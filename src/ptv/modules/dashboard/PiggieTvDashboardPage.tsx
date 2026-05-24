@@ -28,7 +28,11 @@ import {
     type PtvFeatureSettings
 } from '../../core/featureSettings';
 import { getPtvDebugReport, isPtvDebugEnabled, setPtvDebug } from '../../core/observability';
-import { getCurrentPtvPluginApiClient, isPtvPluginApiCoolingDown } from '../../core/pluginApi';
+import {
+    getCurrentPtvPluginApiClient,
+    isPtvPluginApiCoolingDown,
+    normalizePtvApiError
+} from '../../core/pluginApi';
 import {
     clearFeaturedContentCache,
     FEATURED_CACHE_UPDATED_EVENT,
@@ -122,22 +126,19 @@ const EMPTY_PLUGIN_STATE: PluginState = {
 };
 
 const PLUGIN_STATUS_TIMEOUT_MS = 8000;
+const PTV_PLUGIN_INSTALL_NOTE = [
+    'Build plugin Release',
+    'Copy Jellyfin.Plugin.PiggieTV.dll to Jellyfin plugin folder',
+    'Restart Jellyfin',
+    'Refresh this page'
+].join('\n');
 
 function getErrorMessage(err: unknown) {
-    return err instanceof Error ? err.message : String(err || 'Unknown error');
+    return normalizePtvApiError(err).message;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function getHttpStatus(err: unknown): number | null {
-    if (!isRecord(err)) return null;
-
-    if (typeof err.status === 'number') return err.status;
-    if (typeof err.statusCode === 'number') return err.statusCode;
-
-    return getHttpStatus(err.response) || getHttpStatus(err.xhr);
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -158,12 +159,11 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 }
 
 function classifyPluginError(err: unknown): PluginConnectionState {
-    const status = getHttpStatus(err);
-    const message = getErrorMessage(err).toLowerCase();
+    const normalizedError = normalizePtvApiError(err);
 
-    if (status === 401 || status === 403) return 'unauthorized';
-    if (status === 404) return 'plugin-missing';
-    if (message.includes('timed out') || isRecord(err) && err.code === 'PTV_PLUGIN_TIMEOUT') return 'timeout';
+    if (normalizedError.kind === 'unauthorized' || normalizedError.kind === 'forbidden') return 'unauthorized';
+    if (normalizedError.kind === 'missing') return 'plugin-missing';
+    if (normalizedError.kind === 'timeout') return 'timeout';
     if (isPtvPluginApiCoolingDown()) return 'endpoint-unreachable';
 
     return 'endpoint-unreachable';
@@ -179,7 +179,7 @@ function createPluginStateFromStatus(status: PtvPluginStatus): PluginState {
     return {
         connected: Boolean(status?.ok !== false && isVersionMatch),
         connectionState: isVersionMatch ? 'connected' : 'version-mismatch',
-        error: isVersionMatch ? '' : `Plugin API version ${status?.apiVersion ?? 'unknown'} does not match frontend API version ${PTV_PLUGIN_API.version}.`,
+        error: isVersionMatch ? '' : `Version mismatch: expected v${PTV_PLUGIN_API.version} but received v${status?.apiVersion ?? 'unknown'}.`,
         loading: false,
         status
     };
@@ -203,7 +203,7 @@ function getPluginHelpMessage(
     cacheSource: string
 ) {
     if (state === 'plugin-missing' || state === 'endpoint-unreachable') {
-        return 'PTV plugin is not installed or endpoint is unreachable.';
+        return 'PTV plugin backend is not installed or Jellyfin was not restarted after installation.';
     }
 
     if (state === 'using-fallback') {
@@ -457,15 +457,12 @@ function getStatusMessageSeverity(message: string) {
 }
 
 function isPluginRefreshFallbackError(err: unknown) {
-    const status = getHttpStatus(err);
-    const message = getErrorMessage(err).toLowerCase();
+    const normalizedError = normalizePtvApiError(err);
 
     return (
-        status === 404
-        || status === 405
-        || message.includes('unavailable')
-        || message.includes('cannot call plugin')
-        || message.includes('cannot build plugin')
+        normalizedError.kind === 'missing'
+        || normalizedError.status === 405
+        || normalizedError.kind === 'network'
     );
 }
 
@@ -501,6 +498,36 @@ function PluginHelpAlert({
     return (
         <Alert severity={getPluginHelpSeverity(state)}>
             {message}
+        </Alert>
+    );
+}
+
+function PluginInstallGuidance({
+    onCopy,
+    state
+}: Readonly<{
+    onCopy: () => void;
+    state: PluginConnectionState;
+}>) {
+    if (state !== 'plugin-missing' && state !== 'endpoint-unreachable') return null;
+
+    return (
+        <Alert severity='info'>
+            <Stack spacing={1}>
+                <Typography>
+                    Expected endpoint: /{PTV_PLUGIN_API.endpoints.status}
+                </Typography>
+                <Box component='pre' className='ptv-debug-report-preview'>
+                    {PTV_PLUGIN_INSTALL_NOTE}
+                </Box>
+                <Button
+                    type='button'
+                    variant='outlined'
+                    onClick={onCopy}
+                >
+                    Copy Install Note
+                </Button>
+            </Stack>
         </Alert>
     );
 }
@@ -745,6 +772,16 @@ const PiggieTvDashboardPage = () => {
             });
     }, [debugReport]);
 
+    const copyPluginInstallNote = useCallback(() => {
+        copyTextToClipboard(PTV_PLUGIN_INSTALL_NOTE)
+            .then(() => {
+                setStatusMessage('Plugin install note copied.');
+            })
+            .catch((err: unknown) => {
+                setStatusMessage(`Plugin install note copy failed: ${getErrorMessage(err)}`);
+            });
+    }, []);
+
     useEffect(() => {
         refreshPluginStatus();
         syncCacheStatus();
@@ -866,6 +903,10 @@ const PiggieTvDashboardPage = () => {
                                         </Box>
                                         <WarningAlert message={pluginState.error} />
                                         <PluginHelpAlert message={pluginHelpMessage} state={pluginConnectionState} />
+                                        <PluginInstallGuidance
+                                            onCopy={copyPluginInstallNote}
+                                            state={pluginConnectionState}
+                                        />
                                         <Divider />
                                         <Stack className='ptv-dashboard-status-list' spacing={0.5}>
                                             <Typography>Plugin: {pluginName}</Typography>

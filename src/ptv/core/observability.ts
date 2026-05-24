@@ -1,5 +1,11 @@
 import { PTV_DEBUG, PTV_EVENTS } from './config';
-import { getPtvClientProfile } from './clientProfile';
+import {
+    applyPtvClientProfileClasses,
+    getPtvClientProfile,
+    getPtvPerformanceProfile,
+    type PtvClientProfile,
+    type PtvPerformanceProfile
+} from './clientProfile';
 import { dispatchPtvCustomEvent } from './events';
 import { resetRuntimeScope } from './scope';
 
@@ -76,6 +82,7 @@ const imageUrls = new WeakMap<HTMLImageElement, string>();
 
 let debugEnabled = false;
 let debugScope: ReturnType<typeof resetRuntimeScope> | null = null;
+let debugCacheStatusProvider: (() => unknown) | null = null;
 let resourceObserver: PerformanceObserver | null = null;
 
 function now() {
@@ -114,6 +121,53 @@ function debugConsole(message: string, detail?: unknown) {
     if (!debugEnabled) return;
 
     console.debug(`[PiggieTV Debug] ${message}`, detail);
+}
+
+function warnDebug(message: string, detail?: unknown) {
+    if (!debugEnabled) return;
+
+    console.warn(`[PiggieTV Debug] ${message}`, detail);
+}
+
+function getActiveProfiles(): {
+    clientProfile: PtvClientProfile;
+    performanceProfile: PtvPerformanceProfile;
+} {
+    const clientProfile = applyPtvClientProfileClasses();
+    const performanceProfile = getPtvPerformanceProfile();
+
+    if (!performanceProfile.renderProfile?.id || !performanceProfile.renderProfile?.tier) {
+        warnDebug('Unable to detect active render profile.', {
+            clientProfile,
+            performanceProfile
+        });
+    }
+
+    return {
+        clientProfile,
+        performanceProfile
+    };
+}
+
+export function recordPtvStartupEvent() {
+    if (!debugEnabled) return;
+
+    const {
+        clientProfile,
+        performanceProfile
+    } = getActiveProfiles();
+
+    recordPtvEvent('profile', 'ptv:init', {
+        clientProfile: {
+            isFireTv: clientProfile.isFireTv,
+            isLowPower: clientProfile.isLowPower,
+            isMobile: clientProfile.isMobile,
+            isTv: clientProfile.isTv,
+            isWebOs: clientProfile.isWebOs,
+            kind: clientProfile.kind
+        },
+        renderProfile: performanceProfile.renderProfile
+    });
 }
 
 function getMemorySnapshot() {
@@ -352,6 +406,7 @@ export function setPtvDebug(enabled: boolean) {
 
     if (enabled) {
         startDebugObservers();
+        recordPtvStartupEvent();
         recordPtvEvent('profile', 'debug-enabled', getPtvClientProfile());
     } else {
         stopDebugObservers();
@@ -427,8 +482,16 @@ export function timePtvAsync<T>(
         });
 }
 
+export function registerPtvDebugCacheStatusProvider(provider: () => unknown) {
+    debugCacheStatusProvider = provider;
+}
+
 export function getPtvDebugReport() {
-    const renderProfile = {
+    const {
+        clientProfile,
+        performanceProfile
+    } = getActiveProfiles();
+    const renderProfile = performanceProfile.renderProfile || {
         id: document.documentElement.dataset.ptvRenderProfile || 'unknown',
         tier: document.documentElement.dataset.ptvRenderTier || 'unknown'
     };
@@ -439,8 +502,18 @@ export function getPtvDebugReport() {
             errors: getEventCount('cache', 'error'),
             hits: getEventCount('cache', 'hit'),
             misses: getEventCount('cache', 'miss'),
+            status: debugCacheStatusProvider?.() || null,
             staleHits: getEventCount('cache', 'stale-hit'),
             timings: getTimingSummary('cache')
+        },
+        clientProfile: {
+            isFireTv: clientProfile.isFireTv,
+            isLowPower: clientProfile.isLowPower,
+            isMobile: clientProfile.isMobile,
+            isTv: clientProfile.isTv,
+            isWebOs: clientProfile.isWebOs,
+            kind: clientProfile.kind,
+            supportsBackdropFilter: clientProfile.supportsBackdropFilter
         },
         events: [...events],
         images: {
@@ -486,6 +559,7 @@ export function initPtvObservability() {
 
     if (debugEnabled) {
         startDebugObservers();
+        recordPtvStartupEvent();
         recordPtvEvent('profile', 'debug-enabled', getPtvClientProfile());
     }
 }

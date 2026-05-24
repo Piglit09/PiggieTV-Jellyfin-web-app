@@ -3,7 +3,7 @@ import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { PTV_CACHE, PTV_EVENTS } from '../../core/config';
 import { dispatchPtvCustomEvent } from '../../core/events';
 import { ptvLogger } from '../../core/logger';
-import { recordPtvEvent, timePtvAsync } from '../../core/observability';
+import { recordPtvEvent, registerPtvDebugCacheStatusProvider, timePtvAsync } from '../../core/observability';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
 
 export const FEATURED_CACHE_VERSION = PTV_CACHE.featuredContentVersion;
@@ -747,3 +747,5 @@ export function getFeaturedContent(fetcher: () => Promise<FeaturedPayload>): Pro
     return readServerCacheEntry()
         .then(cached => resolveCachedFeaturedContent(cached, fetcher));
 }
+
+registerPtvDebugCacheStatusProvider(getFeaturedContentCacheStatus);

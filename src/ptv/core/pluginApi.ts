@@ -23,13 +23,35 @@ type JsonResponseLike = {
 };
 
 type HttpErrorLike = Record<string, unknown> & {
+    code?: unknown;
+    data?: unknown;
+    error?: unknown;
+    message?: unknown;
     response?: unknown;
+    responseJSON?: unknown;
+    statusText?: unknown;
     status?: unknown;
     statusCode?: unknown;
     xhr?: unknown;
 };
 
 type DebugWindow = Window & Partial<Record<'PTV_DEBUG', boolean>>;
+
+export type PtvNormalizedApiErrorKind =
+    | 'forbidden'
+    | 'missing'
+    | 'network'
+    | 'timeout'
+    | 'unauthorized'
+    | 'unknown'
+    | 'version_mismatch';
+
+export type PtvNormalizedApiError = {
+    code?: string;
+    kind: PtvNormalizedApiErrorKind;
+    message: string;
+    status?: number;
+};
 
 export type PtvPluginFeaturedContentDocument = {
     featuredContent?: unknown;
@@ -77,6 +99,114 @@ function getHttpStatus(value: unknown): number | null {
     return getHttpStatus(carrier.response) || getHttpStatus(carrier.xhr);
 }
 
+function getStringValue(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+}
+
+function getNestedString(value: unknown, key: 'code' | 'error' | 'message' | 'statusText'): string {
+    if (!isRecord(value)) return '';
+
+    const carrier = value as HttpErrorLike;
+    const directValue = getStringValue(carrier[key]);
+
+    if (directValue) return directValue;
+
+    return (
+        getNestedString(carrier.responseJSON, key)
+        || getNestedString(carrier.response, key)
+        || getNestedString(carrier.xhr, key)
+        || getNestedString(carrier.data, key)
+    );
+}
+
+function getErrorCode(value: unknown): string | undefined {
+    return getNestedString(value, 'code') || undefined;
+}
+
+function getRawErrorMessage(value: unknown): string {
+    if (value instanceof Error && value.message) return value.message;
+
+    return (
+        getNestedString(value, 'error')
+        || getNestedString(value, 'message')
+        || getNestedString(value, 'statusText')
+    );
+}
+
+export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
+    const status = getHttpStatus(error) || undefined;
+    const code = getErrorCode(error);
+    const rawMessage = getRawErrorMessage(error);
+    const lowerMessage = rawMessage.toLowerCase();
+
+    if (status === 401) {
+        return {
+            code,
+            kind: 'unauthorized',
+            message: 'HTTP 401: Unauthorized',
+            status
+        };
+    }
+
+    if (status === 403) {
+        return {
+            code,
+            kind: 'forbidden',
+            message: 'HTTP 403: Forbidden',
+            status
+        };
+    }
+
+    if (status === 404) {
+        return {
+            code,
+            kind: 'missing',
+            message: 'HTTP 404: Plugin endpoint not found',
+            status
+        };
+    }
+
+    if (lowerMessage.includes('timed out') || code === 'PTV_PLUGIN_TIMEOUT') {
+        return {
+            code,
+            kind: 'timeout',
+            message: 'Timeout: request timed out',
+            status
+        };
+    }
+
+    if (lowerMessage.includes('version') && lowerMessage.includes('mismatch')) {
+        return {
+            code,
+            kind: 'version_mismatch',
+            message: rawMessage || 'Version mismatch: expected v1 but received another version',
+            status
+        };
+    }
+
+    if (
+        lowerMessage.includes('failed to fetch')
+        || lowerMessage.includes('network')
+        || lowerMessage.includes('unavailable')
+        || lowerMessage.includes('cannot call plugin')
+        || lowerMessage.includes('cannot build plugin')
+    ) {
+        return {
+            code,
+            kind: 'network',
+            message: 'Network failure: endpoint unreachable',
+            status
+        };
+    }
+
+    return {
+        code,
+        kind: 'unknown',
+        message: rawMessage || 'Unknown plugin API error',
+        status
+    };
+}
+
 function getPluginUrl(apiClient: PtvJellyfinApiClient, path: string, params?: Record<string, unknown>) {
     if (!apiClient.getUrl) {
         throw new Error('Jellyfin API client cannot build plugin URLs.');
@@ -101,7 +231,10 @@ function shouldKeepPluginAvailableAfterError(err: unknown) {
 }
 
 function createPluginHttpError(status: number) {
-    return Object.assign(new Error(`PTV plugin endpoint returned HTTP ${status}.`), {
+    const normalizedError = normalizePtvApiError({ status });
+
+    return Object.assign(new Error(normalizedError.message), {
+        ...normalizedError,
         status
     });
 }
