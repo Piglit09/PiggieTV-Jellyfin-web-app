@@ -8,6 +8,7 @@ Initial endpoints only:
 - `GET /Ptv/v1/FeaturedContent`
 - `PUT /Ptv/v1/FeaturedContent`
 - `DELETE /Ptv/v1/FeaturedContent`
+- `POST /Ptv/v1/FeaturedContent/Refresh`
 
 Temporary compatibility aliases are also available:
 
@@ -15,8 +16,9 @@ Temporary compatibility aliases are also available:
 - `GET /Ptv/FeaturedContent`
 - `PUT /Ptv/FeaturedContent`
 - `DELETE /Ptv/FeaturedContent`
+- `POST /Ptv/FeaturedContent/Refresh`
 
-All endpoints require an authenticated Jellyfin user. Featured-content reads are available to any authenticated user, while `PUT /Ptv/v1/FeaturedContent` and `DELETE /Ptv/v1/FeaturedContent` require Jellyfin admin/elevated permissions.
+All endpoints require an authenticated Jellyfin user. Featured-content reads are available to any authenticated user, while `PUT /Ptv/v1/FeaturedContent`, `DELETE /Ptv/v1/FeaturedContent`, and `POST /Ptv/v1/FeaturedContent/Refresh` require Jellyfin admin/elevated permissions.
 
 The cache write endpoint validates payload version, required fields, timestamps, unsafe client fields, and serialized size before saving. The plugin writes only to its fixed PiggieTV cache file and never accepts client-provided storage paths or file names. Validation errors use structured JSON:
 
@@ -32,6 +34,8 @@ The cache is stored at:
 ```text
 <Jellyfin plugin configurations path>/PiggieTV/featured-content-cache.json
 ```
+
+The plugin refreshes this cache in the background on startup when the cache is missing or expired, then on the normal refresh interval. Manual dashboard refresh calls `POST /Ptv/v1/FeaturedContent/Refresh`. Reads continue serving the current cache during refresh; failed refreshes keep stale cache available.
 
 Build:
 

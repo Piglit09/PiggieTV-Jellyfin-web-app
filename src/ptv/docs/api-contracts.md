@@ -28,7 +28,7 @@ Returns plugin health and capability metadata:
   "serverTime": 0,
   "serverTimeUtc": "2026-05-24T00:00:00+00:00",
   "cacheBackend": "plugin-file",
-  "features": ["status", "featuredContent"],
+  "features": ["status", "featuredContent", "featuredContentRefresh"],
   "canReadFeaturedContent": true,
   "canWriteFeaturedContent": false,
   "cachePathExists": true,
@@ -36,6 +36,12 @@ Returns plugin health and capability metadata:
   "featuredCacheFresh": true,
   "featuredCacheCreatedAt": 0,
   "featuredCacheExpiresAt": 0,
+  "refreshInProgress": false,
+  "lastRefreshStartedAt": 0,
+  "lastRefreshCompletedAt": 0,
+  "lastRefreshDurationMs": 1200,
+  "lastRefreshError": null,
+  "nextRefreshAt": 0,
   "maxCachePayloadBytes": 4194304,
   "featuredContent": {
     "hasPayload": true,
@@ -51,6 +57,8 @@ Returns plugin health and capability metadata:
 ```
 
 `canWriteFeaturedContent` is user-specific. It is `true` only when the current Jellyfin user can pass the admin/elevated write policy.
+
+Refresh fields describe the server-side featured-content worker. `refreshInProgress` may be true while the plugin is preparing a new payload; reads continue to serve the current cache during refresh.
 
 The dashboard uses these fields to distinguish:
 
@@ -110,6 +118,14 @@ Only Jellyfin admins/elevated users may call this endpoint.
 
 Clears the shared server-side featured-content cache and returns an empty cache document. The frontend dashboard uses this endpoint when available, then falls back to named configuration or memory behavior if the plugin is unavailable.
 
+### POST /Ptv/v1/FeaturedContent/Refresh
+
+Only Jellyfin admins/elevated users may call this endpoint.
+
+Triggers a server-side featured-content refresh and returns the updated status response. The plugin uses a single refresh lock, so concurrent calls do not start duplicate generation work. If refresh fails, the endpoint returns status with `lastRefreshError` while the existing stale cache remains readable through `GET /Ptv/v1/FeaturedContent`.
+
+Clients should prefer this endpoint for manual dashboard refresh and fall back to client-side generation only when the endpoint is unavailable on older plugin builds.
+
 ### Error Shape
 
 Plugin errors are structured:
@@ -131,6 +147,7 @@ Common codes include:
 - `PTV_CACHE_UNSAFE_CLIENT_FIELD`
 - `PTV_CACHE_WRITE_FORBIDDEN`
 - `PTV_CACHE_CLEAR_FORBIDDEN`
+- `PTV_CACHE_REFRESH_FORBIDDEN`
 
 ## Future Versions
 

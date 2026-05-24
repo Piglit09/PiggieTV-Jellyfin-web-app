@@ -461,11 +461,11 @@ function isPluginRefreshFallbackError(err: unknown) {
     const message = getErrorMessage(err).toLowerCase();
 
     return (
-        status === 404 ||
-        status === 405 ||
-        message.includes('unavailable') ||
-        message.includes('cannot call plugin') ||
-        message.includes('cannot build plugin')
+        status === 404
+        || status === 405
+        || message.includes('unavailable')
+        || message.includes('cannot call plugin')
+        || message.includes('cannot build plugin')
     );
 }
 
@@ -613,10 +613,10 @@ const PiggieTvDashboardPage = () => {
     const refreshCache = useCallback(() => {
         const pluginApi = getCurrentPtvPluginApiClient();
         const canUseServerRefresh = Boolean(
-            pluginApi?.refreshFeaturedContentCacheDocument &&
-            pluginState.connected &&
-            pluginState.status?.canWriteFeaturedContent !== false &&
-            pluginState.status?.features?.includes('featuredContentRefresh') !== false
+            pluginApi?.refreshFeaturedContentCacheDocument
+            && pluginState.connected
+            && pluginState.status?.canWriteFeaturedContent !== false
+            && pluginState.status?.features?.includes('featuredContentRefresh') !== false
         );
 
         setIsRefreshing(true);

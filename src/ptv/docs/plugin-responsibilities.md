@@ -10,10 +10,11 @@ The PiggieTV Jellyfin plugin should stay focused. It is not a second frontend.
 - featured-content cache validation
 - admin-only cache mutation enforcement
 - structured plugin error responses
+- background featured-content refresh
+- manual admin refresh endpoint
 
 ## Owns Next
 
-- background featured-content refresh
 - deterministic recommendation preprocessing
 - prefiltered hero batches
 - seasonal content pools
@@ -32,7 +33,7 @@ The PiggieTV Jellyfin plugin should stay focused. It is not a second frontend.
 
 Featured-content cache reads are authenticated-user endpoints. TV clients and normal Jellyfin users must be able to read shared display data without administrative rights.
 
-Featured-content cache writes and clears are admin/elevated-only until server-side background refresh owns cache generation. This prevents broken clients or browser extensions from poisoning the shared homepage cache for every user.
+Featured-content cache writes, clears, and manual refreshes are admin/elevated-only. This prevents broken clients or browser extensions from poisoning or thrashing the shared homepage cache for every user.
 
 Admin-only endpoints should also be used for future plugin settings that mutate server policy or file-system paths.
 
@@ -49,6 +50,17 @@ Writes must:
 - write a temporary file before replacing the final cache file
 
 Clears must remove only the fixed PiggieTV featured-content cache file.
+
+## Refresh Rule
+
+The plugin should refresh featured content on startup when the cache is missing or expired, then continue refreshing on the configured interval. Manual dashboard refresh uses `POST /Ptv/v1/FeaturedContent/Refresh`.
+
+Refresh work must:
+
+- use a single lock so duplicate refreshes do not run
+- keep serving stale cache when refresh fails
+- avoid blocking cache reads while refresh is in progress
+- report timing, error, and next-refresh status through `/Ptv/v1/Status`
 
 ## Compatibility Rule
 
