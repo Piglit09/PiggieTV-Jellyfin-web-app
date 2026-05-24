@@ -7,5 +7,6 @@ import './settings';
 import './login';
 import './details';
 import './request';
+import './signup';
 import './theme-songs';
 import './playback';

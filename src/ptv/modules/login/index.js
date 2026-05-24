@@ -1,13 +1,16 @@
 import { registerModule } from '../../core/lifecycle';
-import { PTV_ASSETS, PTV_BRANDING, PTV_SERVICES } from '../../core/config';
+import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES, PTV_SERVICES } from '../../core/config';
 import { applyPtvResponsiveImage } from '../../core/images';
 import { watchDom } from '../../core/observer';
+import { resetRuntimeScope } from '../../core/scope';
 import { wasApplied, markApplied } from '../../utils/dom';
 
 const SIGN_UP_URL = PTV_SERVICES.signUpUrl;
 const ACCOUNT_URL = PTV_SERVICES.accountUrl;
 const DISCORD_URL = PTV_SERVICES.discordUrl;
 const DISCORD_ICON_URL = PTV_ASSETS.icons.discord;
+const SIGN_UP_ROUTE = PTV_ROUTES.signup;
+const loginScope = resetRuntimeScope('login-enhancer');
 
 function createLoginActions(loginPage) {
     const actions = document.createElement('div');
@@ -15,7 +18,7 @@ function createLoginActions(loginPage) {
 
     actions.className = 'ptv-extra-actions';
     actions.innerHTML = `
-        <a class="ptv-extra-btn" href="${SIGN_UP_URL}" target="_blank" rel="noopener noreferrer">Sign Up</a>
+        <a class="ptv-extra-btn ptv-signup-trigger" href="${SIGN_UP_ROUTE}" data-ptv-signup-trigger="true" data-ptv-signup-url="${SIGN_UP_URL}">Sign Up</a>
         <a class="ptv-extra-btn" href="${ACCOUNT_URL}" target="_blank" rel="noopener noreferrer">Forgot Password</a>
         <a class="ptv-extra-btn discord" href="${DISCORD_URL}" target="_blank" rel="noopener noreferrer">
             <img src="${DISCORD_ICON_URL}" class="ptv-btn-icon" alt="">
@@ -117,7 +120,10 @@ export function enhanceLoginPage(root = document) {
     markApplied(loginPage, 'ptvLogin');
 }
 
-watchDom(enhanceLoginPage);
+loginScope.add(watchDom(enhanceLoginPage), {
+    label: 'login dom watcher',
+    type: 'observer'
+});
 
 registerModule({
     density: 'comfortable',

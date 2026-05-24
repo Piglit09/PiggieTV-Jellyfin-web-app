@@ -1,5 +1,6 @@
 import { on } from '../core/events';
 import { watchDom } from '../core/observer';
+import { resetRuntimeScope } from '../core/scope';
 import { PTV_PRIMITIVE_CONTRACT } from './PtvPrimitiveContract';
 
 export const PTV_STOCK_TABLE_SELECTOR = [
@@ -276,6 +277,7 @@ const STOCK_PATTERN_RULES = [
 
 let stockBridgeScheduled = false;
 let stockBridgeInstalled = false;
+const stockBridgeScope = resetRuntimeScope('stock-pattern-bridge');
 
 function getElements(root, selector) {
     const elements = [];
@@ -341,7 +343,7 @@ function scheduleStockPatternBridge() {
 
     stockBridgeScheduled = true;
 
-    window.requestAnimationFrame(() => {
+    stockBridgeScope.animationFrame(() => {
         stockBridgeScheduled = false;
         applyPtvStockPrimitives(document);
     });
@@ -362,10 +364,16 @@ export function installPtvStockPatternBridge() {
 
     stockBridgeInstalled = true;
     installStockBridgeApi();
-    watchDom(scheduleStockPatternBridge);
-    on('routechange', scheduleStockPatternBridge);
-    window.addEventListener('hashchange', scheduleStockPatternBridge);
-    window.addEventListener('popstate', scheduleStockPatternBridge);
+    stockBridgeScope.add(watchDom(scheduleStockPatternBridge), {
+        label: 'stock dom watcher',
+        type: 'observer'
+    });
+    stockBridgeScope.add(on('routechange', scheduleStockPatternBridge), {
+        label: 'routechange',
+        type: 'listener'
+    });
+    stockBridgeScope.listen(window, 'hashchange', scheduleStockPatternBridge);
+    stockBridgeScope.listen(window, 'popstate', scheduleStockPatternBridge);
     scheduleStockPatternBridge();
 }
 

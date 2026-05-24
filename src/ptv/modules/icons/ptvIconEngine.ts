@@ -6,6 +6,8 @@ import {
     PTV_ICON_REGISTRY,
     PtvIconName
 } from './iconRegistry';
+import { watchDom } from '../../core/observer';
+import { resetRuntimeScope } from '../../core/scope';
 
 const STOCK_ICON_SELECTOR = [
     '.material-icons',
@@ -60,9 +62,10 @@ const BLOCKED_ICON_SCOPE_SELECTOR = [
     '.dashboardDocument .content-primary'
 ].join(', ');
 
-let observer: MutationObserver | null = null;
 let scheduled = false;
 let started = false;
+let stopWatchingDom: (() => void) | null = null;
+const iconEngineScope = resetRuntimeScope('icon-engine');
 
 function normalizeIconKey(value: string | null | undefined) {
     return String(value || '').trim().toLowerCase();
@@ -240,7 +243,7 @@ export function schedulePtvIconEngine(root: ParentNode = document) {
 
     scheduled = true;
 
-    window.requestAnimationFrame(() => {
+    iconEngineScope.animationFrame(() => {
         scheduled = false;
         runPtvIconEngine(root);
     });
@@ -252,22 +255,20 @@ export function startPtvIconEngine() {
     started = true;
     runPtvIconEngine(document);
 
-    window.addEventListener('hashchange', () => schedulePtvIconEngine(document));
-    window.addEventListener('popstate', () => schedulePtvIconEngine(document));
-    document.addEventListener('click', (event) => {
+    iconEngineScope.listen(window, 'hashchange', () => schedulePtvIconEngine(document));
+    iconEngineScope.listen(window, 'popstate', () => schedulePtvIconEngine(document));
+    iconEngineScope.listen(document, 'click', (event: Event) => {
         const target = event.target instanceof Element ? event.target : null;
 
         if (target?.closest('.mainDrawerButton, .headerButton, button, a')) {
-            window.setTimeout(() => schedulePtvIconEngine(document), 0);
+            iconEngineScope.timeout(() => schedulePtvIconEngine(document), 0);
         }
     });
 
-    observer = new MutationObserver(() => {
+    stopWatchingDom ||= iconEngineScope.add(watchDom(() => {
         schedulePtvIconEngine(document);
-    });
-
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
+    }), {
+        label: 'icon dom watcher',
+        type: 'observer'
     });
 }

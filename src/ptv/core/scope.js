@@ -2,9 +2,11 @@ import { watchDom, watchElement } from './observer';
 
 const runtimeScopes = new Map();
 const eventTargetIds = new WeakMap();
+const listenerCallbackIds = new WeakMap();
 
 let nextScopeId = 1;
 let nextTargetId = 1;
+let nextListenerCallbackId = 1;
 
 function noop() {
     return undefined;
@@ -20,6 +22,12 @@ function debugWarn(message, detail) {
     console.warn(`[PiggieTV Runtime] ${message}`, detail);
 }
 
+function debugLog(message, detail) {
+    if (!isRuntimeDebugEnabled()) return;
+
+    console.debug(`[PiggieTV Runtime] ${message}`, detail);
+}
+
 function normalizeDisposer(disposer) {
     return typeof disposer === 'function' ? disposer : noop;
 }
@@ -33,10 +41,19 @@ function getTargetId(target) {
     return eventTargetIds.get(target);
 }
 
+function getListenerCallbackId(callback) {
+    if (!listenerCallbackIds.has(callback)) {
+        listenerCallbackIds.set(callback, nextListenerCallbackId);
+        nextListenerCallbackId += 1;
+    }
+
+    return listenerCallbackIds.get(callback);
+}
+
 function getListenerKey(target, eventName, callback, options) {
     const capture = typeof options === 'boolean' ? options : Boolean(options?.capture);
 
-    return `${getTargetId(target)}:${eventName}:${capture}:${callback}`;
+    return `${getTargetId(target)}:${eventName}:${capture}:${getListenerCallbackId(callback)}`;
 }
 
 function getResourceCounts(resources) {
@@ -83,6 +100,12 @@ export function createRuntimeScope(name) {
 
     const scope = {
         add(disposer, metadata = {}) {
+            if (scope.disposed) {
+                debugWarn(`attempted to add "${metadata.label || metadata.type || 'cleanup'}" to disposed scope "${name}"`);
+                normalizeDisposer(disposer)();
+                return noop;
+            }
+
             const cleanup = normalizeDisposer(disposer);
             const resourceId = nextResourceId;
 
@@ -104,15 +127,23 @@ export function createRuntimeScope(name) {
         },
 
         animationFrame(callback) {
-            const frame = window.requestAnimationFrame(callback);
+            let release = noop;
+            const frame = window.requestAnimationFrame((timestamp) => {
+                release();
+                callback(timestamp);
+            });
 
-            return scope.add(() => window.cancelAnimationFrame(frame), {
+            release = scope.add(() => window.cancelAnimationFrame(frame), {
                 label: 'requestAnimationFrame',
                 type: 'animationFrame'
             });
+
+            return release;
         },
 
         dispose() {
+            if (scope.disposed) return;
+
             const pendingResources = resources.size;
             const pendingSnapshot = pendingResources ? getScopeSnapshot(scope) : null;
             const pendingDisposers = Array.from(disposers).reverse();
@@ -198,11 +229,22 @@ export function createRuntimeScope(name) {
 
         mutationObserver(callback, target = document.body, options = { childList: true, subtree: true }) {
             const observer = new MutationObserver(callback);
+            const label = target === document.body ? 'document.body' : target.tagName?.toLowerCase() || 'element';
 
             observer.observe(target, options);
+            debugLog('observer created', {
+                label,
+                scope: name
+            });
 
-            return scope.add(() => observer.disconnect(), {
-                label: target === document.body ? 'document.body' : target.tagName?.toLowerCase() || 'element',
+            return scope.add(() => {
+                observer.disconnect();
+                debugLog('observer disconnected', {
+                    label,
+                    scope: name
+                });
+            }, {
+                label,
                 type: 'observer'
             });
         },
@@ -211,12 +253,18 @@ export function createRuntimeScope(name) {
         resources,
 
         timeout(callback, delay) {
-            const timer = window.setTimeout(callback, delay);
+            let release = noop;
+            const timer = window.setTimeout(() => {
+                release();
+                callback();
+            }, delay);
 
-            return scope.add(() => window.clearTimeout(timer), {
+            release = scope.add(() => window.clearTimeout(timer), {
                 label: `${delay}ms timeout`,
                 type: 'timeout'
             });
+
+            return release;
         },
 
         watchDom(callback) {
@@ -262,6 +310,20 @@ export function resetRuntimeScope(name) {
 export function disposeRuntimeScope(name) {
     runtimeScopes.get(name)?.dispose();
     runtimeScopes.delete(name);
+}
+
+export function disposeRuntimeScopes(predicate) {
+    const disposed = [];
+
+    Array.from(runtimeScopes.entries()).forEach(([name, scope]) => {
+        if (typeof predicate === 'function' && !predicate(name, scope)) return;
+
+        scope.dispose();
+        runtimeScopes.delete(name);
+        disposed.push(name);
+    });
+
+    return disposed;
 }
 
 export function getRuntimeScopeNames() {

@@ -4,6 +4,12 @@ import cardBuilder from 'components/cardbuilder/cardBuilder';
 import imageLoader from 'components/images/imageLoader';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { getPtvPerformanceProfile } from 'ptv/core/clientProfile';
+import {
+    cleanupPtvLazyImages,
+    enhancePtvLazyImageAttributes,
+    loadPtvImage,
+    observePtvLazyImages
+} from 'ptv/core/imageManager';
 import { recordPtvEvent, timePtvAsync } from 'ptv/core/observability';
 import { getFeaturedContent } from 'ptv/modules/cache/featuredContentCache';
 import { loadSharedHeroItems } from 'ptv/modules/hero/useHeroItems';
@@ -16,6 +22,8 @@ const ROW_ITEM_LIMIT = 16;
 const MEDIA_FIELDS = 'PrimaryImageAspectRatio,Path,MediaSources,MediaSourceCount,Genres,Tags,Studios,ProductionLocations,ProviderIds,OriginalTitle,DateCreated,PremiereDate,ProductionYear,CommunityRating,CriticRating';
 let backdropSeed = Date.now();
 const rowBackdropObservers = new WeakMap();
+const rowBackdropLoads = new WeakMap();
+const rowBackdropTokens = new WeakMap();
 
 function getHomePerformanceProfile(options = {}) {
     return options.performanceProfile || getPtvPerformanceProfile();
@@ -337,6 +345,8 @@ function applyRowBackdropNow(elem, apiClient, items, options = {}) {
     if (!backdropElement) return;
 
     if (!getHomePerformanceProfile(options).enableRowBackdrops) {
+        rowBackdropLoads.get(elem)?.cancel();
+        rowBackdropLoads.delete(elem);
         elem.classList.remove('ptv-row-has-backdrop');
         backdropElement.removeAttribute('style');
         return;
@@ -350,6 +360,8 @@ function applyRowBackdropNow(elem, apiClient, items, options = {}) {
         .filter(entry => entry.url);
 
     if (!backdropItems.length) {
+        rowBackdropLoads.get(elem)?.cancel();
+        rowBackdropLoads.delete(elem);
         elem.classList.remove('ptv-row-has-backdrop');
         backdropElement.removeAttribute('style');
         return;
@@ -357,15 +369,31 @@ function applyRowBackdropNow(elem, apiClient, items, options = {}) {
 
     const entry = backdropItems[getRandomIndex(backdropItems.length)];
     const safeUrl = entry.url.replace(/"/g, '%22');
+    const token = (rowBackdropTokens.get(elem) || 0) + 1;
+    const handle = loadPtvImage(entry.url, 'decorative', 'row-backdrop');
 
-    backdropElement.setAttribute('style', `background-image: url("${safeUrl}");`);
-    elem.classList.add('ptv-row-has-backdrop');
+    rowBackdropTokens.set(elem, token);
+    rowBackdropLoads.get(elem)?.cancel();
+    rowBackdropLoads.set(elem, handle);
 
-    const homeSections = elem.closest('.homeSectionsContainer');
-    if (homeSections && !homeSections.style.getPropertyValue('--ptv-home-backdrop-image')) {
-        homeSections.style.setProperty('--ptv-home-backdrop-image', `url("${safeUrl}")`);
-        homeSections.classList.add('ptv-home-has-backdrop');
-    }
+    void handle.promise
+        .then((didLoad) => {
+            if (!didLoad || rowBackdropTokens.get(elem) !== token || !elem.isConnected) return;
+
+            backdropElement.setAttribute('style', `background-image: url("${safeUrl}");`);
+            elem.classList.add('ptv-row-has-backdrop');
+
+            const homeSections = elem.closest('.homeSectionsContainer');
+            if (homeSections && !homeSections.style.getPropertyValue('--ptv-home-backdrop-image')) {
+                homeSections.style.setProperty('--ptv-home-backdrop-image', `url("${safeUrl}")`);
+                homeSections.classList.add('ptv-home-has-backdrop');
+            }
+        })
+        .finally(() => {
+            if (rowBackdropLoads.get(elem) === handle) {
+                rowBackdropLoads.delete(elem);
+            }
+        });
 }
 
 function applyRowBackdrop(elem, apiClient, items, options = {}) {
@@ -399,16 +427,59 @@ function applyRowBackdrop(elem, apiClient, items, options = {}) {
     observer.observe(elem);
 }
 
-function forceLoadRowImages(itemsContainer, options = {}) {
-    if (!getHomePerformanceProfile(options).forceLoadRowImages) return;
+export function cleanupPtvRowBackdrops(root = document) {
+    root.querySelectorAll?.('.ptv-dynamic-row').forEach((row) => {
+        const observer = rowBackdropObservers.get(row);
 
-    window.requestAnimationFrame(() => {
-        itemsContainer
-            .querySelectorAll('.cardImageContainer.lazy[data-src], .cardFooterLogo.lazy[data-src]')
-            .forEach((imageElement) => {
-                imageLoader.lazyImage(imageElement);
-            });
+        observer?.disconnect();
+        rowBackdropObservers.delete(row);
+        rowBackdropLoads.get(row)?.cancel();
+        rowBackdropLoads.delete(row);
+        rowBackdropTokens.delete(row);
+        row.classList.remove('ptv-row-has-backdrop');
+        row.querySelector('.ptv-row-backdrop')?.removeAttribute('style');
     });
+
+    root.querySelectorAll?.('.itemsContainer').forEach((itemsContainer) => {
+        if (typeof itemsContainer.ptvLazyImageCleanup === 'function') {
+            itemsContainer.ptvLazyImageCleanup();
+            itemsContainer.ptvLazyImageCleanup = null;
+        }
+    });
+
+    if (root instanceof HTMLElement && root.classList.contains('homeSectionsContainer')) {
+        root.style.removeProperty('--ptv-home-backdrop-image');
+        root.classList.remove('ptv-home-has-backdrop');
+    }
+
+    cleanupPtvLazyImages(root);
+}
+
+function prepareManagedRowImages(itemsContainer, options = {}) {
+    const performanceProfile = getHomePerformanceProfile(options);
+    const rootMargin = performanceProfile.isLowPower || performanceProfile.isWebOs ?
+        '180px 0px' :
+        '480px 0px';
+
+    enhancePtvLazyImageAttributes(itemsContainer);
+    itemsContainer.ptvLazyImageCleanup?.();
+    itemsContainer.ptvLazyImageCleanup = observePtvLazyImages(itemsContainer, {
+        priority: performanceProfile.isLowPower ? 'below-fold-poster' : 'visible-poster',
+        rootMargin,
+        loadElement: (imageElement) => {
+            if (
+                imageElement instanceof HTMLElement
+                && imageElement.classList.contains('lazy')
+                && imageElement.dataset.src
+            ) {
+                imageLoader.lazyImage(imageElement);
+            }
+        }
+    });
+}
+
+function forceLoadRowImages(itemsContainer, options = {}) {
+    prepareManagedRowImages(itemsContainer, options);
 }
 
 function getMoreCardHtml(row, options) {

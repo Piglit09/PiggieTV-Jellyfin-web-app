@@ -83,7 +83,7 @@ function enhanceSettingsIcons() {
 
 function init({ scope }) {
     const runScopedHydrationPasses = () => runDelayedHydrationPasses(scope);
-    const settingsMutationObserver = new MutationObserver((mutations) => {
+    scope.mutationObserver((mutations) => {
         if (!isSettingsRoute()) return;
 
         const shouldHydrate = mutations.some(({ addedNodes, target }) => {
@@ -109,6 +109,9 @@ function init({ scope }) {
         });
 
         if (shouldHydrate) scheduleSettingsHydration();
+    }, document.body, {
+        childList: true,
+        subtree: true
     });
 
     scope.watchDom(enhanceSettingsIcons);
@@ -116,14 +119,6 @@ function init({ scope }) {
     scope.add(on('routechange', runScopedHydrationPasses));
     scope.listen(window, 'hashchange', runScopedHydrationPasses);
     scope.listen(window, 'popstate', runScopedHydrationPasses);
-    settingsMutationObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    scope.add(() => settingsMutationObserver.disconnect(), {
-        label: SETTINGS_ROOT_SELECTOR,
-        type: 'observer'
-    });
     runDocumentHydrationPass();
 }
 

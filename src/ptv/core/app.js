@@ -7,6 +7,7 @@ import './lifecycle';
 import { scheduleRouteCheck } from './router';
 
 import './observer';
+import './lifecycleSafety';
 import './jellyfin-hooks';
 import './theme';
 import './shell';

@@ -175,10 +175,12 @@ function onViewShow(event) {
     void enhanceThemeSongs();
 }
 
-function init() {
-    document.addEventListener('viewshow', onViewShow, true);
+function init({ scope } = {}) {
+    scope?.listen(document, 'viewshow', onViewShow, true);
     void enhanceThemeSongs();
-    stopWatchingDom = watchDom(() => {
+    stopWatchingDom = scope?.watchDom ? scope.watchDom(() => {
+        void enhanceThemeSongs();
+    }) : watchDom(() => {
         void enhanceThemeSongs();
     });
 }
@@ -188,7 +190,6 @@ function refresh() {
 }
 
 function destroy() {
-    document.removeEventListener('viewshow', onViewShow, true);
     stopWatchingDom?.();
     stopWatchingDom = null;
     currentParams = {};

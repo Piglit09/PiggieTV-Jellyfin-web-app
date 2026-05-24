@@ -1,12 +1,15 @@
 import { emit, on } from './events';
 import { recordPtvEvent, recordPtvTiming } from './observability';
 import { schedule } from './scheduler';
+import { resetRuntimeScope } from './scope';
 import { getPtvRouteClassNames, getPtvRouteOwnership } from '../shell/routes';
 
 const browserHistory = window.history;
 
 let currentPath = '';
 let patchedHistory = false;
+let startedRouter = false;
+const routerScope = resetRuntimeScope('router');
 
 export function getRoute() {
     return getPtvRouteOwnership(window.location);
@@ -84,10 +87,13 @@ on('moduleregistered', () => {
 });
 
 export function startRouter() {
+    if (startedRouter) return;
+
+    startedRouter = true;
     patchHistory();
 
-    window.addEventListener('hashchange', () => scheduleRouteCheck());
-    window.addEventListener('popstate', () => scheduleRouteCheck());
+    routerScope.listen(window, 'hashchange', () => scheduleRouteCheck());
+    routerScope.listen(window, 'popstate', () => scheduleRouteCheck());
 
     currentPath = '';
     checkRoute();

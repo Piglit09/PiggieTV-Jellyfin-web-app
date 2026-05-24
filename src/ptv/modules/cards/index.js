@@ -3,10 +3,14 @@ import { watchDom } from '../../core/observer';
 
 import { enhancePtvCards } from './CardEnhancer';
 
-function init() {
+function init({ scope } = {}) {
     document.documentElement.classList.add('ptv-native-cards');
     enhancePtvCards();
-    watchDom(enhancePtvCards);
+    if (scope) {
+        scope.watchDom(enhancePtvCards);
+    } else {
+        watchDom(enhancePtvCards);
+    }
 }
 
 function destroy() {

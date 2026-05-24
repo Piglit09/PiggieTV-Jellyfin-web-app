@@ -3,7 +3,7 @@ import Sidebar from '../sidebar/Sidebar';
 import { PtvIcon } from '../icons';
 import { PTV_ASSETS, PTV_BRANDING, PTV_EVENTS, PTV_ROUTES } from '../../core/config';
 import { dispatchPtvCustomEvent } from '../../core/events';
-import { fallbackPtvImage, getPtvStaticAssetUrl } from '../../core/images';
+import { applyPtvResponsiveImage } from '../../core/images';
 import { openRequestPortal } from '../request';
 
 interface AppHeaderParams {
@@ -40,10 +40,6 @@ function isFavoritesRoute(): boolean {
     return hash.startsWith(PTV_ROUTES.favoritesLegacy) || hash.includes('tab=1');
 }
 
-function handleHeaderLogoError({ currentTarget }: React.SyntheticEvent<HTMLImageElement>): void {
-    fallbackPtvImage(currentTarget, PTV_ASSETS.responsive.logos.bannerLight);
-}
-
 const AppHeader: FC<AppHeaderParams> = ({
     isHidden = false
 }) => {
@@ -58,6 +54,11 @@ const AppHeader: FC<AppHeaderParams> = ({
 
     const closeSidebar = useCallback(() => {
         setIsSidebarOpen(false);
+    }, []);
+    const mountHeaderLogo = useCallback((image: HTMLImageElement | null) => {
+        if (image) {
+            applyPtvResponsiveImage(image, PTV_ASSETS.responsive.logos.bannerLight);
+        }
     }, []);
 
     useEffect(() => {
@@ -127,12 +128,11 @@ const AppHeader: FC<AppHeaderParams> = ({
                         aria-label='Go to home'
                     >
                         <img
-                            src={getPtvStaticAssetUrl(PTV_ASSETS.responsive.logos.bannerLight)}
+                            ref={mountHeaderLogo}
                             alt={PTV_BRANDING.appName}
                             className='ptv-brand-logo'
                             loading='eager'
                             decoding='async'
-                            onError={handleHeaderLogoError}
                         />
                     </a>
                 </div>

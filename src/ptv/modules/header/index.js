@@ -8,7 +8,6 @@ import { createIcon, iconNameFromText, runIconEngine } from '../../utils/icons';
 import { startPtvIconEngine } from '../icons';
 import { closeRequestPortal, openRequestPortal } from '../request';
 
-const HEADER_SELECTOR = '.ptv-skinHeader, .skinHeader';
 const HEADER_ICON_TARGET_SELECTOR = [
     '.ptv-skinHeader button',
     '.skinHeader button',
@@ -55,7 +54,6 @@ const TOP_TABS = [
 
 let headerRepairPending = false;
 let homeTabSelectionToken = 0;
-const watchedHeaders = new WeakMap();
 const headerScope = resetRuntimeScope('header-listeners');
 
 function isHomeRoute() {
@@ -472,31 +470,13 @@ function scheduleHeaderRepair() {
     headerRepairPending = true;
 
     HEADER_REPAIR_DELAYS.forEach((delay, index) => {
-        window.setTimeout(() => {
+        headerScope.timeout(() => {
             repairHeaderIcons();
 
             if (index === HEADER_REPAIR_DELAYS.length - 1) {
                 headerRepairPending = false;
             }
         }, delay);
-    });
-}
-
-function watchHeaderContainers() {
-    document.querySelectorAll(HEADER_SELECTOR).forEach(header => {
-        if (watchedHeaders.has(header)) return;
-
-        const observer = new MutationObserver(scheduleHeaderRepair);
-        observer.observe(header, {
-            childList: true,
-            subtree: true
-        });
-
-        watchedHeaders.set(header, observer);
-        headerScope.add(() => observer.disconnect(), {
-            label: HEADER_SELECTOR,
-            type: 'observer'
-        });
     });
 }
 
@@ -591,14 +571,12 @@ function enhanceHeaderIcons() {
 
     runIconEngine(header);
     repairHeaderIcons();
-    watchHeaderContainers();
 }
 
 headerScope.watchDom(() => {
     enhanceHeaderIcons();
     cleanupSidebarBranding();
     scheduleHeaderRepair();
-    watchHeaderContainers();
 });
 
 [

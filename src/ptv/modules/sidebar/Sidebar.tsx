@@ -1,7 +1,7 @@
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useCallback, useEffect, useState } from 'react';
 import SidebarSection from './SidebarSection';
 import { PTV_ASSETS, PTV_BRANDING, PTV_EVENTS, PTV_ROUTES } from '../../core/config';
-import { fallbackPtvImage, getPtvStaticAssetUrl } from '../../core/images';
+import { applyPtvResponsiveImage } from '../../core/images';
 import { getPtvNavigationSections } from '../../shell';
 
 type SidebarProps = {
@@ -9,12 +9,13 @@ type SidebarProps = {
     onClose: () => void;
 };
 
-function handleSidebarLogoError({ currentTarget }: React.SyntheticEvent<HTMLImageElement>): void {
-    fallbackPtvImage(currentTarget, PTV_ASSETS.responsive.logos.sidebar);
-}
-
 const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
     const [activeRoute, setActiveRoute] = useState(window.location.hash || PTV_ROUTES.home);
+    const mountSidebarLogo = useCallback((image: HTMLImageElement | null) => {
+        if (image) {
+            applyPtvResponsiveImage(image, PTV_ASSETS.responsive.logos.sidebar);
+        }
+    }, []);
 
     useEffect(() => {
         document.body.classList.toggle('ptv-sidebar-is-open', isOpen);
@@ -56,7 +57,7 @@ const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
                     aria-label={`Go to ${PTV_BRANDING.appName} home`}
                 >
                     <img
-                        src={getPtvStaticAssetUrl(PTV_ASSETS.responsive.logos.sidebar)}
+                        ref={mountSidebarLogo}
                         alt={PTV_BRANDING.appName}
                         className='ptv-sidebar-logo ptv-sidebar-logo-image ptv-drawer-logo'
                         data-ptv-logo='sidebar'
@@ -65,7 +66,6 @@ const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
                         loading='eager'
                         decoding='async'
                         draggable={false}
-                        onError={handleSidebarLogoError}
                     />
                 </a>
 

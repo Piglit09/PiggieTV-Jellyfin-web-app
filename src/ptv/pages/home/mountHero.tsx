@@ -11,7 +11,7 @@ type MountHeroOptions = {
     featuredContentPromise?: Promise<FeaturedPayload>;
 };
 
-const heroRoots = new WeakMap<Element, Root>();
+const heroRoots = new Map<Element, Root>();
 
 export default function mountPtvHomeHero(
     parent: Element,
@@ -31,4 +31,30 @@ export default function mountPtvHomeHero(
             featuredContentPromise={options.featuredContentPromise}
         />
     );
+}
+
+export function unmountPtvHomeHero(parent?: Element | null) {
+    const mounts = parent ?
+        Array.from(parent.querySelectorAll('.ptvHeroMount')) :
+        Array.from(heroRoots.keys());
+
+    mounts.forEach((mount) => {
+        const root = heroRoots.get(mount);
+
+        if (!root) return;
+
+        root.unmount();
+        heroRoots.delete(mount);
+    });
+}
+
+export function cleanupDisconnectedPtvHomeHeroes() {
+    Array.from(heroRoots.keys()).forEach((mount) => {
+        if (mount.isConnected) return;
+
+        const root = heroRoots.get(mount);
+
+        root?.unmount();
+        heroRoots.delete(mount);
+    });
 }

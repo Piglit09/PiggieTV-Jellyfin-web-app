@@ -36,6 +36,14 @@ type PtvDebugEvent = {
     type: PtvDebugEventType;
 };
 
+type PtvImageTracker = {
+    completed: boolean;
+    lastEventAt: number;
+    lastEventKey: string;
+    startedAt: number;
+    url: string;
+};
+
 type PtvDebugSummary = {
     averageMs: number;
     count: number;
@@ -57,7 +65,7 @@ type PtvGlobal = Record<string, unknown> & {
     debug?: PtvDebugApi;
 };
 
-type PtvWindow = Window & Partial<Record<'PTV_DEBUG' | '__PTV_OBSERVABILITY_INSTALLED__', boolean>> & {
+type PtvWindow = Window & Partial<Record<'PTV_DEBUG' | '__PTV_IMAGE_TRACKER__' | '__PTV_OBSERVABILITY_INSTALLED__', boolean>> & {
     PTV?: PtvGlobal;
 };
 
@@ -77,8 +85,15 @@ const ptvWindow = window as PtvWindow;
 const dispatchDebugEvent = dispatchPtvCustomEvent as (eventName: string, detail?: unknown) => void;
 const timings: PtvDebugTiming[] = [];
 const events: PtvDebugEvent[] = [];
-const imageStartTimes = new WeakMap<HTMLImageElement, number>();
-const imageUrls = new WeakMap<HTMLImageElement, string>();
+const imageTrackers = new WeakMap<HTMLImageElement, PtvImageTracker>();
+const imageEventDedupe = new Map<string, number>();
+const observedImageFailures = new Map<string, number>();
+const observedImageRetrySuppressions = new Map<string, number>();
+const observedResourceEntries = new Map<string, number>();
+const IMAGE_EVENT_DEDUPE_MS = 15 * 1000;
+const IMAGE_ERROR_SUPPRESSION_MS = 5 * 60 * 1000;
+const IMAGE_MAX_LIFECYCLE_MS = 2 * 60 * 1000;
+const IMAGE_DEDUPE_LIMIT = 500;
 
 let debugEnabled = false;
 let debugScope: ReturnType<typeof resetRuntimeScope> | null = null;
@@ -267,14 +282,40 @@ function getImageUrl(image: HTMLImageElement) {
     return image.currentSrc || image.src || image.getAttribute('data-src') || '';
 }
 
+function trimMap(map: Map<string, number>, maxEntries = IMAGE_DEDUPE_LIMIT) {
+    if (map.size <= maxEntries) return;
+
+    const entriesToDelete = map.size - maxEntries;
+    let deleted = 0;
+
+    for (const key of map.keys()) {
+        map.delete(key);
+        deleted += 1;
+
+        if (deleted >= entriesToDelete) return;
+    }
+}
+
+function isResolvedImage(image: HTMLImageElement) {
+    return Boolean(image.complete && image.naturalWidth > 0 && image.naturalHeight > 0);
+}
+
 function observeImage(image: HTMLImageElement) {
     const url = getImageUrl(image);
     if (!url) return;
 
-    if (imageUrls.get(image) === url) return;
+    const tracker = imageTrackers.get(image);
 
-    imageUrls.set(image, url);
-    imageStartTimes.set(image, performance.now());
+    if (tracker?.url === url) return;
+    if (isResolvedImage(image)) return;
+
+    imageTrackers.set(image, {
+        completed: false,
+        lastEventAt: 0,
+        lastEventKey: '',
+        startedAt: performance.now(),
+        url
+    });
 }
 
 function observeImages(root: ParentNode = document) {
@@ -289,23 +330,125 @@ function handleImageDone(event: Event) {
     if (!(event.target instanceof HTMLImageElement)) return;
 
     const image = event.target;
-    const startedAt = imageStartTimes.get(image);
-    const url = getImageUrl(image);
-    const durationMs = startedAt ? performance.now() - startedAt : 0;
+    const tracker = imageTrackers.get(image);
+    const url = getImageUrl(image) || tracker?.url || '';
+    if (!url) return;
+
+    const eventName = event.type === 'error' ? 'image-error' : 'image-load';
+
+    if (shouldSuppressImageEvent(image, tracker, eventName, url)) return;
+
+    if (event.type === 'error') {
+        markImageTrackerComplete(image, tracker, eventName, url);
+
+        const failedAt = observedImageFailures.get(url);
+        const suppressLoggedAt = observedImageRetrySuppressions.get(url);
+        const isSuppressed = Boolean(failedAt && Date.now() - failedAt < IMAGE_ERROR_SUPPRESSION_MS);
+
+        if (isSuppressed) {
+            if (!suppressLoggedAt || Date.now() - suppressLoggedAt >= IMAGE_ERROR_SUPPRESSION_MS) {
+                observedImageRetrySuppressions.set(url, Date.now());
+                trimMap(observedImageRetrySuppressions);
+                recordPtvEvent('image', 'image-retry-suppressed', {
+                    naturalHeight: image.naturalHeight,
+                    naturalWidth: image.naturalWidth,
+                    url
+                });
+            }
+
+            return;
+        }
+
+        observedImageFailures.set(url, Date.now());
+        trimMap(observedImageFailures);
+        recordPtvEvent('image', 'image-failed-once', {
+            naturalHeight: image.naturalHeight,
+            naturalWidth: image.naturalWidth,
+            url
+        });
+        warnDebug('Image failed to load.', {
+            naturalHeight: image.naturalHeight,
+            naturalWidth: image.naturalWidth,
+            url
+        });
+        return;
+    }
+
+    const durationMs = tracker ? performance.now() - tracker.startedAt : 0;
+    markImageTrackerComplete(image, tracker, eventName, url);
+
+    if (durationMs > IMAGE_MAX_LIFECYCLE_MS) {
+        recordPtvEvent('image', 'image-duration-discarded', {
+            durationMs: Number(durationMs.toFixed(1)),
+            naturalHeight: image.naturalHeight,
+            naturalWidth: image.naturalWidth,
+            url
+        });
+        return;
+    }
 
     if (durationMs > 0) {
-        recordPtvTiming('image', event.type === 'error' ? 'image-error' : 'image-load', durationMs, {
+        recordPtvTiming('image', eventName, durationMs, {
             naturalHeight: image.naturalHeight,
             naturalWidth: image.naturalWidth,
             url
         });
     } else {
-        recordPtvEvent('image', event.type === 'error' ? 'image-error' : 'image-load', {
+        recordPtvEvent('image', eventName, {
             naturalHeight: image.naturalHeight,
             naturalWidth: image.naturalWidth,
             url
         });
     }
+}
+
+function shouldSuppressImageEvent(
+    image: HTMLImageElement,
+    tracker: PtvImageTracker | undefined,
+    eventName: string,
+    url: string
+) {
+    const eventAt = Date.now();
+    const eventKey = `${eventName}:${url}`;
+    const lastGlobalEventAt = imageEventDedupe.get(eventKey);
+
+    if (
+        tracker?.lastEventKey === eventKey
+        && eventAt - tracker.lastEventAt < IMAGE_EVENT_DEDUPE_MS
+    ) {
+        return true;
+    }
+
+    if (lastGlobalEventAt && eventAt - lastGlobalEventAt < IMAGE_EVENT_DEDUPE_MS) {
+        return true;
+    }
+
+    imageEventDedupe.set(eventKey, eventAt);
+    trimMap(imageEventDedupe);
+    markImageTrackerComplete(image, tracker, eventName, url);
+
+    return false;
+}
+
+function markImageTrackerComplete(
+    image: HTMLImageElement,
+    tracker: PtvImageTracker | undefined,
+    eventName: string,
+    url: string
+) {
+    const nextTracker = tracker || {
+        completed: false,
+        lastEventAt: 0,
+        lastEventKey: '',
+        startedAt: performance.now(),
+        url
+    };
+
+    nextTracker.completed = true;
+    nextTracker.lastEventAt = Date.now();
+    nextTracker.lastEventKey = `${eventName}:${url}`;
+    nextTracker.url = url;
+    imageTrackers.set(image, nextTracker);
 }
 
 function startResourceObserver() {
@@ -324,6 +467,8 @@ function startResourceObserver() {
             list.getEntries().forEach(entry => {
                 if ((entry as PerformanceResourceTiming).initiatorType !== 'img') return;
 
+                if (shouldSuppressResourceEntry(entry as PerformanceResourceTiming)) return;
+
                 recordPtvTiming('image', 'image-resource', entry.duration || 0, {
                     transferSize: (entry as PerformanceResourceTiming).transferSize || 0,
                     url: entry.name
@@ -339,6 +484,22 @@ function startResourceObserver() {
     }
 }
 
+function shouldSuppressResourceEntry(entry: PerformanceResourceTiming) {
+    const entryKey = [
+        entry.name,
+        Math.round(entry.startTime || 0),
+        Math.round(entry.duration || 0),
+        entry.transferSize || 0
+    ].join(':');
+
+    if (observedResourceEntries.has(entryKey)) return true;
+
+    observedResourceEntries.set(entryKey, Date.now());
+    trimMap(observedResourceEntries);
+
+    return false;
+}
+
 function stopResourceObserver() {
     resourceObserver?.disconnect();
     resourceObserver = null;
@@ -352,6 +513,7 @@ function startDebugObservers() {
     }
 
     debugScope = resetRuntimeScope('debug-observability');
+    ptvWindow.__PTV_IMAGE_TRACKER__ = true;
     debugScope.listen(document, 'load', handleImageDone, true);
     debugScope.listen(document, 'error', handleImageDone, true);
     const observer = new MutationObserver((mutations: MutationRecord[]) => {
@@ -380,6 +542,7 @@ function startDebugObservers() {
         label: 'debug image observer',
         type: 'observer'
     });
+    debugConsole('image observer created');
     debugScope.interval(() => {
         recordPtvEvent('memory', 'sample', getMemorySnapshot());
     }, 5000);
@@ -390,6 +553,8 @@ function startDebugObservers() {
 function stopDebugObservers() {
     debugScope?.dispose();
     debugScope = null;
+    ptvWindow.__PTV_IMAGE_TRACKER__ = false;
+    debugConsole('image tracker disposed');
     stopResourceObserver();
 }
 
@@ -439,6 +604,15 @@ export function recordPtvTiming(
     detail?: unknown
 ) {
     if (!debugEnabled) return;
+
+    if (type === 'image' && durationMs > IMAGE_MAX_LIFECYCLE_MS) {
+        recordPtvEvent('image', 'image-duration-discarded', {
+            detail,
+            durationMs: Number(durationMs.toFixed(1)),
+            name
+        });
+        return;
+    }
 
     const roundedDuration = Number(durationMs.toFixed(1));
 
@@ -517,7 +691,7 @@ export function getPtvDebugReport() {
         },
         events: [...events],
         images: {
-            errors: getEventCount('image', 'image-error'),
+            errors: getEventCount('image', 'image-error') + getEventCount('image', 'image-failed-once'),
             timings: getTimingSummary('image')
         },
         memory: getMemorySnapshot(),

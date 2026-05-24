@@ -15,6 +15,17 @@ const ROUTE_MATCHERS = [
         pattern: ({ hash, path }) => hash.includes('/login') || path.includes('/login')
     },
     {
+        className: 'ptv-route-signup',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['signup'],
+        id: 'signup',
+        layout: 'auth',
+        owner: 'signup',
+        pageType: 'signup',
+        pattern: ({ hash }) => hash === PTV_ROUTES.signup || document.documentElement.classList.contains('ptv-signup-active')
+    },
+    {
         className: 'ptv-route-dashboard',
         density: 'comfortable',
         elevation: 1,
@@ -185,6 +196,7 @@ export function getPtvRouteOwnership(location = window.location) {
         isLogin: features.includes('login'),
         isPlayback: features.includes('playback'),
         isRequest: features.includes('request'),
+        isSignup: features.includes('signup'),
         isSettings: features.includes('settings')
     };
 }

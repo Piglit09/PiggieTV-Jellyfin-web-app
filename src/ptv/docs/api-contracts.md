@@ -126,6 +126,39 @@ Triggers a server-side featured-content refresh and returns the updated status r
 
 Clients should prefer this endpoint for manual dashboard refresh and fall back to client-side generation only when the endpoint is unavailable on older plugin builds.
 
+### Planned jfa-go Proxy Endpoints
+
+These endpoints are reserved for the native PiggieTV signup/invite dashboard. They are not a replacement for jfa-go; they are a server-side safety layer so frontend JavaScript never receives jfa-go admin secrets.
+
+```text
+GET    /Ptv/v1/JfaGo/Status
+GET    /Ptv/v1/JfaGo/Invites
+POST   /Ptv/v1/JfaGo/Invites
+DELETE /Ptv/v1/JfaGo/Invites/{code}
+```
+
+All jfa-go proxy endpoints should be admin-only. The proxy must validate Jellyfin admin permissions before forwarding to jfa-go.
+
+Expected invite DTO shape for future native UI:
+
+```json
+{
+  "invites": [
+    {
+      "code": "invite-code",
+      "link": "https://signup.piggietv.com/invite/invite-code",
+      "expiresAt": 0,
+      "maxUses": 10,
+      "uses": 0,
+      "profile": "Default",
+      "disabled": false
+    }
+  ]
+}
+```
+
+The current dashboard embeds the jfa-go admin panel until the backend proxy is implemented.
+
 ### Error Shape
 
 Plugin errors are structured:

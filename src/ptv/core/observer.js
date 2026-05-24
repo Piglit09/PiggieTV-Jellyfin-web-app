@@ -1,8 +1,39 @@
 import { emit } from './events';
 import { schedule } from './scheduler';
 
-let observer = null;
-const scopedWatchers = new Set();
+const OBSERVER_STATE_KEY = '__PTV_OBSERVERS__';
+
+function isDebugEnabled() {
+    return window.PTV_DEBUG === true;
+}
+
+function debugLog(message, detail) {
+    if (!isDebugEnabled()) return;
+
+    console.debug(`[PiggieTV Observer] ${message}`, detail);
+}
+
+function createObserverState() {
+    return {
+        callbackIds: new WeakMap(),
+        created: 0,
+        disconnected: 0,
+        nextCallbackId: 1,
+        observer: null,
+        pendingStart: false,
+        scopedWatchers: new Set(),
+        watcherKeys: new Map()
+    };
+}
+
+function getObserverState() {
+    window[OBSERVER_STATE_KEY] ||= createObserverState();
+
+    return window[OBSERVER_STATE_KEY];
+}
+
+const observerState = getObserverState();
+const scopedWatchers = observerState.scopedWatchers;
 
 function shouldIgnoreMutation(mutation) {
     const target = mutation.target;
@@ -32,16 +63,24 @@ function processScopedWatchers() {
 
         if (!watcher.active) {
             watcher.active = true;
-            watcher.callback(root);
+            runWatcherCallback(watcher, root);
             continue;
         }
 
         if (!watcher.once) {
-            watcher.callback(root);
+            runWatcherCallback(watcher, root);
         }
     }
 
     emit('domchange');
+}
+
+function runWatcherCallback(watcher, root) {
+    try {
+        watcher.callback(root);
+    } catch (err) {
+        console.error(`[PiggieTV] DOM watcher failed: ${watcher.selector}`, err);
+    }
 }
 
 function onMutations(mutations) {
@@ -55,20 +94,63 @@ export function watchElement(selector, callback, options = {}) {
         return () => undefined;
     }
 
+    const watcherKey = getWatcherKey(selector, callback, options);
+    const existingWatcher = observerState.watcherKeys.get(watcherKey);
+
+    if (existingWatcher) {
+        existingWatcher.refs += 1;
+
+        return () => {
+            existingWatcher.refs -= 1;
+
+            if (existingWatcher.refs > 0) return;
+
+            scopedWatchers.delete(existingWatcher);
+            observerState.watcherKeys.delete(watcherKey);
+            if (!scopedWatchers.size) {
+                stopObserver();
+            }
+            debugLog('watcher disposed', {
+                selector,
+                watchers: scopedWatchers.size
+            });
+        };
+    }
+
     const watcher = {
         selector,
         callback,
         active: false,
         once: Boolean(options.once),
-        onMissing: options.onMissing
+        onMissing: options.onMissing,
+        refs: 1
     };
 
     scopedWatchers.add(watcher);
+    observerState.watcherKeys.set(watcherKey, watcher);
+    startObserver();
+
+    debugLog('watcher registered', {
+        selector,
+        watchers: scopedWatchers.size
+    });
 
     schedule('dom-watchers', processScopedWatchers);
 
     return () => {
+        watcher.refs -= 1;
+
+        if (watcher.refs > 0) return;
+
         scopedWatchers.delete(watcher);
+        observerState.watcherKeys.delete(watcherKey);
+        if (!scopedWatchers.size) {
+            stopObserver();
+        }
+        debugLog('watcher disposed', {
+            selector,
+            watchers: scopedWatchers.size
+        });
     };
 }
 
@@ -77,23 +159,76 @@ export function watchDom(callback) {
 }
 
 export function startObserver() {
-    if (observer) return observer;
+    if (observerState.observer) return observerState.observer;
 
-    observer = new MutationObserver(onMutations);
+    if (!document.body) {
+        if (!observerState.pendingStart) {
+            observerState.pendingStart = true;
+            document.addEventListener('DOMContentLoaded', () => {
+                observerState.pendingStart = false;
+                startObserver();
+            }, { once: true });
+        }
 
-    observer.observe(document.body, {
+        return null;
+    }
+
+    observerState.observer = new MutationObserver(onMutations);
+
+    observerState.observer.observe(document.body, {
         childList: true,
         subtree: true
     });
+    observerState.created += 1;
+    debugLog('root observer created', {
+        created: observerState.created,
+        watchers: scopedWatchers.size
+    });
 
-    return observer;
+    return observerState.observer;
 }
 
 export function stopObserver() {
-    if (!observer) return;
+    if (!observerState.observer) return;
 
-    observer.disconnect();
-    observer = null;
+    observerState.observer.disconnect();
+    observerState.observer = null;
+    observerState.disconnected += 1;
+    debugLog('root observer disconnected', {
+        disconnected: observerState.disconnected
+    });
+}
+
+export function getObserverDiagnostics() {
+    return {
+        created: observerState.created,
+        disconnected: observerState.disconnected,
+        running: Boolean(observerState.observer),
+        watchers: scopedWatchers.size
+    };
+}
+
+export function clearDomWatchers() {
+    scopedWatchers.clear();
+    observerState.watcherKeys.clear();
+    stopObserver();
+}
+
+function getCallbackId(callback) {
+    if (!observerState.callbackIds.has(callback)) {
+        observerState.callbackIds.set(callback, observerState.nextCallbackId);
+        observerState.nextCallbackId += 1;
+    }
+
+    return observerState.callbackIds.get(callback);
+}
+
+function getWatcherKey(selector, callback, options = {}) {
+    return [
+        selector,
+        getCallbackId(callback),
+        options.once ? 'once' : 'many'
+    ].join(':');
 }
 
 startObserver();

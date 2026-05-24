@@ -1,4 +1,3 @@
-import { watchDom } from '../../core/observer';
 import { on } from '../../core/events';
 import { registerModule } from '../../core/lifecycle';
 import { wasApplied, markApplied } from '../../utils/dom';
@@ -31,7 +30,17 @@ function clearPlayingState() {
     document.documentElement.removeAttribute('data-ptv-now-playing');
 }
 
-watchDom(enhanceNowPlayingBar);
+function init({ scope } = {}) {
+    enhanceNowPlayingBar();
+    scope?.watchDom(enhanceNowPlayingBar);
+    scope?.add(on('playbackstart', setPlayingState));
+    scope?.add(on('playbackstop', clearPlayingState));
+    scope?.add(on('playbackerror', clearPlayingState));
+}
+
+function destroy() {
+    clearPlayingState();
+}
 
 registerModule({
     density: 'comfortable',
@@ -45,11 +54,7 @@ registerModule({
             surface: 3,
             type: 'playback-control'
         }
-    ]
+    ],
+    init,
+    destroy
 });
-
-on('playbackstart', setPlayingState);
-on('playbackstop', clearPlayingState);
-on('playbackerror', clearPlayingState);
-
-enhanceNowPlayingBar();

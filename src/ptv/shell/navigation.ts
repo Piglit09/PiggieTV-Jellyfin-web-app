@@ -48,6 +48,7 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
         items: [
             { id: 'dashboard', label: 'Dashboard', href: '#/dashboard', icon: 'dashboard', permission: 'admin' },
             { id: 'piggietv-dashboard', label: 'PiggieTV', href: '#/dashboard/piggietv', icon: 'piggieHub', permission: 'admin' },
+            { id: 'signup-invites', label: 'Signup / Invites', href: '#/dashboard/users/signup-invites', icon: 'users', permission: 'admin' },
             { id: 'metadata-manager', label: 'Metadata Manager', href: '#/metadata', icon: 'metadata', permission: 'admin' }
         ]
     },

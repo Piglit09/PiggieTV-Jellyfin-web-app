@@ -99,6 +99,14 @@ const ServerDrawerSection = () => {
                 </ListItemLink>
             </ListItem>
             <ListItem disablePadding>
+                <ListItemLink to='/dashboard/users/signup-invites'>
+                    <ListItemIcon>
+                        <People />
+                    </ListItemIcon>
+                    <ListItemText primary='Signup / Invites' />
+                </ListItemLink>
+            </ListItem>
+            <ListItem disablePadding>
                 <ListItemButton onClick={onLibrarySectionClick}>
                     <ListItemIcon>
                         <LibraryAdd />

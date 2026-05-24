@@ -2,6 +2,7 @@ import { playbackManager } from '../../../components/playback/playbackmanager';
 import Events from '../../../utils/events.ts';
 import { ServerConnections } from '../../../lib/jellyfin-apiclient';
 import { registerModule } from '../../core/lifecycle';
+import { cancelPtvImageScope, loadPtvImage } from '../../core/imageManager';
 import { watchDom } from '../../core/observer';
 
 import './playback.scss';
@@ -10,11 +11,16 @@ const PAGE_SELECTOR = '#videoOsdPage';
 const PAUSE_STAGE_CLASS = 'ptv-player-pause-stage';
 const TICKS_PER_MINUTE = 600000000;
 const PLAYBACK_STATE_SETTLE_MS = 80;
+const PAUSE_RELATED_ITEM_LIMIT = 4;
 
 let currentPlayer = null;
 let currentItem = null;
 let stopWatchingDom = null;
 let playbackStateTimer = null;
+let pauseAssetToken = 0;
+
+const relatedItemCache = new Map();
+const activePauseImageLoads = new Set();
 
 function getApiClient(item) {
     if (!item?.ServerId) return null;
@@ -34,9 +40,19 @@ function getImageUrl(item, type, options = {}) {
     });
 }
 
-function getBackdropUrl(item) {
-    if (item?.BackdropImageTags?.length) {
-        return getImageUrl(item, 'Backdrop', {
+function addImageCandidate(candidates, item, type, options = {}) {
+    const url = getImageUrl(item, type, options);
+
+    if (url) {
+        candidates.push(url);
+    }
+}
+
+function addBackdropCandidates(candidates, item) {
+    if (!item) return;
+
+    if (item.BackdropImageTags?.length) {
+        addImageCandidate(candidates, item, 'Backdrop', {
             itemId: item.BackdropItemId || item.Id,
             index: 0,
             tag: item.BackdropImageTags[0],
@@ -44,8 +60,8 @@ function getBackdropUrl(item) {
         });
     }
 
-    if (item?.ParentBackdropItemId && item?.ParentBackdropImageTags?.length) {
-        return getImageUrl(item, 'Backdrop', {
+    if (item.ParentBackdropItemId && item.ParentBackdropImageTags?.length) {
+        addImageCandidate(candidates, item, 'Backdrop', {
             itemId: item.ParentBackdropItemId,
             index: 0,
             tag: item.ParentBackdropImageTags[0],
@@ -53,44 +69,141 @@ function getBackdropUrl(item) {
         });
     }
 
-    if (item?.ImageTags?.Thumb) {
-        return getImageUrl(item, 'Thumb', {
+    if (item.ImageTags?.Thumb) {
+        addImageCandidate(candidates, item, 'Thumb', {
             tag: item.ImageTags.Thumb,
             maxWidth: 1920
         });
     }
 
-    return '';
+    if (item.ImageTags?.Primary || item.PrimaryImageTag) {
+        addImageCandidate(candidates, item, 'Primary', {
+            tag: item.ImageTags?.Primary || item.PrimaryImageTag,
+            maxWidth: 1280
+        });
+    }
 }
 
-function getLogoUrl(item) {
-    if (!item?.ImageTags?.Logo) return '';
+function addLogoCandidates(candidates, item) {
+    if (!item) return;
 
-    return getImageUrl(item, 'Logo', {
-        tag: item.ImageTags.Logo,
-        maxWidth: 760
-    });
+    if (item.ImageTags?.Logo) {
+        addImageCandidate(candidates, item, 'Logo', {
+            tag: item.ImageTags.Logo,
+            maxWidth: 760
+        });
+    }
+
+    if (item.ParentLogoItemId && item.ParentLogoImageTag) {
+        addImageCandidate(candidates, item, 'Logo', {
+            itemId: item.ParentLogoItemId,
+            tag: item.ParentLogoImageTag,
+            maxWidth: 760
+        });
+    }
 }
 
-function getDiscUrl(item) {
-    if (item?.ImageTags?.Disc) {
-        return getImageUrl(item, 'Disc', {
+function addDiscCandidates(candidates, item, includePrimaryFallback = false) {
+    if (!item) return;
+
+    if (item.ImageTags?.Disc) {
+        addImageCandidate(candidates, item, 'Disc', {
             tag: item.ImageTags.Disc,
             maxWidth: 720
         });
     }
+
+    if (!includePrimaryFallback) return;
 
     const primaryTag = item?.ImageTags?.Primary
         || item?.PrimaryImageTag
         || item?.SeriesPrimaryImageTag
         || item?.ParentPrimaryImageTag;
 
-    if (!primaryTag) return '';
+    if (!primaryTag) return;
 
-    return getImageUrl(item, 'Primary', {
+    addImageCandidate(candidates, item, 'Primary', {
         tag: primaryTag,
         maxWidth: 720
     });
+}
+
+function getUniqueUrls(urls) {
+    return Array.from(new Set(urls.filter(Boolean)));
+}
+
+function buildPauseImageCandidates(item, relatedItems = []) {
+    const backdropCandidates = [];
+    const logoCandidates = [];
+    const discCandidates = [];
+
+    addBackdropCandidates(backdropCandidates, item);
+    addLogoCandidates(logoCandidates, item);
+    addDiscCandidates(discCandidates, item);
+
+    relatedItems.forEach(relatedItem => {
+        addBackdropCandidates(backdropCandidates, relatedItem);
+        addLogoCandidates(logoCandidates, relatedItem);
+        addDiscCandidates(discCandidates, relatedItem);
+    });
+
+    addDiscCandidates(discCandidates, item, true);
+
+    return {
+        backdrops: getUniqueUrls(backdropCandidates),
+        discs: getUniqueUrls(discCandidates),
+        logos: getUniqueUrls(logoCandidates)
+    };
+}
+
+function getRelatedItemIds(item) {
+    const ids = [
+        item?.ParentLogoItemId,
+        item?.ParentBackdropItemId,
+        item?.SeasonId,
+        item?.SeriesId,
+        item?.ParentId
+    ].filter(Boolean);
+
+    return Array.from(new Set(ids))
+        .filter(id => id !== item?.Id)
+        .slice(0, PAUSE_RELATED_ITEM_LIMIT);
+}
+
+function getRelatedCacheKey(itemId, serverId) {
+    return `${serverId || 'default'}:${itemId}`;
+}
+
+async function fetchRelatedItem(rootItem, itemId) {
+    const apiClient = getApiClient(rootItem);
+
+    if (!apiClient || !itemId) return null;
+
+    const cacheKey = getRelatedCacheKey(itemId, rootItem.ServerId);
+
+    if (relatedItemCache.has(cacheKey)) {
+        return relatedItemCache.get(cacheKey);
+    }
+
+    const promise = apiClient.getItem(apiClient.getCurrentUserId(), itemId)
+        .catch(() => null);
+
+    relatedItemCache.set(cacheKey, promise);
+
+    return promise;
+}
+
+function getPauseAssetKey(item) {
+    return [
+        item?.ServerId,
+        item?.Id,
+        item?.ParentLogoImageTag,
+        item?.ParentBackdropImageTags?.[0],
+        item?.ImageTags?.Logo,
+        item?.ImageTags?.Disc,
+        item?.BackdropImageTags?.[0],
+        item?.ImageTags?.Primary
+    ].filter(Boolean).join(':');
 }
 
 function formatRuntime(item) {
@@ -120,11 +233,14 @@ function getMetaItems(item) {
     return [
         item?.ProductionYear,
         item?.OfficialRating,
-        formatRuntime(item)
+        formatRuntime(item),
+        item?.CommunityRating ? `Rating ${Number(item.CommunityRating).toFixed(1)}` : ''
     ].filter(Boolean);
 }
 
 function setSafeBackground(element, url) {
+    if (!element) return;
+
     if (!url) {
         element.style.removeProperty('--ptv-player-image');
         return;
@@ -134,6 +250,8 @@ function setSafeBackground(element, url) {
 }
 
 function setSafeDisc(element, url) {
+    if (!element) return;
+
     if (!url) {
         element.classList.remove('ptv-player-pause-stage-has-disc');
         element.style.removeProperty('--ptv-player-disc');
@@ -144,6 +262,111 @@ function setSafeDisc(element, url) {
     element.style.setProperty('--ptv-player-disc', `url("${url.replace(/"/g, '%22')}")`);
 }
 
+function setSafeLogo(element, url) {
+    if (!element) return;
+
+    if (!url) {
+        element.style.removeProperty('background-image');
+        element.classList.remove('ptv-player-logo-visible');
+        return;
+    }
+
+    element.style.backgroundImage = `url("${url.replace(/"/g, '%22')}")`;
+    element.classList.add('ptv-player-logo-visible');
+}
+
+function cancelPauseImageLoads() {
+    activePauseImageLoads.forEach(handle => {
+        handle.cancel();
+    });
+    activePauseImageLoads.clear();
+}
+
+async function resolveFirstImageUrl(urls, priority, scope) {
+    for (const url of getUniqueUrls(urls)) {
+        const handle = loadPtvImage(url, priority, scope);
+
+        activePauseImageLoads.add(handle);
+
+        try {
+            const didLoad = await handle.promise;
+
+            activePauseImageLoads.delete(handle);
+
+            if (didLoad) {
+                return url;
+            }
+        } catch {
+            activePauseImageLoads.delete(handle);
+        }
+    }
+
+    return '';
+}
+
+function applyResolvedPauseAsset(stage, selector, setter, url, token) {
+    if (token !== pauseAssetToken || !stage.isConnected) return;
+
+    const target = selector ? stage.querySelector(selector) : stage;
+
+    if (target) {
+        setter(target, url);
+    }
+}
+
+async function applyPauseCandidateSet(stage, candidates, token) {
+    const [backdropUrl, logoUrl, discUrl] = await Promise.all([
+        resolveFirstImageUrl(candidates.backdrops, 'hero-current', 'pause-screen-backdrop'),
+        resolveFirstImageUrl(candidates.logos, 'hero-current', 'pause-screen-logo'),
+        resolveFirstImageUrl(candidates.discs, 'decorative', 'pause-screen-disc')
+    ]);
+
+    applyResolvedPauseAsset(stage, null, setSafeBackground, backdropUrl, token);
+    applyResolvedPauseAsset(stage, '.ptv-player-logo', setSafeLogo, logoUrl, token);
+    applyResolvedPauseAsset(stage, null, setSafeDisc, discUrl, token);
+}
+
+async function resolvePauseAssets(stage, item, token) {
+    const relatedItemIds = getRelatedItemIds(item);
+    const relatedItemsPromise = Promise.all(
+        relatedItemIds.map(itemId => fetchRelatedItem(item, itemId))
+    );
+
+    await applyPauseCandidateSet(stage, buildPauseImageCandidates(item), token);
+
+    if (token !== pauseAssetToken || !relatedItemIds.length) return;
+
+    const relatedItems = await relatedItemsPromise;
+
+    await applyPauseCandidateSet(
+        stage,
+        buildPauseImageCandidates(item, relatedItems.filter(Boolean)),
+        token
+    );
+}
+
+function resumePlayback() {
+    const player = currentPlayer || playbackManager.getCurrentPlayer?.();
+
+    if (!player) return;
+
+    if (playbackManager.unpause) {
+        playbackManager.unpause(player);
+        return;
+    }
+
+    if (player.unpause) {
+        player.unpause();
+    }
+}
+
+function handlePauseStageKeydown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+
+    event.preventDefault();
+    resumePlayback();
+}
+
 function getOrCreatePauseStage(page) {
     let stage = page.querySelector(`.${PAUSE_STAGE_CLASS}`);
 
@@ -152,6 +375,7 @@ function getOrCreatePauseStage(page) {
     stage = document.createElement('div');
     stage.className = PAUSE_STAGE_CLASS;
     stage.setAttribute('aria-hidden', 'true');
+    stage.dataset.ptvEnhanced = 'true';
     stage.innerHTML = `
         <div class="ptv-player-pause-content">
             <div class="ptv-player-logo"></div>
@@ -165,9 +389,31 @@ function getOrCreatePauseStage(page) {
         </div>
     `;
 
+    const content = stage.querySelector('.ptv-player-pause-content');
+
+    if (content) {
+        content.setAttribute('role', 'button');
+        content.setAttribute('tabindex', '0');
+        content.setAttribute('aria-label', 'Resume playback');
+        content.addEventListener('click', resumePlayback);
+        content.addEventListener('keydown', handlePauseStageKeydown);
+    }
+
     page.prepend(stage);
 
     return stage;
+}
+
+function renderMetaItems(meta, item) {
+    if (!meta) return;
+
+    meta.textContent = '';
+    getMetaItems(item).forEach(value => {
+        const metaItem = document.createElement('span');
+
+        metaItem.textContent = value;
+        meta.appendChild(metaItem);
+    });
 }
 
 function renderPauseStage(page, item, state = {}) {
@@ -177,25 +423,31 @@ function renderPauseStage(page, item, state = {}) {
     const meta = stage.querySelector('.ptv-player-meta');
     const overview = stage.querySelector('.ptv-player-overview');
     const progress = stage.querySelector('.ptv-player-progress-summary');
-    const logoUrl = getLogoUrl(item);
+    const assetKey = getPauseAssetKey(item);
 
-    setSafeBackground(stage, getBackdropUrl(item));
-    setSafeDisc(stage, getDiscUrl(item));
-
-    if (logoUrl) {
-        logo.style.backgroundImage = `url("${logoUrl.replace(/"/g, '%22')}")`;
-        logo.classList.add('ptv-player-logo-visible');
-    } else {
-        logo.style.removeProperty('background-image');
-        logo.classList.remove('ptv-player-logo-visible');
+    if (stage.dataset.ptvPauseAssetKey !== assetKey) {
+        stage.dataset.ptvPauseAssetKey = assetKey;
+        cancelPauseImageLoads();
+        pauseAssetToken += 1;
+        setSafeBackground(stage, '');
+        setSafeDisc(stage, '');
+        setSafeLogo(logo, '');
+        void resolvePauseAssets(stage, item, pauseAssetToken);
     }
 
-    title.textContent = getDisplayTitle(item);
-    meta.innerHTML = getMetaItems(item)
-        .map(value => `<span>${value}</span>`)
-        .join('');
-    overview.textContent = item?.Overview || '';
-    progress.textContent = getProgressText(item, state);
+    if (title) {
+        title.textContent = getDisplayTitle(item);
+    }
+
+    renderMetaItems(meta, item);
+
+    if (overview) {
+        overview.textContent = item?.Overview || '';
+    }
+
+    if (progress) {
+        progress.textContent = getProgressText(item, state);
+    }
 }
 
 function getProgressText(item, state) {
@@ -211,6 +463,9 @@ function getProgressText(item, state) {
 
 function setPauseState(isPaused) {
     document.documentElement.classList.toggle('ptv-player-paused', Boolean(isPaused));
+    document.querySelectorAll(`.${PAUSE_STAGE_CLASS}`).forEach(stage => {
+        stage.setAttribute('aria-hidden', isPaused ? 'false' : 'true');
+    });
 }
 
 function clearPlaybackStateTimer() {
@@ -262,6 +517,11 @@ function enhancePlaybackDom() {
 }
 
 function cleanupPlaybackDom() {
+    cancelPauseImageLoads();
+    cancelPtvImageScope('pause-screen-backdrop');
+    cancelPtvImageScope('pause-screen-logo');
+    cancelPtvImageScope('pause-screen-disc');
+    pauseAssetToken += 1;
     document.querySelectorAll('.ptv-player-page').forEach(page => {
         page.classList.remove('ptv-player-page');
         page.querySelector(`.${PAUSE_STAGE_CLASS}`)?.remove();
@@ -319,11 +579,23 @@ function releasePlayer() {
     currentPlayer = null;
 }
 
-function init() {
+function init({ scope } = {}) {
     Events.on(playbackManager, 'playbackstart', onPlaybackStart);
     Events.on(playbackManager, 'playbackstop', onPlaybackStop);
     Events.on(playbackManager, 'playbackerror', onPlaybackError);
-    stopWatchingDom = watchDom(enhancePlaybackDom);
+    scope?.add(() => Events.off(playbackManager, 'playbackstart', onPlaybackStart), {
+        label: 'playbackstart',
+        type: 'listener'
+    });
+    scope?.add(() => Events.off(playbackManager, 'playbackstop', onPlaybackStop), {
+        label: 'playbackstop',
+        type: 'listener'
+    });
+    scope?.add(() => Events.off(playbackManager, 'playbackerror', onPlaybackError), {
+        label: 'playbackerror',
+        type: 'listener'
+    });
+    stopWatchingDom = scope?.watchDom ? scope.watchDom(enhancePlaybackDom) : watchDom(enhancePlaybackDom);
     bindPlayer(playbackManager.getCurrentPlayer?.());
     updateFromState();
     enhancePlaybackDom();

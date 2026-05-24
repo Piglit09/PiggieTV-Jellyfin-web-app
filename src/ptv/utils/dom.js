@@ -83,4 +83,5 @@ export function wasApplied(el, key = 'ptvApplied') {
 
 export function markApplied(el, key = 'ptvApplied') {
     setDataset(el, key, 'true');
+    setDataset(el, 'ptvEnhanced', 'true');
 }

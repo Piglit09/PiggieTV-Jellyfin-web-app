@@ -233,7 +233,7 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
     );
 
     useEffect(() => {
-        syncPtvImagePreloads('hero-backdrop', [backdropUrl, nextBackdropUrl]);
+        return syncPtvImagePreloads('hero-backdrop', [backdropUrl, nextBackdropUrl]);
     }, [backdropUrl, nextBackdropUrl]);
 
     useEffect(() => {

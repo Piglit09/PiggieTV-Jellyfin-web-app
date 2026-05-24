@@ -32,13 +32,6 @@ import './dashboard.scss';
 
 const DASHBOARD_DOCUMENT_SELECTOR = '.dashboardDocument';
 const DASHBOARD_DRAWER_SELECTOR = '.dashboardDocument .MuiDrawer-paper';
-const DASHBOARD_WATCH_SELECTOR = [
-    DASHBOARD_DOCUMENT_SELECTOR,
-    '.dashboardDocument .mainAnimatedPage',
-    '.dashboardDocument .content-primary',
-    '.dashboardDocument .mainDrawer',
-    DASHBOARD_DRAWER_SELECTOR
-].join(',');
 const DASHBOARD_RETRY_DELAYS = [0, 100, 300, 750, 1500, 2500];
 const FEATURED_CACHE_TASK_SELECTOR = '[data-ptv-featured-cache-task="true"]';
 const PTV_DRAWER_BRAND_SELECTOR = '[data-ptv-brand="drawer"], .ptv-admin-brand';
@@ -65,8 +58,6 @@ const DASHBOARD_DRAWER_PRIMITIVE_CLASSES = [
 ];
 
 let dashboardRunScheduled = false;
-let dashboardObserver = null;
-const watchedDashboardRoots = new WeakSet();
 const dashboardScope = resetRuntimeScope('dashboard-listeners');
 
 const DASHBOARD_DRAWER_ICON_MAP = [
@@ -74,6 +65,7 @@ const DASHBOARD_DRAWER_ICON_MAP = [
     [/dashboard/, 'dashboard'],
     [/general|settings/, 'general'],
     [/branding/, 'branding'],
+    [/signup|invite/, 'users'],
     [/user/, 'users'],
     [/librar/, 'libraries'],
     [/playback/, 'playback'],
@@ -139,14 +131,14 @@ const DASHBOARD_OVERVIEW_COLUMN_CLASSES = [
 const ROUTE_END = '(?:$|\\s|[?#])';
 
 const ADMIN_WIDTH_RULES = [
-    [new RegExp(`/dashboard/(?:devices|activity|plugins|libraries${ROUTE_END}|users${ROUTE_END}|tasks|logs/|backups|livetv${ROUTE_END})`), 'ptv-admin-wide'],
+    [new RegExp(`/dashboard/(?:devices|activity|plugins|libraries${ROUTE_END}|users${ROUTE_END}|users/signup-invites|tasks|logs/|backups|livetv${ROUTE_END})`), 'ptv-admin-wide'],
     [/\/dashboard\/(?:settings|branding|networking|playback\/(?:transcoding|trickplay)|libraries\/(?:metadata|display|nfo)|livetv\/recordings|users\/(?:profile|access|parentalcontrol))/, 'ptv-admin-medium'],
     [/\/dashboard\/(?:playback\/(?:resume|streaming)|users\/(?:add|password)|logs(?:$|[?#]))/, 'ptv-admin-narrow']
 ];
 
 const ADMIN_DENSITY_RULES = [
     [/\/dashboard\/(?:settings|general|branding|networking|playback|libraries\/(?:metadata|display|nfo)|metadata|livetv\/recordings|users\/(?:profile|access|parentalcontrol|add|password))/, 'ptv-density-dense'],
-    [new RegExp(`/dashboard/(?:devices|activity|plugins|libraries${ROUTE_END}|users${ROUTE_END}|tasks|logs|backups|livetv${ROUTE_END})`), 'ptv-density-comfortable'],
+    [new RegExp(`/dashboard/(?:devices|activity|plugins|libraries${ROUTE_END}|users${ROUTE_END}|users/signup-invites|tasks|logs|backups|livetv${ROUTE_END})`), 'ptv-density-comfortable'],
     [/\/dashboard(?:$|\s|[?#])/, 'ptv-density-expanded']
 ];
 
@@ -171,40 +163,12 @@ function scheduleDashboardRun() {
         dashboardRunScheduled = false;
 
         runDashboard();
-        watchDashboardRoots();
     });
 }
 
 function scheduleDashboardRetryPasses() {
     DASHBOARD_RETRY_DELAYS.forEach((delay) => {
-        window.setTimeout(scheduleDashboardRun, delay);
-    });
-}
-
-function watchDashboardRoots() {
-    if (!isDashboardActive()) return;
-
-    if (!dashboardObserver) {
-        dashboardObserver = new MutationObserver(() => {
-            scheduleDashboardRun();
-        });
-        dashboardScope.add(() => {
-            dashboardObserver?.disconnect();
-            dashboardObserver = null;
-        }, {
-            label: DASHBOARD_WATCH_SELECTOR,
-            type: 'observer'
-        });
-    }
-
-    document.querySelectorAll(DASHBOARD_WATCH_SELECTOR).forEach((root) => {
-        if (watchedDashboardRoots.has(root)) return;
-
-        watchedDashboardRoots.add(root);
-        dashboardObserver.observe(root, {
-            childList: true,
-            subtree: true
-        });
+        dashboardScope.timeout(scheduleDashboardRun, delay);
     });
 }
 

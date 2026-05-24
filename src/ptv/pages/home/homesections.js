@@ -1,4 +1,11 @@
-import mountPtvHomeHero from 'ptv/pages/home/mountHero';
+import mountPtvHomeHero, {
+    cleanupDisconnectedPtvHomeHeroes,
+    unmountPtvHomeHero
+} from 'ptv/pages/home/mountHero';
+import {
+    cancelPtvImageScope,
+    trimPtvImageManagerMemory
+} from 'ptv/core/imageManager';
 import { enhancePtvCards } from 'ptv/modules/cards/CardEnhancer';
 import {
     FEATURED_CACHE_UPDATED_EVENT,
@@ -19,6 +26,7 @@ import {
     loadGenreMap,
     loadStudioMap,
     PTV_HOME_ROWS,
+    cleanupPtvRowBackdrops,
     renderLibraryRow,
     renderMediaRow
 } from './ptvRows';
@@ -80,6 +88,12 @@ function delay(ms) {
 }
 
 export function loadSections(elem, apiClient, user) {
+    window.__PTV_HOME_INITIALIZED__ = true;
+    unmountPtvHomeHero(elem);
+    cleanupPtvRowBackdrops(elem);
+    cleanupFeaturedCacheListener(elem);
+    trimPtvImageManagerMemory();
+
     const userId = user.Id || apiClient.getCurrentUserId();
     return timePtvAsync('render', 'home-sections-load', () => queryClient
         .fetchQuery(getUserViewsQuery(toApi(apiClient), userId))
@@ -220,6 +234,14 @@ export function loadSections(elem, apiClient, user) {
 
 export function destroySections(elem) {
     cleanupFeaturedCacheListener(elem);
+    unmountPtvHomeHero(elem);
+    cleanupPtvRowBackdrops(elem);
+    cancelPtvImageScope('hero-backdrop');
+    cancelPtvImageScope('row-backdrop');
+    cancelPtvImageScope('viewport');
+    cancelPtvImageScope('viewport-fallback');
+    cleanupDisconnectedPtvHomeHeroes();
+    trimPtvImageManagerMemory();
 
     const elems = elem.querySelectorAll('.itemsContainer');
     for (const e of elems) {

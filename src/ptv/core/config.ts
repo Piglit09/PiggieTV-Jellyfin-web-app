@@ -6,6 +6,7 @@ export const PTV_BRANDING = {
     loginTaglineHtml: 'MOVIES &bull; TV SHOWS &bull; ANIME',
     loginWelcome: 'Welcome back',
     requestPortalTitle: 'PiggieTV Request Portal',
+    signupPortalTitle: 'PiggieTV Signup',
     welcomeDescription: 'Welcome to PiggieTV'
 } as const;
 
@@ -80,7 +81,9 @@ export const PTV_SERVICES = {
     discordUrl: 'https://discord.gg/FbtexGYau',
     gamesUrl: 'https://emu.piggietv.com',
     requestPortalUrl: 'https://request.piggietv.com',
-    signUpUrl: 'https://signup.piggietv.com/invite/ysBDodSMPv5fFMz9GPMxUL'
+    signupAdminUrl: 'https://signup.piggietv.com',
+    signupInviteCode: 'ysBDoDSMpv5fFMz9GPMxUL',
+    signUpUrl: 'https://signup.piggietv.com/invite/ysBDoDSMpv5fFMz9GPMxUL'
 } as const;
 
 export const PTV_ROUTES = {
@@ -94,7 +97,9 @@ export const PTV_ROUTES = {
     request: '#/ptv/request',
     requestFallback: '#/request',
     requestSafe: '#/home',
-    search: '#/search'
+    search: '#/search',
+    signup: '#/signup',
+    signupFallback: '#/login'
 } as const;
 
 export const PTV_EVENTS = {
@@ -103,6 +108,9 @@ export const PTV_EVENTS = {
     requestClose: 'ptv:request:close',
     requestOpen: 'ptv:request:open',
     requestStateChange: 'ptv:request:statechange',
+    signupClose: 'ptv:signup:close',
+    signupOpen: 'ptv:signup:open',
+    signupStateChange: 'ptv:signup:statechange',
     themeChange: 'ptv:themechange'
 } as const;
 
@@ -131,6 +139,8 @@ export const PTV_PLUGIN_API = {
         featuredContentRefresh: 'Ptv/v1/FeaturedContent/Refresh',
         heroBatches: 'Ptv/v1/HeroBatches',
         imageProxy: 'Ptv/v1/ImageProxy',
+        jfaGoInvites: 'Ptv/v1/JfaGo/Invites',
+        jfaGoStatus: 'Ptv/v1/JfaGo/Status',
         recommendations: 'Ptv/v1/Recommendations',
         status: 'Ptv/v1/Status'
     },

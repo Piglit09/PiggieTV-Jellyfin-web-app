@@ -1,5 +1,4 @@
 import { registerModule } from '../../core/lifecycle';
-import { watchDom } from '../../core/observer';
 import { runIconEngine } from '../../utils/icons';
 
 import './details.scss';
@@ -31,10 +30,10 @@ function enhanceDetails() {
     runIconEngine(page);
 }
 
-function init() {
+function init({ scope } = {}) {
     document.documentElement.classList.add('ptv-route-detail-page');
     enhanceDetails();
-    watchDom(enhanceDetails);
+    scope?.watchDom(enhanceDetails);
 }
 
 function refresh() {

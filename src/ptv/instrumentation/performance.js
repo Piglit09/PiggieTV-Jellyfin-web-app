@@ -1,6 +1,7 @@
 import { getModuleDiagnostics } from '../core/lifecycle';
+import { getPtvImageManagerMetrics } from '../core/imageManager';
 import { getPtvDebugReport, isPtvDebugEnabled } from '../core/observability';
-import { getRuntimeDiagnostics } from '../core/scope';
+import { getRuntimeDiagnostics, resetRuntimeScope } from '../core/scope';
 
 const LOW_FX_CLASS = 'ptv-lowfx';
 const PERFORMANCE_OVERLAY_CLASS = 'ptv-performance-overlay-active';
@@ -48,6 +49,7 @@ let performanceObserverCleanup = [];
 let performanceOverlayRoot = null;
 let performanceOverlayStartedMonitor = false;
 let performanceOverlayTimer = 0;
+const performanceScope = resetRuntimeScope('performance-instrumentation');
 
 const performanceMetrics = {
     active: false,
@@ -424,6 +426,7 @@ export function getPerformanceReport() {
 
     const runtime = getRuntimeDiagnostics();
     const modules = getModuleDiagnostics();
+    const imageManager = getPtvImageManagerMetrics();
 
     return {
         ...performanceMetrics,
@@ -446,6 +449,7 @@ export function getPerformanceReport() {
             tier: document.documentElement.dataset.ptvRenderTier || 'unknown'
         },
         dom: getPerformanceDomReport(),
+        imageManager,
         modules,
         runtime,
         uptime: performanceMetrics.startedAt ?
@@ -573,6 +577,12 @@ function renderPerformanceOverlay() {
         'Images',
         `${report.debug.images.timings.count} samples`,
         `${report.debug.images.timings.averageMs} ms avg / ${report.debug.images.errors} errors`
+    );
+    appendMetric(
+        body,
+        'Image Queue',
+        `${report.imageManager.activeRequests} active / ${report.imageManager.queuedRequests} queued`,
+        `${report.imageManager.cacheHits} hits / ${report.imageManager.cacheMisses} misses`
     );
     appendMetric(
         body,
@@ -706,10 +716,14 @@ if (shouldAutoStartPerformanceOverlay()) {
     togglePerformanceOverlay(true);
 }
 
-window.addEventListener('resize', applyPerformanceMode, { passive: true });
-window.addEventListener('ptv:debug:change', (event) => {
+performanceScope.listen(window, 'resize', applyPerformanceMode, { passive: true });
+performanceScope.listen(window, 'ptv:debug:change', (event) => {
     if (event.detail?.enabled) {
         startPerformanceMonitor();
     }
 });
-window.matchMedia?.('(prefers-reduced-motion: reduce)')?.addEventListener?.('change', applyPerformanceMode);
+const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+
+if (reducedMotionQuery?.addEventListener) {
+    performanceScope.listen(reducedMotionQuery, 'change', applyPerformanceMode);
+}

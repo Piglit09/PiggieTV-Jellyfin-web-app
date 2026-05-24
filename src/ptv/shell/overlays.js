@@ -1,5 +1,6 @@
 import { on } from '../core/events';
 import { watchDom } from '../core/observer';
+import { resetRuntimeScope } from '../core/scope';
 
 const SHELL_DIALOG_SELECTOR = [
     'dialog',
@@ -48,6 +49,7 @@ const FOCUSABLE_SELECTOR = [
 
 let overlayRunScheduled = false;
 let shellOverlayInstalled = false;
+const shellOverlayScope = resetRuntimeScope('shell-overlays');
 
 function isVisible(element) {
     if (!(element instanceof HTMLElement)) return false;
@@ -132,7 +134,7 @@ function scheduleShellOverlays() {
 
     overlayRunScheduled = true;
 
-    window.requestAnimationFrame(() => {
+    shellOverlayScope.animationFrame(() => {
         overlayRunScheduled = false;
         applyShellOverlays(document);
     });
@@ -180,11 +182,17 @@ export function installShellOverlayOwnership() {
 
     shellOverlayInstalled = true;
     installOverlayApi();
-    document.addEventListener('keydown', trapFocus, true);
-    watchDom(scheduleShellOverlays);
-    on('routechange', scheduleShellOverlays);
-    window.addEventListener('hashchange', scheduleShellOverlays);
-    window.addEventListener('popstate', scheduleShellOverlays);
+    shellOverlayScope.listen(document, 'keydown', trapFocus, true);
+    shellOverlayScope.add(watchDom(scheduleShellOverlays), {
+        label: 'overlay dom watcher',
+        type: 'observer'
+    });
+    shellOverlayScope.add(on('routechange', scheduleShellOverlays), {
+        label: 'routechange',
+        type: 'listener'
+    });
+    shellOverlayScope.listen(window, 'hashchange', scheduleShellOverlays);
+    shellOverlayScope.listen(window, 'popstate', scheduleShellOverlays);
     scheduleShellOverlays();
 }
 

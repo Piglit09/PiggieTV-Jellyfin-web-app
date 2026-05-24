@@ -21,6 +21,7 @@ PiggieTV does not replace Jellyfin. It customizes and extends Jellyfin Web while
 - Custom PiggieTV branding, logo assets, favicon variants, and shell styling.
 - PiggieTV sidebar and drawer treatment.
 - PiggieTV top navigation tabs for Home, Favorites, and Request.
+- Native-feeling signup/invite route that embeds the jfa-go invite flow at `#/signup`.
 - PiggieTV media rows, hero presentation, cards, badges, controls, and dashboard styling.
 - Semantic token system for surfaces, text, elevation, density, states, motion, and theme evolution.
 - Scoped PTV styles under `src/ptv` to avoid unnecessary Jellyfin core file changes.
@@ -86,6 +87,19 @@ The dashboard shows:
 - client profile flags
 - PTV debug and performance overlay controls
 - feature toggles for hero, home rows, dynamic backdrops, and low-power mode
+- signup and invite management entry point for the jfa-go invite engine
+
+### Signup And Invites
+
+PiggieTV integrates [jfa-go](https://github.com/hrfee/jfa-go) as the account invite engine while keeping the UI native to PiggieTV.
+
+- Public route: `#/signup`
+- Invite backend: `https://signup.piggietv.com`
+- Current invite flow: `https://signup.piggietv.com/invite/ysBDoDSMpv5fFMz9GPMxUL`
+- Admin route: `#/dashboard/users/signup-invites`
+- jfa-go admin/API secrets must stay server-side behind a PTV plugin/helper proxy.
+
+The first native dashboard version embeds the jfa-go admin panel and documents the secure proxy path for future native invite create/disable/copy actions.
 
 ### Performance And Device Profiles
 
@@ -220,6 +234,7 @@ PiggieTV architecture docs live in `src/ptv/docs`:
 - [Cache lifecycle](src/ptv/docs/cache-lifecycle.md)
 - [Plugin responsibilities](src/ptv/docs/plugin-responsibilities.md)
 - [Render profiles](src/ptv/docs/render-profiles.md)
+- [Signup integration](src/ptv/docs/signup-integration.md)
 - [Static assets](src/ptv/docs/static-assets.md)
 
 Plugin-specific notes:
@@ -236,6 +251,14 @@ Useful upstream links:
 - [Jellyfin Web](https://github.com/jellyfin/jellyfin-web)
 - [Jellyfin documentation](https://jellyfin.org/docs)
 - [Jellyfin translations](https://translate.jellyfin.org/projects/jellyfin/jellyfin-web)
+
+## Credits
+
+- Jellyfin and Jellyfin Web provide the media server and web client foundation.
+- [jfa-go](https://github.com/hrfee/jfa-go) provides the invite/signup engine used by PiggieTV's native signup surfaces.
+- [Jellyfin-PauseScreen](https://github.com/BobHasNoSoul/Jellyfin-PauseScreen) inspired PiggieTV's managed pause-screen feature behavior, including pause-only metadata/artwork presentation.
+- [Jellyfin-Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) inspired PiggieTV's quality tag treatment.
+- [Home Screen Sections](https://github.com/IAmParadox27/jellyfin-plugin-home-sections) inspired PiggieTV's home row direction.
 
 ## License
 

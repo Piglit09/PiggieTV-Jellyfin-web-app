@@ -856,9 +856,16 @@ const PiggieTvDashboardPage = () => {
     const sectionCount = cacheStatus.sectionCount || pluginFeaturedStatus?.sectionCount || 0;
     const lastRefreshDurationMs = pluginStatus?.lastRefreshDurationMs || cacheStatus.lastRefreshDurationMs;
     const performanceDebug = getNestedRecord(performanceReport, 'debug') || getPtvDebugReport();
+    const imageManagerMetrics = getNestedRecord(performanceReport, 'imageManager');
     const currentFps = getNumberValue(performanceReport, 'currentFps');
     const averageFps = getNumberValue(performanceReport, 'averageFps');
     const droppedFrames = getNumberValue(performanceReport, 'droppedFrameCount');
+    const activeImageRequests = getNumberValue(imageManagerMetrics, 'activeRequests');
+    const queuedImageRequests = getNumberValue(imageManagerMetrics, 'queuedRequests');
+    const imageCacheHits = getNumberValue(imageManagerMetrics, 'cacheHits');
+    const imageCacheMisses = getNumberValue(imageManagerMetrics, 'cacheMisses');
+    const imageDedupeHits = getNumberValue(imageManagerMetrics, 'dedupeHits');
+    const imageFailedSuppressions = getNumberValue(imageManagerMetrics, 'failedImageSuppressions');
     const debugReportText = debugReport ? JSON.stringify(debugReport, null, 2) : '';
 
     return (
@@ -1021,6 +1028,15 @@ const PiggieTvDashboardPage = () => {
                                         <Typography>FPS: {getFpsLabel(currentFps, averageFps)}</Typography>
                                         <Typography>Dropped frames: {droppedFrames ?? 'n/a'}</Typography>
                                         <Typography>Memory: {getMemoryLabel(performanceReport)}</Typography>
+                                        <Typography>
+                                            Image requests: {activeImageRequests ?? 0} active / {queuedImageRequests ?? 0} queued
+                                        </Typography>
+                                        <Typography>
+                                            Image cache: {imageCacheHits ?? 0} hits / {imageCacheMisses ?? 0} misses / {imageDedupeHits ?? 0} deduped
+                                        </Typography>
+                                        <Typography>
+                                            Failed image suppressions: {imageFailedSuppressions ?? 0}
+                                        </Typography>
                                         <FormControlLabel
                                             control={<Switch checked={debugEnabled} onChange={toggleDebug} />}
                                             label='Enable PTV_DEBUG'

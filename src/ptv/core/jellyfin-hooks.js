@@ -16,22 +16,30 @@ function bindDocumentEvent(name, callback) {
     document.addEventListener(name, callback);
 }
 
-bindDocumentEvent(HEADER_RENDERED, () => {
-    schedule('jf-header-rendered', emitHeaderRendered);
-});
+function installJellyfinHooks() {
+    if (window.__PTV_JELLYFIN_HOOKS__) return;
 
-bindDocumentEvent(SET_TABS, () => {
-    schedule('jf-tabs-changed', emitTabsChanged);
-});
+    window.__PTV_JELLYFIN_HOOKS__ = true;
 
-document.addEventListener('viewshow', () => {
-    schedule('jf-viewshow', () => emit('jellyfin:viewshow'));
-});
+    bindDocumentEvent(HEADER_RENDERED, () => {
+        schedule('jf-header-rendered', emitHeaderRendered);
+    });
 
-document.addEventListener('viewhide', () => {
-    schedule('jf-viewhide', () => emit('jellyfin:viewhide'));
-});
+    bindDocumentEvent(SET_TABS, () => {
+        schedule('jf-tabs-changed', emitTabsChanged);
+    });
 
-document.addEventListener('pageshow', () => {
-    schedule('jf-pageshow', () => emit('jellyfin:pageshow'));
-});
+    document.addEventListener('viewshow', () => {
+        schedule('jf-viewshow', () => emit('jellyfin:viewshow'));
+    });
+
+    document.addEventListener('viewhide', () => {
+        schedule('jf-viewhide', () => emit('jellyfin:viewhide'));
+    });
+
+    document.addEventListener('pageshow', () => {
+        schedule('jf-pageshow', () => emit('jellyfin:pageshow'));
+    });
+}
+
+installJellyfinHooks();

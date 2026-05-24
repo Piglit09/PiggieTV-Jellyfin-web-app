@@ -1,5 +1,5 @@
 import { on, emit } from './events';
-import { createRuntimeScope, disposeRuntimeScope, getRuntimeDiagnostics, getRuntimeScopeNames } from './scope';
+import { disposeRuntimeScope, getRuntimeDiagnostics, getRuntimeScopeNames, resetRuntimeScope } from './scope';
 
 const modules = new Map();
 let activeRoute = null;
@@ -277,7 +277,7 @@ function activateModule(module, route) {
         warnDebug(`duplicate mount attempt for module "${module.name}"`, snapshotModule(module));
     }
 
-    module.scope = module.scope || createRuntimeScope(module.name);
+    module.scope = module.scope || resetRuntimeScope(`module:${module.name}`);
     module.active = true;
 
     try {
@@ -308,7 +308,7 @@ function deactivateModule(module, route) {
 
     module.scope?.dispose();
     module.scope = null;
-    disposeRuntimeScope(module.name);
+    disposeRuntimeScope(`module:${module.name}`);
     module.active = false;
 }
 

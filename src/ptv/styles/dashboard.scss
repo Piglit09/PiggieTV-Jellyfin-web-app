@@ -1102,6 +1102,73 @@
     white-space: pre-wrap;
 }
 
+.dashboardDocument .ptv-signup-invites-content {
+    max-width: min(1280px, calc(100vw - 72px)) !important;
+}
+
+.dashboardDocument .ptv-signup-invites-page .ptv-signup-invite-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--ptv-space-2);
+}
+
+.dashboardDocument .ptv-signup-invites-page .ptv-signup-invite-fields span {
+    min-height: 34px;
+    padding: 8px 10px;
+
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.16);
+    border-radius: var(--ptv-radius-md);
+    background: rgba(var(--ptv-color-focus-rgb), 0.08);
+
+    color: var(--ptv-color-text-secondary);
+    font-size: 12px;
+    font-weight: 850;
+}
+
+.dashboardDocument .ptv-signup-invites-page .ptv-signup-admin-frame-shell {
+    position: relative;
+    min-height: clamp(520px, 66vh, 840px);
+    overflow: hidden;
+
+    border: 1px solid rgba(var(--ptv-color-accent-secondary-rgb), 0.22);
+    border-radius: var(--ptv-radius-panel);
+    background: rgba(5, 3, 12, 0.78);
+    box-shadow:
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.07),
+        0 22px 60px rgba(0, 0, 0, 0.28);
+}
+
+.dashboardDocument .ptv-signup-invites-page .ptv-signup-admin-frame {
+    display: block;
+    width: 100%;
+    height: clamp(520px, 66vh, 840px);
+
+    border: 0;
+    background: #05050a;
+    color-scheme: dark;
+}
+
+.dashboardDocument .ptv-signup-invites-page .ptv-signup-admin-frame-state {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+
+    display: grid;
+    place-content: center;
+    gap: var(--ptv-space-3);
+    padding: var(--ptv-space-5);
+
+    color: var(--ptv-color-text-primary);
+    text-align: center;
+    background:
+        radial-gradient(circle at 50% 22%, rgba(var(--ptv-color-focus-rgb), 0.16), transparent 32%),
+        var(--ptv-elevation-3-surface-solid);
+}
+
+.dashboardDocument .ptv-signup-invites-page .ptv-signup-admin-frame-shell[data-ptv-frame-state='ready'] .ptv-signup-admin-frame-state {
+    display: none;
+}
+
 @media all and (max-width: 82em) {
     .dashboardDocument .ptv-dashboard-overview-grid {
         grid-template-areas:
