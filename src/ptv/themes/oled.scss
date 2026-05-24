@@ -1,0 +1,57 @@
+/* OLED PTV theme: semantic token overrides for true-black displays. */
+
+:root[data-ptv-theme='oled'] {
+    --ptv-theme-id: oled;
+    --ptv-theme-density: comfortable;
+    --ptv-theme-effects: standard;
+    --ptv-surface-base: rgba(0, 0, 0, 0.98);
+    --ptv-surface-base-solid: #000;
+    --ptv-surface-panel-soft: rgba(3, 3, 8, 0.82);
+    --ptv-surface-panel: rgba(4, 4, 12, 0.86);
+    --ptv-surface-panel-strong: rgba(8, 5, 18, 0.92);
+    --ptv-surface-elevated: rgba(10, 6, 22, 0.96);
+    --ptv-surface-page:
+        radial-gradient(ellipse at 18% 0%, rgba(var(--ptv-color-focus-rgb), 0.065), transparent 34%),
+        radial-gradient(ellipse at 88% 24%, rgba(var(--ptv-color-accent-secondary-rgb), 0.09), transparent 42%),
+        radial-gradient(ellipse at 52% 100%, rgba(var(--ptv-color-accent-rgb), 0.05), transparent 44%),
+        var(--ptv-surface-base-solid);
+    --ptv-surface-panel-gradient:
+        radial-gradient(ellipse at 12% 0%, rgba(var(--ptv-color-focus-rgb), 0.055), transparent 36%),
+        linear-gradient(180deg, var(--ptv-surface-panel), rgba(0, 0, 0, 0.88));
+    --ptv-surface-panel-gradient-soft:
+        linear-gradient(
+            180deg,
+            var(--ptv-surface-panel-soft),
+            rgba(0, 0, 0, 0.7)
+        );
+    --ptv-surface-panel-gradient-elevated:
+        radial-gradient(ellipse at 16% 0%, rgba(var(--ptv-color-focus-rgb), 0.08), transparent 36%),
+        radial-gradient(ellipse at 90% 100%, rgba(var(--ptv-color-accent-rgb), 0.065), transparent 42%),
+        linear-gradient(180deg, var(--ptv-surface-panel-strong), rgba(0, 0, 0, 0.94));
+    --ptv-border-subtle: rgba(var(--ptv-palette-violet-soft-rgb), 0.075);
+    --ptv-border-default: rgba(var(--ptv-palette-violet-soft-rgb), 0.12);
+    --ptv-border-strong: rgba(var(--ptv-color-focus-rgb), 0.22);
+    --ptv-elevation-2-shadow-muted:
+        0 10px 28px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.035);
+    --ptv-elevation-2-shadow:
+        0 16px 40px rgba(0, 0, 0, 0.52),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.035);
+    --ptv-elevation-3-shadow:
+        0 22px 56px rgba(0, 0, 0, 0.62),
+        0 0 20px rgba(var(--ptv-color-accent-secondary-rgb), 0.12);
+    --ptv-elevation-4-surface:
+        radial-gradient(ellipse at 16% 0%, rgba(var(--ptv-color-focus-rgb), 0.075), transparent 36%),
+        radial-gradient(ellipse at 92% 100%, rgba(var(--ptv-color-accent-rgb), 0.055), transparent 42%),
+        linear-gradient(180deg, rgba(10, 6, 22, 0.98), rgba(0, 0, 0, 0.96));
+    --ptv-elevation-4-shadow:
+        0 28px 72px rgba(0, 0, 0, 0.68),
+        0 0 24px rgba(var(--ptv-color-accent-secondary-rgb), 0.1);
+    --ptv-elevation-5-surface: linear-gradient(180deg, rgba(0, 0, 0, 0.96), rgba(0, 0, 0, 0.92));
+    --ptv-elevation-5-shadow:
+        0 32px 88px rgba(0, 0, 0, 0.74),
+        0 0 24px rgba(var(--ptv-color-focus-rgb), 0.08);
+    --ptv-glass-bg: rgba(0, 0, 0, 0.72);
+    --ptv-glass-bg-strong: var(--ptv-elevation-3-surface);
+    --ptv-blur-panel: 10px;
+}

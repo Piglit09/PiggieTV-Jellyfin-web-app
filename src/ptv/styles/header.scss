@@ -1,0 +1,617 @@
+/* PiggieTV native header theme. Settings page styles intentionally untouched. */
+
+.ptv-app-header-root {
+    z-index: 1200;
+}
+
+.skinHeader,
+.ptv-legacy-skinHeader {
+    z-index: 1200 !important;
+    min-height: var(--ptv-shell-header-height) !important;
+    padding: 0 18px !important;
+    background: var(--ptv-glass-header) !important;
+    border-top: 1px solid rgba(167, 139, 250, 0.2);
+    border-bottom: 1px solid rgba(167, 139, 250, 0.12) !important;
+    box-shadow:
+        0 10px 40px rgba(0, 0, 0, 0.45),
+        0 0 24px rgba(124, 58, 237, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+    backdrop-filter: blur(18px) saturate(1.4);
+}
+
+.skinHeader::after,
+.ptv-legacy-skinHeader::after {
+    content: '';
+
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    height: 1px;
+
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            rgba(125, 214, 255, 0.1),
+            rgba(167, 139, 250, 0.16),
+            rgba(255, 141, 195, 0.08),
+            transparent
+        );
+
+    pointer-events: none;
+}
+
+.ptv-header-logo,
+.ptv-stock-header-logo {
+    position: relative;
+
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+
+    height: 40px;
+    min-width: 112px;
+    padding: 0 12px;
+    margin-left: 2px;
+
+    overflow: hidden;
+
+    border: 1px solid rgba(205, 174, 255, 0.12);
+    border-radius: 16px;
+    background:
+        linear-gradient(
+            135deg,
+            rgba(125, 214, 255, 0.08),
+            rgba(167, 139, 250, 0.13) 52%,
+            rgba(255, 141, 195, 0.08)
+        );
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 0 18px rgba(167, 139, 250, 0.12);
+    text-decoration: none;
+}
+
+.ptv-header-logo img,
+.ptv-stock-header-logo img,
+.ptv-brand-logo {
+    display: block;
+
+    width: auto;
+    height: 32px;
+    max-width: 166px;
+
+    object-fit: contain;
+    filter:
+        drop-shadow(0 0 10px rgba(125, 214, 255, 0.22))
+        drop-shadow(0 0 14px rgba(255, 141, 195, 0.16));
+}
+
+.ptv-header-logo::after,
+.ptv-stock-header-logo::after {
+    content: '';
+
+    position: absolute;
+    inset: -4px;
+
+    border-radius: inherit;
+
+    background:
+        linear-gradient(
+            105deg,
+            transparent,
+            rgba(255, 255, 255, 0.2),
+            transparent
+        );
+
+    transform: translateX(-140%);
+    animation: ptvHeaderShimmer var(--ptv-motion-shimmer) infinite;
+
+    pointer-events: none;
+}
+
+@keyframes ptvHeaderShimmer {
+    0%,
+    80%,
+    100% {
+        opacity: 0;
+        transform: translateX(-140%);
+    }
+
+    90% {
+        opacity: 0.6;
+        transform: translateX(140%);
+    }
+}
+
+.ptv-legacy-skinHeader .headerLeft::after {
+    content: none !important;
+    display: none !important;
+}
+
+.skinHeader .pageTitle,
+.ptv-legacy-skinHeader .pageTitle {
+    color: transparent !important;
+    font-size: 0 !important;
+}
+
+.headerTabs,
+.ptv-legacy-skinHeader .headerTabs,
+.ptv-legacy-skinHeader .emby-tabs {
+    background: rgba(30, 38, 72, 0.45) !important;
+    border-radius: var(--ptv-radius-pill) !important;
+    box-shadow: var(--ptv-glass-shadow);
+    backdrop-filter: blur(10px);
+}
+
+.emby-tab-button,
+.ptv-nav-link {
+    color: rgba(245, 247, 255, 0.72) !important;
+    font-family: var(--ptv-font-accent) !important;
+    font-weight: 800 !important;
+    letter-spacing: 0 !important;
+    transition:
+        color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        background var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+.emby-tab-button:hover,
+.ptv-nav-link:hover {
+    color: #ff8dc3 !important;
+    transform: translateY(-1px);
+}
+
+.emby-tab-button-active,
+.ptv-nav-link-active {
+    color: #111827 !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+}
+
+.headerButton,
+.paper-icon-button-light,
+.ptv-header-icon-btn {
+    border-radius: 12px !important;
+    transition:
+        background var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard) !important;
+}
+
+.headerButton:hover,
+.paper-icon-button-light:hover,
+.ptv-header-icon-btn:hover {
+    background: rgba(49, 63, 110, 0.35) !important;
+    box-shadow: var(--ptv-glass-glow) !important;
+    transform: translateY(-1px) scale(1.04);
+}
+
+.headerButton .ptv-icon,
+.paper-icon-button-light .ptv-icon,
+.ptv-header-icon-btn .ptv-icon {
+    display: inline-block !important;
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    min-height: 20px !important;
+    margin: 0 !important;
+
+    background: var(--ptv-gradient-action) !important;
+    mask: var(--ptv-icon-url) center / contain no-repeat !important;
+    /* stylelint-disable-next-line property-no-vendor-prefix */
+    -webkit-mask: var(--ptv-icon-url) center / contain no-repeat !important;
+    filter:
+        drop-shadow(0 0 8px rgba(125, 214, 255, 0.22))
+        drop-shadow(0 0 14px rgba(255, 141, 195, 0.14)) !important;
+}
+
+.headerButton:hover .ptv-icon,
+.paper-icon-button-light:hover .ptv-icon,
+.ptv-header-icon-btn:hover .ptv-icon {
+    transform: scale(1.08);
+    filter:
+        drop-shadow(0 0 8px rgba(125, 214, 255, 0.32))
+        drop-shadow(0 0 12px rgba(167, 139, 250, 0.22)) !important;
+}
+
+.mainDrawer,
+.ptv-sidebar {
+    z-index: 1300 !important;
+}
+
+/* stylelint-disable no-descending-specificity */
+
+/* Hard-pin Home/Favorites/Request tabs. Jellyfin's stock headerTabs rules are
+   responsive and sometimes leave the tabs present in DOM but visually buried. */
+.ptv-legacy-skinHeader > .headerTabs.sectionTabs,
+.skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs,
+.ptv-owned-top-tabs {
+    position: fixed !important;
+    top: 10px !important;
+    left: 50vw !important;
+    z-index: 1250 !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    width: auto !important;
+    min-width: 286px !important;
+    height: 48px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    overflow: visible !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+
+    background: transparent !important;
+    box-shadow: none !important;
+
+    transform: translateX(-50%) translateY(-1px) !important;
+}
+
+.ptv-legacy-skinHeader > .headerTabs.sectionTabs.hide,
+.skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs.hide,
+.ptv-legacy-skinHeader > .headerTabs.sectionTabs.ptv-stock-home-tabs-hidden,
+.skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs.ptv-stock-home-tabs-hidden {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.ptv-legacy-skinHeader > .headerTabs.sectionTabs .tabs-viewmenubar,
+.skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .tabs-viewmenubar,
+.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tabs-slider,
+.skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tabs-slider {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    height: 48px !important;
+    min-height: 48px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    overflow: visible !important;
+}
+
+.ptv-legacy-skinHeader > .headerTabs.sectionTabs .tabs-viewmenubar,
+.skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .tabs-viewmenubar,
+.ptv-top-tabs {
+    border: 1px solid rgba(205, 174, 255, 0.12) !important;
+    border-radius: 18px !important;
+    background:
+        linear-gradient(
+            135deg,
+            rgba(18, 9, 34, 0.68),
+            rgba(42, 18, 68, 0.58) 52%,
+            rgba(18, 9, 34, 0.64)
+        ) !important;
+    box-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+    backdrop-filter: blur(12px) saturate(1.1);
+}
+
+.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button,
+.skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button,
+.ptv-top-tab {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+
+    min-width: 88px !important;
+    height: 48px !important;
+    margin: 0 !important;
+    padding: 0 20px !important;
+
+    color: rgba(245, 247, 255, 0.78) !important;
+    font-size: 13px !important;
+    line-height: 1 !important;
+    text-decoration: none !important;
+
+    border: 0 !important;
+    border-radius: 16px !important;
+    background: transparent !important;
+    cursor: pointer !important;
+}
+
+.ptv-owned-top-tabs .ptv-top-tab-icon {
+    flex: 0 0 auto !important;
+
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+}
+
+.ptv-owned-top-tabs .ptv-top-tab-label {
+    min-width: 0 !important;
+
+    overflow: hidden !important;
+
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+.ptv-owned-top-tabs .emby-tab-button-active,
+.ptv-owned-top-tabs .ptv-nav-link-active {
+    color: #12091f !important;
+    background:
+        linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.94),
+            rgba(226, 214, 255, 0.9)
+        ) !important;
+}
+
+.ptv-legacy-skinHeader .headerTop,
+.skinHeader .headerTop,
+.ptv-legacy-skinHeader .headerLeft,
+.ptv-legacy-skinHeader .headerRight {
+    height: var(--ptv-shell-header-height) !important;
+    min-height: var(--ptv-shell-header-height) !important;
+    align-items: center !important;
+}
+
+.ptv-legacy-skinHeader {
+    height: var(--ptv-shell-header-height) !important;
+}
+
+.ptv-legacy-skinHeader .headerButton,
+.ptv-legacy-skinHeader .paper-icon-button-light,
+.skinHeader .headerButton,
+.skinHeader .paper-icon-button-light {
+    align-self: center !important;
+    margin-top: 0 !important;
+}
+
+.ptv-legacy-skinHeader .headerBackButton,
+.ptv-legacy-skinHeader .headerHomeButton,
+.ptv-legacy-skinHeader .mainDrawerButton,
+.ptv-legacy-skinHeader .headerSyncButton,
+.ptv-legacy-skinHeader .headerAudioPlayerButton,
+.ptv-legacy-skinHeader .headerCastButton,
+.ptv-legacy-skinHeader .headerSearchButton,
+.ptv-legacy-skinHeader .headerUserButton {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.ptv-legacy-skinHeader .headerButton .ptv-icon-legacy,
+.ptv-legacy-skinHeader .paper-icon-button-light .ptv-icon-legacy {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    min-height: 22px !important;
+    margin: 0 !important;
+
+    overflow: hidden !important;
+
+    color: transparent !important;
+    font-family: initial !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    text-indent: 0 !important;
+
+    background: transparent !important;
+}
+
+.ptv-legacy-skinHeader .headerButton .ptv-icon-legacy::before,
+.ptv-legacy-skinHeader .paper-icon-button-light .ptv-icon-legacy::before {
+    content: none !important;
+    display: none !important;
+}
+
+.ptv-legacy-skinHeader .headerButton .ptv-icon-legacy::after,
+.ptv-legacy-skinHeader .paper-icon-button-light .ptv-icon-legacy::after {
+    content: '' !important;
+
+    display: block !important;
+
+    width: 20px !important;
+    height: 20px !important;
+
+    background: var(--ptv-gradient-action) !important;
+    mask: var(--ptv-icon-url) center / contain no-repeat !important;
+    /* stylelint-disable-next-line property-no-vendor-prefix */
+    -webkit-mask: var(--ptv-icon-url) center / contain no-repeat !important;
+
+    filter: drop-shadow(0 0 7px rgba(167, 139, 250, 0.28));
+}
+
+.ptv-legacy-skinHeader .headerRight {
+    gap: 8px !important;
+}
+
+.ptv-legacy-skinHeader .ptv-icon-back { --ptv-icon-url: url('/assets/icons/back.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-home { --ptv-icon-url: url('/assets/icons/home.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-menu { --ptv-icon-url: url('/assets/icons/menu.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-users { --ptv-icon-url: url('/assets/icons/users.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-music { --ptv-icon-url: url('/assets/icons/music.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-cast { --ptv-icon-url: url('/assets/icons/cast.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-search { --ptv-icon-url: url('/assets/icons/search.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-user { --ptv-icon-url: url('/assets/icons/user.svg'); }
+
+.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button-active,
+.skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button-active {
+    color: #12091f !important;
+    background:
+        linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.94),
+            rgba(226, 214, 255, 0.9)
+        ) !important;
+}
+
+@media (max-width: 700px) {
+    .skinHeader,
+    .ptv-legacy-skinHeader {
+        --ptv-mobile-header-height: 56px;
+        --ptv-mobile-tabs-top: calc(var(--ptv-mobile-header-height) + 6px);
+
+        min-height: var(--ptv-mobile-header-height) !important;
+        height: var(--ptv-mobile-header-height) !important;
+        padding: 0 10px !important;
+    }
+
+    .ptv-legacy-skinHeader .headerTop,
+    .skinHeader .headerTop,
+    .ptv-legacy-skinHeader .headerLeft,
+    .ptv-legacy-skinHeader .headerRight {
+        min-height: var(--ptv-mobile-header-height) !important;
+        height: var(--ptv-mobile-header-height) !important;
+    }
+
+    .ptv-legacy-skinHeader .headerTop,
+    .skinHeader .headerTop {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        align-items: center !important;
+        gap: 6px !important;
+        width: 100% !important;
+    }
+
+    .ptv-legacy-skinHeader .headerLeft,
+    .ptv-legacy-skinHeader .headerRight {
+        min-width: 0 !important;
+        gap: 4px !important;
+    }
+
+    .ptv-legacy-skinHeader .headerLeft {
+        overflow: hidden !important;
+    }
+
+    .ptv-legacy-skinHeader .headerRight {
+        justify-content: flex-end !important;
+    }
+
+    .ptv-legacy-skinHeader .ptv-header-logo,
+    .ptv-legacy-skinHeader .ptv-stock-header-logo,
+    .ptv-legacy-skinHeader .headerHomeButton,
+    .ptv-legacy-skinHeader .headerSyncButton,
+    .ptv-legacy-skinHeader .headerAudioPlayerButton,
+    .ptv-legacy-skinHeader .headerCastButton,
+    .ptv-legacy-skinHeader .headerSelectedPlayer {
+        display: none !important;
+    }
+
+    .ptv-legacy-skinHeader .headerButton,
+    .ptv-legacy-skinHeader .paper-icon-button-light,
+    .skinHeader .headerButton,
+    .skinHeader .paper-icon-button-light {
+        width: 40px !important;
+        min-width: 40px !important;
+        height: 40px !important;
+        min-height: 40px !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    .ptv-legacy-skinHeader .headerButton .ptv-icon-legacy,
+    .ptv-legacy-skinHeader .paper-icon-button-light .ptv-icon-legacy,
+    .skinHeader .headerButton .ptv-icon-legacy,
+    .skinHeader .paper-icon-button-light .ptv-icon-legacy {
+        width: 22px !important;
+        height: 22px !important;
+        min-width: 22px !important;
+        min-height: 22px !important;
+    }
+
+    .ptv-legacy-skinHeader > .headerTabs.sectionTabs,
+    .skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs,
+    .ptv-owned-top-tabs {
+        top: var(--ptv-mobile-tabs-top) !important;
+        left: 50% !important;
+        right: auto !important;
+
+        width: min(calc(100vw - 20px), 360px) !important;
+        min-width: 0 !important;
+        max-width: calc(100vw - 20px) !important;
+        height: 44px !important;
+
+        transform: translateX(-50%) !important;
+    }
+
+    .ptv-legacy-skinHeader > .headerTabs.sectionTabs .tabs-viewmenubar,
+    .skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .tabs-viewmenubar,
+    .ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tabs-slider,
+    .skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tabs-slider {
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 44px !important;
+        min-height: 44px !important;
+    }
+
+    .ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tabs-slider,
+    .skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tabs-slider,
+    .ptv-owned-top-tabs {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+
+    .ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button,
+    .skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button,
+    .ptv-top-tab {
+        min-width: 0 !important;
+        width: 100% !important;
+        height: 44px !important;
+        padding: 0 8px !important;
+
+        font-size: 12px !important;
+        white-space: nowrap !important;
+    }
+}
+
+@media (max-width: 380px) {
+    .ptv-legacy-skinHeader .headerBackButton {
+        display: none !important;
+    }
+
+    .ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button,
+    .skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button,
+    .ptv-top-tab {
+        font-size: 11px !important;
+    }
+}
+/* stylelint-enable no-descending-specificity */
+
+.ptv-playing .ptv-legacy-skinHeader.osdHeader-hidden,
+.ptv-playing .ptv-legacy-skinHeader.hide,
+.ptv-playing .skinHeader.osdHeader-hidden,
+.ptv-playing .skinHeader.hide {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+.ptv-playing .osdHeader .ptv-header-logo,
+.ptv-playing .osdHeader .ptv-stock-header-logo,
+.ptv-playing .osdHeader .ptv-owned-top-tabs,
+.ptv-playing .osdHeader .headerTabs,
+.ptv-playing .osdHeader .ptv-brand,
+.ptv-playing .osdHeader .ptv-header-nav,
+.ptv-playing .osdHeader .ptv-header-actions {
+    display: none !important;
+}
+
+.ptv-playing .ptv-mainDrawer,
+.ptv-playing .ptv-mainDrawerHandle,
+.ptv-playing .ptv-sidebar,
+.ptv-playing .ptv-sidebar-backdrop {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}

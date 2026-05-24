@@ -1,0 +1,76 @@
+.ptv-detail-page .ptv-theme-song-chip {
+    --ptv-icon-size: 18px;
+
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 46px;
+    padding: 0 13px;
+
+    border: 1px solid rgba(205, 174, 255, 0.2);
+    border-radius: 12px;
+    background:
+        radial-gradient(circle at 18% 20%, rgba(125, 214, 255, 0.26), transparent 42%),
+        linear-gradient(135deg, rgba(31, 38, 83, 0.72), rgba(64, 32, 92, 0.68));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 12px 28px rgba(0, 0, 0, 0.26);
+    color: rgba(247, 249, 255, 0.92);
+    font-family: var(--ptv-font-main);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0;
+    white-space: nowrap;
+    cursor: pointer;
+    backdrop-filter: blur(12px) saturate(1.18);
+    transition:
+        background var(--ptv-speed-fast) var(--ptv-ease),
+        border-color var(--ptv-speed-fast) var(--ptv-ease),
+        box-shadow var(--ptv-speed-fast) var(--ptv-ease),
+        transform var(--ptv-speed-fast) var(--ptv-ease),
+        opacity var(--ptv-speed-fast) var(--ptv-ease);
+}
+
+.ptv-detail-page .ptv-theme-song-chip:hover,
+.ptv-detail-page .ptv-theme-song-chip:focus-visible {
+    border-color: rgba(125, 214, 255, 0.42);
+    box-shadow:
+        0 0 24px rgba(167, 139, 250, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    transform: translateY(-1px);
+}
+
+.ptv-detail-page .ptv-theme-song-chip-disabled {
+    opacity: 0.66;
+}
+
+.ptv-detail-page .ptv-theme-song-chip-enabled .ptv-icon {
+    filter: drop-shadow(0 0 8px rgba(125, 214, 255, 0.46));
+}
+
+.ptv-detail-page .ptv-theme-song-chip-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 6px;
+
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(7, 10, 24, 0.52);
+    color: rgba(216, 224, 255, 0.86);
+    font-size: 10px;
+    font-weight: 900;
+}
+
+@media (max-width: 720px) {
+    .ptv-detail-page .ptv-theme-song-chip {
+        height: 42px;
+    }
+
+    .ptv-detail-page .ptv-theme-song-chip-text {
+        display: none;
+    }
+}

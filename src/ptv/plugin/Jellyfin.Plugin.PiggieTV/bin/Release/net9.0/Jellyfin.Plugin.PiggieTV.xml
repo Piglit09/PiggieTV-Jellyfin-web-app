@@ -1,0 +1,642 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Jellyfin.Plugin.PiggieTV</name>
+    </assembly>
+    <members>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes">
+            <summary>
+            PiggieTV plugin API route constants.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.Root">
+            <summary>
+            Root plugin API route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.CurrentVersion">
+            <summary>
+            Current public API version.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1">
+            <summary>
+            Version 1 route prefix.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1Status">
+            <summary>
+            Versioned status route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1FeaturedContent">
+            <summary>
+            Versioned featured-content route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1FeaturedContentRefresh">
+            <summary>
+            Versioned featured-content refresh route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.LegacyStatus">
+            <summary>
+            Legacy unversioned status route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.LegacyFeaturedContent">
+            <summary>
+            Legacy unversioned featured-content route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.LegacyFeaturedContentRefresh">
+            <summary>
+            Legacy unversioned featured-content refresh route.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvController">
+            <summary>
+            Minimal PiggieTV plugin API.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.#ctor(Microsoft.AspNetCore.Authorization.IAuthorizationService,Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService,Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Api.PtvController"/> class.
+            </summary>
+            <param name="authorizationService">Authorization service.</param>
+            <param name="featuredContentRefreshService">Featured-content refresh service.</param>
+            <param name="featuredContentStore">Featured-content cache store.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.GetStatus(System.Threading.CancellationToken)">
+            <summary>
+            Gets PiggieTV plugin health and capability information.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Plugin status.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.GetFeaturedContent(System.Threading.CancellationToken)">
+            <summary>
+            Gets the shared PiggieTV featured-content cache document.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Featured-content cache document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.PutFeaturedContent(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument,System.Threading.CancellationToken)">
+            <summary>
+            Replaces the shared PiggieTV featured-content cache document.
+            </summary>
+            <param name="document">Featured-content cache document.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The stored featured-content cache document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.DeleteFeaturedContent(System.Threading.CancellationToken)">
+            <summary>
+            Clears the shared PiggieTV featured-content cache document.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Empty featured-content cache document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.RefreshFeaturedContent(System.Threading.CancellationToken)">
+            <summary>
+            Triggers a server-side refresh of the shared PiggieTV featured-content cache.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Plugin status after the refresh attempt.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration">
+            <summary>
+            PiggieTV plugin configuration.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvErrorResponse">
+            <summary>
+            Structured PiggieTV API error response.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvErrorResponse.#ctor(System.String,System.String)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Models.PtvErrorResponse"/> class.
+            </summary>
+            <param name="code">Stable error code.</param>
+            <param name="error">Human-readable message.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvErrorResponse.Code">
+            <summary>
+            Gets the stable error code.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvErrorResponse.Error">
+            <summary>
+            Gets the human-readable error message.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument">
+            <summary>
+            Shared PiggieTV featured-content cache document.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument.Version">
+            <summary>
+            Gets or sets the server cache document version.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument.FeaturedContent">
+            <summary>
+            Gets or sets the compact featured-content cache entry produced by the web client.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument.FeaturedContentSettings">
+            <summary>
+            Gets or sets the featured-content cache settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument.UpdatedAt">
+            <summary>
+            Gets or sets the last update timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus">
+            <summary>
+            Runtime status for the PiggieTV server-side featured-content refresh worker.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus.RefreshInProgress">
+            <summary>
+            Gets or sets a value indicating whether a refresh is currently running.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus.LastRefreshStartedAt">
+            <summary>
+            Gets or sets the last refresh start timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus.LastRefreshCompletedAt">
+            <summary>
+            Gets or sets the last successful or failed refresh completion timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus.LastRefreshDurationMs">
+            <summary>
+            Gets or sets the last refresh duration in milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus.LastRefreshError">
+            <summary>
+            Gets or sets the last refresh error, if any.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus.NextRefreshAt">
+            <summary>
+            Gets or sets the next scheduled refresh timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus">
+            <summary>
+            Summary of the stored featured-content cache.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.HasPayload">
+            <summary>
+            Gets or sets a value indicating whether a featured cache payload exists.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.CacheVersion">
+            <summary>
+            Gets or sets the featured cache version.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.HeroCount">
+            <summary>
+            Gets or sets the number of cached hero items.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.SectionCount">
+            <summary>
+            Gets or sets the number of cached row sections.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.ItemCount">
+            <summary>
+            Gets or sets the number of cached row items.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.CreatedAt">
+            <summary>
+            Gets or sets the cache creation timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.ExpiresAt">
+            <summary>
+            Gets or sets the cache expiry timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.UpdatedAt">
+            <summary>
+            Gets or sets the document update timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStatus.FromDocument(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument)">
+            <summary>
+            Creates a status object from a stored document.
+            </summary>
+            <param name="document">Featured-content document.</param>
+            <returns>Featured-content status.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus">
+            <summary>
+            File-store status for the shared PiggieTV featured-content cache.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.CachePathExists">
+            <summary>
+            Gets or sets a value indicating whether the fixed cache directory exists.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.FeaturedCacheExists">
+            <summary>
+            Gets or sets a value indicating whether the featured cache file exists.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.FeaturedCacheFresh">
+            <summary>
+            Gets or sets a value indicating whether the stored cache has payload and is fresh.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.FeaturedCacheCreatedAt">
+            <summary>
+            Gets or sets the cache creation timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.FeaturedCacheExpiresAt">
+            <summary>
+            Gets or sets the cache expiry timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.Document">
+            <summary>
+            Gets or sets the currently readable cache document.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse">
+            <summary>
+            PiggieTV plugin health response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Ok">
+            <summary>
+            Gets or sets a value indicating whether the plugin API is available.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Name">
+            <summary>
+            Gets or sets the plugin name.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.PluginName">
+            <summary>
+            Gets or sets the plugin name.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Version">
+            <summary>
+            Gets or sets the plugin version.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.PluginVersion">
+            <summary>
+            Gets or sets the plugin version.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ApiVersion">
+            <summary>
+            Gets or sets the public PiggieTV plugin API version.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ApiPath">
+            <summary>
+            Gets or sets the current versioned API path.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ServerTime">
+            <summary>
+            Gets or sets the server timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ServerTimeUtc">
+            <summary>
+            Gets or sets the current server UTC timestamp.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CacheBackend">
+            <summary>
+            Gets or sets the cache backend identifier.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Features">
+            <summary>
+            Gets or sets the available plugin features.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CanReadFeaturedContent">
+            <summary>
+            Gets or sets a value indicating whether authenticated users can read featured content.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CanWriteFeaturedContent">
+            <summary>
+            Gets or sets a value indicating whether the current user can write featured content.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CachePathExists">
+            <summary>
+            Gets or sets a value indicating whether the fixed plugin cache directory exists.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FeaturedCacheExists">
+            <summary>
+            Gets or sets a value indicating whether a featured cache file exists.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FeaturedCacheFresh">
+            <summary>
+            Gets or sets a value indicating whether the featured cache exists and is fresh.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FeaturedCacheCreatedAt">
+            <summary>
+            Gets or sets the featured cache creation timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FeaturedCacheExpiresAt">
+            <summary>
+            Gets or sets the featured cache expiry timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.MaxCachePayloadBytes">
+            <summary>
+            Gets or sets the maximum accepted cache payload size.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FeaturedContent">
+            <summary>
+            Gets or sets the featured-content cache status.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.RefreshInProgress">
+            <summary>
+            Gets or sets a value indicating whether a server-side featured-content refresh is currently running.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.LastRefreshStartedAt">
+            <summary>
+            Gets or sets the last refresh start timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.LastRefreshCompletedAt">
+            <summary>
+            Gets or sets the last refresh completion timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.LastRefreshDurationMs">
+            <summary>
+            Gets or sets the last refresh duration in milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.LastRefreshError">
+            <summary>
+            Gets or sets the last refresh error.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.NextRefreshAt">
+            <summary>
+            Gets or sets the next scheduled refresh timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FromStoreStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus,System.Boolean,Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus)">
+            <summary>
+            Creates a status response from a stored document.
+            </summary>
+            <param name="storeStatus">Featured-content store status.</param>
+            <param name="canWriteFeaturedContent">Whether the current user can write featured content.</param>
+            <param name="refreshStatus">Featured-content refresh worker status.</param>
+            <returns>Status response.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Plugin">
+            <summary>
+            PiggieTV server-side companion plugin.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Plugin.#ctor(MediaBrowser.Common.Configuration.IApplicationPaths,MediaBrowser.Model.Serialization.IXmlSerializer)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Plugin"/> class.
+            </summary>
+            <param name="applicationPaths">Jellyfin application paths.</param>
+            <param name="xmlSerializer">Jellyfin XML serializer.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Plugin.Name">
+            <inheritdoc />
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Plugin.Description">
+            <inheritdoc />
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Plugin.Id">
+            <inheritdoc />
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Plugin.Instance">
+            <summary>
+            Gets the current plugin instance.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.PluginServiceRegistrator">
+            <summary>
+            Registers PiggieTV plugin services with Jellyfin.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.PluginServiceRegistrator.RegisterServices(Microsoft.Extensions.DependencyInjection.IServiceCollection,MediaBrowser.Controller.IServerApplicationHost)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService">
+            <summary>
+            Coordinates server-side PiggieTV featured-content refreshes.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService.GetRefreshStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus)">
+            <summary>
+            Gets refresh worker status, combined with the current store status when available.
+            </summary>
+            <param name="storeStatus">Current cache store status.</param>
+            <returns>Refresh status.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService.RefreshIfNeededAsync(System.Threading.CancellationToken)">
+            <summary>
+            Refreshes the shared featured-content cache when missing or expired.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The cache store status after the attempt.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService.RefreshAsync(System.Threading.CancellationToken)">
+            <summary>
+            Triggers a featured-content cache refresh.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The cache store status after the attempt.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore">
+            <summary>
+            Server-side store for the shared PiggieTV featured-content cache.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore.ReadAsync(System.Threading.CancellationToken)">
+            <summary>
+            Reads the current cache document.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Cache document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore.WriteAsync(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument,System.Threading.CancellationToken)">
+            <summary>
+            Writes the current cache document.
+            </summary>
+            <param name="document">Cache document.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Stored cache document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore.ClearAsync(System.Threading.CancellationToken)">
+            <summary>
+            Clears the current cache document.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>A task representing the clear operation.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore.GetStatusAsync(System.Threading.CancellationToken)">
+            <summary>
+            Gets store and cache status.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Store status.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore.ValidateDocument(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument)">
+            <summary>
+            Validates and normalizes a document without writing it.
+            </summary>
+            <param name="document">Cache document.</param>
+            <returns>Validated cache document.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService">
+            <summary>
+            Background worker that prepares the shared PiggieTV featured-content cache on the server.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.DefaultRefreshIntervalMs">
+            <summary>
+            Default server-side featured-content refresh interval.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.#ctor(Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore,MediaBrowser.Controller.Library.ILibraryManager,Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService})">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService"/> class.
+            </summary>
+            <param name="store">Featured-content store.</param>
+            <param name="libraryManager">Jellyfin library manager.</param>
+            <param name="logger">Logger.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.GetRefreshStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.RefreshIfNeededAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.RefreshAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.ExecuteAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore">
+            <summary>
+            File-backed featured-content store.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore.#ctor(MediaBrowser.Common.Configuration.IApplicationPaths,Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore})">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore"/> class.
+            </summary>
+            <param name="applicationPaths">Jellyfin application paths.</param>
+            <param name="logger">Logger.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore.ReadAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore.WriteAsync(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore.ClearAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore.GetStatusAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentStore.ValidateDocument(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException">
+            <summary>
+            Error thrown when a featured-content cache document is not safe to persist.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException.#ctor(System.String,System.String)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException"/> class.
+            </summary>
+            <param name="code">Stable error code.</param>
+            <param name="message">Validation error message.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException.Code">
+            <summary>
+            Gets the stable error code.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator">
+            <summary>
+            Validation and normalization rules for the shared featured-content cache document.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.DocumentVersion">
+            <summary>
+            Current outer plugin cache document version.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.FeaturedCacheVersion">
+            <summary>
+            Current supported frontend featured-content cache payload version.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.MaxDocumentBytes">
+            <summary>
+            Maximum serialized document size accepted from clients.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.CreateEmptyDocument">
+            <summary>
+            Creates an empty, safe document.
+            </summary>
+            <returns>Empty featured-content cache document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.NormalizeStoredDocument(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument)">
+            <summary>
+            Normalizes a stored document for reads without trusting client-write metadata.
+            </summary>
+            <param name="document">Stored document.</param>
+            <returns>Normalized document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.ValidateForSave(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument,System.Text.Json.JsonSerializerOptions)">
+            <summary>
+            Validates a document before saving it to the fixed plugin cache location.
+            </summary>
+            <param name="document">Incoming document.</param>
+            <param name="jsonOptions">Serializer options used by the store.</param>
+            <returns>Validated and normalized document.</returns>
+            <exception cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException">Thrown when the document is invalid.</exception>
+        </member>
+    </members>
+</doc>

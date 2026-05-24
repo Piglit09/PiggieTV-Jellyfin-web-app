@@ -1,0 +1,661 @@
+:root {
+    /* Primitive palette: raw values live here; components consume the semantic map below. */
+    --ptv-palette-cyan: #7dd6ff;
+    --ptv-palette-cyan-soft: #9fe7ff;
+    --ptv-palette-violet: #a78bfa;
+    --ptv-palette-violet-soft: #c9b5ff;
+    --ptv-palette-violet-deep: #2c1746;
+    --ptv-palette-pink: #ff8dc3;
+    --ptv-palette-pink-soft: #ff9fd0;
+    --ptv-palette-white: #f8f6ff;
+    --ptv-palette-white-plain: #fff;
+    --ptv-palette-muted: #a9a4ba;
+    --ptv-palette-muted-soft: #c5bed8;
+    --ptv-palette-cyan-rgb: 125, 214, 255;
+    --ptv-palette-violet-rgb: 167, 139, 250;
+    --ptv-palette-violet-soft-rgb: 201, 181, 255;
+    --ptv-palette-violet-deep-rgb: 44, 23, 70;
+    --ptv-palette-pink-rgb: 255, 141, 195;
+    --ptv-palette-white-rgb: 248, 246, 255;
+    --ptv-palette-muted-rgb: 169, 164, 186;
+
+    /* Strict semantic color map. Prefer these in all new PTV UI. */
+    --ptv-color-text-primary: var(--ptv-palette-white);
+    --ptv-color-text-strong: rgba(var(--ptv-palette-white-rgb), 0.96);
+    --ptv-color-text-soft: rgba(var(--ptv-palette-white-rgb), 0.92);
+    --ptv-color-text-secondary: rgba(var(--ptv-palette-white-rgb), 0.86);
+    --ptv-color-text-muted: rgba(var(--ptv-palette-white-rgb), 0.74);
+    --ptv-color-text-disabled: rgba(var(--ptv-palette-muted-rgb), 0.62);
+    --ptv-color-text-inverse: var(--ptv-palette-white-plain);
+    --ptv-color-text-accent: var(--ptv-palette-violet-soft);
+    --ptv-color-text-accent-muted: rgba(var(--ptv-palette-violet-soft-rgb), 0.72);
+    --ptv-color-focus: var(--ptv-palette-cyan);
+    --ptv-color-focus-soft: var(--ptv-palette-cyan-soft);
+    --ptv-color-focus-rgb: var(--ptv-palette-cyan-rgb);
+    --ptv-color-accent: var(--ptv-palette-pink);
+    --ptv-color-accent-soft: var(--ptv-palette-pink-soft);
+    --ptv-color-accent-rgb: var(--ptv-palette-pink-rgb);
+    --ptv-color-accent-secondary: var(--ptv-palette-violet);
+    --ptv-color-accent-secondary-soft: var(--ptv-palette-violet-soft);
+    --ptv-color-accent-secondary-rgb: var(--ptv-palette-violet-rgb);
+    --ptv-color-danger: var(--ptv-color-accent-soft);
+
+    /* Strict semantic surface map. */
+    --ptv-surface-base: rgba(5, 5, 12, 0.96);
+    --ptv-surface-base-solid: #05050c;
+    --ptv-surface-panel-soft: rgba(13, 8, 24, 0.74);
+    --ptv-surface-panel: rgba(20, 11, 36, 0.76);
+    --ptv-surface-panel-strong: rgba(var(--ptv-palette-violet-deep-rgb), 0.74);
+    --ptv-surface-elevated: rgba(var(--ptv-palette-violet-deep-rgb), 0.78);
+    --ptv-surface-page:
+        radial-gradient(ellipse at 18% 0%, rgba(var(--ptv-color-focus-rgb), 0.08), transparent 34%),
+        radial-gradient(ellipse at 88% 24%, rgba(var(--ptv-color-accent-secondary-rgb), 0.12), transparent 42%),
+        radial-gradient(ellipse at 52% 100%, rgba(var(--ptv-color-accent-rgb), 0.07), transparent 44%),
+        var(--ptv-surface-base-solid);
+    --ptv-surface-panel-gradient:
+        radial-gradient(ellipse at 12% 0%, rgba(var(--ptv-color-focus-rgb), 0.07), transparent 36%),
+        linear-gradient(180deg, var(--ptv-surface-panel), rgba(8, 5, 18, 0.78));
+    --ptv-surface-panel-gradient-soft:
+        linear-gradient(
+            180deg,
+            var(--ptv-surface-panel-soft),
+            rgba(8, 5, 18, 0.58)
+        );
+    --ptv-surface-panel-gradient-elevated:
+        radial-gradient(ellipse at 16% 0%, rgba(var(--ptv-color-focus-rgb), 0.1), transparent 36%),
+        radial-gradient(ellipse at 90% 100%, rgba(var(--ptv-color-accent-rgb), 0.08), transparent 42%),
+        linear-gradient(180deg, var(--ptv-surface-panel-strong), rgba(8, 5, 18, 0.88));
+    --ptv-surface-action:
+        linear-gradient(
+            135deg,
+            rgba(var(--ptv-color-focus-rgb), 0.11),
+            rgba(var(--ptv-color-accent-secondary-rgb), 0.16),
+            rgba(var(--ptv-color-accent-rgb), 0.1)
+        );
+    --ptv-surface-danger:
+        linear-gradient(
+            135deg,
+            rgba(var(--ptv-color-accent-rgb), 0.18),
+            rgba(var(--ptv-color-accent-secondary-rgb), 0.14)
+        );
+    --ptv-surface-field:
+        linear-gradient(
+            180deg,
+            rgba(19, 10, 34, 0.78),
+            rgba(8, 5, 18, 0.82)
+        );
+    --ptv-surface-row-alternate: rgba(var(--ptv-palette-white-rgb), 0.018);
+
+    /* Strict semantic border map. */
+    --ptv-border-subtle: rgba(var(--ptv-palette-violet-soft-rgb), 0.09);
+    --ptv-border-default: rgba(var(--ptv-palette-violet-soft-rgb), 0.14);
+    --ptv-border-strong: rgba(var(--ptv-color-focus-rgb), 0.24);
+    --ptv-border-accent: rgba(var(--ptv-color-accent-rgb), 0.26);
+    --ptv-border-danger: rgba(var(--ptv-color-accent-rgb), 0.44);
+    --ptv-border-field: rgba(var(--ptv-palette-violet-soft-rgb), 0.16);
+    --ptv-border-focus: rgba(var(--ptv-color-focus-rgb), 0.52);
+    --ptv-border-divider: rgba(var(--ptv-palette-violet-soft-rgb), 0.07);
+
+    /*
+     * Strict surface elevation contract.
+     * 0 app bg, 1 page, 2 panel, 3 elevated, 4 modal, 5 overlay.
+     */
+    --ptv-elevation-0-surface: var(--ptv-surface-base-solid);
+    --ptv-elevation-0-border: transparent;
+    --ptv-elevation-0-shadow: none;
+    --ptv-elevation-0-blur: 0;
+    --ptv-elevation-1-surface: var(--ptv-surface-page);
+    --ptv-elevation-1-border: transparent;
+    --ptv-elevation-1-shadow: none;
+    --ptv-elevation-1-blur: 0;
+    --ptv-elevation-2-surface: var(--ptv-surface-panel-gradient);
+    --ptv-elevation-2-surface-muted: var(--ptv-surface-panel-gradient-soft);
+    --ptv-elevation-2-surface-solid: var(--ptv-surface-panel);
+    --ptv-elevation-2-surface-muted-solid: var(--ptv-surface-panel-soft);
+    --ptv-elevation-2-border: var(--ptv-border-default);
+    --ptv-elevation-2-shadow:
+        0 16px 42px rgba(0, 0, 0, 0.34),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.05);
+    --ptv-elevation-2-shadow-muted:
+        0 10px 30px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.05);
+    --ptv-elevation-2-blur: var(--ptv-blur-panel);
+    --ptv-elevation-3-surface: var(--ptv-surface-panel-gradient-elevated);
+    --ptv-elevation-3-surface-solid: var(--ptv-surface-panel-strong);
+    --ptv-elevation-3-border: var(--ptv-border-strong);
+    --ptv-elevation-3-shadow:
+        0 20px 54px rgba(0, 0, 0, 0.46),
+        0 0 24px rgba(var(--ptv-color-accent-secondary-rgb), 0.16);
+    --ptv-elevation-3-blur: var(--ptv-blur-panel);
+    --ptv-elevation-4-surface:
+        radial-gradient(ellipse at 16% 0%, rgba(var(--ptv-color-focus-rgb), 0.12), transparent 36%),
+        radial-gradient(ellipse at 92% 100%, rgba(var(--ptv-color-accent-rgb), 0.1), transparent 42%),
+        linear-gradient(180deg, rgba(var(--ptv-palette-violet-deep-rgb), 0.9), rgba(8, 5, 18, 0.94));
+    --ptv-elevation-4-surface-solid: var(--ptv-surface-elevated);
+    --ptv-elevation-4-border: rgba(var(--ptv-color-focus-rgb), 0.28);
+    --ptv-elevation-4-shadow:
+        0 26px 68px rgba(0, 0, 0, 0.54),
+        0 0 30px rgba(var(--ptv-color-accent-secondary-rgb), 0.15),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.06);
+    --ptv-elevation-4-blur: var(--ptv-blur-heavy);
+    --ptv-elevation-5-surface:
+        linear-gradient(180deg, rgba(7, 5, 16, 0.94), rgba(3, 3, 10, 0.9)),
+        var(--ptv-surface-base);
+    --ptv-elevation-5-surface-solid: var(--ptv-surface-base);
+    --ptv-elevation-5-border: rgba(var(--ptv-palette-violet-soft-rgb), 0.18);
+    --ptv-elevation-5-shadow:
+        0 30px 84px rgba(0, 0, 0, 0.62),
+        0 0 34px rgba(var(--ptv-color-focus-rgb), 0.12);
+    --ptv-elevation-5-blur: var(--ptv-blur-heavy);
+    --ptv-elevation-app-bg: var(--ptv-elevation-0-surface);
+    --ptv-elevation-page: var(--ptv-elevation-1-surface);
+    --ptv-elevation-panel: var(--ptv-elevation-2-surface);
+    --ptv-elevation-elevated: var(--ptv-elevation-3-surface);
+    --ptv-elevation-modal: var(--ptv-elevation-4-surface);
+    --ptv-elevation-overlay: var(--ptv-elevation-5-surface);
+    --ptv-elevation-app-bg-shadow: var(--ptv-elevation-0-shadow);
+    --ptv-elevation-page-shadow: var(--ptv-elevation-1-shadow);
+    --ptv-elevation-panel-shadow: var(--ptv-elevation-2-shadow);
+    --ptv-elevation-elevated-shadow: var(--ptv-elevation-3-shadow);
+    --ptv-elevation-modal-shadow: var(--ptv-elevation-4-shadow);
+    --ptv-elevation-overlay-shadow: var(--ptv-elevation-5-shadow);
+
+    /* Strict semantic state map. Components should consume these for interaction states. */
+    --ptv-state-hover:
+        linear-gradient(
+            90deg,
+            rgba(var(--ptv-color-focus-rgb), 0.075),
+            rgba(var(--ptv-color-accent-secondary-rgb), 0.1),
+            rgba(var(--ptv-color-accent-rgb), 0.065)
+        );
+    --ptv-state-hover-border: var(--ptv-border-strong);
+    --ptv-state-hover-text: var(--ptv-color-text-strong);
+    --ptv-state-hover-shadow: var(--ptv-elevation-3-shadow);
+    --ptv-state-hover-transform: translateY(-2px);
+    --ptv-state-focus: var(--ptv-focus-ring);
+    --ptv-state-focus-border: var(--ptv-border-focus);
+    --ptv-state-focus-text: var(--ptv-color-text-strong);
+    --ptv-state-active: var(--ptv-gradient-action);
+    --ptv-state-active-border: var(--ptv-border-strong);
+    --ptv-state-active-text: var(--ptv-color-text-inverse);
+    --ptv-state-active-shadow: var(--ptv-component-button-hover-shadow);
+    --ptv-state-active-transform: translateY(-1px);
+    --ptv-state-selected: var(--ptv-surface-action);
+    --ptv-state-selected-border: var(--ptv-border-accent);
+    --ptv-state-selected-text: var(--ptv-color-text-inverse);
+    --ptv-state-selected-shadow: var(--ptv-elevation-3-shadow);
+    --ptv-state-danger: var(--ptv-surface-danger);
+    --ptv-state-danger-border: var(--ptv-border-danger);
+    --ptv-state-danger-text: var(--ptv-color-danger);
+    --ptv-state-disabled: 0.46;
+    --ptv-state-disabled-cursor: not-allowed;
+    --ptv-state-disabled-opacity: var(--ptv-state-disabled);
+    --ptv-state-disabled-text: var(--ptv-color-text-disabled);
+    --ptv-state-loading: var(--ptv-surface-action);
+    --ptv-state-loading-cursor: progress;
+    --ptv-state-loading-opacity: 0.72;
+
+    /* Strict semantic effect map. */
+    --ptv-gradient-brand:
+        linear-gradient(
+            90deg,
+            var(--ptv-color-focus) 0%,
+            var(--ptv-color-accent-secondary-soft) 50%,
+            var(--ptv-color-accent) 100%
+        );
+    --ptv-gradient-action:
+        linear-gradient(
+            135deg,
+            var(--ptv-color-focus) 0%,
+            var(--ptv-color-accent-secondary) 52%,
+            var(--ptv-color-accent) 100%
+        );
+    --ptv-a11y-focus-outline: 2px solid rgba(var(--ptv-color-focus-rgb), 0.86);
+    --ptv-a11y-focus-offset: 3px;
+    --ptv-a11y-focus-shadow:
+        0 0 0 4px rgba(var(--ptv-color-focus-rgb), 0.14),
+        0 0 18px rgba(var(--ptv-color-accent-secondary-rgb), 0.16);
+    --ptv-focus-ring:
+        0 0 0 1px rgba(var(--ptv-color-focus-rgb), 0.18),
+        0 0 18px rgba(var(--ptv-color-accent-secondary-rgb), 0.16),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.06);
+    --ptv-shadow-soft: var(--ptv-elevation-2-shadow-muted);
+    --ptv-shadow-panel: var(--ptv-elevation-2-shadow);
+    --ptv-shadow-float: var(--ptv-elevation-3-shadow);
+    --ptv-shadow-modal: var(--ptv-elevation-4-shadow);
+    --ptv-shadow-overlay: var(--ptv-elevation-5-shadow);
+    --ptv-glass-bg: rgba(var(--ptv-palette-violet-deep-rgb), 0.68);
+    --ptv-glass-bg-strong: var(--ptv-elevation-3-surface);
+    --ptv-glass-border: var(--ptv-border-default);
+    --ptv-glass-highlight: rgba(var(--ptv-palette-white-rgb), 0.052);
+    --ptv-glass-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.24),
+        inset 0 1px 0 var(--ptv-glass-highlight);
+    --ptv-glass-glow:
+        0 0 8px rgba(var(--ptv-color-focus-rgb), 0.2),
+        0 0 14px rgba(var(--ptv-color-accent-secondary-rgb), 0.14);
+    --ptv-glass-header:
+        linear-gradient(
+            180deg,
+            rgba(8, 8, 18, 0.82),
+            rgba(8, 8, 18, 0.58)
+        );
+
+    /* Component tokens: map semantic intent onto reusable PTV primitives. */
+    --ptv-component-panel-bg: var(--ptv-elevation-2-surface);
+    --ptv-component-panel-bg-subtle: var(--ptv-elevation-2-surface-muted);
+    --ptv-component-panel-bg-strong: var(--ptv-elevation-3-surface);
+    --ptv-component-button-bg: var(--ptv-surface-action);
+    --ptv-component-button-hover-bg: var(--ptv-state-active);
+    --ptv-component-button-shadow:
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.08),
+        0 0 16px rgba(var(--ptv-color-accent-secondary-rgb), 0.12);
+    --ptv-component-button-hover-shadow:
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.14),
+        0 0 22px rgba(var(--ptv-color-focus-rgb), 0.18),
+        0 0 24px rgba(var(--ptv-color-accent-rgb), 0.12);
+    --ptv-component-field-bg: var(--ptv-surface-field);
+    --ptv-component-field-shadow:
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.04),
+        0 0 0 rgba(var(--ptv-color-focus-rgb), 0);
+    --ptv-component-table-row-alt: var(--ptv-surface-row-alternate);
+    --ptv-component-table-divider: var(--ptv-border-divider);
+    --ptv-component-title-accent: var(--ptv-color-text-accent-muted);
+    --ptv-component-scrollbar-thumb-color: rgba(var(--ptv-palette-violet-soft-rgb), 0.72);
+    --ptv-component-scrollbar-track-color: rgba(18, 7, 31, 0.68);
+    --ptv-component-scrollbar-track-border: rgba(var(--ptv-palette-violet-soft-rgb), 0.08);
+    --ptv-component-scrollbar-track-bg:
+        linear-gradient(
+            180deg,
+            rgba(20, 8, 34, 0.74),
+            rgba(8, 3, 18, 0.82)
+        );
+    --ptv-component-scrollbar-thumb-border: rgba(10, 4, 20, 0.84);
+    --ptv-component-scrollbar-thumb-bg:
+        linear-gradient(
+            180deg,
+            var(--ptv-color-focus) 0%,
+            var(--ptv-color-accent-secondary) 52%,
+            var(--ptv-color-accent) 100%
+        );
+    --ptv-component-scrollbar-thumb-hover-bg:
+        linear-gradient(
+            180deg,
+            var(--ptv-color-focus-soft) 0%,
+            var(--ptv-color-accent-secondary-soft) 48%,
+            var(--ptv-color-accent-soft) 100%
+        );
+    --ptv-component-scrollbar-thumb-shadow:
+        0 0 12px rgba(var(--ptv-color-focus-rgb), 0.26),
+        0 0 18px rgba(var(--ptv-color-accent-rgb), 0.18);
+    --ptv-component-scrollbar-corner-bg: rgba(8, 3, 18, 0.86);
+
+    /* Legacy bridge: keep old names alive while migrating stock islands. */
+    --ptv-color-blue: var(--ptv-palette-cyan);
+    --ptv-color-blue-soft: var(--ptv-palette-cyan-soft);
+    --ptv-color-purple: var(--ptv-palette-violet);
+    --ptv-color-purple-soft: var(--ptv-palette-violet-soft);
+    --ptv-color-purple-deep: var(--ptv-palette-violet-deep);
+    --ptv-color-pink: var(--ptv-palette-pink);
+    --ptv-color-pink-soft: var(--ptv-palette-pink-soft);
+    --ptv-color-white: var(--ptv-palette-white);
+    --ptv-color-muted: var(--ptv-palette-muted);
+    --ptv-color-muted-soft: var(--ptv-palette-muted-soft);
+    --ptv-color-blue-rgb: var(--ptv-palette-cyan-rgb);
+    --ptv-color-purple-rgb: var(--ptv-palette-violet-rgb);
+    --ptv-color-purple-soft-rgb: var(--ptv-palette-violet-soft-rgb);
+    --ptv-color-purple-deep-rgb: var(--ptv-palette-violet-deep-rgb);
+    --ptv-color-pink-rgb: var(--ptv-palette-pink-rgb);
+    --ptv-color-white-rgb: var(--ptv-palette-white-rgb);
+    --ptv-color-muted-rgb: var(--ptv-palette-muted-rgb);
+    --ptv-color-surface: var(--ptv-color-accent-secondary);
+    --ptv-color-surface-soft: var(--ptv-color-accent-secondary-soft);
+    --ptv-color-surface-deep: var(--ptv-palette-violet-deep);
+    --ptv-role-active: var(--ptv-color-focus);
+    --ptv-role-focus: var(--ptv-color-focus);
+    --ptv-role-surface: var(--ptv-color-accent-secondary);
+    --ptv-role-surface-quiet: var(--ptv-elevation-3-surface-solid);
+    --ptv-role-highlight: var(--ptv-color-accent);
+    --ptv-role-text: var(--ptv-color-text-primary);
+    --ptv-role-text-secondary: var(--ptv-color-text-secondary);
+    --ptv-role-text-muted: var(--ptv-color-text-muted);
+    --ptv-role-text-strong: var(--ptv-color-text-strong);
+    --ptv-role-text-inverse: var(--ptv-color-text-inverse);
+    --ptv-role-text-soft: var(--ptv-color-text-soft);
+    --ptv-role-text-subtle: var(--ptv-color-text-secondary);
+    --ptv-role-text-faint: var(--ptv-color-text-muted);
+    --ptv-role-text-disabled: var(--ptv-color-text-disabled);
+    --ptv-role-danger: var(--ptv-color-danger);
+    --ptv-role-danger-surface: var(--ptv-surface-danger);
+    --ptv-surface-app-bg: var(--ptv-elevation-0-surface);
+    --ptv-surface-page-level: var(--ptv-elevation-1-surface);
+    --ptv-surface-panel-level: var(--ptv-elevation-2-surface);
+    --ptv-surface-elevated-level: var(--ptv-elevation-3-surface);
+    --ptv-surface-modal: var(--ptv-elevation-4-surface);
+    --ptv-surface-overlay: var(--ptv-elevation-5-surface);
+    --ptv-surface-0: var(--ptv-elevation-0-surface);
+    --ptv-surface-1: var(--ptv-elevation-1-surface);
+    --ptv-surface-2: var(--ptv-elevation-2-surface);
+    --ptv-surface-3: var(--ptv-elevation-3-surface);
+    --ptv-surface-4: var(--ptv-elevation-4-surface);
+    --ptv-surface-5: var(--ptv-elevation-5-surface);
+    --ptv-surface-hover: var(--ptv-state-hover);
+    --ptv-border: var(--ptv-border-default);
+    --ptv-grad: var(--ptv-gradient-brand);
+    --ptv-grad-hot: var(--ptv-gradient-action);
+    --ptv-motion-ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+    --ptv-motion-ease-emphasized: cubic-bezier(0.22, 0.86, 0.28, 1);
+    --ptv-motion-ease-linear: linear;
+    --ptv-motion-fast: 160ms;
+    --ptv-motion-medium: 260ms;
+    --ptv-motion-slow: 420ms;
+    --ptv-motion-hero: 720ms;
+    --ptv-motion-atmosphere: 32s;
+    --ptv-motion-shimmer: 7s;
+    --ptv-motion-sweep: 1100ms;
+    --ptv-motion-disc-spin: 36s;
+    --ptv-motion-disabled-duration: 0.001ms;
+    --ptv-motion-delay-none: 0ms;
+    --ptv-motion-delay-card-glow: 70ms;
+    --ptv-motion-delay-card-meta: 105ms;
+    --ptv-motion-delay-card-action: 145ms;
+    --ptv-ease: var(--ptv-motion-ease-standard);
+    --ptv-ease-soft: var(--ptv-motion-ease-emphasized);
+    --ptv-ease-linear: var(--ptv-motion-ease-linear);
+    --ptv-speed-fast: var(--ptv-motion-fast);
+    --ptv-speed-medium: var(--ptv-motion-medium);
+    --ptv-speed-slow: var(--ptv-motion-slow);
+    --ptv-card-lift-delay: var(--ptv-motion-delay-none);
+    --ptv-card-glow-delay: var(--ptv-motion-delay-card-glow);
+    --ptv-card-meta-delay: var(--ptv-motion-delay-card-meta);
+    --ptv-card-action-delay: var(--ptv-motion-delay-card-action);
+    --ptv-motion-transition-fast:
+        color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        background var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        border-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+    --ptv-motion-transition-medium:
+        border-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized);
+    --ptv-motion-transition-slow:
+        opacity var(--ptv-motion-slow) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-slow) var(--ptv-motion-ease-emphasized);
+    --ptv-motion-transition-hero:
+        opacity var(--ptv-motion-hero) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-hero) var(--ptv-motion-ease-emphasized);
+    --ptv-space-1: 4px;
+    --ptv-space-2: 8px;
+    --ptv-space-3: 12px;
+    --ptv-space-4: 16px;
+    --ptv-space-5: 20px;
+    --ptv-space-6: 24px;
+    --ptv-space-xs: var(--ptv-space-1);
+    --ptv-space-sm: var(--ptv-space-2);
+    --ptv-space-md: var(--ptv-space-4);
+    --ptv-space-lg: var(--ptv-space-6);
+    --ptv-space-xl: 32px;
+    --ptv-space-2xl: 40px;
+    --ptv-admin-gutter: clamp(24px, 4vw, 72px);
+    --ptv-font-size-xs: 11px;
+    --ptv-font-size-sm: 13px;
+    --ptv-font-size-md: 15px;
+    --ptv-font-size-lg: 20px;
+    --ptv-font-size-xl: 28px;
+    --ptv-text-hero: clamp(34px, 3vw, 48px);
+    --ptv-text-title: clamp(25px, 2vw, 34px);
+    --ptv-text-section: clamp(18px, 1.25vw, 23px);
+    --ptv-text-card: 15px;
+    --ptv-text-small: 12.5px;
+    --ptv-text-primary: var(--ptv-color-text-primary);
+    --ptv-text-secondary: var(--ptv-color-text-secondary);
+    --ptv-text-muted: var(--ptv-color-text-muted);
+    --ptv-line-hero: 0.98;
+    --ptv-line-title: 1.08;
+    --ptv-line-section: 1.16;
+    --ptv-line-body: 1.48;
+    --ptv-line-dense: 1.24;
+    --ptv-radius-pill: 999px;
+    --ptv-radius-card: 12px;
+    --ptv-radius-field: 16px;
+    --ptv-radius-group: 18px;
+    --ptv-radius-panel: 22px;
+    --ptv-radius-page: 24px;
+    --ptv-control-height-sm: 36px;
+    --ptv-control-height-md: 42px;
+    --ptv-control-height-lg: 46px;
+    --ptv-icon-button-size: 38px;
+    --ptv-shell-header-height: 68px;
+    --ptv-shell-header-gap: var(--ptv-space-5);
+    --ptv-table-row-height: 48px;
+    --ptv-table-cell-padding-y: 12px;
+    --ptv-table-cell-padding-x: 16px;
+    --ptv-admin-section-gap: var(--ptv-space-5);
+    --ptv-admin-card-padding: clamp(var(--ptv-space-5), 2.2vw, var(--ptv-space-xl));
+    --ptv-field-padding: 14px;
+    --ptv-density-section-gap: var(--ptv-admin-section-gap);
+    --ptv-density-card-padding: var(--ptv-admin-card-padding);
+    --ptv-density-field-padding: var(--ptv-field-padding);
+    --ptv-density-control-height: var(--ptv-control-height-lg);
+    --ptv-density-button-height: var(--ptv-control-height-md);
+    --ptv-density-list-row-height: calc(var(--ptv-table-row-height) + var(--ptv-space-2));
+    --ptv-density-table-row-height: var(--ptv-table-row-height);
+    --ptv-density-table-cell-padding-y: var(--ptv-table-cell-padding-y);
+    --ptv-density-table-cell-padding-x: var(--ptv-table-cell-padding-x);
+    --ptv-density-page-padding-top: clamp(72px, 7vh, 96px);
+    --ptv-density-page-padding-bottom: 48px;
+    --ptv-admin-shell-top-offset: calc(var(--ptv-shell-header-height) + var(--ptv-shell-header-gap) + var(--ptv-density-section-gap));
+    --ptv-dashboard-shell-top-offset: calc(var(--ptv-shell-header-height) + var(--ptv-shell-header-gap) + var(--ptv-space-xl));
+    --ptv-dashboard-grid-gap: clamp(var(--ptv-space-4), 1.35vw, var(--ptv-space-6));
+    --ptv-dashboard-stat-card-min-height: clamp(86px, 7vh, 108px);
+    --ptv-dashboard-action-height: calc(var(--ptv-control-height-lg) + var(--ptv-space-1));
+    --ptv-admin-select-arrow-column: 44px;
+    --ptv-sidebar-rail-width: 2px;
+    --ptv-sidebar-rail-column: 8px;
+    --ptv-sidebar-rail-offset: 3px;
+    --ptv-sidebar-icon-column: 26px;
+    --ptv-sidebar-label-gap: 8px;
+    --ptv-sidebar-item-padding-x: 8px;
+    --ptv-sidebar-active-inset: 2px;
+    --ptv-sidebar-nav-item-height: 42px;
+    --ptv-sidebar-logo-width: 226px;
+    --ptv-sidebar-logo-height: 58px;
+    --ptv-drawer-logo-width: 172px;
+    --ptv-drawer-logo-height: 48px;
+    --ptv-dashboard-drawer-logo-width: 150px;
+    --ptv-dashboard-drawer-logo-height: 48px;
+    --ptv-primitive-gap: var(--ptv-density-section-gap);
+    --ptv-primitive-padding: var(--ptv-density-card-padding);
+    --ptv-transition-hover:
+        color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        background var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        border-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized);
+    --ptv-admin-narrow: 900px;
+    --ptv-admin-medium: 1280px;
+    --ptv-admin-wide: 1600px;
+    --ptv-admin-page-width: var(--ptv-admin-medium);
+    --ptv-admin-card-width: var(--ptv-admin-medium);
+    --ptv-blur: 12px;
+    --ptv-blur-panel: 12px;
+    --ptv-blur-heavy: 20px;
+    --ptv-font-main: 'Inter', system-ui, -apple-system, blinkmacsystemfont, 'Segoe UI', sans-serif;
+    --ptv-font-accent: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+    --ptv-font-brand: 'Space Grotesk', 'Plus Jakarta Sans', system-ui, sans-serif;
+    --ptv-cinema-bg: var(--ptv-elevation-page);
+}
+
+.ptv-elevation-0,
+.ptv-elevation-1,
+.ptv-elevation-2,
+.ptv-elevation-3,
+.ptv-elevation-4,
+.ptv-elevation-5 {
+    border-color: var(--ptv-current-elevation-border);
+    background: var(--ptv-current-elevation-surface);
+    box-shadow: var(--ptv-current-elevation-shadow);
+    backdrop-filter: blur(var(--ptv-current-elevation-blur)) saturate(1.08);
+}
+
+.ptv-elevation-0 {
+    --ptv-current-elevation-surface: var(--ptv-elevation-0-surface);
+    --ptv-current-elevation-border: var(--ptv-elevation-0-border);
+    --ptv-current-elevation-shadow: var(--ptv-elevation-0-shadow);
+    --ptv-current-elevation-blur: var(--ptv-elevation-0-blur);
+}
+
+.ptv-elevation-1 {
+    --ptv-current-elevation-surface: var(--ptv-elevation-1-surface);
+    --ptv-current-elevation-border: var(--ptv-elevation-1-border);
+    --ptv-current-elevation-shadow: var(--ptv-elevation-1-shadow);
+    --ptv-current-elevation-blur: var(--ptv-elevation-1-blur);
+}
+
+.ptv-elevation-2 {
+    --ptv-current-elevation-surface: var(--ptv-elevation-2-surface);
+    --ptv-current-elevation-border: var(--ptv-elevation-2-border);
+    --ptv-current-elevation-shadow: var(--ptv-elevation-2-shadow);
+    --ptv-current-elevation-blur: var(--ptv-elevation-2-blur);
+}
+
+.ptv-elevation-3 {
+    --ptv-current-elevation-surface: var(--ptv-elevation-3-surface);
+    --ptv-current-elevation-border: var(--ptv-elevation-3-border);
+    --ptv-current-elevation-shadow: var(--ptv-elevation-3-shadow);
+    --ptv-current-elevation-blur: var(--ptv-elevation-3-blur);
+}
+
+.ptv-elevation-4 {
+    --ptv-current-elevation-surface: var(--ptv-elevation-4-surface);
+    --ptv-current-elevation-border: var(--ptv-elevation-4-border);
+    --ptv-current-elevation-shadow: var(--ptv-elevation-4-shadow);
+    --ptv-current-elevation-blur: var(--ptv-elevation-4-blur);
+}
+
+.ptv-elevation-5 {
+    --ptv-current-elevation-surface: var(--ptv-elevation-5-surface);
+    --ptv-current-elevation-border: var(--ptv-elevation-5-border);
+    --ptv-current-elevation-shadow: var(--ptv-elevation-5-shadow);
+    --ptv-current-elevation-blur: var(--ptv-elevation-5-blur);
+}
+
+.ptv-density-dense,
+.ptv-density-compact {
+    --ptv-density-section-gap: var(--ptv-space-3);
+    --ptv-density-card-padding: clamp(var(--ptv-space-4), 1.35vw, var(--ptv-space-6));
+    --ptv-density-field-padding: 10px;
+    --ptv-density-control-height: 38px;
+    --ptv-density-button-height: var(--ptv-control-height-sm);
+    --ptv-density-list-row-height: 42px;
+    --ptv-density-table-row-height: 40px;
+    --ptv-density-table-cell-padding-y: 8px;
+    --ptv-density-table-cell-padding-x: 12px;
+    --ptv-density-page-padding-top: clamp(58px, 5.5vh, 78px);
+    --ptv-density-page-padding-bottom: 34px;
+    --ptv-primitive-gap: var(--ptv-density-section-gap);
+    --ptv-primitive-padding: var(--ptv-density-card-padding);
+}
+
+.ptv-density-comfortable {
+    --ptv-density-section-gap: var(--ptv-admin-section-gap);
+    --ptv-density-card-padding: var(--ptv-admin-card-padding);
+    --ptv-density-field-padding: var(--ptv-field-padding);
+    --ptv-density-control-height: var(--ptv-control-height-lg);
+    --ptv-density-button-height: var(--ptv-control-height-md);
+    --ptv-density-list-row-height: calc(var(--ptv-table-row-height) + var(--ptv-space-2));
+    --ptv-density-table-row-height: var(--ptv-table-row-height);
+    --ptv-density-table-cell-padding-y: var(--ptv-table-cell-padding-y);
+    --ptv-density-table-cell-padding-x: var(--ptv-table-cell-padding-x);
+    --ptv-density-page-padding-top: clamp(72px, 7vh, 96px);
+    --ptv-density-page-padding-bottom: 48px;
+    --ptv-primitive-gap: var(--ptv-density-section-gap);
+    --ptv-primitive-padding: var(--ptv-density-card-padding);
+}
+
+.ptv-density-expanded,
+.ptv-density-spacious {
+    --ptv-density-section-gap: var(--ptv-space-6);
+    --ptv-density-card-padding: clamp(var(--ptv-space-6), 2.4vw, var(--ptv-space-2xl));
+    --ptv-density-field-padding: 16px;
+    --ptv-density-control-height: 48px;
+    --ptv-density-button-height: var(--ptv-control-height-lg);
+    --ptv-density-list-row-height: 56px;
+    --ptv-density-table-row-height: 52px;
+    --ptv-density-table-cell-padding-y: 14px;
+    --ptv-density-table-cell-padding-x: 18px;
+    --ptv-density-page-padding-top: clamp(78px, 7.5vh, 104px);
+    --ptv-density-page-padding-bottom: 56px;
+    --ptv-primitive-gap: var(--ptv-density-section-gap);
+    --ptv-primitive-padding: var(--ptv-density-card-padding);
+}
+
+body,
+.skinBody,
+.libraryDocument,
+.mainAnimatedPages,
+.page,
+.cardText,
+.cardText-secondary,
+.listItemBodyText,
+.navMenuOptionText,
+button,
+input,
+select,
+textarea {
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-main) !important;
+    text-rendering: optimizelegibility;
+    -webkit-font-smoothing: antialiased;
+}
+
+.sectionTitle,
+.itemName,
+h1,
+h2,
+h3 {
+    font-family: var(--ptv-font-accent) !important;
+    font-weight: 800 !important;
+    letter-spacing: 0 !important;
+}
+
+.ptv-gradient-text {
+    color: transparent;
+    background: var(--ptv-gradient-action);
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+* {
+    scrollbar-color:
+        var(--ptv-component-scrollbar-thumb-color)
+        var(--ptv-component-scrollbar-track-color);
+    scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+::-webkit-scrollbar-track {
+    border: 1px solid var(--ptv-component-scrollbar-track-border);
+    border-radius: 999px;
+    background: var(--ptv-component-scrollbar-track-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    border: 3px solid var(--ptv-component-scrollbar-thumb-border);
+    border-radius: 999px;
+    background: var(--ptv-component-scrollbar-thumb-bg);
+    box-shadow: var(--ptv-component-scrollbar-thumb-shadow);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--ptv-component-scrollbar-thumb-hover-bg);
+}
+
+::-webkit-scrollbar-corner {
+    background: var(--ptv-component-scrollbar-corner-bg);
+}

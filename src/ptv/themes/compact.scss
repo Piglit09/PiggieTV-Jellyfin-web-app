@@ -1,0 +1,28 @@
+/* Compact PTV theme: density-only semantic token overrides. */
+
+:root[data-ptv-theme='compact'] {
+    --ptv-theme-id: compact;
+    --ptv-theme-density: compact;
+    --ptv-theme-effects: standard;
+    --ptv-density-section-gap: var(--ptv-space-3);
+    --ptv-density-card-padding: clamp(var(--ptv-space-4), 1.25vw, var(--ptv-space-5));
+    --ptv-density-field-padding: 10px;
+    --ptv-density-control-height: 38px;
+    --ptv-density-button-height: var(--ptv-control-height-sm);
+    --ptv-density-list-row-height: 42px;
+    --ptv-density-table-row-height: 40px;
+    --ptv-density-table-cell-padding-y: 8px;
+    --ptv-density-table-cell-padding-x: 12px;
+    --ptv-density-page-padding-top: clamp(58px, 5.5vh, 78px);
+    --ptv-density-page-padding-bottom: 34px;
+    --ptv-primitive-gap: var(--ptv-density-section-gap);
+    --ptv-primitive-padding: var(--ptv-density-card-padding);
+    --ptv-radius-card: 10px;
+    --ptv-radius-field: 12px;
+    --ptv-radius-group: 14px;
+    --ptv-radius-panel: 18px;
+    --ptv-radius-page: 20px;
+    --ptv-icon-button-size: 34px;
+    --ptv-text-card: 14px;
+    --ptv-text-small: 12px;
+}

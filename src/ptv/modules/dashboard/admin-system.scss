@@ -1,0 +1,521 @@
+/* PiggieTV dashboard design system pass. Navigation/home/sidebar are intentionally untouched here. */
+/* stylelint-disable @stylistic/declaration-colon-space-after, no-descending-specificity, property-no-vendor-prefix, selector-class-pattern */
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-page {
+    --ptv-admin-page-width: var(--ptv-admin-medium);
+    --ptv-admin-card-width: var(--ptv-admin-medium);
+
+    width: min(var(--ptv-admin-page-width), calc(100vw - var(--ptv-admin-gutter))) !important;
+    max-width: var(--ptv-admin-page-width) !important;
+    margin-right: auto !important;
+    margin-left: auto !important;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-shell-spaced {
+    padding-top: var(--ptv-dashboard-shell-top-offset, var(--ptv-admin-shell-top-offset)) !important;
+    scroll-margin-top: var(--ptv-dashboard-shell-top-offset, var(--ptv-admin-shell-top-offset));
+    margin-top: 0 !important;
+}
+
+.ptv-admin-document .ptv-admin-content select.ptv-field-control,
+.ptv-admin-document .ptv-admin-content .emby-select.ptv-field-control,
+.ptv-admin-document .ptv-admin-content .MuiSelect-select {
+    padding-right: var(--ptv-admin-select-arrow-column) !important;
+}
+
+.ptv-admin-document .ptv-admin-content select.ptv-field-control,
+.ptv-admin-document .ptv-admin-content .emby-select.ptv-field-control {
+    background-position: right var(--ptv-space-3) center !important;
+}
+
+.ptv-admin-document .ptv-admin-content .MuiSelect-icon {
+    right: var(--ptv-space-3) !important;
+
+    width: var(--ptv-admin-select-arrow-column) !important;
+
+    pointer-events: none;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-narrow {
+    --ptv-admin-page-width: var(--ptv-admin-narrow);
+    --ptv-admin-card-width: var(--ptv-admin-narrow);
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-medium {
+    --ptv-admin-page-width: var(--ptv-admin-medium);
+    --ptv-admin-card-width: var(--ptv-admin-medium);
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-wide {
+    --ptv-admin-page-width: var(--ptv-admin-wide);
+    --ptv-admin-card-width: var(--ptv-admin-wide);
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-page > h1,
+.ptv-admin-document .ptv-admin-content.ptv-admin-page > .MuiStack-root h1,
+.ptv-admin-document .ptv-admin-content.ptv-admin-page > .MuiStack-root .MuiTypography-h1,
+.ptv-admin-document .ptv-admin-content.ptv-admin-page > .ptv-form-section .ptv-section-title {
+    color: rgba(248, 247, 255, 0.96) !important;
+    font-family: var(--ptv-font-accent) !important;
+    font-size: var(--ptv-text-title) !important;
+    font-weight: 760 !important;
+    line-height: var(--ptv-line-title) !important;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-page h2,
+.ptv-admin-document .ptv-admin-content.ptv-admin-page h3,
+.ptv-admin-document .ptv-admin-content.ptv-admin-page .MuiTypography-h2,
+.ptv-admin-document .ptv-admin-content.ptv-admin-page .MuiTypography-h3 {
+    font-size: var(--ptv-text-section) !important;
+    font-weight: 680 !important;
+    line-height: var(--ptv-line-section) !important;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-data-page {
+    width: min(var(--ptv-admin-wide), calc(100vw - var(--ptv-admin-gutter))) !important;
+    max-width: var(--ptv-admin-wide) !important;
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-table-shell,
+.ptv-admin-document .ptv-admin-data-page .ptv-table {
+    border: 1px solid var(--ptv-border-default) !important;
+    border-radius: var(--ptv-radius-page) !important;
+    background:
+        radial-gradient(ellipse at 12% 0%, rgba(125, 214, 255, 0.07), transparent 34%),
+        linear-gradient(180deg, var(--ptv-elevation-2-surface-solid), rgba(8, 5, 18, 0.78)) !important;
+    box-shadow: var(--ptv-elevation-2-shadow) !important;
+    backdrop-filter: blur(var(--ptv-blur-panel, 12px)) saturate(1.08);
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-table-shell {
+    overflow: auto;
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+
+    background:
+        linear-gradient(180deg, rgba(31, 15, 55, 0.94), rgba(13, 7, 27, 0.9)) !important;
+    backdrop-filter: blur(var(--ptv-blur-panel, 12px));
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-table th {
+    height: var(--ptv-density-table-row-height, var(--ptv-table-row-height)) !important;
+    padding:
+        var(--ptv-density-table-cell-padding-y, var(--ptv-table-cell-padding-y))
+        var(--ptv-density-table-cell-padding-x, var(--ptv-table-cell-padding-x)) !important;
+
+    border-bottom: 1px solid var(--ptv-border-default) !important;
+    color: rgba(245, 247, 255, 0.74) !important;
+    font-size: var(--ptv-text-small) !important;
+    font-weight: 760 !important;
+    letter-spacing: 0 !important;
+    line-height: var(--ptv-line-dense) !important;
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-table td {
+    height: var(--ptv-density-table-row-height, var(--ptv-table-row-height)) !important;
+    padding:
+        var(--ptv-density-table-cell-padding-y, var(--ptv-table-cell-padding-y))
+        var(--ptv-density-table-cell-padding-x, var(--ptv-table-cell-padding-x)) !important;
+
+    border-bottom: 1px solid rgba(205, 174, 255, 0.065) !important;
+    color: rgba(245, 247, 255, 0.84) !important;
+    line-height: var(--ptv-line-dense) !important;
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-table tr {
+    transition:
+        background var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.018) !important;
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-table tbody tr:hover {
+    background: var(--ptv-state-hover) !important;
+    box-shadow:
+        inset 3px 0 0 rgba(125, 214, 255, 0.38),
+        inset 0 -1px 0 rgba(255, 141, 195, 0.1) !important;
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-pagination {
+    border-color: rgba(205, 174, 255, 0.08) !important;
+    color: rgba(245, 247, 255, 0.72) !important;
+    background: rgba(9, 5, 19, 0.34) !important;
+}
+
+.ptv-admin-document .ptv-admin-data-page .ptv-field,
+.ptv-admin-document .ptv-admin-data-page .ptv-field-control {
+    min-height: var(--ptv-density-button-height, var(--ptv-control-height-md)) !important;
+
+    border-radius: var(--ptv-radius-card) !important;
+    background: rgba(12, 7, 25, 0.68) !important;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-dashboard-overview {
+    width: min(1500px, calc(100vw - var(--ptv-admin-gutter))) !important;
+    max-width: 1500px !important;
+    padding:
+        var(--ptv-dashboard-shell-top-offset)
+        clamp(var(--ptv-space-5), 3vw, var(--ptv-space-2xl))
+        var(--ptv-density-page-padding-bottom, 48px) !important;
+    margin: 0 auto !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview > .ptv-dashboard-overview-grid {
+    display: grid !important;
+    grid-template-areas: 'main activity side';
+    grid-template-columns:
+        minmax(430px, 1.1fr)
+        minmax(330px, 0.86fr)
+        minmax(330px, 0.86fr);
+    gap: var(--ptv-dashboard-grid-gap) !important;
+    align-items: start !important;
+    justify-content: center;
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview > .ptv-dashboard-overview-grid > .MuiGrid-item {
+    width: auto !important;
+    min-width: 0;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex-basis: auto !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview-main {
+    grid-area: main;
+}
+
+.ptv-admin-document .ptv-dashboard-overview-activity {
+    grid-area: activity;
+}
+
+.ptv-admin-document .ptv-dashboard-overview-side {
+    grid-area: side;
+}
+
+.ptv-admin-document .ptv-dashboard-overview-column > .MuiStack-root,
+.ptv-admin-document .ptv-dashboard-overview-side > .MuiStack-root {
+    gap: var(--ptv-dashboard-grid-gap) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-widget,
+.ptv-admin-document .ptv-dashboard-overview .MuiBox-root {
+    min-width: 0;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: var(--ptv-space-4) !important;
+    align-items: stretch !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid > .MuiGrid-item,
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid > .ptv-dashboard-metric-item {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex-basis: auto !important;
+    box-sizing: border-box !important;
+    transform: none !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .MuiCard-root,
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .ptv-dashboard-metric-card {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: var(--ptv-dashboard-stat-card-min-height) !important;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .MuiCard-root > .MuiStack-root,
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .ptv-dashboard-metric-card > .MuiStack-root {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(26px, auto);
+    gap: var(--ptv-space-2) var(--ptv-space-3) !important;
+    align-items: center !important;
+    align-content: center !important;
+    width: 100%;
+    min-width: 0;
+    min-height: var(--ptv-dashboard-stat-card-min-height);
+    padding: var(--ptv-space-4) !important;
+    box-sizing: border-box;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .MuiBox-root {
+    min-width: 0;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .MuiBox-root + .MuiBox-root {
+    margin-top: var(--ptv-space-1);
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .MuiTypography-root {
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+    text-wrap: pretty;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .MuiTypography-body2 {
+    font-size: var(--ptv-text-small) !important;
+    line-height: var(--ptv-line-dense) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .MuiTypography-h5 {
+    font-size: clamp(18px, 1vw, 23px) !important;
+    line-height: var(--ptv-line-dense) !important;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid .MuiSvgIcon-root {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    justify-self: end;
+    font-size: clamp(22px, 1.45vw, 30px) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-action-row {
+    gap: var(--ptv-space-3) !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-action-button {
+    min-height: var(--ptv-dashboard-action-height, var(--ptv-control-height-lg)) !important;
+    min-width: clamp(112px, 8vw, 148px);
+    padding:
+        0
+        clamp(var(--ptv-space-4), 1.2vw, var(--ptv-space-6)) !important;
+    font-size: var(--ptv-text-card) !important;
+    font-weight: 760 !important;
+    line-height: var(--ptv-line-dense) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-widget-server .MuiPaper-root {
+    padding: var(--ptv-space-5) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-widget-activity .MuiList-root,
+.ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-widget-alerts .MuiList-root {
+    max-height: clamp(420px, 58vh, 720px);
+    overflow: auto;
+}
+
+.ptv-admin-document .ptv-admin-sidebar.ptv-panel {
+    --ptv-admin-drawer-row-height: 44px;
+    --ptv-admin-drawer-icon-column: 34px;
+    --ptv-admin-drawer-row-gap: var(--ptv-space-2);
+
+    padding: 0 !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiList-root {
+    padding: 0 var(--ptv-space-2) var(--ptv-space-2) !important;
+    margin: 0 !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiListItem-root {
+    display: block !important;
+
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    transform: none !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiListItem-root:hover,
+.ptv-admin-document .ptv-admin-sidebar .MuiListItem-root:focus-within {
+    border-color: transparent !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    transform: none !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiListItemButton-root,
+.ptv-admin-document .ptv-admin-sidebar a.MuiListItemButton-root {
+    display: grid !important;
+    grid-template-columns: var(--ptv-admin-drawer-icon-column) minmax(0, 1fr);
+    column-gap: var(--ptv-admin-drawer-row-gap);
+    align-items: center !important;
+
+    min-height: var(--ptv-admin-drawer-row-height) !important;
+    padding: 0 var(--ptv-space-3) !important;
+    margin: 2px var(--ptv-space-2) !important;
+
+    border: 1px solid transparent !important;
+    border-radius: var(--ptv-radius-md, 14px) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    transform: none !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiListItemButton-root:hover,
+.ptv-admin-document .ptv-admin-sidebar .MuiListItemButton-root:focus-visible,
+.ptv-admin-document .ptv-admin-sidebar .Mui-selected,
+.ptv-admin-document .ptv-admin-sidebar .MuiListItemButton-root[aria-current='page'] {
+    transform: none !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiCollapse-root .MuiList-root {
+    padding:
+        0
+        0
+        var(--ptv-space-2)
+        calc(var(--ptv-admin-drawer-icon-column) + var(--ptv-space-2)) !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiCollapse-root .MuiListItemButton-root {
+    min-height: 40px !important;
+    margin-right: var(--ptv-space-2) !important;
+    margin-left: 0 !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiListItemIcon-root,
+.ptv-admin-document .ptv-admin-sidebar .ptv-dashboard-drawer-icon-slot {
+    display: inline-flex !important;
+    grid-column: 1;
+    align-items: center;
+    justify-content: center;
+
+    width: var(--ptv-admin-drawer-icon-column) !important;
+    min-width: var(--ptv-admin-drawer-icon-column) !important;
+    margin: 0 !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiListItemText-root {
+    grid-column: 2;
+
+    min-width: 0;
+    margin: 0 !important;
+}
+
+.ptv-admin-document .ptv-admin-sidebar .MuiListItemText-primary,
+.ptv-admin-document .ptv-admin-sidebar .MuiListItemText-primary .MuiTypography-root {
+    line-height: var(--ptv-line-dense) !important;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-users-page .localUsers {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(clamp(160px, 14vw, 220px), 1fr));
+    gap: var(--ptv-density-section-gap, var(--ptv-space-5)) !important;
+    align-items: stretch;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-users-page .localUsers .card {
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-users-page .localUsers .ptv-panel {
+    height: 100%;
+
+    border: 1px solid rgba(205, 174, 255, 0.12) !important;
+    border-radius: var(--ptv-radius-panel) !important;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(125, 214, 255, 0.09), transparent 38%),
+        linear-gradient(180deg, var(--ptv-elevation-2-surface-solid), rgba(8, 4, 18, 0.72)) !important;
+    box-shadow: var(--ptv-elevation-2-shadow) !important;
+
+    transition:
+        border-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized) !important;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-users-page .localUsers .ptv-panel:hover,
+.ptv-admin-document .ptv-admin-content.ptv-admin-users-page .localUsers .ptv-panel:focus-within {
+    border-color: rgba(125, 214, 255, 0.24) !important;
+    box-shadow: var(--ptv-elevation-3-shadow) !important;
+    transform: translateY(-4px);
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-users-page .cardImage {
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 0 20px rgba(167, 139, 250, 0.16);
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-users-page .cardText {
+    color: rgba(245, 247, 255, 0.9) !important;
+    font-size: var(--ptv-text-card) !important;
+    font-weight: 620 !important;
+    line-height: var(--ptv-line-dense) !important;
+}
+
+.ptv-admin-document .ptv-admin-content.ptv-admin-users-page .cardText-secondary {
+    color: rgba(224, 229, 255, 0.58) !important;
+    font-size: var(--ptv-text-small) !important;
+    font-weight: 480 !important;
+    line-height: var(--ptv-line-dense) !important;
+}
+
+@media all and (max-width: 70em) {
+    .ptv-admin-document .ptv-admin-content.ptv-admin-page,
+    .ptv-admin-document .ptv-admin-content.ptv-admin-data-page {
+        width: 100% !important;
+        max-width: none !important;
+    }
+
+    .ptv-admin-document .ptv-admin-content.ptv-dashboard-overview {
+        padding-right: var(--ptv-space-4) !important;
+        padding-left: var(--ptv-space-4) !important;
+    }
+
+    .ptv-admin-document .ptv-dashboard-overview > .ptv-dashboard-overview-grid {
+        grid-template-areas:
+            'main'
+            'activity'
+            'side';
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ptv-admin-document .ptv-dashboard-overview .ptv-dashboard-metric-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+    }
+
+    .ptv-admin-document .ptv-admin-content.ptv-admin-users-page .localUsers {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: var(--ptv-space-3) !important;
+    }
+}
+
+/* stylelint-enable @stylistic/declaration-colon-space-after, no-descending-specificity, property-no-vendor-prefix, selector-class-pattern */

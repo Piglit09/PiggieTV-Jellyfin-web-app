@@ -1,0 +1,78 @@
+.ptv-detail-page {
+    color: rgba(248, 250, 255, 0.94);
+    background: transparent !important;
+}
+
+.ptv-detail-page .itemBackdrop {
+    opacity: 0.46 !important;
+    filter: saturate(1.18) brightness(0.62) !important;
+}
+
+.ptv-detail-page::before {
+    content: '';
+
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+
+    background:
+        radial-gradient(ellipse at 18% 18%, rgba(167, 139, 250, 0.18), transparent 36%),
+        radial-gradient(ellipse at 88% 8%, rgba(255, 141, 195, 0.12), transparent 38%),
+        linear-gradient(90deg, rgba(7, 4, 14, 0.5), rgba(48, 18, 58, 0.58) 42%, rgba(8, 5, 16, 0.7)),
+        linear-gradient(180deg, rgba(6, 3, 12, 0.2), rgba(6, 3, 12, 0.86) 78%);
+
+    pointer-events: none;
+}
+
+.ptv-detail-page .detailPageWrapperContainer {
+    position: relative;
+
+    width: min(100%, 1840px);
+    margin: 0 auto;
+    padding: clamp(96px, 10vh, 150px) 28px 48px !important;
+}
+
+.ptv-detail-page .detailPagePrimaryContainer {
+    display: grid !important;
+    grid-template-columns: minmax(260px, 500px) minmax(0, 1fr);
+    gap: clamp(18px, 2.8vw, 42px);
+    align-items: end;
+}
+
+.ptv-detail-page .detailPagePrimaryContent {
+    min-width: 0;
+    padding-right: 0 !important;
+}
+
+.ptv-detail-page .detailLogo {
+    position: absolute !important;
+    top: 34px;
+    left: 50%;
+    z-index: 2;
+
+    width: min(36vw, 420px) !important;
+    height: 130px !important;
+    max-height: 130px !important;
+
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    background-size: contain !important;
+
+    transform: translateX(-50%);
+    filter: drop-shadow(0 14px 30px rgba(0, 0, 0, 0.44));
+}
+
+@media (max-width: 900px) {
+    .ptv-detail-page .detailPageWrapperContainer {
+        padding: 92px 16px 36px !important;
+    }
+
+    .ptv-detail-page .detailPagePrimaryContainer {
+        display: block !important;
+    }
+
+    .ptv-detail-page .detailLogo {
+        width: min(68vw, 320px) !important;
+        height: 92px !important;
+    }
+}

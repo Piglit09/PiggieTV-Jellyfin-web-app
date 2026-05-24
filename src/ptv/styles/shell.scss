@@ -1,0 +1,124 @@
+/* PTV shell ownership layer: layout slots and z-index belong here, not in page hacks. */
+
+.ptv-shell-root {
+    color-scheme: dark;
+    background: var(--ptv-elevation-0-surface);
+}
+
+.ptv-app-shell {
+    --ptv-shell-z-background: 0;
+    --ptv-shell-z-content: 10;
+    --ptv-shell-z-header: 1200;
+    --ptv-shell-z-drawer: 1300;
+    --ptv-shell-z-overlay: 1400;
+    --ptv-shell-z-backdrop: calc(var(--ptv-shell-z-overlay) - 10);
+    --ptv-shell-z-dialog: calc(var(--ptv-shell-z-overlay) + 20);
+    --ptv-shell-z-popover: calc(var(--ptv-shell-z-overlay) + 30);
+    --ptv-shell-z-toast: calc(var(--ptv-shell-z-overlay) + 40);
+    --ptv-shell-overlay-motion-duration: var(--ptv-motion-medium);
+    --ptv-shell-overlay-motion-ease: var(--ptv-motion-ease-emphasized);
+
+    min-height: 100vh;
+    color: var(--ptv-color-text-primary);
+    background: var(--ptv-shell-route-surface, var(--ptv-elevation-1-surface));
+}
+
+.ptv-app-shell .backgroundContainer,
+.ptv-app-shell .backdropContainer {
+    z-index: var(--ptv-shell-z-background);
+}
+
+.ptv-app-shell .mainAnimatedPages,
+.ptv-shell-main {
+    position: relative;
+    z-index: var(--ptv-shell-z-content);
+    min-height: 100vh;
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-app-shell .mainAnimatedPage:not(#videoOsdPage):not(.videoOsdPage) {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+.ptv-playing .ptv-app-shell .mainAnimatedPage:not(#videoOsdPage):not(.videoOsdPage) {
+    overflow-y: auto;
+}
+
+.ptv-app-shell .page,
+.ptv-shell-page {
+    position: relative;
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-app-shell .skinHeader,
+.ptv-app-shell .ptv-skinHeader {
+    z-index: var(--ptv-shell-z-header) !important;
+}
+
+.ptv-app-shell .mainDrawer,
+.ptv-app-shell .ptv-sidebar {
+    z-index: var(--ptv-shell-z-drawer) !important;
+}
+
+.ptv-app-shell .dialog,
+.ptv-app-shell .actionSheet,
+.ptv-shell-dialog {
+    z-index: calc(var(--ptv-shell-z-dialog) + var(--ptv-shell-overlay-index, 0));
+    border-color: var(--ptv-elevation-4-border);
+    background: var(--ptv-elevation-4-surface);
+    box-shadow: var(--ptv-elevation-4-shadow);
+    animation: ptv-shell-overlay-enter var(--ptv-shell-overlay-motion-duration) var(--ptv-shell-overlay-motion-ease);
+}
+
+.ptv-app-shell .toast,
+.ptv-shell-toast {
+    z-index: calc(var(--ptv-shell-z-toast) + var(--ptv-shell-overlay-index, 0));
+    border-color: var(--ptv-elevation-5-border);
+    background: var(--ptv-elevation-5-surface);
+    box-shadow: var(--ptv-elevation-5-shadow);
+    animation: ptv-shell-overlay-enter var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+.ptv-shell-overlay {
+    z-index: calc(var(--ptv-shell-z-overlay) + var(--ptv-shell-overlay-index, 0));
+}
+
+.ptv-shell-overlay-surface {
+    z-index: calc(var(--ptv-shell-z-popover) + var(--ptv-shell-overlay-index, 0));
+    border-color: var(--ptv-elevation-5-border);
+    background: var(--ptv-elevation-5-surface);
+    box-shadow: var(--ptv-elevation-5-shadow);
+    animation: ptv-shell-overlay-enter var(--ptv-shell-overlay-motion-duration) var(--ptv-shell-overlay-motion-ease);
+}
+
+.ptv-shell-overlay-backdrop {
+    z-index: calc(var(--ptv-shell-z-backdrop) + var(--ptv-shell-overlay-index, 0));
+    background: var(--ptv-overlay-strong, rgba(5, 5, 12, 0.78));
+    animation: ptv-shell-backdrop-enter var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+@keyframes ptv-shell-overlay-enter {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes ptv-shell-backdrop-enter {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}

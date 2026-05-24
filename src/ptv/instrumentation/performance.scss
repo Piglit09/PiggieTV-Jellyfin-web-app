@@ -1,0 +1,239 @@
+/* Lightweight rendering mode for reduced-motion and lower-power clients. */
+/* stylelint-disable @stylistic/declaration-colon-space-after */
+
+.ptv-lowfx {
+    --ptv-blur: 0;
+    --ptv-blur-panel: 0;
+    --ptv-blur-heavy: 0;
+    --ptv-glass-glow: none;
+    --ptv-state-hover: rgba(var(--ptv-color-focus-rgb), 0.055);
+    --ptv-state-hover-shadow: var(--ptv-elevation-2-shadow);
+    --ptv-state-hover-transform: none;
+    --ptv-focus-ring:
+        0 0 0 1px rgba(var(--ptv-color-focus-rgb), 0.16),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.04);
+    --ptv-state-focus: var(--ptv-focus-ring);
+    --ptv-elevation-2-shadow:
+        0 10px 24px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.04);
+    --ptv-elevation-2-shadow-muted:
+        0 8px 18px rgba(0, 0, 0, 0.26),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.035);
+    --ptv-elevation-3-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.38);
+    --ptv-elevation-4-shadow:
+        0 14px 32px rgba(0, 0, 0, 0.42);
+    --ptv-elevation-5-shadow:
+        0 16px 36px rgba(0, 0, 0, 0.46);
+    --ptv-motion-fast: 90ms;
+    --ptv-motion-medium: 140ms;
+    --ptv-motion-slow: 180ms;
+    --ptv-motion-hero: 180ms;
+    --ptv-motion-atmosphere: var(--ptv-motion-disabled-duration);
+    --ptv-motion-shimmer: var(--ptv-motion-disabled-duration);
+    --ptv-motion-sweep: var(--ptv-motion-disabled-duration);
+    --ptv-motion-disc-spin: var(--ptv-motion-disabled-duration);
+    --ptv-motion-delay-card-glow: 0ms;
+    --ptv-motion-delay-card-meta: 0ms;
+    --ptv-motion-delay-card-action: 0ms;
+}
+
+.ptv-lowfx *,
+.ptv-lowfx *::before,
+.ptv-lowfx *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --ptv-motion-fast: var(--ptv-motion-disabled-duration);
+        --ptv-motion-medium: var(--ptv-motion-disabled-duration);
+        --ptv-motion-slow: var(--ptv-motion-disabled-duration);
+        --ptv-motion-hero: var(--ptv-motion-disabled-duration);
+        --ptv-motion-atmosphere: var(--ptv-motion-disabled-duration);
+        --ptv-motion-shimmer: var(--ptv-motion-disabled-duration);
+        --ptv-motion-sweep: var(--ptv-motion-disabled-duration);
+        --ptv-motion-disc-spin: var(--ptv-motion-disabled-duration);
+        --ptv-motion-delay-card-glow: 0ms;
+        --ptv-motion-delay-card-meta: 0ms;
+        --ptv-motion-delay-card-action: 0ms;
+    }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: var(--ptv-motion-disabled-duration) !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: var(--ptv-motion-disabled-duration) !important;
+    }
+}
+
+.ptv-lowfx .dashboardDocument .MuiPaper-root,
+.ptv-lowfx .dashboardDocument .MuiCard-root,
+.ptv-lowfx .dashboardDocument .MuiList-root,
+.ptv-lowfx .dashboardDocument .paperList,
+.ptv-lowfx .dashboardDocument .dashboardSection,
+.ptv-lowfx .dashboardDocument .ptv-dashboard-card,
+.ptv-lowfx .dashboardDocument .ptv-dashboard-form-card,
+.ptv-lowfx .ptv-skinHeader,
+.ptv-lowfx .ptv-sidebar,
+.ptv-lowfx .mainDrawer {
+    box-shadow: var(--ptv-elevation-2-shadow) !important;
+    backdrop-filter: none !important;
+}
+
+.ptv-performance-overlay {
+    position: fixed;
+    right: clamp(var(--ptv-space-3), 2vw, var(--ptv-space-6));
+    bottom: clamp(var(--ptv-space-3), 2vw, var(--ptv-space-6));
+    z-index: calc(var(--ptv-shell-z-overlay, 1400) + 20);
+
+    display: grid;
+    gap: var(--ptv-space-4);
+
+    width: min(440px, calc(100vw - (var(--ptv-space-4) * 2)));
+    max-height: min(78vh, 720px);
+    padding: var(--ptv-space-4);
+    overflow: auto;
+
+    border: 1px solid var(--ptv-elevation-5-border);
+    border-radius: var(--ptv-radius-card);
+    background: var(--ptv-elevation-5-surface);
+    box-shadow: var(--ptv-elevation-5-shadow);
+    backdrop-filter: blur(var(--ptv-elevation-5-blur)) saturate(1.08);
+
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-main);
+}
+
+.ptv-performance-overlay-header {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: var(--ptv-space-2);
+    align-items: center;
+}
+
+.ptv-performance-overlay-title {
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent);
+    font-size: var(--ptv-text-card);
+    font-weight: 850;
+    line-height: var(--ptv-line-dense);
+}
+
+.ptv-performance-overlay-status {
+    padding: 2px var(--ptv-space-2);
+
+    border: 1px solid var(--ptv-state-selected-border);
+    border-radius: var(--ptv-radius-pill);
+    background: var(--ptv-state-selected);
+
+    color: var(--ptv-state-selected-text);
+    font-size: var(--ptv-font-size-xs);
+    font-weight: 760;
+    line-height: var(--ptv-line-dense);
+}
+
+.ptv-performance-overlay-close {
+    min-height: 28px;
+    padding: 0 var(--ptv-space-2);
+
+    border: 1px solid var(--ptv-border-default);
+    border-radius: var(--ptv-radius-pill);
+    background: transparent;
+
+    color: var(--ptv-color-text-secondary);
+    font: 760 var(--ptv-font-size-xs) / var(--ptv-line-dense) var(--ptv-font-accent);
+
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-performance-overlay-close:hover,
+.ptv-performance-overlay-close:focus-visible {
+    border-color: var(--ptv-state-hover-border);
+    background: var(--ptv-state-hover);
+    color: var(--ptv-state-hover-text);
+}
+
+.ptv-performance-overlay-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ptv-space-2);
+}
+
+.ptv-performance-overlay-metric {
+    display: grid;
+    gap: 2px;
+
+    min-width: 0;
+    padding: var(--ptv-space-3);
+
+    border: 1px solid var(--ptv-border-subtle);
+    border-radius: var(--ptv-radius-card);
+    background: var(--ptv-elevation-2-surface-muted);
+}
+
+.ptv-performance-overlay-label,
+.ptv-performance-overlay-detail,
+.ptv-performance-overlay-list-title {
+    color: var(--ptv-color-text-muted);
+    font-size: var(--ptv-font-size-xs);
+    font-weight: 700;
+    line-height: var(--ptv-line-dense);
+}
+
+.ptv-performance-overlay-value {
+    overflow: hidden;
+
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent);
+    font-size: var(--ptv-font-size-sm);
+    font-weight: 850;
+    line-height: var(--ptv-line-dense);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-performance-overlay-list {
+    display: grid;
+    gap: var(--ptv-space-2);
+}
+
+.ptv-performance-overlay-list-title {
+    color: var(--ptv-color-text-accent);
+}
+
+.ptv-performance-overlay-list-item {
+    padding: var(--ptv-space-2) var(--ptv-space-3);
+
+    border: 1px solid var(--ptv-border-subtle);
+    border-radius: var(--ptv-radius-card);
+    background: var(--ptv-elevation-2-surface-muted);
+
+    color: var(--ptv-color-text-secondary);
+    font-size: var(--ptv-font-size-xs);
+    font-weight: 680;
+    line-height: var(--ptv-line-body);
+}
+
+.ptv-lowfx .ptv-performance-overlay {
+    backdrop-filter: none;
+}
+
+@media (max-width: 42em) {
+    .ptv-performance-overlay {
+        right: var(--ptv-space-3);
+        bottom: var(--ptv-space-3);
+        left: var(--ptv-space-3);
+
+        width: auto;
+    }
+
+    .ptv-performance-overlay-body {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* stylelint-enable @stylistic/declaration-colon-space-after */

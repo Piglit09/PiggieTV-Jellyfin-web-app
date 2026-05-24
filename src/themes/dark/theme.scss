@@ -1,0 +1,67 @@
+@use 'ptv/styles/variables' as *;
+
+/* PiggieTV dark theme bridge.
+   Keep this file light. Do not put layout/card/header/sidebar hacks here. */
+
+:root,
+html,
+body,
+.skinBody,
+.backgroundContainer {
+  color-scheme: dark;
+  background-color: #08080d;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+:root {
+  --theme-primary-color: #a855f7;
+  --theme-accent-text-color: #ffffff;
+  --theme-body-background: #08080d;
+  --theme-background: #08080d;
+  --theme-paper-background: rgba(10, 10, 18, 0.78);
+  --theme-text-primary: rgba(255, 255, 255, 0.92);
+  --theme-text-secondary: rgba(255, 255, 255, 0.68);
+}
+
+/* Material/Jellyfin fallback surfaces */
+.paperList,
+.dialog,
+.formDialog,
+.actionSheet,
+.mainDrawer,
+.drawerContent,
+.navMenuOption,
+.listItem,
+.emby-select-withcolor,
+.emby-input,
+.emby-textarea {
+  background-color: rgba(10, 10, 18, 0.92);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Drawer specifically */
+.mainDrawer,
+.drawerContent {
+  background:
+    linear-gradient(180deg, rgba(13, 10, 24, 0.96), rgba(6, 6, 10, 0.98)) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.navMenuOption {
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.78) !important;
+}
+
+.navMenuOption:hover,
+.navMenuOption-selected {
+  color: #ffffff !important;
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.22), rgba(236, 72, 153, 0.14)) !important;
+}
+
+/* Inputs/dialogs need readable dark mode */
+input,
+textarea,
+select {
+  color: rgba(255, 255, 255, 0.92);
+  background-color: rgba(255, 255, 255, 0.08);
+}

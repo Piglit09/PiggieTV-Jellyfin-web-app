@@ -1,0 +1,350 @@
+/* PiggieTV admin form polish. Scoped to dashboard form pages only. */
+/* stylelint-disable @stylistic/declaration-colon-space-after, no-descending-specificity, property-no-vendor-prefix, selector-class-pattern */
+
+.ptv-admin-document .ptv-admin-content.ptv-dashboard-form-page {
+    --ptv-dashboard-form-gap: var(--ptv-density-section-gap, var(--ptv-admin-section-gap));
+    --ptv-dashboard-form-control-height: var(--ptv-density-control-height, var(--ptv-control-height-lg));
+    --ptv-dashboard-form-button-height: max(var(--ptv-density-button-height, var(--ptv-control-height-md)), var(--ptv-control-height-md));
+
+    width: min(var(--ptv-admin-page-width, var(--ptv-admin-medium)), calc(100vw - var(--ptv-admin-gutter))) !important;
+    max-width: var(--ptv-admin-page-width, var(--ptv-admin-medium)) !important;
+    margin-right: auto !important;
+    margin-left: auto !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page > .ptv-dashboard-form-card,
+.ptv-admin-document .ptv-dashboard-form-page .ptv-dashboard-form-card {
+    position: relative;
+
+    width: min(100%, var(--ptv-admin-card-width, var(--ptv-admin-narrow))) !important;
+    max-width: var(--ptv-admin-card-width, var(--ptv-admin-narrow)) !important;
+    padding: var(--ptv-density-card-padding, var(--ptv-admin-card-padding)) !important;
+    margin: 0 0 var(--ptv-density-section-gap, var(--ptv-admin-section-gap)) !important;
+
+    border: 1px solid var(--ptv-border-default) !important;
+    border-radius: var(--ptv-radius-panel) !important;
+    background:
+        radial-gradient(ellipse at 10% 0%, rgba(125, 214, 255, 0.075), transparent 36%),
+        radial-gradient(ellipse at 92% 100%, rgba(255, 141, 195, 0.06), transparent 42%),
+        linear-gradient(180deg, var(--ptv-elevation-3-surface-solid), rgba(10, 5, 20, 0.86)) !important;
+    box-shadow: var(--ptv-elevation-3-shadow) !important;
+    backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.ptv-admin-document .ptv-dashboard-form-page > .ptv-dashboard-form-card::before,
+.ptv-admin-document .ptv-dashboard-form-page .ptv-dashboard-form-card::before {
+    content: '';
+
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+
+    border-radius: inherit;
+    background:
+        linear-gradient(
+            135deg,
+            rgba(125, 214, 255, 0.08),
+            transparent 28%,
+            rgba(255, 141, 195, 0.07) 100%
+        );
+
+    pointer-events: none;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-form > .MuiStack-root {
+    gap: var(--ptv-dashboard-form-gap) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > h1,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > h2,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > h3,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > .MuiTypography-h1,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > .MuiTypography-h2,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > .MuiTypography-h3,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > .MuiAlert-root,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > .ptv-form-section,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-medium .ptv-form > .MuiStack-root > .ptv-button[type='submit'],
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > h1,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > h2,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > h3,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > .MuiTypography-h1,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > .MuiTypography-h2,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > .MuiTypography-h3,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > .MuiAlert-root,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > .ptv-form-section,
+.ptv-admin-document .ptv-dashboard-form-page.ptv-admin-wide .ptv-form > .MuiStack-root > .ptv-button[type='submit'] {
+    grid-column: 1 / -1;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-field,
+.ptv-admin-document .ptv-dashboard-form-page .ptv-form-section {
+    padding: var(--ptv-density-field-padding, var(--ptv-field-padding)) !important;
+    margin-top: 0 !important;
+    margin-bottom: var(--ptv-dashboard-form-gap) !important;
+
+    border: 1px solid var(--ptv-border-subtle) !important;
+    border-radius: var(--ptv-radius-group) !important;
+    background:
+        linear-gradient(180deg, var(--ptv-elevation-2-surface-muted-solid), rgba(9, 5, 19, 0.52)) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.035),
+        0 8px 20px rgba(0, 0, 0, 0.14) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ptv-space-2);
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-form > .ptv-form-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+    gap: var(--ptv-dashboard-form-gap);
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-form > .ptv-form-section > .sectionTitleContainer,
+.ptv-admin-document .ptv-dashboard-form-page .ptv-form > .ptv-form-section > .ptv-dashboard-form-section:not(fieldset) {
+    grid-column: 1 / -1;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page h1,
+.ptv-admin-document .ptv-dashboard-form-page h2,
+.ptv-admin-document .ptv-dashboard-form-page h3,
+.ptv-admin-document .ptv-dashboard-form-page legend,
+.ptv-admin-document .ptv-dashboard-form-page .ptv-section-title,
+.ptv-admin-document .ptv-dashboard-form-page .MuiTypography-h1,
+.ptv-admin-document .ptv-dashboard-form-page .MuiTypography-h2,
+.ptv-admin-document .ptv-dashboard-form-page .MuiTypography-h3 {
+    position: relative;
+
+    width: fit-content;
+    max-width: 100%;
+    padding-bottom: 10px;
+    margin-bottom: 6px !important;
+
+    color: rgba(248, 247, 255, 0.96) !important;
+    font-family: var(--ptv-font-accent) !important;
+    font-weight: 880 !important;
+    letter-spacing: 0 !important;
+    line-height: var(--ptv-line-section) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page legend {
+    padding-right: 16px;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page h1::after,
+.ptv-admin-document .ptv-dashboard-form-page h2::after,
+.ptv-admin-document .ptv-dashboard-form-page h3::after,
+.ptv-admin-document .ptv-dashboard-form-page legend::after,
+.ptv-admin-document .ptv-dashboard-form-page .ptv-section-title::after,
+.ptv-admin-document .ptv-dashboard-form-page .MuiTypography-h1::after,
+.ptv-admin-document .ptv-dashboard-form-page .MuiTypography-h2::after,
+.ptv-admin-document .ptv-dashboard-form-page .MuiTypography-h3::after {
+    content: '';
+
+    position: absolute;
+    left: 0;
+    bottom: 0;
+
+    width: min(88px, 100%);
+    height: 2px;
+
+    border-radius: var(--ptv-radius-pill);
+    background: linear-gradient(90deg, #7dd6ff, #a78bfa 52%, #ff8dc3);
+    opacity: 0.88;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page fieldset.ptv-dashboard-form-section {
+    padding: var(--ptv-density-section-gap, var(--ptv-admin-section-gap)) !important;
+    margin: 0 !important;
+
+    border: 1px solid var(--ptv-border-subtle) !important;
+    border-radius: var(--ptv-radius-group) !important;
+    background:
+        radial-gradient(ellipse at 12% 0%, rgba(125, 214, 255, 0.055), transparent 36%),
+        linear-gradient(180deg, var(--ptv-elevation-2-surface-muted-solid), rgba(8, 4, 18, 0.58)) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page label,
+.ptv-admin-document .ptv-dashboard-form-page .MuiInputLabel-root,
+.ptv-admin-document .ptv-dashboard-form-page .MuiFormControlLabel-label {
+    color: rgba(245, 247, 255, 0.86) !important;
+    font-weight: 720 !important;
+    letter-spacing: 0 !important;
+    line-height: var(--ptv-line-dense) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .fieldDescription,
+.ptv-admin-document .ptv-dashboard-form-page .checkboxFieldDescription,
+.ptv-admin-document .ptv-dashboard-form-page .MuiFormHelperText-root,
+.ptv-admin-document .ptv-dashboard-form-page .secondaryText {
+    margin-top: var(--ptv-space-2) !important;
+
+    color: rgba(224, 229, 255, 0.62) !important;
+    font-size: var(--ptv-text-small) !important;
+    line-height: var(--ptv-line-body) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .MuiFormControl-root,
+.ptv-admin-document .ptv-dashboard-form-page .MuiTextField-root {
+    gap: var(--ptv-space-2);
+    min-width: 0;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-field-control,
+.ptv-admin-document .ptv-dashboard-form-page .MuiInputBase-root,
+.ptv-admin-document .ptv-dashboard-form-page .MuiOutlinedInput-root {
+    border-radius: var(--ptv-radius-field) !important;
+    background:
+        linear-gradient(180deg, rgba(19, 10, 34, 0.78), rgba(8, 5, 18, 0.82)) !important;
+
+    color: rgba(250, 250, 255, 0.94) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-field-control {
+    min-height: var(--ptv-dashboard-form-control-height) !important;
+    padding: 10px var(--ptv-space-3) !important;
+
+    border: 1px solid rgba(205, 174, 255, 0.16) !important;
+    border-radius: var(--ptv-radius-field) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        0 0 0 rgba(125, 214, 255, 0) !important;
+
+    transition:
+        border-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        background-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .MuiInputBase-root,
+.ptv-admin-document .ptv-dashboard-form-page .MuiOutlinedInput-root {
+    min-height: var(--ptv-dashboard-form-control-height) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .MuiInputBase-input:not(textarea),
+.ptv-admin-document .ptv-dashboard-form-page input.ptv-field-control:not([type='checkbox']):not([type='radio']) {
+    min-height: calc(var(--ptv-dashboard-form-control-height) - 2px) !important;
+    box-sizing: border-box;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page select.ptv-field-control,
+.ptv-admin-document .ptv-dashboard-form-page .emby-select.ptv-field-control,
+.ptv-admin-document .ptv-dashboard-form-page .MuiSelect-select {
+    min-height: calc(var(--ptv-dashboard-form-control-height) - 2px) !important;
+    padding-right: var(--ptv-admin-select-arrow-column) !important;
+    box-sizing: border-box;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page select.ptv-field-control,
+.ptv-admin-document .ptv-dashboard-form-page .emby-select.ptv-field-control {
+    background-position: right var(--ptv-space-3) center !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .MuiOutlinedInput-notchedOutline {
+    border-color: rgba(205, 174, 255, 0.16) !important;
+    border-radius: var(--ptv-radius-field) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-field-control:focus,
+.ptv-admin-document .ptv-dashboard-form-page .Mui-focused .MuiOutlinedInput-notchedOutline,
+.ptv-admin-document .ptv-dashboard-form-page .MuiInputBase-root:focus-within {
+    border-color: var(--ptv-state-focus-border) !important;
+    box-shadow: var(--ptv-state-focus) !important;
+    outline: 0 !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .MuiSelect-icon,
+.ptv-admin-document .ptv-dashboard-form-page .MuiSvgIcon-root {
+    color: #c9b5ff !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .MuiSelect-icon {
+    right: var(--ptv-space-3) !important;
+
+    width: var(--ptv-admin-select-arrow-column) !important;
+
+    pointer-events: none;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-choice-control {
+    accent-color: #a78bfa;
+    color: rgba(201, 181, 255, 0.82) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-choice-control.Mui-checked,
+.ptv-admin-document .ptv-dashboard-form-page .MuiSwitch-switchBase.Mui-checked {
+    color: #7dd6ff !important;
+    filter: drop-shadow(0 0 8px rgba(125, 214, 255, 0.28));
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .MuiAlert-root {
+    border: 1px solid rgba(125, 214, 255, 0.22) !important;
+    border-radius: var(--ptv-radius-card) !important;
+    background: rgba(11, 6, 22, 0.74) !important;
+    color: rgba(245, 247, 255, 0.9) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-button[type='submit'],
+.ptv-admin-document .ptv-dashboard-form-page .button-submit {
+    align-self: flex-start;
+    min-width: 132px;
+    min-height: var(--ptv-dashboard-form-button-height);
+    padding: 0 22px !important;
+
+    border: 1px solid rgba(205, 174, 255, 0.2) !important;
+    border-radius: var(--ptv-radius-pill) !important;
+    background:
+        linear-gradient(135deg, rgba(125, 214, 255, 0.18), rgba(167, 139, 250, 0.24) 52%, rgba(255, 141, 195, 0.18)) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 0 18px rgba(167, 139, 250, 0.16) !important;
+
+    color: #fff !important;
+    font-weight: 840 !important;
+    text-transform: none !important;
+
+    transition:
+        border-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard) !important;
+}
+
+.ptv-admin-document .ptv-dashboard-form-page .ptv-button[type='submit']:hover,
+.ptv-admin-document .ptv-dashboard-form-page .ptv-button[type='submit']:focus-visible,
+.ptv-admin-document .ptv-dashboard-form-page .button-submit:hover,
+.ptv-admin-document .ptv-dashboard-form-page .button-submit:focus-visible {
+    border-color: rgba(125, 214, 255, 0.34) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.16),
+        0 0 22px rgba(125, 214, 255, 0.18),
+        0 0 28px rgba(255, 141, 195, 0.12) !important;
+    transform: translateY(-1px);
+}
+
+@media all and (max-width: 70em) {
+    .ptv-admin-document .ptv-admin-content.ptv-dashboard-form-page {
+        width: 100% !important;
+        max-width: none !important;
+        margin-right: 0 !important;
+        margin-left: 0 !important;
+    }
+
+    .ptv-admin-document .ptv-dashboard-form-page > .ptv-dashboard-form-card,
+    .ptv-admin-document .ptv-dashboard-form-page .ptv-dashboard-form-card {
+        width: 100% !important;
+        max-width: none !important;
+        padding: var(--ptv-space-5) !important;
+    }
+}
+
+/* stylelint-enable @stylistic/declaration-colon-space-after, no-descending-specificity, property-no-vendor-prefix, selector-class-pattern */

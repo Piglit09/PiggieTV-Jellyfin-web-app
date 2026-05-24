@@ -1,0 +1,38 @@
+/* Low-FX PTV theme: semantic token overrides for lower-power clients. */
+
+:root[data-ptv-theme='lowfx'] {
+    --ptv-theme-id: lowfx;
+    --ptv-theme-density: comfortable;
+    --ptv-theme-effects: reduced;
+    --ptv-blur: 0;
+    --ptv-blur-panel: 0;
+    --ptv-blur-heavy: 0;
+    --ptv-glass-glow: none;
+    --ptv-state-hover: rgba(var(--ptv-color-focus-rgb), 0.055);
+    --ptv-state-hover-shadow: var(--ptv-elevation-2-shadow);
+    --ptv-state-hover-transform: none;
+    --ptv-focus-ring:
+        0 0 0 1px rgba(var(--ptv-color-focus-rgb), 0.16),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.04);
+    --ptv-state-focus: var(--ptv-focus-ring);
+    --ptv-elevation-2-shadow-muted:
+        0 8px 18px rgba(0, 0, 0, 0.26),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.035);
+    --ptv-elevation-2-shadow:
+        0 10px 24px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.04);
+    --ptv-elevation-3-shadow: 0 12px 28px rgba(0, 0, 0, 0.38);
+    --ptv-elevation-4-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
+    --ptv-elevation-5-shadow: 0 16px 36px rgba(0, 0, 0, 0.46);
+    --ptv-motion-fast: 90ms;
+    --ptv-motion-medium: 140ms;
+    --ptv-motion-slow: 180ms;
+    --ptv-motion-hero: 180ms;
+    --ptv-motion-atmosphere: var(--ptv-motion-disabled-duration);
+    --ptv-motion-shimmer: var(--ptv-motion-disabled-duration);
+    --ptv-motion-sweep: var(--ptv-motion-disabled-duration);
+    --ptv-motion-disc-spin: var(--ptv-motion-disabled-duration);
+    --ptv-motion-delay-card-glow: 0ms;
+    --ptv-motion-delay-card-meta: 0ms;
+    --ptv-motion-delay-card-action: 0ms;
+}

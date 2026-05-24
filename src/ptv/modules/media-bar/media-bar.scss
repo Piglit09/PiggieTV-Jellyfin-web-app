@@ -1,0 +1,9 @@
+.ptv-media-bar {
+    border-radius: 22px !important;
+    background: linear-gradient(180deg, rgba(22, 0, 44, 0.86), rgba(8, 0, 18, 0.92)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.13) !important;
+    box-shadow:
+        0 18px 50px rgba(0, 0, 0, 0.38),
+        0 0 34px rgba(155, 63, 183, 0.22) !important;
+    backdrop-filter: blur(22px) saturate(1.25) !important;
+}

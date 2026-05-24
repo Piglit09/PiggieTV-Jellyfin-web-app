@@ -1,0 +1,666 @@
+/* PiggieTV native card theme. Posters/backdrops stay real media images. */
+/* stylelint-disable property-no-vendor-prefix */
+
+.homeSectionsContainer .ptv-icon,
+.itemsContainer .ptv-icon,
+.homeSection .ptv-icon,
+.card .ptv-icon,
+.cardBox .ptv-icon,
+.cardImageContainer .ptv-icon,
+.portraitCard .ptv-icon,
+.backdropCard .ptv-icon,
+.emby-scroller .ptv-icon,
+.verticalSection .sectionTitle .ptv-icon {
+    display: none !important;
+}
+
+.cardImageContainer img,
+.cardImage,
+.card img,
+.portraitCard img,
+.backdropCard img {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1;
+}
+
+.ptv-card {
+    --ptv-card-radius: var(--ptv-radius-card);
+}
+
+.ptv-card .cardBox {
+    border: 1px solid var(--ptv-glass-border) !important;
+    border-radius: var(--ptv-radius-card) !important;
+    background:
+        linear-gradient(
+            180deg,
+            rgba(44, 16, 72, 0.74),
+            rgba(14, 5, 28, 0.88)
+        ) !important;
+    backdrop-filter: blur(12px) saturate(1.18);
+    box-shadow:
+        0 10px 26px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 225, 255, 0.08);
+}
+
+.ptv-card .cardImageContainer {
+    position: relative;
+    overflow: hidden !important;
+    border-radius: inherit !important;
+}
+
+.ptv-card .cardImageContainer::before {
+    background:
+        radial-gradient(circle at top left, rgba(var(--ptv-card-accent), 0.16), transparent 44%),
+        linear-gradient(to top, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.08) 48%, transparent) !important;
+}
+
+.ptv-card:hover .cardBox,
+.ptv-card:focus-within .cardBox,
+.ptv-card.show-focus .cardBox {
+    border-color: rgba(125, 214, 255, 0.34) !important;
+    box-shadow:
+        0 22px 54px rgba(0, 0, 0, 0.56),
+        0 0 30px rgba(var(--ptv-card-accent), 0.24),
+        0 0 16px rgba(255, 141, 195, 0.1) !important;
+}
+
+.ptv-card-play-pill {
+    position: absolute !important;
+    left: 50% !important;
+    top: 58% !important;
+    z-index: 40;
+
+    border-radius: var(--ptv-radius-pill);
+
+    background: var(--ptv-gradient-action) !important;
+    box-shadow:
+        0 10px 22px rgba(167, 139, 250, 0.22),
+        0 0 12px rgba(255, 141, 195, 0.14);
+
+    transform: translate(-50%, -50%) scale(0.8) !important;
+}
+
+.ptv-card:hover .ptv-card-play-pill,
+.ptv-card:focus-within .ptv-card-play-pill,
+.ptv-card.show-focus .ptv-card-play-pill {
+    transform: translate(-50%, -50%) scale(0.92) !important;
+}
+
+.homeSectionsContainer .ptv-dynamic-row {
+    position: relative;
+    overflow: hidden !important;
+    isolation: isolate;
+
+    background:
+        radial-gradient(ellipse at 16% 0%, rgba(168, 85, 247, 0.15), transparent 42%),
+        radial-gradient(ellipse at 84% 100%, rgba(236, 72, 153, 0.1), transparent 48%),
+        linear-gradient(180deg, rgba(40, 14, 66, 0.72), rgba(10, 3, 22, 0.86)) !important;
+    backdrop-filter: blur(12px) saturate(1.14);
+}
+
+.homeSection {
+    padding-block: 18px !important;
+}
+
+.homeSectionsContainer .ptv-row-backdrop {
+    position: absolute;
+    inset: -44px -32px;
+    z-index: -3;
+
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+
+    opacity: 0;
+    filter:
+        saturate(1.18)
+        brightness(0.7);
+    transform: scale(1.02);
+
+    transition:
+        opacity var(--ptv-motion-hero) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-hero) var(--ptv-motion-ease-emphasized);
+
+    pointer-events: none;
+}
+
+.homeSectionsContainer .ptv-row-has-backdrop .ptv-row-backdrop {
+    opacity: 0.48;
+}
+
+.homeSectionsContainer .ptv-dynamic-row::before {
+    z-index: -2;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(13, 4, 22, 0.78),
+            rgba(44, 17, 67, 0.42) 22%,
+            rgba(32, 12, 52, 0.38) 72%,
+            rgba(13, 4, 22, 0.82)
+        ),
+        linear-gradient(
+            180deg,
+            rgba(22, 9, 36, 0.7),
+            rgba(54, 22, 78, 0.22) 46%,
+            rgba(13, 4, 22, 0.78)
+        ) !important;
+}
+
+.homeSectionsContainer .ptv-dynamic-row::after {
+    z-index: -1;
+}
+
+.homeSectionsContainer .ptv-dynamic-row:hover .ptv-row-backdrop,
+.homeSectionsContainer .ptv-dynamic-row:focus-within .ptv-row-backdrop {
+    opacity: 0.54;
+    transform: scale(1.025);
+}
+
+.homeSectionsContainer .ptv-dynamic-row .sectionTitle,
+.homeSectionsContainer .ptv-dynamic-row .emby-scroller,
+.homeSectionsContainer .ptv-dynamic-row .itemsContainer {
+    position: relative;
+    z-index: 2;
+}
+
+.homeSectionsContainer .ptv-dynamic-row .emby-scrollbuttons {
+    position: absolute !important;
+    top: 18px !important;
+    right: 36px !important;
+    left: auto !important;
+    z-index: 12 !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 10px !important;
+    width: auto !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+
+    transform: none !important;
+}
+
+.homeSectionsContainer .ptv-dynamic-row .itemsContainer,
+.homeSectionsContainer .ptv-dynamic-row .emby-scroller,
+.homeSectionsContainer .ptv-dynamic-row .itemsContainer > .card {
+    align-items: flex-start !important;
+}
+
+[dir="rtl"] .homeSectionsContainer .ptv-dynamic-row .emby-scrollbuttons {
+    right: auto !important;
+    left: 36px !important;
+}
+
+.homeSectionsContainer.ptv-home-has-backdrop::before {
+    content: '';
+
+    position: fixed;
+    inset: 0;
+    z-index: -10;
+
+    background-image: var(--ptv-home-backdrop-image);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+
+    opacity: 0.28;
+    filter:
+        saturate(1.12)
+        brightness(0.56);
+
+    pointer-events: none;
+}
+
+.homeSectionsContainer.ptv-home-has-backdrop::after {
+    content: '';
+
+    position: fixed;
+    inset: 0;
+    z-index: -9;
+
+    background:
+        radial-gradient(ellipse at 12% 0%, rgba(168, 85, 247, 0.28), transparent 36%),
+        radial-gradient(ellipse at 88% 100%, rgba(236, 72, 153, 0.16), transparent 42%),
+        linear-gradient(180deg, rgba(4, 2, 10, 0.72), rgba(8, 3, 16, 0.82));
+
+    pointer-events: none;
+}
+
+/* Keep Jellyfin poster/backdrop layers intact. Some card images are CSS backgrounds,
+   so avoid wiping or covering those surfaces while the PTV card shell is active. */
+.homeSectionsContainer .cardScalable,
+.homeSectionsContainer .cardPadder,
+.homeSectionsContainer .cardImageContainer,
+.homeSectionsContainer .cardImage,
+.homeSectionsContainer .coveredImage,
+.itemsContainer .cardScalable,
+.itemsContainer .cardPadder,
+.itemsContainer .cardImageContainer,
+.itemsContainer .cardImage,
+.itemsContainer .coveredImage {
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.homeSectionsContainer .cardPadder,
+.homeSectionsContainer .cardImage,
+.homeSectionsContainer .coveredImage,
+.itemsContainer .cardPadder,
+.itemsContainer .cardImage,
+.itemsContainer .coveredImage {
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    background-size: cover !important;
+}
+
+.homeSectionsContainer .cardImageContainer img,
+.homeSectionsContainer .cardImageContainer picture,
+.homeSectionsContainer .cardImageContainer .cardImage,
+.homeSectionsContainer .cardImageContainer .coveredImage,
+.itemsContainer .cardImageContainer img,
+.itemsContainer .cardImageContainer picture,
+.itemsContainer .cardImageContainer .cardImage,
+.itemsContainer .cardImageContainer .coveredImage {
+    position: relative;
+    z-index: 1;
+
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Final poster layer guard. Jellyfin paints many card posters as a CSS
+   background on .cardContent.cardImageContainer; keep that element absolute
+   over the padder so PTV glass/hover styling cannot bury it. */
+.homeSectionsContainer .ptv-card .cardScalable,
+.itemsContainer .ptv-card .cardScalable {
+    position: relative !important;
+}
+
+.homeSectionsContainer .ptv-card .cardContent.cardImageContainer,
+.itemsContainer .ptv-card .cardContent.cardImageContainer {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 2 !important;
+
+    display: flex !important;
+    width: 100% !important;
+    height: 100% !important;
+
+    background-color: transparent !important;
+    background-clip: border-box !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    background-size: cover !important;
+
+    filter: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.homeSectionsContainer .ptv-card .cardPadder.lazy-hidden-children,
+.itemsContainer .ptv-card .cardPadder.lazy-hidden-children {
+    background-color: transparent !important;
+}
+
+.homeSectionsContainer .ptv-card .cardPadder.lazy-hidden-children .cardImageIcon,
+.itemsContainer .ptv-card .cardPadder.lazy-hidden-children .cardImageIcon {
+    display: none !important;
+}
+
+.homeSectionsContainer .ptv-card .cardContent.cardImageContainer::before,
+.homeSectionsContainer .ptv-card .cardContent.cardImageContainer::after,
+.itemsContainer .ptv-card .cardContent.cardImageContainer::before,
+.itemsContainer .ptv-card .cardContent.cardImageContainer::after {
+    pointer-events: none !important;
+}
+
+.homeSectionsContainer .ptv-card:not(:hover):not(:focus-within):not(.show-focus) .cardContent.cardImageContainer::before,
+.homeSectionsContainer .ptv-card:not(:hover):not(:focus-within):not(.show-focus) .cardContent.cardImageContainer::after,
+.itemsContainer .ptv-card:not(:hover):not(:focus-within):not(.show-focus) .cardContent.cardImageContainer::before,
+.itemsContainer .ptv-card:not(:hover):not(:focus-within):not(.show-focus) .cardContent.cardImageContainer::after {
+    opacity: 0 !important;
+}
+
+.homeSectionsContainer .ptv-card .cardOverlayContainer,
+.itemsContainer .ptv-card .cardOverlayContainer {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 8 !important;
+
+    overflow: visible !important;
+
+    pointer-events: none !important;
+}
+
+.homeSectionsContainer .ptv-card .ptv-card-play-pill,
+.itemsContainer .ptv-card .ptv-card-play-pill {
+    display: none !important;
+}
+
+.homeSectionsContainer .ptv-card .cardOverlayButton-br,
+.itemsContainer .ptv-card .cardOverlayButton-br {
+    position: absolute !important;
+    right: 8px !important;
+    bottom: 8px !important;
+    z-index: 45 !important;
+
+    display: flex !important;
+    gap: 4px !important;
+
+    pointer-events: auto !important;
+}
+
+.homeSectionsContainer .ptv-card .cardOverlayButton-centered,
+.homeSectionsContainer .ptv-card .cardOverlayFab-primary,
+.homeSectionsContainer .ptv-card .cardOverlayButton[data-action="play"],
+.homeSectionsContainer .ptv-card .cardOverlayButton[data-action="resume"],
+.itemsContainer .ptv-card .cardOverlayButton-centered,
+.itemsContainer .ptv-card .cardOverlayFab-primary,
+.itemsContainer .ptv-card .cardOverlayButton[data-action="play"],
+.itemsContainer .ptv-card .cardOverlayButton[data-action="resume"] {
+    position: absolute !important;
+    left: 50% !important;
+    top: 58% !important;
+    z-index: 46 !important;
+
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    width: auto !important;
+    min-width: 92px !important;
+    height: 40px !important;
+    padding: 0 18px !important;
+
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    border-radius: 999px !important;
+    background: linear-gradient(135deg, #7dd6ff, #a78bfa 52%, #ff8dc3) !important;
+    box-shadow:
+        0 10px 22px rgba(167, 139, 250, 0.24),
+        0 0 14px rgba(255, 141, 195, 0.16) !important;
+
+    color: #fff !important;
+    font-size: 12px !important;
+    font-weight: 900 !important;
+    line-height: 1 !important;
+
+    opacity: 0 !important;
+    transform: translate(-50%, -50%) scale(0.82) !important;
+    transition:
+        opacity var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized),
+        box-shadow var(--ptv-motion-fast) var(--ptv-motion-ease-standard) !important;
+
+    pointer-events: auto !important;
+}
+
+.homeSectionsContainer .ptv-card .cardOverlayButton-centered::after,
+.homeSectionsContainer .ptv-card .cardOverlayFab-primary::after,
+.homeSectionsContainer .ptv-card .cardOverlayButton[data-action="play"]::after,
+.homeSectionsContainer .ptv-card .cardOverlayButton[data-action="resume"]::after,
+.itemsContainer .ptv-card .cardOverlayButton-centered::after,
+.itemsContainer .ptv-card .cardOverlayFab-primary::after,
+.itemsContainer .ptv-card .cardOverlayButton[data-action="play"]::after,
+.itemsContainer .ptv-card .cardOverlayButton[data-action="resume"]::after {
+    content: 'Play' !important;
+
+    display: inline-block !important;
+}
+
+.homeSectionsContainer .ptv-card:hover .cardOverlayButton-centered,
+.homeSectionsContainer .ptv-card:hover .cardOverlayFab-primary,
+.homeSectionsContainer .ptv-card:hover .cardOverlayButton[data-action="play"],
+.homeSectionsContainer .ptv-card:hover .cardOverlayButton[data-action="resume"],
+.homeSectionsContainer .ptv-card:focus-within .cardOverlayButton-centered,
+.homeSectionsContainer .ptv-card:focus-within .cardOverlayFab-primary,
+.homeSectionsContainer .ptv-card:focus-within .cardOverlayButton[data-action="play"],
+.homeSectionsContainer .ptv-card:focus-within .cardOverlayButton[data-action="resume"],
+.homeSectionsContainer .ptv-card.show-focus .cardOverlayButton-centered,
+.homeSectionsContainer .ptv-card.show-focus .cardOverlayFab-primary,
+.homeSectionsContainer .ptv-card.show-focus .cardOverlayButton[data-action="play"],
+.homeSectionsContainer .ptv-card.show-focus .cardOverlayButton[data-action="resume"],
+.itemsContainer .ptv-card:hover .cardOverlayButton-centered,
+.itemsContainer .ptv-card:hover .cardOverlayFab-primary,
+.itemsContainer .ptv-card:hover .cardOverlayButton[data-action="play"],
+.itemsContainer .ptv-card:hover .cardOverlayButton[data-action="resume"],
+.itemsContainer .ptv-card:focus-within .cardOverlayButton-centered,
+.itemsContainer .ptv-card:focus-within .cardOverlayFab-primary,
+.itemsContainer .ptv-card:focus-within .cardOverlayButton[data-action="play"],
+.itemsContainer .ptv-card:focus-within .cardOverlayButton[data-action="resume"],
+.itemsContainer .ptv-card.show-focus .cardOverlayButton-centered,
+.itemsContainer .ptv-card.show-focus .cardOverlayFab-primary,
+.itemsContainer .ptv-card.show-focus .cardOverlayButton[data-action="play"],
+.itemsContainer .ptv-card.show-focus .cardOverlayButton[data-action="resume"] {
+    opacity: 1 !important;
+    transform: translate(-50%, -50%) scale(0.92) !important;
+}
+
+.homeSectionsContainer .portraitCard .cardScalable,
+.homeSectionsContainer .portraitCard .cardPadder {
+    min-height: 0 !important;
+}
+
+.homeSectionsContainer .ptv-row-title-link.ptv-button {
+    display: inline-flex !important;
+    width: auto !important;
+    min-height: 0 !important;
+    padding-right: 0 !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    color: var(--ptv-color-text-primary) !important;
+}
+
+.homeSectionsContainer .ptv-row-more-card.ptv-button,
+.itemsContainer .ptv-row-more-card.ptv-button {
+    display: block !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+
+    color: inherit !important;
+    font: inherit !important;
+    text-align: inherit !important;
+    white-space: normal !important;
+}
+
+.homeSectionsContainer .ptv-row-more-card,
+.itemsContainer .ptv-row-more-card {
+    flex: 0 0 auto !important;
+    align-self: flex-start !important;
+}
+
+.homeSectionsContainer .ptv-row-more-card .cardBox,
+.itemsContainer .ptv-row-more-card .cardBox {
+    height: auto !important;
+    min-height: 0 !important;
+}
+
+.homeSectionsContainer .ptv-row-more-card .cardScalable,
+.itemsContainer .ptv-row-more-card .cardScalable {
+    position: relative !important;
+
+    width: 100% !important;
+    overflow: hidden !important;
+
+    border-radius: var(--ptv-radius-card);
+}
+
+.homeSectionsContainer .ptv-row-more-card .cardPadder,
+.itemsContainer .ptv-row-more-card .cardPadder {
+    display: block !important;
+    width: 100% !important;
+}
+
+.homeSectionsContainer .ptv-row-more-card .ptv-row-more-card-content,
+.itemsContainer .ptv-row-more-card .ptv-row-more-card-content {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 2 !important;
+
+    display: grid !important;
+    align-content: center !important;
+    justify-items: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding: 16px !important;
+
+    box-sizing: border-box !important;
+    text-align: center !important;
+    background:
+        radial-gradient(circle at 30% 18%, rgba(125, 214, 255, 0.2), transparent 38%),
+        linear-gradient(135deg, rgba(167, 139, 250, 0.22), rgba(255, 141, 195, 0.18)) !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    background-size: cover !important;
+}
+
+.homeSectionsContainer .ptv-row-more-card-kicker,
+.homeSectionsContainer .ptv-row-more-card-title,
+.homeSectionsContainer .ptv-row-more-card-icon,
+.itemsContainer .ptv-row-more-card-kicker,
+.itemsContainer .ptv-row-more-card-title,
+.itemsContainer .ptv-row-more-card-icon {
+    position: relative;
+    z-index: 4;
+}
+
+.homeSectionsContainer .ptv-row-more-card-kicker,
+.itemsContainer .ptv-row-more-card-kicker {
+    color: var(--ptv-color-text-secondary);
+    font-size: var(--ptv-text-small);
+    font-weight: 800;
+    line-height: var(--ptv-line-dense);
+}
+
+.homeSectionsContainer .ptv-row-more-card-title,
+.itemsContainer .ptv-row-more-card-title {
+    max-width: 100%;
+
+    overflow: hidden;
+
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-accent);
+    font-size: var(--ptv-text-card);
+    font-weight: 850;
+    line-height: var(--ptv-line-dense);
+    text-overflow: ellipsis;
+}
+
+.homeSectionsContainer .ptv-row-more-card-icon.material-icons,
+.itemsContainer .ptv-row-more-card-icon.material-icons {
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    min-height: 22px !important;
+
+    overflow: hidden !important;
+
+    color: transparent !important;
+    font-family: initial !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+
+    background: linear-gradient(135deg, #ff8dc3 0%, #c9b5ff 36%, #a78bfa 58%, #7dd6ff 100%) !important;
+    filter:
+        drop-shadow(0 0 5px rgba(167, 139, 250, 0.34))
+        drop-shadow(0 0 8px rgba(255, 141, 195, 0.2));
+    mask: url('/assets/icons/right.svg') center / contain no-repeat !important;
+    -webkit-mask: url('/assets/icons/right.svg') center / contain no-repeat !important;
+}
+
+.homeSectionsContainer .ptv-row-more-card-icon.material-icons::before,
+.homeSectionsContainer .ptv-row-more-card-icon.material-icons::after,
+.itemsContainer .ptv-row-more-card-icon.material-icons::before,
+.itemsContainer .ptv-row-more-card-icon.material-icons::after {
+    content: none !important;
+    display: none !important;
+}
+
+/* Row/card controls stay outside the global PTV icon engine so media posters
+   are never touched, but the visible stock glyphs still need the same custom
+   masked icon treatment as the rest of PiggieTV. */
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons,
+.homeSectionsContainer .ptv-card .cardOverlayButtonIcon.material-icons,
+.itemsContainer .ptv-card .cardOverlayButtonIcon.material-icons,
+.homeSectionsContainer .ptv-card .indicatorIcon.material-icons,
+.itemsContainer .ptv-card .indicatorIcon.material-icons {
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+
+    overflow: hidden !important;
+
+    color: transparent !important;
+    font-family: initial !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+
+    background: linear-gradient(135deg, #ff8dc3 0%, #c9b5ff 36%, #a78bfa 58%, #7dd6ff 100%) !important;
+    filter:
+        drop-shadow(0 0 5px rgba(167, 139, 250, 0.34))
+        drop-shadow(0 0 8px rgba(255, 141, 195, 0.2));
+    mask: var(--ptv-card-control-icon) center / contain no-repeat !important;
+    -webkit-mask: var(--ptv-card-control-icon) center / contain no-repeat !important;
+}
+
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons::before,
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons::after,
+.homeSectionsContainer .ptv-card .cardOverlayButtonIcon.material-icons::before,
+.homeSectionsContainer .ptv-card .cardOverlayButtonIcon.material-icons::after,
+.itemsContainer .ptv-card .cardOverlayButtonIcon.material-icons::before,
+.itemsContainer .ptv-card .cardOverlayButtonIcon.material-icons::after,
+.homeSectionsContainer .ptv-card .indicatorIcon.material-icons::before,
+.homeSectionsContainer .ptv-card .indicatorIcon.material-icons::after,
+.itemsContainer .ptv-card .indicatorIcon.material-icons::before,
+.itemsContainer .ptv-card .indicatorIcon.material-icons::after {
+    content: none !important;
+    display: none !important;
+}
+
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons.arrow_back,
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons.chevron_left,
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons.keyboard_arrow_left {
+    --ptv-card-control-icon: url('/assets/icons/skip-previous.svg');
+}
+
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons.arrow_forward,
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons.chevron_right,
+.homeSectionsContainer .emby-scrollbuttons-button .material-icons.keyboard_arrow_right {
+    --ptv-card-control-icon: url('/assets/icons/skip-next.svg');
+}
+
+.homeSectionsContainer .ptv-card .material-icons.play_arrow,
+.itemsContainer .ptv-card .material-icons.play_arrow {
+    --ptv-card-control-icon: url('/assets/icons/play.svg');
+}
+
+.homeSectionsContainer .ptv-card .material-icons.check,
+.itemsContainer .ptv-card .material-icons.check {
+    --ptv-card-control-icon: url('/assets/icons/check.svg');
+}
+
+.homeSectionsContainer .ptv-card .material-icons.favorite,
+.itemsContainer .ptv-card .material-icons.favorite {
+    --ptv-card-control-icon: url('/assets/icons/favorite.svg');
+}
+
+.homeSectionsContainer .ptv-card .material-icons.more_vert,
+.itemsContainer .ptv-card .material-icons.more_vert {
+    --ptv-card-control-icon: url('/assets/icons/more-vertical.svg');
+}

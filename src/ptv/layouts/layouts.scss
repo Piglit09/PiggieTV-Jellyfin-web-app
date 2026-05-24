@@ -1,0 +1,79 @@
+/* PTV layout templates. Use these to migrate stock Jellyfin page structures gradually. */
+
+.ptv-layout {
+    width: min(100%, var(--ptv-layout-width, var(--ptv-admin-medium)));
+    margin-inline: auto;
+    padding:
+        var(--ptv-density-page-padding-top)
+        var(--ptv-admin-gutter)
+        var(--ptv-density-page-padding-bottom);
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-layout-narrow {
+    --ptv-layout-width: var(--ptv-admin-narrow);
+}
+
+.ptv-layout-medium {
+    --ptv-layout-width: var(--ptv-admin-medium);
+}
+
+.ptv-layout-wide {
+    --ptv-layout-width: var(--ptv-admin-wide);
+}
+
+.ptv-layout-fluid {
+    --ptv-layout-width: 100%;
+}
+
+.ptv-layout-header {
+    display: grid;
+    gap: var(--ptv-space-3);
+    margin-bottom: var(--ptv-density-section-gap);
+}
+
+.ptv-layout-header-action {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.ptv-layout-description {
+    max-width: 72ch;
+    margin: 0;
+    color: var(--ptv-color-text-secondary);
+    font-size: var(--ptv-text-card);
+    line-height: var(--ptv-line-body);
+}
+
+.ptv-layout-body {
+    display: grid;
+    gap: var(--ptv-density-section-gap);
+}
+
+.ptv-settings-layout-panel,
+.ptv-data-table-panel {
+    width: 100%;
+}
+
+.ptv-data-table-toolbar,
+.ptv-media-grid-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ptv-space-3);
+    margin-bottom: var(--ptv-space-4);
+}
+
+.ptv-media-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--ptv-space-4);
+    align-items: start;
+}
+
+@media (max-width: 50em) {
+    .ptv-layout {
+        padding-inline: var(--ptv-space-4);
+    }
+}

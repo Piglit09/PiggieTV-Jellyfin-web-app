@@ -1,0 +1,138 @@
+/* ===== PTV CINEMATIC HOVER ===== */
+
+.ptv-card {
+    overflow: visible !important;
+}
+
+.ptv-card .cardImageContainer {
+    position: relative;
+    overflow: hidden;
+
+    border-radius: 22px;
+
+    isolation: isolate;
+}
+
+/* image motion */
+.ptv-card img,
+.ptv-card .cardImage {
+    transition:
+        transform var(--ptv-motion-slow) var(--ptv-motion-ease-emphasized) var(--ptv-card-lift-delay),
+        filter var(--ptv-motion-medium) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay) !important;
+
+    transform-origin: center center;
+}
+
+.ptv-card:hover img,
+.ptv-card:hover .cardImage,
+.ptv-card:focus-within img,
+.ptv-card:focus-within .cardImage,
+.ptv-card.show-focus img,
+.ptv-card.show-focus .cardImage {
+    transform: scale(1.045);
+
+    filter:
+        saturate(1.08)
+        contrast(1.04)
+        brightness(1.04);
+}
+
+/* ambient overlay */
+.ptv-card .cardImageContainer::before {
+    content: '';
+
+    position: absolute;
+    inset: 0;
+
+    background:
+        radial-gradient(
+            circle at top left,
+            rgba(var(--ptv-card-accent), 0.18),
+            transparent 48%
+        ),
+        radial-gradient(
+            circle at bottom right,
+            rgba(236, 72, 153, 0.1),
+            transparent 52%
+        );
+
+    opacity: 0;
+
+    transition: opacity var(--ptv-motion-slow) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay);
+
+    z-index: 2;
+
+    pointer-events: none;
+}
+
+.ptv-card:hover .cardImageContainer::before,
+.ptv-card:focus-within .cardImageContainer::before,
+.ptv-card.show-focus .cardImageContainer::before {
+    opacity: 0.72;
+}
+
+/* glass reflection */
+.ptv-card .cardImageContainer::after {
+    content: '';
+
+    position: absolute;
+    inset: 0;
+
+    background:
+        linear-gradient(
+            110deg,
+            transparent 34%,
+            rgba(255, 255, 255, 0.1) 48%,
+            transparent 62%
+        );
+
+    opacity: 0;
+
+    transform:
+        translate3d(-34%, 0, 0)
+        skewX(-18deg);
+
+    transition:
+        opacity var(--ptv-motion-fast) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay),
+        transform var(--ptv-motion-hero) var(--ptv-motion-ease-emphasized) var(--ptv-card-glow-delay);
+
+    z-index: 3;
+
+    pointer-events: none;
+    will-change: transform, opacity;
+}
+
+.ptv-card:hover .cardImageContainer::after,
+.ptv-card:focus-within .cardImageContainer::after,
+.ptv-card.show-focus .cardImageContainer::after {
+    opacity: 0.2;
+
+    transform:
+        translate3d(34%, 0, 0)
+        skewX(-18deg);
+}
+
+.ptv-card:hover .cardBox,
+.ptv-card:hover .ptv-cardContent,
+.ptv-card:focus-within .cardBox,
+.ptv-card:focus-within .ptv-cardContent,
+.ptv-card.show-focus .cardBox,
+.ptv-card.show-focus .ptv-cardContent {
+    box-shadow:
+        0 30px 72px rgba(0, 0, 0, 0.62),
+        0 0 50px rgba(var(--ptv-card-accent), 0.36),
+        0 0 30px rgba(236, 72, 153, 0.18) !important;
+}
+
+.ptv-card-play-pill {
+    background:
+        linear-gradient(
+            135deg,
+            rgba(var(--ptv-card-accent), 1),
+            #ec4899
+        ) !important;
+
+    box-shadow:
+        0 14px 34px rgba(var(--ptv-card-accent), 0.38),
+        0 0 24px rgba(236, 72, 153, 0.24) !important;
+}

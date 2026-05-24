@@ -1,0 +1,616 @@
+/* ==========================================================================
+   PiggieTV Native Sidebar
+   ========================================================================== */
+
+.ptv-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1300 !important;
+
+    --ptv-sidebar-row-padding-x: var(--ptv-space-4);
+    --ptv-sidebar-icon-cell: 28px;
+    --ptv-sidebar-label-gap: 14px;
+
+    width: 304px;
+    height: 100vh;
+
+    padding: 24px 16px;
+
+    overflow-y: auto;
+    overflow-x: hidden;
+
+    background:
+        radial-gradient(
+            ellipse at 18% 10%,
+            rgba(168, 85, 247, 0.18),
+            transparent 34%
+        ),
+        radial-gradient(
+            ellipse at 108% 44%,
+            rgba(59, 130, 246, 0.12),
+            transparent 42%
+        ),
+        linear-gradient(
+            180deg,
+            rgba(22, 8, 38, 0.66),
+            rgba(7, 3, 16, 0.86)
+        );
+
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+
+    box-shadow:
+        20px 0 50px rgba(0, 0, 0, 0.5),
+        inset -1px 0 0 rgba(255, 255, 255, 0.035),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+    transform: translateX(-105%);
+
+    transition:
+        transform var(--ptv-speed-medium) var(--ptv-ease-soft),
+        opacity var(--ptv-speed-medium) var(--ptv-ease);
+
+    backdrop-filter: blur(22px) saturate(1.16);
+}
+
+.ptv-sidebar::before,
+.ptv-sidebar::after {
+    content: '';
+
+    position: absolute;
+
+    pointer-events: none;
+}
+
+.ptv-sidebar::before {
+    inset: 0;
+    z-index: -1;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.05),
+            transparent 42%
+        ),
+        linear-gradient(
+            180deg,
+            rgba(236, 72, 153, 0.08),
+            transparent 24%,
+            rgba(59, 130, 246, 0.06) 78%,
+            transparent
+        );
+
+    opacity: 0.84;
+}
+
+.ptv-sidebar::after {
+    top: 0;
+    right: 0;
+
+    width: 1px;
+    height: 100%;
+
+    background:
+        linear-gradient(
+            to bottom,
+            transparent,
+            rgba(168, 85, 247, 0.42),
+            rgba(236, 72, 153, 0.24),
+            transparent
+        );
+
+    opacity: 0.72;
+}
+
+.ptv-sidebar-open {
+    transform: translateX(0);
+}
+
+.ptv-sidebar-brand {
+    display: flex;
+    align-items: center;
+
+    max-height: calc(var(--ptv-sidebar-logo-height) + (var(--ptv-space-3) * 2));
+    padding: 4px 10px 26px;
+    overflow: hidden;
+}
+
+.ptv-sidebar-logo {
+    display: block;
+
+    width: min(var(--ptv-sidebar-logo-width), 100%);
+    max-width: min(var(--ptv-sidebar-logo-width), 100%);
+    height: var(--ptv-sidebar-logo-height);
+    max-height: var(--ptv-sidebar-logo-height);
+
+    object-fit: contain;
+
+    filter:
+        drop-shadow(0 0 12px rgba(168, 85, 247, 0.22))
+        drop-shadow(0 0 18px rgba(236, 72, 153, 0.08));
+}
+
+.ptv-sidebar-brand > [data-ptv-logo='sidebar'],
+.ptv-sidebar [data-ptv-logo='sidebar'],
+.mainDrawer [data-ptv-logo='drawer'] {
+    position: static;
+    display: block;
+    object-fit: contain;
+    object-position: center;
+    transform: none;
+}
+
+.ptv-sidebar-nav {
+    position: relative;
+
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.ptv-sidebar-section {
+    position: relative;
+
+    padding-top: 4px;
+}
+
+.ptv-sidebar-section + .ptv-sidebar-section {
+    padding-top: 18px;
+}
+
+.ptv-sidebar-section + .ptv-sidebar-section::before {
+    content: '';
+
+    position: absolute;
+    top: 0;
+    right: 10px;
+    left: 10px;
+
+    height: 1px;
+
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            rgba(255, 255, 255, 0.1),
+            rgba(168, 85, 247, 0.14),
+            transparent
+        );
+}
+
+.ptv-sidebar-section-title {
+    margin: 8px 0 10px;
+    padding: 0 14px;
+
+    color: rgba(255, 255, 255, 0.46);
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 0.18em;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.ptv-sidebar-section-items {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ptv-sidebar-item {
+    position: relative;
+
+    display: grid;
+    grid-template-columns: var(--ptv-sidebar-icon-cell) minmax(0, 1fr);
+    column-gap: var(--ptv-sidebar-label-gap);
+    align-items: center;
+
+    box-sizing: border-box;
+    min-height: 42px;
+    padding: 0 var(--ptv-sidebar-row-padding-x);
+
+    overflow: hidden;
+
+    border: 1px solid transparent;
+    border-radius: var(--ptv-radius-md);
+
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 15px;
+    font-weight: 720;
+    line-height: 1;
+    text-decoration: none;
+
+    transform: translateX(0);
+
+    transition:
+        color var(--ptv-speed-fast) var(--ptv-ease),
+        background-color var(--ptv-speed-fast) var(--ptv-ease),
+        border-color var(--ptv-speed-fast) var(--ptv-ease),
+        box-shadow var(--ptv-speed-medium) var(--ptv-ease),
+        transform var(--ptv-speed-medium) var(--ptv-ease-soft);
+}
+
+.ptv-sidebar-item::before {
+    content: '';
+
+    position: absolute;
+    inset: 0;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(168, 85, 247, 0.22),
+            rgba(236, 72, 153, 0.1),
+            transparent 78%
+        );
+
+    opacity: 0;
+
+    transition: opacity var(--ptv-speed-medium) var(--ptv-ease);
+
+    pointer-events: none;
+}
+
+.ptv-sidebar-item::after {
+    content: '';
+
+    position: absolute;
+    top: 10px;
+    bottom: 10px;
+    left: calc(var(--ptv-sidebar-row-padding-x) - 6px);
+
+    width: 2px;
+    border-radius: var(--ptv-radius-pill);
+
+    background: linear-gradient(180deg, #7dd6ff, #a78bfa 52%, #ff8dc3);
+    box-shadow:
+        0 0 16px rgba(168, 85, 247, 0.42),
+        0 0 24px rgba(236, 72, 153, 0.22);
+
+    opacity: 0;
+
+    transition: opacity var(--ptv-speed-fast) var(--ptv-ease);
+
+    pointer-events: none;
+}
+
+.ptv-sidebar-item-icon {
+    --ptv-icon-size: 20px;
+
+    display: inline-flex;
+    grid-column: 1;
+    align-items: center;
+    justify-content: center;
+    justify-self: center;
+    flex: 0 0 var(--ptv-icon-size);
+
+    width: var(--ptv-icon-size);
+    height: var(--ptv-icon-size);
+    margin: 0 !important;
+
+    opacity: 0.82;
+    overflow: hidden;
+    transform: none;
+}
+
+.ptv-sidebar .ptv-icon {
+    width: var(--ptv-icon-size, 20px) !important;
+    height: var(--ptv-icon-size, 20px) !important;
+    min-width: var(--ptv-icon-size, 20px) !important;
+    max-width: var(--ptv-icon-size, 20px) !important;
+    min-height: var(--ptv-icon-size, 20px) !important;
+    max-height: var(--ptv-icon-size, 20px) !important;
+    margin: 0 !important;
+
+    background: linear-gradient(135deg, #7dd6ff, #a78bfa 52%, #ff8dc3) !important;
+    filter: drop-shadow(0 0 6px rgba(125, 214, 255, 0.45)) !important;
+}
+
+.ptv-sidebar-item-label {
+    grid-column: 2;
+    justify-self: start;
+
+    min-width: 0;
+
+    overflow: hidden;
+
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-sidebar-item:hover,
+.ptv-sidebar-item:focus-visible {
+    color: rgba(255, 255, 255, 0.94);
+    background:
+        linear-gradient(
+            90deg,
+            rgba(167, 139, 250, 0.16),
+            rgba(255, 141, 195, 0.08),
+            rgba(125, 214, 255, 0.06)
+        );
+    border-color: rgba(167, 139, 250, 0.22);
+    box-shadow:
+        inset 3px 0 0 #a78bfa,
+        inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 8px 20px rgba(0, 0, 0, 0.16),
+        0 0 10px rgba(167, 139, 250, 0.14);
+
+    transform: none;
+}
+
+.ptv-sidebar-item:hover::before,
+.ptv-sidebar-item:focus-visible::before {
+    opacity: 0.48;
+}
+
+.ptv-sidebar-item-active {
+    color: #fff;
+    background:
+        linear-gradient(
+            90deg,
+            rgba(167, 139, 250, 0.2),
+            rgba(255, 141, 195, 0.12),
+            rgba(125, 214, 255, 0.08)
+        );
+    border-color: rgba(167, 139, 250, 0.28);
+
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.045),
+        0 8px 22px rgba(0, 0, 0, 0.18),
+        0 0 12px rgba(168, 85, 247, 0.12),
+        0 0 20px rgba(236, 72, 153, 0.06);
+}
+
+.ptv-sidebar-item-active::before {
+    opacity: 1;
+}
+
+.ptv-sidebar-item-active::after {
+    opacity: 1;
+}
+
+.ptv-sidebar-item-active .ptv-sidebar-item-icon {
+    opacity: 1;
+}
+
+.ptv-sidebar-item:hover .ptv-sidebar-item-icon,
+.ptv-sidebar-item:focus-visible .ptv-sidebar-item-icon {
+    opacity: 1;
+
+    transform: none;
+}
+
+.ptv-sidebar-item:hover .ptv-icon::before,
+.ptv-sidebar-item:focus-visible .ptv-icon::before {
+    opacity: 1;
+}
+
+.ptv-sidebar-item:hover .ptv-icon,
+.ptv-sidebar-item:focus-visible .ptv-icon {
+    opacity: 1;
+
+    background: linear-gradient(135deg, #7dd6ff, #a78bfa 52%, #ff8dc3) !important;
+    filter: drop-shadow(0 0 12px rgba(167, 139, 250, 0.58)) !important;
+}
+
+.ptv-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1290;
+
+    padding: 0;
+    margin: 0;
+
+    background:
+        radial-gradient(
+            ellipse at 18% 40%,
+            rgba(168, 85, 247, 0.13),
+            transparent 38%
+        ),
+        rgba(0, 0, 0, 0.48);
+    backdrop-filter: blur(6px);
+    border: 0;
+
+    opacity: 0;
+    pointer-events: none;
+
+    transition: opacity var(--ptv-speed-medium) var(--ptv-ease);
+}
+
+.ptv-sidebar-backdrop-open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@media (max-width: 720px) {
+    .ptv-sidebar {
+        width: min(86vw, 292px);
+    }
+}
+
+/* ==========================================================================
+   Legacy Jellyfin Drawer Bridge
+   ========================================================================== */
+
+.mainDrawer {
+    background:
+        radial-gradient(
+            ellipse at 18% 8%,
+            rgba(168, 85, 247, 0.22),
+            transparent 34%
+        ),
+        radial-gradient(
+            ellipse at 92% 100%,
+            rgba(236, 72, 153, 0.16),
+            transparent 42%
+        ),
+        linear-gradient(
+            180deg,
+            rgba(16, 9, 32, 0.96),
+            rgba(10, 4, 22, 0.98)
+        ) !important;
+
+    border-right: 1px solid rgba(168, 85, 247, 0.22);
+
+    box-shadow:
+        24px 0 72px rgba(0, 0, 0, 0.58),
+        inset -1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+.mainDrawer-scrollContainer {
+    padding: 20px 14px 28px !important;
+}
+
+.ptv-main-drawer-brand {
+    display: flex;
+    align-items: center;
+
+    min-height: 74px;
+    padding: 0 10px 18px;
+    margin-bottom: 8px;
+}
+
+.ptv-main-drawer-brand > [data-ptv-logo='drawer'],
+.ptv-main-drawer-brand > img[src*='assets/logo/'] {
+    width: var(--ptv-drawer-logo-width);
+    max-width: var(--ptv-drawer-logo-width);
+    height: var(--ptv-drawer-logo-height);
+    max-height: var(--ptv-drawer-logo-height);
+
+    object-fit: contain;
+
+    filter:
+        drop-shadow(0 0 18px rgba(168, 85, 247, 0.44))
+        drop-shadow(0 0 28px rgba(236, 72, 153, 0.18));
+}
+
+.mainDrawer .sidebarHeader {
+    margin: 22px 0 10px;
+    padding: 0 10px;
+
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 11px;
+    font-weight: 850;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+}
+
+.mainDrawer .adminMenuOptions,
+.mainDrawer .userMenuOptions,
+.mainDrawer .libraryMenuOptions,
+.mainDrawer .customMenuOptions {
+    position: relative;
+}
+
+.mainDrawer .adminMenuOptions::before,
+.mainDrawer .userMenuOptions::before {
+    content: '';
+
+    display: block;
+
+    height: 1px;
+    margin: 18px 8px 14px;
+
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            rgba(168, 85, 247, 0.24),
+            rgba(255, 255, 255, 0.08),
+            transparent
+        );
+}
+
+.mainDrawer .navMenuOption {
+    min-height: 42px !important;
+    padding: 0 12px !important;
+    margin: 2px 0;
+
+    border: 1px solid transparent;
+    border-radius: 12px;
+
+    color: rgba(255, 255, 255, 0.76) !important;
+    font-size: 14px;
+    font-weight: 760;
+
+    transition:
+        color var(--ptv-speed-fast) var(--ptv-ease),
+        background-color var(--ptv-speed-fast) var(--ptv-ease),
+        border-color var(--ptv-speed-fast) var(--ptv-ease),
+        box-shadow var(--ptv-speed-medium) var(--ptv-ease),
+        transform var(--ptv-speed-medium) var(--ptv-ease-soft);
+}
+
+.mainDrawer .navMenuOption:hover,
+.mainDrawer .navMenuOption:focus-visible,
+.mainDrawer .navMenuOption-selected {
+    color: #fff !important;
+    background-color: rgba(255, 255, 255, 0.07) !important;
+    border-color: rgba(255, 255, 255, 0.1);
+
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+        0 0 22px rgba(168, 85, 247, 0.18);
+
+    transform: translateX(2px);
+}
+
+.mainDrawer .navMenuOptionIcon {
+    flex: 0 0 20px;
+
+    width: 20px;
+    height: 20px;
+    margin: 0 14px 0 0 !important;
+
+    color: inherit;
+}
+
+.mainDrawer .ptv-drawer-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mainDrawer .ptv-drawer-icon img {
+    display: block;
+
+    width: 18px;
+    height: 18px;
+
+    object-fit: contain;
+
+    filter:
+        brightness(0)
+        invert(1)
+        opacity(0.76);
+
+    transition:
+        opacity var(--ptv-speed-fast) var(--ptv-ease),
+        filter var(--ptv-speed-medium) var(--ptv-ease),
+        transform var(--ptv-speed-medium) var(--ptv-ease-soft);
+}
+
+.mainDrawer .navMenuOption-selected .ptv-drawer-icon img {
+    opacity: 1;
+
+    transform: scale(1.04);
+
+    filter:
+        brightness(0)
+        invert(1)
+        drop-shadow(0 0 9px rgba(168, 85, 247, 0.46))
+        drop-shadow(0 0 16px rgba(59, 130, 246, 0.24));
+}
+
+.mainDrawer .navMenuOption:hover .ptv-drawer-icon img,
+.mainDrawer .navMenuOption:focus-visible .ptv-drawer-icon img {
+    opacity: 1;
+
+    transform: scale(1.04);
+
+    filter:
+        brightness(0)
+        invert(1)
+        drop-shadow(0 0 9px rgba(168, 85, 247, 0.46))
+        drop-shadow(0 0 16px rgba(59, 130, 246, 0.24));
+}

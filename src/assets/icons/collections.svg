@@ -1,0 +1,12 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+<defs>
+  <linearGradient id="ptvGrad" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#31D8FF"/>
+    <stop offset="0.52" stop-color="#7E6CFF"/>
+    <stop offset="1" stop-color="#FF43D1"/>
+  </linearGradient>
+</defs>
+
+<rect x="3" y="6" width="11" height="11" rx="2.5" fill="url(#ptvGrad)" fill-opacity="0.92"/><rect x="10" y="3" width="11" height="11" rx="2.5" fill="url(#ptvGrad)"/><rect x="10" y="10" width="11" height="11" rx="2.5" fill="url(#ptvGrad)" fill-opacity="0.82"/>
+</svg>

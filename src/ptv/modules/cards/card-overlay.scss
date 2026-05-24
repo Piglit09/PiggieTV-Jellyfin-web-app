@@ -1,0 +1,94 @@
+.ptv-card-enhanced .cardBox,
+.ptv-card-enhanced .cardImageContainer,
+.ptv-card-enhanced .cardOverlayContainer {
+    position: relative !important;
+    overflow: hidden;
+}
+
+.ptv-card-play-pill {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 999;
+
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    padding: 0 18px;
+    height: 42px;
+
+    border-radius: 999px;
+
+    background:
+        linear-gradient(
+            135deg,
+            #a855f7,
+            #ec4899
+        );
+
+    box-shadow:
+        0 14px 34px rgba(168, 85, 247, 0.34),
+        0 0 24px rgba(236, 72, 153, 0.22);
+
+    color: #fff;
+    font-size: 13px;
+    font-weight: 900;
+
+    opacity: 0;
+
+    transform:
+        translate(-50%, -50%)
+        scale(0.86);
+
+    transition:
+        opacity var(--ptv-motion-medium) var(--ptv-motion-ease-standard) var(--ptv-card-action-delay),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized) var(--ptv-card-action-delay);
+
+    pointer-events: none;
+}
+
+.ptv-card-enhanced:hover .ptv-card-play-pill,
+.ptv-card-enhanced:focus-within .ptv-card-play-pill,
+.ptv-card-enhanced.show-focus .ptv-card-play-pill {
+    opacity: 1;
+
+    transform:
+        translate(-50%, -50%)
+        scale(0.98);
+}
+
+/* Hide stock card overlay buttons until we rebuild them as PTV buttons */
+.ptv-card .cardOverlayButton,
+.ptv-card .cardOverlayFab-primary,
+.ptv-card .cardOverlayFab-secondary {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 999px !important;
+
+    background: rgba(10, 10, 18, 0.58) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    backdrop-filter: blur(12px);
+
+    opacity: 0 !important;
+    transform: scale(0.86) !important;
+
+    transition:
+        opacity var(--ptv-motion-fast) var(--ptv-motion-ease-standard) var(--ptv-card-action-delay),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized) var(--ptv-card-action-delay),
+        filter var(--ptv-motion-fast) var(--ptv-motion-ease-standard) var(--ptv-card-action-delay);
+}
+
+.ptv-card:hover .cardOverlayButton,
+.ptv-card:hover .cardOverlayFab-primary,
+.ptv-card:hover .cardOverlayFab-secondary,
+.ptv-card:focus-within .cardOverlayButton,
+.ptv-card:focus-within .cardOverlayFab-primary,
+.ptv-card:focus-within .cardOverlayFab-secondary,
+.ptv-card.show-focus .cardOverlayButton,
+.ptv-card.show-focus .cardOverlayFab-primary,
+.ptv-card.show-focus .cardOverlayFab-secondary {
+    opacity: 1 !important;
+    transform: scale(1) !important;
+    filter: drop-shadow(0 0 10px rgba(168, 85, 247, 0.35));
+}

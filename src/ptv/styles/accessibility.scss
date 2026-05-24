@@ -1,0 +1,35 @@
+/* Accessibility contract: visible focus, semantic accents, and system fallbacks. */
+
+.ptv-app-shell {
+    accent-color: var(--ptv-color-focus);
+}
+
+.ptv-app-shell :focus-visible {
+    outline: var(--ptv-a11y-focus-outline) !important;
+    outline-offset: var(--ptv-a11y-focus-offset) !important;
+    box-shadow: var(--ptv-a11y-focus-shadow) !important;
+}
+
+.ptv-app-shell :focus:not(:focus-visible) {
+    outline: none;
+}
+
+.ptv-app-shell button:disabled,
+.ptv-app-shell input:disabled,
+.ptv-app-shell select:disabled,
+.ptv-app-shell textarea:disabled,
+.ptv-app-shell [aria-disabled='true'] {
+    cursor: var(--ptv-state-disabled-cursor) !important;
+    opacity: var(--ptv-state-disabled-opacity) !important;
+}
+
+@media (forced-colors: active) {
+    .ptv-app-shell :focus-visible {
+        outline: 2px solid Highlight !important;
+        box-shadow: none !important;
+    }
+
+    .ptv-icon {
+        forced-color-adjust: auto;
+    }
+}

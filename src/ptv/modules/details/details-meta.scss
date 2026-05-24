@@ -1,0 +1,82 @@
+.ptv-detail-page .itemMiscInfo,
+.ptv-detail-page .itemMiscInfoPrimary,
+.ptv-detail-page .itemMiscInfoSecondary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+
+    margin: 10px 0 0 !important;
+}
+
+.ptv-detail-page .mediaInfoItem,
+.ptv-detail-page .mediaInfoText,
+.ptv-detail-page .starRatingContainer,
+.ptv-detail-page .endsAt {
+    min-height: 28px;
+    padding: 0 12px !important;
+
+    border: 1px solid rgba(205, 174, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.09);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9) !important;
+    font-size: 12px !important;
+    font-weight: 850 !important;
+    line-height: 28px !important;
+}
+
+.ptv-detail-page .mediaInfoCriticRatingFresh,
+.ptv-detail-page .mediaInfoCriticRatingRotten {
+    padding-left: 26px !important;
+}
+
+.ptv-detail-page .detailTrackSelections {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    max-width: 560px;
+    margin: 18px 0 !important;
+}
+
+.ptv-detail-page .selectContainer {
+    margin: 0 !important;
+}
+
+.ptv-detail-page .emby-select-withcolor,
+.ptv-detail-page select.detailTrackSelect {
+    min-height: 28px !important;
+
+    border: 1px solid rgba(125, 214, 255, 0.2) !important;
+    border-radius: 999px !important;
+    background: rgba(36, 48, 92, 0.54) !important;
+    color: rgba(255, 255, 255, 0.92) !important;
+    font-size: 12px !important;
+    font-weight: 750 !important;
+}
+
+.ptv-detail-page .overview,
+.ptv-detail-page .tagline,
+.ptv-detail-page .detailSectionContent {
+    max-width: 760px;
+
+    color: rgba(248, 250, 255, 0.9) !important;
+    font-size: 14px !important;
+    font-weight: 650;
+    line-height: 1.52;
+}
+
+.ptv-detail-page .tagline {
+    margin-top: 16px !important;
+
+    font-family: var(--ptv-font-accent);
+    font-size: 16px !important;
+    font-weight: 900;
+}
+
+.ptv-detail-page .itemExternalLinks,
+.ptv-detail-page .itemTags {
+    color: rgba(248, 250, 255, 0.78);
+    font-size: 12px;
+    font-weight: 750;
+}

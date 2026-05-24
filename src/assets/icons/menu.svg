@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <defs>
+    <linearGradient id="ptvMenuGradient" x1="5" y1="7" x2="19" y2="17" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff4fd8"></stop>
+      <stop offset="50%" stop-color="#b86cff"></stop>
+      <stop offset="100%" stop-color="#59d6ff"></stop>
+    </linearGradient>
+  </defs>
+  <path d="M5 7h14" stroke="url(#ptvMenuGradient)" stroke-width="2.5" stroke-linecap="round"></path>
+  <path d="M5 12h14" stroke="url(#ptvMenuGradient)" stroke-width="2.5" stroke-linecap="round"></path>
+  <path d="M5 17h14" stroke="url(#ptvMenuGradient)" stroke-width="2.5" stroke-linecap="round"></path>
+</svg>

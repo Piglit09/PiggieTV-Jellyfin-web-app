@@ -1,0 +1,66 @@
+/* Opt-in visual QA helper. Toggle with: window.PTV.debugLayout(true). */
+
+.ptv-debug-layout,
+.ptv-debug-layout body {
+    --ptv-debug-blue: rgba(var(--ptv-color-focus-rgb), 0.82);
+    --ptv-debug-purple: rgba(var(--ptv-color-accent-secondary-rgb), 0.72);
+    --ptv-debug-pink: rgba(var(--ptv-color-accent-rgb), 0.72);
+    --ptv-debug-muted: rgba(var(--ptv-palette-muted-rgb), 0.5);
+}
+
+.ptv-debug-layout * {
+    outline: 1px solid var(--ptv-debug-muted) !important;
+    outline-offset: -1px !important;
+}
+
+.ptv-debug-layout [class*='ptv-'] {
+    outline-color: var(--ptv-debug-purple) !important;
+}
+
+.ptv-debug-layout .ptv-skinHeader,
+.ptv-debug-layout .skinHeader,
+.ptv-debug-layout .ptv-sidebar,
+.ptv-debug-layout .mainDrawer,
+.ptv-debug-layout .ptv-admin-page,
+.ptv-debug-layout .homeSection,
+.ptv-debug-layout .verticalSection {
+    background-image:
+        linear-gradient(rgba(var(--ptv-color-focus-rgb), 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(var(--ptv-color-focus-rgb), 0.08) 1px, transparent 1px) !important;
+    background-size: var(--ptv-space-2) var(--ptv-space-2) !important;
+}
+
+.ptv-debug-layout [style*='filter'],
+.ptv-debug-layout [style*='transform'],
+.ptv-debug-layout [style*='backdrop-filter'],
+.ptv-debug-layout [class*='backdrop'],
+.ptv-debug-layout [class*='glass'] {
+    outline-color: var(--ptv-debug-pink) !important;
+}
+
+.ptv-debug-layout .ptv-skinHeader::after,
+.ptv-debug-layout .skinHeader::after,
+.ptv-debug-layout .ptv-sidebar::after,
+.ptv-debug-layout .mainDrawer::after {
+    position: absolute;
+    right: var(--ptv-space-2);
+    bottom: var(--ptv-space-2);
+    z-index: calc(var(--ptv-shell-z-overlay, 1400) + 1);
+    padding: 2px 6px;
+    border: 1px solid var(--ptv-debug-blue);
+    border-radius: 999px;
+    color: var(--ptv-color-text-primary);
+    background: rgba(0, 0, 0, 0.72);
+    font: 600 10px / 1.2 var(--ptv-font-main);
+    pointer-events: none;
+}
+
+.ptv-debug-layout .ptv-skinHeader::after,
+.ptv-debug-layout .skinHeader::after {
+    content: 'header z=1200';
+}
+
+.ptv-debug-layout .ptv-sidebar::after,
+.ptv-debug-layout .mainDrawer::after {
+    content: 'drawer z=1300';
+}

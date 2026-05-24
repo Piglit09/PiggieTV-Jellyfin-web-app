@@ -1,0 +1,8 @@
+/* Default PTV theme: inherits the canonical token contract from styles/tokens.scss. */
+
+:root,
+:root[data-ptv-theme='default'] {
+    --ptv-theme-id: default;
+    --ptv-theme-density: comfortable;
+    --ptv-theme-effects: standard;
+}

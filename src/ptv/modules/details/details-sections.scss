@@ -1,0 +1,90 @@
+.ptv-detail-page .detailPageSecondaryContainer {
+    width: min(100%, 1840px);
+    margin: 24px auto 0;
+    padding: 0 28px 80px !important;
+}
+
+.ptv-detail-page .detailPageContent {
+    max-width: 100% !important;
+}
+
+.ptv-detail-page .detailVerticalSection,
+.ptv-detail-page .verticalSection {
+    position: relative;
+
+    padding: 20px 26px !important;
+    margin: 22px 0 !important;
+
+    border: 1px solid rgba(205, 174, 255, 0.12);
+    border-radius: var(--ptv-radius-lg, 22px);
+    background:
+        radial-gradient(ellipse at 12% 0%, rgba(167, 139, 250, 0.12), transparent 34%),
+        linear-gradient(180deg, rgba(42, 16, 70, 0.5), rgba(9, 5, 18, 0.7));
+    box-shadow:
+        0 18px 48px rgba(0, 0, 0, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px) saturate(1.1);
+}
+
+.ptv-detail-page .detailVerticalSection > .sectionTitle,
+.ptv-detail-page .verticalSection > .sectionTitle {
+    margin: 0 0 16px !important;
+
+    color: rgba(255, 255, 255, 0.96) !important;
+    font-family: var(--ptv-font-accent) !important;
+    font-size: clamp(20px, 1.7vw, 28px) !important;
+    font-weight: 900 !important;
+    letter-spacing: 0 !important;
+}
+
+.ptv-detail-page .detailVerticalSection > .sectionTitle::after,
+.ptv-detail-page .verticalSection > .sectionTitle::after {
+    content: '';
+
+    display: block;
+    width: 70px;
+    height: 2px;
+    margin-top: 9px;
+
+    border-radius: 999px;
+    background: linear-gradient(90deg, #7dd6ff, #a78bfa 52%, #ff8dc3);
+    opacity: 0.74;
+}
+
+.ptv-detail-page .itemDetailsGroup {
+    display: grid;
+    gap: 10px;
+    max-width: 760px;
+}
+
+.ptv-detail-page .detailsGroupItem {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 16px;
+
+    color: rgba(248, 250, 255, 0.86);
+    font-size: 13px;
+    font-weight: 750;
+}
+
+.ptv-detail-page .detailsGroupItem .label,
+.ptv-detail-page .detailsGroupItemLabel {
+    color: rgba(205, 174, 255, 0.72);
+    font-weight: 900;
+}
+
+.ptv-detail-page #castContent,
+.ptv-detail-page .itemsContainer {
+    padding-bottom: 6px !important;
+}
+
+@media (max-width: 900px) {
+    .ptv-detail-page .detailPageSecondaryContainer {
+        padding: 0 16px 60px !important;
+    }
+
+    .ptv-detail-page .detailsGroupItem {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+}

@@ -1,0 +1,296 @@
+@use './card-hover';
+@use './card-layout';
+@use './card-metadata';
+@use './card-overlay';
+
+/* =========================================================
+   PIGGIETV CINEMATIC CARDS
+========================================================= */
+
+.ptv-card {
+    --ptv-card-radius: var(--ptv-radius-card, 12px);
+
+    position: relative;
+    isolation: isolate;
+}
+
+/* =========================================================
+   CARD SHELL
+========================================================= */
+
+.ptv-card .cardBox {
+    overflow: hidden !important;
+    border-radius: var(--ptv-card-radius) !important;
+
+    background:
+        linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.04),
+            rgba(255, 255, 255, 0.01)
+        ) !important;
+
+    border: 1px solid rgba(205, 174, 255, 0.1);
+
+    transition:
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized) var(--ptv-card-lift-delay),
+        box-shadow var(--ptv-motion-slow) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay),
+        border-color var(--ptv-motion-medium) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay),
+        filter var(--ptv-motion-medium) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay) !important;
+
+    transform-origin: center center;
+
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+
+    will-change:
+        transform,
+        box-shadow;
+}
+
+/* =========================================================
+   IMAGE
+========================================================= */
+
+.ptv-card .cardImageContainer {
+    overflow: hidden !important;
+    border-radius: inherit !important;
+
+    position: relative;
+}
+
+.ptv-card .cardImage {
+    transition:
+        transform var(--ptv-motion-slow) var(--ptv-motion-ease-emphasized) var(--ptv-card-lift-delay),
+        filter var(--ptv-motion-medium) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay) !important;
+
+    transform-origin: center center;
+}
+
+/* =========================================================
+   CINEMATIC OVERLAY
+========================================================= */
+
+.ptv-card .cardImageContainer::before {
+    content: '';
+
+    position: absolute;
+    inset: 0;
+
+    z-index: 2;
+
+    opacity: 0;
+
+    transition: opacity var(--ptv-motion-slow) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay);
+
+    background:
+        radial-gradient(
+            circle at top left,
+            rgba(var(--ptv-card-accent), 0.18),
+            transparent 42%
+        ),
+        linear-gradient(
+            to top,
+            rgba(0, 0, 0, 0.5),
+            rgba(0, 0, 0, 0.1) 48%,
+            rgba(0, 0, 0, 0)
+        );
+}
+
+/* =========================================================
+   HOVER
+========================================================= */
+
+.ptv-card:hover .cardBox,
+.ptv-card:focus-within .cardBox,
+.ptv-card.show-focus .cardBox {
+    transform:
+        translateY(-5px)
+        scale(1.025);
+
+    border-color: rgba(var(--ptv-card-accent), 0.38);
+
+    box-shadow:
+        0 22px 54px rgba(0, 0, 0, 0.54),
+        0 0 30px rgba(var(--ptv-card-accent), 0.22),
+        0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.ptv-card:hover .cardImage,
+.ptv-card:focus-within .cardImage,
+.ptv-card.show-focus .cardImage {
+    transform: scale(1.025);
+
+    filter:
+        brightness(1.05)
+        saturate(1.08);
+}
+
+.ptv-card:hover .cardImageContainer::before,
+.ptv-card:focus-within .cardImageContainer::before,
+.ptv-card.show-focus .cardImageContainer::before {
+    opacity: 0.48;
+}
+
+.ptv-card .cardImageContainer::after {
+    content: '';
+
+    position: absolute;
+    inset: -20% -55%;
+
+    z-index: 3;
+
+    opacity: 0;
+
+    transform:
+        translate3d(-34%, 0, 0)
+        skewX(-18deg);
+
+    transition:
+        opacity var(--ptv-motion-fast) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay),
+        transform var(--ptv-motion-hero) var(--ptv-motion-ease-emphasized) var(--ptv-card-glow-delay);
+
+    background:
+        linear-gradient(
+            110deg,
+            transparent 34%,
+            rgba(255, 255, 255, 0.07) 48%,
+            transparent 62%
+        );
+
+    pointer-events: none;
+    will-change: transform, opacity;
+}
+
+.ptv-card:hover .cardImageContainer::after,
+.ptv-card:focus-within .cardImageContainer::after,
+.ptv-card.show-focus .cardImageContainer::after {
+    opacity: 0.14;
+
+    transform:
+        translate3d(34%, 0, 0)
+        skewX(-18deg);
+}
+
+/* =========================================================
+   PLAY PILL
+========================================================= */
+
+.ptv-card-play-pill {
+    position: absolute;
+
+    left: 50%;
+    top: 50%;
+
+    transform:
+        translate(-50%, -50%)
+        scale(0.84);
+
+    z-index: 40;
+
+    opacity: 0;
+
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+
+    padding: 0.72rem 1.35rem;
+
+    border-radius: 999px;
+
+    backdrop-filter: blur(12px);
+
+    background:
+        linear-gradient(
+            135deg,
+            rgba(var(--ptv-card-accent), 0.95),
+            rgba(236, 72, 153, 0.95)
+        );
+
+    box-shadow:
+        0 12px 28px rgba(var(--ptv-card-accent), 0.28),
+        0 0 18px rgba(236, 72, 153, 0.18);
+
+    transition:
+        opacity var(--ptv-motion-medium) var(--ptv-motion-ease-standard) var(--ptv-card-action-delay),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized) var(--ptv-card-action-delay);
+
+    pointer-events: none;
+}
+
+.ptv-card:hover .ptv-card-play-pill,
+.ptv-card:focus-within .ptv-card-play-pill,
+.ptv-card.show-focus .ptv-card-play-pill {
+    opacity: 1;
+
+    transform:
+        translate(-50%, -50%)
+        scale(0.98);
+}
+
+/* =========================================================
+   TEXT
+========================================================= */
+
+.ptv-card .cardText {
+    transition:
+        transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        opacity var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+.ptv-card:hover .cardText,
+.ptv-card:focus-within .cardText,
+.ptv-card.show-focus .cardText {
+    transform: translateY(-2px);
+}
+
+/* =========================================================
+   CONTINUE WATCHING BAR
+========================================================= */
+
+.ptv-card .itemProgressBar {
+    position: absolute;
+
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+
+    height: 5px;
+
+    overflow: hidden;
+
+    border-radius: 999px;
+
+    background: rgba(255, 255, 255, 0.08);
+
+    z-index: 50;
+}
+
+.ptv-card .itemProgressBarForeground {
+    height: 100%;
+
+    border-radius: inherit;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(var(--ptv-card-accent), 1),
+            rgba(236, 72, 153, 1)
+        );
+
+    box-shadow: 0 0 14px rgba(var(--ptv-card-accent), 0.48);
+}
+
+/* =========================================================
+   FIX JELLYFIN WEIRDNESS
+========================================================= */
+
+.ptv-card .cardScalable {
+    overflow: visible !important;
+}
+
+.ptv-card .cardPadder {
+    background-color: transparent !important;
+}
+
+.ptv-card .innerCardFooter {
+    background: transparent !important;
+}

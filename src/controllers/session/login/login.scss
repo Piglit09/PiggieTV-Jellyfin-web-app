@@ -1,0 +1,572 @@
+.loginDisclaimerContainer {
+    display: flex;
+    margin-top: 2em;
+}
+
+.loginDisclaimer {
+    margin: 0 auto;
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    p {
+        text-align: center;
+    }
+
+    ol,
+    ul {
+        max-width: 40em;
+        margin-left: auto;
+        margin-right: auto;
+        width: fit-content;
+    }
+}
+
+#loginPage {
+    /* PiggieTV serves WebP first to reduce production payload and decoded
+       memory pressure; PNG remains as a fallback for older clients. */
+    --ptv-login-page-bg-image:
+        image-set(
+            url('/assets/backgrounds/login-bg.webp') type('image/webp'),
+            url('/assets/backgrounds/login-bg.png') type('image/png')
+        );
+    --ptv-login-brand-bg-image:
+        image-set(
+            url('/assets/backgrounds/PiggieTVBG.webp') type('image/webp'),
+            url('/assets/backgrounds/PiggieTVBG.png') type('image/png')
+        );
+
+    min-height: 100vh;
+
+    overflow: hidden;
+
+    background:
+        linear-gradient(
+            180deg,
+            rgba(3, 3, 8, 0.22),
+            rgba(3, 3, 8, 0.9)
+        ),
+        radial-gradient(
+            ellipse at 18% 24%,
+            rgba(168, 85, 247, 0.2),
+            transparent 42%
+        ),
+        radial-gradient(
+            ellipse at 82% 78%,
+            rgba(14, 165, 233, 0.14),
+            transparent 44%
+        ),
+        var(--ptv-login-page-bg-image) center / cover no-repeat fixed;
+}
+
+:is(.ptv-client-tv, .ptv-client-webos, .ptv-client-firetv, .ptv-client-low-power) #loginPage {
+    --ptv-login-page-bg-image:
+        image-set(
+            url('/assets/backgrounds/login-bg-tv.webp') type('image/webp'),
+            url('/assets/backgrounds/login-bg.png') type('image/png')
+        );
+    --ptv-login-brand-bg-image:
+        image-set(
+            url('/assets/backgrounds/PiggieTVBG-tv.webp') type('image/webp'),
+            url('/assets/backgrounds/PiggieTVBG.png') type('image/png')
+        );
+}
+
+#loginPage::before,
+#loginPage::after {
+    content: '';
+
+    position: fixed;
+    inset: 0;
+
+    pointer-events: none;
+}
+
+#loginPage::before {
+    z-index: 0;
+
+    background:
+        radial-gradient(
+            ellipse at 50% 48%,
+            transparent,
+            rgba(0, 0, 0, 0.5) 62%,
+            rgba(0, 0, 0, 0.84)
+        ),
+        linear-gradient(
+            90deg,
+            rgba(0, 0, 0, 0.68),
+            rgba(0, 0, 0, 0.18) 50%,
+            rgba(0, 0, 0, 0.72)
+        );
+}
+
+#loginPage::after {
+    z-index: 0;
+
+    background: var(--ptv-login-brand-bg-image) center / cover no-repeat;
+    opacity: 0.12;
+
+    animation: ptv-login-backdrop-breathe 36s ease-out infinite alternate;
+}
+
+#loginPage > .padded-left,
+#loginPage > .padded-right,
+#loginPage > .padded-bottom-page {
+    position: relative;
+    z-index: 1;
+}
+
+#loginPage > .padded-left,
+#loginPage > .padded-right {
+    display: grid;
+    place-items: center;
+
+    min-height: calc(100vh - 5rem);
+    padding: 24px;
+}
+
+#loginPage h1,
+#loginPage.ptv-login-custom-actions .btnQuick,
+#loginPage.ptv-login-custom-actions .btnForgotPassword,
+#loginPage.ptv-login-custom-actions .btnSelectServer,
+#loginPage.ptv-login-custom-actions .readOnlyContent,
+#loginPage.ptv-login-custom-actions .visualLoginForm {
+    display: none !important;
+}
+
+#loginPage .ptv-login-shell {
+    position: relative;
+
+    display: grid;
+    grid-template-columns: minmax(430px, 480px) minmax(340px, 1fr);
+
+    width: min(1040px, calc(100vw - 56px)) !important;
+    min-height: min(500px, calc(100vh - 128px));
+
+    overflow: hidden;
+
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 24px;
+
+    background:
+        linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.08),
+            transparent 42%
+        ),
+        rgba(18, 20, 31, 0.62);
+
+    box-shadow:
+        0 34px 90px rgba(0, 0, 0, 0.62),
+        0 0 52px rgba(168, 85, 247, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+    backdrop-filter: blur(12px);
+}
+
+#loginPage .ptv-login-panel {
+    position: relative;
+    z-index: 1;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+
+    padding: 30px;
+
+    background:
+        radial-gradient(
+            ellipse at 18% 0%,
+            rgba(125, 211, 252, 0.18),
+            transparent 34%
+        ),
+        radial-gradient(
+            ellipse at 90% 100%,
+            rgba(236, 72, 153, 0.18),
+            transparent 42%
+        ),
+        linear-gradient(
+            180deg,
+            rgba(42, 48, 66, 0.86),
+            rgba(20, 21, 32, 0.9)
+        );
+
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#loginPage .manualLoginForm > .padded-left,
+#loginPage .manualLoginForm > .padded-right,
+#loginPage .manualLoginForm > .padded-left.padded-right {
+    display: block !important;
+
+    min-height: 0 !important;
+    padding: 0 !important;
+}
+
+#loginPage .ptv-login-panel::before {
+    content: '';
+
+    position: absolute;
+    inset: 0;
+
+    background:
+        linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.12),
+            transparent 34%,
+            rgba(59, 130, 246, 0.08)
+        );
+
+    pointer-events: none;
+}
+
+#loginPage .ptv-login-atmosphere {
+    position: relative;
+
+    min-height: 100%;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(5, 5, 12, 0.58),
+            rgba(5, 5, 12, 0.18) 46%,
+            rgba(5, 5, 12, 0.72)
+        ),
+        var(--ptv-login-page-bg-image) center / cover no-repeat;
+}
+
+#loginPage .ptv-login-atmosphere::before {
+    content: '';
+
+    position: absolute;
+    inset: 0;
+
+    background:
+        radial-gradient(
+            ellipse at 70% 24%,
+            rgba(236, 72, 153, 0.18),
+            transparent 40%
+        ),
+        var(--ptv-login-brand-bg-image) center / cover no-repeat;
+
+    opacity: 0.24;
+
+    animation: ptv-login-atmosphere-fade 32s ease-out infinite alternate;
+}
+
+#loginPage .ptv-login-atmosphere::after {
+    content: '';
+
+    position: absolute;
+    inset: 0;
+
+    background:
+        radial-gradient(
+            ellipse at 52% 45%,
+            transparent,
+            rgba(0, 0, 0, 0.52) 70%
+        ),
+        linear-gradient(
+            0deg,
+            rgba(0, 0, 0, 0.66),
+            transparent 54%,
+            rgba(0, 0, 0, 0.45)
+        );
+}
+
+#loginPage .ptv-login-atmosphere-copy {
+    position: absolute;
+    right: 34px;
+    bottom: 32px;
+    left: 34px;
+    z-index: 1;
+
+    display: grid;
+    gap: 6px;
+
+    color: rgba(255, 255, 255, 0.82);
+}
+
+#loginPage .ptv-login-atmosphere-copy span {
+    font-size: 11px;
+    font-weight: 850;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+}
+
+#loginPage .ptv-login-atmosphere-copy strong {
+    font-size: 42px;
+    font-weight: 900;
+    line-height: 0.95;
+}
+
+#loginPage .ptv-login-atmosphere-copy em {
+    max-width: 26rem;
+
+    color: rgba(255, 255, 255, 0.64);
+    font-size: 14px;
+    font-style: normal;
+    line-height: 1.45;
+}
+
+#loginPage .manualLoginForm,
+#loginPage form.manualLoginForm {
+    position: relative;
+    z-index: 1;
+
+    width: 100% !important;
+    padding: 0 !important;
+
+    overflow: visible;
+
+    border: 0;
+    border-radius: 0;
+
+    background: transparent;
+    box-shadow: none;
+
+    backdrop-filter: none;
+}
+
+#loginPage .manualLoginForm::before,
+#loginPage .manualLoginForm::after {
+    display: none !important;
+}
+
+#loginPage .ptv-login-brand {
+    position: relative;
+    z-index: 1;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 9px;
+
+    margin-bottom: 18px;
+}
+
+#loginPage .ptv-login-logo {
+    width: min(250px, 82%);
+    height: auto;
+
+    filter:
+        drop-shadow(0 0 16px rgba(168, 85, 247, 0.38))
+        drop-shadow(0 0 28px rgba(236, 72, 153, 0.16));
+}
+
+#loginPage .ptv-login-tagline {
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 10px;
+    font-weight: 850;
+    letter-spacing: 0.26em;
+    line-height: 1.2;
+    text-align: center;
+}
+
+#loginPage label {
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 12px;
+    font-weight: 820;
+}
+
+#loginPage .inputContainer {
+    position: relative;
+    z-index: 1;
+
+    margin-bottom: 13px;
+}
+
+#loginPage input:not([type='checkbox']) {
+    min-height: 44px;
+
+    border: 1px solid rgba(191, 219, 254, 0.76) !important;
+    border-radius: 12px !important;
+
+    background: rgba(226, 235, 249, 0.96) !important;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.36),
+        0 0 0 0 rgba(168, 85, 247, 0);
+
+    color: #111827 !important;
+
+    transition:
+        border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#loginPage input:not([type='checkbox']):focus {
+    border-color: rgba(216, 180, 254, 0.92) !important;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.52),
+        0 0 0 3px rgba(168, 85, 247, 0.22),
+        0 0 24px rgba(59, 130, 246, 0.18);
+
+    transform: translateY(-1px);
+}
+
+#loginPage .checkboxContainer {
+    position: relative;
+    z-index: 1;
+
+    margin: 2px 0 12px;
+
+    color: rgba(255, 255, 255, 0.82);
+}
+
+#loginPage .button-submit {
+    position: relative;
+    z-index: 1;
+
+    min-height: 44px;
+    margin-top: 8px;
+
+    overflow: hidden;
+
+    border: 0 !important;
+    border-radius: 12px !important;
+
+    background:
+        linear-gradient(
+            135deg,
+            #0ea5e9,
+            #06b6d4 44%,
+            #d946ef
+        ) !important;
+
+    box-shadow:
+        0 16px 34px rgba(14, 165, 233, 0.28),
+        0 0 22px rgba(217, 70, 239, 0.18);
+
+    color: #fff !important;
+    font-weight: 880;
+
+    transition:
+        box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#loginPage .ptv-extra-actions {
+    position: relative;
+    z-index: 1;
+
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+
+    width: 100%;
+    margin-top: 12px;
+}
+
+#loginPage .ptv-extra-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+
+    min-height: 38px;
+    padding: 0 14px;
+
+    border: 1px solid rgba(168, 85, 247, 0.34);
+    border-radius: 999px;
+
+    background:
+        linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.06),
+            rgba(59, 130, 246, 0.12)
+        );
+
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0 16px rgba(168, 85, 247, 0.14);
+
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+    font-weight: 840;
+    text-align: center;
+    text-decoration: none;
+
+    transition:
+        color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#loginPage .ptv-extra-btn:hover,
+#loginPage .ptv-extra-btn:focus-visible,
+#loginPage .button-submit:hover,
+#loginPage .button-submit:focus-visible {
+    color: #fff;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 0 26px rgba(236, 72, 153, 0.24);
+
+    transform: translateY(-1px);
+}
+
+#loginPage .ptv-btn-icon {
+    width: 14px;
+    height: 14px;
+
+    object-fit: contain;
+}
+
+@media (max-width: 860px) {
+    #loginPage .ptv-login-shell {
+        grid-template-columns: 1fr;
+
+        width: min(420px, calc(100vw - 40px)) !important;
+        min-height: auto;
+    }
+
+    #loginPage .ptv-login-atmosphere {
+        display: none;
+    }
+
+    #loginPage .ptv-login-panel {
+        border-right: 0;
+    }
+}
+
+@media (max-width: 520px) {
+    #loginPage > .padded-left,
+    #loginPage > .padded-right {
+        padding: 18px;
+    }
+
+    #loginPage .ptv-login-panel {
+        padding: 24px 20px;
+    }
+
+    #loginPage .ptv-extra-actions {
+        grid-template-columns: 1fr;
+    }
+}
+
+@keyframes ptv-login-backdrop-breathe {
+    from {
+        opacity: 0.08;
+        transform: scale(1);
+    }
+
+    to {
+        opacity: 0.16;
+        transform: scale(1.025);
+    }
+}
+
+@keyframes ptv-login-atmosphere-fade {
+    from {
+        opacity: 0.14;
+        transform: scale(1);
+    }
+
+    to {
+        opacity: 0.28;
+        transform: scale(1.035);
+    }
+}

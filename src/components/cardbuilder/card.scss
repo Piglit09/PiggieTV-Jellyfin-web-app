@@ -1,0 +1,1458 @@
+button {
+    -webkit-border-fit: border !important;
+}
+
+button::-moz-focus-inner {
+    padding: 0;
+    border: 0;
+}
+
+.card {
+    border: 0;
+    font-size: inherit !important;
+    font-family: inherit !important;
+    text-transform: none;
+    background: none !important;
+    background-color: transparent !important;
+    margin: 0;
+    padding: 0;
+    display: block;
+    color: inherit !important;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    outline: none !important;
+    cursor: pointer;
+    contain: layout style;
+    flex-shrink: 0;
+    font-weight: inherit !important;
+}
+
+.card:not(.show-animation) {
+    contain: layout style paint;
+}
+
+.itemsContainer {
+    display: flex;
+}
+
+.vertical-list {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+}
+
+.vertical-wrap {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.vertical-wrap.centered {
+    justify-content: center;
+}
+
+.cardScalable {
+    position: relative;
+    contain: layout style;
+}
+
+.cardPadder-backdrop,
+.cardPadder-mixedBackdrop,
+.cardPadder-smallBackdrop,
+.cardPadder-overflowBackdrop,
+.cardPadder-overflowSmallBackdrop {
+    padding-bottom: 56.25%;
+    contain: strict;
+}
+
+.cardPadder-square,
+.cardPadder-mixedSquare,
+.cardPadder-overflowSquare,
+.overflowSquareCard-textCardPadder {
+    padding-bottom: 100%;
+    contain: strict;
+}
+
+.cardPadder-portrait,
+.cardPadder-mixedPortrait,
+.cardPadder-overflowPortrait,
+.overflowPortraitCard-textCardPadder {
+    padding-bottom: 150%;
+    contain: strict;
+}
+
+.cardPadder-banner {
+    padding-bottom: 18.5%;
+    contain: strict;
+}
+
+.cardBox {
+    padding: 0 !important;
+    margin: 0.6em;
+    transition: none;
+    border: 0 solid transparent;
+
+    /* These both are needed in case cardBox is a button */
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    outline: none !important;
+    contain: layout;
+    contain: style;
+}
+
+.card.show-animation .cardBox {
+    will-change: transform;
+    transition: transform 200ms ease-out;
+}
+
+.card.show-focus:not(.show-animation) .cardBox {
+    margin: 0.4em;
+}
+
+.card.show-focus:not(.show-animation) .cardBox.visualCardBox,
+.card.show-focus:not(.show-animation) .cardBox:not(.visualCardBox) .cardScalable {
+    border: 0.5em solid transparent;
+    border-radius: 0.7em; /* card border + card border-radius */
+}
+
+.card.show-animation:focus > .cardBox {
+    transform: scale(1.07, 1.07);
+}
+
+.cardBox-bottompadded {
+    margin-bottom: 1.8em !important;
+}
+
+@media (max-width: 50em) {
+    .cardBox-bottompadded {
+        margin-bottom: 1.2em !important;
+    }
+}
+
+.card:focus {
+    position: relative !important;
+    z-index: 10 !important;
+    font-weight: inherit !important;
+}
+
+.btnCardOptions {
+    position: absolute;
+    bottom: 0.25em;
+    right: 0;
+    margin: 0 !important;
+    z-index: 1;
+}
+
+.mediaSourceIndicator {
+    display: flex;
+    position: absolute;
+    align-items: center;
+    justify-content: center;
+    top: 0.3em;
+    left: 0.3em;
+    text-align: center;
+    vertical-align: middle;
+    font-size: 88%;
+    font-weight: 500;
+    width: 2em;
+    height: 2em;
+    border-radius: 50%;
+    color: #fff;
+    background: rgb(51, 136, 204);
+    box-shadow: 0 2px 2px 0 rgba(0, 0, 0, 0.14), 0 1px 5px 0 rgba(0, 0, 0, 0.12), 0 3px 1px -2px rgba(0, 0, 0, 0.2);
+    z-index: 1;
+}
+
+.cardImageContainer {
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: center center;
+    border-radius: 0.2em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background-clip: content-box !important;
+    color: inherit;
+    text-decoration: none;
+}
+
+.cardContent.cardImageContainer {
+    display: flex;
+}
+
+.cardScalable .cardImageContainer {
+    height: 100%;
+    width: 100%;
+    contain: strict;
+}
+
+.chapterCardImageContainer {
+    background-color: #000;
+    border-radius: 0;
+}
+
+.textCardImageContainer {
+    background-color: #333;
+}
+
+.cardContent {
+    overflow: hidden;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 0.2em;
+
+    /* Needed in case this is a button */
+    display: block;
+    margin: 0 !important;
+    border: 0 !important;
+    padding: 0 !important;
+    cursor: pointer;
+    color: inherit;
+    width: 100%;
+    font-family: inherit;
+    font-size: inherit;
+
+    /* Needed in safari */
+    height: 100%;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    outline: none !important;
+    contain: strict;
+}
+
+.defaultCardBackground {
+    display: flex;
+}
+
+.cardContent:not(.defaultCardBackground) {
+    background-color: transparent;
+}
+
+.cardPadder {
+    position: relative; // For centering the cardImageIcon
+}
+
+.cardBox:not(.visualCardBox) .cardPadder {
+    border-radius: 0.2em;
+    background-color: #242424;
+}
+
+.blurhash-canvas {
+    border-radius: 0.2em;
+}
+
+.cardContent-shadow,
+.cardBox:not(.visualCardBox) .cardPadder {
+    box-shadow: 0 0.0725em 0.29em 0 rgba(0, 0, 0, 0.37);
+}
+
+.cardImage {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: center;
+    border: none;
+}
+
+.coveredImage {
+    background-size: cover;
+    background-position: center center;
+}
+
+.coveredImage.coveredImage-contain {
+    background-size: contain;
+}
+
+.cardFooter {
+    padding: 0.3em 0.3em 0.5em 0.3em;
+    position: relative;
+}
+
+.visualCardBox {
+    box-shadow: 0 0.0725em 0.29em 0 rgba(0, 0, 0, 0.37);
+    border-radius: 0.2em;
+}
+
+.innerCardFooter {
+    background: rgba(0, 0, 0, 0.7);
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    text-align: left;
+    z-index: 1;
+    overflow: hidden;
+    max-width: 100%;
+    color: #fff;
+}
+
+.innerCardFooterClear {
+    background-color: transparent;
+}
+
+.fullInnerCardFooter {
+    right: 0;
+}
+
+.cardText {
+    padding: 0.06em 0.5em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    [dir="ltr"] & {
+        text-align: left;
+    }
+
+    [dir="rtl"] & {
+        text-align: right;
+    }
+}
+
+.dialog .cardText {
+    text-overflow: initial;
+}
+
+.cardText-secondary {
+    font-size: 86%;
+}
+
+.cardText-first {
+    padding-top: 0.24em;
+}
+
+.textActionButton {
+    border: 0 !important;
+    background: transparent;
+    padding: 0 !important;
+    cursor: pointer;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    outline: none !important;
+    color: inherit;
+    vertical-align: middle;
+    font-family: inherit;
+    font-size: inherit;
+    text-decoration: none;
+}
+
+.textActionButton:hover {
+    text-decoration: underline;
+}
+
+.cardText > .textActionButton {
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+}
+
+.innerCardFooter > .cardText {
+    padding: 0.3em 0.5em;
+}
+
+.cardFooter-withlogo {
+    padding-left: 4em;
+    position: relative;
+}
+
+.cardFooterLogo {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 4.5em;
+    background-size: 70% auto;
+    background-repeat: no-repeat;
+    background-position: center center;
+}
+
+.cardTextCentered,
+.cardTextCentered > .textActionButton {
+    text-align: center !important;
+}
+
+.cardText-rightmargin {
+    margin-right: 2em;
+}
+
+.cardImageContainer > .cardDefaultText {
+    white-space: normal;
+    text-align: center;
+    font-size: 2em;
+    font-weight: bold;
+}
+
+.cardImageIcon {
+    font-size: 5em;
+    color: inherit;
+}
+
+.cardPadder .cardImageIcon {
+    color: #111;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.cardImageContainer .cardImageIcon {
+    margin: auto; /* 'justify-content: center' doesn't work in Safari 10 */
+}
+
+.cardIndicators {
+    top: 0.225em;
+    position: absolute;
+    display: flex;
+    align-items: center;
+    contain: layout style;
+    z-index: 1;
+
+    [dir="ltr"] & {
+        right: 0.225em;
+    }
+
+    [dir="rtl"] & {
+        left: 0.225em;
+    }
+}
+
+.ptv-card-quality-stack {
+    position: absolute !important;
+    top: 0.48rem !important;
+    left: 0.48rem !important;
+    z-index: 6 !important;
+
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.28rem;
+
+    max-width: calc(100% - 3.4rem);
+
+    pointer-events: none;
+}
+
+.ptv-card-quality-pill {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+
+    min-width: 1.75rem;
+    min-height: 1.18rem;
+    padding: 0 0.42rem;
+    border-radius: 0.45rem;
+
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.96), rgba(2, 132, 199, 0.92));
+    border: 1px solid rgba(255, 255, 255, 0.22);
+
+    box-shadow:
+        0 0.45rem 1.15rem rgba(0, 0, 0, 0.42),
+        0 0 1rem rgba(168, 85, 247, 0.24);
+
+    color: rgba(255, 255, 255, 0.96) !important;
+    font-size: 0.62rem;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.ptv-card-quality-pill-4k {
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.98), rgba(217, 70, 239, 0.92));
+}
+
+.ptv-card-quality-pill-hdr,
+.ptv-card-quality-pill-hdr10,
+.ptv-card-quality-pill-dolby-vision {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.98), rgba(249, 115, 22, 0.92));
+}
+
+.ptv-card-quality-pill-hevc {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.98), rgba(14, 165, 233, 0.92));
+}
+
+.ptv-card-quality-pill-h264 {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.98), rgba(22, 163, 74, 0.92));
+}
+
+.ptv-card-quality-pill-5-1,
+.ptv-card-quality-pill-atmos {
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.98), rgba(79, 70, 229, 0.92));
+}
+
+.ptv-card-rating-stack {
+    position: absolute !important;
+    right: 0.52rem !important;
+    bottom: 0.52rem !important;
+    z-index: 7 !important;
+
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.26rem;
+
+    pointer-events: none;
+}
+
+.ptv-card-rating-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.28rem;
+
+    min-height: 1.32rem;
+    padding: 0 0.46rem;
+    border-radius: 0.36rem;
+
+    background: rgba(5, 8, 14, 0.86);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(10px);
+
+    box-shadow:
+        0 0.4rem 1rem rgba(0, 0, 0, 0.38),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 900;
+    line-height: 1;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.38);
+}
+
+.ptv-card-tomato {
+    position: relative;
+
+    width: 0.82rem;
+    height: 0.82rem;
+    border-radius: 999px;
+
+    background: #f43f1f;
+    box-shadow: 0 0 0.5rem rgba(244, 63, 31, 0.42);
+}
+
+.ptv-card-tomato::before {
+    content: '';
+
+    position: absolute;
+    top: -0.14rem;
+    left: 0.18rem;
+
+    width: 0.42rem;
+    height: 0.24rem;
+    border-radius: 0.4rem 0.4rem 0.04rem 0.04rem;
+
+    background: #22c55e;
+}
+
+.ptv-card-rating-star {
+    color: #facc15;
+    font-size: 0.88rem;
+    line-height: 1;
+    text-shadow: 0 0 0.55rem rgba(250, 204, 21, 0.42);
+}
+
+.cardProgramAttributeIndicators {
+    top: 0;
+    position: absolute;
+    display: flex;
+    text-transform: uppercase;
+    font-size: 92%;
+
+    [dir="ltr"] & {
+        left: 0;
+    }
+
+    [dir="rtl"] & {
+        right: 0;
+    }
+}
+
+.programAttributeIndicator {
+    padding: 0.18em 0.5em;
+    color: #fff;
+    font-weight: 500;
+}
+
+.cardOverlayButton {
+    color: rgba(255, 255, 255, 0.76);
+    margin: 0;
+    z-index: 1;
+    padding: 0.75em;
+    font-size: 88%;
+}
+
+.cardOverlayButton-br {
+    position: absolute;
+    bottom: 0;
+
+    [dir="ltr"] & {
+        right: 0;
+    }
+
+    [dir="rtl"] & {
+        left: 0;
+    }
+}
+
+.cardOverlayButtonIcon {
+    background-color: rgba(0, 0, 0, 0.7) !important;
+    border-radius: 100em;
+    width: 1.5em !important;
+    height: 1.5em !important;
+    justify-content: center;
+    align-items: center;
+    display: flex;
+    font-size: 1.66956521739130434em !important;
+}
+
+.cardOverlayButtonIcon.material-icons {
+    /* material-icons override display, so we need to
+       make a better matching selector to set it to flex */
+    display: flex;
+}
+
+.cardOverlayButton-centered {
+    bottom: initial;
+    right: initial;
+    position: static;
+    position: absolute;
+    display: flex;
+    font-size: 112%;
+    margin: -1.3em 0 0 -1.3em;
+    width: 2.6em;
+    height: 2.6em;
+    top: 50%;
+    left: 50%;
+    background-color: rgba(0, 0, 0, 0.5) !important;
+    border: 0.06em solid rgba(255, 255, 255, 0.6);
+    padding: 0.38em !important;
+    color: rgba(255, 255, 255, 0.76);
+    transition: transform 200ms ease-out;
+}
+
+.bannerCard {
+    width: 100%;
+}
+
+.backdropCard {
+    width: 100%;
+}
+
+.smallBackdropCard {
+    width: 50%;
+}
+
+.squareCard {
+    width: 50%;
+}
+
+.portraitCard {
+    width: 33.333333333333333333333333333333%;
+}
+
+.mixedPortraitCard {
+    width: 12em;
+}
+
+.mixedSquareCard {
+    width: 18em;
+}
+
+.mixedBackdropCard {
+    width: 32em;
+}
+
+@media (min-width: 25em) {
+    .backdropCard {
+        width: 50%;
+    }
+}
+
+@media (min-width: 31.25em) {
+    .smallBackdropCard {
+        width: 33.333333333333333333333333333333%;
+    }
+
+    .squareCard,
+    .portraitCard {
+        width: 33.333333333333333333333333333333%;
+    }
+}
+
+@media (min-width: 43.75em) {
+    .squareCard,
+    .portraitCard {
+        width: 25%;
+    }
+}
+
+@media (min-width: 48.125em) {
+    .backdropCard {
+        width: 33.333333333333333333333333333333%;
+    }
+}
+
+@media (min-width: 50em) {
+    .bannerCard {
+        width: 50%;
+    }
+
+    .squareCard,
+    .portraitCard {
+        width: 20%;
+    }
+
+    .smallBackdropCard {
+        width: 25%;
+    }
+}
+
+@media (min-width: 62.5em) {
+    .smallBackdropCard {
+        width: 20%;
+    }
+}
+
+@media (min-width: 75em) {
+    .backdropCard {
+        width: 25%;
+    }
+
+    .squareCard,
+    .portraitCard {
+        width: 16.666666666666666666666666666667%;
+    }
+
+    .bannerCard {
+        width: 33.333333333333333333333333333333%;
+    }
+
+    .smallBackdropCard {
+        width: 16.666666666666666666666666666667%;
+    }
+}
+
+@media (min-width: 87.5em) {
+    .squareCard,
+    .portraitCard {
+        width: 14.285714285714285714285714285714%;
+    }
+
+    .smallBackdropCard {
+        width: 14.285714285714285714285714285714%;
+    }
+}
+
+@media (min-width: 100em) {
+    .smallBackdropCard {
+        width: 12.5%;
+    }
+
+    .backdropCard {
+        width: 20%;
+    }
+
+    .squareCard,
+    .portraitCard {
+        width: 12.5%;
+    }
+}
+
+@media (min-width: 120em) {
+    .squareCard,
+    .portraitCard {
+        width: 11.111111111111111111111111111111%;
+    }
+}
+
+@media (min-width: 131.25em) {
+    .bannerCard {
+        width: 25%;
+    }
+
+    .squareCard,
+    .portraitCard {
+        width: 10%;
+    }
+}
+
+@media (min-width: 156.25em) {
+    .backdropCard {
+        width: 16.666666666666666666666666666667%;
+    }
+}
+
+.itemsContainer-tv > .backdropCard {
+    width: 25%;
+}
+
+.itemsContainer-tv > .squareCard {
+    width: 16.666666666666666666666666666667%;
+}
+
+.itemsContainer-tv > .portraitCard {
+    width: 16.666666666666666666666666666667%;
+}
+
+.overflowBackdropCard {
+    width: 72vw;
+}
+
+.overflowSmallBackdropCard {
+    width: 72vw;
+}
+
+.overflowSquareCard,
+.overflowPortraitCard {
+    width: 40vw;
+}
+
+@media (min-width: 25em) {
+    .overflowPortraitCard {
+        width: 31.2vw;
+    }
+}
+
+@media (min-width: 35em) {
+    .overflowSquareCard {
+        width: 31.2vw;
+    }
+
+    .overflowBackdropCard {
+        width: 45.5vw;
+    }
+
+    .overflowSmallBackdropCard {
+        width: 30vw;
+    }
+}
+
+@media (min-width: 43.75em) {
+    .overflowSquareCard,
+    .overflowPortraitCard {
+        width: 23.1vw;
+    }
+}
+
+@media (min-width: 48.125em) {
+    .overflowBackdropCard,
+    .overflowSmallBackdropCard {
+        width: 30vw;
+    }
+}
+
+@media (orientation: landscape) {
+    .overflowBackdropCard,
+    .overflowSmallBackdropCard {
+        width: 30vw;
+    }
+
+    .overflowSquareCard,
+    .overflowPortraitCard {
+        width: 23.1vw;
+    }
+}
+
+@media (orientation: landscape) and (min-width: 48.125em) {
+    .overflowBackdropCard,
+    .overflowSmallBackdropCard {
+        width: 23.1vw;
+    }
+}
+
+@media (orientation: landscape) and (min-width: 50em) {
+    .overflowSmallBackdropCard {
+        width: 15.5vw;
+    }
+}
+
+@media (min-width: 50em) {
+    .overflowSquareCard,
+    .overflowPortraitCard {
+        width: 18.5vw;
+    }
+}
+
+@media (min-width: 75em) {
+    .overflowBackdropCard,
+    .overflowSmallBackdropCard {
+        width: 23.1vw;
+    }
+
+    .overflowSquareCard,
+    .overflowPortraitCard {
+        width: 15.5vw;
+    }
+}
+
+@media (min-width: 87.5em) {
+    .overflowSquareCard,
+    .overflowPortraitCard {
+        width: 13.3vw;
+    }
+}
+
+@media (min-width: 100em) {
+    .overflowBackdropCard,
+    .overflowSmallBackdropCard {
+        width: 18.7vw;
+    }
+
+    .overflowSquareCard,
+    .overflowPortraitCard {
+        width: 11.6vw;
+    }
+}
+
+@media (min-width: 120em) {
+    .overflowSquareCard,
+    .overflowPortraitCard {
+        width: 10.41vw;
+    }
+}
+
+@media (min-width: 131.25em) {
+    .overflowSquareCard,
+    .overflowPortraitCard {
+        width: 9.3vw;
+    }
+}
+
+@media (min-width: 156.25em) {
+    .overflowBackdropCard,
+    .overflowSmallBackdropCard {
+        width: 15.6vw;
+    }
+}
+
+.itemsContainer-tv > .overflowBackdropCard {
+    width: 23.5vw;
+}
+
+.overflowBackdropCard-textCard {
+    width: 15.5vw !important;
+}
+
+.overflowBackdropCard-textCardPadder {
+    padding-bottom: 87.75%;
+}
+
+.itemsContainer-tv > .overflowSquareCard,
+.itemsContainer-tv > .overflowPortraitCard {
+    width: 15.6vw;
+}
+
+.itemsContainer-tv > .overflowSmallBackdropCard {
+    width: 18.8vw;
+}
+
+.cardOverlayContainer {
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transition: opacity 0.2s;
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    user-select: none;
+    border-radius: 0.2em;
+
+    /** Disable pointer events for the overlay container, but allow them for its children */
+    pointer-events: none;
+
+    * {
+        pointer-events: auto;
+    }
+}
+
+.visualCardBox .blurhash-canvas,
+.visualCardBox .cardContent,
+.visualCardBox .cardOverlayContainer {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.cardOverlayButton-hover {
+    opacity: 0;
+    transition: 0.2s;
+    background: transparent;
+    padding: 0.25em;
+}
+
+.cardOverlayButtonIcon-hover {
+    background: transparent !important;
+}
+
+.card-hoverable:focus-within,
+.card-hoverable:hover {
+    .cardOverlayContainer,
+    .cardOverlayButton-hover {
+        opacity: 1;
+    }
+}
+
+.cardOverlayContainer > .cardOverlayFab-primary {
+    background-color: rgba(0, 0, 0, 0.7);
+    font-size: 130%;
+    padding: 0;
+    width: 3em;
+    height: 3em;
+    margin-top: -1.5em;
+    margin-left: -1.5em;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+}
+
+.cardOverlayContainer > .cardOverlayFab-primary:hover {
+    transform: scale(1.4, 1.4);
+    transition: 0.2s;
+}
+
+/* ===== PiggieTV Native Card Layer - Clean / Safe ===== */
+
+.ptv-card {
+    position: relative;
+    z-index: 0;
+    transition:
+        transform .2s ease,
+        filter .2s ease;
+}
+
+.ptv-card:hover,
+.ptv-card:focus-within {
+    z-index: 20;
+}
+
+.ptv-card .cardBox,
+.ptv-card .cardScalable,
+.ptv-card .cardContent,
+.ptv-card .cardImageContainer {
+    border-radius: 18px;
+}
+
+.ptv-card .cardContent {
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.ptv-card .cardImage,
+.ptv-card .cardImageContainer img {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transition: transform .28s ease;
+}
+
+.ptv-card:hover .cardImage,
+.ptv-card:focus-within .cardImage {
+    transform: scale(1.025);
+}
+
+/* Keep blurhash from sitting over real posters */
+.ptv-card .blurhash-canvas {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* Cheap cinematic overlay */
+.ptv-card .cardContent::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+
+    background:
+        linear-gradient(
+            to top,
+            rgba(0, 0, 0, .58) 0%,
+            rgba(0, 0, 0, .24) 42%,
+            rgba(0, 0, 0, .04) 78%,
+            transparent 100%
+        );
+
+    opacity: .72;
+    transition: opacity .2s ease;
+}
+
+.ptv-card:hover .cardContent::after,
+.ptv-card:focus-within .cardContent::after {
+    opacity: .48;
+}
+
+/* Native Jellyfin overlay cleanup */
+.ptv-card .cardOverlayContainer {
+    background: transparent;
+}
+
+.ptv-card .cardOverlayButton {
+    opacity: .78;
+    transition:
+        opacity .18s ease,
+        transform .18s ease;
+}
+
+.ptv-card:hover .cardOverlayButton,
+.ptv-card:focus-within .cardOverlayButton {
+    opacity: 1;
+    transform: scale(1.04);
+}
+
+/* Text glow */
+.ptv-card .cardText {
+    transition:
+        color .18s ease,
+        text-shadow .18s ease;
+}
+
+.ptv-card:hover .cardText,
+.ptv-card:focus-within .cardText {
+    color: #fff;
+    text-shadow: 0 0 12px rgba(180, 0, 255, .24);
+}
+
+/* ===== PiggieTV Play Pill ===== */
+
+.ptv-card-play-pill {
+    position: absolute;
+    left: 50%;
+    bottom: 28px;
+    z-index: 42;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+
+    min-height: 34px;
+    padding: 8px 18px;
+
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 999px;
+
+    background: linear-gradient(135deg, rgba(140,0,243,.92), rgba(243,0,177,.82));
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+
+    box-shadow:
+        0 10px 26px rgba(0,0,0,.34),
+        0 0 22px rgba(180,0,255,.24);
+
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+
+    cursor: pointer;
+    pointer-events: auto;
+    opacity: 0;
+
+    transform: translateX(-50%) translateY(10px) scale(.96);
+    transition:
+        opacity .16s ease,
+        transform .16s ease,
+        box-shadow .16s ease,
+        filter .16s ease;
+}
+
+.ptv-card:hover .ptv-card-play-pill,
+.ptv-card:focus-within .ptv-card-play-pill {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.ptv-card-play-pill:hover {
+    filter: brightness(1.05);
+}
+
+.ptv-card-play-icon {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+}
+
+/* Backdrop / wide cards */
+.backdropCard.ptv-card .ptv-card-play-pill,
+.overflowBackdropCard.ptv-card .ptv-card-play-pill,
+.smallBackdropCard.ptv-card .ptv-card-play-pill {
+    bottom: 68px;
+    min-height: 52px;
+    padding: 15px 42px;
+    font-size: 14px;
+}
+
+/* Portrait cards */
+.portraitCard.ptv-card .ptv-card-play-pill,
+.overflowPortraitCard.ptv-card .ptv-card-play-pill {
+    bottom: 44px;
+    min-height: 38px;
+    padding: 9px 22px;
+    font-size: 13px;
+}
+
+/* Square cards */
+.squareCard.ptv-card .ptv-card-play-pill,
+.overflowSquareCard.ptv-card .ptv-card-play-pill {
+    bottom: 36px;
+    min-height: 36px;
+    padding: 8px 20px;
+}
+
+.ptv-card:has(.ptv-card-play-pill) .cardOverlayFab-primary,
+.ptv-card:has(.ptv-card-play-pill) .cardOverlayButton-centered {
+    display: none !important;
+}
+
+.layout-tv .ptv-card-play-pill,
+.touch .ptv-card-play-pill {
+    display: none;
+}
+
+/* Portrait cards */
+.portraitCard.ptv-card .ptv-card-play-pill,
+.overflowPortraitCard.ptv-card .ptv-card-play-pill {
+    bottom: 128px;
+
+    min-height: 32px;
+    padding: 7px 16px;
+
+    font-size: 11px;
+    font-weight: 600;
+
+    border-color: rgba(255,255,255,.14);
+
+    background:
+        linear-gradient(
+            135deg,
+            rgba(140,0,243,.82),
+            rgba(243,0,177,.72)
+        );
+
+    box-shadow:
+        0 8px 22px rgba(0,0,0,.28),
+        0 0 18px rgba(180,0,255,.18);
+}
+
+.portraitCard.ptv-card .ptv-card-play-icon,
+.overflowPortraitCard.ptv-card .ptv-card-play-icon {
+    width: 10px;
+    height: 10px;
+}
+
+.ptv-card:hover .cardImage {
+    transform: scale(1.02);
+    filter: brightness(1.04);
+}
+
+.ptv-card .cardContent::after {
+    opacity: .58;
+}
+
+.ptv-card:hover .cardContent::after {
+    opacity: .38;
+}
+
+/* Backdrop / wide cards */
+.backdropCard.ptv-card .ptv-card-play-pill,
+.overflowBackdropCard.ptv-card .ptv-card-play-pill,
+.smallBackdropCard.ptv-card .ptv-card-play-pill {
+    bottom: 62px;
+
+    min-height: 44px;
+    padding: 12px 30px;
+
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.homePage .itemsContainer {
+    position: relative;
+    padding: 8px 0;
+}
+
+.homePage .itemsContainer::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+
+    background:
+        linear-gradient(
+            to bottom,
+            rgba(255,255,255,.015),
+            rgba(255,255,255,0)
+        );
+
+    border-radius: 22px;
+    pointer-events: none;
+}
+
+.sectionTitle {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -.02em;
+
+    color: rgba(255,255,255,.94);
+
+    margin-bottom: 18px;
+
+    transition: color .2s ease;
+}
+
+.sectionTitle:hover {
+    color: #d48cff;
+}
+
+
+/* ===== Homepage Layout Rhythm ===== */
+
+.homePage .section0 {
+    margin-top: 22px;
+}
+
+.homePage .verticalSection {
+    margin-bottom: 52px;
+}
+
+.homePage .itemsContainer {
+    position: relative;
+    padding: 10px 0;
+}
+
+/* subtle shelf depth */
+.homePage .itemsContainer::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+
+    border-radius: 24px;
+
+    background:
+        linear-gradient(
+            to bottom,
+            rgba(255,255,255,.016),
+            rgba(255,255,255,0)
+        );
+
+    pointer-events: none;
+}
+
+/* ===== PTV Section Titles ===== */
+
+.homePage .sectionTitle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    margin-bottom: 18px;
+
+    font-size: 2rem;
+    font-weight: 720;
+    letter-spacing: -.03em;
+
+    color: rgba(255,255,255,.96);
+
+    transition:
+        color .18s ease,
+        transform .18s ease;
+}
+
+.homePage .sectionTitle:hover {
+    color: #d68cff;
+}
+
+.homePage .sectionTitleTextButton {
+    padding: 0 !important;
+}
+
+.homePage .sectionTitle-cards {
+    margin-bottom: 18px;
+}
+
+.homePage .ptv-row-title-link {
+    width: fit-content;
+    text-decoration: none;
+}
+
+.homePage .ptv-row-title-link-icon {
+    font-size: 1.7rem;
+    opacity: .78;
+    transition:
+        opacity .18s ease,
+        transform .18s ease;
+}
+
+.homePage .ptv-row-title-link:hover .ptv-row-title-link-icon,
+.homePage .ptv-row-title-link:focus-visible .ptv-row-title-link-icon {
+    opacity: 1;
+    transform: translateX(4px);
+}
+
+.ptv-row-more-card {
+    text-decoration: none;
+}
+
+.ptv-row-more-card-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: .35rem;
+    min-height: 100%;
+    padding: 1rem;
+    text-align: center;
+    background:
+        linear-gradient(
+            135deg,
+            rgba(17, 24, 39, .94),
+            rgba(67, 56, 202, .46)
+        );
+}
+
+.ptv-row-more-card-content::before {
+    content: '';
+    position: absolute;
+    inset: .55rem;
+    z-index: 1;
+    border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 14px;
+    pointer-events: none;
+}
+
+.ptv-row-more-card-kicker,
+.ptv-row-more-card-title,
+.ptv-row-more-card-icon {
+    position: relative;
+    z-index: 3;
+}
+
+.ptv-row-more-card-kicker {
+    color: rgba(255, 255, 255, .72);
+    font-size: .82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.ptv-row-more-card-title {
+    max-width: 90%;
+    overflow-wrap: anywhere;
+    color: #fff;
+    font-size: 1.35rem;
+    font-weight: 800;
+}
+
+.ptv-row-more-card-icon {
+    color: rgba(255, 255, 255, .86);
+    font-size: 2rem;
+    transition: transform .18s ease;
+}
+
+.ptv-row-more-card:hover .ptv-row-more-card-icon,
+.ptv-row-more-card:focus-visible .ptv-row-more-card-icon {
+    transform: translateX(5px);
+}

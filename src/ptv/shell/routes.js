@@ -1,0 +1,190 @@
+import { getRegisteredRouteEntries } from '../core/lifecycle';
+import { PTV_ROUTES } from '../core/config';
+import { getPtvNavigationSections } from './navigation';
+
+const ROUTE_MATCHERS = [
+    {
+        className: 'ptv-route-login',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['login'],
+        id: 'login',
+        layout: 'auth',
+        owner: 'login',
+        pageType: 'login',
+        pattern: ({ hash, path }) => hash.includes('/login') || path.includes('/login')
+    },
+    {
+        className: 'ptv-route-dashboard',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['dashboard'],
+        id: 'dashboard',
+        layout: 'admin',
+        navigationItemId: 'dashboard',
+        owner: 'dashboard',
+        pageType: 'dashboard',
+        pattern: ({ hash, path }) => hash.includes('/dashboard') || path.includes('/dashboard')
+    },
+    {
+        className: 'ptv-route-settings',
+        density: 'dense',
+        elevation: 1,
+        features: ['settings'],
+        id: 'settings',
+        layout: 'settings',
+        navigationItemId: 'settings',
+        owner: 'settings',
+        pageType: 'settings',
+        pattern: ({ hash, path }) => hash.includes('/settings') || path.includes('/settings') || hash.includes('/mypreferences')
+    },
+    {
+        className: 'ptv-route-details',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['details'],
+        id: 'details',
+        layout: 'media-detail',
+        owner: 'details',
+        pageType: 'details',
+        pattern: ({ hash }) => hash.includes('/details') || hash.includes('/item')
+    },
+    {
+        className: 'ptv-route-home',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['home'],
+        id: 'home',
+        layout: 'media-home',
+        navigationItemId: 'home',
+        owner: 'home',
+        pageType: 'home',
+        pattern: ({ hash }) => hash === PTV_ROUTES.homeHtml || hash === PTV_ROUTES.home || hash.includes('/home')
+    },
+    {
+        className: 'ptv-route-request',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['request'],
+        id: 'request',
+        layout: 'embedded',
+        navigationItemId: 'request',
+        owner: 'request',
+        pageType: 'request',
+        pattern: () => document.documentElement.classList.contains('ptv-request-active')
+    },
+    {
+        className: 'ptv-route-playback',
+        density: 'comfortable',
+        elevation: 0,
+        features: ['playback'],
+        id: 'playback',
+        layout: 'player',
+        owner: 'playback',
+        pageType: 'playback',
+        pattern: () => document.documentElement.classList.contains('ptv-playing')
+    },
+    {
+        className: 'ptv-route-library',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['library'],
+        id: 'library',
+        layout: 'media-grid',
+        owner: 'library',
+        pageType: 'library',
+        pattern: ({ hash }) => /#\/(?:tv|movies|music|collections|livetv|playlists)/i.test(hash)
+    }
+];
+
+const FALLBACK_ROUTE = {
+    className: 'ptv-route-generic',
+    density: 'comfortable',
+    elevation: 1,
+    features: [],
+    id: 'generic',
+    layout: 'standard',
+    owner: 'shell',
+    pageType: 'generic'
+};
+
+export const PTV_ROUTE_REGISTRY = [...ROUTE_MATCHERS, FALLBACK_ROUTE];
+
+export function getPtvRouteRegistry() {
+    return [
+        ...ROUTE_MATCHERS,
+        ...getRegisteredRouteEntries(),
+        FALLBACK_ROUTE
+    ];
+}
+
+export function getPtvRouteClassNames() {
+    return getPtvRouteRegistry().map(route => route.className).filter(Boolean);
+}
+
+function findNavigationItem(route) {
+    const sections = getPtvNavigationSections();
+
+    for (const section of sections) {
+        const item = section.items.find(entry => entry.id === route.navigationItemId);
+
+        if (item) {
+            return {
+                activeItemId: item.id,
+                activeSectionId: section.id,
+                href: item.href
+            };
+        }
+    }
+
+    return {
+        activeItemId: route.navigationItemId || '',
+        activeSectionId: '',
+        href: ''
+    };
+}
+
+export function getPtvRouteOwnership(location = window.location) {
+    const path = location.pathname || '';
+    const hash = location.hash || '';
+    const full = `${path}${hash}`;
+    const context = { full, hash, path };
+    const playbackActive = document.documentElement.classList.contains('ptv-playing');
+    const routeRegistry = getPtvRouteRegistry();
+    const playbackRoute = routeRegistry.find(entry => entry.id === 'playback');
+    const route = routeRegistry
+        .filter(entry => entry.id !== 'playback')
+        .filter(entry => typeof entry.pattern === 'function')
+        .find(entry => entry.pattern(context))
+        || (playbackActive ? playbackRoute : FALLBACK_ROUTE)
+        || FALLBACK_ROUTE;
+    const navigation = findNavigationItem(route);
+    const features = [...new Set([
+        ...(route.features || []),
+        ...(playbackActive ? ['playback'] : [])
+    ])];
+
+    return {
+        ...route,
+        className: route.className,
+        density: route.density,
+        elevation: route.elevation,
+        features,
+        full,
+        hash,
+        layout: route.layout,
+        navigation,
+        owner: route.owner,
+        pageType: route.pageType,
+        path,
+
+        isDashboard: features.includes('dashboard'),
+        isDetails: features.includes('details'),
+        isHome: features.includes('home'),
+        isLibrary: features.includes('library'),
+        isLogin: features.includes('login'),
+        isPlayback: features.includes('playback'),
+        isRequest: features.includes('request'),
+        isSettings: features.includes('settings')
+    };
+}

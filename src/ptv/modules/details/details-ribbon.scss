@@ -1,0 +1,105 @@
+.ptv-detail-page .detailRibbon {
+    position: relative;
+
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px;
+    align-items: center;
+
+    padding: 18px 20px !important;
+    margin: 0 0 18px !important;
+
+    border: 1px solid rgba(205, 174, 255, 0.18);
+    border-radius: var(--ptv-radius-lg, 22px);
+    background:
+        radial-gradient(ellipse at 10% 0%, rgba(125, 214, 255, 0.13), transparent 36%),
+        linear-gradient(120deg, rgba(70, 83, 125, 0.56), rgba(53, 27, 74, 0.68) 58%, rgba(24, 12, 38, 0.82));
+    box-shadow:
+        0 20px 56px rgba(0, 0, 0, 0.38),
+        inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(16px) saturate(1.16);
+}
+
+.ptv-detail-page .detailNameContainer {
+    min-width: 0;
+}
+
+.ptv-detail-page .itemName {
+    margin: 0 !important;
+
+    color: rgba(255, 255, 255, 0.96) !important;
+    font-family: var(--ptv-font-accent) !important;
+    font-size: clamp(20px, 1.8vw, 32px) !important;
+    font-weight: 900 !important;
+    line-height: 1.05 !important;
+    letter-spacing: 0 !important;
+    text-shadow: 0 8px 22px rgba(0, 0, 0, 0.36);
+}
+
+.ptv-detail-page .itemName.originalTitle,
+.ptv-detail-page .itemName.subtitle {
+    margin-top: 3px !important;
+
+    color: rgba(245, 247, 255, 0.72) !important;
+    font-size: 13px !important;
+    font-weight: 800 !important;
+}
+
+.ptv-detail-page .mainDetailButtons {
+    display: flex !important;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.ptv-detail-page .detailButton {
+    min-width: 48px !important;
+    height: 46px !important;
+    padding: 0 13px !important;
+
+    border: 1px solid rgba(205, 174, 255, 0.18) !important;
+    border-radius: 12px !important;
+    background: rgba(26, 34, 76, 0.58) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 8px 22px rgba(0, 0, 0, 0.26) !important;
+    color: rgba(246, 247, 255, 0.9) !important;
+    backdrop-filter: blur(12px);
+    transition:
+        background var(--ptv-speed-fast) var(--ptv-ease),
+        border-color var(--ptv-speed-fast) var(--ptv-ease),
+        box-shadow var(--ptv-speed-fast) var(--ptv-ease),
+        transform var(--ptv-speed-fast) var(--ptv-ease) !important;
+}
+
+.ptv-detail-page .detailButton:hover,
+.ptv-detail-page .detailButton:focus-visible {
+    border-color: rgba(125, 214, 255, 0.34) !important;
+    background: rgba(47, 58, 117, 0.78) !important;
+    box-shadow:
+        0 0 22px rgba(167, 139, 250, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+    transform: translateY(-1px);
+}
+
+.ptv-detail-page .btnPlay,
+.ptv-detail-page .btnReplay {
+    background: linear-gradient(135deg, rgba(125, 214, 255, 0.34), rgba(167, 139, 250, 0.34) 52%, rgba(255, 141, 195, 0.28)) !important;
+}
+
+.ptv-detail-page .detailButton .ptv-icon,
+.ptv-detail-page .detailButton .detailButton-icon {
+    --ptv-icon-size: 20px;
+
+    margin: 0 !important;
+}
+
+@media (max-width: 900px) {
+    .ptv-detail-page .detailRibbon {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-detail-page .mainDetailButtons {
+        justify-content: flex-start;
+    }
+}

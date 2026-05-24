@@ -1,0 +1,326 @@
+/* Compatibility guardrails for TV browsers, embedded WebViews, and small touch screens. */
+/* stylelint-disable property-no-vendor-prefix */
+
+.ptv-legacy-skinHeader,
+.ptv-sidebar,
+.ptv-panel,
+.ptv-glass-card,
+.ptv-shell-dialog,
+.ptv-shell-overlay-surface,
+.ptv-hero-btn-secondary,
+.homeSectionsContainer .emby-scrollbuttons-button {
+    -webkit-backdrop-filter: blur(var(--ptv-blur-panel, 12px)) saturate(1.08);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .ptv-legacy-skinHeader,
+    .ptv-sidebar,
+    .ptv-panel,
+    .ptv-glass-card,
+    .ptv-shell-dialog,
+    .ptv-shell-overlay-surface,
+    .ptv-hero-btn-secondary,
+    .homeSectionsContainer .emby-scrollbuttons-button {
+        background-color: rgba(10, 7, 18, 0.96) !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+}
+
+.ptv-render-desktop {
+    --ptv-render-allows-animated-rows: 1;
+    --ptv-render-allows-backdrop-filter: 1;
+    --ptv-render-allows-blur-layers: 1;
+    --ptv-render-allows-decorative-backdrops: 1;
+    --ptv-render-allows-hero-auto-rotate: 1;
+}
+
+.ptv-render-tv,
+.ptv-render-lowpower {
+    --ptv-blur: 0;
+    --ptv-blur-panel: 0;
+    --ptv-blur-heavy: 0;
+    --ptv-motion-atmosphere: 1ms;
+    --ptv-motion-delay-card-action: 0ms;
+    --ptv-motion-delay-card-glow: 0ms;
+    --ptv-motion-delay-card-meta: 0ms;
+    --ptv-motion-disc-spin: 1ms;
+    --ptv-motion-hero: 1ms;
+    --ptv-motion-shimmer: 1ms;
+    --ptv-motion-sweep: 1ms;
+    --ptv-render-allows-animated-rows: 0;
+    --ptv-render-allows-backdrop-filter: 0;
+    --ptv-render-allows-blur-layers: 0;
+    --ptv-render-allows-decorative-backdrops: 0;
+    --ptv-render-allows-hero-auto-rotate: 0;
+}
+
+.ptv-no-backdrop-filter .ptv-legacy-skinHeader,
+.ptv-no-backdrop-filter .ptv-sidebar,
+.ptv-no-backdrop-filter .ptv-panel,
+.ptv-no-backdrop-filter .ptv-glass-card,
+.ptv-no-backdrop-filter .ptv-shell-dialog,
+.ptv-no-backdrop-filter .ptv-shell-overlay-surface,
+.ptv-no-backdrop-filter .ptv-hero-btn-secondary,
+.ptv-no-backdrop-filter .homeSectionsContainer .emby-scrollbuttons-button {
+    background-color: rgba(10, 7, 18, 0.96) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+@media (hover: none), (pointer: coarse), (max-width: 720px) {
+    .ptv-hero-bg {
+        animation: none !important;
+        transform: none !important;
+        will-change: auto;
+    }
+
+    .ptv-hero-ambient,
+    .ptv-row-backdrop {
+        display: none !important;
+    }
+
+    .itemsContainer .card,
+    .ptv-hero-content {
+        will-change: auto;
+    }
+
+    .homeSectionsContainer .itemsContainer,
+    .homeSectionsContainer .emby-scroller {
+        scroll-behavior: auto;
+    }
+}
+
+.ptv-client-low-power .ptv-hero-bg {
+    animation: none !important;
+    transform: none !important;
+    will-change: auto;
+}
+
+.ptv-render-tv .ptv-hero-bg,
+.ptv-render-lowpower .ptv-hero-bg {
+    animation: none !important;
+    transform: none !important;
+    will-change: auto;
+}
+
+.ptv-client-low-power .ptv-hero-ambient,
+.ptv-client-low-power .ptv-row-backdrop,
+.ptv-client-low-power .homeSectionsContainer.ptv-home-has-backdrop::before,
+.ptv-client-low-power .homeSectionsContainer.ptv-home-has-backdrop::after {
+    display: none !important;
+}
+
+.ptv-render-tv .ptv-hero-ambient,
+.ptv-render-tv .ptv-row-backdrop,
+.ptv-render-tv .homeSectionsContainer.ptv-home-has-backdrop::before,
+.ptv-render-tv .homeSectionsContainer.ptv-home-has-backdrop::after,
+.ptv-render-lowpower .ptv-hero-ambient,
+.ptv-render-lowpower .ptv-row-backdrop,
+.ptv-render-lowpower .homeSectionsContainer.ptv-home-has-backdrop::before,
+.ptv-render-lowpower .homeSectionsContainer.ptv-home-has-backdrop::after {
+    display: none !important;
+}
+
+.ptv-client-low-power {
+    --ptv-blur: 0;
+    --ptv-blur-panel: 0;
+    --ptv-blur-heavy: 0;
+    --ptv-motion-atmosphere: 1ms;
+    --ptv-motion-delay-card-action: 0ms;
+    --ptv-motion-delay-card-glow: 0ms;
+    --ptv-motion-delay-card-meta: 0ms;
+    --ptv-motion-disc-spin: 1ms;
+    --ptv-motion-hero: 1ms;
+    --ptv-motion-shimmer: 1ms;
+    --ptv-motion-sweep: 1ms;
+}
+
+.ptv-client-low-power .ptv-legacy-skinHeader,
+.ptv-client-low-power .ptv-sidebar,
+.ptv-client-low-power .ptv-panel,
+.ptv-client-low-power .ptv-glass-card,
+.ptv-client-low-power .ptv-shell-dialog,
+.ptv-client-low-power .ptv-shell-overlay-surface,
+.ptv-client-low-power .ptv-hero-btn-secondary,
+.ptv-client-low-power .homeSectionsContainer .emby-scrollbuttons-button,
+.ptv-client-low-power .homeSectionsContainer .ptv-dynamic-row,
+.ptv-client-low-power .homeSectionsContainer .cardBox {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+.ptv-render-tv .ptv-legacy-skinHeader,
+.ptv-render-tv .ptv-sidebar,
+.ptv-render-tv .ptv-panel,
+.ptv-render-tv .ptv-glass-card,
+.ptv-render-tv .ptv-shell-dialog,
+.ptv-render-tv .ptv-shell-overlay-surface,
+.ptv-render-tv .ptv-hero-btn-secondary,
+.ptv-render-tv .homeSectionsContainer .emby-scrollbuttons-button,
+.ptv-render-tv .homeSectionsContainer .ptv-dynamic-row,
+.ptv-render-tv .homeSectionsContainer .cardBox,
+.ptv-render-lowpower .ptv-legacy-skinHeader,
+.ptv-render-lowpower .ptv-sidebar,
+.ptv-render-lowpower .ptv-panel,
+.ptv-render-lowpower .ptv-glass-card,
+.ptv-render-lowpower .ptv-shell-dialog,
+.ptv-render-lowpower .ptv-shell-overlay-surface,
+.ptv-render-lowpower .ptv-hero-btn-secondary,
+.ptv-render-lowpower .homeSectionsContainer .emby-scrollbuttons-button,
+.ptv-render-lowpower .homeSectionsContainer .ptv-dynamic-row,
+.ptv-render-lowpower .homeSectionsContainer .cardBox {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+.ptv-client-webos {
+    --ptv-card-action-delay: 0ms;
+    --ptv-card-glow-delay: 0ms;
+    --ptv-card-lift-delay: 0ms;
+    --ptv-card-meta-delay: 0ms;
+    --ptv-state-active-transform: none;
+    --ptv-state-hover-transform: none;
+}
+
+.ptv-client-webos .ptv-hero-bg,
+.ptv-client-webos .ptv-hero-content,
+.ptv-client-webos .homeSectionsContainer .card,
+.ptv-client-webos .homeSectionsContainer .cardBox,
+.ptv-client-webos .homeSectionsContainer .cardImageContainer,
+.ptv-client-webos .homeSectionsContainer .cardImage,
+.ptv-client-webos .homeSectionsContainer .coveredImage,
+.ptv-client-webos .ptv-sidebar,
+.ptv-client-webos .ptv-legacy-skinHeader {
+    animation: none !important;
+    filter: none !important;
+    transform: none !important;
+    transition: none !important;
+    will-change: auto !important;
+}
+
+.ptv-client-webos .ptv-hero-bg-previous,
+.ptv-client-webos .ptv-hero-ambient,
+.ptv-client-webos .homeSectionsContainer .ptv-dynamic-row::before,
+.ptv-client-webos .homeSectionsContainer .ptv-dynamic-row::after,
+.ptv-client-webos .homeSectionsContainer .ptv-card .cardContent.cardImageContainer::before,
+.ptv-client-webos .homeSectionsContainer .ptv-card .cardContent.cardImageContainer::after,
+.ptv-client-webos .itemsContainer .ptv-card .cardContent.cardImageContainer::before,
+.ptv-client-webos .itemsContainer .ptv-card .cardContent.cardImageContainer::after {
+    display: none !important;
+}
+
+.ptv-client-webos .ptv-legacy-skinHeader,
+.ptv-client-webos .ptv-sidebar,
+.ptv-client-webos .homeSectionsContainer .ptv-dynamic-row,
+.ptv-client-webos .homeSectionsContainer .cardBox,
+.ptv-client-webos .homeSectionsContainer .emby-scrollbuttons-button {
+    box-shadow: none !important;
+}
+
+.ptv-render-tv .homeSectionsContainer .card,
+.ptv-render-tv .homeSectionsContainer .cardBox,
+.ptv-render-tv .ptv-card,
+.ptv-render-lowpower .homeSectionsContainer .card,
+.ptv-render-lowpower .homeSectionsContainer .cardBox,
+.ptv-render-lowpower .ptv-card,
+.ptv-client-low-power .homeSectionsContainer .card,
+.ptv-client-low-power .homeSectionsContainer .cardBox,
+.ptv-client-low-power .ptv-card,
+.ptv-render-tv .homeSectionsContainer .card:hover,
+.ptv-render-tv .ptv-card:hover,
+.ptv-render-lowpower .homeSectionsContainer .card:hover,
+.ptv-render-lowpower .ptv-card:hover,
+.ptv-client-low-power .homeSectionsContainer .card:hover,
+.ptv-client-low-power .ptv-card:hover {
+    transform: none !important;
+    will-change: auto !important;
+}
+
+.ptv-client-low-power .ptv-home-low-power .ptv-dynamic-row {
+    contain: layout paint;
+}
+
+.ptv-render-tv .ptv-home-low-power .ptv-dynamic-row,
+.ptv-render-lowpower .ptv-home-low-power .ptv-dynamic-row {
+    contain: layout paint;
+}
+
+@media (max-width: 640px) {
+    .ptv-legacy-skinHeader {
+        min-width: 0 !important;
+        height: 56px !important;
+        padding-right: 8px !important;
+        padding-left: 8px !important;
+    }
+
+    .ptv-legacy-skinHeader .headerTop {
+        display: flex !important;
+        min-width: 0 !important;
+        height: 56px !important;
+    }
+
+    .ptv-legacy-skinHeader .headerLeft,
+    .ptv-legacy-skinHeader .headerRight {
+        min-width: 0 !important;
+        gap: 4px;
+    }
+
+    .ptv-legacy-skinHeader .headerRight {
+        flex: 0 1 auto;
+    }
+
+    .ptv-header-logo {
+        min-width: 0;
+        max-width: 128px;
+        padding-right: 8px;
+        padding-left: 8px;
+    }
+
+    .ptv-legacy-skinHeader .headerTabs {
+        left: 8px !important;
+        right: 8px !important;
+        min-width: 0 !important;
+        width: auto !important;
+        transform: none !important;
+    }
+
+    .ptv-legacy-skinHeader .emby-tabs {
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .ptv-legacy-skinHeader .emby-tab-button {
+        min-width: 64px;
+        padding-right: 10px;
+        padding-left: 10px;
+    }
+
+    .ptv-legacy-skinHeader .headerButton,
+    .ptv-legacy-skinHeader .paper-icon-button-light {
+        width: 36px !important;
+        height: 36px !important;
+    }
+
+    .homeSectionsContainer {
+        margin-top: 0;
+    }
+
+    .homeSectionsContainer .sectionTitle,
+    .homeSectionsContainer .itemsContainer {
+        padding-left: 18px !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-hero-bg,
+    .itemsContainer .card,
+    .ptv-shell-dialog,
+    .ptv-shell-overlay-surface,
+    .ptv-shell-overlay-backdrop {
+        animation: none !important;
+        transition-duration: 1ms !important;
+    }
+}
+/* stylelint-enable property-no-vendor-prefix */

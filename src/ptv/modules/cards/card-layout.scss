@@ -1,0 +1,69 @@
+.ptv-card {
+    position: relative;
+
+    transition:
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized),
+        filter var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+
+    will-change: transform;
+}
+
+.ptv-card:hover {
+    transform:
+        translateY(-3px)
+        scale(1.014);
+
+    z-index: 50;
+}
+
+.ptv-cardContent {
+    position: relative;
+
+    overflow: hidden;
+    border-radius: 24px;
+
+    background:
+        linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.03),
+            rgba(255, 255, 255, 0.01)
+        );
+
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
+
+    transition:
+        box-shadow var(--ptv-motion-slow) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay),
+        border-color var(--ptv-motion-medium) var(--ptv-motion-ease-standard) var(--ptv-card-glow-delay);
+}
+
+.ptv-card:hover .ptv-cardContent {
+    box-shadow:
+        0 16px 42px rgba(0, 0, 0, 0.42),
+        0 0 22px rgba(168, 85, 247, 0.12);
+}
+
+/* ===== PTV WATCH PROGRESS ===== */
+
+.ptv-card .itemProgressBar {
+    position: absolute !important;
+    left: 14px !important;
+    right: 14px !important;
+    bottom: 12px !important;
+    height: 5px !important;
+    border-radius: 999px !important;
+    overflow: hidden !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 4px 16px rgba(0, 0, 0, 0.35) !important;
+    z-index: 50 !important;
+}
+
+.ptv-card .itemProgressBarForeground {
+    height: 100% !important;
+    border-radius: inherit !important;
+    background: linear-gradient(90deg, #8b5cf6, #d946ef, #ec4899) !important;
+    box-shadow:
+        0 0 12px rgba(217, 70, 239, 0.48),
+        0 0 18px rgba(236, 72, 153, 0.28) !important;
+}

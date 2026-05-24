@@ -1,0 +1,323 @@
+/* ==========================================================================
+   PiggieTV Dashboard/Admin Visual Layer
+   ========================================================================== */
+
+.dashboardDocument {
+    --ptv-admin-sidebar-width: 228px;
+
+    background:
+        radial-gradient(
+            ellipse at 24% 0%,
+            rgba(168, 85, 247, 0.14),
+            transparent 36%
+        ),
+        radial-gradient(
+            ellipse at 90% 28%,
+            rgba(14, 165, 233, 0.1),
+            transparent 42%
+        ),
+        #07070d;
+}
+
+.dashboardDocument .skinBody,
+.dashboardDocument .mainAnimatedPage {
+    background: transparent !important;
+}
+
+.dashboardDocument .mainAnimatedPage::before {
+    content: '';
+
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+
+    background:
+        linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.018),
+            transparent 28%
+        ),
+        radial-gradient(
+            ellipse at 50% 110%,
+            rgba(236, 72, 153, 0.06),
+            transparent 48%
+        );
+
+    pointer-events: none;
+}
+
+.dashboardDocument .mainDrawer {
+    background:
+        radial-gradient(
+            ellipse at 14% 8%,
+            rgba(168, 85, 247, 0.22),
+            transparent 34%
+        ),
+        radial-gradient(
+            ellipse at 90% 92%,
+            rgba(59, 130, 246, 0.14),
+            transparent 42%
+        ),
+        linear-gradient(
+            180deg,
+            rgba(20, 8, 36, 0.76),
+            rgba(6, 3, 14, 0.9)
+        ) !important;
+
+    border-right: 1px solid rgba(168, 85, 247, 0.22);
+
+    box-shadow:
+        22px 0 58px rgba(0, 0, 0, 0.52),
+        inset -1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+.dashboardDocument .adminDrawerLogo,
+.dashboardDocument .ptv-admin-brand {
+    display: flex;
+    align-items: center;
+
+    min-height: 78px;
+    padding: var(--ptv-space-4) var(--ptv-space-5) var(--ptv-space-5);
+    margin: 0 0 var(--ptv-space-2);
+
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dashboardDocument .adminDrawerLogo > img[src*='assets/logo/'],
+.dashboardDocument [data-ptv-logo='drawer'].ptv-admin-brand-logo {
+    width: min(var(--ptv-drawer-logo-width), 78%);
+    max-width: var(--ptv-drawer-logo-width);
+    height: var(--ptv-drawer-logo-height);
+    max-height: var(--ptv-drawer-logo-height);
+
+    object-fit: contain;
+    filter:
+        drop-shadow(0 0 18px rgba(168, 85, 247, 0.4))
+        drop-shadow(0 0 28px rgba(236, 72, 153, 0.16));
+}
+
+.dashboardDocument .navMenuOption,
+.dashboardDocument .lnkManageServer {
+    min-height: 40px !important;
+    padding: 0 var(--ptv-space-3) !important;
+    margin: 2px 10px;
+
+    border: 1px solid transparent;
+    border-radius: var(--ptv-radius-md, 14px);
+
+    background: transparent !important;
+
+    color: rgba(255, 255, 255, 0.76) !important;
+    font-size: 14px;
+    font-weight: 760;
+
+    transition:
+        color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        background-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        border-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized);
+}
+
+.dashboardDocument .navMenuOption:hover,
+.dashboardDocument .navMenuOption:focus-visible,
+.dashboardDocument .navMenuOption-selected,
+.dashboardDocument .lnkManageServer:hover,
+.dashboardDocument .lnkManageServer:focus-visible {
+    color: #fff !important;
+    background:
+        linear-gradient(
+            90deg,
+            rgba(168, 85, 247, 0.2),
+            rgba(236, 72, 153, 0.11),
+            transparent 84%
+        ) !important;
+    border-color: rgba(255, 255, 255, 0.1);
+
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+        0 0 22px rgba(168, 85, 247, 0.18);
+
+    transform: translateX(2px);
+}
+
+.dashboardDocument .ptv-dashboard-icon-row {
+    display: flex;
+    align-items: center;
+    gap: var(--ptv-space-3);
+}
+
+.dashboardDocument .navMenuOptionIcon img {
+    flex: 0 0 18px;
+
+    width: 18px;
+    height: 18px;
+
+    object-fit: contain;
+
+    filter:
+        brightness(0)
+        invert(1)
+        opacity(0.76);
+}
+
+.dashboardDocument .ptv-dashboard-card,
+.dashboardDocument .paperList,
+.dashboardDocument .dashboardSection,
+.dashboardDocument .activeSession,
+.dashboardDocument .formDialog,
+.dashboardDocument .dialog,
+.dashboardDocument .visualCardBox {
+    border: 1px solid var(--ptv-border-subtle);
+    border-radius: var(--ptv-radius-lg, 20px);
+
+    background:
+        radial-gradient(
+            ellipse at 12% 0%,
+            rgba(125, 211, 252, 0.06),
+            transparent 34%
+        ),
+        radial-gradient(
+            ellipse at 90% 100%,
+            rgba(236, 72, 153, 0.06),
+            transparent 42%
+        ),
+        var(--ptv-elevation-2-surface) !important;
+
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    backdrop-filter: blur(10px) saturate(1.08);
+}
+
+.dashboardDocument .dashboardSection {
+    padding: var(--ptv-space-5);
+    margin-bottom: var(--ptv-space-5);
+}
+
+.dashboardDocument .dashboardSection h3,
+.dashboardDocument .sectionTitle,
+.dashboardDocument .sectionTitleTextButton {
+    color: rgba(255, 255, 255, 0.92) !important;
+    font-weight: 860;
+    letter-spacing: 0;
+}
+
+.dashboardDocument .listItem {
+    margin: 6px 0;
+    padding: 11px var(--ptv-space-3);
+
+    border: 1px solid rgba(205, 174, 255, 0.08);
+    border-radius: var(--ptv-radius-md, 12px);
+    background: rgba(13, 7, 24, 0.42) !important;
+}
+
+.dashboardDocument .listItemBodyText,
+.dashboardDocument .secondaryText,
+.dashboardDocument .fieldDescription,
+.dashboardDocument .cardText-secondary {
+    color: rgba(255, 255, 255, 0.62) !important;
+}
+
+.dashboardDocument .emby-button,
+.dashboardDocument .button-submit,
+.dashboardDocument a[data-role='button'] {
+    border: 1px solid rgba(168, 85, 247, 0.34) !important;
+    border-radius: 999px !important;
+
+    background:
+        linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.07),
+            rgba(59, 130, 246, 0.12)
+        ) !important;
+
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0 16px rgba(168, 85, 247, 0.14);
+
+    color: rgba(255, 255, 255, 0.86) !important;
+
+    transition:
+        box-shadow var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-medium) var(--ptv-motion-ease-emphasized);
+}
+
+.dashboardDocument .emby-button:hover,
+.dashboardDocument .emby-button:focus-visible,
+.dashboardDocument a[data-role='button']:hover,
+.dashboardDocument a[data-role='button']:focus-visible {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 0 26px rgba(236, 72, 153, 0.22);
+
+    transform: translateY(-1px);
+}
+
+.dashboardDocument progress,
+.dashboardDocument .playbackProgress,
+.dashboardDocument .transcodingProgress,
+.dashboardDocument .backgroundProgress {
+    height: 7px;
+
+    overflow: hidden;
+
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: inset 0 0 0 1px rgba(205, 174, 255, 0.08);
+}
+
+.dashboardDocument progress::-webkit-progress-value,
+.dashboardDocument .playbackProgress > div {
+    background:
+        linear-gradient(
+            90deg,
+            #0ea5e9,
+            #d946ef
+        ) !important;
+}
+
+.dashboardDocument .transcodingProgress > div {
+    background:
+        linear-gradient(
+            90deg,
+            #f97316,
+            #d946ef
+        ) !important;
+}
+
+.dashboardDocument .sessionNowPlayingContent {
+    border-radius: var(--ptv-radius-md, 14px);
+}
+
+.dashboardDocument .activeSession,
+.dashboardDocument .sessionNowPlayingContent,
+.dashboardDocument .visualCardBox {
+    background:
+        linear-gradient(
+            180deg,
+            rgba(44, 16, 72, 0.72),
+            var(--ptv-elevation-2-surface-muted-solid)
+        ) !important;
+}
+
+.dashboardDocument .cardBox,
+.dashboardDocument .visualCardBox {
+    border-color: rgba(205, 174, 255, 0.1) !important;
+    box-shadow:
+        0 10px 26px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+.dashboardDocument .darkenContent {
+    background:
+        linear-gradient(
+            180deg,
+            rgba(0, 0, 0, 0.34),
+            rgba(0, 0, 0, 0.78)
+        );
+}
+
+@media all and (max-width: 70em) {
+    .dashboardDocument .dashboardSection {
+        padding: 14px;
+    }
+}

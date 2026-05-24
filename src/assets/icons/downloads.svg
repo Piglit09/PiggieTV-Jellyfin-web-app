@@ -1,0 +1,19 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="ptvGrad" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#31D8FF"/>
+    <stop offset="0.52" stop-color="#7E6CFF"/>
+    <stop offset="1" stop-color="#FF43D1"/>
+  </linearGradient>
+  <filter id="ptvGlow" x="-50%" y="-50%" width="200%" height="200%">
+    <feDropShadow dx="0" dy="0" stdDeviation="1.3" flood-color="#9B6BFF" flood-opacity="0.28"/>
+  </filter>
+</defs>
+<g filter="url(#ptvGlow)">
+
+<path d="M12 4V13.8" stroke="url(#ptvGrad)" stroke-width="2.2" stroke-linecap="round"/>
+<path d="M8.2 10.7L12 14.5L15.8 10.7" stroke="url(#ptvGrad)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M5 19H19" stroke="url(#ptvGrad)" stroke-width="2.2" stroke-linecap="round"/>
+
+</g>
+</svg>

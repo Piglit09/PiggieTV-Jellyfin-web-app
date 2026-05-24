@@ -1,0 +1,15 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ptvGrad" x1="4" y1="6" x2="20" y2="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7DD6FF"></stop>
+      <stop offset="50%" stop-color="#A78BFA"></stop>
+      <stop offset="100%" stop-color="#FF8DC3"></stop>
+    </linearGradient>
+  </defs>
+
+  <!-- frame -->
+  <rect x="4" y="6" width="16" height="12" rx="3" stroke="url(#ptvGrad)" stroke-width="2.4"></rect>
+
+  <!-- play -->
+  <path d="M10 9.5L15 12L10 14.5Z" fill="url(#ptvGrad)"></path>
+</svg>

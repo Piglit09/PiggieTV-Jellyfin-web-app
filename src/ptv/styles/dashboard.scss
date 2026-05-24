@@ -1,0 +1,1150 @@
+/* PiggieTV native dashboard theme. Drawer icons only; dashboard content icons remain Jellyfin-native. */
+/* stylelint-disable @stylistic/declaration-colon-space-after, property-no-vendor-prefix, no-descending-specificity */
+
+.dashboardDocument {
+    background: var(--ptv-cinema-bg);
+}
+
+.dashboardDocument .mainAnimatedPage,
+.dashboardDocument .skinBody {
+    background: transparent !important;
+}
+
+.dashboardDocument .mainDrawer {
+    background:
+        radial-gradient(ellipse at 14% 8%, rgba(167, 139, 250, 0.22), transparent 34%),
+        radial-gradient(ellipse at 90% 92%, rgba(125, 214, 255, 0.14), transparent 42%),
+        linear-gradient(180deg, rgba(13, 8, 28, 0.96), rgba(5, 5, 12, 0.98)) !important;
+    border-right: 1px solid rgba(167, 139, 250, 0.22);
+}
+
+.dashboardDocument .content-primary .ptv-icon,
+.dashboardDocument .dashboardSection .ptv-icon,
+.dashboardDocument .paperList .ptv-icon,
+.dashboardDocument .visualCardBox .ptv-icon,
+.dashboardDocument .card .ptv-icon,
+.dashboardDocument .listItem .ptv-icon {
+    display: none !important;
+}
+
+.dashboardDocument .mainDrawer .ptv-icon,
+.dashboardDocument .mainDrawer .ptv-drawer-icon,
+.dashboardDocument .MuiDrawer-paper .ptv-icon {
+    display: inline-block !important;
+}
+
+.dashboardDocument .ptv-dashboard-card,
+.dashboardDocument .paperList,
+.dashboardDocument .dashboardSection,
+.dashboardDocument .activeSession,
+.dashboardDocument .formDialog,
+.dashboardDocument .dialog,
+.dashboardDocument .visualCardBox {
+    border: 1px solid var(--ptv-glass-border) !important;
+    border-radius: var(--ptv-radius-lg, 20px) !important;
+    background:
+        radial-gradient(ellipse at 12% 0%, rgba(125, 214, 255, 0.1), transparent 34%),
+        radial-gradient(ellipse at 90% 100%, rgba(255, 141, 195, 0.1), transparent 42%),
+        linear-gradient(180deg, rgba(52, 20, 82, 0.46), rgba(9, 5, 18, 0.72)),
+        var(--ptv-glass-bg-strong) !important;
+    box-shadow: var(--ptv-elevation-2-shadow) !important;
+    backdrop-filter: blur(10px) saturate(1.08);
+}
+
+.dashboardDocument .dashboardSection,
+.dashboardDocument .paperList {
+    padding: var(--ptv-density-section-gap, var(--ptv-admin-section-gap));
+    margin-bottom: var(--ptv-density-section-gap, var(--ptv-admin-section-gap));
+}
+
+.dashboardDocument .sectionTitle,
+.dashboardDocument .sectionTitleTextButton,
+.dashboardDocument .dashboardSection h3 {
+    color: rgba(245, 247, 255, 0.94) !important;
+    font-family: var(--ptv-font-accent) !important;
+    font-size: clamp(20px, 1.45vw, 28px) !important;
+    font-weight: 800 !important;
+    line-height: var(--ptv-line-title) !important;
+    letter-spacing: 0 !important;
+}
+
+.dashboardDocument .navMenuOption:hover,
+.dashboardDocument .navMenuOption:focus-visible,
+.dashboardDocument .navMenuOption-selected {
+    background: rgba(49, 31, 86, 0.28) !important;
+    box-shadow:
+        inset 0 0 0 1px rgba(205, 174, 255, 0.08),
+        0 0 14px rgba(167, 139, 250, 0.14) !important;
+}
+
+.dashboardDocument .MuiDrawer-paper {
+    border-right: 1px solid rgba(205, 174, 255, 0.16) !important;
+    background:
+        radial-gradient(ellipse at 14% 8%, rgba(167, 139, 250, 0.18), transparent 34%),
+        radial-gradient(ellipse at 92% 92%, rgba(255, 141, 195, 0.08), transparent 42%),
+        linear-gradient(180deg, rgba(24, 7, 43, 0.9), rgba(7, 3, 15, 0.96)) !important;
+    box-shadow:
+        18px 0 52px rgba(0, 0, 0, 0.44),
+        inset -1px 0 0 rgba(255, 255, 255, 0.04) !important;
+    backdrop-filter: blur(20px) saturate(1.15);
+}
+
+.dashboardDocument .ptv-dashboard-drawer-brand {
+    justify-content: center !important;
+    align-items: center !important;
+    min-height: 108px !important;
+    padding: 18px 20px !important;
+    margin: 10px 10px 12px !important;
+
+    border: 1px solid rgba(205, 174, 255, 0.13);
+    border-radius: var(--ptv-radius-lg, 20px);
+    background:
+        radial-gradient(ellipse at 22% 0%, rgba(125, 214, 255, 0.08), transparent 38%),
+        linear-gradient(180deg, rgba(42, 14, 72, 0.56), rgba(12, 5, 24, 0.72));
+    box-shadow:
+        0 14px 34px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.dashboardDocument [data-ptv-logo='drawer'].ptv-dashboard-drawer-logo {
+    display: block !important;
+    width: var(--ptv-dashboard-drawer-logo-width) !important;
+    max-width: var(--ptv-dashboard-drawer-logo-width) !important;
+    height: var(--ptv-dashboard-drawer-logo-height) !important;
+    max-height: var(--ptv-dashboard-drawer-logo-height) !important;
+
+    opacity: 1 !important;
+    visibility: visible !important;
+    object-fit: contain;
+    filter:
+        drop-shadow(0 0 14px rgba(125, 214, 255, 0.22))
+        drop-shadow(0 0 22px rgba(255, 141, 195, 0.16));
+}
+
+.dashboardDocument .ptv-dashboard-drawer-brand .MuiListItemIcon-root {
+    display: flex !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+    width: 100% !important;
+}
+
+.dashboardDocument .ptv-dashboard-drawer-brand-text {
+    display: none !important;
+}
+
+.dashboardDocument .MuiDrawer-paper .MuiListSubheader-root {
+    margin: 12px 10px 8px;
+    padding: 0 14px 8px !important;
+
+    color: rgba(245, 247, 255, 0.66) !important;
+    background: transparent !important;
+    font-family: var(--ptv-font-accent) !important;
+    font-size: 13px !important;
+    font-weight: 850 !important;
+    letter-spacing: 0 !important;
+    line-height: var(--ptv-line-dense) !important;
+}
+
+.dashboardDocument .MuiDrawer-paper .MuiListSubheader-root::after {
+    content: '';
+
+    display: block;
+    width: 54px;
+    height: 2px;
+    margin-top: 8px;
+
+    border-radius: var(--ptv-radius-pill);
+    background: linear-gradient(90deg, #7dd6ff, #a78bfa 52%, #ff8dc3);
+    opacity: 0.8;
+}
+
+.dashboardDocument .MuiDrawer-paper .MuiListItemButton-root,
+.dashboardDocument .MuiDrawer-paper a.MuiListItemButton-root {
+    min-height: var(--ptv-control-height-lg) !important;
+    margin: 3px 10px !important;
+    padding: 0 14px !important;
+
+    border: 1px solid transparent !important;
+    border-radius: var(--ptv-radius-md, 14px) !important;
+    background: transparent !important;
+
+    color: rgba(245, 247, 255, 0.78) !important;
+
+    transition: var(--ptv-transition-hover) !important;
+}
+
+.dashboardDocument .MuiDrawer-paper .MuiListItemButton-root:hover,
+.dashboardDocument .MuiDrawer-paper .MuiListItemButton-root:focus-visible,
+.dashboardDocument .MuiDrawer-paper a.MuiListItemButton-root:hover,
+.dashboardDocument .MuiDrawer-paper a.MuiListItemButton-root:focus-visible {
+    color: #fff !important;
+    border-color: rgba(205, 174, 255, 0.16) !important;
+    background:
+        linear-gradient(90deg, rgba(125, 214, 255, 0.08), rgba(167, 139, 250, 0.14) 52%, rgba(255, 141, 195, 0.08)) !important;
+    box-shadow:
+        0 0 16px rgba(167, 139, 250, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
+    transform: translateX(2px);
+}
+
+.dashboardDocument .MuiDrawer-paper .Mui-selected,
+.dashboardDocument .MuiDrawer-paper .MuiListItemButton-root[aria-current='page'] {
+    color: #fff !important;
+    border-color: rgba(205, 174, 255, 0.2) !important;
+    background:
+        linear-gradient(90deg, rgba(125, 214, 255, 0.11), rgba(167, 139, 250, 0.18) 52%, rgba(255, 141, 195, 0.1)) !important;
+}
+
+.dashboardDocument .ptv-dashboard-drawer-icon-slot {
+    min-width: 44px !important;
+    color: inherit !important;
+}
+
+.dashboardDocument .ptv-dashboard-drawer-icon,
+.dashboardDocument .MuiDrawer-paper .ptv-icon {
+    width: 22px !important;
+    height: 22px !important;
+    min-width: 22px !important;
+    min-height: 22px !important;
+
+    background:
+        linear-gradient(135deg, #ff8dc3 0%, #c9b5ff 36%, #a78bfa 58%, #7dd6ff 100%) !important;
+    mask: var(--ptv-icon-url) center / contain no-repeat !important;
+    -webkit-mask: var(--ptv-icon-url) center / contain no-repeat !important;
+    filter:
+        drop-shadow(0 0 5px rgba(167, 139, 250, 0.28))
+        drop-shadow(0 0 9px rgba(255, 141, 195, 0.18)) !important;
+}
+
+.dashboardDocument .MuiDrawer-paper .MuiListItemButton-root:hover .ptv-icon,
+.dashboardDocument .MuiDrawer-paper .MuiListItemButton-root:focus-visible .ptv-icon,
+.dashboardDocument .MuiDrawer-paper .Mui-selected .ptv-icon {
+    background:
+        linear-gradient(135deg, #ff9fd0 0%, #d8c7ff 34%, #a78bfa 58%, #9fe7ff 100%) !important;
+    filter:
+        drop-shadow(0 0 7px rgba(167, 139, 250, 0.4))
+        drop-shadow(0 0 10px rgba(255, 141, 195, 0.26)) !important;
+}
+
+.dashboardDocument .content-primary {
+    max-width: min(1480px, calc(100vw - 64px));
+    margin-right: auto !important;
+    margin-left: auto !important;
+}
+
+.dashboardDocument .readOnlyContent,
+.dashboardDocument .verticalSection,
+.dashboardDocument .dashboardSection {
+    max-width: 100%;
+}
+
+.dashboardDocument .visualCardBox,
+.dashboardDocument .activeSession {
+    overflow: hidden;
+}
+
+.dashboardDocument .listItem,
+.dashboardDocument .activeSession {
+    border-radius: var(--ptv-radius-md) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        0 8px 22px rgba(0, 0, 0, 0.18) !important;
+}
+
+.dashboardDocument .backgroundProgress,
+.dashboardDocument .playbackProgress,
+.dashboardDocument progress {
+    height: 7px !important;
+    border-radius: var(--ptv-radius-pill) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: inset 0 0 0 1px rgba(205, 174, 255, 0.08);
+}
+
+.dashboardDocument .backgroundProgress > div,
+.dashboardDocument .playbackProgress > div,
+.dashboardDocument progress::-webkit-progress-value {
+    background: var(--ptv-gradient-action) !important;
+}
+
+.dashboardDocument .visualCardBox,
+.dashboardDocument .cardBox {
+    box-shadow:
+        0 12px 30px rgba(0, 0, 0, 0.26),
+        0 0 18px rgba(167, 139, 250, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+/* stylelint-disable no-duplicate-selectors */
+
+/* ===== PTV Dashboard Product Pass ===== */
+.dashboardDocument {
+    --ptv-dashboard-surface:
+        var(--ptv-elevation-2-surface);
+    --ptv-dashboard-surface-secondary: var(--ptv-elevation-2-surface-muted);
+    --ptv-dashboard-row:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.045), rgba(125, 214, 255, 0.035), rgba(255, 141, 195, 0.025));
+    --ptv-dashboard-border: rgba(205, 174, 255, 0.13);
+    --ptv-dashboard-border-soft: rgba(205, 174, 255, 0.085);
+    --ptv-dashboard-shadow: var(--ptv-elevation-2-shadow);
+}
+
+.dashboardDocument .mainAnimatedPage::after {
+    content: '';
+
+    position: fixed;
+    inset: var(--ptv-shell-header-height) 0 0 var(--ptv-admin-sidebar-width, 228px);
+    z-index: -1;
+
+    background:
+        radial-gradient(ellipse at 24% 10%, rgba(125, 214, 255, 0.07), transparent 34%),
+        radial-gradient(ellipse at 82% 20%, rgba(167, 139, 250, 0.09), transparent 38%),
+        radial-gradient(ellipse at 62% 92%, rgba(255, 141, 195, 0.06), transparent 44%);
+
+    pointer-events: none;
+}
+
+.dashboardDocument .content-primary {
+    width: min(1500px, calc(100vw - 72px)) !important;
+    padding:
+        0
+        clamp(22px, 3vw, 42px)
+        var(--ptv-density-page-padding-bottom, 48px) !important;
+}
+
+.dashboardDocument .content-primary.ptv-admin-shell-spaced {
+    padding-top: var(--ptv-dashboard-shell-top-offset, var(--ptv-admin-shell-top-offset)) !important;
+}
+
+.dashboardDocument .content-primary > .MuiGrid-container {
+    align-items: flex-start;
+}
+
+.dashboardDocument .ptv-dashboard-overview-page {
+    width: min(1500px, calc(100vw - var(--ptv-admin-gutter))) !important;
+}
+
+.dashboardDocument .ptv-dashboard-overview-grid {
+    display: grid !important;
+    grid-template-areas: 'main activity side';
+    grid-template-columns:
+        minmax(420px, 1.16fr)
+        minmax(320px, 0.86fr)
+        minmax(320px, 0.86fr);
+    gap: var(--ptv-dashboard-grid-gap) !important;
+    align-items: start !important;
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+.dashboardDocument .ptv-dashboard-overview-grid > .MuiGrid-item {
+    width: auto !important;
+    min-width: 0;
+    max-width: none !important;
+    padding: 0 !important;
+    flex-basis: auto !important;
+}
+
+.dashboardDocument .ptv-dashboard-overview-main {
+    grid-area: main;
+}
+
+.dashboardDocument .ptv-dashboard-overview-activity {
+    grid-area: activity;
+}
+
+.dashboardDocument .ptv-dashboard-overview-side {
+    grid-area: side;
+}
+
+.dashboardDocument .ptv-dashboard-overview-column > .MuiStack-root {
+    gap: var(--ptv-dashboard-grid-gap) !important;
+}
+
+.dashboardDocument .ptv-dashboard-metric-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: var(--ptv-space-4) !important;
+    align-items: stretch !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.dashboardDocument .ptv-dashboard-metric-grid > .MuiGrid-item,
+.dashboardDocument .ptv-dashboard-metric-grid > .ptv-dashboard-metric-item {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex-basis: auto !important;
+    box-sizing: border-box !important;
+    transform: none !important;
+}
+
+.dashboardDocument .ptv-dashboard-metric-grid .MuiCard-root,
+.dashboardDocument .ptv-dashboard-metric-grid .ptv-dashboard-metric-card {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: var(--ptv-dashboard-stat-card-min-height) !important;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.dashboardDocument .ptv-dashboard-metric-grid .MuiCard-root > .MuiStack-root,
+.dashboardDocument .ptv-dashboard-metric-grid .ptv-dashboard-metric-card > .MuiStack-root {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(26px, auto);
+    align-items: center !important;
+    align-content: center !important;
+    width: 100%;
+    min-width: 0;
+    min-height: var(--ptv-dashboard-stat-card-min-height);
+    padding: var(--ptv-space-4) !important;
+    gap: var(--ptv-space-2) var(--ptv-space-3) !important;
+    box-sizing: border-box;
+}
+
+.dashboardDocument .ptv-dashboard-metric-grid .MuiBox-root {
+    min-width: 0;
+}
+
+.dashboardDocument .ptv-dashboard-metric-grid .MuiTypography-body2 {
+    display: block;
+    max-width: 100%;
+
+    font-size: var(--ptv-text-small) !important;
+    line-height: var(--ptv-line-dense) !important;
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
+.dashboardDocument .ptv-dashboard-metric-grid .MuiTypography-h5 {
+    font-size: clamp(18px, 1.15vw, 24px) !important;
+    line-height: var(--ptv-line-dense) !important;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
+.dashboardDocument .ptv-dashboard-metric-grid .MuiSvgIcon-root {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    justify-self: end;
+
+    font-size: clamp(24px, 1.8vw, 32px) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget {
+    position: relative;
+
+    margin-bottom: 4px;
+}
+
+.dashboardDocument .ptv-dashboard-widget::before {
+    content: '';
+
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: 48px;
+    z-index: -1;
+
+    height: 1px;
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(125, 214, 255, 0.26),
+            rgba(167, 139, 250, 0.22),
+            rgba(255, 141, 195, 0.14),
+            transparent
+        );
+
+    opacity: 0.65;
+}
+
+.dashboardDocument .ptv-dashboard-widget-title {
+    min-height: 40px !important;
+    padding: 0 4px !important;
+    margin: 0 0 12px !important;
+
+    color: rgba(245, 247, 255, 0.94) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    text-transform: none !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-title .MuiTypography-root {
+    font-size: clamp(20px, 1.3vw, 27px) !important;
+    font-weight: 900 !important;
+    line-height: var(--ptv-line-title) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-title .MuiSvgIcon-root {
+    color: #c9b5ff !important;
+    filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.22));
+}
+
+.dashboardDocument .ptv-dashboard-widget-title .MuiButton-endIcon {
+    flex: 0 0 auto;
+    margin-left: var(--ptv-space-2);
+}
+
+.dashboardDocument .ptv-dashboard-action-row {
+    gap: var(--ptv-space-3) !important;
+    align-items: center !important;
+    flex-wrap: wrap;
+}
+
+.dashboardDocument .ptv-dashboard-action-button {
+    min-height: var(--ptv-dashboard-action-height, var(--ptv-control-height-lg)) !important;
+    padding: 0 clamp(var(--ptv-space-4), 1.35vw, var(--ptv-space-6)) !important;
+
+    font-size: var(--ptv-text-card) !important;
+}
+
+.dashboardDocument .ptv-dashboard-action-button .MuiButton-startIcon {
+    margin-right: var(--ptv-space-2);
+}
+
+.dashboardDocument .MuiPaper-root,
+.dashboardDocument .MuiCard-root,
+.dashboardDocument .MuiList-root,
+.dashboardDocument .paperList,
+.dashboardDocument .dashboardSection,
+.dashboardDocument .ptv-dashboard-card {
+    border: 1px solid var(--ptv-dashboard-border) !important;
+    border-radius: var(--ptv-radius-lg, 20px) !important;
+
+    background: var(--ptv-dashboard-surface) !important;
+
+    box-shadow: var(--ptv-dashboard-shadow) !important;
+    backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.dashboardDocument .ptv-dashboard-widget-secondary .MuiPaper-root,
+.dashboardDocument .ptv-dashboard-widget-secondary .MuiCard-root,
+.dashboardDocument .ptv-dashboard-widget-secondary .MuiList-root,
+.dashboardDocument .ptv-dashboard-widget-alerts .MuiList-root,
+.dashboardDocument .ptv-dashboard-widget-paths .MuiList-root {
+    background: var(--ptv-dashboard-surface-secondary) !important;
+    box-shadow: var(--ptv-elevation-2-shadow-muted) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-server .MuiPaper-root {
+    border-color: rgba(125, 214, 255, 0.18) !important;
+    box-shadow: var(--ptv-elevation-3-shadow) !important;
+}
+
+.dashboardDocument .ptv-dashboard-overview-page .ptv-dashboard-widget {
+    margin-bottom: 0;
+}
+
+.dashboardDocument .ptv-dashboard-widget-server .MuiPaper-root {
+    padding: var(--ptv-space-5) !important;
+}
+
+.dashboardDocument .MuiCard-root {
+    overflow: hidden;
+
+    transition: var(--ptv-transition-hover);
+}
+
+.dashboardDocument .MuiCard-root:hover,
+.dashboardDocument .MuiCard-root:focus-within {
+    border-color: rgba(125, 214, 255, 0.24) !important;
+    box-shadow: var(--ptv-elevation-3-shadow) !important;
+    transform: translateY(-2px);
+}
+
+.dashboardDocument .MuiList-root {
+    padding: 8px !important;
+}
+
+.dashboardDocument .MuiListItem-root,
+.dashboardDocument .MuiListItemButton-root,
+.dashboardDocument .listItem {
+    min-height: var(--ptv-density-list-row-height, calc(var(--ptv-table-row-height) + var(--ptv-space-2)));
+    padding: 10px 12px !important;
+    margin: 4px 0 !important;
+
+    border: 1px solid transparent !important;
+    border-radius: var(--ptv-radius-md, 14px) !important;
+    background: transparent !important;
+
+    transition: var(--ptv-transition-hover);
+}
+
+.dashboardDocument .MuiListItemButton-root {
+    margin: 0 !important;
+}
+
+.dashboardDocument .MuiListItem-root:hover,
+.dashboardDocument .MuiListItem-root:focus-within,
+.dashboardDocument .MuiListItemButton-root:hover,
+.dashboardDocument .MuiListItemButton-root:focus-visible,
+.dashboardDocument .listItem:hover,
+.dashboardDocument .listItem:focus-visible {
+    border-color: var(--ptv-dashboard-border-soft) !important;
+    background: var(--ptv-dashboard-row) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.045),
+        0 10px 24px rgba(0, 0, 0, 0.18),
+        0 0 16px rgba(167, 139, 250, 0.1) !important;
+    transform: translateY(-1px);
+}
+
+.dashboardDocument .MuiListItemAvatar-root,
+.dashboardDocument .MuiListItemIcon-root {
+    min-width: 44px !important;
+}
+
+.dashboardDocument .MuiAvatar-root {
+    background:
+        linear-gradient(135deg, rgba(125, 214, 255, 0.9), rgba(167, 139, 250, 0.92) 52%, rgba(255, 141, 195, 0.9)) !important;
+    box-shadow:
+        0 0 10px rgba(125, 214, 255, 0.18),
+        0 0 16px rgba(255, 141, 195, 0.12) !important;
+}
+
+.dashboardDocument .MuiTypography-root {
+    letter-spacing: 0 !important;
+}
+
+.dashboardDocument .MuiTypography-body1,
+.dashboardDocument .MuiTypography-body2,
+.dashboardDocument .MuiListItemText-primary {
+    color: rgba(245, 247, 255, 0.86) !important;
+    line-height: var(--ptv-line-body) !important;
+}
+
+.dashboardDocument .MuiTypography-colorTextSecondary,
+.dashboardDocument .MuiListItemText-secondary,
+.dashboardDocument .secondaryText,
+.dashboardDocument .fieldDescription {
+    color: rgba(224, 229, 255, 0.62) !important;
+    line-height: var(--ptv-line-body) !important;
+}
+
+.dashboardDocument .MuiButton-root {
+    min-height: var(--ptv-density-button-height, var(--ptv-control-height-md)) !important;
+    padding: 0 var(--ptv-space-4) !important;
+
+    border-radius: var(--ptv-radius-pill) !important;
+    font-weight: 820 !important;
+    letter-spacing: 0 !important;
+    line-height: var(--ptv-line-dense) !important;
+    transition: var(--ptv-transition-hover) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-server .MuiButton-root:not(.ptv-dashboard-widget-title) {
+    border: 1px solid rgba(205, 174, 255, 0.16) !important;
+    background:
+        linear-gradient(135deg, rgba(125, 214, 255, 0.1), rgba(167, 139, 250, 0.14), rgba(255, 141, 195, 0.08)) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.07),
+        0 0 14px rgba(167, 139, 250, 0.1) !important;
+}
+
+.dashboardDocument .MuiLinearProgress-root,
+.dashboardDocument progress,
+.dashboardDocument .playbackProgress,
+.dashboardDocument .transcodingProgress,
+.dashboardDocument .backgroundProgress {
+    height: 7px !important;
+    overflow: hidden !important;
+
+    border-radius: var(--ptv-radius-pill) !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: inset 0 0 0 1px rgba(205, 174, 255, 0.08) !important;
+}
+
+.dashboardDocument .MuiLinearProgress-bar,
+.dashboardDocument .MuiLinearProgress-bar1Buffer,
+.dashboardDocument .MuiLinearProgress-bar2Buffer,
+.dashboardDocument progress::-webkit-progress-value,
+.dashboardDocument .playbackProgress > div,
+.dashboardDocument .transcodingProgress > div,
+.dashboardDocument .backgroundProgress > div {
+    background:
+        linear-gradient(90deg, #7dd6ff, #a78bfa 52%, #ff8dc3) !important;
+    box-shadow:
+        0 0 10px rgba(125, 214, 255, 0.28),
+        0 0 16px rgba(255, 141, 195, 0.16);
+}
+
+.dashboardDocument .MuiLinearProgress-dashed {
+    background-image: none !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-devices .MuiCard-root {
+    width: min(100%, 380px) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-devices .MuiCardMedia-root {
+    min-height: 208px;
+    background-color: rgba(10, 4, 20, 0.88);
+}
+
+.dashboardDocument .ptv-dashboard-widget-devices .MuiCardMedia-root > .MuiStack-root {
+    background:
+        linear-gradient(180deg, rgba(5, 3, 12, 0.54), rgba(5, 3, 12, 0.84)) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-devices .MuiCardActions-root {
+    padding: 10px 12px !important;
+    border-top: 1px solid rgba(205, 174, 255, 0.08);
+    background: rgba(7, 4, 15, 0.46);
+}
+
+.dashboardDocument .ptv-dashboard-widget-devices .MuiIconButton-root {
+    margin: 0 4px;
+
+    color: #c9b5ff !important;
+    background: rgba(255, 255, 255, 0.045) !important;
+    box-shadow: inset 0 0 0 1px rgba(205, 174, 255, 0.08);
+}
+
+.dashboardDocument .ptv-dashboard-widget-devices .MuiIconButton-root:hover,
+.dashboardDocument .ptv-dashboard-widget-devices .MuiIconButton-root:focus-visible {
+    color: #fff !important;
+    background:
+        linear-gradient(135deg, rgba(125, 214, 255, 0.16), rgba(167, 139, 250, 0.2), rgba(255, 141, 195, 0.12)) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-paths .MuiListItem-root {
+    align-items: flex-start;
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-paths .MuiListItemText-primary .MuiTypography-root {
+    color: rgba(245, 247, 255, 0.9) !important;
+    font-weight: 820 !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-paths .MuiListItemText-secondary .MuiTypography-root:first-child {
+    font-size: 12px !important;
+    color: rgba(224, 229, 255, 0.56) !important;
+}
+
+.dashboardDocument .ptv-dashboard-widget-activity .MuiList-root,
+.dashboardDocument .ptv-dashboard-widget-alerts .MuiList-root {
+    max-height: clamp(420px, 58vh, 720px);
+    overflow: auto;
+}
+
+.dashboardDocument .ptv-featured-cache-task {
+    display: grid;
+    gap: var(--ptv-space-4);
+
+    width: min(100%, 920px);
+    margin: 0 0 var(--ptv-space-5) !important;
+    padding: clamp(var(--ptv-space-4), 2vw, var(--ptv-space-5)) !important;
+}
+
+.dashboardDocument .ptv-featured-cache-task-header {
+    display: grid;
+    gap: var(--ptv-space-2);
+}
+
+.dashboardDocument .ptv-featured-cache-task-title {
+    margin: 0;
+
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-accent);
+    font-size: var(--ptv-text-section);
+    font-weight: 850;
+    line-height: var(--ptv-line-section);
+}
+
+.dashboardDocument .ptv-featured-cache-task-meta {
+    margin: 0;
+
+    color: var(--ptv-color-text-secondary);
+    font-size: var(--ptv-text-card);
+    line-height: var(--ptv-line-body);
+}
+
+.dashboardDocument .ptv-featured-cache-task-message {
+    margin: 0;
+
+    color: var(--ptv-color-text-secondary);
+    font-size: var(--ptv-text-card);
+    font-weight: 760;
+    line-height: var(--ptv-line-body);
+}
+
+.dashboardDocument .ptv-featured-cache-task[data-ptv-featured-cache-run-state='running'] .ptv-featured-cache-task-message {
+    color: var(--ptv-color-text-primary);
+}
+
+.dashboardDocument .ptv-featured-cache-task[data-ptv-featured-cache-run-state='success'] .ptv-featured-cache-task-message {
+    color: var(--ptv-state-success-text, var(--ptv-color-text-primary));
+}
+
+.dashboardDocument .ptv-featured-cache-task[data-ptv-featured-cache-run-state='error'] .ptv-featured-cache-task-message {
+    color: var(--ptv-state-danger-text, var(--ptv-color-text-primary));
+}
+
+.dashboardDocument .ptv-featured-cache-task-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: var(--ptv-space-3);
+}
+
+.dashboardDocument .ptv-featured-cache-task-field {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ptv-space-2);
+
+    color: var(--ptv-color-text-secondary);
+    font-weight: 760;
+}
+
+.dashboardDocument .ptv-featured-cache-task-input {
+    width: 92px !important;
+    min-height: var(--ptv-control-height-md) !important;
+    padding-inline: var(--ptv-space-3) !important;
+
+    text-align: center;
+}
+
+.dashboardDocument .ptv-featured-cache-task-button {
+    min-height: var(--ptv-control-height-md) !important;
+    padding-inline: var(--ptv-space-4) !important;
+}
+
+.dashboardDocument .ptv-featured-cache-task-status {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ptv-space-3);
+
+    margin: 0;
+}
+
+.dashboardDocument .ptv-featured-cache-task-status > div {
+    min-width: 0;
+    padding: var(--ptv-space-3);
+
+    border: 1px solid var(--ptv-dashboard-border-soft);
+    border-radius: var(--ptv-radius-card);
+    background: var(--ptv-dashboard-row);
+}
+
+.dashboardDocument .ptv-featured-cache-task-status dt {
+    margin: 0 0 var(--ptv-space-1);
+
+    color: var(--ptv-color-text-muted);
+    font-size: var(--ptv-text-small);
+    font-weight: 780;
+    line-height: var(--ptv-line-dense);
+}
+
+.dashboardDocument .ptv-featured-cache-task-status dd {
+    margin: 0;
+
+    overflow: hidden;
+
+    color: var(--ptv-color-text-primary);
+    font-size: var(--ptv-text-card);
+    font-weight: 760;
+    line-height: var(--ptv-line-body);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dashboardDocument .ptv-dashboard-control-content {
+    max-width: min(1180px, calc(100vw - 72px)) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page {
+    --ptv-dashboard-status-ok: #34d399;
+    --ptv-dashboard-status-error: var(--ptv-state-danger-text);
+    --ptv-dashboard-status-warning-rgb: 251, 146, 60;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card {
+    height: 100%;
+    min-height: 0 !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .MuiGrid-root {
+    align-items: stretch;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .MuiCardContent-root {
+    padding: clamp(var(--ptv-space-3), 1.5vw, var(--ptv-space-4)) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-compact .MuiCardContent-root {
+    padding: clamp(var(--ptv-space-2), 1.15vw, var(--ptv-space-3)) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-stack-compact {
+    gap: var(--ptv-space-2) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-compact .MuiDivider-root {
+    margin: 0 !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-compact .MuiButton-root {
+    min-height: 36px !important;
+    padding: 0 var(--ptv-space-4) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .MuiAlert-root {
+    padding: 6px 10px !important;
+    border-radius: var(--ptv-radius-md);
+    font-size: 12px;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-dashboard-status-list .MuiTypography-root,
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-debug .MuiTypography-root {
+    font-size: 13px !important;
+    line-height: 1.35 !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-debug .MuiFormControlLabel-root {
+    min-height: 34px;
+    margin: 0;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-debug .MuiSwitch-root {
+    transform: scale(0.9);
+    transform-origin: left center;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .MuiTypography-h1 {
+    margin: 0 0 var(--ptv-space-2);
+
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(28px, 2.4vw, 42px);
+    font-weight: 900;
+    line-height: var(--ptv-line-title);
+}
+
+.dashboardDocument .ptv-dashboard-control-page .MuiTypography-h2 {
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-accent);
+    font-size: var(--ptv-text-section);
+    font-weight: 850;
+    line-height: var(--ptv-line-section);
+}
+
+.dashboardDocument .ptv-dashboard-control-page .MuiSwitch-root {
+    flex: 0 0 auto;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-live-status-chip,
+.dashboardDocument .ptv-dashboard-control-page .ptv-cache-state-chip,
+.dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge,
+.dashboardDocument .ptv-dashboard-control-page .ptv-status-badge {
+    height: 24px !important;
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.2) !important;
+    background: rgba(var(--ptv-color-focus-rgb), 0.1) !important;
+    color: var(--ptv-color-text-primary) !important;
+    font-size: 11px !important;
+    font-weight: 850 !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-status-badge-path {
+    max-width: min(100%, 360px);
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-status-badge-path .MuiChip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-status-badge-backend {
+    border-color: rgba(var(--ptv-color-accent-secondary-rgb), 0.28) !important;
+    background: rgba(var(--ptv-color-accent-secondary-rgb), 0.11) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-live-status-dot {
+    width: 8px !important;
+    height: 8px !important;
+    margin-left: 7px !important;
+    border-radius: 999px;
+    background: var(--ptv-dashboard-status-error);
+    box-shadow: 0 0 0 3px rgba(var(--ptv-color-accent-rgb), 0.12);
+}
+
+.dashboardDocument .ptv-dashboard-control-page [data-ptv-plugin-state='connected'] .ptv-live-status-dot {
+    background: var(--ptv-dashboard-status-ok);
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.14);
+    animation: ptvDashboardStatusPulse 1.8s var(--ptv-motion-ease-standard) infinite;
+}
+
+.dashboardDocument .ptv-dashboard-control-page [data-ptv-plugin-state='connected'] .ptv-live-status-chip {
+    border-color: rgba(52, 211, 153, 0.34) !important;
+    background: rgba(52, 211, 153, 0.12) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page [data-ptv-plugin-state='using-fallback'] .ptv-live-status-chip,
+.dashboardDocument .ptv-dashboard-control-page [data-ptv-plugin-state='timeout'] .ptv-live-status-chip {
+    border-color: rgba(var(--ptv-dashboard-status-warning-rgb), 0.38) !important;
+    background: rgba(var(--ptv-dashboard-status-warning-rgb), 0.13) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page [data-ptv-plugin-state='endpoint-unreachable'] .ptv-live-status-chip,
+.dashboardDocument .ptv-dashboard-control-page [data-ptv-plugin-state='plugin-missing'] .ptv-live-status-chip,
+.dashboardDocument .ptv-dashboard-control-page [data-ptv-plugin-state='unauthorized'] .ptv-live-status-chip,
+.dashboardDocument .ptv-dashboard-control-page [data-ptv-plugin-state='version-mismatch'] .ptv-live-status-chip {
+    border-color: var(--ptv-state-danger-border) !important;
+    background: var(--ptv-state-danger) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-cache[data-ptv-cache-state='stale'] {
+    border-color: rgba(var(--ptv-dashboard-status-warning-rgb), 0.38) !important;
+    box-shadow:
+        var(--ptv-dashboard-shadow),
+        0 0 24px rgba(var(--ptv-dashboard-status-warning-rgb), 0.14) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-cache[data-ptv-cache-state='missing'] {
+    border-color: var(--ptv-state-danger-border) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-cache[data-ptv-cache-state='stale'] .ptv-cache-state-chip {
+    border-color: rgba(var(--ptv-dashboard-status-warning-rgb), 0.38) !important;
+    background: rgba(var(--ptv-dashboard-status-warning-rgb), 0.13) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-cache[data-ptv-cache-state='fresh'] .ptv-cache-state-chip {
+    border-color: rgba(52, 211, 153, 0.3) !important;
+    background: rgba(52, 211, 153, 0.11) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-control-card-cache[data-ptv-cache-state='missing'] .ptv-cache-state-chip {
+    border-color: var(--ptv-state-danger-border) !important;
+    background: var(--ptv-state-danger) !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-cache-refresh-spinner {
+    width: 12px !important;
+    height: 12px !important;
+    margin-left: 7px !important;
+    border: 2px solid rgba(var(--ptv-palette-white-rgb), 0.22);
+    border-top-color: var(--ptv-color-focus);
+    border-radius: 999px;
+    animation: ptvDashboardCacheSpin 0.8s var(--ptv-motion-ease-linear) infinite;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge {
+    --ptv-render-badge-rgb: var(--ptv-color-focus-rgb);
+
+    border-color: rgba(var(--ptv-render-badge-rgb), 0.38) !important;
+    background: rgba(var(--ptv-render-badge-rgb), 0.14) !important;
+    box-shadow: 0 0 16px rgba(var(--ptv-render-badge-rgb), 0.12);
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge[data-ptv-render-profile='PTV_TV'] {
+    --ptv-render-badge-rgb: var(--ptv-color-accent-secondary-rgb);
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge[data-ptv-render-profile='PTV_LOWPOWER'] {
+    --ptv-render-badge-rgb: var(--ptv-dashboard-status-warning-rgb);
+}
+
+@keyframes ptvDashboardStatusPulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.14);
+    }
+
+    50% {
+        box-shadow: 0 0 0 7px rgba(52, 211, 153, 0);
+    }
+}
+
+@keyframes ptvDashboardCacheSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.dashboardDocument .ptv-debug-report-preview {
+    max-height: 260px;
+    padding: var(--ptv-space-3);
+    margin: 0;
+    overflow: auto;
+
+    border: 1px solid var(--ptv-dashboard-border-soft);
+    border-radius: var(--ptv-radius-md);
+    background: rgba(5, 3, 12, 0.54);
+
+    color: var(--ptv-color-text-secondary);
+    font-family: var(--ptv-font-mono, monospace);
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+
+@media all and (max-width: 82em) {
+    .dashboardDocument .ptv-dashboard-overview-grid {
+        grid-template-areas:
+            'main main'
+            'activity side';
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 0.92fr);
+    }
+}
+
+@media all and (max-width: 70em) {
+    .dashboardDocument .mainAnimatedPage::after {
+        left: 0;
+    }
+
+    .dashboardDocument .content-primary {
+        width: 100% !important;
+        padding-right: 18px !important;
+        padding-left: 18px !important;
+    }
+
+    .dashboardDocument .ptv-dashboard-overview-grid {
+        grid-template-areas:
+            'main'
+            'activity'
+            'side';
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboardDocument .ptv-dashboard-metric-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)) !important;
+    }
+
+    .dashboardDocument .ptv-featured-cache-task-status {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboardDocument .dashboardSection,
+    .dashboardDocument .paperList,
+    .dashboardDocument .MuiPaper-root,
+    .dashboardDocument .MuiList-root {
+        padding: 14px !important;
+    }
+}
+
+/* stylelint-enable no-duplicate-selectors */
+/* stylelint-enable @stylistic/declaration-colon-space-after, property-no-vendor-prefix, no-descending-specificity */
