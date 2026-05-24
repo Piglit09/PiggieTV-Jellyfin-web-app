@@ -240,3 +240,4 @@ Useful upstream links:
 ## License
 
 Jellyfin Web is licensed under the GPL 2.0 license. PiggieTV modifications in this repository follow the same repository licensing unless otherwise noted in a specific file.
+
