@@ -5,6 +5,7 @@ import { dispatchPtvCustomEvent } from '../../core/events';
 import { ptvLogger } from '../../core/logger';
 import { recordPtvEvent, registerPtvDebugCacheStatusProvider, timePtvAsync } from '../../core/observability';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
+import { getRuntimeScope } from '../../core/scope';
 
 export const FEATURED_CACHE_VERSION = PTV_CACHE.featuredContentVersion;
 export const FEATURED_CACHE_UPDATED_EVENT = PTV_EVENTS.featuredCacheUpdated;
@@ -47,9 +48,14 @@ let memoryCacheEntry: FeaturedCacheEntry | null = null;
 let memoryCacheSettings: FeaturedCacheSettings = {};
 let lastCacheStorage: 'memory' | 'named-config' | 'plugin' | null = null;
 let lastCacheWriteError: string | null = null;
+let lastCacheReadError: string | null = null;
 let lastRefreshDurationMs: number | null = null;
 let lastRefreshError: string | null = null;
 let lastServerBackend: 'named-config' | 'plugin' | null = null;
+let initialCachePrimeScheduled = false;
+
+const FEATURED_CACHE_PRIME_DELAYS = [300, 1200, 3200, 8000, 15000];
+const featuredCacheScope = getRuntimeScope('featured-cache');
 
 const CACHE_ITEM_FIELDS = new Set([
     'Album',
@@ -427,6 +433,7 @@ function readServerCacheEntry() {
             memoryCacheEntry = parseCacheEntryValue(document.featuredContent);
             lastCacheStorage = memoryCacheEntry ? getSuccessfulServerStorage() : null;
             lastCacheWriteError = null;
+            lastCacheReadError = null;
 
             debugLog('read server cache', {
                 hasCache: Boolean(memoryCacheEntry),
@@ -438,6 +445,7 @@ function readServerCacheEntry() {
         })
         .catch((err: unknown) => {
             lastCacheWriteError = null;
+            lastCacheReadError = getErrorMessage(err);
             recordPtvEvent('cache', 'error', {
                 error: getErrorMessage(err),
                 operation: 'read'
@@ -451,6 +459,27 @@ function readServerCacheEntry() {
         });
 
     return inflightServerRead;
+}
+
+export function primeFeaturedContentCacheStatus() {
+    if (memoryCacheEntry || inflightServerRead) {
+        return inflightServerRead || Promise.resolve(memoryCacheEntry);
+    }
+
+    if (!getCurrentApiClient()) {
+        return Promise.resolve(null);
+    }
+
+    recordPtvEvent('cache', 'status-prime', {
+        source: 'startup'
+    });
+
+    return readServerCacheEntry()
+        .then(entry => {
+            dispatchCacheUpdated();
+
+            return entry;
+        });
 }
 
 export function getFeaturedContentCacheTtlMs() {
@@ -644,6 +673,10 @@ export function getFeaturedContentCacheStatus() {
     const cached = memoryCacheEntry;
     const now = Date.now();
 
+    if (!cached && !inflightServerRead) {
+        void primeFeaturedContentCacheStatus();
+    }
+
     return {
         createdAt: cached?.createdAt || null,
         expiresAt: cached?.expiresAt || null,
@@ -653,6 +686,8 @@ export function getFeaturedContentCacheStatus() {
         itemCount: cached ? getPayloadItemCount(cached.payload) : 0,
         sectionCount: cached ? Object.keys(cached.payload.sectionItems).length : 0,
         storage: lastCacheStorage || 'none',
+        readError: lastCacheReadError,
+        readInProgress: Boolean(inflightServerRead),
         writeError: lastCacheWriteError,
         lastRefreshDurationMs,
         lastRefreshError,
@@ -749,3 +784,18 @@ export function getFeaturedContent(fetcher: () => Promise<FeaturedPayload>): Pro
 }
 
 registerPtvDebugCacheStatusProvider(getFeaturedContentCacheStatus);
+
+function scheduleInitialCachePrime() {
+    if (initialCachePrimeScheduled) return;
+
+    initialCachePrimeScheduled = true;
+    FEATURED_CACHE_PRIME_DELAYS.forEach(delay => {
+        featuredCacheScope.timeout(() => {
+            if (memoryCacheEntry) return;
+
+            void primeFeaturedContentCacheStatus();
+        }, delay);
+    });
+}
+
+scheduleInitialCachePrime();

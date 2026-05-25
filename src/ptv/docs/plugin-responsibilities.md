@@ -12,6 +12,7 @@ The PiggieTV Jellyfin plugin should stay focused. It is not a second frontend.
 - structured plugin error responses
 - background featured-content refresh
 - manual admin refresh endpoint
+- optional server-side TMDb metadata enrichment for featured row matching
 
 ## Owns Next
 
@@ -36,6 +37,15 @@ Featured-content cache reads are authenticated-user endpoints. TV clients and no
 Featured-content cache writes, clears, and manual refreshes are admin/elevated-only. This prevents broken clients or browser extensions from poisoning or thrashing the shared homepage cache for every user.
 
 Admin-only endpoints should also be used for future plugin settings that mutate server policy or file-system paths.
+
+## Secret Rule
+
+Third-party API credentials must never be sent to frontend JavaScript. TMDb credentials are server-side only and should be supplied through the Jellyfin host environment or plugin configuration:
+
+- `PTV_TMDB_READ_ACCESS_TOKEN`
+- `PTV_TMDB_API_KEY`
+
+The plugin may use TMDb only as an enrichment layer for items that already have TMDb provider ids. If TMDb is unavailable, cache refreshes must continue using Jellyfin metadata.
 
 ## Store Rule
 

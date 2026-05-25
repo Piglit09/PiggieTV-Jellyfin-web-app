@@ -3,21 +3,6 @@ import { PTV_ASSETS, PTV_BRANDING } from '../../core/config';
 import { applyPtvResponsiveImage } from '../../core/images';
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
-import { ServerConnections } from 'lib/jellyfin-apiclient';
-import { getUserViewsQuery } from 'hooks/useUserViews';
-import { toApi } from 'utils/jellyfin-apiclient/compat';
-import { queryClient } from 'utils/query/queryClient';
-import {
-    forceRefreshFeaturedContentCache,
-    getFeaturedContentCacheStatus,
-    setFeaturedContentCacheTtlMs
-} from '../cache/featuredContentCache';
-import {
-    createFeaturedContentFetcher,
-    loadGenreMap,
-    loadStudioMap,
-    PTV_HOME_ROWS
-} from '../../pages/home/ptvRows';
 import {
     applyPtvStockPrimitives,
     PTV_STOCK_FORM_FIELD_SELECTOR as ADMIN_FORM_FIELD_SELECTOR,
@@ -33,7 +18,6 @@ import './dashboard.scss';
 const DASHBOARD_DOCUMENT_SELECTOR = '.dashboardDocument';
 const DASHBOARD_DRAWER_SELECTOR = '.dashboardDocument .MuiDrawer-paper';
 const DASHBOARD_RETRY_DELAYS = [0, 100, 300, 750, 1500, 2500];
-const FEATURED_CACHE_TASK_SELECTOR = '[data-ptv-featured-cache-task="true"]';
 const PTV_DRAWER_BRAND_SELECTOR = '[data-ptv-brand="drawer"], .ptv-admin-brand';
 const PTV_DRAWER_LOGO_SELECTOR = '[data-ptv-logo="drawer"], .ptv-admin-brand-logo, .ptv-dashboard-drawer-logo';
 const DASHBOARD_DRAWER_PRIMITIVE_SELECTOR = [
@@ -144,10 +128,6 @@ const ADMIN_DENSITY_RULES = [
 
 function getDashboardRouteText() {
     return `${window.location.pathname} ${window.location.hash}`.toLowerCase();
-}
-
-function isDashboardTasksRoute() {
-    return /\/dashboard\/tasks(?:$|[?#\s])/.test(getDashboardRouteText());
 }
 
 function isDashboardActive() {
@@ -669,253 +649,6 @@ function enhanceDashboardIcons() {
     runIconEngine(document);
 }
 
-function formatDateTime(timestamp) {
-    if (!timestamp) return 'Not cached yet';
-
-    return new Date(timestamp).toLocaleString(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short'
-    });
-}
-
-function formatDurationHours(ttlMs) {
-    return Math.max(1, Math.round(ttlMs / (60 * 60 * 1000)));
-}
-
-function getFeaturedPayloadSummary(payload) {
-    const heroCount = Array.isArray(payload?.heroItems) ? payload.heroItems.length : 0;
-    const sectionItems = payload?.sectionItems || {};
-    const sectionIds = Object.keys(sectionItems);
-    const itemCount = sectionIds.reduce((count, sectionId) => {
-        const items = sectionItems[sectionId];
-
-        return count + (Array.isArray(items) ? items.length : 0);
-    }, 0);
-
-    return {
-        heroCount,
-        itemCount,
-        sectionCount: sectionIds.length
-    };
-}
-
-function setFeaturedCacheTaskMessage(panel, message, state = 'idle') {
-    const messageElement = panel.querySelector('[data-ptv-featured-cache-message]');
-
-    panel.dataset.ptvFeaturedCacheRunState = state;
-
-    if (messageElement) {
-        messageElement.textContent = message;
-    }
-}
-
-function updateFeaturedCacheTaskPanel(panel) {
-    const status = getFeaturedContentCacheStatus();
-    const ttlInput = panel.querySelector('[data-ptv-featured-cache-ttl]');
-    const statusText = panel.querySelector('[data-ptv-featured-cache-status]');
-    const expiresText = panel.querySelector('[data-ptv-featured-cache-expires]');
-    const sectionText = panel.querySelector('[data-ptv-featured-cache-sections]');
-
-    if (ttlInput instanceof HTMLInputElement && document.activeElement !== ttlInput) {
-        ttlInput.value = String(formatDurationHours(status.ttlMs));
-    }
-
-    if (statusText) {
-        let label = 'Stale or empty';
-
-        if (status.isFresh) {
-            if (status.storage === 'plugin') {
-                label = 'Fresh on PTV plugin';
-            } else if (status.storage === 'named-config') {
-                label = 'Fresh in named config';
-            } else {
-                label = status.isStored ? 'Fresh on server' : 'Fresh in memory';
-            }
-        }
-
-        statusText.textContent = label;
-    }
-
-    if (expiresText) {
-        expiresText.textContent = formatDateTime(status.expiresAt);
-    }
-
-    if (sectionText) {
-        sectionText.textContent = [
-            `${status.heroCount} hero`,
-            `${status.itemCount} row items`,
-            `${status.sectionCount} sections`
-        ].join(' / ');
-    }
-
-    if (status.writeError) {
-        setFeaturedCacheTaskMessage(
-            panel,
-            `Cache is available for this page, but the server did not save it: ${status.writeError}`,
-            'error'
-        );
-    }
-}
-
-function fetchDashboardFeaturedContent() {
-    const apiClient = ServerConnections.currentApiClient?.();
-    const userId = apiClient?.getCurrentUserId?.();
-
-    if (!apiClient || !userId) {
-        return Promise.reject(new Error('No active Jellyfin API client is available.'));
-    }
-
-    const userViewsPromise = queryClient
-        .fetchQuery(getUserViewsQuery(toApi(apiClient), userId))
-        .catch(() => (
-            typeof apiClient.getUserViews === 'function' ?
-                apiClient.getUserViews({}, userId) :
-                { Items: [] }
-        ));
-
-    return userViewsPromise
-        .then(result => result.Items || [])
-        .then(userViews => Promise.all([
-            loadGenreMap(apiClient, userId),
-            loadStudioMap(apiClient, userId)
-        ])
-            .then(([genresByName, studiosByName]) => createFeaturedContentFetcher(
-                apiClient,
-                userId,
-                PTV_HOME_ROWS,
-                {
-                    genresByName,
-                    studiosByName
-                },
-                userViews
-            )()));
-}
-
-function createFeaturedCacheTaskPanel() {
-    const panel = document.createElement('section');
-    const header = document.createElement('div');
-    const title = document.createElement('h2');
-    const meta = document.createElement('p');
-    const controls = document.createElement('div');
-    const intervalLabel = document.createElement('label');
-    const intervalInput = document.createElement('input');
-    const saveButton = document.createElement('button');
-    const forceButton = document.createElement('button');
-    const runMessage = document.createElement('p');
-    const statusGrid = document.createElement('dl');
-
-    panel.className = 'ptv-featured-cache-task ptv-dashboard-card ptv-panel';
-    panel.dataset.ptvFeaturedCacheTask = 'true';
-
-    header.className = 'ptv-featured-cache-task-header';
-    title.className = 'ptv-featured-cache-task-title';
-    title.textContent = 'PiggieTV Featured Content Refresh';
-    meta.className = 'ptv-featured-cache-task-meta';
-    meta.textContent = 'Controls the shared server-side hero and home-row featured content cache.';
-    header.append(title, meta);
-
-    controls.className = 'ptv-featured-cache-task-controls';
-
-    intervalLabel.className = 'ptv-featured-cache-task-field';
-    intervalLabel.textContent = 'Refresh every';
-    intervalInput.className = 'ptv-field-control ptv-featured-cache-task-input';
-    intervalInput.dataset.ptvFeaturedCacheTtl = 'true';
-    intervalInput.type = 'number';
-    intervalInput.min = '1';
-    intervalInput.max = '168';
-    intervalInput.step = '1';
-    intervalInput.inputMode = 'numeric';
-    intervalLabel.append(intervalInput, document.createTextNode(' hours'));
-
-    saveButton.type = 'button';
-    saveButton.className = 'ptv-button ptv-button-ghost ptv-featured-cache-task-button';
-    saveButton.textContent = 'Save Interval';
-    saveButton.addEventListener('click', () => {
-        const nextHours = Number(intervalInput.value || 12);
-
-        setFeaturedContentCacheTtlMs(nextHours * 60 * 60 * 1000);
-        updateFeaturedCacheTaskPanel(panel);
-    });
-
-    forceButton.type = 'button';
-    forceButton.className = 'ptv-button ptv-button-primary ptv-featured-cache-task-button';
-    forceButton.textContent = 'Force Run';
-    forceButton.addEventListener('click', () => {
-        forceButton.disabled = true;
-        forceButton.textContent = 'Running...';
-        setFeaturedCacheTaskMessage(panel, 'Refreshing featured content...', 'running');
-
-        forceRefreshFeaturedContentCache(fetchDashboardFeaturedContent)
-            .then(payload => {
-                const summary = getFeaturedPayloadSummary(payload);
-
-                updateFeaturedCacheTaskPanel(panel);
-
-                const status = getFeaturedContentCacheStatus();
-
-                if (!status.writeError) {
-                    setFeaturedCacheTaskMessage(
-                        panel,
-                        `Finished: ${summary.heroCount} hero items, ${summary.itemCount} row items across ${summary.sectionCount} sections.`,
-                        'success'
-                    );
-                }
-            })
-            .catch(err => {
-                console.warn('[PTV Dashboard] Failed to force featured cache refresh', err);
-                setFeaturedCacheTaskMessage(
-                    panel,
-                    `Refresh failed: ${err?.message || 'Unable to fetch featured content.'}`,
-                    'error'
-                );
-            })
-            .finally(() => {
-                forceButton.disabled = false;
-                forceButton.textContent = 'Force Run';
-            });
-    });
-
-    controls.append(intervalLabel, saveButton, forceButton);
-
-    runMessage.className = 'ptv-featured-cache-task-message';
-    runMessage.dataset.ptvFeaturedCacheMessage = 'true';
-    runMessage.textContent = 'Ready to refresh featured content.';
-
-    statusGrid.className = 'ptv-featured-cache-task-status';
-    statusGrid.innerHTML = [
-        '<div><dt>Status</dt><dd data-ptv-featured-cache-status></dd></div>',
-        '<div><dt>Expires</dt><dd data-ptv-featured-cache-expires></dd></div>',
-        '<div><dt>Payload</dt><dd data-ptv-featured-cache-sections></dd></div>'
-    ].join('');
-
-    panel.append(header, controls, runMessage, statusGrid);
-    updateFeaturedCacheTaskPanel(panel);
-
-    return panel;
-}
-
-function enhanceFeaturedCacheScheduledTask() {
-    document.querySelectorAll(FEATURED_CACHE_TASK_SELECTOR).forEach((panel) => {
-        if (!isDashboardTasksRoute()) {
-            panel.remove();
-        }
-    });
-
-    if (!isDashboardTasksRoute()) return;
-
-    const content = document.querySelector('.dashboardDocument .content-primary');
-    if (!content) return;
-
-    const existingPanel = content.querySelector(FEATURED_CACHE_TASK_SELECTOR);
-
-    if (existingPanel instanceof HTMLElement) {
-        updateFeaturedCacheTaskPanel(existingPanel);
-        return;
-    }
-
-    content.prepend(createFeaturedCacheTaskPanel());
-}
-
 function runDashboard() {
     if (!isDashboardActive()) return;
 
@@ -932,7 +665,6 @@ function runDashboard() {
     enhanceDashboardCards();
     enhanceDashboardForms();
     enhanceDashboardIcons();
-    enhanceFeaturedCacheScheduledTask();
 }
 
 dashboardScope.watchDom(() => scheduleDashboardRun());

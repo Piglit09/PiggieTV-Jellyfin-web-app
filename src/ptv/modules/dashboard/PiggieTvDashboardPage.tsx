@@ -9,6 +9,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Grid from '@mui/material/Grid2';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
+import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import React, { useCallback, useEffect, useState } from 'react';
 
@@ -19,7 +20,7 @@ import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 
 import { getPtvClientProfile, getPtvPerformanceProfile } from '../../core/clientProfile';
-import { PTV_PLUGIN_API } from '../../core/config';
+import { PTV_CACHE, PTV_PLUGIN_API } from '../../core/config';
 import {
     getPtvFeatureSettings,
     PTV_FEATURE_SETTINGS_CHANGE_EVENT,
@@ -38,6 +39,7 @@ import {
     FEATURED_CACHE_UPDATED_EVENT,
     forceRefreshFeaturedContentCache,
     getFeaturedContentCacheStatus,
+    setFeaturedContentCacheTtlMs,
     type FeaturedPayload
 } from '../cache/featuredContentCache';
 import {
@@ -283,6 +285,10 @@ function formatDuration(durationMs?: number | null) {
     if (durationMs < 1000) return `${durationMs} ms`;
 
     return `${(durationMs / 1000).toFixed(1)} s`;
+}
+
+function formatIntervalHours(ttlMs?: number | null) {
+    return Math.max(1, Math.round((ttlMs || PTV_CACHE.featuredContentTtlMs) / (60 * 60 * 1000)));
 }
 
 function formatBytes(bytes?: number) {
@@ -581,6 +587,8 @@ const PiggieTvDashboardPage = () => {
     const [performanceReport, setPerformanceReport] = useState<unknown>(getPerformanceSnapshot);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isClearing, setIsClearing] = useState(false);
+    const [refreshIntervalHours, setRefreshIntervalHours] = useState(() => String(formatIntervalHours(getFeaturedContentCacheStatus().ttlMs)));
+    const [isEditingRefreshInterval, setIsEditingRefreshInterval] = useState(false);
 
     const clientProfile = getPtvClientProfile();
     const performanceProfile = getPtvPerformanceProfile();
@@ -704,6 +712,37 @@ const PiggieTvDashboardPage = () => {
             setStatusMessage('Featured cache clear requested.');
         }, 250);
     }, [refreshPluginStatus, syncCacheStatus, syncPerformanceReport]);
+
+    const saveRefreshInterval = useCallback(() => {
+        const hours = Number(refreshIntervalHours);
+
+        if (!Number.isFinite(hours) || hours < 1) {
+            setStatusMessage('Refresh interval must be at least 1 hour.');
+            return;
+        }
+
+        const normalizedTtlMs = setFeaturedContentCacheTtlMs(hours * 60 * 60 * 1000);
+        const normalizedHours = formatIntervalHours(normalizedTtlMs);
+
+        setRefreshIntervalHours(String(normalizedHours));
+        setIsEditingRefreshInterval(false);
+        syncCacheStatus();
+        syncPerformanceReport();
+        refreshPluginStatus();
+        setStatusMessage(`Featured cache refresh interval saved to ${normalizedHours} hour${normalizedHours === 1 ? '' : 's'}.`);
+    }, [refreshIntervalHours, refreshPluginStatus, syncCacheStatus, syncPerformanceReport]);
+
+    const handleRefreshIntervalChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setRefreshIntervalHours(event.target.value);
+    }, []);
+
+    const handleRefreshIntervalFocus = useCallback(() => {
+        setIsEditingRefreshInterval(true);
+    }, []);
+
+    const handleRefreshIntervalBlur = useCallback(() => {
+        setIsEditingRefreshInterval(false);
+    }, []);
 
     const toggleDebug = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         const enabled = event.target.checked;
@@ -833,6 +872,12 @@ const PiggieTvDashboardPage = () => {
         };
     }, [refreshPluginStatus, syncCacheStatus, syncPerformanceReport]);
 
+    useEffect(() => {
+        if (isEditingRefreshInterval) return;
+
+        setRefreshIntervalHours(String(formatIntervalHours(cacheStatus.ttlMs)));
+    }, [cacheStatus.ttlMs, isEditingRefreshInterval]);
+
     const pluginStatus = pluginState.status;
     const pluginFeaturedStatus = pluginStatus?.featuredContent;
     const cacheSource = getDashboardCacheSource(cacheStatus, pluginStatus);
@@ -955,6 +1000,38 @@ const PiggieTvDashboardPage = () => {
                                         </Stack>
                                         <Divider />
                                         <CacheStateAlerts cacheFreshness={cacheFreshness} cacheSource={cacheSource} />
+                                        <Stack
+                                            direction={{ xs: 'column', sm: 'row' }}
+                                            spacing={1.5}
+                                            alignItems={{ xs: 'stretch', sm: 'center' }}
+                                        >
+                                            <TextField
+                                                className='ptv-featured-cache-interval-field'
+                                                slotProps={{
+                                                    htmlInput: {
+                                                        max: formatIntervalHours(PTV_CACHE.maxFeaturedContentTtlMs),
+                                                        min: formatIntervalHours(PTV_CACHE.minFeaturedContentTtlMs),
+                                                        step: 1
+                                                    }
+                                                }}
+                                                label='Refresh interval'
+                                                onBlur={handleRefreshIntervalBlur}
+                                                onChange={handleRefreshIntervalChange}
+                                                onFocus={handleRefreshIntervalFocus}
+                                                size='small'
+                                                type='number'
+                                                value={refreshIntervalHours}
+                                            />
+                                            <Typography color='text.secondary'>hours</Typography>
+                                            <Button
+                                                type='button'
+                                                variant='outlined'
+                                                onClick={saveRefreshInterval}
+                                                disabled={pluginState.connected && pluginStatus?.canWriteFeaturedContent === false}
+                                            >
+                                                Save Interval
+                                            </Button>
+                                        </Stack>
                                         <Grid container spacing={1.5}>
                                             <Grid size={{ xs: 12, sm: 6 }}>
                                                 <Typography>Source: {cacheSource}</Typography>

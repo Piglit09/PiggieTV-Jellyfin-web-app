@@ -316,7 +316,7 @@ export function getModuleDiagnostics() {
     const runtimeDiagnostics = getRuntimeDiagnostics();
     const scopeMap = new Map(runtimeDiagnostics.scopes.map(scope => [scope.name, scope]));
     const moduleSnapshots = Array.from(modules.values()).map(module => {
-        const scope = scopeMap.get(module.name);
+        const scope = scopeMap.get(`module:${module.name}`) || scopeMap.get(module.name);
 
         return {
             ...snapshotModule(module),

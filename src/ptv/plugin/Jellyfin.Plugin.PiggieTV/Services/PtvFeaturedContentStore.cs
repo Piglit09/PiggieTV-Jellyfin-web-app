@@ -120,6 +120,7 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
                 FeaturedCacheExists = File.Exists(_filePath),
                 FeaturedCacheExpiresAt = featuredStatus.ExpiresAt,
                 FeaturedCacheFresh = featuredStatus.HasPayload
+                    && featuredStatus.CacheVersion == PtvFeaturedContentValidator.FeaturedCacheVersion
                     && featuredStatus.ExpiresAt.HasValue
                     && featuredStatus.ExpiresAt.Value > now
             };

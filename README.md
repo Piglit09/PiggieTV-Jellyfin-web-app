@@ -57,6 +57,7 @@ The plugin provides:
 - plugin health/status reporting
 - shared featured-content cache storage
 - server-side featured cache refresh
+- optional server-side TMDb metadata enrichment for Disney, family animation, anime, and other featured row matching
 - startup refresh when cache is missing or expired
 - 12-hour default refresh interval
 - stale cache serving when refresh fails
@@ -70,6 +71,8 @@ Featured cache file:
 ```text
 <Jellyfin plugin configurations path>/PiggieTV/featured-content-cache.json
 ```
+
+Optional TMDb credentials must stay server-side. The plugin can read `PTV_TMDB_READ_ACCESS_TOKEN` or `PTV_TMDB_API_KEY` from the Jellyfin host environment to improve featured row accuracy without exposing secrets to browsers.
 
 ### PiggieTV Dashboard
 

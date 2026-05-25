@@ -37,6 +37,19 @@ The cache is stored at:
 
 The plugin refreshes this cache in the background on startup when the cache is missing or expired, then on the normal refresh interval. Manual dashboard refresh calls `POST /Ptv/v1/FeaturedContent/Refresh`. Reads continue serving the current cache during refresh; failed refreshes keep stale cache available.
 
+## Optional TMDb Enrichment
+
+TMDb can improve category accuracy for rows such as Disney, family animation, and anime when Jellyfin items already have TMDb provider ids. Keep TMDb secrets on the Jellyfin server only. Do not place them in frontend JavaScript.
+
+Preferred server environment variables:
+
+```text
+PTV_TMDB_READ_ACCESS_TOKEN
+PTV_TMDB_API_KEY
+```
+
+The read access token is preferred. The API key is a fallback. If neither is configured, PiggieTV keeps using Jellyfin metadata only.
+
 Build:
 
 ```powershell

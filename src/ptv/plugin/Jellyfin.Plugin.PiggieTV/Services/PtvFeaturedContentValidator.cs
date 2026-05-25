@@ -17,7 +17,7 @@ public static class PtvFeaturedContentValidator
     /// <summary>
     /// Current supported frontend featured-content cache payload version.
     /// </summary>
-    public const int FeaturedCacheVersion = 6;
+    public const int FeaturedCacheVersion = 7;
 
     /// <summary>
     /// Maximum serialized document size accepted from clients.

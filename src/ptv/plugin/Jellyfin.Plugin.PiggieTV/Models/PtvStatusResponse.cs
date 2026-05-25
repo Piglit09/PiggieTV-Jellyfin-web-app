@@ -164,16 +164,24 @@ public sealed class PtvStatusResponse
     public long? NextRefreshAt { get; set; }
 
     /// <summary>
+    /// Gets or sets the optional TMDb metadata enrichment status.
+    /// </summary>
+    [JsonPropertyName("tmdbMetadata")]
+    public PtvTmdbMetadataStatus TmdbMetadata { get; set; } = new();
+
+    /// <summary>
     /// Creates a status response from a stored document.
     /// </summary>
     /// <param name="storeStatus">Featured-content store status.</param>
     /// <param name="canWriteFeaturedContent">Whether the current user can write featured content.</param>
     /// <param name="refreshStatus">Featured-content refresh worker status.</param>
+    /// <param name="tmdbMetadata">TMDb metadata enrichment status.</param>
     /// <returns>Status response.</returns>
     public static PtvStatusResponse FromStoreStatus(
         PtvFeaturedContentStoreStatus storeStatus,
         bool canWriteFeaturedContent,
-        PtvFeaturedContentRefreshStatus? refreshStatus = null)
+        PtvFeaturedContentRefreshStatus? refreshStatus = null,
+        PtvTmdbMetadataStatus? tmdbMetadata = null)
     {
         var now = DateTimeOffset.UtcNow;
         var pluginVersion = Plugin.Instance?.Version?.ToString() ?? "0.0.0.0";
@@ -197,6 +205,7 @@ public sealed class PtvStatusResponse
             RefreshInProgress = refreshStatus.RefreshInProgress,
             ServerTime = now.ToUnixTimeMilliseconds(),
             ServerTimeUtc = now,
+            TmdbMetadata = tmdbMetadata ?? new PtvTmdbMetadataStatus(),
             Version = pluginVersion
         };
     }

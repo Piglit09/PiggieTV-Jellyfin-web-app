@@ -59,13 +59,14 @@
             Minimal PiggieTV plugin API.
             </summary>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.#ctor(Microsoft.AspNetCore.Authorization.IAuthorizationService,Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService,Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.#ctor(Microsoft.AspNetCore.Authorization.IAuthorizationService,Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService,Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore,Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService)">
             <summary>
             Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Api.PtvController"/> class.
             </summary>
             <param name="authorizationService">Authorization service.</param>
             <param name="featuredContentRefreshService">Featured-content refresh service.</param>
             <param name="featuredContentStore">Featured-content cache store.</param>
+            <param name="tmdbMetadataService">TMDb metadata enrichment service.</param>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.GetStatus(System.Threading.CancellationToken)">
             <summary>
@@ -106,6 +107,26 @@
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration">
             <summary>
             PiggieTV plugin configuration.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration.EnableTmdbMetadata">
+            <summary>
+            Gets or sets a value indicating whether PiggieTV may use TMDb metadata during server-side cache refreshes.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration.TmdbReadAccessToken">
+            <summary>
+            Gets or sets the optional TMDb API read access token. Prefer the PTV_TMDB_READ_ACCESS_TOKEN environment variable.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration.TmdbApiKey">
+            <summary>
+            Gets or sets the optional TMDb v3 API key fallback. Prefer the PTV_TMDB_API_KEY environment variable.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration.TmdbMaxEnrichmentItems">
+            <summary>
+            Gets or sets the maximum number of Jellyfin items enriched from TMDb during a single refresh.
             </summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvErrorResponse">
@@ -412,14 +433,60 @@
             Gets or sets the next scheduled refresh timestamp as Unix epoch milliseconds.
             </summary>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FromStoreStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus,System.Boolean,Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus)">
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.TmdbMetadata">
+            <summary>
+            Gets or sets the optional TMDb metadata enrichment status.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FromStoreStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus,System.Boolean,Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus,Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus)">
             <summary>
             Creates a status response from a stored document.
             </summary>
             <param name="storeStatus">Featured-content store status.</param>
             <param name="canWriteFeaturedContent">Whether the current user can write featured content.</param>
             <param name="refreshStatus">Featured-content refresh worker status.</param>
+            <param name="tmdbMetadata">TMDb metadata enrichment status.</param>
             <returns>Status response.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus">
+            <summary>
+            PiggieTV TMDb metadata enrichment status.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.Enabled">
+            <summary>
+            Gets or sets a value indicating whether TMDb metadata enrichment is enabled.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.Configured">
+            <summary>
+            Gets or sets a value indicating whether a server-side TMDb credential is configured.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.CacheSize">
+            <summary>
+            Gets or sets the number of cached TMDb fact entries in memory.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.CacheHits">
+            <summary>
+            Gets or sets the number of TMDb fact cache hits.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.CacheMisses">
+            <summary>
+            Gets or sets the number of TMDb fact cache misses.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastError">
+            <summary>
+            Gets or sets the last TMDb enrichment error, if any.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastDurationMs">
+            <summary>
+            Gets or sets the last TMDb enrichment duration in milliseconds.
+            </summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Plugin">
             <summary>
@@ -522,6 +589,30 @@
             <param name="document">Cache document.</param>
             <returns>Validated cache document.</returns>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService">
+            <summary>
+            Provides optional server-side TMDb metadata enrichment for PiggieTV row matching.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService.IsConfigured">
+            <summary>
+            Gets a value indicating whether TMDb enrichment has a credential available.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService.GetFactsAsync(System.Collections.Generic.IEnumerable{MediaBrowser.Controller.Entities.BaseItem},System.Threading.CancellationToken)">
+            <summary>
+            Gets TMDb enrichment facts for Jellyfin items that have TMDb provider ids.
+            </summary>
+            <param name="items">Jellyfin items to enrich.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>TMDb facts keyed by Jellyfin item id.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService.GetStatus">
+            <summary>
+            Gets the current TMDb enrichment status.
+            </summary>
+            <returns>TMDb enrichment status.</returns>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService">
             <summary>
             Background worker that prepares the shared PiggieTV featured-content cache on the server.
@@ -532,13 +623,14 @@
             Default server-side featured-content refresh interval.
             </summary>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.#ctor(Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore,MediaBrowser.Controller.Library.ILibraryManager,Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService})">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.#ctor(Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore,MediaBrowser.Controller.Library.ILibraryManager,Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService},Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService)">
             <summary>
             Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService"/> class.
             </summary>
             <param name="store">Featured-content store.</param>
             <param name="libraryManager">Jellyfin library manager.</param>
             <param name="logger">Logger.</param>
+            <param name="tmdbMetadataService">Optional TMDb metadata enrichment service.</param>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.GetRefreshStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus)">
             <inheritdoc />
@@ -637,6 +729,76 @@
             <param name="jsonOptions">Serializer options used by the store.</param>
             <returns>Validated and normalized document.</returns>
             <exception cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException">Thrown when the document is invalid.</exception>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts">
+            <summary>
+            Normalized TMDb facts used for PiggieTV row matching.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.Empty">
+            <summary>
+            Gets an empty fact set.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.Genres">
+            <summary>
+            Gets or sets normalized TMDb genres.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.Keywords">
+            <summary>
+            Gets or sets normalized TMDb keywords.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.ProductionCompanies">
+            <summary>
+            Gets or sets normalized TMDb production companies.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.Networks">
+            <summary>
+            Gets or sets normalized TMDb TV networks.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.OriginCountries">
+            <summary>
+            Gets or sets normalized TMDb origin countries.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.OriginalLanguage">
+            <summary>
+            Gets or sets the TMDb original language.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.HasFacts">
+            <summary>
+            Gets a value indicating whether this fact set contains any useful metadata.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts.SearchText">
+            <summary>
+            Gets the normalized text used by PiggieTV row matchers.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService">
+            <summary>
+            Optional TMDb metadata client used only by the PiggieTV plugin backend.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService})">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService"/> class.
+            </summary>
+            <param name="logger">Logger.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService.IsConfigured">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService.GetFactsAsync(System.Collections.Generic.IEnumerable{MediaBrowser.Controller.Entities.BaseItem},System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService.GetStatus">
+            <inheritdoc />
         </member>
     </members>
 </doc>

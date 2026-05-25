@@ -87,11 +87,74 @@ function delay(ms) {
     return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
+function createLookupMaps() {
+    return {
+        genresByName: new Map(),
+        studiosByName: new Map()
+    };
+}
+
+function hydrateLookupMaps(lookupMaps, apiClient, userId) {
+    return Promise.all([
+        loadGenreMap(apiClient, userId),
+        loadStudioMap(apiClient, userId)
+    ])
+        .then(([genresByName, studiosByName]) => {
+            lookupMaps.genresByName = genresByName;
+            lookupMaps.studiosByName = studiosByName;
+
+            return lookupMaps;
+        });
+}
+
+function clearDeferredResumeTimers(elem) {
+    if (!elem?.ptvDeferredResumeTimers) return;
+
+    for (const timer of elem.ptvDeferredResumeTimers) {
+        window.clearTimeout(timer);
+    }
+
+    elem.ptvDeferredResumeTimers.clear();
+}
+
+function scheduleDeferredResume(elem, sections, options) {
+    if (!sections.length) return;
+
+    if (!elem.ptvDeferredResumeTimers) {
+        elem.ptvDeferredResumeTimers = new Set();
+    }
+
+    const timer = window.setTimeout(() => {
+        elem.ptvDeferredResumeTimers?.delete(timer);
+
+        const connectedSections = sections.filter(section => section.isConnected);
+        if (!connectedSections.length) return;
+
+        void timePtvAsync(
+            'render',
+            'home-sections-resume-deferred',
+            () => Promise.all(connectedSections.map(section => section.resume(options))),
+            {
+                sections: connectedSections.length
+            }
+        )
+            .then(() => {
+                enhancePtvCards(elem);
+            })
+            .catch(err => {
+                console.warn('[PTV Home] Failed resuming deferred sections', err);
+            });
+    }, 450);
+
+    elem.ptvDeferredResumeTimers.add(timer);
+}
+
 export function loadSections(elem, apiClient, user) {
     window.__PTV_HOME_INITIALIZED__ = true;
     unmountPtvHomeHero(elem);
     cleanupPtvRowBackdrops(elem);
     cleanupFeaturedCacheListener(elem);
+    clearDeferredResumeTimers(elem);
     trimPtvImageManagerMemory();
 
     const userId = user.Id || apiClient.getCurrentUserId();
@@ -132,77 +195,73 @@ export function loadSections(elem, apiClient, user) {
                     return Promise.resolve();
                 }
 
-                return Promise.all([
-                    loadGenreMap(apiClient, userId),
-                    loadStudioMap(apiClient, userId)
-                ])
-                    .then(([genresByName, studiosByName]) => {
-                        const lookupMaps = {
-                            genresByName,
-                            studiosByName
-                        };
-                        const fetchFeaturedContent = createFeaturedContentFetcher(
-                            apiClient,
-                            userId,
-                            rows,
-                            lookupMaps,
-                            userViews,
-                            {
-                                performanceProfile
-                            }
-                        );
-                        let featuredContentPromise = getSharedFeaturedContent(fetchFeaturedContent);
-                        const featuredContentSource = {
-                            get: () => featuredContentPromise
-                        };
-                        const handleFeaturedCacheUpdated = () => {
-                            featuredContentPromise = getFeaturedContent(fetchFeaturedContent);
+                const lookupMaps = createLookupMaps();
+                const lookupMapsPromise = hydrateLookupMaps(lookupMaps, apiClient, userId)
+                    .catch(() => lookupMaps);
+                const fetchFeaturedContent = () => lookupMapsPromise.then(() => createFeaturedContentFetcher(
+                    apiClient,
+                    userId,
+                    rows,
+                    lookupMaps,
+                    userViews,
+                    {
+                        performanceProfile
+                    }
+                )());
+                let featuredContentPromise = getSharedFeaturedContent(fetchFeaturedContent);
+                const featuredContentSource = {
+                    get: () => featuredContentPromise
+                };
+                const handleFeaturedCacheUpdated = () => {
+                    featuredContentPromise = getFeaturedContent(fetchFeaturedContent);
 
-                            void resume(elem, {
-                                refresh: true
-                            })
-                                .then(() => {
-                                    enhancePtvCards(elem);
-                                })
-                                .catch(err => {
-                                    console.warn('[PTV Home] Failed refreshing featured cache content', err);
-                                });
-                        };
-
-                        cleanupFeaturedCacheListener(elem);
-                        window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
-                        elem.ptvFeaturedCacheCleanup = () => {
-                            window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
-                        };
-
-                        mountPtvHomeHero(elem, {
-                            apiClient,
-                            user,
-                            featuredContentPromise
-                        });
-
-                        for (let i = 0; i < rows.length; i++) {
-                            const row = rows[i];
-                            const sectionElem = elem.querySelector('.section' + i);
-                            const options = {
-                                enableOverflow: enableScrollX(),
-                                featuredContentSource,
-                                performanceProfile
-                            };
-
-                            if (row.type === 'libraries') {
-                                renderLibraryRow(sectionElem, apiClient, userViews, options);
-                            } else {
-                                renderMediaRow(sectionElem, apiClient, userId, row, lookupMaps, userViews, options);
-                            }
-                        }
+                    void resume(elem, {
+                        deferContinue: true,
+                        refresh: true
                     })
-                    // Timeout for polyfilled CustomElements (webOS 1.2)
-                    .then(() => new Promise(resolve => window.setTimeout(resolve, 0)))
+                        .then(() => {
+                            enhancePtvCards(elem);
+                        })
+                        .catch(err => {
+                            console.warn('[PTV Home] Failed refreshing featured cache content', err);
+                        });
+                };
+
+                cleanupFeaturedCacheListener(elem);
+                window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
+                elem.ptvFeaturedCacheCleanup = () => {
+                    window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
+                };
+
+                mountPtvHomeHero(elem, {
+                    apiClient,
+                    user,
+                    featuredContentPromise
+                });
+
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i];
+                    const sectionElem = elem.querySelector('.section' + i);
+                    const options = {
+                        enableOverflow: enableScrollX(),
+                        featuredContentSource,
+                        performanceProfile
+                    };
+
+                    if (row.type === 'libraries') {
+                        renderLibraryRow(sectionElem, apiClient, userViews, options);
+                    } else {
+                        renderMediaRow(sectionElem, apiClient, userId, row, lookupMaps, userViews, options);
+                    }
+                }
+
+                // Timeout for polyfilled CustomElements (webOS 1.2)
+                return new Promise(resolve => window.setTimeout(resolve, 0))
                     .then(() => {
                         enhancePtvCards(elem);
 
                         void resume(elem, {
+                            deferContinue: true,
                             refresh: true
                         }).catch(err => {
                             console.warn('[PTV Home] Failed resuming background sections', err);
@@ -233,6 +292,7 @@ export function loadSections(elem, apiClient, user) {
 }
 
 export function destroySections(elem) {
+    clearDeferredResumeTimers(elem);
     cleanupFeaturedCacheListener(elem);
     unmountPtvHomeHero(elem);
     cleanupPtvRowBackdrops(elem);
@@ -254,26 +314,47 @@ export function destroySections(elem) {
 }
 
 export function pause(elem) {
+    clearDeferredResumeTimers(elem);
+
     const elems = elem.querySelectorAll('.itemsContainer');
     for (const e of elems) {
         e.pause();
     }
 }
 
+function getImmediateResumeSections(sections, options) {
+    if (options?.deferContinue === false) return sections;
+
+    return sections.filter(section => section.dataset.ptvRowType !== 'continue');
+}
+
+function getDeferredResumeSections(sections, options) {
+    if (options?.deferContinue === false) return [];
+
+    return sections.filter(section => section.dataset.ptvRowType === 'continue');
+}
+
 export function resume(elem, options) {
+    clearDeferredResumeTimers(elem);
+
     const sections = Array.from(elem.querySelectorAll('.itemsContainer'))
         .filter(section => typeof section.resume === 'function');
+    const immediateSections = getImmediateResumeSections(sections, options);
+    const deferredSections = getDeferredResumeSections(sections, options);
     const performanceProfile = getPtvPerformanceProfile();
     const batchSize = options?.batchSize || performanceProfile.sectionResumeBatchSize;
     const batchDelay = options?.batchDelayMs ?? performanceProfile.sectionResumeBatchDelayMs;
+
+    scheduleDeferredResume(elem, deferredSections, options);
 
     if (!batchSize || batchSize <= 0) {
         return timePtvAsync(
             'render',
             'home-sections-resume',
-            () => Promise.all(sections.map(section => section.resume(options))),
+            () => Promise.all(immediateSections.map(section => section.resume(options))),
             {
-                sections: sections.length
+                deferredSections: deferredSections.length,
+                sections: immediateSections.length
             }
         );
     }
@@ -281,8 +362,8 @@ export function resume(elem, options) {
     const results = [];
     const batches = [];
 
-    for (let i = 0; i < sections.length; i += batchSize) {
-        batches.push(sections.slice(i, i + batchSize));
+    for (let i = 0; i < immediateSections.length; i += batchSize) {
+        batches.push(immediateSections.slice(i, i + batchSize));
     }
 
     return timePtvAsync('render', 'home-sections-resume-batched', () => batches.reduce((chain, batch, index) => chain
@@ -298,7 +379,8 @@ export function resume(elem, options) {
         }), Promise.resolve())
         .then(() => results), {
         batches: batches.length,
-        sections: sections.length
+        deferredSections: deferredSections.length,
+        sections: immediateSections.length
     });
 }
 

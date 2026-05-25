@@ -42,10 +42,19 @@ Returns plugin health and capability metadata:
   "lastRefreshDurationMs": 1200,
   "lastRefreshError": null,
   "nextRefreshAt": 0,
+  "tmdbMetadata": {
+    "enabled": true,
+    "configured": false,
+    "cacheSize": 0,
+    "cacheHits": 0,
+    "cacheMisses": 0,
+    "lastError": null,
+    "lastDurationMs": null
+  },
   "maxCachePayloadBytes": 4194304,
   "featuredContent": {
     "hasPayload": true,
-    "cacheVersion": 6,
+    "cacheVersion": 7,
     "heroCount": 20,
     "sectionCount": 19,
     "itemCount": 276,
@@ -59,6 +68,8 @@ Returns plugin health and capability metadata:
 `canWriteFeaturedContent` is user-specific. It is `true` only when the current Jellyfin user can pass the admin/elevated write policy.
 
 Refresh fields describe the server-side featured-content worker. `refreshInProgress` may be true while the plugin is preparing a new payload; reads continue to serve the current cache during refresh.
+
+`tmdbMetadata` describes optional server-side TMDb enrichment used during featured row generation. Credentials must stay on the Jellyfin server through plugin configuration or environment variables; frontend JavaScript must never receive TMDb secrets.
 
 The dashboard uses these fields to distinguish:
 
@@ -79,7 +90,7 @@ Returns the shared featured-content cache document:
 {
   "version": 1,
   "featuredContent": {
-    "version": 6,
+    "version": 7,
     "createdAt": 0,
     "expiresAt": 0,
     "payload": {

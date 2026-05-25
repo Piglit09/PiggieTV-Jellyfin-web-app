@@ -15,15 +15,19 @@ import { getFeaturedContent } from 'ptv/modules/cache/featuredContentCache';
 import { loadSharedHeroItems } from 'ptv/modules/hero/useHeroItems';
 import { getBackdropShape, getPortraitShape, getSquareShape } from 'utils/card';
 import {
+    isAnimeItem,
+    isFamilyAnimationItem,
     mediaBrandMatchers
 } from './rowMatchers/mediaBrandMatcher';
 
 const ROW_ITEM_LIMIT = 16;
+const CONTINUE_ROW_CACHE_TTL_MS = 90000;
 const MEDIA_FIELDS = 'PrimaryImageAspectRatio,Path,MediaSources,MediaSourceCount,Genres,Tags,Studios,ProductionLocations,ProviderIds,OriginalTitle,DateCreated,PremiereDate,ProductionYear,CommunityRating,CriticRating';
 let backdropSeed = Date.now();
 const rowBackdropObservers = new WeakMap();
 const rowBackdropLoads = new WeakMap();
 const rowBackdropTokens = new WeakMap();
+const continueRowCache = new Map();
 
 function getHomePerformanceProfile(options = {}) {
     return options.performanceProfile || getPtvPerformanceProfile();
@@ -61,22 +65,34 @@ function getSearchTerms(row, options = {}) {
 
 export const PTV_HOME_ROWS = [
     { id: 'my-media', title: 'My Media', type: 'libraries' },
-    { id: 'continue-watching', title: 'Continue Watching', type: 'continue' },
+    { id: 'continue-watching', title: 'Continue Watching', type: 'continue', itemLimit: 8, queryLimit: 8 },
     { id: 'latest-shows', title: 'Latest Shows', type: 'latest', itemTypes: 'Series', shape: 'portrait' },
     { id: 'latest-movies', title: 'Latest Movies', type: 'latest', itemTypes: 'Movie', shape: 'portrait' },
-    { id: 'latest-music', title: 'Latest Music', type: 'latest', itemTypes: 'MusicAlbum', shape: 'square' },
+    { id: 'latest-music', title: 'Latest Music', type: 'latest', itemTypes: 'MusicAlbum', preferPrimaryImage: true, shape: 'square' },
     { id: 'horror', title: 'Horror', type: 'genre', genres: ['Horror'] },
     { id: 'comedy', title: 'Comedy', type: 'genre', genres: ['Comedy'] },
-    { id: 'family-animation', title: 'Family Animation', type: 'genre', genres: ['Family', 'Animation'] },
+    { id: 'family-animation', title: 'Family Animation', type: 'genre', genres: ['Family', 'Animation'], itemMatcher: isFamilyAnimationItem },
     { id: 'drama', title: 'Drama', type: 'genre', genres: ['Drama'] },
     { id: 'science-fiction', title: 'Science Fiction', type: 'genre', genres: ['Science Fiction', 'Sci-Fi', 'Sci Fi'] },
-    { id: 'anime', title: 'Anime', type: 'library', libraryNames: ['anime'], itemTypes: 'Movie,Series' },
+    {
+        id: 'anime',
+        title: mediaBrandMatchers.anime.definition.title,
+        type: 'search',
+        candidateLimit: 220,
+        includeItemTypes: 'Movie,Series',
+        itemMatcher: isAnimeItem,
+        queryLimit: 14,
+        searchTerms: mediaBrandMatchers.anime.searchTerms,
+        studioKeywords: mediaBrandMatchers.anime.studioKeywords,
+        studioNames: mediaBrandMatchers.anime.studioNames
+    },
     {
         id: 'music',
         title: 'Music',
         type: 'library',
         libraryNames: ['music'],
         itemTypes: 'MusicAlbum',
+        preferPrimaryImage: true,
         shape: 'square',
         sortBy: 'CommunityRating,SortName',
         sortOrder: 'Descending'
@@ -144,6 +160,45 @@ function getItemsFromResults(results) {
     });
 
     return items;
+}
+
+function getContinueRowCacheKey(currentApiClient, userId, row, options = {}) {
+    const serverId = currentApiClient?.serverId?.() || getFallbackServerId(options);
+
+    return [
+        serverId,
+        userId,
+        row.id || row.type,
+        getRowItemLimit(row, options)
+    ].join(':');
+}
+
+function getCachedContinueItems(cacheKey) {
+    const entry = continueRowCache.get(cacheKey);
+
+    if (!entry) return null;
+
+    if (Date.now() >= entry.expiresAt) {
+        continueRowCache.delete(cacheKey);
+        return null;
+    }
+
+    return entry.items;
+}
+
+function setCachedContinueItems(cacheKey, items) {
+    continueRowCache.set(cacheKey, {
+        expiresAt: Date.now() + CONTINUE_ROW_CACHE_TTL_MS,
+        items: items || []
+    });
+
+    if (continueRowCache.size > 8) {
+        const oldestKey = continueRowCache.keys().next().value;
+
+        if (oldestKey) {
+            continueRowCache.delete(oldestKey);
+        }
+    }
 }
 
 function filterRowItems(row, items) {
@@ -228,11 +283,39 @@ function getCardShape(row, enableOverflow) {
     return getBackdropShape(enableOverflow);
 }
 
+function getFallbackServerId(options = {}) {
+    if (options.serverId) return options.serverId;
+
+    const apiServerId = options.apiClient?.serverId?.();
+    if (apiServerId) return apiServerId;
+
+    return ServerConnections.currentApiClient?.()?.serverId?.() || '';
+}
+
+function ensureItemsHaveServerId(items, options = {}) {
+    const serverId = getFallbackServerId(options);
+    if (!serverId) return items || [];
+
+    return (items || []).map(item => {
+        if (!item || typeof item !== 'object' || item.ServerId) return item;
+
+        return {
+            ...item,
+            ServerId: serverId
+        };
+    });
+}
+
 function getCardsHtml(row, items, options) {
+    const cardOptions = {
+        ...options,
+        serverId: getFallbackServerId(options)
+    };
+
     let html = cardBuilder.getCardsHtml({
-        items,
+        items: ensureItemsHaveServerId(items, cardOptions),
         shape: getCardShape(row, options.enableOverflow),
-        preferThumb: row.shape !== 'portrait',
+        preferThumb: row.preferPrimaryImage ? false : row.shape !== 'portrait',
         scalable: true,
         overlayPlayButton: true,
         allowBottomPadding: false,
@@ -240,11 +323,12 @@ function getCardsHtml(row, items, options) {
         showYear: row.shape !== 'square',
         centerText: true,
         context: 'home',
-        lines: 2
+        lines: 2,
+        serverId: cardOptions.serverId
     });
 
     if (row.moreUrl) {
-        html += getMoreCardHtml(row, options);
+        html += getMoreCardHtml(row, cardOptions);
     }
 
     return html;
@@ -572,6 +656,17 @@ function getLibraryParentId(row, userViews) {
 
 function fetchRowResultCore(currentApiClient, userId, row, genresByName, studiosByName, userViews, options = {}) {
     if (row.type === 'continue') {
+        const cacheKey = getContinueRowCacheKey(currentApiClient, userId, row, options);
+        const cachedItems = getCachedContinueItems(cacheKey);
+
+        if (cachedItems) {
+            recordPtvEvent('cache', 'hit', {
+                row: row.id,
+                source: 'continue-memory'
+            });
+            return Promise.resolve({ Items: cachedItems });
+        }
+
         return currentApiClient.getResumableItems(userId, {
             Limit: getRowItemLimit(row, options),
             Recursive: true,
@@ -581,7 +676,12 @@ function fetchRowResultCore(currentApiClient, userId, row, genresByName, studios
             EnableImageTypes: 'Primary,Backdrop,Thumb',
             EnableTotalRecordCount: false,
             MediaTypes: 'Video'
-        });
+        })
+            .then(result => {
+                setCachedContinueItems(cacheKey, getItems(result));
+
+                return result;
+            });
     }
 
     if (row.type === 'library') {
@@ -654,9 +754,11 @@ function getPayloadRowItems(payload, row, options = {}) {
     const items = payload?.sectionItems?.[rowId];
 
     if (!Array.isArray(items) || !items.length) return null;
-    if (!items.some(hasRenderableImage)) return null;
+    const matchedItems = filterRowItems(row, items);
 
-    return items.slice(0, getRowItemLimit(row, options));
+    if (!matchedItems.some(hasRenderableImage)) return null;
+
+    return matchedItems.slice(0, getRowItemLimit(row, options));
 }
 
 function fetchSectionItems(currentApiClient, userId, row, lookupMaps, userViews, options = {}) {
@@ -764,7 +866,7 @@ function createFetchData({
     const serverId = apiClient.serverId();
 
     return function () {
-        const currentApiClient = ServerConnections.getApiClient(serverId);
+        const currentApiClient = ServerConnections.getApiClient(serverId) || apiClient;
         const fetchFallbackRow = () => fetchRowResult(
             currentApiClient,
             userId,
@@ -845,39 +947,53 @@ function renderRowShell(elem, row, options) {
 }
 
 export function renderLibraryRow(elem, apiClient, userViews, options) {
+    const rowOptions = {
+        ...options,
+        apiClient,
+        serverId: apiClient.serverId()
+    };
     const rowWithNavigation = {
         ...PTV_HOME_ROWS[0],
-        moreUrl: `#/home.html?serverId=${encodeURIComponent(apiClient.serverId())}`
+        moreUrl: `#/home.html?serverId=${encodeURIComponent(rowOptions.serverId)}`
     };
 
-    renderRowShell(elem, rowWithNavigation, options);
+    renderRowShell(elem, rowWithNavigation, rowOptions);
 
     const itemsContainer = elem.querySelector('.itemsContainer');
     if (!itemsContainer) return;
 
+    itemsContainer.dataset.ptvRowId = rowWithNavigation.id || '';
+    itemsContainer.dataset.ptvRowType = rowWithNavigation.type || '';
+
     let html = cardBuilder.getCardsHtml({
-        items: userViews,
-        shape: getBackdropShape(options.enableOverflow),
+        items: ensureItemsHaveServerId(userViews, rowOptions),
+        shape: getBackdropShape(rowOptions.enableOverflow),
         showTitle: true,
         centerText: true,
         overlayText: false,
         lazy: true,
         transition: false,
-        allowBottomPadding: !options.enableOverflow
+        allowBottomPadding: !rowOptions.enableOverflow,
+        serverId: rowOptions.serverId
     });
 
     html += getMoreCardHtml({
         ...rowWithNavigation,
         title: 'Libraries'
-    }, options);
+    }, rowOptions);
 
     itemsContainer.innerHTML = html;
     imageLoader.lazyChildren(elem);
-    forceLoadRowImages(itemsContainer, options);
-    applyRowBackdrop(elem, apiClient, userViews, options);
+    forceLoadRowImages(itemsContainer, rowOptions);
+    applyRowBackdrop(elem, apiClient, userViews, rowOptions);
 }
 
 export function renderMediaRow(elem, apiClient, userId, row, lookupMaps, userViews, options) {
+    const rowOptions = {
+        ...options,
+        apiClient,
+        serverId: apiClient.serverId()
+    };
     const parentId = row.type === 'library' ? getLibraryParentId(row, userViews) : '';
     const rowWithNavigation = {
         ...row,
@@ -885,30 +1001,33 @@ export function renderMediaRow(elem, apiClient, userId, row, lookupMaps, userVie
         moreUrl: getRowUrl({
             ...row,
             parentId
-        }, lookupMaps.genresByName, apiClient.serverId())
+        }, lookupMaps.genresByName, rowOptions.serverId)
     };
 
-    renderRowShell(elem, rowWithNavigation, options);
+    renderRowShell(elem, rowWithNavigation, rowOptions);
     elem.classList.add('hide');
 
     const itemsContainer = elem.querySelector('.itemsContainer');
     if (!itemsContainer) return;
 
+    itemsContainer.dataset.ptvRowId = rowWithNavigation.id || '';
+    itemsContainer.dataset.ptvRowType = rowWithNavigation.type || '';
+
     itemsContainer.fetchData = createFetchData({
         apiClient,
-        featuredContentSource: options.featuredContentSource,
+        featuredContentSource: rowOptions.featuredContentSource,
         genresByName: lookupMaps.genresByName,
-        options,
+        options: rowOptions,
         row: rowWithNavigation,
         studiosByName: lookupMaps.studiosByName,
         userId,
         userViews
     });
-    itemsContainer.getItemsHtml = getRowItemsHtml(rowWithNavigation, options);
+    itemsContainer.getItemsHtml = getRowItemsHtml(rowWithNavigation, rowOptions);
     itemsContainer.parentContainer = elem;
     itemsContainer.afterRefresh = function (result) {
-        applyRowBackdrop(elem, apiClient, getItems(result), options);
-        forceLoadRowImages(itemsContainer, options);
+        applyRowBackdrop(elem, apiClient, getItems(result), rowOptions);
+        forceLoadRowImages(itemsContainer, rowOptions);
     };
 }
 

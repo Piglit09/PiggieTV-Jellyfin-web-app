@@ -76,4 +76,10 @@ The worker intentionally starts with deterministic ranking and filtering only:
 - hero batch preselection
 - image preselection
 
+When configured server-side, the worker may enrich row matching with TMDb facts for items that already have TMDb provider ids in Jellyfin metadata. This improves category accuracy for rows such as Disney, family animation, and anime without exposing TMDb credentials to browser clients. Supported secret locations:
+
+- `PTV_TMDB_READ_ACCESS_TOKEN`
+- `PTV_TMDB_API_KEY`
+- PiggieTV plugin configuration fields on the Jellyfin server
+
 Do not add AI to this layer.

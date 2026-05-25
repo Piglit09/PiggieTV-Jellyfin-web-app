@@ -14,6 +14,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<IPtvFeaturedContentStore, PtvFeaturedContentStore>();
+        serviceCollection.AddSingleton<IPtvTmdbMetadataService, PtvTmdbMetadataService>();
         serviceCollection.AddSingleton<PtvFeaturedContentRefreshService>();
         serviceCollection.AddSingleton<IPtvFeaturedContentRefreshService>(
             serviceProvider => serviceProvider.GetRequiredService<PtvFeaturedContentRefreshService>());

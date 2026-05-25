@@ -743,127 +743,6 @@
     overflow: auto;
 }
 
-.dashboardDocument .ptv-featured-cache-task {
-    display: grid;
-    gap: var(--ptv-space-4);
-
-    width: min(100%, 920px);
-    margin: 0 0 var(--ptv-space-5) !important;
-    padding: clamp(var(--ptv-space-4), 2vw, var(--ptv-space-5)) !important;
-}
-
-.dashboardDocument .ptv-featured-cache-task-header {
-    display: grid;
-    gap: var(--ptv-space-2);
-}
-
-.dashboardDocument .ptv-featured-cache-task-title {
-    margin: 0;
-
-    color: var(--ptv-color-text-primary);
-    font-family: var(--ptv-font-accent);
-    font-size: var(--ptv-text-section);
-    font-weight: 850;
-    line-height: var(--ptv-line-section);
-}
-
-.dashboardDocument .ptv-featured-cache-task-meta {
-    margin: 0;
-
-    color: var(--ptv-color-text-secondary);
-    font-size: var(--ptv-text-card);
-    line-height: var(--ptv-line-body);
-}
-
-.dashboardDocument .ptv-featured-cache-task-message {
-    margin: 0;
-
-    color: var(--ptv-color-text-secondary);
-    font-size: var(--ptv-text-card);
-    font-weight: 760;
-    line-height: var(--ptv-line-body);
-}
-
-.dashboardDocument .ptv-featured-cache-task[data-ptv-featured-cache-run-state='running'] .ptv-featured-cache-task-message {
-    color: var(--ptv-color-text-primary);
-}
-
-.dashboardDocument .ptv-featured-cache-task[data-ptv-featured-cache-run-state='success'] .ptv-featured-cache-task-message {
-    color: var(--ptv-state-success-text, var(--ptv-color-text-primary));
-}
-
-.dashboardDocument .ptv-featured-cache-task[data-ptv-featured-cache-run-state='error'] .ptv-featured-cache-task-message {
-    color: var(--ptv-state-danger-text, var(--ptv-color-text-primary));
-}
-
-.dashboardDocument .ptv-featured-cache-task-controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: end;
-    gap: var(--ptv-space-3);
-}
-
-.dashboardDocument .ptv-featured-cache-task-field {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--ptv-space-2);
-
-    color: var(--ptv-color-text-secondary);
-    font-weight: 760;
-}
-
-.dashboardDocument .ptv-featured-cache-task-input {
-    width: 92px !important;
-    min-height: var(--ptv-control-height-md) !important;
-    padding-inline: var(--ptv-space-3) !important;
-
-    text-align: center;
-}
-
-.dashboardDocument .ptv-featured-cache-task-button {
-    min-height: var(--ptv-control-height-md) !important;
-    padding-inline: var(--ptv-space-4) !important;
-}
-
-.dashboardDocument .ptv-featured-cache-task-status {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--ptv-space-3);
-
-    margin: 0;
-}
-
-.dashboardDocument .ptv-featured-cache-task-status > div {
-    min-width: 0;
-    padding: var(--ptv-space-3);
-
-    border: 1px solid var(--ptv-dashboard-border-soft);
-    border-radius: var(--ptv-radius-card);
-    background: var(--ptv-dashboard-row);
-}
-
-.dashboardDocument .ptv-featured-cache-task-status dt {
-    margin: 0 0 var(--ptv-space-1);
-
-    color: var(--ptv-color-text-muted);
-    font-size: var(--ptv-text-small);
-    font-weight: 780;
-    line-height: var(--ptv-line-dense);
-}
-
-.dashboardDocument .ptv-featured-cache-task-status dd {
-    margin: 0;
-
-    overflow: hidden;
-
-    color: var(--ptv-color-text-primary);
-    font-size: var(--ptv-text-card);
-    font-weight: 760;
-    line-height: var(--ptv-line-body);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .dashboardDocument .ptv-dashboard-control-content {
     max-width: min(1180px, calc(100vw - 72px)) !important;
 }
@@ -877,6 +756,10 @@
 .dashboardDocument .ptv-dashboard-control-page .ptv-control-card {
     height: 100%;
     min-height: 0 !important;
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-featured-cache-interval-field {
+    width: min(180px, 100%);
 }
 
 .dashboardDocument .ptv-dashboard-control-page .MuiGrid-root {
@@ -1199,10 +1082,6 @@
 
     .dashboardDocument .ptv-dashboard-metric-grid {
         grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)) !important;
-    }
-
-    .dashboardDocument .ptv-featured-cache-task-status {
-        grid-template-columns: 1fr;
     }
 
     .dashboardDocument .dashboardSection,

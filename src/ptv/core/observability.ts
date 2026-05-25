@@ -326,80 +326,91 @@ function observeImages(root: ParentNode = document) {
     });
 }
 
-function handleImageDone(event: Event) {
-    if (!(event.target instanceof HTMLImageElement)) return;
+function getCurrentImageTracker(image: HTMLImageElement, url: string) {
+    const existingTracker = imageTrackers.get(image);
 
-    const image = event.target;
-    const tracker = imageTrackers.get(image);
-    const url = getImageUrl(image) || tracker?.url || '';
-    if (!url) return;
+    if (!existingTracker || existingTracker.url === url) {
+        return existingTracker;
+    }
 
-    const eventName = event.type === 'error' ? 'image-error' : 'image-load';
+    recordPtvEvent('image', 'image-tracker-reset', {
+        from: existingTracker.url,
+        to: url
+    });
 
-    if (shouldSuppressImageEvent(image, tracker, eventName, url)) return;
+    return undefined;
+}
 
-    if (event.type === 'error') {
-        markImageTrackerComplete(image, tracker, eventName, url);
+function getImageEventDetail(image: HTMLImageElement, url: string) {
+    return {
+        naturalHeight: image.naturalHeight,
+        naturalWidth: image.naturalWidth,
+        url
+    };
+}
 
-        const failedAt = observedImageFailures.get(url);
-        const suppressLoggedAt = observedImageRetrySuppressions.get(url);
-        const isSuppressed = Boolean(failedAt && Date.now() - failedAt < IMAGE_ERROR_SUPPRESSION_MS);
+function handleImageError(image: HTMLImageElement, tracker: PtvImageTracker | undefined, eventName: string, url: string) {
+    markImageTrackerComplete(image, tracker, eventName, url);
 
-        if (isSuppressed) {
-            if (!suppressLoggedAt || Date.now() - suppressLoggedAt >= IMAGE_ERROR_SUPPRESSION_MS) {
-                observedImageRetrySuppressions.set(url, Date.now());
-                trimMap(observedImageRetrySuppressions);
-                recordPtvEvent('image', 'image-retry-suppressed', {
-                    naturalHeight: image.naturalHeight,
-                    naturalWidth: image.naturalWidth,
-                    url
-                });
-            }
+    const failedAt = observedImageFailures.get(url);
+    const suppressLoggedAt = observedImageRetrySuppressions.get(url);
+    const isSuppressed = Boolean(failedAt && Date.now() - failedAt < IMAGE_ERROR_SUPPRESSION_MS);
 
-            return;
+    if (isSuppressed) {
+        if (!suppressLoggedAt || Date.now() - suppressLoggedAt >= IMAGE_ERROR_SUPPRESSION_MS) {
+            observedImageRetrySuppressions.set(url, Date.now());
+            trimMap(observedImageRetrySuppressions);
+            recordPtvEvent('image', 'image-retry-suppressed', getImageEventDetail(image, url));
         }
 
-        observedImageFailures.set(url, Date.now());
-        trimMap(observedImageFailures);
-        recordPtvEvent('image', 'image-failed-once', {
-            naturalHeight: image.naturalHeight,
-            naturalWidth: image.naturalWidth,
-            url
-        });
-        warnDebug('Image failed to load.', {
-            naturalHeight: image.naturalHeight,
-            naturalWidth: image.naturalWidth,
-            url
-        });
         return;
     }
 
+    observedImageFailures.set(url, Date.now());
+    trimMap(observedImageFailures);
+    recordPtvEvent('image', 'image-failed-once', getImageEventDetail(image, url));
+    warnDebug('Image failed to load.', getImageEventDetail(image, url));
+}
+
+function handleImageLoad(image: HTMLImageElement, tracker: PtvImageTracker | undefined, eventName: string, url: string) {
     const durationMs = tracker ? performance.now() - tracker.startedAt : 0;
+
     markImageTrackerComplete(image, tracker, eventName, url);
 
     if (durationMs > IMAGE_MAX_LIFECYCLE_MS) {
         recordPtvEvent('image', 'image-duration-discarded', {
-            durationMs: Number(durationMs.toFixed(1)),
-            naturalHeight: image.naturalHeight,
-            naturalWidth: image.naturalWidth,
-            url
+            ...getImageEventDetail(image, url),
+            durationMs: Number(durationMs.toFixed(1))
         });
         return;
     }
 
     if (durationMs > 0) {
-        recordPtvTiming('image', eventName, durationMs, {
-            naturalHeight: image.naturalHeight,
-            naturalWidth: image.naturalWidth,
-            url
-        });
-    } else {
-        recordPtvEvent('image', eventName, {
-            naturalHeight: image.naturalHeight,
-            naturalWidth: image.naturalWidth,
-            url
-        });
+        recordPtvTiming('image', eventName, durationMs, getImageEventDetail(image, url));
+        return;
     }
+
+    recordPtvEvent('image', eventName, getImageEventDetail(image, url));
+}
+
+function handleImageDone(event: Event) {
+    if (!(event.target instanceof HTMLImageElement)) return;
+
+    const image = event.target;
+    const url = getImageUrl(image) || imageTrackers.get(image)?.url || '';
+    if (!url) return;
+
+    const eventName = event.type === 'error' ? 'image-error' : 'image-load';
+    const tracker = getCurrentImageTracker(image, url);
+
+    if (shouldSuppressImageEvent(image, tracker, eventName, url)) return;
+
+    if (event.type === 'error') {
+        handleImageError(image, tracker, eventName, url);
+        return;
+    }
+
+    handleImageLoad(image, tracker, eventName, url);
 }
 
 function shouldSuppressImageEvent(

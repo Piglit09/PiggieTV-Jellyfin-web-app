@@ -18,6 +18,7 @@ public sealed class PtvController : ControllerBase
     private readonly IAuthorizationService _authorizationService;
     private readonly IPtvFeaturedContentRefreshService _featuredContentRefreshService;
     private readonly IPtvFeaturedContentStore _featuredContentStore;
+    private readonly IPtvTmdbMetadataService _tmdbMetadataService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PtvController"/> class.
@@ -25,14 +26,17 @@ public sealed class PtvController : ControllerBase
     /// <param name="authorizationService">Authorization service.</param>
     /// <param name="featuredContentRefreshService">Featured-content refresh service.</param>
     /// <param name="featuredContentStore">Featured-content cache store.</param>
+    /// <param name="tmdbMetadataService">TMDb metadata enrichment service.</param>
     public PtvController(
         IAuthorizationService authorizationService,
         IPtvFeaturedContentRefreshService featuredContentRefreshService,
-        IPtvFeaturedContentStore featuredContentStore)
+        IPtvFeaturedContentStore featuredContentStore,
+        IPtvTmdbMetadataService tmdbMetadataService)
     {
         _authorizationService = authorizationService;
         _featuredContentRefreshService = featuredContentRefreshService;
         _featuredContentStore = featuredContentStore;
+        _tmdbMetadataService = tmdbMetadataService;
     }
 
     /// <summary>
@@ -51,7 +55,8 @@ public sealed class PtvController : ControllerBase
         return Ok(PtvStatusResponse.FromStoreStatus(
             storeStatus,
             canWriteFeaturedContent,
-            _featuredContentRefreshService.GetRefreshStatus(storeStatus)));
+            _featuredContentRefreshService.GetRefreshStatus(storeStatus),
+            _tmdbMetadataService.GetStatus()));
     }
 
     /// <summary>
@@ -157,7 +162,8 @@ public sealed class PtvController : ControllerBase
         return Ok(PtvStatusResponse.FromStoreStatus(
             storeStatus,
             canWriteFeaturedContent: true,
-            refreshStatus: _featuredContentRefreshService.GetRefreshStatus(storeStatus)));
+            refreshStatus: _featuredContentRefreshService.GetRefreshStatus(storeStatus),
+            tmdbMetadata: _tmdbMetadataService.GetStatus()));
     }
 
     private async Task<bool> CanWriteFeaturedContentAsync()

@@ -207,12 +207,42 @@ const MEDIA_BRAND_DEFINITIONS = {
     anime: {
         id: 'anime',
         title: 'Anime',
-        minScore: 5,
-        searchTerms: ['Anime', 'Crunchyroll', 'Funimation', 'Toonami'],
-        strongKeywords: ['anime', 'crunchyroll', 'funimation', 'toonami'],
-        studioKeywords: ['toei animation', 'mappa', 'bones', 'madhouse', 'studio pierrot', 'trigger'],
-        studioNames: ['Toei Animation', 'MAPPA', 'Bones', 'Madhouse', 'Studio Pierrot', 'Trigger'],
-        supportingKeywords: ['animation', 'animated', 'japanese']
+        minScore: 2,
+        searchTerms: ['Anime', 'Manga', 'Crunchyroll', 'Funimation', 'Toonami', 'Toei Animation', 'Studio Pierrot', 'MAPPA'],
+        strongKeywords: ['anime', 'manga', 'crunchyroll', 'funimation', 'toonami'],
+        studioKeywords: [
+            'toei animation',
+            'mappa',
+            'bones',
+            'madhouse',
+            'studio pierrot',
+            'trigger',
+            'a 1 pictures',
+            'kyoto animation',
+            'sunrise',
+            'production i g',
+            'ufotable',
+            'shaft',
+            'wit studio',
+            'cloverworks'
+        ],
+        studioNames: [
+            'Toei Animation',
+            'MAPPA',
+            'Bones',
+            'Madhouse',
+            'Studio Pierrot',
+            'Trigger',
+            'A-1 Pictures',
+            'Kyoto Animation',
+            'Sunrise',
+            'Production I.G',
+            'Ufotable',
+            'Shaft',
+            'Wit Studio',
+            'CloverWorks'
+        ],
+        supportingKeywords: ['anime', 'manga', 'animation', 'animated', 'japan', 'japanese']
     },
     studioGhibli: {
         id: 'studioGhibli',
@@ -397,6 +427,59 @@ function createMediaBrandMatcher(definition: MediaBrandDefinition): MediaBrandMa
     };
 }
 
+const FAMILY_ANIMATION_KEYWORDS = [
+    'animation',
+    'animated',
+    'cartoon',
+    'walt disney animation',
+    'disney television animation',
+    'pixar',
+    'dreamworks animation',
+    'illumination',
+    'studio ghibli',
+    'cartoon network',
+    'nickelodeon'
+];
+
+const FAMILY_AUDIENCE_KEYWORDS = [
+    'family',
+    'children',
+    'kids',
+    'disney',
+    'pixar',
+    'dreamworks',
+    'illumination',
+    'cartoon network',
+    'nickelodeon',
+    'disney channel',
+    'disney junior'
+];
+
+const ADULT_ANIMATION_EXCLUSION_KEYWORDS = [
+    'adult animation',
+    'adult swim',
+    'mature',
+    'tv ma'
+];
+
+export function isFamilyAnimationItem(item: unknown) {
+    if (!isRecord(item) || !isMovieOrSeries(item)) return false;
+
+    const buckets = getMetadataBuckets(item);
+    const metadataText = normalizeBrandText([
+        buckets.studioText,
+        buckets.providerText,
+        buckets.productionText,
+        buckets.genreTagText,
+        buckets.collectionText
+    ].filter(Boolean).join(' '));
+    const animationScore = countKeywordMatches(metadataText, FAMILY_ANIMATION_KEYWORDS);
+    const familyScore = countKeywordMatches(metadataText, FAMILY_AUDIENCE_KEYWORDS);
+    const adultScore = countKeywordMatches(metadataText, ADULT_ANIMATION_EXCLUSION_KEYWORDS);
+
+    return animationScore > 0 && familyScore > 0 && adultScore === 0;
+}
+
 export const mediaBrandMatchers = Object.keys(MEDIA_BRAND_DEFINITIONS).reduce<Record<string, MediaBrandMatcher>>(
     (matchers, brandId) => {
         const definition = MEDIA_BRAND_DEFINITIONS[brandId as keyof typeof MEDIA_BRAND_DEFINITIONS];
@@ -412,4 +495,8 @@ export const DISNEY_ANIMATION_SEARCH_TERMS = mediaBrandMatchers.disney.searchTer
 
 export function isDisneyAnimationItem(item: unknown) {
     return mediaBrandMatchers.disney.matches(item);
+}
+
+export function isAnimeItem(item: unknown) {
+    return mediaBrandMatchers.anime.matches(item);
 }

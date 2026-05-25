@@ -12,3 +12,4 @@ C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.P
 C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Release\net9.0\Jellyfin.Plugin.PiggieTV.xml
 C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Release\net9.0\Jellyfin.Plugin.PiggieTV.pdb
 C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Release\net9.0\ref\Jellyfin.Plugin.PiggieTV.dll
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Release\net9.0\Jellyfin.Plugin.PiggieTV.sourcelink.json

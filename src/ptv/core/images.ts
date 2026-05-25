@@ -146,6 +146,11 @@ export function fallbackPtvImage(image: HTMLImageElement, asset: PtvResponsiveAs
 export function applyPtvResponsiveImage(image: HTMLImageElement, asset: PtvResponsiveAsset | string) {
     const candidates = getPtvStaticAssetCandidates(asset);
     const requestKey = candidates.join('|');
+    const fallbackUrl = getPtvStaticAssetFallbackUrl(asset) || candidates[0] || EMBEDDED_FALLBACK_LOGO;
+    const currentSrc = image.getAttribute('src') || '';
+    const shouldReplaceImmediately = !currentSrc
+        || currentSrc.startsWith('/assets/')
+        || (image.complete && !isPtvImageValid(image));
 
     if (image.dataset.ptvImageRequest === requestKey && isPtvImageValid(image)) return;
 
@@ -156,6 +161,10 @@ export function applyPtvResponsiveImage(image: HTMLImageElement, asset: PtvRespo
             fallbackPtvImage(image, asset);
         }
     };
+
+    if (shouldReplaceImmediately) {
+        image.src = fallbackUrl;
+    }
 
     void resolveFirstValidImageUrl(candidates)
         .then(url => {

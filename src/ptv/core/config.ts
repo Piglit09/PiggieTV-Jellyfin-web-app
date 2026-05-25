@@ -122,11 +122,11 @@ export const PTV_DEBUG = {
 } as const;
 
 export const PTV_CACHE = {
-    featuredContentKey: 'ptv:featured-content:v6',
+    featuredContentKey: 'ptv:featured-content:v7',
     featuredContentServerConfigName: 'ptv',
     featuredContentSettingsKey: 'ptv:featured-content:settings:v1',
     featuredContentTtlMs: 12 * 60 * 60 * 1000,
-    featuredContentVersion: 6,
+    featuredContentVersion: 7,
     maxFeaturedContentTtlMs: 7 * 24 * 60 * 60 * 1000,
     minFeaturedContentTtlMs: 60 * 60 * 1000
 } as const;
