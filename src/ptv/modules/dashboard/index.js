@@ -155,11 +155,12 @@ function scheduleDashboardRetryPasses() {
 function normalizeDrawerLogo(logo, className) {
     if (!(logo instanceof HTMLImageElement)) return;
 
+    logo.dataset.ptvLogo = 'drawer';
+    logo.dataset.ptvImageComponent = 'dashboard-drawer-logo';
     applyPtvResponsiveImage(logo, PTV_ASSETS.responsive.logos.sidebar);
     logo.alt = PTV_BRANDING.appName;
     logo.loading = 'eager';
     logo.decoding = 'async';
-    logo.dataset.ptvLogo = 'drawer';
     logo.className = className;
 }
 

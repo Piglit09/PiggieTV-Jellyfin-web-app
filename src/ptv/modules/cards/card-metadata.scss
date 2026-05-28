@@ -130,17 +130,33 @@
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
 }
 
+.ptv-card-quality-pill-resolution {
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.9), rgba(2, 132, 199, 0.82));
+}
+
+.ptv-card-quality-pill-8k,
 .ptv-card-quality-pill-4k {
     background: linear-gradient(135deg, rgba(168, 85, 247, 0.98), rgba(217, 70, 239, 0.92));
 }
 
+.ptv-card-quality-pill-source {
+    background: linear-gradient(135deg, rgba(100, 116, 139, 0.94), rgba(71, 85, 105, 0.86));
+}
+
 .ptv-card-quality-pill-hdr,
 .ptv-card-quality-pill-hdr10,
+.ptv-card-quality-pill-hdr10-plus,
+.ptv-card-quality-pill-video-feature,
+.ptv-card-quality-pill-3d,
 .ptv-card-quality-pill-dolby-vision {
     background: linear-gradient(135deg, rgba(245, 158, 11, 0.98), rgba(249, 115, 22, 0.92));
 }
 
-.ptv-card-quality-pill-hevc {
+.ptv-card-quality-pill-video-format,
+.ptv-card-quality-pill-av1,
+.ptv-card-quality-pill-hevc,
+.ptv-card-quality-pill-h265,
+.ptv-card-quality-pill-vp9 {
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.98), rgba(14, 165, 233, 0.92));
 }
 
@@ -148,7 +164,13 @@
     background: linear-gradient(135deg, rgba(34, 197, 94, 0.98), rgba(22, 163, 74, 0.92));
 }
 
+.ptv-card-quality-pill-audio,
 .ptv-card-quality-pill-5-1,
+.ptv-card-quality-pill-7-1,
+.ptv-card-quality-pill-dts,
+.ptv-card-quality-pill-dts-x,
+.ptv-card-quality-pill-dolby-digital-plus,
+.ptv-card-quality-pill-truehd,
 .ptv-card-quality-pill-atmos {
     background: linear-gradient(135deg, rgba(124, 58, 237, 0.98), rgba(79, 70, 229, 0.92));
 }

@@ -6,6 +6,7 @@ import './dashboard';
 import './settings';
 import './login';
 import './details';
+import './integrations/arrActions';
 import './request';
 import './signup';
 import './theme-songs';

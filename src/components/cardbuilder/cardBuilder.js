@@ -15,6 +15,10 @@ import globalize from 'lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { getBackdropShape, getPortraitShape, getSquareShape } from 'utils/card';
 import { getItemTypeIcon, getLibraryIcon } from 'utils/image';
+import {
+    getPtvQualityAttribute,
+    getPtvQualityPillsHtml
+} from 'ptv/modules/cards/qualityTags';
 
 import focusManager from '../focusManager';
 import imageLoader from '../images/imageLoader';
@@ -42,70 +46,6 @@ import {
 } from './cardBuilderUtils';
 
 const enableFocusTransform = !browser.slow && !browser.edge;
-
-function getPtvQualityTags(item) {
-    const tags = [];
-    const mediaSource = item.MediaSources?.[0] || {};
-    const mediaStreams = item.MediaStreams || mediaSource.MediaStreams || [];
-    const videoStream = mediaStreams.find(stream => stream.Type === 'Video') || {};
-    const width = item.Width || videoStream.Width || mediaSource.Width;
-    const videoRange = `${item.VideoRange || videoStream.VideoRange || mediaSource.VideoRange || ''}`.toLowerCase();
-    const videoCodec = `${videoStream.Codec || mediaSource.VideoCodec || ''}`.toLowerCase();
-    const audioStreams = mediaStreams.filter(stream => stream.Type === 'Audio');
-    const videoTypes = ['Movie', 'Episode', 'Series', 'Season', 'Video'];
-    const isVideoItem = item.MediaType === 'Video' || videoTypes.includes(item.Type);
-
-    if (width >= 3800) {
-        tags.push('4K');
-    } else if (width >= 1200 || (!width && isVideoItem)) {
-        tags.push('HD');
-    }
-
-    if (videoRange.includes('hdr')) {
-        tags.push('HDR');
-    }
-
-    if (videoRange.includes('dovi') || videoRange.includes('dolby')) {
-        tags.push('Dolby Vision');
-    }
-
-    if (videoCodec.includes('hevc') || videoCodec.includes('h265') || videoCodec.includes('x265')) {
-        tags.push('HEVC');
-    } else if (videoCodec.includes('h264') || videoCodec.includes('avc') || videoCodec.includes('x264')) {
-        tags.push('H264');
-    }
-
-    if (audioStreams.some(stream => `${stream.Codec || stream.Profile || ''}`.toLowerCase().includes('atmos'))) {
-        tags.push('Atmos');
-    } else if (audioStreams.some(stream => Number(stream.Channels || 0) >= 6)) {
-        tags.push('5.1');
-    }
-
-    return tags.slice(0, 4).join(',');
-}
-
-function getPtvQualityPillClass(tag) {
-    const slug = tag.toLowerCase()
-        .replace(/\+/g, 'plus')
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-/, '')
-        .replace(/-$/, '');
-
-    return `ptv-card-quality-pill ptv-card-quality-pill-${slug}`;
-}
-
-function getPtvQualityPillsHtml(item) {
-    const quality = getPtvQualityTags(item)
-        .split(',')
-        .map(tag => tag.trim())
-        .filter(Boolean);
-
-    if (!quality.length) return '';
-
-    return '<div class="ptv-card-quality-stack">'
-        + quality.map(tag => '<span class="' + getPtvQualityPillClass(tag) + '">' + escapeHtml(tag) + '</span>').join('')
-        + '</div>';
-}
 
 function getPtvRatingBadgesHtml(item) {
     const badges = [];
@@ -177,7 +117,7 @@ function getPtvMetadataAttributes(item) {
     const runtime = item.RunTimeTicks ? datetime.getDisplayRunningTime(item.RunTimeTicks) : '';
     const year = item.ProductionYear ? datetime.toLocaleString(item.ProductionYear, { useGrouping: false }) : '';
     const genre = item.Genres?.[0] || '';
-    const quality = getPtvQualityTags(item);
+    const quality = getPtvQualityAttribute(item);
     const badge = getPtvBadge(item);
     const seriesMeta = getPtvSeriesMeta(item);
     const score = getPtvScore(item);

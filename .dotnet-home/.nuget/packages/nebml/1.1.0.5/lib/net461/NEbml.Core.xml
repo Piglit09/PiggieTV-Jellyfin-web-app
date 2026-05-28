@@ -1,0 +1,931 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>NEbml.Core</name>
+    </assembly>
+    <members>
+        <member name="T:NEbml.Core.BackpatchingMasterElementWriter">
+            <summary>
+            Implements the Backpatching strategy for writing EBML master elements, where the size field is backpatched after writing content.
+            Used by <see cref="M:NEbml.Core.EbmlWriter.StartMasterElement(NEbml.Core.VInt,NEbml.Core.EbmlWriter.MasterElementSizeStrategy,System.Int32)"/> when the Backpatching strategy is selected.
+            </summary>
+        </member>
+        <member name="T:NEbml.Core.BufferedMasterElementWriter">
+            <summary>
+            Implements the buffered (legacy) strategy for writing EBML master elements.
+            Used by <see cref="M:NEbml.Core.EbmlWriter.StartMasterElement(NEbml.Core.VInt,NEbml.Core.EbmlWriter.MasterElementSizeStrategy,System.Int32)"/> when the Buffered strategy is selected.
+            </summary>
+        </member>
+        <member name="T:NEbml.Core.DTDBase">
+            <summary>
+            Root class for Ebml type schema
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.Container(System.Int64,System.String)">
+            <summary>
+            Creates a master element descriptor (container)
+            </summary>
+            <param name="id">Element identifier</param>
+            <param name="name">Element name</param>
+            <returns>Element descriptor for a master element</returns>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.Binary(System.Int64,System.String)">
+            <summary>
+            Creates a binary element descriptor
+            </summary>
+            <param name="id">Element identifier</param>
+            <param name="name">Element name</param>
+            <returns>Element descriptor for a binary element</returns>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.Uint(System.Int64,System.String)">
+            <summary>
+            Creates an unsigned integer element descriptor
+            </summary>
+            <param name="id">Element identifier</param>
+            <param name="name">Element name</param>
+            <returns>Element descriptor for an unsigned integer element</returns>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.Int(System.Int64,System.String)">
+            <summary>
+            Creates a signed integer element descriptor
+            </summary>
+            <param name="id">Element identifier</param>
+            <param name="name">Element name</param>
+            <returns>Element descriptor for a signed integer element</returns>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.Ascii(System.Int64,System.String)">
+            <summary>
+            Creates an ASCII string element descriptor
+            </summary>
+            <param name="id">Element identifier</param>
+            <param name="name">Element name</param>
+            <returns>Element descriptor for an ASCII string element</returns>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.Utf8(System.Int64,System.String)">
+            <summary>
+            Creates a UTF-8 string element descriptor
+            </summary>
+            <param name="id">Element identifier</param>
+            <param name="name">Element name</param>
+            <returns>Element descriptor for a UTF-8 string element</returns>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.Float(System.Int64,System.String)">
+            <summary>
+            Creates a floating point element descriptor
+            </summary>
+            <param name="id">Element identifier</param>
+            <param name="name">Element name</param>
+            <returns>Element descriptor for a floating point element</returns>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.Date(System.Int64,System.String)">
+            <summary>
+            Creates a date element descriptor
+            </summary>
+            <param name="id">Element identifier</param>
+            <param name="name">Element name</param>
+            <returns>Element descriptor for a date element</returns>
+        </member>
+        <member name="T:NEbml.Core.DTDBase.MasterElementDescriptor">
+            <summary>
+            Specialized element descriptor for master elements (containers)
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.DTDBase.MasterElementDescriptor.#ctor(System.Int64,System.String)">
+            <summary>
+            Initializes a new instance of the MasterElementDescriptor class
+            </summary>
+            <param name="identifier">Element identifier</param>
+            <param name="name">Element name</param>
+        </member>
+        <member name="T:NEbml.Core.StandardDtd">
+            <summary>
+            Appendix C. EBML Standard definitions.
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.EBML">
+            <summary>
+            EBML header element descriptor
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.SignatureSlot">
+            <summary>
+            Signature slot element descriptor for digital signatures
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.CRC32">
+            <summary>
+            CRC-32 checksum element descriptor
+            </summary>
+            <summary>
+            Void element descriptor for padding
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.Void">
+            <summary>
+            CRC-32 checksum element descriptor
+            </summary>
+            <summary>
+            Void element descriptor for padding
+            </summary>
+        </member>
+        <member name="T:NEbml.Core.StandardDtd.EBMLDesc">
+            <summary>
+            EBML header element with standard sub-elements
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.EBMLDesc.EBMLVersion">
+            <summary>EBML version number</summary>
+            <summary>Minimum EBML version required to read this file</summary>
+            <summary>Maximum length of element IDs in this file</summary>
+            <summary>Maximum length of element sizes in this file</summary>
+            <summary>Document type string identifier</summary>
+            <summary>Document type version number</summary>
+            <summary>Minimum document type version required to read this file</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.EBMLDesc.EBMLReadVersion">
+            <summary>EBML version number</summary>
+            <summary>Minimum EBML version required to read this file</summary>
+            <summary>Maximum length of element IDs in this file</summary>
+            <summary>Maximum length of element sizes in this file</summary>
+            <summary>Document type string identifier</summary>
+            <summary>Document type version number</summary>
+            <summary>Minimum document type version required to read this file</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.EBMLDesc.EBMLMaxIDLength">
+            <summary>EBML version number</summary>
+            <summary>Minimum EBML version required to read this file</summary>
+            <summary>Maximum length of element IDs in this file</summary>
+            <summary>Maximum length of element sizes in this file</summary>
+            <summary>Document type string identifier</summary>
+            <summary>Document type version number</summary>
+            <summary>Minimum document type version required to read this file</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.EBMLDesc.EBMLMaxSizeLength">
+            <summary>EBML version number</summary>
+            <summary>Minimum EBML version required to read this file</summary>
+            <summary>Maximum length of element IDs in this file</summary>
+            <summary>Maximum length of element sizes in this file</summary>
+            <summary>Document type string identifier</summary>
+            <summary>Document type version number</summary>
+            <summary>Minimum document type version required to read this file</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.EBMLDesc.DocType">
+            <summary>EBML version number</summary>
+            <summary>Minimum EBML version required to read this file</summary>
+            <summary>Maximum length of element IDs in this file</summary>
+            <summary>Maximum length of element sizes in this file</summary>
+            <summary>Document type string identifier</summary>
+            <summary>Document type version number</summary>
+            <summary>Minimum document type version required to read this file</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.EBMLDesc.DocTypeVersion">
+            <summary>EBML version number</summary>
+            <summary>Minimum EBML version required to read this file</summary>
+            <summary>Maximum length of element IDs in this file</summary>
+            <summary>Maximum length of element sizes in this file</summary>
+            <summary>Document type string identifier</summary>
+            <summary>Document type version number</summary>
+            <summary>Minimum document type version required to read this file</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.EBMLDesc.DocTypeReadVersion">
+            <summary>EBML version number</summary>
+            <summary>Minimum EBML version required to read this file</summary>
+            <summary>Maximum length of element IDs in this file</summary>
+            <summary>Maximum length of element sizes in this file</summary>
+            <summary>Document type string identifier</summary>
+            <summary>Document type version number</summary>
+            <summary>Minimum document type version required to read this file</summary>
+        </member>
+        <member name="T:NEbml.Core.StandardDtd.SignatureSlotDesc">
+            <summary>
+            Digital signature slot element with cryptographic sub-elements
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.SignatureSlotDesc.SignatureAlgo">
+            <summary>Signature algorithm identifier</summary>
+            <summary>Hash algorithm identifier</summary>
+            <summary>Public key used for signature verification</summary>
+            <summary>Digital signature data</summary>
+            <summary>Container for signature-related elements</summary>
+            <summary>List of signed elements</summary>
+            <summary>Individual signed element reference</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.SignatureSlotDesc.SignatureHash">
+            <summary>Signature algorithm identifier</summary>
+            <summary>Hash algorithm identifier</summary>
+            <summary>Public key used for signature verification</summary>
+            <summary>Digital signature data</summary>
+            <summary>Container for signature-related elements</summary>
+            <summary>List of signed elements</summary>
+            <summary>Individual signed element reference</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.SignatureSlotDesc.SignaturePublicKey">
+            <summary>Signature algorithm identifier</summary>
+            <summary>Hash algorithm identifier</summary>
+            <summary>Public key used for signature verification</summary>
+            <summary>Digital signature data</summary>
+            <summary>Container for signature-related elements</summary>
+            <summary>List of signed elements</summary>
+            <summary>Individual signed element reference</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.SignatureSlotDesc.Signature">
+            <summary>Signature algorithm identifier</summary>
+            <summary>Hash algorithm identifier</summary>
+            <summary>Public key used for signature verification</summary>
+            <summary>Digital signature data</summary>
+            <summary>Container for signature-related elements</summary>
+            <summary>List of signed elements</summary>
+            <summary>Individual signed element reference</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.SignatureSlotDesc.SignatureElements">
+            <summary>Signature algorithm identifier</summary>
+            <summary>Hash algorithm identifier</summary>
+            <summary>Public key used for signature verification</summary>
+            <summary>Digital signature data</summary>
+            <summary>Container for signature-related elements</summary>
+            <summary>List of signed elements</summary>
+            <summary>Individual signed element reference</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.SignatureSlotDesc.SignatureElementList">
+            <summary>Signature algorithm identifier</summary>
+            <summary>Hash algorithm identifier</summary>
+            <summary>Public key used for signature verification</summary>
+            <summary>Digital signature data</summary>
+            <summary>Container for signature-related elements</summary>
+            <summary>List of signed elements</summary>
+            <summary>Individual signed element reference</summary>
+        </member>
+        <member name="F:NEbml.Core.StandardDtd.SignatureSlotDesc.SignedElement">
+            <summary>Signature algorithm identifier</summary>
+            <summary>Hash algorithm identifier</summary>
+            <summary>Public key used for signature verification</summary>
+            <summary>Digital signature data</summary>
+            <summary>Container for signature-related elements</summary>
+            <summary>List of signed elements</summary>
+            <summary>Individual signed element reference</summary>
+        </member>
+        <member name="T:NEbml.Core.EbmlDataFormatException">
+            <summary>
+            Thrown to indicate the EBML data format violation.
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.EbmlDataFormatException.#ctor">
+            <summary>
+            Initializes a new instance of the EbmlDataFormatException class
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.EbmlDataFormatException.#ctor(System.String)">
+            <summary>
+            Initializes a new instance of the EbmlDataFormatException class with a specified error message
+            </summary>
+            <param name="message">The message that describes the error</param>
+        </member>
+        <member name="M:NEbml.Core.EbmlDataFormatException.#ctor(System.String,System.Exception)">
+            <summary>
+            Initializes a new instance of the EbmlDataFormatException class with a specified error message and a reference to the inner exception
+            </summary>
+            <param name="message">The message that describes the error</param>
+            <param name="cause">The exception that is the cause of the current exception</param>
+        </member>
+        <member name="T:NEbml.Core.EbmlReader">
+            <summary>
+            The <code>EbmlReader</code> interface allows forward, read-only access to EBML data.
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.#ctor(System.IO.Stream)">
+            <summary>
+            Creates a new EBML reader.
+            </summary>
+            <param name="source">the source of bytes</param>
+            <exception cref="T:System.ArgumentNullException">if <code>source</code> is <code>null</code></exception>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.#ctor(System.IO.Stream,System.Int64)">
+            <summary>
+            Creates a new EBML reader.
+            </summary>
+            <param name="source">the source of bytes</param>
+            <param name="size">the maximum number of bytes to read from the source</param>
+            <exception cref="T:System.ArgumentNullException">if <code>source</code> is <code>null</code></exception>
+            <exception cref="T:System.ArgumentNullException">if <code>size</code> is negative</exception>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadNext">
+            <summary>
+            Reads the next child element of the current container and positions the stream at the beginning of the element data.
+            </summary>
+            <returns><code>true</code> if the child element is available; <code>false</code> otherwise</returns>
+            <exception cref="T:NEbml.Core.EbmlDataFormatException">if the value of the element identifier or element data size read from the stream is reserved</exception>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadAt(System.Int64)">
+            <summary>
+            Reads the next child element of the current container at the specified position and positions the stream at the beginning of the element data.
+            </summary>
+            <param name="position">The exact position in the current container to read the next element from.</param>
+            <returns><code>true</code> if the child element is available; <code>false</code> otherwise</returns>
+            <exception cref="T:NEbml.Core.EbmlDataFormatException">if the value of the element identifier or element data size read from the stream is reserved</exception>
+        </member>
+        <member name="P:NEbml.Core.EbmlReader.ElementId">
+            <summary>
+            Returns the identifier of the current element.
+            </summary>
+            <value>the element identifier</value>
+            <exception cref="T:System.InvalidOperationException">if the current element is not available</exception>
+        </member>
+        <member name="P:NEbml.Core.EbmlReader.ElementSize">
+            <summary>
+            Returns the data size of the current element.
+            </summary>
+            <value>the element data size in the encoded form</value>
+            <exception cref="T:System.InvalidOperationException">if the current element is not available</exception>
+        </member>
+        <member name="P:NEbml.Core.EbmlReader.ElementPosition">
+            <summary>
+            Gets starting position in file for current element
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.EnterContainer">
+            <summary>
+            Instructs the reader to parse the current element data as sub-elements. The current container
+            will be saved on the stack and the current element will become the new container.
+            </summary>
+            <exception cref="T:System.InvalidOperationException">if the current element is not available or if the element data was already accessed as some other type</exception>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.LeaveContainer">
+            <summary>
+            Instructs the reader to return to the previous container.
+            </summary>
+            <exception cref="T:System.InvalidOperationException">if the current container represents the whole input source</exception>
+            <exception cref="T:System.IO.EndOfStreamException">if the input source reaches the end before reading all the bytes</exception>
+            <exception cref="T:System.IO.IOException">if an I/O error has occurred</exception>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadInt">
+            <summary>
+            Reads the element data as a signed integer.
+            </summary>
+            <returns>the element data as a signed integer</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadUInt">
+            <summary>
+            Reads the element data as an unsigned integer.
+            </summary>
+            <returns>the element data as an unsigned integer</returns>
+            <exception cref="T:System.InvalidOperationException">if the current element is not available or if the element data was already accessed as some other type</exception>
+            <exception cref="T:NEbml.Core.EbmlDataFormatException">if the element size is greater than <code>8</code></exception>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadFloat">
+             <summary>
+             Reads the element data as a floating-point number.
+            
+             If the element data size is equal to <code>4</code>, then an instance of the <code>Float</code> is returned. If
+             the element data size is equal to <code>8</code>, then an instance of the <code>Double</code> is returned.
+             </summary>
+             <returns>the element data as a floating-point number</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadDate">
+            <summary>
+            Reads the element data as a date.
+            </summary>
+            <returns>the element data as a date</returns>
+        </member>
+        <member name="F:NEbml.Core.EbmlReader.MilleniumStart">
+            <summary>
+            The reference date for EBML date calculations (2001-01-01T00:00:00.000000000 UTC)
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadAscii">
+            <summary>
+            Reads the element data as an ASCII string.
+            </summary>
+            <returns>the element data as an ASCII string</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadUtf">
+            <summary>
+            Reads the element data as an UTF8 string.
+            </summary>
+            <returns>the element data as an UTF8 string</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadBinary(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads the element data as binary.
+            </summary>
+            <param name="buffer">the buffer into which the data is read</param>
+            <param name="offset">the start offset in <code>buffer</code> at which the data is written</param>
+            <param name="length">the maximum number of bytes to read</param>
+            <returns>the actual number of bytes read, or <code>-1</code> if the end of the element data is reached</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.Dispose">
+            <summary>
+            Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadFully(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads <code>length</code> bytes of data from the current element data into an array of bytes.
+            </summary>
+            <param name="buffer">the buffer into which the data is read</param>
+            <param name="offset">the start offset in array <code>buffer</code> at which the data is written</param>
+            <param name="length">the number of bytes to read</param>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.Skip(System.Int64)">
+            <summary>
+            Skips <code>length</code> bytes from an input stream.
+            </summary>
+            <param name="length">the number of bytes to skip</param>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadVarInt(System.Int32)">
+            <summary>
+            Reads the element data as a variable size integer.
+            </summary>
+            <returns>a variable size integer, or <code>null</code> if the end of the input source is reached</returns>
+            <exception cref="T:NEbml.Core.EbmlDataFormatException">if the input source contains length descriptor with zero value</exception>
+            <exception cref="T:System.IO.EndOfStreamException">if the input source reaches the end before reading all the bytes</exception>
+            <exception cref="T:System.IO.IOException">if an I/O error has occurred</exception>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadSignedIntegerUnsafe(System.Int32)">
+            <summary>
+            Reads the element data as a signed integer.
+            </summary>
+            <param name="length">the number of bytes to read</param>
+            <returns>the element data as a signed integer</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadUnsignedIntegerUnsafe(System.Int32)">
+            <summary>
+            Reads the element data as an unsigned integer.
+            </summary>
+            <param name="length">the number of bytes to read</param>
+            <returns>the element data as an unsigned integer</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.ReadString(System.Text.Encoding)">
+            <summary>
+            Reads the element data as a string in the specified charset.
+            </summary>
+            <param name="decoder">the name of the charset to be used to decode the bytes</param>
+            <returns>the element data as a string</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlReader.IsUnknownSize(NEbml.Core.VInt)">
+            <summary>
+            Determines whether a VINT represents an unknown-size value.
+            According to EBML specification, an Element Data Size with all VINT_DATA bits set to one 
+            is reserved as an indicator that the size of the EBML Element is unknown.
+            </summary>
+            <param name="vint">The VINT to check</param>
+            <returns>True if the VINT represents unknown size, false otherwise</returns>
+        </member>
+        <member name="T:NEbml.Core.EbmlWriter">
+            <summary>
+            Writes EBML file
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.EbmlWriter._stream">
+            <summary>
+            The underlying stream to write EBML data to
+            </summary>
+        </member>
+        <member name="P:NEbml.Core.EbmlWriter.BaseStream">
+            <summary>
+            Exposes the underlying stream for derived classes.
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.#ctor(System.IO.Stream)">
+            <summary>
+            Initializes a new instance of the EbmlWriter class.
+            </summary>
+            <param name="stream">The stream to write EBML data to.</param>
+        </member>
+        <member name="T:NEbml.Core.EbmlWriter.MasterElementSizeStrategy">
+            <summary>
+            Master element size calculation strategies.
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.EbmlWriter.MasterElementSizeStrategy.Buffered">
+            <summary>
+            Buffer all content, then write the size field (default, legacy behavior).
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.EbmlWriter.MasterElementSizeStrategy.Backpatching">
+            <summary>
+            Write a placeholder for the size, then backpatch it after content is written.
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.EbmlWriter.MasterElementSizeStrategy.Hybrid">
+            <summary>
+            Hybrid strategy: buffer initially, switch to backpatching when buffer limit is exceeded.
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.StartMasterElement(NEbml.Core.VInt,NEbml.Core.EbmlWriter.MasterElementSizeStrategy,System.Int32)">
+            <summary>
+            Starts a master element using the specified size calculation strategy.
+            </summary>
+            <param name="elementId">Element ID.</param>
+            <param name="strategy">Size calculation strategy (Buffered, Backpatching, or Hybrid).</param>
+            <param name="sizeFieldLength">Number of bytes to reserve for the size field (applies to backpatching and hybrid strategies; ignored for buffered).</param>
+            <returns>A <see cref="T:NEbml.Core.MasterElementWriterBase"/> for writing the master element.</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.StartMasterElement(NEbml.Core.VInt)">
+            <summary>
+            Legacy method for backward compatibility. Uses the Buffered strategy.
+            </summary>
+            <param name="elementId">Element ID.</param>
+            <returns>A <see cref="T:NEbml.Core.MasterElementWriterBase"/> for writing the master element.</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.StartHybridMasterElement(NEbml.Core.VInt,System.Int32,System.Int32)">
+            <summary>
+            Starts a master element using the Hybrid strategy with a custom buffer limit.
+            </summary>
+            <param name="elementId">Element ID.</param>
+            <param name="sizeFieldLength">Number of bytes to reserve for the size field in backpatching mode (default 8).</param>
+            <param name="bufferLimit">Buffer size limit in bytes before switching to backpatching (default 128).</param>
+            <returns>A <see cref="T:NEbml.Core.MasterElementWriterBase"/> for writing the master element.</returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.WriteElementHeader(NEbml.Core.VInt,NEbml.Core.VInt)">
+            <summary>
+            Writes element header
+            </summary>
+            <param name="elementId"></param>
+            <param name="size"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.Write(NEbml.Core.VInt,System.Int64)">
+            <summary>
+            Writes signed integer value
+            </summary>
+            <param name="elementId"></param>
+            <param name="value"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.Write(NEbml.Core.VInt,System.UInt64)">
+            <summary>
+            Writes unsigned integer value
+            </summary>
+            <param name="elementId"></param>
+            <param name="value"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.Write(NEbml.Core.VInt,System.DateTime)">
+            <summary>
+            Writes datetime value
+            </summary>
+            <param name="elementId"></param>
+            <param name="dateTime"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.Write(NEbml.Core.VInt,System.Single)">
+            <summary>
+            Writes floating point number
+            </summary>
+            <param name="elementId"></param>
+            <param name="value"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.Write(NEbml.Core.VInt,System.Double)">
+            <summary>
+            Writes floating point number with double precision
+            </summary>
+            <param name="elementId"></param>
+            <param name="value"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.Write(NEbml.Core.VInt,System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Writes binary data
+            </summary>
+            <param name="elementId"></param>
+            <param name="data"></param>
+            <param name="offset"></param>
+            <param name="length"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.Write(NEbml.Core.VInt,System.Byte[])">
+            <summary>
+            Writes binary data
+            </summary>
+            <param name="elementId"></param>
+            <param name="data"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.WriteAscii(NEbml.Core.VInt,System.String)">
+            <summary>
+            Writes string in ASCII encoding
+            </summary>
+            <param name="elementId"></param>
+            <param name="value"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.WriteUtf(NEbml.Core.VInt,System.String)">
+            <summary>
+            Writes string in UTF-8 encoding
+            </summary>
+            <param name="elementId"></param>
+            <param name="value"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.EbmlWriter.Write(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Writes raw binary data
+            </summary>
+            <param name="buffer"></param>
+            <param name="offset"></param>
+            <param name="length"></param>
+            <returns></returns>
+        </member>
+        <member name="T:NEbml.Core.ElementDescriptor">
+            <summary>
+            Defines the EBML element description.
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.ElementDescriptor.#ctor(System.UInt64,System.String,NEbml.Core.ElementType)">
+            <summary>
+            Initializes a new instance of the <code>ElementDescriptor</code> class.
+            </summary>
+            <param name="identifier"></param>
+            <param name="name"></param>
+            <param name="type"></param>
+        </member>
+        <member name="M:NEbml.Core.ElementDescriptor.#ctor(System.Int64,System.String,NEbml.Core.ElementType)">
+            <summary>
+            Initializes a new instance of the <code>ElementDescriptor</code> class.
+            </summary>
+            <param name="identifier"></param>
+            <param name="name"></param>
+            <param name="type"></param>
+        </member>
+        <member name="M:NEbml.Core.ElementDescriptor.#ctor(NEbml.Core.VInt,System.String,NEbml.Core.ElementType)">
+            <summary>
+            Initializes a new instance of the <code>ElementDescriptor</code> class.
+            </summary>
+            <param name="identifier">the element identifier</param>
+            <param name="name">the element name or <code>null</code> if the name is not known</param>
+            <param name="type">the element type or <code>null</code> if the type is not known</param>
+            <exception cref="T:System.ArgumentNullException">if <code>identifier</code> is <code>null</code></exception>
+        </member>
+        <member name="P:NEbml.Core.ElementDescriptor.Identifier">
+            <summary>
+            Returns the element identifier.
+            </summary>
+            <value>the element identifier in the encoded form</value>
+        </member>
+        <member name="P:NEbml.Core.ElementDescriptor.Name">
+            <summary>
+            Returns the element name.
+            </summary>
+            <value>the element name or &lt;code&gt;null&lt;/code&gt; if the name is not known</value>
+        </member>
+        <member name="P:NEbml.Core.ElementDescriptor.Type">
+            <summary>
+            Returns the element type.
+            </summary>
+            <value>the element type or &lt;code&gt;null&lt;/code&gt; if the type is not known</value>
+        </member>
+        <member name="M:NEbml.Core.ElementDescriptor.GetHashCode">
+            <summary>
+            Returns the hash code for this ElementDescriptor
+            </summary>
+            <returns>A hash code for the current object</returns>
+        </member>
+        <member name="M:NEbml.Core.ElementDescriptor.Equals(System.Object)">
+            <summary>
+            Determines whether the specified object is equal to the current ElementDescriptor
+            </summary>
+            <param name="obj">The object to compare with the current ElementDescriptor</param>
+            <returns>true if the specified object is equal to the current ElementDescriptor; otherwise, false</returns>
+        </member>
+        <member name="M:NEbml.Core.ElementDescriptor.ToString">
+            <summary>
+            Returns a string representation of this ElementDescriptor
+            </summary>
+            <returns>A string that represents the current ElementDescriptor</returns>
+        </member>
+        <member name="M:NEbml.Core.ElementDescriptor.Named(System.String)">
+            <summary>
+            Returns a new descriptor with updated name.
+            </summary>
+            <param name="name"></param>
+            <returns></returns>
+        </member>
+        <member name="T:NEbml.Core.ElementType">
+            <summary>
+            Defines the EBML element types
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.SignedInteger">
+            <summary>
+            The signed integer
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.UnsignedInteger">
+            <summary>
+            The unsigned integer
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.Float">
+            <summary>
+            The floating point number
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.AsciiString">
+            <summary>
+            The character string in the ASCII encoding
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.Utf8String">
+            <summary>
+            The character string in the UTF-8 encoding
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.Date">
+            <summary>
+            The date
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.Binary">
+            <summary>
+            The binary data
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.MasterElement">
+            <summary>
+            Contains other EBML sub-elements of the next lower level
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.ElementType.None">
+            <summary>
+            Element type not yet determined or unknown
+            </summary>
+        </member>
+        <member name="T:NEbml.Core.HybridMasterElementWriter">
+            <summary>
+            Implements a hybrid strategy for writing EBML master elements: buffers in memory until a limit, then switches to backpatching mode.
+            Used by <see cref="M:NEbml.Core.EbmlWriter.StartMasterElement(NEbml.Core.VInt,NEbml.Core.EbmlWriter.MasterElementSizeStrategy,System.Int32)"/> when the Hybrid strategy is selected.
+            </summary>
+        </member>
+        <member name="T:NEbml.Core.HybridMasterElementWriter.HybridStream">
+            <summary>
+            A hybrid stream that buffers data until a limit, then switches to backpatching mode.
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.HybridMasterElementWriter.HybridStream.#ctor(NEbml.Core.EbmlWriter,NEbml.Core.VInt,System.Int32,System.Int32)">
+            <summary>
+            A hybrid stream that buffers data until a limit, then switches to backpatching mode.
+            </summary>
+        </member>
+        <member name="T:NEbml.Core.MasterElementWriterBase">
+            <summary>
+            Abstract base class for EBML master element writing strategies (Buffered, Backpatching, etc).
+            Provides the contract for flushing and disposing master element writers.
+            </summary>
+            <remarks>
+            Initializes a new instance of the <see cref="T:NEbml.Core.MasterElementWriterBase"/> class.
+            </remarks>
+            <param name="stream">The stream to write to.</param>
+        </member>
+        <member name="M:NEbml.Core.MasterElementWriterBase.#ctor(System.IO.Stream)">
+            <summary>
+            Abstract base class for EBML master element writing strategies (Buffered, Backpatching, etc).
+            Provides the contract for flushing and disposing master element writers.
+            </summary>
+            <remarks>
+            Initializes a new instance of the <see cref="T:NEbml.Core.MasterElementWriterBase"/> class.
+            </remarks>
+            <param name="stream">The stream to write to.</param>
+        </member>
+        <member name="P:NEbml.Core.MasterElementWriterBase.FlushImpl">
+            <summary>
+            Delegate that implements the flush logic for the master element writer.
+            </summary>
+        </member>
+        <member name="P:NEbml.Core.MasterElementWriterBase.BufferStream">
+            <summary>
+            Gets the buffer stream used for writing the master element.
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.MasterElementWriterBase.Dispose">
+            <summary>
+            Disposes the master element writer and flushes any pending data.
+            </summary>
+        </member>
+        <member name="T:NEbml.Core.StreamExtensions">
+            <summary>
+            Extension methods for Stream operations
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.StreamExtensions.ReadFully(System.IO.Stream,System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Reads data from a stream until the requested number of bytes is read or end of stream is reached
+            </summary>
+            <param name="stream">The stream to read from</param>
+            <param name="buffer">The buffer to store read data</param>
+            <param name="offset">The offset in the buffer to start storing data</param>
+            <param name="count">The number of bytes to read</param>
+            <returns>The total number of bytes read</returns>
+        </member>
+        <member name="T:NEbml.Core.VInt">
+            <summary>
+            Variable size integer implementation as of http://www.matroska.org/technical/specs/rfc/index.html
+            </summary>
+        </member>
+        <member name="P:NEbml.Core.VInt.Value">
+            <summary>
+            Gets the value
+            </summary>
+        </member>
+        <member name="P:NEbml.Core.VInt.IsReserved">
+            <summary>
+            Gets true if value is reserved (i.e. all data bits are zeros or 1's)
+            </summary>
+        </member>
+        <member name="P:NEbml.Core.VInt.IsValidIdentifier">
+            <summary>
+            Gets true if value is correct identifier
+            </summary>
+        </member>
+        <member name="P:NEbml.Core.VInt.EncodedValue">
+            <summary>
+            Gets the encoded value.
+            </summary>
+        </member>
+        <member name="P:NEbml.Core.VInt.Length">
+            <summary>
+            Gets the encoded value's length
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.VInt.op_Implicit(NEbml.Core.VInt)~System.Nullable{System.UInt64}">
+            <summary>
+            Implicitly converts VInt to nullable ulong, returning null for reserved values
+            </summary>
+            <param name="value">The VInt value to convert</param>
+            <returns>The ulong value or null if reserved</returns>
+        </member>
+        <member name="M:NEbml.Core.VInt.EncodeSize(System.UInt64,System.Int32)">
+            <summary>
+            Returns VInt value with specific encoded value with a specific length.
+            </summary>
+            <param name="value">(Size) value to be encoded.</param>
+            <param name="length">VInt length to store value to.</param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.VInt.MakeId(System.UInt32)">
+             <summary>
+            
+             </summary>
+             <param name="elementId"></param>
+             <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.VInt.UnknownSize(System.Int32)">
+            <summary>
+            Creates VInt for unknown size (all databits are 1's)
+            </summary>
+            <param name="length"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.VInt.FromEncoded(System.UInt64)">
+            <summary>
+            Constructs the VInt value from its encoded form
+            </summary>
+            <param name="encodedValue"></param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.VInt.Read(System.IO.Stream,System.Int32,System.Byte[])">
+            <summary>
+            Reads the value from the stream
+            </summary>
+            <param name="source"></param>
+            <param name="maxLength">Maximal expected length (either 4 or 8)</param>
+            <param name="buffer">The buffer for optimization purposes. Must match the maxlength</param>
+            <returns></returns>
+        </member>
+        <member name="M:NEbml.Core.VInt.Write(System.IO.Stream)">
+            <summary>
+            Writes value to stream
+            </summary>
+            <param name="stream"></param>
+        </member>
+        <member name="F:NEbml.Core.VInt.DataBitsMask">
+            <summary>
+            Maps length to data bits mask
+            </summary>
+        </member>
+        <member name="F:NEbml.Core.VInt.MaxSizeValue">
+            <summary>
+            All 1's is reserved for unknown size
+            </summary>
+        </member>
+        <member name="M:NEbml.Core.VInt.GetHashCode">
+            <summary>
+            Returns the hash code for this VInt
+            </summary>
+            <returns>A hash code for the current object</returns>
+        </member>
+        <member name="M:NEbml.Core.VInt.Equals(System.Object)">
+            <summary>
+            Determines whether the specified object is equal to the current VInt
+            </summary>
+            <param name="obj">The object to compare with the current VInt</param>
+            <returns>true if the specified object is equal to the current VInt; otherwise, false</returns>
+        </member>
+        <member name="M:NEbml.Core.VInt.ToString">
+            <summary>
+            Returns a string representation of this VInt
+            </summary>
+            <returns>A string that represents the current VInt</returns>
+        </member>
+    </members>
+</doc>

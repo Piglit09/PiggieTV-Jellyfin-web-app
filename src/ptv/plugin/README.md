@@ -4,21 +4,29 @@ Minimal server-side companion for the PiggieTV web client.
 
 Initial endpoints only:
 
+- `GET /Ptv/v1/status`
+- `GET /Ptv/v1/featured`
+- `PUT /Ptv/v1/featured`
+- `DELETE /Ptv/v1/featured`
+- `POST /Ptv/v1/featured/refresh`
+- `GET /Ptv/v1/settings`
+- `POST /Ptv/v1/settings`
+- `POST /Ptv/v1/settings/reset`
+
+Temporary compatibility aliases are also available:
+
 - `GET /Ptv/v1/Status`
 - `GET /Ptv/v1/FeaturedContent`
 - `PUT /Ptv/v1/FeaturedContent`
 - `DELETE /Ptv/v1/FeaturedContent`
 - `POST /Ptv/v1/FeaturedContent/Refresh`
-
-Temporary compatibility aliases are also available:
-
 - `GET /Ptv/Status`
 - `GET /Ptv/FeaturedContent`
 - `PUT /Ptv/FeaturedContent`
 - `DELETE /Ptv/FeaturedContent`
 - `POST /Ptv/FeaturedContent/Refresh`
 
-All endpoints require an authenticated Jellyfin user. Featured-content reads are available to any authenticated user, while `PUT /Ptv/v1/FeaturedContent`, `DELETE /Ptv/v1/FeaturedContent`, and `POST /Ptv/v1/FeaturedContent/Refresh` require Jellyfin admin/elevated permissions.
+All endpoints require an authenticated Jellyfin user. Featured-content reads are available to any authenticated user, while `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, and all settings endpoints require Jellyfin admin/elevated permissions.
 
 The cache write endpoint validates payload version, required fields, timestamps, unsafe client fields, and serialized size before saving. The plugin writes only to its fixed PiggieTV cache file and never accepts client-provided storage paths or file names. Validation errors use structured JSON:
 
@@ -35,7 +43,17 @@ The cache is stored at:
 <Jellyfin plugin configurations path>/PiggieTV/featured-content-cache.json
 ```
 
-The plugin refreshes this cache in the background on startup when the cache is missing or expired, then on the normal refresh interval. Manual dashboard refresh calls `POST /Ptv/v1/FeaturedContent/Refresh`. Reads continue serving the current cache during refresh; failed refreshes keep stale cache available.
+The plugin refreshes this cache in the background on startup when the cache is missing or expired, then on the configured refresh interval. Manual dashboard refresh calls `POST /Ptv/v1/featured/refresh`. Reads continue serving the current cache during refresh; failed refreshes keep stale cache available. Refreshes are protected by a single lock and timeout so `refreshInProgress` cannot stay true forever.
+
+## Settings
+
+Plugin settings are stored in Jellyfin plugin configuration storage. The PiggieTV dashboard uses `/Ptv/v1/settings` to edit feature toggles, hero behavior, row limits, refresh interval, performance limits, and TMDb enrichment options.
+
+TMDb tokens are write-only:
+
+- `GET /Ptv/v1/settings` returns only `tmdbApiTokenConfigured`.
+- `POST /Ptv/v1/settings` may include `tmdbSettings.tmdbApiToken` to replace the stored token.
+- The plugin never returns or logs the token.
 
 ## Optional TMDb Enrichment
 

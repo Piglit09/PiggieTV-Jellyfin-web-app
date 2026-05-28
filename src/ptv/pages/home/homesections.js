@@ -13,7 +13,7 @@ import {
 } from 'ptv/modules/cache/featuredContentCache';
 import { getPtvPerformanceProfile } from 'ptv/core/clientProfile';
 import { getPtvFeatureSettings } from 'ptv/core/featureSettings';
-import { timePtvAsync } from 'ptv/core/observability';
+import { recordPtvEvent, timePtvAsync } from 'ptv/core/observability';
 import { getUserViewsQuery } from 'hooks/useUserViews';
 import globalize from 'lib/globalize';
 import { DEFAULT_SECTIONS } from 'types/homeSectionType';
@@ -23,6 +23,7 @@ import { queryClient } from 'utils/query/queryClient';
 
 import {
     createFeaturedContentFetcher,
+    getRowsFromFeaturedPayload,
     loadGenreMap,
     loadStudioMap,
     PTV_HOME_ROWS,
@@ -38,22 +39,26 @@ import 'elements/emby-button/emby-button';
 
 import 'components/homesections/homesections.scss';
 
+const VIRTUAL_ROW_MOUNT_BATCH_SIZE = 3;
+const VIRTUAL_ROW_IDLE_CLEANUP_MS = 2600;
+const VIRTUAL_ROW_UNMOUNT_HYSTERESIS_MS = 2400;
+const VIRTUAL_ROW_RECENT_MOUNT_GRACE_MS = 3200;
+const DESKTOP_OVERSCAN_ROWS_ABOVE = 5;
+const DESKTOP_OVERSCAN_ROWS_BELOW = 8;
+const DEFAULT_OVERSCAN_ROWS_ABOVE = 3;
+const DEFAULT_OVERSCAN_ROWS_BELOW = 5;
+const HIGH_PRIORITY_ROW_IDS = new Set([
+    'my-media',
+    'continue-watching',
+    'requested-by-you',
+    'latest-movies',
+    'latest-shows',
+    'latest-music'
+]);
+
 export function getDefaultSection(index) {
     if (index < 0 || index > DEFAULT_SECTIONS.length) return '';
     return DEFAULT_SECTIONS[index];
-}
-
-function shuffleRows(rows) {
-    const shuffled = [...rows];
-    let seed = Date.now() + (shuffled.length * 7919);
-
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        seed = ((seed * 1664525) + 1013904223) % 4294967296;
-        const j = seed % (i + 1);
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-
-    return shuffled;
 }
 
 function limitRowsForPerformance(rows, performanceProfile) {
@@ -68,6 +73,16 @@ function limitRowsForPerformance(rows, performanceProfile) {
         ...pinnedRows,
         ...remainingRows
     ].slice(0, limit);
+}
+
+function getHomeRowsForPayload(featuredPayload, performanceProfile) {
+    const payloadRows = getRowsFromFeaturedPayload(featuredPayload, PTV_HOME_ROWS);
+
+    if (featuredPayload?.rowConfigApplied === true || featuredPayload?.sections?.length) {
+        return payloadRows;
+    }
+
+    return limitRowsForPerformance(payloadRows, performanceProfile);
 }
 
 function getSharedFeaturedContent(fetchFeaturedContent) {
@@ -117,6 +132,131 @@ function clearDeferredResumeTimers(elem) {
     elem.ptvDeferredResumeTimers.clear();
 }
 
+function getVirtualRowStateCache(elem) {
+    if (!elem.ptvVirtualRowStateCache) {
+        elem.ptvVirtualRowStateCache = new Map();
+    }
+
+    return elem.ptvVirtualRowStateCache;
+}
+
+function getVirtualRowState(elem, row, index) {
+    const rowId = getVirtualRowId(row, index);
+    const cache = getVirtualRowStateCache(elem);
+    let state = cache.get(rowId);
+
+    if (!state) {
+        state = {
+            cardCount: 0,
+            distantSince: 0,
+            height: 0,
+            html: '',
+            hydrated: false,
+            mountedAt: 0,
+            remountCount: 0,
+            rowDataKey: '',
+            scrollLeft: 0
+        };
+        cache.set(rowId, state);
+    }
+
+    return state;
+}
+
+function getVirtualRowId(row, index) {
+    return row?.id || row?.title || `row-${index}`;
+}
+
+function getVirtualRowDataKey(row) {
+    return [
+        row?.id || '',
+        row?.type || '',
+        row?.title || '',
+        row?.itemLimit || '',
+        row?.queryLimit || '',
+        row?.presentation || '',
+        row?.tier || '',
+        row?.sourceValue || ''
+    ].join('|');
+}
+
+function getRowItemContainer(sectionElem) {
+    return sectionElem?.querySelector('.itemsContainer');
+}
+
+function getRowCardCount(sectionElem) {
+    return sectionElem?.querySelectorAll('.card, .ptv-card, .ptv-row-empty-card, .ptv-row-more-card').length || 0;
+}
+
+function rememberRowState(elem, sectionElem, row, index) {
+    if (!sectionElem) return null;
+
+    const state = getVirtualRowState(elem, row, index);
+    const scroller = sectionElem.querySelector('.emby-scrollslider, .scrollSlider, .itemsContainer');
+    const height = Math.round(sectionElem.getBoundingClientRect?.().height || sectionElem.offsetHeight || 0);
+
+    state.cardCount = getRowCardCount(sectionElem);
+    state.className = sectionElem.className;
+    state.height = height || state.height || 0;
+    state.html = sectionElem.dataset.ptvRowResumed === 'true' ? sectionElem.innerHTML : state.html;
+    state.hydrated = state.hydrated || sectionElem.dataset.ptvRowResumed === 'true';
+    state.rowDataKey = getVirtualRowDataKey(row);
+    state.scrollLeft = Math.round(scroller?.scrollLeft || Number(sectionElem.dataset.ptvScrollLeft || 0) || 0);
+    state.styleBackdropImage = sectionElem.style.getPropertyValue('--ptv-row-backdrop-image') || '';
+
+    return state;
+}
+
+function noteMountedRow(elem, sectionElem, row, index, reason) {
+    const state = getVirtualRowState(elem, row, index);
+    const now = Date.now();
+
+    state.distantSince = 0;
+    state.mountedAt = now;
+    state.remountReason = reason;
+    state.rowDataKey = getVirtualRowDataKey(row);
+    sectionElem.dataset.ptvRowMountedAt = String(now);
+    sectionElem.dataset.ptvRowRemountReason = reason;
+}
+
+function noteHydratedRow(elem, sectionElem, row, index) {
+    const state = rememberRowState(elem, sectionElem, row, index);
+
+    if (state) {
+        state.hydrated = true;
+        state.hydratedAt = Date.now();
+    }
+
+    sectionElem.dataset.ptvRowHydrated = 'true';
+}
+
+function cleanupViewportResumeObserver(elem) {
+    if (!elem) return;
+
+    elem.ptvViewportResumeObserver?.disconnect();
+    elem.ptvViewportResumeObserver = null;
+}
+
+function cleanupRowMountObserver(elem) {
+    if (!elem) return;
+
+    elem.ptvRowMountObserver?.disconnect();
+    elem.ptvRowMountObserver = null;
+
+    if (typeof elem.ptvRowMountCleanup === 'function') {
+        elem.ptvRowMountCleanup();
+        elem.ptvRowMountCleanup = null;
+    }
+}
+
+function markSectionResumed(section) {
+    section.dataset.ptvRowResumed = 'true';
+
+    if (section.parentContainer) {
+        section.parentContainer.dataset.ptvRowResumed = 'true';
+    }
+}
+
 function scheduleDeferredResume(elem, sections, options) {
     if (!sections.length) return;
 
@@ -149,12 +289,882 @@ function scheduleDeferredResume(elem, sections, options) {
     elem.ptvDeferredResumeTimers.add(timer);
 }
 
+function getRowMountRootMargin(performanceProfile) {
+    return performanceProfile.homeRowViewportRootMargin || '520px 0px';
+}
+
+function getRowMountRootMarginPixels(performanceProfile) {
+    const rootMargin = getRowMountRootMargin(performanceProfile);
+    const firstMargin = rootMargin.split(/\s+/)[0] || '';
+    const value = Number(firstMargin.replace('px', ''));
+
+    return Number.isFinite(value) ? value : 520;
+}
+
+function isScrollableElement(element) {
+    if (!element || element === document.body || element === document.documentElement) return false;
+
+    const style = window.getComputedStyle(element);
+    const overflow = `${style.overflowY} ${style.overflow}`;
+
+    return /(auto|scroll|overlay)/i.test(overflow)
+        && element.scrollHeight > element.clientHeight + 4;
+}
+
+function getRowScrollRoot(elem) {
+    let current = elem;
+
+    while (current && current !== document.body && current !== document.documentElement) {
+        if (isScrollableElement(current)) {
+            return current;
+        }
+
+        current = current.parentElement;
+    }
+
+    const candidates = [
+        elem?.closest?.('.mainAnimatedPage'),
+        elem?.closest?.('.page'),
+        elem?.closest?.('.view'),
+        document.querySelector('.mainAnimatedPage:not(.hide)'),
+        document.querySelector('.page:not(.hide)'),
+        document.querySelector('.view:not(.hide)')
+    ];
+
+    return candidates.find(isScrollableElement) || null;
+}
+
+function getViewportBounds(scrollRoot) {
+    if (scrollRoot && typeof scrollRoot.getBoundingClientRect === 'function') {
+        const rect = scrollRoot.getBoundingClientRect();
+
+        return {
+            bottom: rect.bottom,
+            height: rect.height,
+            top: rect.top
+        };
+    }
+
+    const height = window.innerHeight || document.documentElement.clientHeight || 0;
+
+    return {
+        bottom: height,
+        height,
+        top: 0
+    };
+}
+
+function getScrollRootDebugName(scrollRoot) {
+    if (!scrollRoot) return 'window';
+
+    const id = scrollRoot.id ? `#${scrollRoot.id}` : '';
+    const classes = scrollRoot.className && typeof scrollRoot.className === 'string' ?
+        `.${scrollRoot.className.trim().split(/\s+/).filter(Boolean).join('.')}` :
+        '';
+
+    return `${scrollRoot.tagName?.toLowerCase() || 'element'}${id}${classes}`;
+}
+
+function getRowSlot(elem, index) {
+    return elem.querySelector('.section' + index);
+}
+
+function getPendingVirtualRows(elem, rows) {
+    return rows
+        .map((row, index) => ({
+            row,
+            index,
+            slot: getRowSlot(elem, index)
+        }))
+        .filter(entry => entry.slot
+            && entry.slot.dataset.ptvRowMounted !== 'true'
+            && entry.slot.dataset.ptvRowMounting !== 'true');
+}
+
+function getMountedUnresumedVirtualRows(elem, rows) {
+    return rows
+        .map((row, index) => ({
+            row,
+            index,
+            slot: getRowSlot(elem, index)
+        }))
+        .filter(entry => entry.slot
+            && entry.slot.dataset.ptvRowMounted === 'true'
+            && entry.slot.dataset.ptvRowResumed !== 'true'
+            && entry.slot.dataset.ptvRowMounting !== 'true'
+            && typeof entry.slot.querySelector('.itemsContainer')?.resume === 'function');
+}
+
+function getResumedVirtualRowCount(elem, rows) {
+    return rows
+        .map((row, index) => getRowSlot(elem, index))
+        .filter(slot => slot?.dataset.ptvRowResumed === 'true')
+        .length;
+}
+
+function isRowSlotNearViewport(slot, performanceProfile, scrollRoot = null) {
+    const margin = getRowMountRootMarginPixels(performanceProfile);
+    const viewport = getViewportBounds(scrollRoot);
+    const rect = slot.getBoundingClientRect();
+
+    return rect.top <= viewport.bottom + margin && rect.bottom >= viewport.top - margin;
+}
+
+function isRowSlotVisible(slot, scrollRoot = null) {
+    const viewport = getViewportBounds(scrollRoot);
+    const rect = slot.getBoundingClientRect();
+
+    return rect.top <= viewport.bottom && rect.bottom >= viewport.top;
+}
+
+function getOverscanRowsAbove(performanceProfile) {
+    return performanceProfile.clientKind === 'desktop' ?
+        DESKTOP_OVERSCAN_ROWS_ABOVE :
+        DEFAULT_OVERSCAN_ROWS_ABOVE;
+}
+
+function getOverscanRowsBelow(performanceProfile) {
+    return performanceProfile.clientKind === 'desktop' ?
+        DESKTOP_OVERSCAN_ROWS_BELOW :
+        DEFAULT_OVERSCAN_ROWS_BELOW;
+}
+
+function getVisibleRowIndexes(elem, rows, scrollRoot = null) {
+    return rows
+        .map((row, index) => ({
+            index,
+            slot: getRowSlot(elem, index)
+        }))
+        .filter(entry => entry.slot && isRowSlotVisible(entry.slot, scrollRoot))
+        .map(entry => entry.index);
+}
+
+function getOverscanRowRange(elem, rows, performanceProfile, scrollRoot = null) {
+    const visibleIndexes = getVisibleRowIndexes(elem, rows, scrollRoot);
+
+    if (!visibleIndexes.length) {
+        const nearIndex = rows.findIndex((row, index) => {
+            const slot = getRowSlot(elem, index);
+
+            return slot && isRowSlotNearViewport(slot, performanceProfile, scrollRoot);
+        });
+        const anchorIndex = nearIndex === -1 ? 0 : nearIndex;
+
+        return {
+            end: Math.min(rows.length - 1, anchorIndex + getOverscanRowsBelow(performanceProfile)),
+            start: Math.max(0, anchorIndex - getOverscanRowsAbove(performanceProfile))
+        };
+    }
+
+    return {
+        end: Math.min(rows.length - 1, Math.max(...visibleIndexes) + getOverscanRowsBelow(performanceProfile)),
+        start: Math.max(0, Math.min(...visibleIndexes) - getOverscanRowsAbove(performanceProfile))
+    };
+}
+
+function isRowIndexInOverscan(index, elem, rows, performanceProfile, scrollRoot = null) {
+    const range = getOverscanRowRange(elem, rows, performanceProfile, scrollRoot);
+
+    return index >= range.start && index <= range.end;
+}
+
+function isHighPriorityRow(row) {
+    return HIGH_PRIORITY_ROW_IDS.has(row?.id);
+}
+
+function isRowSlotDistantFromViewport(slot, performanceProfile, scrollRoot = null) {
+    const baseMargin = getRowMountRootMarginPixels(performanceProfile);
+    const viewport = getViewportBounds(scrollRoot);
+    const margin = Math.max(baseMargin * 3, viewport.height * 1.5);
+    const rect = slot.getBoundingClientRect();
+
+    return rect.top > viewport.bottom + margin || rect.bottom < viewport.top - margin;
+}
+
+function saveRowScrollPosition(sectionElem) {
+    const scroller = sectionElem.querySelector('.emby-scrollslider, .scrollSlider, .itemsContainer');
+
+    if (scroller) {
+        sectionElem.dataset.ptvScrollLeft = String(Math.round(scroller.scrollLeft || 0));
+    }
+}
+
+function getVirtualizationMetrics(elem, rows, scrollRoot = null) {
+    const slots = rows
+        .map((row, index) => ({
+            row,
+            index,
+            slot: getRowSlot(elem, index)
+        }))
+        .filter(entry => entry.slot);
+    const mountedEntries = slots.filter(entry => entry.slot.dataset.ptvRowMounted === 'true');
+    const unmountedEntries = slots.filter(entry => entry.slot.dataset.ptvRowMounted !== 'true');
+    const hydratedEntries = slots.filter(entry => entry.slot.dataset.ptvRowHydrated === 'true' || entry.slot.dataset.ptvRowResumed === 'true');
+    const range = getOverscanRowRange(elem, rows, getPtvPerformanceProfile(), scrollRoot);
+    const stateCache = getVirtualRowStateCache(elem);
+    const reusedRowIds = Array.from(stateCache.entries())
+        .filter(([, state]) => state.remountCount > 0)
+        .map(([rowId]) => rowId);
+    const mountedRows = mountedEntries.length;
+    const resumedRows = slots.filter(entry => entry.slot.dataset.ptvRowResumed === 'true').length;
+    const unresumedMountedRows = Math.max(0, mountedRows - resumedRows);
+    const actualViewportRows = slots.filter(entry => isRowSlotVisible(entry.slot, scrollRoot)).length;
+    const pendingRows = getPendingVirtualRows(elem, rows).length;
+
+    return {
+        actualViewportRows,
+        deferredRows: Math.max(0, rows.length - mountedRows),
+        hydratedRowIds: hydratedEntries.map(entry => getVirtualRowId(entry.row, entry.index)),
+        hydrationQueueLength: pendingRows + unresumedMountedRows,
+        lastHydrationReason: elem.ptvLastHydrationReason || '',
+        manualViewportPassCount: elem.ptvRowManualViewportPassCount || 0,
+        mountedRows,
+        mountedRowIds: mountedEntries.map(entry => getVirtualRowId(entry.row, entry.index)),
+        observerTriggerCount: elem.ptvRowObserverTriggerCount || 0,
+        resumeQueueLength: unresumedMountedRows,
+        resumedRows,
+        reusedRowIds,
+        scrollRoot: getScrollRootDebugName(scrollRoot),
+        totalRows: rows.length,
+        unmountedRowIds: unmountedEntries.map(entry => getVirtualRowId(entry.row, entry.index)),
+        unmountReason: elem.ptvLastUnmountReason || '',
+        viewportOverscan: range
+    };
+}
+
+function recordVirtualizationMetrics(elem, rows, origin, scrollRoot = null) {
+    recordPtvEvent('render', 'home-row-virtualization', {
+        ...getVirtualizationMetrics(elem, rows, scrollRoot),
+        origin
+    });
+}
+
+function setRowSlotMetadata(sectionElem, row, index) {
+    sectionElem.dataset.ptvRowId = row.id || '';
+    sectionElem.dataset.ptvRowIndex = String(index);
+    sectionElem.dataset.ptvRowDataKey = getVirtualRowDataKey(row);
+    sectionElem.dataset.ptvRowPresentation = row.presentation || '';
+    sectionElem.dataset.ptvRowTier = String(row.tier || '');
+    sectionElem.dataset.ptvRowType = row.type || '';
+    sectionElem.dataset.ptvRowMounted = 'false';
+    sectionElem.dataset.ptvRowHydrated = 'false';
+    sectionElem.classList.add('ptv-row-virtual-slot', 'ptv-row-virtual-placeholder');
+    Array.from(sectionElem.classList)
+        .filter(className => className.startsWith('ptv-row-tier-')
+            || className.startsWith('ptv-row-presentation-'))
+        .forEach(className => {
+            sectionElem.classList.remove(className);
+        });
+
+    if (row.tier) {
+        sectionElem.classList.add(`ptv-row-tier-${row.tier}`);
+    }
+
+    if (row.presentation) {
+        sectionElem.classList.add(`ptv-row-presentation-${row.presentation}`);
+    }
+
+    sectionElem.classList.toggle('ptv-row-group-start', row.showGroupHeader === true);
+    sectionElem.classList.toggle('ptv-row-personalized', row.isPersonalized === true);
+}
+
+function getRowMountOptions(context) {
+    return {
+        enableOverflow: enableScrollX(),
+        featuredContentSource: context.featuredContentSource,
+        performanceProfile: context.performanceProfile
+    };
+}
+
+function restoreRowScrollPosition(sectionElem) {
+    const scrollLeft = Number(sectionElem.dataset.ptvScrollLeft || 0);
+    if (!scrollLeft) return;
+
+    const scroller = sectionElem.querySelector('.emby-scrollslider, .scrollSlider, .itemsContainer');
+    if (scroller) {
+        scroller.scrollLeft = scrollLeft;
+    }
+}
+
+function restoreCachedVirtualRow(elem, sectionElem, row, index, reason) {
+    const state = getVirtualRowState(elem, row, index);
+    const rowDataKey = getVirtualRowDataKey(row);
+
+    if (!state.html || state.rowDataKey !== rowDataKey || !state.hydrated) {
+        return null;
+    }
+
+    sectionElem.className = state.className || sectionElem.className;
+    sectionElem.innerHTML = state.html;
+    sectionElem.classList.remove('ptv-row-virtual-placeholder', 'hide');
+    sectionElem.style.removeProperty('min-height');
+    sectionElem.dataset.ptvRowMounted = 'true';
+    sectionElem.dataset.ptvRowHydrated = 'true';
+    sectionElem.dataset.ptvRowResumed = 'true';
+    sectionElem.dataset.ptvRowId = row.id || '';
+    sectionElem.dataset.ptvRowIndex = String(index);
+    sectionElem.dataset.ptvRowType = row.type || '';
+    sectionElem.dataset.ptvRowDataKey = rowDataKey;
+
+    if (state.styleBackdropImage) {
+        sectionElem.style.setProperty('--ptv-row-backdrop-image', state.styleBackdropImage);
+    }
+
+    noteMountedRow(elem, sectionElem, row, index, reason);
+    state.remountCount++;
+    restoreRowScrollPosition(sectionElem);
+    recordPtvEvent('render', 'home-row-cache-hit', {
+        cardCount: state.cardCount,
+        row: row.id || '',
+        rowIndex: index,
+        rowType: row.type || ''
+    });
+
+    return getRowItemContainer(sectionElem);
+}
+
+function mountVirtualRow(elem, sectionElem, row, index, context, reason = 'mount') {
+    if (!sectionElem || sectionElem.dataset.ptvRowMounted === 'true') {
+        return getRowItemContainer(sectionElem);
+    }
+
+    const cachedSection = restoreCachedVirtualRow(elem, sectionElem, row, index, reason);
+
+    if (cachedSection) {
+        return cachedSection;
+    }
+
+    sectionElem.classList.remove('ptv-row-virtual-placeholder');
+    sectionElem.style.removeProperty('min-height');
+    sectionElem.dataset.ptvRowMounted = 'true';
+    sectionElem.dataset.ptvRowHydrated = 'false';
+    sectionElem.dataset.ptvRowId = row.id || '';
+    sectionElem.dataset.ptvRowIndex = String(index);
+    sectionElem.dataset.ptvRowType = row.type || '';
+    sectionElem.dataset.ptvRowDataKey = getVirtualRowDataKey(row);
+    noteMountedRow(elem, sectionElem, row, index, reason);
+
+    const options = getRowMountOptions(context);
+
+    if (row.type === 'libraries') {
+        renderLibraryRow(sectionElem, context.apiClient, context.userViews, options, row);
+    } else {
+        renderMediaRow(sectionElem, context.apiClient, context.userId, row, context.lookupMaps, context.userViews, options);
+    }
+
+    restoreRowScrollPosition(sectionElem);
+
+    recordPtvEvent('render', 'home-row-cache-miss', {
+        row: row.id || '',
+        rowIndex: index,
+        rowType: row.type || ''
+    });
+
+    return getRowItemContainer(sectionElem);
+}
+
+function unmountVirtualRow(elem, sectionElem, row, index, reason = 'distant') {
+    if (!sectionElem || sectionElem.dataset.ptvRowMounted !== 'true') {
+        return false;
+    }
+
+    if (sectionElem.contains(document.activeElement)) {
+        return false;
+    }
+
+    saveRowScrollPosition(sectionElem);
+    const state = rememberRowState(elem, sectionElem, row, index);
+    cleanupPtvRowBackdrops(sectionElem);
+
+    sectionElem.querySelectorAll('.itemsContainer').forEach(itemsContainer => {
+        itemsContainer.pause?.();
+        itemsContainer.fetchData = null;
+        itemsContainer.parentContainer = null;
+        itemsContainer.getItemsHtml = null;
+    });
+
+    sectionElem.innerHTML = '';
+    sectionElem.classList.add('ptv-row-virtual-placeholder');
+    sectionElem.classList.remove('ptv-dynamic-row', 'ptv-row-has-backdrop', 'hide');
+    sectionElem.style.removeProperty('--ptv-row-backdrop-image');
+    sectionElem.dataset.ptvRowMounted = 'false';
+    sectionElem.dataset.ptvRowUnmountReason = reason;
+    if (state?.height) {
+        sectionElem.style.minHeight = `${state.height}px`;
+    }
+    delete sectionElem.dataset.ptvRowMounting;
+    delete sectionElem.dataset.ptvRowResumed;
+
+    return true;
+}
+
+function mountAndResumeVirtualRow(elem, entry, context, origin) {
+    if (!entry.slot || entry.slot.dataset.ptvRowMounted === 'true' || entry.slot.dataset.ptvRowMounting === 'true') {
+        return Promise.resolve(null);
+    }
+
+    entry.slot.dataset.ptvRowMounting = 'true';
+
+    return timePtvAsync(
+        'render',
+        'home-row-mount-viewport',
+        () => Promise.resolve().then(() => {
+            const section = mountVirtualRow(elem, entry.slot, entry.row, entry.index, context, origin);
+            if (entry.slot.dataset.ptvRowResumed === 'true') {
+                noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+
+                return null;
+            }
+
+            if (!section || typeof section.resume !== 'function') {
+                return null;
+            }
+
+            return resumeSection(section, {
+                deferContinue: false,
+                refresh: true
+            }).then(result => {
+                noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+
+                return result;
+            });
+        }),
+        {
+            origin,
+            row: entry.row.id || '',
+            rowIndex: entry.index,
+            rowType: entry.row.type || ''
+        }
+    )
+        .catch(err => {
+            console.warn('[PTV Home] Failed mounting viewport row', err);
+        })
+        .finally(() => {
+            delete entry.slot.dataset.ptvRowMounting;
+        });
+}
+
+function resumeMountedVirtualRow(elem, entry, origin) {
+    const section = entry.slot?.querySelector('.itemsContainer');
+
+    if (!entry.slot
+        || entry.slot.dataset.ptvRowResumed === 'true'
+        || entry.slot.dataset.ptvRowMounting === 'true'
+        || !section
+        || typeof section.resume !== 'function'
+    ) {
+        return Promise.resolve(null);
+    }
+
+    entry.slot.dataset.ptvRowMounting = 'true';
+
+    return timePtvAsync(
+        'render',
+        'home-row-resume-mounted',
+        () => resumeSection(section, {
+            deferContinue: false,
+            refresh: true
+        }).then(result => {
+            noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+
+            return result;
+        }),
+        {
+            origin,
+            row: entry.row.id || '',
+            rowIndex: entry.index,
+            rowType: entry.row.type || ''
+        }
+    )
+        .catch(err => {
+            console.warn('[PTV Home] Failed resuming mounted viewport row', err);
+        })
+        .finally(() => {
+            delete entry.slot.dataset.ptvRowMounting;
+        });
+}
+
+function getHydrationBufferRows(performanceProfile) {
+    if (performanceProfile.clientKind === 'desktop') return 5;
+    if (performanceProfile.clientKind === 'mobile') return 3;
+    if (performanceProfile.isLowPower) return 3;
+
+    return 4;
+}
+
+function getInitialHydrationTarget(elem, rows, performanceProfile, scrollRoot = null) {
+    const actualViewportRows = rows
+        .map((row, index) => getRowSlot(elem, index))
+        .filter(slot => slot && isRowSlotVisible(slot, scrollRoot))
+        .length;
+    const viewportWithBuffer = actualViewportRows + getHydrationBufferRows(performanceProfile);
+
+    return Math.min(rows.length, Math.max(getInitialRowCount(performanceProfile), viewportWithBuffer));
+}
+
+function getMinimumHydratedRows(elem, rows, performanceProfile, scrollRoot = null) {
+    return getInitialHydrationTarget(elem, rows, performanceProfile, scrollRoot);
+}
+
+function takeUniqueRowEntries(entries, limit) {
+    const seenSlots = new Set();
+    const result = [];
+
+    entries.forEach(entry => {
+        if (!entry.slot || seenSlots.has(entry.slot) || result.length >= limit) return;
+
+        seenSlots.add(entry.slot);
+        result.push(entry);
+    });
+
+    return result;
+}
+
+function mountInitialRows(elem, rows, context, scrollRoot = null) {
+    const pendingRows = getPendingVirtualRows(elem, rows);
+    const targetCount = getInitialHydrationTarget(elem, rows, context.performanceProfile, scrollRoot);
+    const visibleRows = pendingRows
+        .filter(entry => isRowSlotVisible(entry.slot, scrollRoot))
+        .slice(0, targetCount);
+    const nearRows = pendingRows
+        .filter(entry => isRowSlotNearViewport(entry.slot, context.performanceProfile, scrollRoot));
+    const initialRows = takeUniqueRowEntries([
+        ...visibleRows,
+        ...nearRows,
+        ...pendingRows
+    ], targetCount);
+
+    elem.ptvLastHydrationReason = 'initial';
+    for (let i = 0; i < initialRows.length; i += VIRTUAL_ROW_MOUNT_BATCH_SIZE) {
+        const batch = initialRows.slice(i, i + VIRTUAL_ROW_MOUNT_BATCH_SIZE);
+        const delayMs = i === 0 ? 0 : 80 * (i / VIRTUAL_ROW_MOUNT_BATCH_SIZE);
+
+        window.setTimeout(() => {
+            batch.forEach(entry => {
+                void mountAndResumeVirtualRow(elem, entry, context, 'initial');
+            });
+        }, delayMs);
+    }
+
+    recordVirtualizationMetrics(elem, rows, 'initial', scrollRoot);
+}
+
+function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
+    cleanupRowMountObserver(elem);
+
+    const slots = getPendingVirtualRows(elem, rows);
+
+    let pumpFrame = 0;
+    let pumpRunning = false;
+    let pendingPumpOrigin = '';
+    let cleanupTimer = 0;
+    let observer = null;
+    const observedSlots = new Set();
+    const entriesBySlot = new WeakMap();
+
+    const observeSlot = (entry) => {
+        if (!observer || !entry.slot || entry.slot.dataset.ptvRowMounted === 'true') return;
+        if (entry.slot.dataset.ptvRowMounting === 'true' || observedSlots.has(entry.slot)) return;
+
+        entriesBySlot.set(entry.slot, entry);
+        observer.observe(entry.slot);
+        observedSlots.add(entry.slot);
+    };
+
+    const unobserveSlot = (slot) => {
+        if (!observer || !slot) return;
+
+        observer.unobserve(slot);
+        observedSlots.delete(slot);
+    };
+
+    const canUnmountRow = (row, index, slot) => {
+        if (!slot
+            || slot.dataset.ptvRowMounted !== 'true'
+            || slot.dataset.ptvRowMounting === 'true'
+            || slot.dataset.ptvRowHydrating === 'true'
+            || slot.contains(document.activeElement)
+        ) {
+            return false;
+        }
+
+        if (isHighPriorityRow(row)) return false;
+        if (isRowSlotVisible(slot, scrollRoot)) return false;
+        if (isRowIndexInOverscan(index, elem, rows, context.performanceProfile, scrollRoot)) return false;
+        if (isRowSlotNearViewport(slot, context.performanceProfile, scrollRoot)) return false;
+
+        const state = getVirtualRowState(elem, row, index);
+        const mountedAt = Number(slot.dataset.ptvRowMountedAt || state.mountedAt || 0);
+        const now = Date.now();
+
+        if (mountedAt && now - mountedAt < VIRTUAL_ROW_RECENT_MOUNT_GRACE_MS) return false;
+        if (!isRowSlotDistantFromViewport(slot, context.performanceProfile, scrollRoot)) {
+            state.distantSince = 0;
+            return false;
+        }
+
+        if (!state.distantSince) {
+            state.distantSince = now;
+            return false;
+        }
+
+        return now - state.distantSince >= VIRTUAL_ROW_UNMOUNT_HYSTERESIS_MS;
+    };
+
+    const cleanupDistantRows = (origin = 'scan') => {
+        let unmountedRows = 0;
+        const unmountedRowIds = [];
+
+        rows.forEach((row, index) => {
+            const slot = getRowSlot(elem, index);
+
+            if (!canUnmountRow(row, index, slot)) {
+                return;
+            }
+
+            if (unmountVirtualRow(elem, slot, row, index, origin)) {
+                unmountedRows++;
+                unmountedRowIds.push(getVirtualRowId(row, index));
+                observeSlot({ row, index, slot });
+            }
+        });
+
+        if (unmountedRows) {
+            elem.ptvLastUnmountReason = origin;
+            recordPtvEvent('render', 'home-row-unmount', {
+                origin,
+                unmountedRowIds
+            });
+            recordVirtualizationMetrics(elem, rows, `${origin}-unmount`, scrollRoot);
+        }
+    };
+
+    const scheduleIdleCleanup = (origin = 'idle') => {
+        if (cleanupTimer) {
+            window.clearTimeout(cleanupTimer);
+        }
+
+        cleanupTimer = window.setTimeout(() => {
+            cleanupTimer = 0;
+            cleanupDistantRows(origin);
+        }, VIRTUAL_ROW_IDLE_CLEANUP_MS);
+    };
+
+    const getRowsToMount = (origin = 'scan') => {
+        const pendingRows = getPendingVirtualRows(elem, rows);
+        const overscanRows = pendingRows.filter(entry =>
+            isRowIndexInOverscan(entry.index, elem, rows, context.performanceProfile, scrollRoot)
+        );
+        const nearRows = pendingRows.filter(entry => isRowSlotNearViewport(entry.slot, context.performanceProfile, scrollRoot));
+        const mountedRows = rows
+            .map((row, index) => getRowSlot(elem, index))
+            .filter(slot => slot?.dataset.ptvRowMounted === 'true')
+            .length;
+        const minimumHydratedRows = getMinimumHydratedRows(elem, rows, context.performanceProfile, scrollRoot);
+        const needsFallbackFill = /fallback|layout-settle|route|keyboard|wheel|touch/.test(origin)
+            && mountedRows < minimumHydratedRows;
+        const fallbackRows = needsFallbackFill ?
+            pendingRows.filter(entry => !nearRows.includes(entry)).slice(0, minimumHydratedRows - mountedRows) :
+            [];
+
+        return takeUniqueRowEntries([
+            ...overscanRows,
+            ...nearRows,
+            ...fallbackRows
+        ], VIRTUAL_ROW_MOUNT_BATCH_SIZE);
+    };
+
+    const getRowsToResume = (origin = 'scan') => {
+        const mountedRows = getMountedUnresumedVirtualRows(elem, rows);
+        const overscanRows = mountedRows.filter(entry =>
+            isRowIndexInOverscan(entry.index, elem, rows, context.performanceProfile, scrollRoot)
+        );
+        const nearRows = mountedRows.filter(entry => isRowSlotNearViewport(entry.slot, context.performanceProfile, scrollRoot));
+        const needsFallbackFill = /fallback|layout-settle|route|keyboard|wheel|touch|initial/.test(origin);
+        const fallbackRows = needsFallbackFill ?
+            mountedRows.filter(entry => !nearRows.includes(entry)) :
+            [];
+
+        return takeUniqueRowEntries([
+            ...overscanRows,
+            ...nearRows,
+            ...fallbackRows
+        ], VIRTUAL_ROW_MOUNT_BATCH_SIZE);
+    };
+
+    const pumpRows = (origin = 'scan') => {
+        if (!elem.isConnected) return Promise.resolve();
+
+        if (pumpRunning) {
+            pendingPumpOrigin = origin;
+            return Promise.resolve();
+        }
+
+        elem.ptvLastHydrationReason = origin;
+        elem.ptvRowManualViewportPassCount = (elem.ptvRowManualViewportPassCount || 0) + 1;
+
+        const rowsToResume = getRowsToResume(origin);
+        const rowsToMount = rowsToResume.length ? [] : getRowsToMount(origin);
+
+        if (!rowsToResume.length && !rowsToMount.length) {
+            scheduleIdleCleanup(`${origin}-idle`);
+            recordVirtualizationMetrics(elem, rows, `${origin}-steady`, scrollRoot);
+            return Promise.resolve();
+        }
+
+        pumpRunning = true;
+        rowsToMount.forEach(entry => {
+            unobserveSlot(entry.slot);
+        });
+
+        return Promise.all([
+            ...rowsToResume.map(entry => resumeMountedVirtualRow(elem, entry, origin)),
+            ...rowsToMount.map(entry => mountAndResumeVirtualRow(elem, entry, context, origin))
+        ])
+            .then(() => {
+                enhancePtvCards(elem);
+                scheduleIdleCleanup(`${origin}-idle`);
+                recordVirtualizationMetrics(elem, rows, origin, scrollRoot);
+
+                const pendingRows = getPendingVirtualRows(elem, rows).length;
+                const unresumedRows = getMountedUnresumedVirtualRows(elem, rows).length;
+                const resumedRows = getResumedVirtualRowCount(elem, rows);
+                const minimumHydratedRows = getMinimumHydratedRows(elem, rows, context.performanceProfile, scrollRoot);
+
+                if (/fallback|layout-settle/.test(origin)
+                    && (pendingRows || unresumedRows)
+                    && resumedRows < minimumHydratedRows
+                ) {
+                    window.setTimeout(() => schedulePump(`${origin}-continue`), 180);
+                }
+            })
+            .finally(() => {
+                pumpRunning = false;
+
+                if (pendingPumpOrigin) {
+                    const nextOrigin = pendingPumpOrigin;
+                    pendingPumpOrigin = '';
+                    schedulePump(nextOrigin);
+                }
+            });
+    };
+
+    const schedulePump = (origin = 'event') => {
+        if (pumpFrame) return;
+
+        pumpFrame = window.requestAnimationFrame(() => {
+            pumpFrame = 0;
+            void pumpRows(origin);
+        });
+    };
+
+    const onScrollOrResize = () => {
+        schedulePump('scroll');
+    };
+    const onWheel = () => schedulePump('wheel');
+    const onTouchMove = () => schedulePump('touch');
+    const onKeyboardNavigation = (event) => {
+        if (!['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' '].includes(event.key)) return;
+
+        schedulePump('keyboard');
+    };
+
+    if (typeof IntersectionObserver === 'function') {
+        observer = new IntersectionObserver((entries) => {
+            entries
+                .filter(entry => entry.isIntersecting)
+                .forEach(entry => {
+                    const slotEntry = entriesBySlot.get(entry.target);
+                    if (!slotEntry) return;
+
+                    elem.ptvRowObserverTriggerCount = (elem.ptvRowObserverTriggerCount || 0) + 1;
+                    unobserveSlot(entry.target);
+                    void mountAndResumeVirtualRow(elem, slotEntry, context, 'observer')
+                        .then(() => {
+                            enhancePtvCards(elem);
+                            scheduleIdleCleanup('observer-idle');
+                            recordVirtualizationMetrics(elem, rows, 'observer', scrollRoot);
+                        });
+                });
+        }, {
+            root: scrollRoot,
+            rootMargin: getRowMountRootMargin(context.performanceProfile),
+            threshold: 0.01
+        });
+
+        slots.forEach(observeSlot);
+        elem.ptvRowMountObserver = observer;
+    }
+
+    document.addEventListener('scroll', onScrollOrResize, {
+        capture: true,
+        passive: true
+    });
+    scrollRoot?.addEventListener('scroll', onScrollOrResize, {
+        passive: true
+    });
+    window.addEventListener('resize', onScrollOrResize, {
+        passive: true
+    });
+    document.addEventListener('keydown', onKeyboardNavigation);
+    document.addEventListener('wheel', onWheel, {
+        capture: true,
+        passive: true
+    });
+    document.addEventListener('touchmove', onTouchMove, {
+        capture: true,
+        passive: true
+    });
+
+    elem.ptvRowMountCleanup = () => {
+        document.removeEventListener('scroll', onScrollOrResize, {
+            capture: true
+        });
+        scrollRoot?.removeEventListener('scroll', onScrollOrResize);
+        window.removeEventListener('resize', onScrollOrResize);
+        document.removeEventListener('keydown', onKeyboardNavigation);
+        document.removeEventListener('wheel', onWheel, {
+            capture: true
+        });
+        document.removeEventListener('touchmove', onTouchMove, {
+            capture: true
+        });
+
+        if (pumpFrame) {
+            window.cancelAnimationFrame(pumpFrame);
+            pumpFrame = 0;
+        }
+
+        if (cleanupTimer) {
+            window.clearTimeout(cleanupTimer);
+            cleanupTimer = 0;
+        }
+
+        observedSlots.clear();
+    };
+
+    schedulePump('initial-scan');
+    window.setTimeout(() => schedulePump('fallback-early'), 420);
+    window.setTimeout(() => schedulePump('fallback-late'), 780);
+    window.setTimeout(() => schedulePump('layout-settle'), 250);
+    window.setTimeout(() => schedulePump('layout-settle-late'), 1000);
+}
+
 export function loadSections(elem, apiClient, user) {
     window.__PTV_HOME_INITIALIZED__ = true;
     unmountPtvHomeHero(elem);
     cleanupPtvRowBackdrops(elem);
     cleanupFeaturedCacheListener(elem);
     clearDeferredResumeTimers(elem);
+    cleanupViewportResumeObserver(elem);
+    cleanupRowMountObserver(elem);
+    elem.ptvVirtualRows = null;
+    elem.ptvVirtualRowContext = null;
+    elem.ptvVirtualRowStateCache = new Map();
+    elem.ptvLastHydrationReason = '';
+    elem.ptvRowObserverTriggerCount = 0;
+    elem.ptvRowManualViewportPassCount = 0;
+    elem.ptvLastUnmountReason = '';
     trimPtvImageManagerMemory();
 
     const userId = user.Id || apiClient.getCurrentUserId();
@@ -171,101 +1181,121 @@ export function loadSections(elem, apiClient, user) {
             }
 
             if (userViews.length) {
-                const rows = featureSettings.homeRowsEnabled ?
-                    limitRowsForPerformance(shuffleRows(PTV_HOME_ROWS), performanceProfile) :
+                const seedRows = featureSettings.homeRowsEnabled ?
+                    limitRowsForPerformance(PTV_HOME_ROWS, performanceProfile) :
                     [];
-
-                for (let i = 0; i < rows.length; i++) {
-                    html += '<div class="verticalSection section' + i + '"></div>';
-                }
-
-                elem.innerHTML = html;
-                elem.classList.add('homeSectionsContainer');
-                elem.classList.toggle('ptv-home-low-power', performanceProfile.isLowPower);
-                elem.dataset.ptvClientProfile = performanceProfile.clientKind;
-                elem.dataset.ptvRenderProfile = performanceProfile.renderProfile.id;
-                elem.dataset.ptvRenderTier = performanceProfile.renderProfile.tier;
-
-                if (!rows.length) {
-                    mountPtvHomeHero(elem, {
-                        apiClient,
-                        user
-                    });
-
-                    return Promise.resolve();
-                }
-
                 const lookupMaps = createLookupMaps();
                 const lookupMapsPromise = hydrateLookupMaps(lookupMaps, apiClient, userId)
                     .catch(() => lookupMaps);
                 const fetchFeaturedContent = () => lookupMapsPromise.then(() => createFeaturedContentFetcher(
                     apiClient,
                     userId,
-                    rows,
+                    seedRows,
                     lookupMaps,
                     userViews,
                     {
                         performanceProfile
                     }
                 )());
-                let featuredContentPromise = getSharedFeaturedContent(fetchFeaturedContent);
-                const featuredContentSource = {
-                    get: () => featuredContentPromise
-                };
-                const handleFeaturedCacheUpdated = () => {
-                    featuredContentPromise = getFeaturedContent(fetchFeaturedContent);
+                let featuredContentPromise = seedRows.length ?
+                    getSharedFeaturedContent(fetchFeaturedContent) :
+                    Promise.resolve({
+                        heroItems: [],
+                        sectionItems: {},
+                        sections: []
+                    });
 
-                    void resume(elem, {
-                        deferContinue: true,
-                        refresh: true
-                    })
-                        .then(() => {
-                            enhancePtvCards(elem);
-                        })
-                        .catch(err => {
-                            console.warn('[PTV Home] Failed refreshing featured cache content', err);
+                return featuredContentPromise
+                    .catch(() => null)
+                    .then(featuredPayload => {
+                        const rows = featureSettings.homeRowsEnabled ?
+                            getHomeRowsForPayload(featuredPayload, performanceProfile) :
+                            [];
+
+                        if (featuredPayload) {
+                            featuredContentPromise = Promise.resolve(featuredPayload);
+                        }
+
+                        for (let i = 0; i < rows.length; i++) {
+                            html += '<div class="verticalSection section' + i + '"></div>';
+                        }
+
+                        elem.innerHTML = html;
+                        elem.classList.add('homeSectionsContainer');
+                        elem.classList.toggle('ptv-home-low-power', performanceProfile.isLowPower);
+                        elem.dataset.ptvClientProfile = performanceProfile.clientKind;
+                        elem.dataset.ptvRenderProfile = performanceProfile.renderProfile.id;
+                        elem.dataset.ptvRenderTier = performanceProfile.renderProfile.tier;
+
+                        if (!rows.length) {
+                            mountPtvHomeHero(elem, {
+                                apiClient,
+                                user
+                            });
+
+                            return Promise.resolve();
+                        }
+
+                        const featuredContentSource = {
+                            get: () => featuredContentPromise
+                        };
+                        const handleFeaturedCacheUpdated = () => {
+                            featuredContentPromise = getFeaturedContent(fetchFeaturedContent);
+
+                            void resume(elem, {
+                                deferContinue: true,
+                                refresh: true
+                            })
+                                .then(() => {
+                                    enhancePtvCards(elem);
+                                })
+                                .catch(err => {
+                                    console.warn('[PTV Home] Failed refreshing featured cache content', err);
+                                });
+                        };
+
+                        cleanupFeaturedCacheListener(elem);
+                        window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
+                        elem.ptvFeaturedCacheCleanup = () => {
+                            window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
+                        };
+
+                        mountPtvHomeHero(elem, {
+                            apiClient,
+                            user,
+                            featuredContentPromise
                         });
-                };
 
-                cleanupFeaturedCacheListener(elem);
-                window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
-                elem.ptvFeaturedCacheCleanup = () => {
-                    window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
-                };
+                        for (let i = 0; i < rows.length; i++) {
+                            setRowSlotMetadata(getRowSlot(elem, i), rows[i], i);
+                        }
 
-                mountPtvHomeHero(elem, {
-                    apiClient,
-                    user,
-                    featuredContentPromise
-                });
+                        const rowMountContext = {
+                            apiClient,
+                            featuredContentSource,
+                            lookupMaps,
+                            performanceProfile,
+                            userId,
+                            userViews
+                        };
+                        const rowScrollRoot = getRowScrollRoot(elem);
+                        elem.ptvVirtualRows = rows;
+                        elem.ptvVirtualRowContext = rowMountContext;
+                        mountInitialRows(elem, rows, rowMountContext, rowScrollRoot);
+                        observeVirtualRowSlots(elem, rows, rowMountContext, rowScrollRoot);
 
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
-                    const sectionElem = elem.querySelector('.section' + i);
-                    const options = {
-                        enableOverflow: enableScrollX(),
-                        featuredContentSource,
-                        performanceProfile
-                    };
+                        // Timeout for polyfilled CustomElements (webOS 1.2)
+                        return new Promise(resolve => window.setTimeout(resolve, 0))
+                            .then(() => {
+                                enhancePtvCards(elem);
 
-                    if (row.type === 'libraries') {
-                        renderLibraryRow(sectionElem, apiClient, userViews, options);
-                    } else {
-                        renderMediaRow(sectionElem, apiClient, userId, row, lookupMaps, userViews, options);
-                    }
-                }
-
-                // Timeout for polyfilled CustomElements (webOS 1.2)
-                return new Promise(resolve => window.setTimeout(resolve, 0))
-                    .then(() => {
-                        enhancePtvCards(elem);
-
-                        void resume(elem, {
-                            deferContinue: true,
-                            refresh: true
-                        }).catch(err => {
-                            console.warn('[PTV Home] Failed resuming background sections', err);
-                        });
+                                void resume(elem, {
+                                    deferContinue: true,
+                                    refresh: true
+                                }).catch(err => {
+                                    console.warn('[PTV Home] Failed resuming background sections', err);
+                                });
+                            });
                     });
             } else {
                 let noLibDescription;
@@ -293,6 +1323,8 @@ export function loadSections(elem, apiClient, user) {
 
 export function destroySections(elem) {
     clearDeferredResumeTimers(elem);
+    cleanupViewportResumeObserver(elem);
+    cleanupRowMountObserver(elem);
     cleanupFeaturedCacheListener(elem);
     unmountPtvHomeHero(elem);
     cleanupPtvRowBackdrops(elem);
@@ -310,11 +1342,15 @@ export function destroySections(elem) {
         e.getItemsHtml = null;
     }
 
+    elem.ptvVirtualRows = null;
+    elem.ptvVirtualRowContext = null;
+    elem.ptvVirtualRowStateCache = null;
     elem.innerHTML = '';
 }
 
 export function pause(elem) {
     clearDeferredResumeTimers(elem);
+    cleanupViewportResumeObserver(elem);
 
     const elems = elem.querySelectorAll('.itemsContainer');
     for (const e of elems) {
@@ -322,16 +1358,113 @@ export function pause(elem) {
     }
 }
 
-function getImmediateResumeSections(sections, options) {
-    if (options?.deferContinue === false) return sections;
-
-    return sections.filter(section => section.dataset.ptvRowType !== 'continue');
+function getInitialRowCount(performanceProfile) {
+    return Math.max(1, Number(performanceProfile.homeInitialRowCount) || 4);
 }
 
-function getDeferredResumeSections(sections, options) {
+function getRowIndex(section) {
+    return Number(section.dataset.ptvRowIndex || section.parentContainer?.dataset.ptvRowIndex || 0);
+}
+
+function getImmediateResumeSections(sections, options, performanceProfile) {
+    if (options?.deferContinue === false) return sections;
+
+    if (options?.virtualizeRows === false) {
+        return sections.filter(section => section.dataset.ptvRowType !== 'continue');
+    }
+
+    const initialRowCount = getInitialRowCount(performanceProfile);
+
+    return sections.filter(section => {
+        if (section.parentContainer?.dataset.ptvRowMounting === 'true') return false;
+        if (section.dataset.ptvRowResumed === 'true') return true;
+        if (section.dataset.ptvRowType === 'continue') return false;
+
+        return getRowIndex(section) < initialRowCount;
+    });
+}
+
+function getDeferredResumeSections(sections, options, performanceProfile) {
     if (options?.deferContinue === false) return [];
 
-    return sections.filter(section => section.dataset.ptvRowType === 'continue');
+    if (options?.virtualizeRows === false) {
+        return sections.filter(section => section.dataset.ptvRowType === 'continue');
+    }
+
+    const immediateSections = new Set(getImmediateResumeSections(sections, options, performanceProfile));
+
+    return sections.filter(section => !immediateSections.has(section));
+}
+
+function resumeSection(section, options) {
+    return section.resume(options)
+        .then(result => {
+            markSectionResumed(section);
+            return result;
+        });
+}
+
+function observeDeferredResumeSections(elem, sections, options, performanceProfile) {
+    cleanupViewportResumeObserver(elem);
+
+    if (!sections.length) return;
+
+    if (typeof IntersectionObserver !== 'function') {
+        scheduleDeferredResume(elem, sections, {
+            ...options,
+            batchDelayMs: options?.batchDelayMs ?? performanceProfile.sectionResumeBatchDelayMs,
+            batchSize: options?.batchSize ?? Math.max(1, performanceProfile.sectionResumeBatchSize || 2),
+            deferContinue: false
+        });
+        return;
+    }
+
+    const rootMargin = performanceProfile.homeRowViewportRootMargin || '520px 0px';
+    const scrollRoot = getRowScrollRoot(elem);
+    const targetsBySection = new WeakMap();
+    const observer = new IntersectionObserver((entries) => {
+        entries
+            .filter(entry => entry.isIntersecting)
+            .forEach(entry => {
+                const section = targetsBySection.get(entry.target) || entry.target;
+
+                observer.unobserve(entry.target);
+
+                if (section.parentContainer?.dataset.ptvRowMounting === 'true'
+                    || section.dataset.ptvRowResumed === 'true'
+                    || typeof section.resume !== 'function') {
+                    return;
+                }
+
+                void timePtvAsync(
+                    'render',
+                    'home-section-resume-viewport',
+                    () => resumeSection(section, options),
+                    {
+                        row: section.dataset.ptvRowId || '',
+                        rowIndex: getRowIndex(section),
+                        rowType: section.dataset.ptvRowType || ''
+                    }
+                )
+                    .then(() => {
+                        enhancePtvCards(elem);
+                    })
+                    .catch(err => {
+                        console.warn('[PTV Home] Failed resuming viewport section', err);
+                    });
+            });
+    }, {
+        root: scrollRoot,
+        rootMargin
+    });
+
+    sections.forEach(section => {
+        const target = section.parentContainer || section.closest?.('.verticalSection') || section;
+
+        targetsBySection.set(target, section);
+        observer.observe(target);
+    });
+    elem.ptvViewportResumeObserver = observer;
 }
 
 export function resume(elem, options) {
@@ -339,19 +1472,19 @@ export function resume(elem, options) {
 
     const sections = Array.from(elem.querySelectorAll('.itemsContainer'))
         .filter(section => typeof section.resume === 'function');
-    const immediateSections = getImmediateResumeSections(sections, options);
-    const deferredSections = getDeferredResumeSections(sections, options);
     const performanceProfile = getPtvPerformanceProfile();
+    const immediateSections = getImmediateResumeSections(sections, options, performanceProfile);
+    const deferredSections = getDeferredResumeSections(sections, options, performanceProfile);
     const batchSize = options?.batchSize || performanceProfile.sectionResumeBatchSize;
     const batchDelay = options?.batchDelayMs ?? performanceProfile.sectionResumeBatchDelayMs;
 
-    scheduleDeferredResume(elem, deferredSections, options);
+    observeDeferredResumeSections(elem, deferredSections, options, performanceProfile);
 
     if (!batchSize || batchSize <= 0) {
         return timePtvAsync(
             'render',
             'home-sections-resume',
-            () => Promise.all(immediateSections.map(section => section.resume(options))),
+            () => Promise.all(immediateSections.map(section => resumeSection(section, options))),
             {
                 deferredSections: deferredSections.length,
                 sections: immediateSections.length
@@ -367,7 +1500,7 @@ export function resume(elem, options) {
     }
 
     return timePtvAsync('render', 'home-sections-resume-batched', () => batches.reduce((chain, batch, index) => chain
-        .then(() => Promise.all(batch.map(section => section.resume(options))))
+        .then(() => Promise.all(batch.map(section => resumeSection(section, options))))
         .then(batchResults => {
             results.push(...batchResults);
 

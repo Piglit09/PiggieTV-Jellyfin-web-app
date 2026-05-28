@@ -4,24 +4,23 @@ The featured-content cache is shared across users on the same Jellyfin server.
 
 ## Current Flow
 
-1. Web client asks the plugin for `/Ptv/v1/FeaturedContent`.
-2. If the plugin is unavailable, the client falls back to Jellyfin named configuration.
+1. Web client asks the plugin for `/Ptv/v1/featured`.
+2. If the plugin is unavailable, the client keeps rendering from in-memory session cache.
 3. The plugin background worker refreshes the cache on startup when it is missing or expired.
 4. The plugin background worker refreshes the cache every 12 hours by default.
 5. Clients reuse the payload until `expiresAt`.
 6. If expired, clients show stale content immediately while the server refreshes in the background.
 
-Normal users can read plugin cache data. If a normal user cannot write or manually refresh the shared cache, the web client keeps rendering from memory or fallback storage without surfacing an error.
+Normal users can read plugin cache data. If a normal user cannot write or manually refresh the shared cache, the web client keeps rendering from memory without surfacing an error.
 
 Current fallback order:
 
-1. Plugin file cache: `/Ptv/v1/FeaturedContent`
-2. Jellyfin named configuration: `ptv`
-3. In-memory cache for the current browser session
+1. Plugin file cache: `/Ptv/v1/featured`
+2. In-memory cache for the current browser session
 
-`DELETE /Ptv/v1/FeaturedContent` is the preferred clear path. It is admin-only. When unavailable, the web client clears local memory and attempts the named-configuration fallback.
+`DELETE /Ptv/v1/featured` is the preferred clear path. It is admin-only. When unavailable, the web client clears local memory only.
 
-`POST /Ptv/v1/FeaturedContent/Refresh` is the preferred manual refresh path. It is admin-only and runs the plugin refresh worker. When unavailable, the dashboard falls back to the older client-generated refresh path.
+`POST /Ptv/v1/featured/refresh` is the preferred manual refresh path. It is admin-only and runs the plugin refresh worker. When unavailable, the dashboard falls back to the older client-generated refresh path.
 
 ## Payload Shape
 
@@ -40,9 +39,9 @@ The web cache entry wraps this payload with:
 
 ## TTL
 
-Default TTL is 12 hours. The dashboard task can adjust the interval and force a refresh.
+Default TTL is 12 hours. Dashboard -> PiggieTV -> Plugin Settings can adjust the refresh interval through `/Ptv/v1/settings` and force a refresh through `/Ptv/v1/featured/refresh`.
 
-The plugin never blocks `GET /Ptv/v1/FeaturedContent` while a refresh is running. Failed refreshes keep the previous cache document in place so stale content can still render.
+The plugin never blocks `GET /Ptv/v1/featured` while a refresh is running. Failed refreshes keep the previous cache document in place so stale content can still render.
 
 The PiggieTV dashboard shows:
 
@@ -53,6 +52,7 @@ The PiggieTV dashboard shows:
 - item counts
 - last refresh duration
 - last refresh or write error
+- last non-fatal trim/partial warning
 - server refresh in-progress state
 - next server refresh time
 

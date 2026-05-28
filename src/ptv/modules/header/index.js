@@ -308,6 +308,8 @@ function ensureHomeTabs(header) {
 function normalizeSidebarLogo(logo, brandType) {
     if (!(logo instanceof HTMLImageElement)) return;
 
+    logo.dataset.ptvLogo = brandType;
+    logo.dataset.ptvImageComponent = brandType === 'sidebar' ? 'sidebar-logo' : 'drawer-logo';
     applyPtvResponsiveImage(
         logo,
         brandType === 'sidebar' ?
@@ -318,10 +320,9 @@ function normalizeSidebarLogo(logo, brandType) {
     logo.loading = 'eager';
     logo.decoding = 'async';
     logo.draggable = false;
-    logo.dataset.ptvLogo = brandType;
 
     if (brandType === 'sidebar') {
-        logo.className = 'ptv-sidebar-logo ptv-sidebar-logo-image ptv-drawer-logo';
+        logo.className = 'ptv-sidebar-logo ptv-sidebar-logo-image';
         logo.width = 226;
         logo.height = 58;
         return;
@@ -527,6 +528,8 @@ function enhanceHeaderIcons() {
             const headerLogoImage = create('img', {
                 attrs: {
                     alt: PTV_BRANDING.appName,
+                    'data-ptv-image-component': 'header-logo',
+                    'data-ptv-logo': 'header',
                     loading: 'eager',
                     decoding: 'async'
                 }
@@ -539,6 +542,8 @@ function enhanceHeaderIcons() {
             const logoImage = logo.querySelector('img');
 
             if (logoImage instanceof HTMLImageElement) {
+                logoImage.dataset.ptvLogo = 'header';
+                logoImage.dataset.ptvImageComponent = 'header-logo';
                 applyPtvResponsiveImage(logoImage, PTV_ASSETS.responsive.logos.bannerLight);
                 logoImage.alt = PTV_BRANDING.appName;
                 logoImage.loading = 'eager';

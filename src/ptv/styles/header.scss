@@ -435,14 +435,14 @@
     gap: 8px !important;
 }
 
-.ptv-legacy-skinHeader .ptv-icon-back { --ptv-icon-url: url('/assets/icons/back.svg'); }
-.ptv-legacy-skinHeader .ptv-icon-home { --ptv-icon-url: url('/assets/icons/home.svg'); }
-.ptv-legacy-skinHeader .ptv-icon-menu { --ptv-icon-url: url('/assets/icons/menu.svg'); }
-.ptv-legacy-skinHeader .ptv-icon-users { --ptv-icon-url: url('/assets/icons/users.svg'); }
-.ptv-legacy-skinHeader .ptv-icon-music { --ptv-icon-url: url('/assets/icons/music.svg'); }
-.ptv-legacy-skinHeader .ptv-icon-cast { --ptv-icon-url: url('/assets/icons/cast.svg'); }
-.ptv-legacy-skinHeader .ptv-icon-search { --ptv-icon-url: url('/assets/icons/search.svg'); }
-.ptv-legacy-skinHeader .ptv-icon-user { --ptv-icon-url: url('/assets/icons/user.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-back { --ptv-icon-url: url('assets/icons/back.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-home { --ptv-icon-url: url('assets/icons/home.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-menu { --ptv-icon-url: url('assets/icons/menu.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-users { --ptv-icon-url: url('assets/icons/users.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-music { --ptv-icon-url: url('assets/icons/music.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-cast { --ptv-icon-url: url('assets/icons/cast.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-search { --ptv-icon-url: url('assets/icons/search.svg'); }
+.ptv-legacy-skinHeader .ptv-icon-user { --ptv-icon-url: url('assets/icons/user.svg'); }
 
 .ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button-active,
 .skinHeader.ptv-legacy-skinHeader > .headerTabs.sectionTabs .emby-tab-button-active {

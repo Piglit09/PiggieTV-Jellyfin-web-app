@@ -13,6 +13,8 @@ const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
     const [activeRoute, setActiveRoute] = useState(window.location.hash || PTV_ROUTES.home);
     const mountSidebarLogo = useCallback((image: HTMLImageElement | null) => {
         if (image) {
+            image.dataset.ptvLogo = 'sidebar';
+            image.dataset.ptvImageComponent = 'sidebar-logo';
             applyPtvResponsiveImage(image, PTV_ASSETS.responsive.logos.sidebar);
         }
     }, []);
@@ -59,8 +61,9 @@ const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
                     <img
                         ref={mountSidebarLogo}
                         alt={PTV_BRANDING.appName}
-                        className='ptv-sidebar-logo ptv-sidebar-logo-image ptv-drawer-logo'
+                        className='ptv-sidebar-logo ptv-sidebar-logo-image'
                         data-ptv-logo='sidebar'
+                        data-ptv-image-component='sidebar-logo'
                         width='226'
                         height='58'
                         loading='eager'

@@ -38,6 +38,12 @@ public sealed class PtvFeaturedContentRefreshStatus
     public string? LastRefreshError { get; set; }
 
     /// <summary>
+    /// Gets or sets the last non-fatal refresh warning, if any.
+    /// </summary>
+    [JsonPropertyName("lastRefreshWarning")]
+    public string? LastRefreshWarning { get; set; }
+
+    /// <summary>
     /// Gets or sets the next scheduled refresh timestamp as Unix epoch milliseconds.
     /// </summary>
     [JsonPropertyName("nextRefreshAt")]

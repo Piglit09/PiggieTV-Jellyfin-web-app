@@ -50,6 +50,7 @@ import './ptv/styles/ptv.scss';
 import './ptv/modules/header';
 import './ptv/modules/dashboard';
 import './ptv/modules/settings';
+import './ptv/modules/playback';
 
 async function init() {
     // Log current version to console to help out with issue triage and debugging

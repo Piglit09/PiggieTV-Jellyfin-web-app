@@ -14,6 +14,36 @@ public sealed class PtvFeaturedContentStoreStatus
     public bool CachePathExists { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the fixed cache directory is writable.
+    /// </summary>
+    [JsonPropertyName("cachePathWritable")]
+    public bool CachePathWritable { get; set; }
+
+    /// <summary>
+    /// Gets or sets the fixed cache directory path.
+    /// </summary>
+    [JsonPropertyName("cachePath")]
+    public string? CachePath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the fixed featured-content cache file path.
+    /// </summary>
+    [JsonPropertyName("cacheFilePath")]
+    public string? CacheFilePath { get; set; }
+
+    /// <summary>
+    /// Gets or sets the last cache store write error.
+    /// </summary>
+    [JsonPropertyName("cacheWriteError")]
+    public string? CacheWriteError { get; set; }
+
+    /// <summary>
+    /// Gets or sets the last serialized cache payload size in bytes.
+    /// </summary>
+    [JsonPropertyName("cachePayloadBytes")]
+    public long CachePayloadBytes { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether the featured cache file exists.
     /// </summary>
     [JsonPropertyName("featuredCacheExists")]

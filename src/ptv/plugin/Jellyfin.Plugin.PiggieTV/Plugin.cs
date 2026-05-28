@@ -2,6 +2,7 @@ using Jellyfin.Plugin.PiggieTV.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Serialization;
+using System.Diagnostics;
 
 namespace Jellyfin.Plugin.PiggieTV;
 
@@ -11,6 +12,11 @@ namespace Jellyfin.Plugin.PiggieTV;
 public sealed class Plugin : BasePlugin<PluginConfiguration>
 {
     /// <summary>
+    /// Gets the build timestamp stamped into this diagnostic plugin build.
+    /// </summary>
+    public const string BuildTimestampUtc = "2026-05-25T17:43:32Z";
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
     /// </summary>
     /// <param name="applicationPaths">Jellyfin application paths.</param>
@@ -19,6 +25,10 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+        var message = $"PiggieTV plugin constructed. BuildTimestampUtc={BuildTimestampUtc}. ConfigurationPath={applicationPaths.PluginConfigurationsPath}.";
+
+        Console.WriteLine(message);
+        Trace.TraceInformation(message);
     }
 
     /// <inheritdoc />

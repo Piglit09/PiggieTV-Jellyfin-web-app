@@ -45,11 +45,28 @@ PiggieTV includes a minimal Jellyfin plugin companion in `src/ptv/plugin`.
 Current versioned API surface:
 
 ```text
-GET    /Ptv/v1/Status
-GET    /Ptv/v1/FeaturedContent
-PUT    /Ptv/v1/FeaturedContent
-DELETE /Ptv/v1/FeaturedContent
-POST   /Ptv/v1/FeaturedContent/Refresh
+GET    /Ptv/v1/status
+GET    /Ptv/v1/settings
+POST   /Ptv/v1/settings
+POST   /Ptv/v1/settings/reset
+GET    /Ptv/v1/featured
+PUT    /Ptv/v1/featured
+DELETE /Ptv/v1/featured
+POST   /Ptv/v1/featured/refresh
+GET    /Ptv/v1/integrations/status
+POST   /Ptv/v1/integrations/seerr/test
+GET    /Ptv/v1/integrations/seerr/search
+POST   /Ptv/v1/integrations/seerr/request
+POST   /Ptv/v1/integrations/{sonarr|radarr|lidarr|prowlarr}/test
+GET    /Ptv/v1/integrations/arr/calendar
+GET    /Ptv/v1/integrations/arr/downloads
+GET    /Ptv/v1/tags
+GET    /Ptv/v1/tags/rows
+POST   /Ptv/v1/tags/rows
+GET    /Ptv/v1/random/movie
+GET    /Ptv/v1/random/episode
+GET    /Ptv/v1/random/anime
+GET    /Ptv/v1/random/library/{libraryId}
 ```
 
 The plugin provides:
@@ -65,6 +82,8 @@ The plugin provides:
 - authenticated-user cache reads
 - structured error responses
 - fixed plugin-owned cache file path
+- server-side settings for Jellyseerr, Sonarr, Radarr, Lidarr, Prowlarr, qBittorrent-style downloads, tag rows, and random discovery
+- write-only secret handling for TMDb, Jellyseerr, *Arr, and download-provider credentials
 
 Featured cache file:
 
@@ -73,6 +92,19 @@ Featured cache file:
 ```
 
 Optional TMDb credentials must stay server-side. The plugin can read `PTV_TMDB_READ_ACCESS_TOKEN` or `PTV_TMDB_API_KEY` from the Jellyfin host environment to improve featured row accuracy without exposing secrets to browsers.
+
+### Media Control Integrations
+
+PiggieTV now has a native integration foundation inspired by the UX direction of Jellyfin-Enhanced, but implemented as PTV-owned settings and routes.
+
+- Jellyseerr request/search settings with internal and external URL support.
+- Server-side Jellyseerr proxy routes for search, request actions, and connection tests.
+- Server-side *Arr connection settings and test routes for Sonarr, Radarr, Lidarr, and Prowlarr.
+- Download provider settings for qBittorrent-style dashboards without exposing credentials to frontend JavaScript.
+- Tag-based smart row settings for rows such as Disney Animation, Anime Movies, Holiday, Halloween, Christmas, Marvel, DC, and Studio Ghibli.
+- Random discovery settings for movie, episode, anime, and current-library random actions.
+
+API keys and passwords are stored only in the Jellyfin plugin configuration. Public settings responses return `apiKeyConfigured`, `usernameConfigured`, and `passwordConfigured` booleans instead of secret values.
 
 ### PiggieTV Dashboard
 
@@ -91,6 +123,7 @@ The dashboard shows:
 - PTV debug and performance overlay controls
 - feature toggles for hero, home rows, dynamic backdrops, and low-power mode
 - signup and invite management entry point for the jfa-go invite engine
+- Jellyseerr, *Arr, download provider, tag row, random discovery, and TMDb controls with section-level save buttons
 
 ### Signup And Invites
 
@@ -260,7 +293,7 @@ Useful upstream links:
 - Jellyfin and Jellyfin Web provide the media server and web client foundation.
 - [jfa-go](https://github.com/hrfee/jfa-go) provides the invite/signup engine used by PiggieTV's native signup surfaces.
 - [Jellyfin-PauseScreen](https://github.com/BobHasNoSoul/Jellyfin-PauseScreen) inspired PiggieTV's managed pause-screen feature behavior, including pause-only metadata/artwork presentation.
-- [Jellyfin-Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) inspired PiggieTV's quality tag treatment.
+- [Jellyfin-Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) inspired PiggieTV's quality tag treatment and the native request, automation, tag filtering, and random discovery integration direction.
 - [Home Screen Sections](https://github.com/IAmParadox27/jellyfin-plugin-home-sections) inspired PiggieTV's home row direction.
 
 ## License

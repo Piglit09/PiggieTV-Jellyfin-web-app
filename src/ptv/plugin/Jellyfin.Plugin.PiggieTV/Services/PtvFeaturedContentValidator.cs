@@ -27,7 +27,15 @@ public static class PtvFeaturedContentValidator
     private const long MinTtlMs = 60 * 60 * 1000;
     private const long MaxTtlMs = 7 * 24 * 60 * 60 * 1000;
     private const long ClockSkewMs = 5 * 60 * 1000;
-    private static readonly string[] UnsafePropertyNameFragments = ["path", "file", "filename"];
+    private static readonly string[] UnsafePropertyNames = [
+        "file",
+        "filename",
+        "filepath",
+        "localpath",
+        "originalpath",
+        "path",
+        "sourcepath"
+    ];
 
     /// <summary>
     /// Creates an empty, safe document.
@@ -40,6 +48,20 @@ public static class PtvFeaturedContentValidator
             Version = DocumentVersion,
             UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
+    }
+
+    /// <summary>
+    /// Gets the currently configured maximum document size.
+    /// </summary>
+    /// <returns>Maximum document size in bytes.</returns>
+    public static int GetMaxDocumentBytes()
+    {
+        var configuredValue = Plugin.Instance?.Configuration?.PerformanceSettings?.MaxCachePayloadBytes ?? MaxDocumentBytes;
+
+        return Math.Clamp(
+            configuredValue,
+            PtvPluginSettingsNormalizer.MinMaxCachePayloadBytes,
+            PtvPluginSettingsNormalizer.MaxMaxCachePayloadBytes);
     }
 
     /// <summary>
@@ -233,12 +255,170 @@ public static class PtvFeaturedContentValidator
 
     private static void EnsureSafeSize(PtvFeaturedContentDocument document, JsonSerializerOptions jsonOptions)
     {
+        var maxDocumentBytes = GetMaxDocumentBytes();
         var serialized = JsonSerializer.SerializeToUtf8Bytes(document, jsonOptions);
 
-        if (serialized.Length > MaxDocumentBytes)
+        if (serialized.Length <= maxDocumentBytes)
         {
-            throw Invalid("PTV_CACHE_PAYLOAD_TOO_LARGE", "The featured-content document exceeds the safe payload size limit.");
+            return;
         }
+
+        var originalBytes = serialized.Length;
+
+        TrimDocumentToSafeSize(document, jsonOptions, maxDocumentBytes);
+        serialized = JsonSerializer.SerializeToUtf8Bytes(document, jsonOptions);
+
+        if (serialized.Length > maxDocumentBytes)
+        {
+            throw Invalid(
+                "PTV_CACHE_PAYLOAD_TOO_LARGE",
+                $"Payload exceeded maxCachePayloadBytes: {originalBytes} > {maxDocumentBytes}; trimmed to {serialized.Length} bytes but still could not fit.");
+        }
+    }
+
+    private static void TrimDocumentToSafeSize(
+        PtvFeaturedContentDocument document,
+        JsonSerializerOptions jsonOptions,
+        int maxDocumentBytes)
+    {
+        if (document.FeaturedContent is not JsonObject featuredContent
+            || featuredContent["payload"] is not JsonObject payload)
+        {
+            throw Invalid("PTV_CACHE_PAYLOAD_TOO_LARGE", "Payload exceeded maxCachePayloadBytes and could not be trimmed because featuredContent.payload is missing.");
+        }
+
+        var originalBytes = JsonSerializer.SerializeToUtf8Bytes(document, jsonOptions).Length;
+
+        MarkPayloadTrimmed(document, originalBytes, originalBytes);
+        RemoveVerbosePayloadFields(payload);
+
+        while (JsonSerializer.SerializeToUtf8Bytes(document, jsonOptions).Length > maxDocumentBytes
+            && TrimLargestSectionItem(payload))
+        {
+        }
+
+        while (JsonSerializer.SerializeToUtf8Bytes(document, jsonOptions).Length > maxDocumentBytes
+            && TrimHeroItem(payload))
+        {
+        }
+
+        while (JsonSerializer.SerializeToUtf8Bytes(document, jsonOptions).Length > maxDocumentBytes
+            && RemoveLargestSection(payload))
+        {
+        }
+
+        MarkPayloadTrimmed(document, originalBytes, JsonSerializer.SerializeToUtf8Bytes(document, jsonOptions).Length);
+    }
+
+    private static void MarkPayloadTrimmed(PtvFeaturedContentDocument document, int originalBytes, int storedBytes)
+    {
+        if (document.FeaturedContent is JsonObject featuredContent)
+        {
+            featuredContent["payloadTrimmed"] = true;
+            featuredContent["payloadOriginalBytes"] = originalBytes;
+            featuredContent["payloadStoredBytes"] = storedBytes;
+        }
+
+        var settings = document.FeaturedContentSettings as JsonObject ?? new JsonObject();
+        settings["payloadTrimmed"] = true;
+        settings["payloadOriginalBytes"] = originalBytes;
+        settings["payloadStoredBytes"] = storedBytes;
+        document.FeaturedContentSettings = settings;
+    }
+
+    private static void RemoveVerbosePayloadFields(JsonObject payload)
+    {
+        if (payload["heroItems"] is JsonArray heroItems)
+        {
+            RemoveVerboseItemFields(heroItems);
+        }
+
+        if (payload["sectionItems"] is JsonObject sectionItems)
+        {
+            foreach (var section in sectionItems.ToArray())
+            {
+                if (section.Value is JsonArray items)
+                {
+                    RemoveVerboseItemFields(items);
+                }
+            }
+        }
+    }
+
+    private static void RemoveVerboseItemFields(JsonArray items)
+    {
+        foreach (var item in items)
+        {
+            if (item is not JsonObject itemObject)
+            {
+                continue;
+            }
+
+            itemObject.Remove("Overview");
+            itemObject.Remove("ProviderIds");
+        }
+    }
+
+    private static bool TrimLargestSectionItem(JsonObject payload)
+    {
+        if (payload["sectionItems"] is not JsonObject sectionItems)
+        {
+            return false;
+        }
+
+        var largestSection = sectionItems
+            .Select(section => new
+            {
+                section.Key,
+                Items = section.Value as JsonArray
+            })
+            .Where(section => section.Items is { Count: > 1 })
+            .OrderByDescending(section => section.Items?.Count ?? 0)
+            .FirstOrDefault();
+
+        if (largestSection?.Items is null)
+        {
+            return false;
+        }
+
+        largestSection.Items.RemoveAt(largestSection.Items.Count - 1);
+        return true;
+    }
+
+    private static bool TrimHeroItem(JsonObject payload)
+    {
+        if (payload["heroItems"] is not JsonArray heroItems || heroItems.Count <= 1)
+        {
+            return false;
+        }
+
+        heroItems.RemoveAt(heroItems.Count - 1);
+        return true;
+    }
+
+    private static bool RemoveLargestSection(JsonObject payload)
+    {
+        if (payload["sectionItems"] is not JsonObject sectionItems || sectionItems.Count == 0)
+        {
+            return false;
+        }
+
+        var largestSection = sectionItems
+            .Select(section => new
+            {
+                section.Key,
+                ItemCount = section.Value is JsonArray items ? items.Count : 0
+            })
+            .OrderByDescending(section => section.ItemCount)
+            .FirstOrDefault();
+
+        if (largestSection is null)
+        {
+            return false;
+        }
+
+        sectionItems.Remove(largestSection.Key);
+        return true;
     }
 
     private static PtvFeaturedContentValidationException Invalid(string code, string message)
@@ -281,7 +461,13 @@ public static class PtvFeaturedContentValidator
 
     private static bool IsUnsafePropertyName(string propertyName)
     {
-        return UnsafePropertyNameFragments.Any(
-            fragment => propertyName.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+        var normalizedName = new string(propertyName
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+
+        return UnsafePropertyNames.Contains(normalizedName, StringComparer.Ordinal)
+            || normalizedName.EndsWith("path", StringComparison.Ordinal)
+            || normalizedName.EndsWith("filename", StringComparison.Ordinal);
     }
 }

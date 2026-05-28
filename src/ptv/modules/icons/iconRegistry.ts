@@ -1,4 +1,5 @@
 import { PTV_ASSETS } from '../../core/config';
+import { resolvePtvStaticAssetUrl } from '../../core/urlOrigins';
 
 export const PTV_ICON_BASE = PTV_ASSETS.iconBase;
 
@@ -341,7 +342,7 @@ function removeLegacyMaterialIconClasses(element: Element) {
 export function getPtvIconUrl(name: PtvIconInput, fallback: PtvIconName = 'settings') {
     const iconName = normalizePtvIconName(name, fallback);
 
-    return `${PTV_ICON_BASE}/${PTV_ICON_REGISTRY[iconName]}`;
+    return resolvePtvStaticAssetUrl(`${PTV_ICON_BASE}/${PTV_ICON_REGISTRY[iconName]}`);
 }
 
 type PtvIconElementOptions = {

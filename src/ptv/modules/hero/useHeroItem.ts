@@ -10,6 +10,7 @@ export type HeroItem = {
     OfficialRating?: string;
     PremiereDate?: string;
     RunTimeTicks?: number;
+    ServerId?: string;
     Type?: string;
     SeriesId?: string;
     SeriesName?: string;
@@ -26,6 +27,9 @@ export type HeroItem = {
     ImageTags?: {
         Logo?: string;
         Primary?: string;
+    };
+    UserData?: {
+        PlaybackPositionTicks?: number;
     };
     PtvHeroSource?: 'featured' | 'continue' | 'seasonal';
     PtvHeroRecommendationLabel?: string;

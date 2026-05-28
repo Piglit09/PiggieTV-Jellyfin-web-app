@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Jellyfin.Extensions</id>
+    <version>10.11.8</version>
+    <authors>Jellyfin Contributors</authors>
+    <license type="expression">GPL-3.0-only</license>
+    <licenseUrl>https://licenses.nuget.org/GPL-3.0-only</licenseUrl>
+    <description>Package Description</description>
+    <repository type="git" url="https://github.com/jellyfin/jellyfin" commit="2c62d40f0d13926874eef9118a95be0dcee4e659" />
+    <dependencies>
+      <group targetFramework="net9.0">
+        <dependency id="Diacritics" version="4.0.17" exclude="Build,Analyzers" />
+        <dependency id="ICU4N.Transliterator" version="60.1.0-alpha.356" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

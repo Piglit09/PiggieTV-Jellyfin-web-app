@@ -1,4 +1,16 @@
-const isDev = window.location.hostname === 'localhost';
+import { getPtvStaticAssetBaseUrl, isPtvLocalDevHost } from './urlOrigins';
+
+const isDev = isPtvLocalDevHost();
+const devJellyfinServerUrl =
+    // eslint-disable-next-line sonarjs/no-clear-text-protocols
+    'http://10.16.0.50:8096';
+
+export const PTV_RUNTIME = {
+    devStaticAssetBaseUrl: isDev ? getPtvStaticAssetBaseUrl() : '',
+    devStaticAssetOrigin: isDev ? window.location.origin : '',
+    jellyfinServerUrl: isDev ? devJellyfinServerUrl : window.location.origin,
+    mode: isDev ? 'development' : 'production'
+} as const;
 
 export const PTV_BRANDING = {
     appName: 'PiggieTV',
@@ -94,8 +106,9 @@ export const PTV_ROUTES = {
     homeHtml: '#/home.html',
     profilePreferences: '#/mypreferencesmenu',
     randomItem: '#/list?sortBy=Random',
-    request: '#/ptv/request',
-    requestFallback: '#/request',
+    request: '#/requests',
+    requestFallback: '#/ptv/request',
+    requestLegacy: '#/request',
     requestSafe: '#/home',
     search: '#/search',
     signup: '#/signup',
@@ -123,7 +136,6 @@ export const PTV_DEBUG = {
 
 export const PTV_CACHE = {
     featuredContentKey: 'ptv:featured-content:v7',
-    featuredContentServerConfigName: 'ptv',
     featuredContentSettingsKey: 'ptv:featured-content:settings:v1',
     featuredContentTtlMs: 12 * 60 * 60 * 1000,
     featuredContentVersion: 7,
@@ -135,14 +147,34 @@ export const PTV_PLUGIN_API = {
     enabled: true,
     endpoints: {
         backdropPreprocess: 'Ptv/v1/Backdrops/Preprocess',
-        featuredContent: 'Ptv/v1/FeaturedContent',
-        featuredContentRefresh: 'Ptv/v1/FeaturedContent/Refresh',
+        featuredContent: 'Ptv/v1/featured',
+        featuredContentRefresh: 'Ptv/v1/featured/refresh',
         heroBatches: 'Ptv/v1/HeroBatches',
         imageProxy: 'Ptv/v1/ImageProxy',
+        integrationsStatus: 'Ptv/v1/integrations/status',
+        integrationTestBase: 'Ptv/v1/integrations',
+        jfaGoTest: 'Ptv/v1/integrations/jfa-go/test',
+        jfaGoTestAlias: 'Ptv/v1/integrations/jfago/test',
+        seerrRequest: 'Ptv/v1/integrations/seerr/request',
+        seerrRequests: 'Ptv/v1/integrations/seerr/requests',
+        seerrSearch: 'Ptv/v1/integrations/seerr/search',
+        seerrTest: 'Ptv/v1/integrations/seerr/test',
+        arrCalendar: 'Ptv/v1/integrations/arr/calendar',
+        arrDownloads: 'Ptv/v1/integrations/arr/downloads',
+        randomAnime: 'Ptv/v1/random/anime',
+        randomEpisode: 'Ptv/v1/random/episode',
+        randomMovie: 'Ptv/v1/random/movie',
+        rows: 'Ptv/v1/rows',
+        rowsPreview: 'Ptv/v1/rows/preview',
+        rowsValidate: 'Ptv/v1/rows/validate',
+        tags: 'Ptv/v1/tags',
+        tagRows: 'Ptv/v1/tags/rows',
         jfaGoInvites: 'Ptv/v1/JfaGo/Invites',
         jfaGoStatus: 'Ptv/v1/JfaGo/Status',
         recommendations: 'Ptv/v1/Recommendations',
-        status: 'Ptv/v1/Status'
+        settings: 'Ptv/v1/settings',
+        settingsReset: 'Ptv/v1/settings/reset',
+        status: 'Ptv/v1/status'
     },
     version: 1,
     unavailableRetryMs: 5 * 60 * 1000
@@ -162,6 +194,8 @@ export const PTV_PERFORMANCE = {
         heroSeasonalSearchTermLimit: 5,
         recommendationLookupTimeoutMs: 2500,
         rowBackdropMaxWidth: 1280,
+        homeInitialRowCount: 4,
+        homeRowViewportRootMargin: '520px 0px',
         homeRowLimit: 0,
         rowItemLimit: 16,
         rowPrimaryMaxWidth: 900,
@@ -183,6 +217,8 @@ export const PTV_PERFORMANCE = {
         heroSeasonalSearchTermLimit: 3,
         recommendationLookupTimeoutMs: 1600,
         rowBackdropMaxWidth: 720,
+        homeInitialRowCount: 2,
+        homeRowViewportRootMargin: '260px 0px',
         homeRowLimit: 12,
         rowItemLimit: 8,
         rowPrimaryMaxWidth: 520,
@@ -204,6 +240,8 @@ export const PTV_PERFORMANCE = {
         heroSeasonalSearchTermLimit: 3,
         recommendationLookupTimeoutMs: 1800,
         rowBackdropMaxWidth: 820,
+        homeInitialRowCount: 3,
+        homeRowViewportRootMargin: '320px 0px',
         homeRowLimit: 14,
         rowItemLimit: 10,
         rowPrimaryMaxWidth: 640,
@@ -225,6 +263,8 @@ export const PTV_PERFORMANCE = {
         heroSeasonalSearchTermLimit: 2,
         recommendationLookupTimeoutMs: 1200,
         rowBackdropMaxWidth: 520,
+        homeInitialRowCount: 1,
+        homeRowViewportRootMargin: '180px 0px',
         homeRowLimit: 9,
         rowItemLimit: 6,
         rowPrimaryMaxWidth: 420,
@@ -265,10 +305,8 @@ export const PTV_CONFIG = {
     performance: PTV_PERFORMANCE,
     pluginApi: PTV_PLUGIN_API,
     routes: PTV_ROUTES,
-    serverUrl: isDev ?
-        // eslint-disable-next-line sonarjs/no-clear-text-protocols
-        'http://10.16.0.50:8096' :
-        window.location.origin,
+    runtime: PTV_RUNTIME,
+    serverUrl: PTV_RUNTIME.jellyfinServerUrl,
     services: PTV_SERVICES,
     timers: PTV_TIMERS
 } as const;

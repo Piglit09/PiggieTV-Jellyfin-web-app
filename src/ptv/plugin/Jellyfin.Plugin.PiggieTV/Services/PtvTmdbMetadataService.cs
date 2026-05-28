@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 using Jellyfin.Plugin.PiggieTV.Configuration;
@@ -18,6 +19,7 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     private const int MaxAllowedEnrichmentItems = 600;
     private const int MaxFactCacheEntries = 1600;
     private const int MaxParallelRequests = 4;
+    private const string UnauthorizedErrorCode = "unauthorized";
     private const string ReadAccessTokenEnvironmentVariable = "PTV_TMDB_READ_ACCESS_TOKEN";
     private const string ApiKeyEnvironmentVariable = "PTV_TMDB_API_KEY";
     private static readonly HttpClient Client = new()
@@ -31,6 +33,7 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     private long _cacheMisses;
     private long? _lastDurationMs;
     private string? _lastError;
+    private string? _lastErrorCode;
 
     private sealed record TmdbRequest(BaseItem Item, string Endpoint, string TmdbId)
     {
@@ -58,6 +61,12 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
 
         if (!IsEnabled() || !credentials.Configured)
         {
+            if (IsEnabled() && !credentials.Configured)
+            {
+                _lastError = "TMDb metadata is enabled, but no TMDb read access token or API key is configured.";
+                _lastErrorCode = "missing-credential";
+            }
+
             return new Dictionary<Guid, PtvTmdbItemFacts>();
         }
 
@@ -72,6 +81,11 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             .ToArray();
 
         if (requests.Length == 0)
+        {
+            return new Dictionary<Guid, PtvTmdbItemFacts>();
+        }
+
+        if (!await ValidateCredentialsAsync(credentials, cancellationToken).ConfigureAwait(false))
         {
             return new Dictionary<Guid, PtvTmdbItemFacts>();
         }
@@ -100,15 +114,22 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         try
         {
             await Task.WhenAll(tasks).ConfigureAwait(false);
-            _lastError = null;
+
+            if (!string.Equals(_lastErrorCode, UnauthorizedErrorCode, StringComparison.OrdinalIgnoreCase))
+            {
+                _lastError = null;
+                _lastErrorCode = null;
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            throw;
+            _lastError = "TMDb metadata enrichment timed out or was canceled.";
+            _lastErrorCode = "canceled";
         }
         catch (Exception ex)
         {
             _lastError = ex.Message;
+            _lastErrorCode = "error";
             _logger.LogDebug(ex, "PiggieTV TMDb metadata enrichment failed.");
         }
         finally
@@ -133,9 +154,59 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             CacheSize = _factCache.Count,
             Configured = credentials.Configured,
             Enabled = IsEnabled(),
+            LastErrorCode = _lastErrorCode,
             LastDurationMs = _lastDurationMs,
             LastError = _lastError
         };
+    }
+
+    private async Task<bool> ValidateCredentialsAsync(
+        TmdbCredentials credentials,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var message = new HttpRequestMessage(HttpMethod.Get, BuildValidationUrl(credentials));
+
+            if (!string.IsNullOrWhiteSpace(credentials.ReadAccessToken))
+            {
+                message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.ReadAccessToken);
+            }
+
+            message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await Client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                MarkUnauthorized();
+                return false;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _lastError = $"TMDb credential validation returned {(int)response.StatusCode}. Metadata enrichment skipped for this refresh.";
+                _lastErrorCode = "validation-failed";
+                return false;
+            }
+
+            _lastError = null;
+            _lastErrorCode = null;
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            _lastError = "TMDb credential validation timed out or was canceled. Metadata enrichment skipped for this refresh.";
+            _lastErrorCode = "canceled";
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _lastError = $"TMDb credential validation failed: {ex.Message}";
+            _lastErrorCode = "validation-failed";
+            _logger.LogDebug(ex, "PiggieTV TMDb credential validation failed.");
+            return false;
+        }
     }
 
     private async Task<PtvTmdbItemFacts> GetOrFetchFactsAsync(
@@ -179,7 +250,16 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
 
         if (!response.IsSuccessStatusCode)
         {
-            _lastError = $"TMDb {request.Endpoint} metadata returned {(int)response.StatusCode}.";
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                MarkUnauthorized();
+            }
+            else
+            {
+                _lastError = $"TMDb {request.Endpoint} metadata returned {(int)response.StatusCode}.";
+                _lastErrorCode = "request-failed";
+            }
+
             return PtvTmdbItemFacts.Empty;
         }
 
@@ -187,6 +267,12 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         var json = JsonNode.Parse(body);
 
         return ParseFacts(json);
+    }
+
+    private void MarkUnauthorized()
+    {
+        _lastError = "TMDb metadata unauthorized. Check the TMDb read access token or API key.";
+        _lastErrorCode = UnauthorizedErrorCode;
     }
 
     private static PtvTmdbItemFacts ParseFacts(JsonNode? json)
@@ -255,6 +341,18 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         return new Uri($"https://api.themoviedb.org/3/{request.Endpoint}/{Uri.EscapeDataString(request.TmdbId)}?{query}");
     }
 
+    private static Uri BuildValidationUrl(TmdbCredentials credentials)
+    {
+        var query = "language=en-US";
+
+        if (string.IsNullOrWhiteSpace(credentials.ReadAccessToken) && !string.IsNullOrWhiteSpace(credentials.ApiKey))
+        {
+            query += $"&api_key={Uri.EscapeDataString(credentials.ApiKey)}";
+        }
+
+        return new Uri($"https://api.themoviedb.org/3/configuration?{query}");
+    }
+
     private static TmdbRequest? CreateRequest(BaseItem item)
     {
         if (!TryGetTmdbId(item, out var tmdbId))
@@ -299,12 +397,22 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
 
     private static bool IsEnabled()
     {
-        return Plugin.Instance?.Configuration.EnableTmdbMetadata ?? true;
+        var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+
+        PtvPluginSettingsNormalizer.Normalize(configuration);
+
+        return configuration.TmdbSettings.TmdbEnabled && configuration.TmdbSettings.UseTmdbForRowAccuracy;
     }
 
     private static int GetMaxEnrichmentItems()
     {
-        var configuredValue = Plugin.Instance?.Configuration.TmdbMaxEnrichmentItems ?? DefaultMaxEnrichmentItems;
+        var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+
+        PtvPluginSettingsNormalizer.Normalize(configuration);
+
+        var configuredValue = configuration.TmdbMaxEnrichmentItems > 0
+            ? configuration.TmdbMaxEnrichmentItems
+            : DefaultMaxEnrichmentItems;
 
         return Math.Clamp(configuredValue, 0, MaxAllowedEnrichmentItems);
     }
@@ -312,12 +420,15 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     private static TmdbCredentials GetCredentials()
     {
         var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+
+        PtvPluginSettingsNormalizer.Normalize(configuration);
+
         var readAccessToken = Environment.GetEnvironmentVariable(ReadAccessTokenEnvironmentVariable);
         var apiKey = Environment.GetEnvironmentVariable(ApiKeyEnvironmentVariable);
 
         if (string.IsNullOrWhiteSpace(readAccessToken))
         {
-            readAccessToken = configuration.TmdbReadAccessToken;
+            readAccessToken = configuration.TmdbSettings.TmdbApiToken ?? configuration.TmdbReadAccessToken;
         }
 
         if (string.IsNullOrWhiteSpace(apiKey))

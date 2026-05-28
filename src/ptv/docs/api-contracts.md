@@ -10,7 +10,7 @@ Unversioned aliases may exist temporarily for compatibility, but new client code
 
 ## v1 Endpoints
 
-### GET /Ptv/v1/Status
+### GET /Ptv/v1/status
 
 Authenticated Jellyfin users may call this endpoint. Admin policy is not required.
 
@@ -32,6 +32,10 @@ Returns plugin health and capability metadata:
   "canReadFeaturedContent": true,
   "canWriteFeaturedContent": false,
   "cachePathExists": true,
+  "cachePathWritable": true,
+  "cachePath": "/config/plugins/configurations/PiggieTV",
+  "cacheFilePath": "/config/plugins/configurations/PiggieTV/featured-content-cache.json",
+  "cacheWriteError": null,
   "featuredCacheExists": true,
   "featuredCacheFresh": true,
   "featuredCacheCreatedAt": 0,
@@ -41,6 +45,7 @@ Returns plugin health and capability metadata:
   "lastRefreshCompletedAt": 0,
   "lastRefreshDurationMs": 1200,
   "lastRefreshError": null,
+  "lastRefreshWarning": null,
   "nextRefreshAt": 0,
   "tmdbMetadata": {
     "enabled": true,
@@ -80,7 +85,7 @@ The dashboard uses these fields to distinguish:
 - stale or missing cache
 - fallback storage in use
 
-### GET /Ptv/v1/FeaturedContent
+### GET /Ptv/v1/featured
 
 Authenticated Jellyfin users may call this endpoint. Admin policy is not required.
 
@@ -105,7 +110,7 @@ Returns the shared featured-content cache document:
 }
 ```
 
-### PUT /Ptv/v1/FeaturedContent
+### PUT /Ptv/v1/featured
 
 Only Jellyfin admins/elevated users may call this endpoint.
 
@@ -123,19 +128,88 @@ The plugin always writes to its own fixed cache file and never accepts client-pr
 
 Non-admin callers receive `403` with a structured error response.
 
-### DELETE /Ptv/v1/FeaturedContent
+### DELETE /Ptv/v1/featured
 
 Only Jellyfin admins/elevated users may call this endpoint.
 
-Clears the shared server-side featured-content cache and returns an empty cache document. The frontend dashboard uses this endpoint when available, then falls back to named configuration or memory behavior if the plugin is unavailable.
+Clears the shared server-side featured-content cache and returns an empty cache document. The frontend dashboard uses this endpoint when available, then falls back to memory-only behavior if the plugin is unavailable.
 
-### POST /Ptv/v1/FeaturedContent/Refresh
+### POST /Ptv/v1/featured/refresh
 
 Only Jellyfin admins/elevated users may call this endpoint.
 
-Triggers a server-side featured-content refresh and returns the updated status response. The plugin uses a single refresh lock, so concurrent calls do not start duplicate generation work. If refresh fails, the endpoint returns status with `lastRefreshError` while the existing stale cache remains readable through `GET /Ptv/v1/FeaturedContent`.
+Triggers a server-side featured-content refresh and returns the updated status response. The plugin uses a single refresh lock, so concurrent calls do not start duplicate generation work. If refresh fails, the endpoint returns status with `lastRefreshError` while the existing stale cache remains readable through `GET /Ptv/v1/featured`.
 
 Clients should prefer this endpoint for manual dashboard refresh and fall back to client-side generation only when the endpoint is unavailable on older plugin builds.
+
+### GET /Ptv/v1/settings
+
+Only Jellyfin admins/elevated users may call this endpoint.
+
+Returns public PiggieTV plugin settings used by the custom dashboard. TMDb secrets are never returned. The response only includes `tmdbApiTokenConfigured`.
+
+```json
+{
+  "featureSettings": {
+    "heroEnabled": true,
+    "homeRowsEnabled": true,
+    "dynamicBackdropsEnabled": true,
+    "tvLowPowerModeEnabled": true,
+    "debugModeEnabled": false
+  },
+  "heroSettings": {
+    "heroAutoRotateEnabled": true,
+    "heroRotationSeconds": 12,
+    "heroMaxItems": 15,
+    "heroBackdropMaxWidth": 1920,
+    "heroLogoMaxWidth": 800
+  },
+  "rowSettings": {
+    "rowMaxItems": 16,
+    "rowRefreshHours": 12,
+    "enableSeasonalRows": true,
+    "enableCollectionRows": true,
+    "enableRecentlyAddedRows": true,
+    "enableRecommendedRows": true
+  },
+  "performanceSettings": {
+    "maxCachePayloadBytes": 4194304,
+    "imagePreloadLimit": 4,
+    "enableAnimatedRows": true,
+    "enableBackdropBlur": true,
+    "lowPowerDisableBlur": true,
+    "lowPowerDisableAnimations": true
+  },
+  "tmdbSettings": {
+    "tmdbEnabled": true,
+    "tmdbApiTokenConfigured": false,
+    "tmdbLanguage": "en-US",
+    "tmdbRegion": "US",
+    "useTmdbForRowAccuracy": true
+  }
+}
+```
+
+### POST /Ptv/v1/settings
+
+Only Jellyfin admins/elevated users may call this endpoint.
+
+Saves PiggieTV plugin settings. Numeric fields are clamped server-side:
+
+- `heroRotationSeconds`: 5-120
+- `heroMaxItems`: 1-50
+- `rowMaxItems`: 5-100
+- `rowRefreshHours`: 1-168
+- `imagePreloadLimit`: 1-10
+- `maxCachePayloadBytes`: 1048576-52428800
+
+`tmdbSettings.tmdbApiToken` is write-only. If omitted or empty, the existing stored token is preserved. If provided, it replaces the stored token and is never returned by subsequent reads.
+
+### POST /Ptv/v1/settings/reset
+
+Only Jellyfin admins/elevated users may call this endpoint.
+
+Restores default PiggieTV plugin settings. This resets the plugin configuration to defaults and returns the public settings DTO.
 
 ### Planned jfa-go Proxy Endpoints
 
@@ -192,6 +266,9 @@ Common codes include:
 - `PTV_CACHE_WRITE_FORBIDDEN`
 - `PTV_CACHE_CLEAR_FORBIDDEN`
 - `PTV_CACHE_REFRESH_FORBIDDEN`
+- `PTV_SETTINGS_READ_FORBIDDEN`
+- `PTV_SETTINGS_WRITE_FORBIDDEN`
+- `PTV_SETTINGS_RESET_FORBIDDEN`
 
 ## Future Versions
 

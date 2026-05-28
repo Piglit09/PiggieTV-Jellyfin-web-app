@@ -1,4 +1,4 @@
-import { PTV_DEBUG, PTV_EVENTS } from './config';
+import { PTV_DEBUG, PTV_EVENTS, PTV_RUNTIME } from './config';
 import {
     applyPtvClientProfileClasses,
     getPtvClientProfile,
@@ -7,7 +7,9 @@ import {
     type PtvPerformanceProfile
 } from './clientProfile';
 import { dispatchPtvCustomEvent } from './events';
+import { getPtvPluginApiDiagnostics } from './pluginApi';
 import { resetRuntimeScope } from './scope';
+import { classifyPtvRequestUrl } from './urlOrigins';
 
 type PtvDebugEventType =
     | 'api'
@@ -40,6 +42,8 @@ type PtvImageTracker = {
     completed: boolean;
     lastEventAt: number;
     lastEventKey: string;
+    resetCount: number;
+    sourceComponent: string;
     startedAt: number;
     url: string;
 };
@@ -87,12 +91,15 @@ const timings: PtvDebugTiming[] = [];
 const events: PtvDebugEvent[] = [];
 const imageTrackers = new WeakMap<HTMLImageElement, PtvImageTracker>();
 const imageEventDedupe = new Map<string, number>();
+const imageTrackerResetDedupe = new Map<string, number>();
 const observedImageFailures = new Map<string, number>();
 const observedImageRetrySuppressions = new Map<string, number>();
 const observedResourceEntries = new Map<string, number>();
 const IMAGE_EVENT_DEDUPE_MS = 15 * 1000;
 const IMAGE_ERROR_SUPPRESSION_MS = 5 * 60 * 1000;
 const IMAGE_MAX_LIFECYCLE_MS = 2 * 60 * 1000;
+const IMAGE_TRACKER_RESET_DEDUPE_MS = 30 * 1000;
+const STATIC_LOGO_EVENT_SUPPRESSION_MS = 5 * 60 * 1000;
 const IMAGE_DEDUPE_LIMIT = 500;
 
 let debugEnabled = false;
@@ -279,7 +286,52 @@ function setDebugStorage(enabled: boolean) {
 }
 
 function getImageUrl(image: HTMLImageElement) {
-    return image.currentSrc || image.src || image.getAttribute('data-src') || '';
+    return image.currentSrc || image.src || image.getAttribute('src') || image.getAttribute('data-src') || '';
+}
+
+function normalizeImageTrackerUrl(url: string) {
+    if (!url) return '';
+
+    const anchor = document.createElement('a');
+    anchor.href = url;
+
+    return anchor.href || url;
+}
+
+function isStaticLogoUrl(url: string) {
+    return /\/(?:web\/)?assets\/logo\/(?:banner-light|sidebar-logo)\.(?:webp|png)(?:[?#].*)?$/i.test(url);
+}
+
+function getImageSourceComponent(image: HTMLImageElement) {
+    const explicitComponent = image.dataset.ptvImageComponent;
+
+    if (explicitComponent) return explicitComponent;
+
+    if (image.dataset.ptvLogo) return `${image.dataset.ptvLogo}-logo`;
+    if (image.classList.contains('ptv-hero-logo')) return 'hero-logo';
+    if (image.classList.contains('ptv-hero-bg')) return 'hero-backdrop';
+    if (image.classList.contains('ptv-brand-logo')) return 'header-logo';
+    if (image.classList.contains('ptv-sidebar-logo')) return 'sidebar-logo';
+    if (image.classList.contains('ptv-drawer-logo')) return 'drawer-logo';
+
+    return 'image';
+}
+
+function createImageTracker(
+    image: HTMLImageElement,
+    url: string,
+    previousTracker?: PtvImageTracker,
+    completed = false
+): PtvImageTracker {
+    return {
+        completed,
+        lastEventAt: previousTracker?.lastEventAt || 0,
+        lastEventKey: previousTracker?.lastEventKey || '',
+        resetCount: previousTracker?.resetCount || 0,
+        sourceComponent: getImageSourceComponent(image),
+        startedAt: completed ? previousTracker?.startedAt || performance.now() : performance.now(),
+        url
+    };
 }
 
 function trimMap(map: Map<string, number>, maxEntries = IMAGE_DEDUPE_LIMIT) {
@@ -301,21 +353,20 @@ function isResolvedImage(image: HTMLImageElement) {
 }
 
 function observeImage(image: HTMLImageElement) {
-    const url = getImageUrl(image);
+    const url = normalizeImageTrackerUrl(getImageUrl(image));
     if (!url) return;
 
     const tracker = imageTrackers.get(image);
+    const trackerUrl = normalizeImageTrackerUrl(tracker?.url || '');
 
-    if (tracker?.url === url) return;
-    if (isResolvedImage(image)) return;
+    if (trackerUrl === url) return;
 
-    imageTrackers.set(image, {
-        completed: false,
-        lastEventAt: 0,
-        lastEventKey: '',
-        startedAt: performance.now(),
-        url
-    });
+    if (isResolvedImage(image)) {
+        imageTrackers.set(image, createImageTracker(image, url, tracker, true));
+        return;
+    }
+
+    imageTrackers.set(image, createImageTracker(image, url, tracker));
 }
 
 function observeImages(root: ParentNode = document) {
@@ -328,25 +379,53 @@ function observeImages(root: ParentNode = document) {
 
 function getCurrentImageTracker(image: HTMLImageElement, url: string) {
     const existingTracker = imageTrackers.get(image);
+    const normalizedUrl = normalizeImageTrackerUrl(url);
+    const existingUrl = normalizeImageTrackerUrl(existingTracker?.url || '');
 
-    if (!existingTracker || existingTracker.url === url) {
+    if (!existingTracker || existingUrl === normalizedUrl) {
         return existingTracker;
     }
 
-    recordPtvEvent('image', 'image-tracker-reset', {
-        from: existingTracker.url,
-        to: url
-    });
+    const sourceComponent = getImageSourceComponent(image);
+    const resetCount = existingTracker.resetCount + 1;
+    const resetKey = `${sourceComponent}:${existingUrl}->${normalizedUrl}`;
+    const lastResetAt = imageTrackerResetDedupe.get(resetKey);
+
+    existingTracker.resetCount = resetCount;
+    existingTracker.sourceComponent = sourceComponent;
+    imageTrackerResetDedupe.set(resetKey, Date.now());
+    trimMap(imageTrackerResetDedupe);
+
+    if (!lastResetAt || Date.now() - lastResetAt >= IMAGE_TRACKER_RESET_DEDUPE_MS) {
+        recordPtvEvent('image', 'image-tracker-reset', {
+            nextUrl: normalizedUrl,
+            previousUrl: existingUrl,
+            resetCount,
+            sourceComponent
+        });
+    }
 
     return undefined;
 }
 
 function getImageEventDetail(image: HTMLImageElement, url: string) {
+    const originDetail = getRequestOriginDetail(url);
+
     return {
+        ...originDetail,
         naturalHeight: image.naturalHeight,
         naturalWidth: image.naturalWidth,
         url
     };
+}
+
+function getRequestOriginDetail(url: string) {
+    const pluginApi = getPtvPluginApiDiagnostics();
+
+    return classifyPtvRequestUrl(url, {
+        jellyfinRoot: pluginApi.resolvedRoot,
+        pluginRoot: pluginApi.resolvedRoot
+    });
 }
 
 function handleImageError(image: HTMLImageElement, tracker: PtvImageTracker | undefined, eventName: string, url: string) {
@@ -377,6 +456,14 @@ function handleImageLoad(image: HTMLImageElement, tracker: PtvImageTracker | und
 
     markImageTrackerComplete(image, tracker, eventName, url);
 
+    if (isStaticLogoUrl(url) && durationMs > 1000) {
+        recordPtvEvent('image', 'static-logo-load-suppressed', {
+            ...getImageEventDetail(image, url),
+            durationMs: Number(durationMs.toFixed(1))
+        });
+        return;
+    }
+
     if (durationMs > IMAGE_MAX_LIFECYCLE_MS) {
         recordPtvEvent('image', 'image-duration-discarded', {
             ...getImageEventDetail(image, url),
@@ -397,7 +484,7 @@ function handleImageDone(event: Event) {
     if (!(event.target instanceof HTMLImageElement)) return;
 
     const image = event.target;
-    const url = getImageUrl(image) || imageTrackers.get(image)?.url || '';
+    const url = normalizeImageTrackerUrl(getImageUrl(image) || imageTrackers.get(image)?.url || '');
     if (!url) return;
 
     const eventName = event.type === 'error' ? 'image-error' : 'image-load';
@@ -451,6 +538,8 @@ function markImageTrackerComplete(
         completed: false,
         lastEventAt: 0,
         lastEventKey: '',
+        resetCount: 0,
+        sourceComponent: getImageSourceComponent(image),
         startedAt: performance.now(),
         url
     };
@@ -458,6 +547,7 @@ function markImageTrackerComplete(
     nextTracker.completed = true;
     nextTracker.lastEventAt = Date.now();
     nextTracker.lastEventKey = `${eventName}:${url}`;
+    nextTracker.sourceComponent = getImageSourceComponent(image);
     nextTracker.url = url;
     imageTrackers.set(image, nextTracker);
 }
@@ -481,6 +571,7 @@ function startResourceObserver() {
                 if (shouldSuppressResourceEntry(entry as PerformanceResourceTiming)) return;
 
                 recordPtvTiming('image', 'image-resource', entry.duration || 0, {
+                    ...getRequestOriginDetail(entry.name),
                     transferSize: (entry as PerformanceResourceTiming).transferSize || 0,
                     url: entry.name
                 });
@@ -496,6 +587,17 @@ function startResourceObserver() {
 }
 
 function shouldSuppressResourceEntry(entry: PerformanceResourceTiming) {
+    if (isStaticLogoUrl(entry.name)) {
+        const staticLogoKey = `static-logo:${entry.name}`;
+        const lastStaticLogoAt = observedResourceEntries.get(staticLogoKey);
+
+        if (lastStaticLogoAt && Date.now() - lastStaticLogoAt < STATIC_LOGO_EVENT_SUPPRESSION_MS) {
+            return true;
+        }
+
+        observedResourceEntries.set(staticLogoKey, Date.now());
+    }
+
     const entryKey = [
         entry.name,
         Math.round(entry.startTime || 0),
@@ -703,9 +805,12 @@ export function getPtvDebugReport() {
         events: [...events],
         images: {
             errors: getEventCount('image', 'image-error') + getEventCount('image', 'image-failed-once'),
+            resetCount: getEventCount('image', 'image-tracker-reset'),
             timings: getTimingSummary('image')
         },
         memory: getMemorySnapshot(),
+        origins: PTV_RUNTIME,
+        pluginApi: getPtvPluginApiDiagnostics(),
         recommendations: getTimingSummary('recommendation'),
         render: getTimingSummary('render'),
         renderProfile,

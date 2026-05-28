@@ -4,6 +4,11 @@
         <name>Jellyfin.Plugin.PiggieTV</name>
     </assembly>
     <members>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Api.BaseJellyfinApiController">
+            <summary>
+            Local compatibility base for PiggieTV API controllers.
+            </summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes">
             <summary>
             PiggieTV plugin API route constants.
@@ -29,14 +34,39 @@
             Versioned status route.
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1StatusLower">
+            <summary>
+            Lowercase versioned status route.
+            </summary>
+        </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1FeaturedContent">
             <summary>
             Versioned featured-content route.
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1Featured">
+            <summary>
+            Lowercase versioned featured-content route.
+            </summary>
+        </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1FeaturedContentRefresh">
             <summary>
             Versioned featured-content refresh route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1FeaturedRefresh">
+            <summary>
+            Lowercase versioned featured-content refresh route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1Settings">
+            <summary>
+            Versioned plugin settings route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1SettingsReset">
+            <summary>
+            Versioned plugin settings reset route.
             </summary>
         </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.LegacyStatus">
@@ -54,35 +84,34 @@
             Legacy unversioned featured-content refresh route.
             </summary>
         </member>
-        <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvController">
+        <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController">
             <summary>
             Minimal PiggieTV plugin API.
             </summary>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.#ctor(Microsoft.AspNetCore.Authorization.IAuthorizationService,Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService,Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentStore,Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Api.PtvStatusController},System.IServiceProvider)">
             <summary>
-            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Api.PtvController"/> class.
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController"/> class.
             </summary>
-            <param name="authorizationService">Authorization service.</param>
-            <param name="featuredContentRefreshService">Featured-content refresh service.</param>
-            <param name="featuredContentStore">Featured-content cache store.</param>
-            <param name="tmdbMetadataService">TMDb metadata enrichment service.</param>
+            <param name="logger">Logger.</param>
+            <param name="serviceProvider">Application service provider.</param>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.GetStatus(System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetStatus(System.Boolean,System.Threading.CancellationToken)">
             <summary>
             Gets PiggieTV plugin health and capability information.
             </summary>
+            <param name="full">Whether to run full subsystem diagnostics.</param>
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Plugin status.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.GetFeaturedContent(System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetFeaturedContent(System.Threading.CancellationToken)">
             <summary>
             Gets the shared PiggieTV featured-content cache document.
             </summary>
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Featured-content cache document.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.PutFeaturedContent(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument,System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.PutFeaturedContent(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument,System.Threading.CancellationToken)">
             <summary>
             Replaces the shared PiggieTV featured-content cache document.
             </summary>
@@ -90,44 +119,771 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>The stored featured-content cache document.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.DeleteFeaturedContent(System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.DeleteFeaturedContent(System.Threading.CancellationToken)">
             <summary>
             Clears the shared PiggieTV featured-content cache document.
             </summary>
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Empty featured-content cache document.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvController.RefreshFeaturedContent(System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.RefreshFeaturedContent(System.Threading.CancellationToken)">
             <summary>
             Triggers a server-side refresh of the shared PiggieTV featured-content cache.
             </summary>
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Plugin status after the refresh attempt.</returns>
         </member>
-        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetSettings">
+            <summary>
+            Gets PiggieTV plugin settings for the dashboard.
+            </summary>
+            <returns>Public plugin settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SaveSettings(Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto)">
+            <summary>
+            Saves PiggieTV plugin settings from the dashboard.
+            </summary>
+            <param name="settings">Incoming plugin settings patch.</param>
+            <returns>Saved public plugin settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetRows">
+            <summary>
+            Gets PiggieTV row-builder settings.
+            </summary>
+            <returns>Row-builder settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SaveRows(Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings)">
+            <summary>
+            Saves PiggieTV row-builder settings.
+            </summary>
+            <param name="settings">Row-builder settings.</param>
+            <returns>Saved row-builder settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.ValidateRows(Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings,System.Threading.CancellationToken)">
+            <summary>
+            Validates PiggieTV row-builder settings.
+            </summary>
+            <param name="settings">Row-builder settings.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Validation result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.PreviewRows(Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings,System.Threading.CancellationToken)">
+            <summary>
+            Previews generated PiggieTV homepage rows without refreshing the cache.
+            </summary>
+            <param name="settings">Optional unsaved row-builder settings.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Generated row preview.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.ResetSettings">
+            <summary>
+            Resets PiggieTV plugin settings to defaults.
+            </summary>
+            <returns>Default public plugin settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetIntegrationsStatus">
+            <summary>
+            Gets redacted integration status for PiggieTV dashboard cards.
+            </summary>
+            <returns>Integration status.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestSeerr(Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch,System.Threading.CancellationToken)">
+            <summary>
+            Tests Jellyseerr connectivity from the Jellyfin server.
+            </summary>
+            <param name="settingsOverride">Optional unsaved settings to test.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Redacted test result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestSavedJfaGo(System.Threading.CancellationToken)">
+            <summary>
+            Tests saved jfa-go connectivity from the Jellyfin server.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Redacted test result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestJfaGo(Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch,System.Threading.CancellationToken)">
+            <summary>
+            Tests jfa-go connectivity from the Jellyfin server with optional unsaved settings.
+            </summary>
+            <param name="settingsOverride">Optional unsaved settings to test.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Redacted test result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SearchSeerr(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Searches Jellyseerr through the PiggieTV backend proxy.
+            </summary>
+            <param name="query">Search query.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Jellyseerr search response or a redacted error.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.RequestSeerr(System.Text.Json.Nodes.JsonObject,System.Threading.CancellationToken)">
+            <summary>
+            Proxies a Jellyseerr request action.
+            </summary>
+            <param name="body">Request payload.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Jellyseerr response or a redacted error.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetSeerrRequestedItems(System.String,System.Nullable{System.Int32},System.Threading.CancellationToken)">
+            <summary>
+            Gets local Jellyfin items requested by a Jellyfin user through Jellyseerr.
+            </summary>
+            <param name="userId">Jellyfin user id.</param>
+            <param name="limit">Maximum local items to return.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Local Jellyfin items matching the user's Jellyseerr requests.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestSonarr(Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch,System.Threading.CancellationToken)">
+            <summary>Tests Sonarr connectivity.</summary>
+            <param name="settingsOverride">Optional unsaved settings to test.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Redacted test result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestRadarr(Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch,System.Threading.CancellationToken)">
+            <summary>Tests Radarr connectivity.</summary>
+            <param name="settingsOverride">Optional unsaved settings to test.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Redacted test result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestLidarr(Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch,System.Threading.CancellationToken)">
+            <summary>Tests Lidarr connectivity.</summary>
+            <param name="settingsOverride">Optional unsaved settings to test.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Redacted test result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestProwlarr(Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch,System.Threading.CancellationToken)">
+            <summary>Tests Prowlarr connectivity.</summary>
+            <param name="settingsOverride">Optional unsaved settings to test.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Redacted test result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetArrCalendar">
+            <summary>
+            Gets an aggregated *Arr calendar placeholder through the PiggieTV backend.
+            </summary>
+            <returns>Calendar status.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetArrDownloads">
+            <summary>
+            Gets an aggregated downloads placeholder through the PiggieTV backend.
+            </summary>
+            <returns>Download status.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetTags">
+            <summary>
+            Gets known Jellyfin tags.
+            </summary>
+            <returns>Known tags.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetTagRows">
+            <summary>
+            Gets configured PiggieTV tag row definitions.
+            </summary>
+            <returns>Tag row definitions.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SaveTagRows(Jellyfin.Plugin.PiggieTV.Models.PtvTagSettingsPatch)">
+            <summary>
+            Saves PiggieTV tag row definitions.
+            </summary>
+            <param name="settings">Tag settings patch.</param>
+            <returns>Saved public settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetRandomMovie">
+            <summary>Gets a random movie.</summary>
+            <returns>Random movie result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetRandomEpisode">
+            <summary>Gets a random episode.</summary>
+            <returns>Random episode result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetRandomAnime">
+            <summary>Gets a random anime item.</summary>
+            <returns>Random anime result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetRandomLibraryItem(System.String)">
+            <summary>Gets a random item from a current library context.</summary>
+            <param name="libraryId">Library id.</param>
+            <returns>Random item result.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration">
             <summary>
             PiggieTV plugin configuration.
             </summary>
         </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration.EnableTmdbMetadata">
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.FeatureSettings">
             <summary>
-            Gets or sets a value indicating whether PiggieTV may use TMDb metadata during server-side cache refreshes.
+            Gets or sets feature toggle settings.
             </summary>
         </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration.TmdbReadAccessToken">
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.HeroSettings">
             <summary>
-            Gets or sets the optional TMDb API read access token. Prefer the PTV_TMDB_READ_ACCESS_TOKEN environment variable.
+            Gets or sets hero settings.
             </summary>
         </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration.TmdbApiKey">
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.RowSettings">
             <summary>
-            Gets or sets the optional TMDb v3 API key fallback. Prefer the PTV_TMDB_API_KEY environment variable.
+            Gets or sets home-row settings.
             </summary>
         </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration.TmdbMaxEnrichmentItems">
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.Rows">
             <summary>
-            Gets or sets the maximum number of Jellyfin items enriched from TMDb during a single refresh.
+            Gets or sets versioned row-builder settings.
             </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.CacheSettings">
+            <summary>
+            Gets or sets featured cache settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.PerformanceSettings">
+            <summary>
+            Gets or sets performance settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.TmdbSettings">
+            <summary>
+            Gets or sets metadata provider settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.SeerrSettings">
+            <summary>
+            Gets or sets Jellyseerr request integration settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.JfaGoSettings">
+            <summary>
+            Gets or sets jfa-go account/invite integration settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.ArrSettings">
+            <summary>
+            Gets or sets *Arr automation integration settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.DownloadSettings">
+            <summary>
+            Gets or sets download provider integration settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.TagSettings">
+            <summary>
+            Gets or sets tag-based row/filter settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.RandomSettings">
+            <summary>
+            Gets or sets random discovery settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.EnableTmdbMetadata">
+            <summary>
+            Gets or sets a legacy TMDb enable flag from older plugin builds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.TmdbReadAccessToken">
+            <summary>
+            Gets or sets a legacy TMDb API read access token from older plugin builds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.TmdbApiKey">
+            <summary>
+            Gets or sets a legacy TMDb v3 API key from older plugin builds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.TmdbMaxEnrichmentItems">
+            <summary>
+            Gets or sets a legacy maximum number of Jellyfin items enriched from TMDb during a single refresh.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration">
+            <summary>
+            Jellyfin plugin configuration type.
+            </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings">
+            <summary>
+            PiggieTV feature toggles.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings.HeroEnabled">
+            <summary>Gets or sets a value indicating whether the PiggieTV hero is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings.HomeRowsEnabled">
+            <summary>Gets or sets a value indicating whether PiggieTV home rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings.DynamicBackdropsEnabled">
+            <summary>Gets or sets a value indicating whether dynamic backdrops are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings.TvLowPowerModeEnabled">
+            <summary>Gets or sets a value indicating whether TV low-power mode is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings.DebugModeEnabled">
+            <summary>Gets or sets a value indicating whether backend debug mode is enabled.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.HeroSettings">
+            <summary>
+            PiggieTV hero settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.HeroSettings.HeroAutoRotateEnabled">
+            <summary>Gets or sets a value indicating whether hero auto-rotation is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.HeroSettings.HeroRotationSeconds">
+            <summary>Gets or sets the hero rotation interval in seconds.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.HeroSettings.HeroMaxItems">
+            <summary>Gets or sets the maximum shared hero item count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.HeroSettings.HeroBackdropMaxWidth">
+            <summary>Gets or sets the maximum hero backdrop width.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.HeroSettings.HeroLogoMaxWidth">
+            <summary>Gets or sets the maximum hero logo width.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RowSettings">
+            <summary>
+            PiggieTV home-row settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSettings.RowMaxItems">
+            <summary>Gets or sets the maximum item count per row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSettings.RowRefreshHours">
+            <summary>Gets or sets the featured row refresh interval in hours.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSettings.EnableSeasonalRows">
+            <summary>Gets or sets a value indicating whether seasonal rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSettings.EnableCollectionRows">
+            <summary>Gets or sets a value indicating whether collection rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSettings.EnableRecentlyAddedRows">
+            <summary>Gets or sets a value indicating whether recently added rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSettings.EnableRecommendedRows">
+            <summary>Gets or sets a value indicating whether recommended rows are enabled.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings">
+            <summary>
+            PiggieTV versioned row-builder settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.SchemaVersion">
+            <summary>Gets or sets the row-builder schema version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.Enabled">
+            <summary>Gets or sets a value indicating whether configured homepage rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.DefaultsInitialized">
+            <summary>Gets or sets a value indicating whether default rule initialization has run.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.Rules">
+            <summary>Gets or sets configured row rules.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.Categories">
+            <summary>Gets or sets legacy configured row categories. Used only for migration from schema v1.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.CreateDefault">
+            <summary>
+            Creates the default row-builder settings.
+            </summary>
+            <returns>Default row-builder settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule">
+            <summary>
+            PiggieTV unified row-builder rule.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.Id">
+            <summary>Gets or sets the stable rule id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.Enabled">
+            <summary>Gets or sets a value indicating whether this rule is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.Name">
+            <summary>Gets or sets the display row name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.MediaType">
+            <summary>Gets or sets the media type: movies, shows, cartoons, anime, music, books, liveTv, or mixed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.SourceType">
+            <summary>Gets or sets the source type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.SourceValue">
+            <summary>Gets or sets the source value for the selected source type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.GenerationMode">
+            <summary>Gets or sets the generation mode.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.ItemLimit">
+            <summary>Gets or sets the item limit for a generated row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.RowCount">
+            <summary>Gets or sets how many rows or subrows this rule can generate.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.IncludeSubgenres">
+            <summary>Gets or sets a value indicating whether genre subrows should be generated.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.SubgenreRowCount">
+            <summary>Gets or sets how many subgenre rows should be generated.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.Seasonal">
+            <summary>Gets or sets optional seasonal settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.ProviderHints">
+            <summary>Gets or sets provider hints that may enrich matching.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.SortPriority">
+            <summary>Gets or sets a stable sort priority. Lower values render earlier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.Tier">
+            <summary>Gets or sets the visual tier. Use 0 for automatic tiering.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.Presentation">
+            <summary>Gets or sets the row presentation: auto, featured, standard, compact, mini, or library-hub.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderRule.GroupTitle">
+            <summary>Gets or sets an optional homepage group label.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RowSeasonalSettings">
+            <summary>
+            Optional seasonal row settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSeasonalSettings.Mode">
+            <summary>Gets or sets the seasonal mode.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSeasonalSettings.StartMonth">
+            <summary>Gets or sets the custom start month.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSeasonalSettings.StartDay">
+            <summary>Gets or sets the custom start day.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSeasonalSettings.EndMonth">
+            <summary>Gets or sets the custom end month.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSeasonalSettings.EndDay">
+            <summary>Gets or sets the custom end day.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory">
+            <summary>
+            PiggieTV row-builder category.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory.Id">
+            <summary>Gets or sets the stable category id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory.Enabled">
+            <summary>Gets or sets a value indicating whether this category is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory.MediaType">
+            <summary>Gets or sets the media type: movies, shows, cartoons, anime, or mixed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory.SourceType">
+            <summary>Gets or sets the source type: genre, studio, or customTag.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory.GenerationMode">
+            <summary>Gets or sets the generation mode: random or specific.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory.RowCount">
+            <summary>Gets or sets how many rows to generate in random mode.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory.Entries">
+            <summary>Gets or sets specific row entries.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderCategory.SourcePoolFilters">
+            <summary>Gets or sets optional source-pool filters for random mode.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.CacheSettings">
+            <summary>
+            PiggieTV featured cache settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.CacheSettings.RefreshIntervalHours">
+            <summary>Gets or sets the featured cache refresh interval in hours.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PerformanceSettings">
+            <summary>
+            PiggieTV performance settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PerformanceSettings.MaxCachePayloadBytes">
+            <summary>Gets or sets the maximum cache payload size in bytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PerformanceSettings.ImagePreloadLimit">
+            <summary>Gets or sets the maximum number of images to preload.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PerformanceSettings.EnableAnimatedRows">
+            <summary>Gets or sets a value indicating whether animated rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PerformanceSettings.EnableBackdropBlur">
+            <summary>Gets or sets a value indicating whether backdrop blur is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PerformanceSettings.LowPowerDisableBlur">
+            <summary>Gets or sets a value indicating whether low-power clients should disable blur.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PerformanceSettings.LowPowerDisableAnimations">
+            <summary>Gets or sets a value indicating whether low-power clients should disable animations.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.TmdbSettings">
+            <summary>
+            PiggieTV TMDb settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TmdbSettings.TmdbEnabled">
+            <summary>Gets or sets a value indicating whether TMDb metadata is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TmdbSettings.TmdbApiToken">
+            <summary>Gets or sets the TMDb API token. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TmdbSettings.TmdbLanguage">
+            <summary>Gets or sets the TMDb language.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TmdbSettings.TmdbRegion">
+            <summary>Gets or sets the TMDb region.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TmdbSettings.UseTmdbForRowAccuracy">
+            <summary>Gets or sets a value indicating whether TMDb should influence row matching.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings">
+            <summary>
+            PiggieTV Jellyseerr integration settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.Enabled">
+            <summary>Gets or sets a value indicating whether Jellyseerr integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.DisplayName">
+            <summary>Gets or sets the display name shown in PiggieTV.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.InternalUrl">
+            <summary>Gets or sets the internal Jellyseerr URL used by the plugin backend.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.ExternalUrl">
+            <summary>Gets or sets the external Jellyseerr URL used as a browser fallback.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.ApiKey">
+            <summary>Gets or sets the Jellyseerr API key. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.EnableRequestsPage">
+            <summary>Gets or sets a value indicating whether the request page is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.EnableSearchIntegration">
+            <summary>Gets or sets a value indicating whether search integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.EnableAutoRequest">
+            <summary>Gets or sets a value indicating whether automatic request actions are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.OpenRequestsInPtv">
+            <summary>Gets or sets a value indicating whether requests should open inside PiggieTV.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.OpenExternalFallback">
+            <summary>Gets or sets a value indicating whether external fallback should be offered.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings">
+            <summary>
+            PiggieTV jfa-go integration settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.Enabled">
+            <summary>Gets or sets a value indicating whether jfa-go integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.DisplayName">
+            <summary>Gets or sets the display name shown in PiggieTV.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.InternalUrl">
+            <summary>Gets or sets the internal jfa-go URL used by the plugin backend.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.ExternalUrl">
+            <summary>Gets or sets the external jfa-go URL used as a browser fallback.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.ApiKey">
+            <summary>Gets or sets the jfa-go API key/token. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.AllowSelfSignedTls">
+            <summary>Gets or sets a value indicating whether invalid/self-signed internal TLS certificates are allowed.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ArrSettings">
+            <summary>
+            PiggieTV *Arr integration settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ArrSettings.Sonarr">
+            <summary>Gets or sets Sonarr settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ArrSettings.Radarr">
+            <summary>Gets or sets Radarr settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ArrSettings.Lidarr">
+            <summary>Gets or sets Lidarr settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ArrSettings.Prowlarr">
+            <summary>Gets or sets Prowlarr settings.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ArrServiceSettings">
+            <summary>
+            PiggieTV individual *Arr service settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ArrServiceSettings.Enabled">
+            <summary>Gets or sets a value indicating whether the service is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ArrServiceSettings.InternalUrl">
+            <summary>Gets or sets the internal service URL used by the plugin backend.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ArrServiceSettings.ExternalUrl">
+            <summary>Gets or sets the external service URL used as a browser fallback.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ArrServiceSettings.ApiKey">
+            <summary>Gets or sets the service API key. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.DownloadSettings">
+            <summary>
+            PiggieTV download provider settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.DownloadSettings.Enabled">
+            <summary>Gets or sets a value indicating whether download provider integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.DownloadSettings.Provider">
+            <summary>Gets or sets the download provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.DownloadSettings.InternalUrl">
+            <summary>Gets or sets the internal provider URL used by the plugin backend.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.DownloadSettings.ExternalUrl">
+            <summary>Gets or sets the external provider URL used as a browser fallback.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.DownloadSettings.Username">
+            <summary>Gets or sets the provider username. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.DownloadSettings.Password">
+            <summary>Gets or sets the provider password. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.TagSettings">
+            <summary>
+            PiggieTV tag-based row and filtering settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagSettings.Enabled">
+            <summary>Gets or sets a value indicating whether tag features are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagSettings.EnableTagRows">
+            <summary>Gets or sets a value indicating whether tag rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagSettings.EnableTagFilters">
+            <summary>Gets or sets a value indicating whether tag filters are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagSettings.IncludeTags">
+            <summary>Gets or sets tags that should be included in smart row/filter matching.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagSettings.ExcludeTags">
+            <summary>Gets or sets tags that should be excluded from smart row/filter matching.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagSettings.RowDefinitions">
+            <summary>Gets or sets custom tag row definitions.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.TagRowDefinition">
+            <summary>
+            PiggieTV tag row definition.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagRowDefinition.Id">
+            <summary>Gets or sets the stable row id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagRowDefinition.Name">
+            <summary>Gets or sets the row display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagRowDefinition.Tags">
+            <summary>Gets or sets tags matched by the row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagRowDefinition.IncludeItemTypes">
+            <summary>Gets or sets allowed Jellyfin item types.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagRowDefinition.SortBy">
+            <summary>Gets or sets the row sort mode.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagRowDefinition.Limit">
+            <summary>Gets or sets maximum row items.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TagRowDefinition.Enabled">
+            <summary>Gets or sets a value indicating whether the row is enabled.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings">
+            <summary>
+            PiggieTV random discovery settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.Enabled">
+            <summary>Gets or sets a value indicating whether random discovery is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.EnableRandomMovie">
+            <summary>Gets or sets a value indicating whether random movie is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.EnableRandomEpisode">
+            <summary>Gets or sets a value indicating whether random episode is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.EnableRandomAnime">
+            <summary>Gets or sets a value indicating whether random anime is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.EnableRandomFromCurrentLibrary">
+            <summary>Gets or sets a value indicating whether random from current library is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.RespectParentalRating">
+            <summary>Gets or sets a value indicating whether random discovery should respect parental rating.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.RespectHiddenContent">
+            <summary>Gets or sets a value indicating whether random discovery should respect hidden content.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.UseUnwatchedOnlyOption">
+            <summary>Gets or sets a value indicating whether unwatched-only option is available.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.Behavior">
+            <summary>Gets or sets random action behavior.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus">
+            <summary>
+            Public status for the featured-content cache subsystem.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus.Exists">
+            <summary>
+            Gets or sets a value indicating whether the cache file exists.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus.Fresh">
+            <summary>
+            Gets or sets a value indicating whether the cache file is fresh.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus.WriteError">
+            <summary>
+            Gets or sets the last cache write error.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus.PayloadBytes">
+            <summary>
+            Gets or sets the last serialized cache payload size in bytes.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus.CreatedAt">
+            <summary>
+            Gets or sets the cache creation timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus.ExpiresAt">
+            <summary>
+            Gets or sets the cache expiry timestamp as Unix epoch milliseconds.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus.FromStoreStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus)">
+            <summary>
+            Creates public content cache status from the store status.
+            </summary>
+            <param name="storeStatus">Store status.</param>
+            <returns>Public content cache status.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvErrorResponse">
             <summary>
@@ -206,6 +962,11 @@
             Gets or sets the last refresh error, if any.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus.LastRefreshWarning">
+            <summary>
+            Gets or sets the last non-fatal refresh warning, if any.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus.NextRefreshAt">
             <summary>
             Gets or sets the next scheduled refresh timestamp as Unix epoch milliseconds.
@@ -273,6 +1034,31 @@
             Gets or sets a value indicating whether the fixed cache directory exists.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.CachePathWritable">
+            <summary>
+            Gets or sets a value indicating whether the fixed cache directory is writable.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.CachePath">
+            <summary>
+            Gets or sets the fixed cache directory path.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.CacheFilePath">
+            <summary>
+            Gets or sets the fixed featured-content cache file path.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.CacheWriteError">
+            <summary>
+            Gets or sets the last cache store write error.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.CachePayloadBytes">
+            <summary>
+            Gets or sets the last serialized cache payload size in bytes.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus.FeaturedCacheExists">
             <summary>
             Gets or sets a value indicating whether the featured cache file exists.
@@ -298,6 +1084,710 @@
             Gets or sets the currently readable cache document.
             </summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto">
+            <summary>
+            Public PiggieTV plugin settings DTO. Secrets are write-only.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.FeatureSettings">
+            <summary>Gets or sets feature toggles.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.HeroSettings">
+            <summary>Gets or sets hero settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.RowSettings">
+            <summary>Gets or sets row settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.Rows">
+            <summary>Gets or sets versioned row-builder settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.CacheSettings">
+            <summary>Gets or sets featured cache settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.Cache">
+            <summary>Gets or sets featured cache settings using the canonical dashboard key.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.PerformanceSettings">
+            <summary>Gets or sets performance settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.TmdbSettings">
+            <summary>Gets or sets TMDb settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.SeerrSettings">
+            <summary>Gets or sets Jellyseerr settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.JfaGoSettings">
+            <summary>Gets or sets jfa-go settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.ArrSettings">
+            <summary>Gets or sets *Arr integration settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.DownloadSettings">
+            <summary>Gets or sets download provider settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.TagSettings">
+            <summary>Gets or sets tag row/filter settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.RandomSettings">
+            <summary>Gets or sets random discovery settings.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>
+            Creates a public settings DTO from plugin configuration.
+            </summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public settings DTO.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto">
+            <summary>
+            Partial PiggieTV plugin settings patch. Missing values preserve existing configuration.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.FeatureSettings">
+            <summary>Gets or sets feature toggle updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.HeroSettings">
+            <summary>Gets or sets hero setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.RowSettings">
+            <summary>Gets or sets row setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.Rows">
+            <summary>Gets or sets row-builder setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.CacheSettings">
+            <summary>Gets or sets featured cache setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.Cache">
+            <summary>Gets or sets featured cache setting updates using the canonical dashboard key.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.PerformanceSettings">
+            <summary>Gets or sets performance setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.TmdbSettings">
+            <summary>Gets or sets TMDb setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.SeerrSettings">
+            <summary>Gets or sets Jellyseerr setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.JfaGoSettings">
+            <summary>Gets or sets jfa-go setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.ArrSettings">
+            <summary>Gets or sets *Arr setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.DownloadSettings">
+            <summary>Gets or sets download provider setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.TagSettings">
+            <summary>Gets or sets tag row/filter setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.RandomSettings">
+            <summary>Gets or sets random discovery setting updates.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch">
+            <summary>
+            Partial feature settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch.HeroEnabled">
+            <summary>Gets or sets whether the hero is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch.HomeRowsEnabled">
+            <summary>Gets or sets whether home rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch.DynamicBackdropsEnabled">
+            <summary>Gets or sets whether dynamic backdrops are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch.TvLowPowerModeEnabled">
+            <summary>Gets or sets whether TV low-power mode is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch.DebugModeEnabled">
+            <summary>Gets or sets whether debug mode is enabled.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvHeroSettingsPatch">
+            <summary>
+            Partial hero settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvHeroSettingsPatch.HeroAutoRotateEnabled">
+            <summary>Gets or sets whether hero auto-rotation is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvHeroSettingsPatch.HeroRotationSeconds">
+            <summary>Gets or sets hero rotation seconds.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvHeroSettingsPatch.HeroMaxItems">
+            <summary>Gets or sets max hero items.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvHeroSettingsPatch.HeroBackdropMaxWidth">
+            <summary>Gets or sets backdrop max width.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvHeroSettingsPatch.HeroLogoMaxWidth">
+            <summary>Gets or sets logo max width.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRowSettingsPatch">
+            <summary>
+            Partial row settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowSettingsPatch.RowMaxItems">
+            <summary>Gets or sets max items per row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowSettingsPatch.RowRefreshHours">
+            <summary>Gets or sets featured refresh interval in hours.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowSettingsPatch.EnableSeasonalRows">
+            <summary>Gets or sets whether seasonal rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowSettingsPatch.EnableCollectionRows">
+            <summary>Gets or sets whether collection rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowSettingsPatch.EnableRecentlyAddedRows">
+            <summary>Gets or sets whether recently added rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowSettingsPatch.EnableRecommendedRows">
+            <summary>Gets or sets whether recommended rows are enabled.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvCacheSettingsPatch">
+            <summary>
+            Partial featured cache settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvCacheSettingsPatch.RefreshIntervalHours">
+            <summary>Gets or sets featured cache refresh interval in hours.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPerformanceSettingsPatch">
+            <summary>
+            Partial performance settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPerformanceSettingsPatch.MaxCachePayloadBytes">
+            <summary>Gets or sets max cache payload bytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPerformanceSettingsPatch.ImagePreloadLimit">
+            <summary>Gets or sets image preload limit.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPerformanceSettingsPatch.EnableAnimatedRows">
+            <summary>Gets or sets whether animated rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPerformanceSettingsPatch.EnableBackdropBlur">
+            <summary>Gets or sets whether backdrop blur is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPerformanceSettingsPatch.LowPowerDisableBlur">
+            <summary>Gets or sets whether low power disables blur.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPerformanceSettingsPatch.LowPowerDisableAnimations">
+            <summary>Gets or sets whether low power disables animations.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbSettingsPatch">
+            <summary>
+            Partial TMDb settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbSettingsPatch.TmdbEnabled">
+            <summary>Gets or sets whether TMDb is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbSettingsPatch.TmdbApiToken">
+            <summary>Gets or sets a write-only TMDb API token replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbSettingsPatch.TmdbLanguage">
+            <summary>Gets or sets TMDb language.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbSettingsPatch.TmdbRegion">
+            <summary>Gets or sets TMDb region.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbSettingsPatch.UseTmdbForRowAccuracy">
+            <summary>Gets or sets whether TMDb influences row accuracy.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch">
+            <summary>
+            Partial Jellyseerr settings patch. API key is write-only.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.Enabled">
+            <summary>Gets or sets whether Jellyseerr integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.DisplayName">
+            <summary>Gets or sets the display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.InternalUrl">
+            <summary>Gets or sets the internal URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.ExternalUrl">
+            <summary>Gets or sets the external URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.ApiKey">
+            <summary>Gets or sets a write-only API key replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.EnableRequestsPage">
+            <summary>Gets or sets whether request pages are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.EnableSearchIntegration">
+            <summary>Gets or sets whether search integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.EnableAutoRequest">
+            <summary>Gets or sets whether auto-request is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.OpenRequestsInPtv">
+            <summary>Gets or sets whether requests open inside PiggieTV.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.OpenExternalFallback">
+            <summary>Gets or sets whether external fallback is enabled.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch">
+            <summary>
+            Partial jfa-go settings patch. API key/token is write-only.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.Enabled">
+            <summary>Gets or sets whether jfa-go integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.DisplayName">
+            <summary>Gets or sets the display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.InternalUrl">
+            <summary>Gets or sets the internal URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.ExternalUrl">
+            <summary>Gets or sets the external URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.ApiKey">
+            <summary>Gets or sets a write-only API key/token replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.AllowSelfSignedTls">
+            <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.InsecureTls">
+            <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvArrSettingsPatch">
+            <summary>
+            Partial *Arr integration settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvArrSettingsPatch.Sonarr">
+            <summary>Gets or sets Sonarr updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvArrSettingsPatch.Radarr">
+            <summary>Gets or sets Radarr updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvArrSettingsPatch.Lidarr">
+            <summary>Gets or sets Lidarr updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvArrSettingsPatch.Prowlarr">
+            <summary>Gets or sets Prowlarr updates.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch">
+            <summary>
+            Partial individual *Arr service settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch.Enabled">
+            <summary>Gets or sets whether the service is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch.InternalUrl">
+            <summary>Gets or sets the internal URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch.ExternalUrl">
+            <summary>Gets or sets the external URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvArrServiceSettingsPatch.ApiKey">
+            <summary>Gets or sets a write-only API key replacement.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvDownloadSettingsPatch">
+            <summary>
+            Partial download provider settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDownloadSettingsPatch.Enabled">
+            <summary>Gets or sets whether downloads integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDownloadSettingsPatch.Provider">
+            <summary>Gets or sets provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDownloadSettingsPatch.InternalUrl">
+            <summary>Gets or sets the internal URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDownloadSettingsPatch.ExternalUrl">
+            <summary>Gets or sets the external URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDownloadSettingsPatch.Username">
+            <summary>Gets or sets a write-only username replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDownloadSettingsPatch.Password">
+            <summary>Gets or sets a write-only password replacement.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvTagSettingsPatch">
+            <summary>
+            Partial tag row/filter settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTagSettingsPatch.Enabled">
+            <summary>Gets or sets whether tag features are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTagSettingsPatch.EnableTagRows">
+            <summary>Gets or sets whether tag rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTagSettingsPatch.EnableTagFilters">
+            <summary>Gets or sets whether tag filters are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTagSettingsPatch.IncludeTags">
+            <summary>Gets or sets included tags.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTagSettingsPatch.ExcludeTags">
+            <summary>Gets or sets excluded tags.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTagSettingsPatch.RowDefinitions">
+            <summary>Gets or sets custom row definitions.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch">
+            <summary>
+            Partial random discovery settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.Enabled">
+            <summary>Gets or sets whether random discovery is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.EnableRandomMovie">
+            <summary>Gets or sets whether random movie is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.EnableRandomEpisode">
+            <summary>Gets or sets whether random episode is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.EnableRandomAnime">
+            <summary>Gets or sets whether random anime is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.EnableRandomFromCurrentLibrary">
+            <summary>Gets or sets whether current-library random is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.RespectParentalRating">
+            <summary>Gets or sets whether parental ratings are respected.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.RespectHiddenContent">
+            <summary>Gets or sets whether hidden content is respected.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.UseUnwatchedOnlyOption">
+            <summary>Gets or sets whether unwatched-only option is shown.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRandomSettingsPatch.Behavior">
+            <summary>Gets or sets random action behavior.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicTmdbSettings">
+            <summary>
+            Public TMDb settings DTO that never returns the stored token.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicTmdbSettings.TmdbEnabled">
+            <summary>Gets or sets a value indicating whether TMDb enrichment is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicTmdbSettings.TmdbApiTokenConfigured">
+            <summary>Gets or sets a value indicating whether a TMDb API token is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicTmdbSettings.TmdbApiToken">
+            <summary>Gets or sets a write-only TMDb API token replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicTmdbSettings.TmdbLanguage">
+            <summary>Gets or sets the TMDb language.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicTmdbSettings.TmdbRegion">
+            <summary>Gets or sets the TMDb region.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicTmdbSettings.UseTmdbForRowAccuracy">
+            <summary>Gets or sets a value indicating whether TMDb should influence row matching.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicTmdbSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>
+            Creates a public TMDb DTO from plugin configuration.
+            </summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public TMDb settings DTO.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings">
+            <summary>
+            Public Jellyseerr settings DTO that never returns the stored API key.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.Enabled">
+            <summary>Gets or sets whether Jellyseerr integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.DisplayName">
+            <summary>Gets or sets the display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.InternalUrl">
+            <summary>Gets or sets the internal URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.ExternalUrl">
+            <summary>Gets or sets the external URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.ApiKeyConfigured">
+            <summary>Gets or sets whether an API key is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.ApiKey">
+            <summary>Gets or sets a write-only API key replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.EnableRequestsPage">
+            <summary>Gets or sets whether request pages are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.EnableSearchIntegration">
+            <summary>Gets or sets whether search integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.EnableAutoRequest">
+            <summary>Gets or sets whether auto-request is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.OpenRequestsInPtv">
+            <summary>Gets or sets whether requests open inside PiggieTV.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.OpenExternalFallback">
+            <summary>Gets or sets whether external fallback is enabled.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>Creates public Jellyseerr settings.</summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public Jellyseerr settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings">
+            <summary>
+            Public jfa-go settings DTO that never returns the stored API key/token.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.Enabled">
+            <summary>Gets or sets whether jfa-go integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.DisplayName">
+            <summary>Gets or sets the display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.InternalUrl">
+            <summary>Gets or sets the internal URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.ExternalUrl">
+            <summary>Gets or sets the external URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.ApiKeyConfigured">
+            <summary>Gets or sets whether an API key/token is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.ApiKey">
+            <summary>Gets or sets a write-only API key/token replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.AllowSelfSignedTls">
+            <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>Creates public jfa-go settings.</summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public jfa-go settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrSettings">
+            <summary>
+            Public *Arr settings DTO that never returns API keys.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrSettings.Sonarr">
+            <summary>Gets or sets public Sonarr settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrSettings.Radarr">
+            <summary>Gets or sets public Radarr settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrSettings.Lidarr">
+            <summary>Gets or sets public Lidarr settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrSettings.Prowlarr">
+            <summary>Gets or sets public Prowlarr settings.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>Creates public *Arr settings.</summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public *Arr settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrServiceSettings">
+            <summary>
+            Public individual *Arr service settings DTO.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrServiceSettings.Enabled">
+            <summary>Gets or sets whether the service is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrServiceSettings.InternalUrl">
+            <summary>Gets or sets the internal URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrServiceSettings.ExternalUrl">
+            <summary>Gets or sets the external URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrServiceSettings.ApiKeyConfigured">
+            <summary>Gets or sets whether an API key is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrServiceSettings.ApiKey">
+            <summary>Gets or sets a write-only API key replacement.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrServiceSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.ArrServiceSettings)">
+            <summary>Creates public service settings.</summary>
+            <param name="settings">Private service settings.</param>
+            <returns>Public service settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings">
+            <summary>
+            Public download settings DTO that never returns credentials.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.Enabled">
+            <summary>Gets or sets whether download integration is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.Provider">
+            <summary>Gets or sets the provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.InternalUrl">
+            <summary>Gets or sets the internal URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.ExternalUrl">
+            <summary>Gets or sets the external URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.UsernameConfigured">
+            <summary>Gets or sets whether a username is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.PasswordConfigured">
+            <summary>Gets or sets whether a password is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.Username">
+            <summary>Gets or sets a write-only username replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.Password">
+            <summary>Gets or sets a write-only password replacement.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicDownloadSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>Creates public download settings.</summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public download settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRowValidationResult">
+            <summary>
+            Row-builder validation result.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowValidationResult.Ok">
+            <summary>Gets or sets a value indicating whether the row settings are valid.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowValidationResult.Errors">
+            <summary>Gets or sets validation errors.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowValidationResult.Warnings">
+            <summary>Gets or sets validation warnings.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewResponse">
+            <summary>
+            Row-builder preview response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewResponse.Ok">
+            <summary>Gets or sets a value indicating whether preview generation completed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewResponse.Settings">
+            <summary>Gets or sets normalized row settings used for preview.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewResponse.Validation">
+            <summary>Gets or sets validation output.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewResponse.Rows">
+            <summary>Gets or sets preview rows.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewResponse.Diagnostics">
+            <summary>Gets or sets row generation diagnostics.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewResponse.ProviderStatus">
+            <summary>Gets or sets provider health/status summary.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem">
+            <summary>
+            Row preview item.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.Id">
+            <summary>Gets or sets the row id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.Title">
+            <summary>Gets or sets the row title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.CategoryId">
+            <summary>Gets or sets the category id that produced this row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.RuleId">
+            <summary>Gets or sets the rule id that produced this row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.RuleName">
+            <summary>Gets or sets the rule name that produced this row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.MediaType">
+            <summary>Gets or sets media type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.SourceType">
+            <summary>Gets or sets source type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.GenerationMode">
+            <summary>Gets or sets generation mode.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.Source">
+            <summary>Gets or sets the source value used for the row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.ProviderUsed">
+            <summary>Gets or sets provider used for enrichment.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.ItemCount">
+            <summary>Gets or sets row item count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.Empty">
+            <summary>Gets or sets a value indicating whether the row is empty.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.Weak">
+            <summary>Gets or sets a value indicating whether the row is weak.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowPreviewItem.Warnings">
+            <summary>Gets or sets row warnings.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic">
+            <summary>
+            Row generation diagnostic.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.CategoryId">
+            <summary>Gets or sets category id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.RuleId">
+            <summary>Gets or sets rule id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.RuleName">
+            <summary>Gets or sets rule name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.SourceType">
+            <summary>Gets or sets source type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.MediaType">
+            <summary>Gets or sets media type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.GenerationMode">
+            <summary>Gets or sets generation mode.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.SearchTerm">
+            <summary>Gets or sets search/tag used.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.SourceValue">
+            <summary>Gets or sets source value used by the rule.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.ProviderUsed">
+            <summary>Gets or sets provider used.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.ProviderError">
+            <summary>Gets or sets provider error, if any.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.ItemCount">
+            <summary>Gets or sets item count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.FilteredDuplicateCount">
+            <summary>Gets or sets filtered duplicate count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.EmptyResultReason">
+            <summary>Gets or sets empty result reason.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.GenerationTimeMs">
+            <summary>Gets or sets generation time in milliseconds.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse">
             <summary>
             PiggieTV plugin health response.
@@ -306,6 +1796,16 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Ok">
             <summary>
             Gets or sets a value indicating whether the plugin API is available.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Degraded">
+            <summary>
+            Gets or sets a value indicating whether the status response contains degraded subsystem data.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Error">
+            <summary>
+            Gets or sets a human-readable degraded status error.
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Name">
@@ -358,6 +1858,11 @@
             Gets or sets the available plugin features.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FeatureFlags">
+            <summary>
+            Gets or sets a map of feature capabilities for clients that prefer object lookup.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CanReadFeaturedContent">
             <summary>
             Gets or sets a value indicating whether authenticated users can read featured content.
@@ -368,9 +1873,44 @@
             Gets or sets a value indicating whether the current user can write featured content.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.SettingsAvailable">
+            <summary>
+            Gets or sets a value indicating whether plugin settings can be safely loaded.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CacheHealthy">
+            <summary>
+            Gets or sets a value indicating whether the cache subsystem is healthy.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CachePathExists">
             <summary>
             Gets or sets a value indicating whether the fixed plugin cache directory exists.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CachePathWritable">
+            <summary>
+            Gets or sets a value indicating whether the plugin cache directory is writable.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CachePath">
+            <summary>
+            Gets or sets the plugin cache directory path.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CacheFilePath">
+            <summary>
+            Gets or sets the featured-content cache file path.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CacheWriteError">
+            <summary>
+            Gets or sets the last cache write error.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CachePayloadBytes">
+            <summary>
+            Gets or sets the last serialized featured cache payload size in bytes.
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FeaturedCacheExists">
@@ -403,6 +1943,11 @@
             Gets or sets the featured-content cache status.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ContentCacheStatus">
+            <summary>
+            Gets or sets the content cache subsystem status.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.RefreshInProgress">
             <summary>
             Gets or sets a value indicating whether a server-side featured-content refresh is currently running.
@@ -428,6 +1973,11 @@
             Gets or sets the last refresh error.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.LastRefreshWarning">
+            <summary>
+            Gets or sets the last non-fatal refresh warning.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.NextRefreshAt">
             <summary>
             Gets or sets the next scheduled refresh timestamp as Unix epoch milliseconds.
@@ -436,6 +1986,11 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.TmdbMetadata">
             <summary>
             Gets or sets the optional TMDb metadata enrichment status.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.TmdbMetadataStatus">
+            <summary>
+            Gets or sets the TMDb metadata subsystem status.
             </summary>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FromStoreStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus,System.Boolean,Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus,Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus)">
@@ -483,6 +2038,11 @@
             Gets or sets the last TMDb enrichment error, if any.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastErrorCode">
+            <summary>
+            Gets or sets a stable code for the last TMDb enrichment error, if any.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastDurationMs">
             <summary>
             Gets or sets the last TMDb enrichment duration in milliseconds.
@@ -491,6 +2051,11 @@
         <member name="T:Jellyfin.Plugin.PiggieTV.Plugin">
             <summary>
             PiggieTV server-side companion plugin.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Plugin.BuildTimestampUtc">
+            <summary>
+            Gets the build timestamp stamped into this diagnostic plugin build.
             </summary>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Plugin.#ctor(MediaBrowser.Common.Configuration.IApplicationPaths,MediaBrowser.Model.Serialization.IXmlSerializer)">
@@ -541,6 +2106,14 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>The cache store status after the attempt.</returns>
         </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService.PreviewRowsAsync(Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings,System.Threading.CancellationToken)">
+            <summary>
+            Previews configured homepage rows without writing the featured-content cache.
+            </summary>
+            <param name="settings">Optional row-builder settings override.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Row preview response.</returns>
+        </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvFeaturedContentRefreshService.RefreshAsync(System.Threading.CancellationToken)">
             <summary>
             Triggers a featured-content cache refresh.
@@ -588,6 +2161,30 @@
             </summary>
             <param name="document">Cache document.</param>
             <returns>Validated cache document.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvPluginSettingsService">
+            <summary>
+            Manages PiggieTV plugin settings.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvPluginSettingsService.GetSettings">
+            <summary>
+            Gets public plugin settings.
+            </summary>
+            <returns>Public plugin settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvPluginSettingsService.SaveSettings(Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto)">
+            <summary>
+            Saves public plugin settings from a partial patch.
+            </summary>
+            <param name="settings">Incoming settings patch.</param>
+            <returns>Saved public plugin settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvPluginSettingsService.ResetSettings">
+            <summary>
+            Resets plugin settings to defaults.
+            </summary>
+            <returns>Default public plugin settings.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService">
             <summary>
@@ -639,6 +2236,9 @@
             <inheritdoc />
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.RefreshAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.PreviewRowsAsync(Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings,System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService.ExecuteAsync(System.Threading.CancellationToken)">
@@ -714,6 +2314,12 @@
             </summary>
             <returns>Empty featured-content cache document.</returns>
         </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.GetMaxDocumentBytes">
+            <summary>
+            Gets the currently configured maximum document size.
+            </summary>
+            <returns>Maximum document size in bytes.</returns>
+        </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.NormalizeStoredDocument(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentDocument)">
             <summary>
             Normalizes a stored document for reads without trusting client-write metadata.
@@ -729,6 +2335,93 @@
             <param name="jsonOptions">Serializer options used by the store.</param>
             <returns>Validated and normalized document.</returns>
             <exception cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException">Thrown when the document is invalid.</exception>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer">
+            <summary>
+            Normalizes PiggieTV plugin settings and preserves safe defaults for older installs.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinHeroRotationSeconds">
+            <summary>Minimum hero rotation interval in seconds.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxHeroRotationSeconds">
+            <summary>Maximum hero rotation interval in seconds.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinHeroMaxItems">
+            <summary>Minimum hero item count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxHeroMaxItems">
+            <summary>Maximum hero item count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinRowMaxItems">
+            <summary>Minimum row item count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxRowMaxItems">
+            <summary>Maximum row item count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinRowRefreshHours">
+            <summary>Minimum row refresh interval in hours.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxRowRefreshHours">
+            <summary>Maximum row refresh interval in hours.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxRowBuilderCategories">
+            <summary>Legacy maximum configured row-builder categories.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxRowBuilderRandomRows">
+            <summary>Legacy maximum generated rows per random category.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinCacheRefreshHours">
+            <summary>Minimum featured cache refresh interval in hours.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxCacheRefreshHours">
+            <summary>Maximum featured cache refresh interval in hours.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinImagePreloadLimit">
+            <summary>Minimum image preload limit.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxImagePreloadLimit">
+            <summary>Maximum image preload limit.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinMaxCachePayloadBytes">
+            <summary>Minimum cache payload size in bytes.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxMaxCachePayloadBytes">
+            <summary>Maximum cache payload size in bytes.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.Normalize(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>
+            Normalizes a plugin configuration in place.
+            </summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Normalized plugin configuration.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.NormalizeRowBuilderSettings(Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings)">
+            <summary>
+            Normalizes row-builder settings in place.
+            </summary>
+            <param name="settings">Row-builder settings.</param>
+            <returns>Normalized row-builder settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService">
+            <summary>
+            File-backed Jellyfin plugin configuration service.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService})">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService"/> class.
+            </summary>
+            <param name="logger">Logger.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.GetSettings">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.SaveSettings(Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.ResetSettings">
+            <inheritdoc />
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts">
             <summary>

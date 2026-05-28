@@ -67,6 +67,51 @@ const DISNEY_TITLE_MATCHES: BrandTitleMatch[] = [
     { aliases: ['house of mouse'] }
 ];
 
+const STAR_WARS_TITLE_MATCHES: BrandTitleMatch[] = [
+    { aliases: ['star wars'] },
+    { aliases: ['a new hope'] },
+    { aliases: ['empire strikes back', 'the empire strikes back'] },
+    { aliases: ['return of the jedi'] },
+    { aliases: ['phantom menace', 'the phantom menace'] },
+    { aliases: ['attack of the clones'] },
+    { aliases: ['revenge of the sith'] },
+    { aliases: ['force awakens', 'the force awakens'] },
+    { aliases: ['last jedi', 'the last jedi'] },
+    { aliases: ['rise of skywalker', 'the rise of skywalker'] },
+    { aliases: ['rogue one'] },
+    { aliases: ['solo'], needsSignal: true },
+    { aliases: ['clone wars', 'the clone wars'] },
+    { aliases: ['the bad batch', 'bad batch'], needsSignal: true },
+    { aliases: ['rebels'], needsSignal: true },
+    { aliases: ['mandalorian', 'the mandalorian'] },
+    { aliases: ['andor'], needsSignal: true },
+    { aliases: ['ahsoka'], needsSignal: true },
+    { aliases: ['obi wan kenobi', 'obi-wan kenobi'] },
+    { aliases: ['book of boba fett', 'the book of boba fett'] }
+];
+
+const STAR_TREK_TITLE_MATCHES: BrandTitleMatch[] = [
+    { aliases: ['star trek'] },
+    { aliases: ['the original series'], needsSignal: true },
+    { aliases: ['next generation', 'the next generation'], needsSignal: true },
+    { aliases: ['deep space nine', 'ds9'] },
+    { aliases: ['voyager'], needsSignal: true },
+    { aliases: ['enterprise'], needsSignal: true },
+    { aliases: ['discovery'], needsSignal: true },
+    { aliases: ['picard'], needsSignal: true },
+    { aliases: ['strange new worlds'] },
+    { aliases: ['lower decks'] },
+    { aliases: ['prodigy'], needsSignal: true },
+    { aliases: ['wrath of khan', 'the wrath of khan'] },
+    { aliases: ['search for spock', 'the search for spock'] },
+    { aliases: ['voyage home', 'the voyage home'] },
+    { aliases: ['undiscovered country', 'the undiscovered country'] },
+    { aliases: ['generations'], needsSignal: true },
+    { aliases: ['first contact'], needsSignal: true },
+    { aliases: ['insurrection'], needsSignal: true },
+    { aliases: ['nemesis'], needsSignal: true }
+];
+
 const MEDIA_BRAND_DEFINITIONS = {
     disney: {
         id: 'disney',
@@ -188,6 +233,99 @@ const MEDIA_BRAND_DEFINITIONS = {
             { aliases: ['x men', 'xmen'], needsSignal: true },
             { aliases: ['guardians of the galaxy'] }
         ]
+    },
+    starWars: {
+        id: 'star-wars',
+        title: 'Star Wars',
+        minScore: 4,
+        searchTerms: [
+            'Star Wars',
+            'A New Hope',
+            'Empire Strikes Back',
+            'Return of the Jedi',
+            'Phantom Menace',
+            'Attack of the Clones',
+            'Revenge of the Sith',
+            'Force Awakens',
+            'Last Jedi',
+            'Rise of Skywalker',
+            'Rogue One',
+            'The Mandalorian',
+            'Andor',
+            'Ahsoka',
+            'Clone Wars',
+            'Bad Batch',
+            'Rebels',
+            'Obi-Wan Kenobi',
+            'Boba Fett'
+        ],
+        strongKeywords: [
+            'star wars',
+            'lucasfilm',
+            'jedi',
+            'sith',
+            'skywalker',
+            'mandalorian',
+            'clone wars',
+            'galactic empire',
+            'rebel alliance'
+        ],
+        studioKeywords: ['lucasfilm'],
+        studioNames: ['Lucasfilm', 'Lucasfilm Ltd.'],
+        supportingKeywords: [
+            'jedi',
+            'sith',
+            'skywalker',
+            'mandalorian',
+            'clone wars',
+            'galactic empire',
+            'rebel alliance'
+        ],
+        titleMatches: STAR_WARS_TITLE_MATCHES
+    },
+    starTrek: {
+        id: 'star-trek',
+        title: 'Star Trek',
+        minScore: 4,
+        searchTerms: [
+            'Star Trek',
+            'The Original Series',
+            'The Next Generation',
+            'Deep Space Nine',
+            'Voyager',
+            'Star Trek Enterprise',
+            'Star Trek Discovery',
+            'Star Trek Picard',
+            'Strange New Worlds',
+            'Lower Decks',
+            'Star Trek Prodigy',
+            'Wrath of Khan',
+            'Search for Spock',
+            'Voyage Home',
+            'Undiscovered Country',
+            'First Contact'
+        ],
+        strongKeywords: [
+            'star trek',
+            'starfleet',
+            'federation',
+            'klingon',
+            'vulcan',
+            'romulan',
+            'deep space nine'
+        ],
+        studioKeywords: ['paramount', 'cbs studios', 'desilu'],
+        studioNames: ['Paramount', 'Paramount Pictures', 'CBS Studios', 'Desilu Productions'],
+        supportingKeywords: [
+            'starfleet',
+            'federation',
+            'klingon',
+            'vulcan',
+            'romulan',
+            'uss enterprise',
+            'deep space nine'
+        ],
+        titleMatches: STAR_TREK_TITLE_MATCHES
     },
     dc: {
         id: 'dc',

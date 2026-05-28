@@ -22,7 +22,7 @@ ptv-render-desktop
 
 ### PTV_TV
 
-TV profile assumes weaker browsers and remote-control navigation:
+TV profile is reserved for actual 10-foot clients such as Fire TV, webOS, Android TV, Roku-style clients, and other TV browsers:
 
 - no animated rows
 - no backdrop filters
@@ -36,9 +36,26 @@ Root class:
 ptv-render-tv
 ```
 
+Coarse pointer is not enough to select this profile. Phones and tablets also use coarse pointers and should resolve to the mobile profile unless they advertise real TV signals.
+
+### PTV_MOBILE
+
+Mobile profile is for phones and tablets:
+
+- mobile layout and touch-friendly sizing
+- backdrop filters and blur layers remain enabled when the browser supports them
+- decorative backdrops remain available
+- hero auto-rotation remains available
+
+Root class:
+
+```text
+ptv-render-mobile
+```
+
 ### PTV_LOWPOWER
 
-Low-power profile is for constrained or known-problem clients such as Fire TV, webOS, and low-memory devices.
+Low-power profile is for constrained non-TV, non-mobile clients and browsers that cannot support the visual layer.
 
 It has the same visual restrictions as TV, with more aggressive fetch and row limits through the performance profile.
 
@@ -63,6 +80,7 @@ Current CSS classes:
 
 ```text
 ptv-render-desktop
+ptv-render-mobile
 ptv-render-tv
 ptv-render-lowpower
 ```

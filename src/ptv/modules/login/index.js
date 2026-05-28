@@ -1,6 +1,6 @@
 import { registerModule } from '../../core/lifecycle';
 import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES, PTV_SERVICES } from '../../core/config';
-import { applyPtvResponsiveImage } from '../../core/images';
+import { applyPtvResponsiveImage, getPtvStaticAssetUrl } from '../../core/images';
 import { watchDom } from '../../core/observer';
 import { resetRuntimeScope } from '../../core/scope';
 import { wasApplied, markApplied } from '../../utils/dom';
@@ -8,7 +8,7 @@ import { wasApplied, markApplied } from '../../utils/dom';
 const SIGN_UP_URL = PTV_SERVICES.signUpUrl;
 const ACCOUNT_URL = PTV_SERVICES.accountUrl;
 const DISCORD_URL = PTV_SERVICES.discordUrl;
-const DISCORD_ICON_URL = PTV_ASSETS.icons.discord;
+const DISCORD_ICON_URL = getPtvStaticAssetUrl(PTV_ASSETS.icons.discord);
 const SIGN_UP_ROUTE = PTV_ROUTES.signup;
 const loginScope = resetRuntimeScope('login-enhancer');
 

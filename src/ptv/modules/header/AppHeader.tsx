@@ -4,6 +4,7 @@ import { PtvIcon } from '../icons';
 import { PTV_ASSETS, PTV_BRANDING, PTV_EVENTS, PTV_ROUTES } from '../../core/config';
 import { dispatchPtvCustomEvent } from '../../core/events';
 import { applyPtvResponsiveImage } from '../../core/images';
+import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
 import { openRequestPortal } from '../request';
 
 interface AppHeaderParams {
@@ -20,6 +21,43 @@ function navigateBack(): void {
 
 function refreshPage(): void {
     window.location.reload();
+}
+
+type PtvRandomItemResponse = {
+    behavior?: string;
+    item?: {
+        Id?: string;
+        id?: string;
+    };
+    ok?: boolean;
+};
+
+function navigateToRandom(event: React.MouseEvent<HTMLAnchorElement>): void {
+    event.preventDefault();
+    const fallback = () => {
+        window.location.hash = PTV_ROUTES.randomItem;
+    };
+    const pluginApi = getCurrentPtvPluginApiClient();
+
+    if (!pluginApi?.getRandomMovie) {
+        fallback();
+        return;
+    }
+
+    pluginApi.getRandomMovie<PtvRandomItemResponse>()
+        .then(response => {
+            const itemId = response.item?.id || response.item?.Id;
+
+            if (!response.ok || !itemId) {
+                fallback();
+                return;
+            }
+
+            window.location.hash = response.behavior === 'play' ?
+                `#/playback?itemId=${encodeURIComponent(itemId)}` :
+                `#/details?id=${encodeURIComponent(itemId)}`;
+        })
+        .catch(fallback);
 }
 
 function navigateToRequest(event: React.MouseEvent<HTMLAnchorElement>): void {
@@ -57,6 +95,8 @@ const AppHeader: FC<AppHeaderParams> = ({
     }, []);
     const mountHeaderLogo = useCallback((image: HTMLImageElement | null) => {
         if (image) {
+            image.dataset.ptvLogo = 'header';
+            image.dataset.ptvImageComponent = 'header-logo';
             applyPtvResponsiveImage(image, PTV_ASSETS.responsive.logos.bannerLight);
         }
     }, []);
@@ -131,6 +171,8 @@ const AppHeader: FC<AppHeaderParams> = ({
                             ref={mountHeaderLogo}
                             alt={PTV_BRANDING.appName}
                             className='ptv-brand-logo'
+                            data-ptv-logo='header'
+                            data-ptv-image-component='header-logo'
                             loading='eager'
                             decoding='async'
                         />
@@ -174,6 +216,7 @@ const AppHeader: FC<AppHeaderParams> = ({
                         className='ptv-header-icon-btn ptv-random-btn itemAction'
                         data-action='link'
                         aria-label='Random'
+                        onClick={navigateToRandom}
                     >
                         <PtvIcon name='shuffle' />
                     </a>

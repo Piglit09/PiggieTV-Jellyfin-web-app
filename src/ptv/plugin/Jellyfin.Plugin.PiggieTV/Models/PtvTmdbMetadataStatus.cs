@@ -44,6 +44,12 @@ public sealed class PtvTmdbMetadataStatus
     public string? LastError { get; set; }
 
     /// <summary>
+    /// Gets or sets a stable code for the last TMDb enrichment error, if any.
+    /// </summary>
+    [JsonPropertyName("lastErrorCode")]
+    public string? LastErrorCode { get; set; }
+
+    /// <summary>
     /// Gets or sets the last TMDb enrichment duration in milliseconds.
     /// </summary>
     [JsonPropertyName("lastDurationMs")]

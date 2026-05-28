@@ -1,0 +1,82 @@
+.ptv-integration-actions {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--ptv-space-2, 8px);
+    margin-inline-start: var(--ptv-space-2, 8px);
+    vertical-align: middle;
+}
+
+.ptv-integration-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-height: 38px;
+    padding: 0 0.95rem;
+
+    border: 1px solid rgba(167, 139, 250, 0.28);
+    border-radius: 999px;
+    background:
+        radial-gradient(circle at 20% 0%, rgba(125, 214, 255, 0.2), transparent 35%),
+        linear-gradient(135deg, rgba(125, 214, 255, 0.14), rgba(167, 139, 250, 0.16) 52%, rgba(255, 141, 195, 0.14));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 10px 24px rgba(0, 0, 0, 0.24);
+    color: var(--ptv-color-text-primary);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    line-height: 1;
+    text-decoration: none;
+    transition:
+        background var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        border-color var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+.ptv-integration-action:hover,
+.ptv-integration-action:focus-visible {
+    border-color: rgba(125, 214, 255, 0.52);
+    background:
+        radial-gradient(circle at 20% 0%, rgba(125, 214, 255, 0.26), transparent 35%),
+        linear-gradient(135deg, rgba(125, 214, 255, 0.22), rgba(167, 139, 250, 0.24) 52%, rgba(255, 141, 195, 0.2));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 0 22px rgba(167, 139, 250, 0.24),
+        0 12px 28px rgba(0, 0, 0, 0.28);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.ptv-integration-action:focus-visible {
+    outline: 2px solid rgba(125, 214, 255, 0.72);
+    outline-offset: 3px;
+}
+
+.ptv-integration-action-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 1rem;
+    height: 1rem;
+    color: #7dd6ff;
+    font-weight: 900;
+    line-height: 1;
+}
+
+@media (max-width: 700px) {
+    .ptv-integration-actions {
+        display: flex;
+        margin-block-start: var(--ptv-space-2, 8px);
+        margin-inline-start: 0;
+    }
+
+    .ptv-integration-action {
+        min-height: 36px;
+        padding: 0 0.8rem;
+        font-size: 0.82rem;
+    }
+}

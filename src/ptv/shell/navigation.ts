@@ -68,7 +68,7 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
             {
                 id: 'request',
                 label: 'Request',
-                href: PTV_ROUTES.requestSafe,
+                href: PTV_ROUTES.request,
                 icon: 'request'
             }
         ]

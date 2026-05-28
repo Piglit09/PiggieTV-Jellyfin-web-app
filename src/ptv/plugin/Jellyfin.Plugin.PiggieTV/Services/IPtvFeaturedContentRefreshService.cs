@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.PiggieTV.Models;
+using Jellyfin.Plugin.PiggieTV.Configuration;
 
 namespace Jellyfin.Plugin.PiggieTV.Services;
 
@@ -20,6 +21,14 @@ public interface IPtvFeaturedContentRefreshService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The cache store status after the attempt.</returns>
     Task<PtvFeaturedContentStoreStatus> RefreshIfNeededAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Previews configured homepage rows without writing the featured-content cache.
+    /// </summary>
+    /// <param name="settings">Optional row-builder settings override.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Row preview response.</returns>
+    Task<PtvRowPreviewResponse> PreviewRowsAsync(RowBuilderSettings? settings, CancellationToken cancellationToken);
 
     /// <summary>
     /// Triggers a featured-content cache refresh.

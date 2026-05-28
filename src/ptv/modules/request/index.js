@@ -2,11 +2,13 @@ import { dispatchPtvCustomEvent, on } from '../../core/events';
 import { PTV_BRANDING, PTV_EVENTS, PTV_ROUTES, PTV_SERVICES, PTV_TIMERS } from '../../core/config';
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
+import { getPtvRequestPortalUrl } from '../integrations/integrationsConfig';
 
 import './request.scss';
 
 const REQUEST_ROUTE = PTV_ROUTES.request;
 const REQUEST_FALLBACK_ROUTE = PTV_ROUTES.requestFallback;
+const REQUEST_LEGACY_ROUTE = PTV_ROUTES.requestLegacy;
 const REQUEST_SAFE_ROUTE = PTV_ROUTES.requestSafe;
 const REQUEST_URL = PTV_SERVICES.requestPortalUrl;
 const REQUEST_VIEW_SELECTOR = '[data-ptv-request-view="true"]';
@@ -16,6 +18,7 @@ const REQUEST_TRIGGER_SELECTOR = [
     '.ptv-top-tab-request',
     `a[href="${REQUEST_ROUTE}"]`,
     `a[href="${REQUEST_FALLBACK_ROUTE}"]`,
+    `a[href="${REQUEST_LEGACY_ROUTE}"]`,
     `a[href="${REQUEST_URL}"]`,
     'a[href*="request.piggietv.com"]'
 ].join(',');
@@ -28,6 +31,8 @@ let requestViewScheduled = false;
 let requestLoadTimer = null;
 let lastSafeUrl = '';
 let lastRequestOpenAt = 0;
+let resolvedRequestUrl = REQUEST_URL;
+let pendingRequestQuery = '';
 
 function normalizeRequestTriggers() {
     document.querySelectorAll(REQUEST_TRIGGER_SELECTOR).forEach((trigger) => {
@@ -36,7 +41,7 @@ function normalizeRequestTriggers() {
         trigger.dataset.ptvRequestTrigger = 'true';
 
         if (trigger instanceof HTMLAnchorElement) {
-            trigger.setAttribute('href', REQUEST_SAFE_ROUTE);
+            trigger.setAttribute('href', REQUEST_ROUTE);
             trigger.removeAttribute('target');
             trigger.removeAttribute('rel');
             trigger.removeAttribute('data-ptv-external');
@@ -54,7 +59,7 @@ function normalizeRequestTriggers() {
 function isRequestRoute() {
     const hash = window.location.hash || '';
 
-    return hash === REQUEST_ROUTE || hash === REQUEST_FALLBACK_ROUTE;
+    return hash === REQUEST_ROUTE || hash === REQUEST_FALLBACK_ROUTE || hash === REQUEST_LEGACY_ROUTE;
 }
 
 function getCurrentUrl() {
@@ -65,16 +70,14 @@ function getFallbackSafeUrl() {
     return `${window.location.pathname}${window.location.search}${REQUEST_SAFE_ROUTE}`;
 }
 
+function getRequestRouteUrl() {
+    return `${window.location.pathname}${window.location.search}${REQUEST_ROUTE}`;
+}
+
 function rememberSafeRoute() {
     if (isRequestRoute()) return;
 
     lastSafeUrl = getCurrentUrl();
-}
-
-function replaceRequestHashWithSafeRoute() {
-    if (!isRequestRoute()) return;
-
-    window.history.replaceState(window.history.state, '', lastSafeUrl || getFallbackSafeUrl());
 }
 
 function getRequestView() {
@@ -136,16 +139,74 @@ function syncRequestNavigationState(isActive) {
     dispatchPtvCustomEvent(REQUEST_STATE_EVENT, { isActive });
 }
 
+function getCurrentRequestUrl() {
+    return resolvedRequestUrl || REQUEST_URL;
+}
+
+function withSearchParam(url, key, value) {
+    const hashIndex = url.indexOf('#');
+    const urlWithoutHash = hashIndex === -1 ? url : url.slice(0, hashIndex);
+    const hash = hashIndex === -1 ? '' : url.slice(hashIndex);
+    const queryIndex = urlWithoutHash.indexOf('?');
+    const base = queryIndex === -1 ? urlWithoutHash : urlWithoutHash.slice(0, queryIndex);
+    const query = queryIndex === -1 ? '' : urlWithoutHash.slice(queryIndex + 1);
+    const encodedKey = encodeURIComponent(key);
+    const params = query.split('&').filter((param) => {
+        const [paramKey] = param.split('=');
+
+        return param && paramKey !== encodedKey;
+    });
+
+    params.push(`${encodedKey}=${encodeURIComponent(value)}`);
+
+    return `${base}?${params.join('&')}${hash}`;
+}
+
+function applyQueryToRequestUrl(url, query) {
+    if (!query) return url;
+
+    return withSearchParam(url, 'search', query);
+}
+
+function getFrameRequestUrl() {
+    return applyQueryToRequestUrl(getCurrentRequestUrl(), pendingRequestQuery);
+}
+
+function updateRequestLinks(view = getRequestView()) {
+    const url = getFrameRequestUrl();
+
+    document.querySelectorAll('[data-ptv-request-external="true"]').forEach((link) => {
+        if (link instanceof HTMLAnchorElement) {
+            link.href = url;
+        }
+    });
+
+    const frame = view?.querySelector?.('.ptv-request-frame');
+
+    if (frame instanceof HTMLIFrameElement && frame.src !== url) {
+        setRequestState(view, 'loading');
+        frame.src = url;
+    }
+}
+
+function resolveRequestUrl(view) {
+    getPtvRequestPortalUrl()
+        .then((url) => {
+            resolvedRequestUrl = url || REQUEST_URL;
+            updateRequestLinks(view);
+        })
+        .catch(() => {
+            resolvedRequestUrl = REQUEST_URL;
+            updateRequestLinks(view);
+        });
+}
+
 function openExternalRequestPortal(event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
     event?.stopImmediatePropagation?.();
 
-    const externalWindow = window.open(REQUEST_URL, '_blank', 'noopener,noreferrer');
-
-    if (externalWindow) {
-        externalWindow.opener = null;
-    }
+    window.location.href = getFrameRequestUrl();
 }
 
 function createFallbackLink(className) {
@@ -153,9 +214,7 @@ function createFallbackLink(className) {
 
     link.className = className;
     link.dataset.ptvRequestExternal = 'true';
-    link.href = REQUEST_URL;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
+    link.href = getFrameRequestUrl();
     link.textContent = 'Open Request Portal';
     link.addEventListener('click', openExternalRequestPortal, true);
 
@@ -172,6 +231,7 @@ function closeRequestView(options = {}) {
 
     clearRequestTimer();
     getRequestView()?.remove();
+    pendingRequestQuery = '';
     syncRequestNavigationState(false);
 
     if (!shouldUseHistory && window.history.state?.ptvRequestActive) {
@@ -181,6 +241,18 @@ function closeRequestView(options = {}) {
 
         window.history.replaceState(nextState, '', getCurrentUrl());
     }
+
+    if (shouldUseHistory && isRequestRoute()) {
+        window.history.replaceState(getCleanRequestState(), '', lastSafeUrl || getFallbackSafeUrl());
+    }
+}
+
+function getCleanRequestState() {
+    const state = { ...(window.history.state || {}) };
+
+    delete state.ptvRequestActive;
+
+    return state;
 }
 
 function createRequestView() {
@@ -226,7 +298,7 @@ function createRequestView() {
     fallback.append(fallbackTitle, fallbackText, createFallbackLink('ptv-request-fallback-link ptv-button ptv-button-primary'));
 
     iframe.className = 'ptv-request-frame';
-    iframe.src = REQUEST_URL;
+    iframe.src = getFrameRequestUrl();
     iframe.title = PTV_BRANDING.requestPortalTitle;
     iframe.loading = 'eager';
     iframe.referrerPolicy = 'no-referrer-when-downgrade';
@@ -251,24 +323,28 @@ function createRequestView() {
         }
     }, REQUEST_LOAD_TIMEOUT);
 
+    resolveRequestUrl(view);
+
     return view;
 }
 
 function openRequestView(options = {}) {
     lastRequestOpenAt = Date.now();
-    replaceRequestHashWithSafeRoute();
+    pendingRequestQuery = typeof options.query === 'string' ? options.query : pendingRequestQuery;
     syncRequestNavigationState(true);
 
     if (options.pushHistory !== false && !window.history.state?.ptvRequestActive) {
         window.history.pushState({
             ...(window.history.state || {}),
             ptvRequestActive: true
-        }, '', getCurrentUrl());
+        }, '', getRequestRouteUrl());
     }
 
     const existingView = getRequestView();
 
     if (existingView) {
+        updateRequestLinks(existingView);
+        resolveRequestUrl(existingView);
         return;
     }
 

@@ -5,6 +5,8 @@ import {
     syncPtvManagedPreloads,
     type PtvImagePriority
 } from './imageManager';
+import { getPtvPluginApiDiagnostics } from './pluginApi';
+import { resolvePtvStaticAssetUrl } from './urlOrigins';
 
 export type PtvStaticAssetProfile = 'PTV_DESKTOP' | 'PTV_FIRETV' | 'PTV_LOWPOWER' | 'PTV_TV' | 'PTV_WEBOS';
 
@@ -31,11 +33,32 @@ const EMBEDDED_FALLBACK_LOGO = `data:image/svg+xml;charset=utf-8,${encodeURIComp
     '<text x="112" y="58" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700">PiggieTV</text>',
     '</svg>'
 ].join(''))}`;
+const staticAssetResolutionCache = new Map<string, Promise<string>>();
 
-function normalizeAssetUrl(url: string) {
+function normalizeGenericImageUrl(url: string) {
     if (/^(?:https?:|data:|blob:)?\/\//.test(url) || url.startsWith('data:') || url.startsWith('blob:')) return url;
+    if (url.startsWith('/')) {
+        const jellyfinRoot = getPtvPluginApiDiagnostics().resolvedRoot;
 
-    return url.replace(/^\/+/, '');
+        return jellyfinRoot ? `${jellyfinRoot}${url}` : url;
+    }
+
+    return url;
+}
+
+function normalizeStaticAssetUrl(url: string) {
+    return resolvePtvStaticAssetUrl(url);
+}
+
+function isManagedStaticAssetUrl(url: string) {
+    const lowerUrl = url.toLowerCase();
+
+    return lowerUrl.includes('/assets/backgrounds/')
+        || lowerUrl.includes('/assets/icons/')
+        || lowerUrl.includes('/assets/logo/')
+        || lowerUrl.startsWith('assets/backgrounds/')
+        || lowerUrl.startsWith('assets/icons/')
+        || lowerUrl.startsWith('assets/logo/');
 }
 
 function isDebugEnabled() {
@@ -93,6 +116,31 @@ async function resolveFirstValidImageUrl(candidates: string[]): Promise<string> 
     return EMBEDDED_FALLBACK_LOGO;
 }
 
+function resolveFirstValidStaticAssetUrl(candidates: string[]) {
+    const requestKey = candidates.join('|');
+    const cachedRequest = staticAssetResolutionCache.get(requestKey);
+
+    if (cachedRequest) return cachedRequest;
+
+    const request = resolveFirstValidImageUrl(candidates)
+        .catch(error => {
+            staticAssetResolutionCache.delete(requestKey);
+            throw error;
+        });
+
+    staticAssetResolutionCache.set(requestKey, request);
+
+    if (staticAssetResolutionCache.size > 50) {
+        const oldestKey = staticAssetResolutionCache.keys().next().value;
+
+        if (oldestKey) {
+            staticAssetResolutionCache.delete(oldestKey);
+        }
+    }
+
+    return request;
+}
+
 export function getPtvStaticAssetProfile(): PtvStaticAssetProfile {
     const profile = getPtvClientProfile();
 
@@ -105,7 +153,7 @@ export function getPtvStaticAssetProfile(): PtvStaticAssetProfile {
 }
 
 export function getPtvStaticAssetUrl(asset: PtvResponsiveAsset | string) {
-    if (typeof asset === 'string') return normalizeAssetUrl(asset);
+    if (typeof asset === 'string') return normalizeStaticAssetUrl(asset);
 
     const profile = getPtvStaticAssetProfile();
     let selected = asset.default;
@@ -120,36 +168,51 @@ export function getPtvStaticAssetUrl(asset: PtvResponsiveAsset | string) {
         selected = asset.lowPower || selected;
     }
 
-    return normalizeAssetUrl(selected);
+    return normalizeStaticAssetUrl(selected);
 }
 
 export function getPtvStaticAssetFallbackUrl(asset: PtvResponsiveAsset | string) {
-    if (typeof asset === 'string') return normalizeAssetUrl(asset);
+    if (typeof asset === 'string') return normalizeStaticAssetUrl(asset);
 
-    return normalizeAssetUrl(asset.fallback || asset.default);
+    return normalizeStaticAssetUrl(asset.fallback || asset.default);
 }
 
 export function fallbackPtvImage(image: HTMLImageElement, asset: PtvResponsiveAsset | string) {
-    const currentUrl = normalizeAssetUrl(image.getAttribute('src') || image.src || '');
+    const currentUrl = normalizeStaticAssetUrl(image.currentSrc || image.getAttribute('src') || image.src || '');
     const candidates = getPtvStaticAssetCandidates(asset).filter(url => url !== currentUrl);
 
     if (!candidates.length) return;
 
-    void resolveFirstValidImageUrl(candidates)
+    void resolveFirstValidStaticAssetUrl(candidates)
         .then(url => {
             image.onerror = null;
             image.onload = null;
-            image.src = url;
+            setImageSource(image, url);
         });
+}
+
+function getCurrentNormalizedImageSource(image: HTMLImageElement) {
+    return normalizeGenericImageUrl(image.currentSrc || image.getAttribute('src') || image.src || '');
+}
+
+function setImageSource(image: HTMLImageElement, url: string) {
+    if (!url) return;
+
+    const currentUrl = getCurrentNormalizedImageSource(image);
+    const nextUrl = normalizeGenericImageUrl(url);
+
+    if (currentUrl === nextUrl) return;
+
+    image.src = url;
 }
 
 export function applyPtvResponsiveImage(image: HTMLImageElement, asset: PtvResponsiveAsset | string) {
     const candidates = getPtvStaticAssetCandidates(asset);
     const requestKey = candidates.join('|');
-    const fallbackUrl = getPtvStaticAssetFallbackUrl(asset) || candidates[0] || EMBEDDED_FALLBACK_LOGO;
-    const currentSrc = image.getAttribute('src') || '';
+    const immediateUrl = candidates[0] || getPtvStaticAssetFallbackUrl(asset) || EMBEDDED_FALLBACK_LOGO;
+    const currentSrc = getCurrentNormalizedImageSource(image);
     const shouldReplaceImmediately = !currentSrc
-        || currentSrc.startsWith('/assets/')
+        || (isManagedStaticAssetUrl(currentSrc) && !candidates.includes(currentSrc))
         || (image.complete && !isPtvImageValid(image));
 
     if (image.dataset.ptvImageRequest === requestKey && isPtvImageValid(image)) return;
@@ -163,20 +226,20 @@ export function applyPtvResponsiveImage(image: HTMLImageElement, asset: PtvRespo
     };
 
     if (shouldReplaceImmediately) {
-        image.src = fallbackUrl;
+        setImageSource(image, immediateUrl);
     }
 
-    void resolveFirstValidImageUrl(candidates)
+    void resolveFirstValidStaticAssetUrl(candidates)
         .then(url => {
             if (image.dataset.ptvImageRequest !== requestKey) return;
 
-            image.src = url;
+            setImageSource(image, url);
         });
 }
 
 export function getPtvImageSetValue(asset: PtvResponsiveAsset) {
     const primary = getPtvStaticAssetUrl(asset);
-    const fallback = asset.fallback ? normalizeAssetUrl(asset.fallback) : primary;
+    const fallback = asset.fallback ? normalizeStaticAssetUrl(asset.fallback) : primary;
 
     if (fallback === primary) {
         return `url("${primary}")`;
@@ -194,7 +257,7 @@ export function syncPtvImagePreloads(
 
     return syncPtvManagedPreloads(
         scope,
-        urls.map(url => (url ? normalizeAssetUrl(String(url)) : undefined)),
+        urls.map(url => (url ? normalizeGenericImageUrl(String(url)) : undefined)),
         priorities
     );
 }

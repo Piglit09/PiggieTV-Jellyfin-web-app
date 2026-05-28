@@ -96,7 +96,7 @@ const DEFAULT_LIMITS: Record<PtvImageQueueKind, number> = {
     background: 2,
     decorative: 2,
     hero: 2,
-    poster: 6
+    poster: 4
 };
 const LOW_POWER_LIMITS: Record<PtvImageQueueKind, number> = {
     background: 1,

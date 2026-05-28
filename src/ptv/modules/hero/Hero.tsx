@@ -1,5 +1,6 @@
-import React, { FC, useEffect, useMemo, useRef, useState } from 'react';
+import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { playbackManager } from '../../../components/playback/playbackmanager';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { PTV_BRANDING, PTV_ROUTES } from '../../core/config';
 import { syncPtvImagePreloads } from '../../core/images';
@@ -231,6 +232,24 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
         () => `ptv-hero ${heroStateClass} ${transitionClass}`,
         [heroStateClass, transitionClass]
     );
+    const handleWatchNow = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
+        if (!heroItem?.Id) return;
+
+        event.preventDefault();
+
+        const startPositionTicks = heroItem.PtvHeroSource === 'continue' ?
+            heroItem.UserData?.PlaybackPositionTicks || 0 :
+            0;
+
+        playbackManager.play({
+            ids: [heroItem.Id],
+            serverId: heroItem.ServerId,
+            startPositionTicks
+        }).catch((err: unknown) => {
+            console.warn('[PTV Hero] Failed to start playback', err);
+            window.location.hash = detailsUrl.replace(/^#/, '');
+        });
+    }, [detailsUrl, heroItem]);
 
     useEffect(() => {
         return syncPtvImagePreloads('hero-backdrop', [backdropUrl, nextBackdropUrl]);
@@ -275,6 +294,7 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
                     className='ptv-hero-bg ptv-hero-bg-previous'
                     src={previousBackdropUrl}
                     alt=''
+                    data-ptv-image-component='hero-backdrop-previous'
                     aria-hidden='true'
                     loading='lazy'
                     decoding='async'
@@ -286,6 +306,7 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
                     className='ptv-hero-bg ptv-hero-bg-current'
                     src={backdropUrl}
                     alt=''
+                    data-ptv-image-component='hero-backdrop-current'
                     aria-hidden='true'
                     loading='eager'
                     decoding='async'
@@ -309,6 +330,7 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
                             className='ptv-hero-logo'
                             src={logoUrl}
                             alt={heroTitle}
+                            data-ptv-image-component='hero-logo'
                             loading='eager'
                             decoding='async'
                         />
@@ -355,6 +377,7 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
                         <a
                             className='ptv-hero-btn ptv-hero-btn-primary'
                             href={detailsUrl}
+                            onClick={handleWatchNow}
                         >
                             {heroItem ? 'Watch Now' : 'Play'}
                         </a>

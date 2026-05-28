@@ -3,13 +3,13 @@
        on TV clients. PNG remains in image-set() for older embedded browsers. */
     --ptv-login-page-bg-image:
         image-set(
-            url('/assets/backgrounds/login-bg.webp') type('image/webp'),
-            url('/assets/backgrounds/login-bg.png') type('image/png')
+            url('assets/backgrounds/login-bg.webp') type('image/webp'),
+            url('assets/backgrounds/login-bg.png') type('image/png')
         );
     --ptv-login-brand-bg-image:
         image-set(
-            url('/assets/backgrounds/PiggieTVBG.webp') type('image/webp'),
-            url('/assets/backgrounds/PiggieTVBG.png') type('image/png')
+            url('assets/backgrounds/PiggieTVBG.webp') type('image/webp'),
+            url('assets/backgrounds/PiggieTVBG.png') type('image/png')
         );
 
     min-height: 100vh;
@@ -38,13 +38,13 @@
 :is(.ptv-client-tv, .ptv-client-webos, .ptv-client-firetv, .ptv-client-low-power) :is(.ptv-login-page, #loginPage) {
     --ptv-login-page-bg-image:
         image-set(
-            url('/assets/backgrounds/login-bg-tv.webp') type('image/webp'),
-            url('/assets/backgrounds/login-bg.png') type('image/png')
+            url('assets/backgrounds/login-bg-tv.webp') type('image/webp'),
+            url('assets/backgrounds/login-bg.png') type('image/png')
         );
     --ptv-login-brand-bg-image:
         image-set(
-            url('/assets/backgrounds/PiggieTVBG-tv.webp') type('image/webp'),
-            url('/assets/backgrounds/PiggieTVBG.png') type('image/png')
+            url('assets/backgrounds/PiggieTVBG-tv.webp') type('image/webp'),
+            url('assets/backgrounds/PiggieTVBG.png') type('image/png')
         );
 }
 

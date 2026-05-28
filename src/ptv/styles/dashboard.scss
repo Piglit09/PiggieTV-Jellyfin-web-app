@@ -762,6 +762,13 @@
     width: min(180px, 100%);
 }
 
+.dashboardDocument .ptv-dashboard-control-page .ptv-settings-field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+    gap: var(--ptv-space-3);
+    align-items: start;
+}
+
 .dashboardDocument .ptv-dashboard-control-page .MuiGrid-root {
     align-items: stretch;
 }
@@ -945,6 +952,10 @@
 
 .dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge[data-ptv-render-profile='PTV_TV'] {
     --ptv-render-badge-rgb: var(--ptv-color-accent-secondary-rgb);
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge[data-ptv-render-profile='PTV_MOBILE'] {
+    --ptv-render-badge-rgb: var(--ptv-color-focus-rgb);
 }
 
 .dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge[data-ptv-render-profile='PTV_LOWPOWER'] {

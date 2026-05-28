@@ -14,11 +14,15 @@ type NavigatorWithHardwareHints = Navigator & {
 export type PtvClientKind = 'desktop' | 'firetv' | 'mobile' | 'tv' | 'webos';
 
 export type PtvClientProfile = {
+    isAndroidTv: boolean;
     isCoarsePointer: boolean;
     isConstrainedHardware: boolean;
     isFireTv: boolean;
     isLowPower: boolean;
     isMobile: boolean;
+    isRoku: boolean;
+    isTablet: boolean;
+    isTenFootClient: boolean;
     isTv: boolean;
     isWebOs: boolean;
     kind: PtvClientKind;
@@ -45,11 +49,14 @@ export type PtvPerformanceProfile = PtvPerformanceDefaults & {
 
 const FIRE_TV_PATTERN = /(aft[a-z0-9]*|fire\s?tv|amazonwebappplatform)/i;
 const WEB_OS_PATTERN = /(web0s|webos|netcast|lg\s?browser|lge)/i;
+const ANDROID_TV_PATTERN = /(android\s?tv|google\s?tv|googletv|shield\s?android|nvidia\s?shield|mi\s?box|bravia.*android)/i;
+const ROKU_PATTERN = /(roku|dvp)/i;
 const TV_CLIENT_PATTERNS = [
     /(aft[a-z0-9]*|fire\s?tv|roku|dvp|tizen|web0s|webos)/i,
     /(smart-tv|smarttv|hbbtv|netcast|viera|bravia|crkey|appletv|xbox|playstation)/i
 ];
 const MOBILE_CLIENT_PATTERN = /(android|iphone|ipad|ipod|mobile)/i;
+const TABLET_CLIENT_PATTERN = /(ipad|tablet|silk(?!.*mobile)|kindle|playbook)/i;
 
 function getNavigator(): NavigatorWithHardwareHints | null {
     if (typeof navigator === 'undefined') return null;
@@ -88,12 +95,13 @@ function getClientKind(
     isFireTv: boolean,
     isWebOs: boolean,
     isTv: boolean,
-    isMobile: boolean
+    isMobile: boolean,
+    isTablet: boolean
 ): PtvClientKind {
     if (isFireTv) return 'firetv';
     if (isWebOs) return 'webos';
     if (isTv) return 'tv';
-    if (isMobile) return 'mobile';
+    if (isMobile || isTablet) return 'mobile';
 
     return 'desktop';
 }
@@ -103,17 +111,33 @@ export function getPtvClientProfile(): PtvClientProfile {
     const userAgent = nav?.userAgent || '';
     const isFireTv = FIRE_TV_PATTERN.test(userAgent);
     const isWebOs = WEB_OS_PATTERN.test(userAgent);
-    const isTv = isWebOs || TV_CLIENT_PATTERNS.some(pattern => pattern.test(userAgent));
-    const isMobile = MOBILE_CLIENT_PATTERN.test(userAgent);
+    const isAndroidTv = ANDROID_TV_PATTERN.test(userAgent);
+    const isRoku = ROKU_PATTERN.test(userAgent);
+    const isTenFootClient = typeof document !== 'undefined'
+        && (
+            document.documentElement.classList.contains('layout-tv')
+            || document.body?.classList.contains('layout-tv')
+        );
+    const isTv = isWebOs
+        || isAndroidTv
+        || isRoku
+        || isTenFootClient
+        || TV_CLIENT_PATTERNS.some(pattern => pattern.test(userAgent));
+    const isTablet = TABLET_CLIENT_PATTERN.test(userAgent);
+    const isMobile = !isTv && MOBILE_CLIENT_PATTERN.test(userAgent);
     const isCoarsePointer = hasCoarsePointer();
     const constrainedHardware = isConstrainedHardware(nav);
-    const isLowPower = isFireTv || isTv || isMobile || isCoarsePointer || constrainedHardware;
+    const isLowPower = isFireTv || isTv || (!isMobile && !isTablet && constrainedHardware);
     const baseProfile = {
+        isAndroidTv,
         isCoarsePointer,
         isConstrainedHardware: constrainedHardware,
         isFireTv,
         isLowPower,
         isMobile,
+        isRoku,
+        isTablet,
+        isTenFootClient,
         isTv,
         isWebOs,
         supportsBackdropFilter: supportsBackdropFilter()
@@ -121,7 +145,7 @@ export function getPtvClientProfile(): PtvClientProfile {
 
     return {
         ...baseProfile,
-        kind: getClientKind(isFireTv, isWebOs, isTv, isMobile),
+        kind: getClientKind(isFireTv, isWebOs, isTv, isMobile, isTablet),
         renderProfile: getPtvRenderProfile(baseProfile)
     };
 }
@@ -158,8 +182,12 @@ export function applyPtvClientProfileClasses(profile = getPtvClientProfile()) {
 
     root.classList.toggle('ptv-client-firetv', profile.isFireTv);
     root.classList.toggle('ptv-client-webos', profile.isWebOs);
+    root.classList.toggle('ptv-client-android-tv', profile.isAndroidTv);
+    root.classList.toggle('ptv-client-roku', profile.isRoku);
+    root.classList.toggle('ptv-client-ten-foot', profile.isTenFootClient);
     root.classList.toggle('ptv-client-tv', profile.isTv);
     root.classList.toggle('ptv-client-mobile', profile.isMobile);
+    root.classList.toggle('ptv-client-tablet', profile.isTablet);
     root.classList.toggle('ptv-client-coarse-pointer', profile.isCoarsePointer);
     root.classList.toggle('ptv-client-low-power', profile.isLowPower);
     root.classList.toggle('ptv-client-constrained-hardware', profile.isConstrainedHardware);

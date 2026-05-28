@@ -27,12 +27,18 @@
     }
 }
 
-.ptv-render-desktop {
+.ptv-render-desktop,
+.ptv-render-mobile {
     --ptv-render-allows-animated-rows: 1;
     --ptv-render-allows-backdrop-filter: 1;
     --ptv-render-allows-blur-layers: 1;
     --ptv-render-allows-decorative-backdrops: 1;
     --ptv-render-allows-hero-auto-rotate: 1;
+}
+
+.ptv-render-mobile {
+    --ptv-motion-atmosphere: 26s;
+    --ptv-motion-hero: 420ms;
 }
 
 .ptv-render-tv,
@@ -73,11 +79,6 @@
         animation: none !important;
         transform: none !important;
         will-change: auto;
-    }
-
-    .ptv-hero-ambient,
-    .ptv-row-backdrop {
-        display: none !important;
     }
 
     .itemsContainer .card,

@@ -26,14 +26,39 @@ public static class PtvApiRoutes
     public const string V1Status = $"{V1}/Status";
 
     /// <summary>
+    /// Lowercase versioned status route.
+    /// </summary>
+    public const string V1StatusLower = $"{V1}/status";
+
+    /// <summary>
     /// Versioned featured-content route.
     /// </summary>
     public const string V1FeaturedContent = $"{V1}/FeaturedContent";
 
     /// <summary>
+    /// Lowercase versioned featured-content route.
+    /// </summary>
+    public const string V1Featured = $"{V1}/featured";
+
+    /// <summary>
     /// Versioned featured-content refresh route.
     /// </summary>
     public const string V1FeaturedContentRefresh = $"{V1}/FeaturedContent/Refresh";
+
+    /// <summary>
+    /// Lowercase versioned featured-content refresh route.
+    /// </summary>
+    public const string V1FeaturedRefresh = $"{V1}/featured/refresh";
+
+    /// <summary>
+    /// Versioned plugin settings route.
+    /// </summary>
+    public const string V1Settings = $"{V1}/settings";
+
+    /// <summary>
+    /// Versioned plugin settings reset route.
+    /// </summary>
+    public const string V1SettingsReset = $"{V1}/settings/reset";
 
     /// <summary>
     /// Legacy unversioned status route.
