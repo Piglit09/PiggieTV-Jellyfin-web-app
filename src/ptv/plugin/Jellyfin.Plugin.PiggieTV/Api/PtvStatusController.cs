@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Text.Json.Nodes;
 
 namespace Jellyfin.Plugin.PiggieTV.Api;
@@ -40,7 +41,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         _serviceProvider = serviceProvider;
 
         _logger.LogInformation(
-            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET /Ptv/v1/integrations/status, GET/POST /Ptv/v1/integrations/jfa-go/test, GET/POST /Ptv/v1/integrations/jfago/test, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
+            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
     }
 
     /// <summary>
@@ -83,6 +84,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         ["featuredContent"] = true,
                         ["featuredContentRefresh"] = true,
                         ["integrations"] = true,
+                        ["signup"] = true,
                         ["tags"] = true,
                         ["random"] = true
                     },
@@ -93,10 +95,13 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         "featuredContent",
                         "featuredContentRefresh",
                         "integrations",
+                        "signup",
                         "tags",
                         "random"
                     },
                     ok = true,
+                    integrations = PtvStatusIntegrations.Create(),
+                    signup = PtvStatusSignup.Create(),
                     name = "PiggieTV",
                     pluginName = "PiggieTV",
                     pluginVersion = Plugin.Instance?.Version?.ToString() ?? "1.0.0.0",
@@ -140,6 +145,8 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 tmdbStatus);
 
             response.SettingsAvailable = settingsAvailable;
+            response.Integrations = GetStatusIntegrations(PtvApiRoutes.V1StatusLower);
+            response.Signup = GetStatusSignup(PtvApiRoutes.V1StatusLower);
             ApplyDegradedStatus(response, failures);
 
             _logger.LogInformation(
@@ -158,9 +165,14 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 RedactSecrets(ex.Message),
                 ex.InnerException is null ? null : RedactSecrets(ex.InnerException.Message));
 
-            return StatusCode(
-                StatusCodes.Status500InternalServerError,
-                DiagnosticError("PTV_STATUS_CRASHED", PtvApiRoutes.V1StatusLower, ex));
+            var fallbackResponse = CreateFallbackStatus(
+                canWriteFeaturedContent: false,
+                settingsAvailable: false,
+                error: $"Full status diagnostics failed: {RedactSecrets(ex.Message)}");
+            fallbackResponse.Integrations = PtvStatusIntegrations.Create();
+            fallbackResponse.Signup = PtvStatusSignup.Create();
+
+            return Ok(fallbackResponse);
         }
     }
 
@@ -558,15 +570,21 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                     configuration.SeerrSettings.OpenRequestsInPtv,
                     configuration.SeerrSettings.OpenExternalFallback
                 },
-                jfaGo = PtvPublicJfaGoSettings.FromConfiguration(configuration),
                 arr = PtvPublicArrSettings.FromConfiguration(configuration),
                 downloads = PtvPublicDownloadSettings.FromConfiguration(configuration),
                 endpoints = new
                 {
-                    jfaGoTest = "/Ptv/v1/integrations/jfa-go/test",
-                    jfaGoTestAlias = "/Ptv/v1/integrations/jfago/test",
-                    jfaGoTestMethods = new[] { "GET", "POST" }
+                    arrCalendar = "/Ptv/v1/calendar",
+                    arrCalendarAlias = "/Ptv/v1/integrations/arr/calendar",
+                    signupCreateUser = "/Ptv/v1/signup/create-user",
+                    signupVerifyEmail = "/Ptv/v1/signup/verify-email",
+                    signupPasswordResetRequest = "/Ptv/v1/signup/password-reset/request",
+                    signupPasswordResetConfirm = "/Ptv/v1/signup/password-reset/confirm",
+                    signupAdminInvites = "/Ptv/v1/signup/admin/invites",
+                    signupAdminSettings = "/Ptv/v1/signup/admin/settings",
+                    signupAdminTestEmail = "/Ptv/v1/signup/admin/email/test"
                 },
+                signup = PtvStatusSignup.Create(configuration.SignupSettings),
                 tags = configuration.TagSettings,
                 random = configuration.RandomSettings
             });
@@ -610,49 +628,6 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             settings.ApiKey,
             "Jellyseerr",
             cancellationToken).ConfigureAwait(false));
-    }
-
-    /// <summary>
-    /// Tests saved jfa-go connectivity from the Jellyfin server.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Redacted test result.</returns>
-    [HttpGet("integrations/jfa-go/test")]
-    [HttpGet("integrations/jfago/test")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult> TestSavedJfaGo(CancellationToken cancellationToken)
-    {
-        if (!await CanWriteFeaturedContentSafeAsync("integrations/jfa-go/test").ConfigureAwait(false))
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, Error("PTV_INTEGRATION_TEST_FORBIDDEN", "Only Jellyfin administrators can test PiggieTV integrations."));
-        }
-
-        var settings = BuildJfaGoTestSettings(null);
-
-        return Ok(await TestJfaGoEndpointAsync(settings, cancellationToken).ConfigureAwait(false));
-    }
-
-    /// <summary>
-    /// Tests jfa-go connectivity from the Jellyfin server with optional unsaved settings.
-    /// </summary>
-    /// <param name="settingsOverride">Optional unsaved settings to test.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Redacted test result.</returns>
-    [HttpPost("integrations/jfa-go/test")]
-    [HttpPost("integrations/jfago/test")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<ActionResult> TestJfaGo(
-        [FromBody] PtvJfaGoSettingsPatch? settingsOverride,
-        CancellationToken cancellationToken)
-    {
-        if (!await CanWriteFeaturedContentSafeAsync("integrations/jfa-go/test").ConfigureAwait(false))
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, Error("PTV_INTEGRATION_TEST_FORBIDDEN", "Only Jellyfin administrators can test PiggieTV integrations."));
-        }
-
-        var settings = BuildJfaGoTestSettings(settingsOverride);
-
-        return Ok(await TestJfaGoEndpointAsync(settings, cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -848,17 +823,64 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         CancellationToken cancellationToken) => TestArrServiceAsync("prowlarr", settingsOverride, cancellationToken);
 
     /// <summary>
-    /// Gets an aggregated *Arr calendar placeholder through the PiggieTV backend.
+    /// Gets an aggregated *Arr calendar through the PiggieTV backend.
     /// </summary>
+    /// <param name="start">Optional start date.</param>
+    /// <param name="end">Optional end date.</param>
+    /// <param name="daysBefore">Days before today when start is omitted.</param>
+    /// <param name="daysAfter">Days after today when end is omitted.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Calendar status.</returns>
+    [HttpGet("calendar")]
     [HttpGet("integrations/arr/calendar")]
-    public ActionResult GetArrCalendar()
+    public async Task<ActionResult> GetArrCalendar(
+        [FromQuery] DateTimeOffset? start,
+        [FromQuery] DateTimeOffset? end,
+        [FromQuery] int daysBefore = 7,
+        [FromQuery] int daysAfter = 30,
+        CancellationToken cancellationToken = default)
     {
+        var now = DateTimeOffset.UtcNow.UtcDateTime.Date;
+        var startDate = (start?.UtcDateTime.Date ?? now.AddDays(-Math.Clamp(daysBefore, 0, 120)));
+        var endDate = (end?.UtcDateTime.Date ?? now.AddDays(Math.Clamp(daysAfter, 1, 240)));
+
+        if (endDate < startDate)
+        {
+            (startDate, endDate) = (endDate, startDate);
+        }
+
+        var serviceResults = new List<PtvArrCalendarServiceResultDto>();
+        var items = new List<PtvArrCalendarItemDto>();
+        var configuration = GetNormalizedConfiguration();
+
+        await AppendArrCalendarAsync("sonarr", configuration.ArrSettings.Sonarr, startDate, endDate, items, serviceResults, cancellationToken).ConfigureAwait(false);
+        await AppendArrCalendarAsync("radarr", configuration.ArrSettings.Radarr, startDate, endDate, items, serviceResults, cancellationToken).ConfigureAwait(false);
+        await AppendArrCalendarAsync("lidarr", configuration.ArrSettings.Lidarr, startDate, endDate, items, serviceResults, cancellationToken).ConfigureAwait(false);
+
+        serviceResults.Add(CreateArrCalendarServiceResult(
+            "prowlarr",
+            configuration.ArrSettings.Prowlarr,
+            supported: false,
+            itemCount: 0,
+            error: "Prowlarr does not expose a media release calendar."));
+
+        var sortedItems = items
+            .OrderBy(item => item.SortDate ?? item.Date ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         return Ok(new
         {
             ok = true,
-            items = Array.Empty<object>(),
-            message = "Calendar proxy endpoint is available. Configure service-specific calendar adapters next."
+            enabled = serviceResults.Any(service => service.Enabled && service.Configured && service.Supported),
+            start = startDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            end = endDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            itemCount = sortedItems.Length,
+            services = serviceResults,
+            items = sortedItems,
+            message = sortedItems.Length == 0
+                ? "No upcoming *Arr calendar items were found for the selected range."
+                : $"Loaded {sortedItems.Length} upcoming *Arr calendar items."
         });
     }
 
@@ -1003,7 +1025,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         return Ok(await TestJsonEndpointAsync(
             settings.Enabled,
             settings.InternalUrl,
-            "/api/v3/system/status",
+            GetArrSystemStatusPath(serviceName),
             settings.ApiKey,
             serviceName,
             cancellationToken).ConfigureAwait(false));
@@ -1037,41 +1059,288 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         if (!string.IsNullOrWhiteSpace(settingsOverride.ApiKey))
         {
             settings.ApiKey = settingsOverride.ApiKey.Trim();
+            settings.Enabled = true;
         }
 
         return settings;
     }
 
-    private static JfaGoSettings BuildJfaGoTestSettings(PtvJfaGoSettingsPatch? settingsOverride)
+    private async Task AppendArrCalendarAsync(
+        string serviceName,
+        ArrServiceSettings settings,
+        DateTime startDate,
+        DateTime endDate,
+        ICollection<PtvArrCalendarItemDto> items,
+        ICollection<PtvArrCalendarServiceResultDto> serviceResults,
+        CancellationToken cancellationToken)
     {
-        var saved = GetNormalizedConfiguration().JfaGoSettings;
-        var settings = new JfaGoSettings
+        var isSupported = IsArrCalendarSupported(serviceName);
+        var isConfigured = IsArrServiceConfigured(settings);
+        var isEnabled = IsArrServiceEffectivelyEnabled(settings);
+
+        if (!isSupported || !isEnabled || !isConfigured)
         {
-            AllowSelfSignedTls = saved.AllowSelfSignedTls,
-            ApiKey = saved.ApiKey,
-            DisplayName = saved.DisplayName,
-            Enabled = saved.Enabled,
-            ExternalUrl = saved.ExternalUrl,
-            InternalUrl = saved.InternalUrl
+            serviceResults.Add(CreateArrCalendarServiceResult(
+                serviceName,
+                settings,
+                isSupported,
+                itemCount: 0,
+                error: GetArrCalendarSkipReason(serviceName, settings, isSupported)));
+            return;
+        }
+
+        var path = GetArrCalendarPath(serviceName, startDate, endDate);
+        var result = await FetchArrCalendarPayloadAsync(
+            settings.InternalUrl,
+            path,
+            settings.ApiKey,
+            $"integrations/{serviceName}/calendar",
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.Payload is null)
+        {
+            serviceResults.Add(CreateArrCalendarServiceResult(
+                serviceName,
+                settings,
+                isSupported,
+                itemCount: 0,
+                error: result.Error ?? $"{serviceName} calendar returned no usable data.",
+                statusCode: result.StatusCode));
+            return;
+        }
+
+        var serviceItems = ExtractArrCalendarItems(serviceName, result.Payload, settings.ExternalUrl)
+            .ToArray();
+
+        foreach (var item in serviceItems)
+        {
+            items.Add(item);
+        }
+
+        serviceResults.Add(CreateArrCalendarServiceResult(
+            serviceName,
+            settings,
+            isSupported,
+            serviceItems.Length,
+            error: null,
+            statusCode: result.StatusCode));
+    }
+
+    private static PtvArrCalendarServiceResultDto CreateArrCalendarServiceResult(
+        string serviceName,
+        ArrServiceSettings settings,
+        bool supported,
+        int itemCount,
+        string? error,
+        int? statusCode = null)
+    {
+        return new PtvArrCalendarServiceResultDto
+        {
+            Configured = IsArrServiceConfigured(settings),
+            Enabled = IsArrServiceEffectivelyEnabled(settings),
+            Error = error,
+            ItemCount = itemCount,
+            Service = serviceName,
+            StatusCode = statusCode,
+            Supported = supported
         };
+    }
 
-        if (settingsOverride is null)
+    private static bool IsArrServiceConfigured(ArrServiceSettings settings)
+    {
+        return !string.IsNullOrWhiteSpace(settings.InternalUrl)
+            && !string.IsNullOrWhiteSpace(settings.ApiKey);
+    }
+
+    private static bool IsArrServiceEffectivelyEnabled(ArrServiceSettings settings)
+    {
+        return settings.Enabled || !string.IsNullOrWhiteSpace(settings.ApiKey);
+    }
+
+    private static bool IsArrCalendarSupported(string serviceName)
+    {
+        return serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase)
+            || serviceName.Equals("radarr", StringComparison.OrdinalIgnoreCase)
+            || serviceName.Equals("lidarr", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetArrCalendarSkipReason(string serviceName, ArrServiceSettings settings, bool supported)
+    {
+        if (!supported) return $"{serviceName} does not expose a supported PiggieTV calendar adapter.";
+        if (!IsArrServiceEffectivelyEnabled(settings)) return $"{serviceName} integration is disabled.";
+        if (string.IsNullOrWhiteSpace(settings.InternalUrl)) return $"{serviceName} internal URL is not configured.";
+        if (string.IsNullOrWhiteSpace(settings.ApiKey)) return $"{serviceName} API key is not configured.";
+
+        return $"{serviceName} calendar is not configured.";
+    }
+
+    private static string GetArrSystemStatusPath(string serviceName)
+    {
+        return serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase)
+            || serviceName.Equals("radarr", StringComparison.OrdinalIgnoreCase)
+            ? "/api/v3/system/status"
+            : "/api/v1/system/status";
+    }
+
+    private static string GetArrCalendarPath(string serviceName, DateTime startDate, DateTime endDate)
+    {
+        var apiVersion = serviceName.Equals("lidarr", StringComparison.OrdinalIgnoreCase)
+            ? "v1"
+            : "v3";
+        var start = startDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var end = endDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var includeParameters = serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase)
+            ? "&includeSeries=true&includeEpisodeFile=true"
+            : string.Empty;
+
+        return $"/api/{apiVersion}/calendar?start={start}&end={end}{includeParameters}";
+    }
+
+    private async Task<(JsonNode? Payload, int? StatusCode, string? Error)> FetchArrCalendarPayloadAsync(
+        string baseUrl,
+        string path,
+        string? apiKey,
+        string routeName,
+        CancellationToken cancellationToken)
+    {
+        try
         {
-            return settings;
+            using var client = CreateProxyHttpClient(apiKey);
+            using var response = await client.GetAsync(BuildProxyUri(baseUrl, path), cancellationToken).ConfigureAwait(false);
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return (null, (int)response.StatusCode, $"{routeName} returned HTTP {(int)response.StatusCode}.");
+            }
+
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return (null, (int)response.StatusCode, $"{routeName} returned an empty response.");
+            }
+
+            return (JsonNode.Parse(payload), (int)response.StatusCode, null);
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure(routeName, ex);
+
+            return (null, null, RedactSecrets(ex.Message));
+        }
+    }
+
+    private static IEnumerable<PtvArrCalendarItemDto> ExtractArrCalendarItems(
+        string serviceName,
+        JsonNode payload,
+        string externalUrl)
+    {
+        if (payload is JsonArray rootArray)
+        {
+            return rootArray.OfType<JsonObject>().Select(item => ToArrCalendarItem(serviceName, item, externalUrl));
         }
 
-        settings.Enabled = settingsOverride.Enabled ?? settings.Enabled;
-        settings.DisplayName = settingsOverride.DisplayName ?? settings.DisplayName;
-        settings.InternalUrl = settingsOverride.InternalUrl ?? settings.InternalUrl;
-        settings.ExternalUrl = settingsOverride.ExternalUrl ?? settings.ExternalUrl;
-        settings.AllowSelfSignedTls = settingsOverride.AllowSelfSignedTls ?? settingsOverride.InsecureTls ?? settings.AllowSelfSignedTls;
-
-        if (!string.IsNullOrWhiteSpace(settingsOverride.ApiKey))
+        if (payload is JsonObject root)
         {
-            settings.ApiKey = settingsOverride.ApiKey.Trim();
+            foreach (var key in new[] { "records", "items", "results" })
+            {
+                if (root[key] is JsonArray nestedArray)
+                {
+                    return nestedArray.OfType<JsonObject>().Select(item => ToArrCalendarItem(serviceName, item, externalUrl));
+                }
+            }
         }
 
-        return settings;
+        return [];
+    }
+
+    private static PtvArrCalendarItemDto ToArrCalendarItem(
+        string serviceName,
+        JsonObject item,
+        string externalUrl)
+    {
+        var date = GetArrCalendarDate(serviceName, item);
+        var title = GetArrCalendarTitle(serviceName, item);
+        var seriesTitle = ReadJsonString(item["series"], "title");
+        var artistTitle = ReadJsonString(item["artist"], "artistName")
+            ?? ReadJsonString(item["artist"], "name")
+            ?? ReadJsonString(item, "artistName");
+        var seasonNumber = ReadJsonInt(item, "seasonNumber");
+        var episodeNumber = ReadJsonInt(item, "episodeNumber");
+        var arrId = ReadJsonString(item, "id") ?? Guid.NewGuid().ToString("N");
+
+        return new PtvArrCalendarItemDto
+        {
+            Date = date,
+            EpisodeNumber = episodeNumber,
+            EpisodeTitle = serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase) ? ReadJsonString(item, "title") : null,
+            ExternalUrl = string.IsNullOrWhiteSpace(externalUrl) ? null : externalUrl.TrimEnd('/'),
+            HasFile = ReadJsonBool(item, "hasFile") ?? ReadJsonBool(item["movieFile"], "id") ?? ReadJsonBool(item["episodeFile"], "id"),
+            Id = $"{serviceName}-{arrId}",
+            Monitored = ReadJsonBool(item, "monitored"),
+            Overview = Truncate(ReadJsonString(item, "overview"), 500),
+            SeasonNumber = seasonNumber,
+            SeriesTitle = seriesTitle ?? artistTitle,
+            Service = serviceName,
+            SortDate = NormalizeDateForSort(date),
+            Status = ReadJsonString(item, "status"),
+            Title = title
+        };
+    }
+
+    private static string GetArrCalendarTitle(string serviceName, JsonObject item)
+    {
+        if (serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReadJsonString(item["series"], "title")
+                ?? ReadJsonString(item, "seriesTitle")
+                ?? ReadJsonString(item, "title")
+                ?? "Upcoming episode";
+        }
+
+        if (serviceName.Equals("lidarr", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReadJsonString(item, "title")
+                ?? ReadJsonString(item, "albumTitle")
+                ?? ReadJsonString(item["artist"], "artistName")
+                ?? "Upcoming music release";
+        }
+
+        return ReadJsonString(item, "title")
+            ?? ReadJsonString(item, "movieTitle")
+            ?? "Upcoming movie";
+    }
+
+    private static string? GetArrCalendarDate(string serviceName, JsonObject item)
+    {
+        if (serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReadJsonString(item, "airDateUtc")
+                ?? ReadJsonString(item, "airDate");
+        }
+
+        if (serviceName.Equals("lidarr", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReadJsonString(item, "releaseDate")
+                ?? ReadJsonString(item, "physicalRelease")
+                ?? ReadJsonString(item, "digitalRelease");
+        }
+
+        return ReadJsonString(item, "inCinemas")
+            ?? ReadJsonString(item, "digitalRelease")
+            ?? ReadJsonString(item, "physicalRelease")
+            ?? ReadJsonString(item, "releaseDate");
+    }
+
+    private static string? NormalizeDateForSort(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+            ? parsed.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
+            : value;
     }
 
     private static ArrServiceSettings BuildArrTestSettings(string serviceName, PtvArrServiceSettingsPatch? settingsOverride)
@@ -1175,138 +1444,6 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 ok = false,
                 service = serviceName,
                 error = RedactSecrets(ex.Message)
-            };
-        }
-    }
-
-    private async Task<object> TestJfaGoEndpointAsync(
-        JfaGoSettings settings,
-        CancellationToken cancellationToken)
-    {
-        const string serviceName = "jfa-go";
-        const string endpointPath = "/config";
-
-        if (!settings.Enabled)
-        {
-            return new
-            {
-                ok = false,
-                service = serviceName,
-                endpoint = string.Empty,
-                statusCode = (int?)null,
-                message = "jfa-go integration is disabled."
-            };
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.InternalUrl))
-        {
-            return new
-            {
-                ok = false,
-                service = serviceName,
-                endpoint = string.Empty,
-                statusCode = (int?)null,
-                message = "jfa-go internal URL is not configured."
-            };
-        }
-
-        Uri endpoint;
-
-        try
-        {
-            endpoint = BuildProxyUri(settings.InternalUrl, endpointPath);
-        }
-        catch (Exception ex)
-        {
-            return new
-            {
-                ok = false,
-                service = serviceName,
-                endpoint = RedactSecrets(settings.InternalUrl),
-                statusCode = (int?)null,
-                message = "jfa-go internal URL is invalid.",
-                details = new
-                {
-                    error = RedactSecrets(ex.Message)
-                }
-            };
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.ApiKey))
-        {
-            return new
-            {
-                ok = false,
-                service = serviceName,
-                endpoint = RedactSecrets(endpoint.ToString()),
-                statusCode = (int?)null,
-                message = "jfa-go API token is not configured."
-            };
-        }
-
-        try
-        {
-            using var client = CreateProxyHttpClient(settings.ApiKey, PtvProxyAuthMode.Bearer, settings.AllowSelfSignedTls);
-            using var response = await client.GetAsync(endpoint, cancellationToken).ConfigureAwait(false);
-            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var details = ParseProxyPayload(payload);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return new
-                {
-                    ok = false,
-                    service = serviceName,
-                    endpoint = RedactSecrets(endpoint.ToString()),
-                    statusCode = (int)response.StatusCode,
-                    message = $"jfa-go returned HTTP {(int)response.StatusCode}.",
-                    details
-                };
-            }
-
-            return new
-            {
-                ok = true,
-                service = serviceName,
-                endpoint = RedactSecrets(endpoint.ToString()),
-                statusCode = (int)response.StatusCode,
-                message = "jfa-go connection succeeded.",
-                details
-            };
-        }
-        catch (HttpRequestException ex) when (LooksLikeTlsValidationFailure(ex))
-        {
-            LogEndpointFailure("integrations/jfa-go/test", ex);
-
-            return new
-            {
-                ok = false,
-                service = serviceName,
-                endpoint = RedactSecrets(endpoint.ToString()),
-                statusCode = (int?)null,
-                message = "jfa-go TLS validation failed. Enable self-signed TLS only for trusted LAN/internal jfa-go endpoints.",
-                details = new
-                {
-                    allowSelfSignedTls = settings.AllowSelfSignedTls,
-                    error = RedactSecrets(ex.Message)
-                }
-            };
-        }
-        catch (Exception ex)
-        {
-            LogEndpointFailure("integrations/jfa-go/test", ex);
-
-            return new
-            {
-                ok = false,
-                service = serviceName,
-                endpoint = RedactSecrets(endpoint.ToString()),
-                statusCode = (int?)null,
-                message = RedactSecrets(ex.Message),
-                details = new
-                {
-                    allowSelfSignedTls = settings.AllowSelfSignedTls
-                }
             };
         }
     }
@@ -1612,6 +1749,31 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             : null;
     }
 
+    private static bool? ReadJsonBool(JsonNode? node, string propertyName)
+    {
+        if (node is not JsonObject root || root[propertyName] is not { } value)
+        {
+            return null;
+        }
+
+        if (value is JsonValue jsonValue)
+        {
+            if (jsonValue.TryGetValue<bool>(out var boolValue))
+            {
+                return boolValue;
+            }
+
+            if (jsonValue.TryGetValue<int>(out var intValue))
+            {
+                return intValue > 0;
+            }
+        }
+
+        return bool.TryParse(Convert.ToString(value.GetValue<object>(), CultureInfo.InvariantCulture), out var parsedValue)
+            ? parsedValue
+            : null;
+    }
+
     private static string? ReadJsonString(JsonNode? node, string propertyName)
     {
         if (node is not JsonObject root || root[propertyName] is not { } value)
@@ -1698,6 +1860,75 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     {
         ApiKey,
         Bearer
+    }
+
+    private sealed class PtvArrCalendarServiceResultDto
+    {
+        [JsonPropertyName("service")]
+        public string Service { get; init; } = string.Empty;
+
+        [JsonPropertyName("enabled")]
+        public bool Enabled { get; init; }
+
+        [JsonPropertyName("configured")]
+        public bool Configured { get; init; }
+
+        [JsonPropertyName("supported")]
+        public bool Supported { get; init; }
+
+        [JsonPropertyName("itemCount")]
+        public int ItemCount { get; init; }
+
+        [JsonPropertyName("statusCode")]
+        public int? StatusCode { get; init; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; init; }
+    }
+
+    private sealed class PtvArrCalendarItemDto
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; init; } = string.Empty;
+
+        [JsonPropertyName("service")]
+        public string Service { get; init; } = string.Empty;
+
+        [JsonPropertyName("title")]
+        public string Title { get; init; } = string.Empty;
+
+        [JsonPropertyName("seriesTitle")]
+        public string? SeriesTitle { get; init; }
+
+        [JsonPropertyName("episodeTitle")]
+        public string? EpisodeTitle { get; init; }
+
+        [JsonPropertyName("date")]
+        public string? Date { get; init; }
+
+        [JsonPropertyName("sortDate")]
+        public string? SortDate { get; init; }
+
+        [JsonPropertyName("seasonNumber")]
+        public int? SeasonNumber { get; init; }
+
+        [JsonPropertyName("episodeNumber")]
+        public int? EpisodeNumber { get; init; }
+
+        [JsonPropertyName("monitored")]
+        public bool? Monitored { get; init; }
+
+        [JsonPropertyName("hasFile")]
+        public bool? HasFile { get; init; }
+
+        [JsonPropertyName("status")]
+        public string? Status { get; init; }
+
+        [JsonPropertyName("overview")]
+        public string? Overview { get; init; }
+
+        [JsonPropertyName("externalUrl")]
+        public string? ExternalUrl { get; init; }
     }
 
     private sealed record PtvSeerrRequestedMedia(
@@ -1982,6 +2213,38 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             LogEndpointFailure(routeName, ex);
 
             return false;
+        }
+    }
+
+    private PtvStatusIntegrations GetStatusIntegrations(string routeName)
+    {
+        try
+        {
+            GetNormalizedConfiguration();
+
+            return PtvStatusIntegrations.Create();
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure(routeName, ex);
+
+            return PtvStatusIntegrations.Create();
+        }
+    }
+
+    private PtvStatusSignup GetStatusSignup(string routeName)
+    {
+        try
+        {
+            var configuration = GetNormalizedConfiguration();
+
+            return PtvStatusSignup.Create(configuration.SignupSettings);
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure(routeName, ex);
+
+            return PtvStatusSignup.Create();
         }
     }
 

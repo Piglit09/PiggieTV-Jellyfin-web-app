@@ -48,7 +48,6 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         configuration.PerformanceSettings ??= new PerformanceSettings();
         configuration.TmdbSettings ??= new TmdbSettings();
         configuration.SeerrSettings ??= new SeerrSettings();
-        configuration.JfaGoSettings ??= new JfaGoSettings();
         configuration.ArrSettings ??= new ArrSettings();
         configuration.DownloadSettings ??= new DownloadSettings();
         configuration.TagSettings ??= new TagSettings();
@@ -66,7 +65,6 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         ApplyPerformanceSettingsPatch(configuration.PerformanceSettings, settings.PerformanceSettings);
         ApplyTmdbSettingsPatch(configuration, settings.TmdbSettings);
         ApplySeerrSettingsPatch(configuration.SeerrSettings, settings.SeerrSettings);
-        ApplyJfaGoSettingsPatch(configuration.JfaGoSettings, settings.JfaGoSettings);
         ApplyArrSettingsPatch(configuration.ArrSettings, settings.ArrSettings);
         ApplyDownloadSettingsPatch(configuration.DownloadSettings, settings.DownloadSettings);
         ApplyTagSettingsPatch(configuration.TagSettings, settings.TagSettings);
@@ -208,22 +206,10 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         if (!string.IsNullOrWhiteSpace(patch.ApiKey))
         {
             target.ApiKey = patch.ApiKey.Trim();
-        }
-    }
-
-    private static void ApplyJfaGoSettingsPatch(JfaGoSettings target, PtvJfaGoSettingsPatch? patch)
-    {
-        if (patch is null) return;
-
-        target.Enabled = patch.Enabled ?? target.Enabled;
-        target.DisplayName = patch.DisplayName ?? target.DisplayName;
-        target.InternalUrl = patch.InternalUrl ?? target.InternalUrl;
-        target.ExternalUrl = patch.ExternalUrl ?? target.ExternalUrl;
-        target.AllowSelfSignedTls = patch.AllowSelfSignedTls ?? patch.InsecureTls ?? target.AllowSelfSignedTls;
-
-        if (!string.IsNullOrWhiteSpace(patch.ApiKey))
-        {
-            target.ApiKey = patch.ApiKey.Trim();
+            target.Enabled = true;
+            target.EnableRequestsPage = true;
+            target.EnableSearchIntegration = true;
+            target.OpenRequestsInPtv = true;
         }
     }
 
@@ -253,6 +239,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         if (!string.IsNullOrWhiteSpace(patch.ApiKey))
         {
             target.ApiKey = patch.ApiKey.Trim();
+            target.Enabled = true;
         }
     }
 
@@ -316,7 +303,6 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         if (settings.PerformanceSettings is not null) sections.Add("performanceSettings");
         if (settings.TmdbSettings is not null) sections.Add("tmdbSettings");
         if (settings.SeerrSettings is not null) sections.Add("seerrSettings");
-        if (settings.JfaGoSettings is not null) sections.Add("jfaGoSettings");
         if (settings.ArrSettings is not null) sections.Add("arrSettings");
         if (settings.DownloadSettings is not null) sections.Add("downloadSettings");
         if (settings.TagSettings is not null) sections.Add("tagSettings");
@@ -407,20 +393,6 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
             if (seerrSettings.ApiKey is not null)
             {
                 keys.Add("seerrSettings.apiKey:<redacted>");
-            }
-        }
-
-        if (settings.JfaGoSettings is { } jfaGoSettings)
-        {
-            AddIfPresent(keys, jfaGoSettings.Enabled, "jfaGoSettings.enabled");
-            AddIfPresent(keys, jfaGoSettings.DisplayName, "jfaGoSettings.displayName");
-            AddIfPresent(keys, jfaGoSettings.InternalUrl, "jfaGoSettings.internalUrl");
-            AddIfPresent(keys, jfaGoSettings.ExternalUrl, "jfaGoSettings.externalUrl");
-            AddIfPresent(keys, jfaGoSettings.AllowSelfSignedTls, "jfaGoSettings.allowSelfSignedTls");
-
-            if (jfaGoSettings.ApiKey is not null)
-            {
-                keys.Add("jfaGoSettings.apiKey:<redacted>");
             }
         }
 

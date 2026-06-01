@@ -1173,34 +1173,6 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 }
             );
         },
-        testJfaGo<T = unknown, TSettings = unknown>(settings?: TSettings, options?: PtvPluginRequestOptions) {
-            return requestPluginJson<T>(
-                apiClient,
-                PTV_PLUGIN_API.endpoints.jfaGoTest,
-                {
-                    ...options,
-                    body: settings,
-                    method: 'POST'
-                }
-            )
-                .catch(error => {
-                    const normalizedError = normalizePtvApiError(error);
-
-                    if (normalizedError.kind !== 'missing') {
-                        throw error;
-                    }
-
-                    return requestPluginJson<T>(
-                        apiClient,
-                        PTV_PLUGIN_API.endpoints.jfaGoTestAlias,
-                        {
-                            ...options,
-                            body: settings,
-                            method: 'POST'
-                        }
-                    );
-                });
-        },
         searchSeerr<T = unknown>(query: string) {
             return requestPluginJson<T>(
                 apiClient,
@@ -1227,6 +1199,117 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 options
             );
         },
+        createSignupUser<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupCreateUser,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        verifySignupEmail<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupVerifyEmail,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        requestSignupPasswordReset<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupPasswordResetRequest,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        confirmSignupPasswordReset<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupPasswordResetConfirm,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        getSignupSettings<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupAdminSettings,
+                options
+            );
+        },
+        saveSignupSettings<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupAdminSettings,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        sendSignupTestEmail<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupAdminTestEmail,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        getSignupInvites<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupAdminInvites,
+                options
+            );
+        },
+        createSignupInvite<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.signupAdminInvites,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        disableSignupInvite<T = unknown>(inviteId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.signupAdminInvites}/${encodeURIComponent(inviteId)}/disable`,
+                {
+                    ...options,
+                    method: 'POST'
+                }
+            );
+        },
+        deleteSignupInvite<T = unknown>(inviteId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.signupAdminInvites}/${encodeURIComponent(inviteId)}`,
+                {
+                    ...options,
+                    method: 'DELETE'
+                }
+            );
+        },
         testArrService<T = unknown, TSettings = unknown>(
             serviceName: 'lidarr' | 'prowlarr' | 'radarr' | 'sonarr',
             settings?: TSettings,
@@ -1242,10 +1325,11 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 }
             );
         },
-        getArrCalendar<T = unknown>() {
+        getArrCalendar<T = unknown>(options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
                 apiClient,
-                PTV_PLUGIN_API.endpoints.arrCalendar
+                PTV_PLUGIN_API.endpoints.arrCalendar,
+                options
             );
         },
         getArrDownloads<T = unknown>() {

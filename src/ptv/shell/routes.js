@@ -23,7 +23,11 @@ const ROUTE_MATCHERS = [
         layout: 'auth',
         owner: 'signup',
         pageType: 'signup',
-        pattern: ({ hash }) => hash === PTV_ROUTES.signup || document.documentElement.classList.contains('ptv-signup-active')
+        pattern: ({ hash }) => hash === PTV_ROUTES.signup
+            || hash.startsWith(`${PTV_ROUTES.signup}?`)
+            || hash === '#/ptv/signup'
+            || hash.startsWith('#/ptv/signup?')
+            || document.documentElement.classList.contains('ptv-signup-active')
     },
     {
         className: 'ptv-route-dashboard',
@@ -83,6 +87,18 @@ const ROUTE_MATCHERS = [
         owner: 'request',
         pageType: 'request',
         pattern: () => document.documentElement.classList.contains('ptv-request-active')
+    },
+    {
+        className: 'ptv-route-calendar',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['calendar'],
+        id: 'calendar',
+        layout: 'embedded',
+        navigationItemId: 'calendar',
+        owner: 'calendar',
+        pageType: 'calendar',
+        pattern: ({ hash }) => hash === PTV_ROUTES.calendar || hash.includes('/calendar')
     },
     {
         className: 'ptv-route-playback',
@@ -190,6 +206,7 @@ export function getPtvRouteOwnership(location = window.location) {
         path,
 
         isDashboard: features.includes('dashboard'),
+        isCalendar: features.includes('calendar'),
         isDetails: features.includes('details'),
         isHome: features.includes('home'),
         isLibrary: features.includes('library'),

@@ -84,6 +84,99 @@
             Legacy unversioned featured-content refresh route.
             </summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController">
+            <summary>
+            Native PiggieTV signup and invite API.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Api.PtvSignupController},Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService,Microsoft.AspNetCore.Authorization.IAuthorizationService)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController"/> class.
+            </summary>
+            <param name="logger">Logger.</param>
+            <param name="signupService">Signup service.</param>
+            <param name="authorizationService">Authorization service.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.CreateUser(Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest,System.Threading.CancellationToken)">
+            <summary>
+            Creates a Jellyfin local user from native PiggieTV signup.
+            </summary>
+            <param name="request">Create user request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Create user result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.VerifyEmail(Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailVerificationRequest,System.Threading.CancellationToken)">
+            <summary>
+            Verifies a pending signup email link and finalizes user creation.
+            </summary>
+            <param name="request">Verification request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Verification result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.RequestPasswordReset(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest,System.Threading.CancellationToken)">
+            <summary>
+            Sends a password reset code by email.
+            </summary>
+            <param name="request">Password reset request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Reset request result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.ConfirmPasswordReset(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest,System.Threading.CancellationToken)">
+            <summary>
+            Confirms a password reset code and sets a new password.
+            </summary>
+            <param name="request">Password reset confirmation request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Reset confirmation result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.GetSettings">
+            <summary>
+            Gets native PiggieTV signup settings for admins.
+            </summary>
+            <returns>Signup settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.SaveSettings(Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch)">
+            <summary>
+            Saves native PiggieTV signup settings for admins.
+            </summary>
+            <param name="request">Settings patch.</param>
+            <returns>Saved settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.SendTestEmail(Jellyfin.Plugin.PiggieTV.Models.PtvSignupTestEmailRequest,System.Threading.CancellationToken)">
+            <summary>
+            Sends a signup engine test email for admins.
+            </summary>
+            <param name="request">Test email request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Test result.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.GetInvites">
+            <summary>
+            Gets native PiggieTV signup invites for admins.
+            </summary>
+            <returns>Invite list.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.CreateInvite(Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest)">
+            <summary>
+            Creates a native PiggieTV signup invite.
+            </summary>
+            <param name="request">Create invite request.</param>
+            <returns>Created invite and one-time clear invite code.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.DisableInvite(System.String)">
+            <summary>
+            Disables a native PiggieTV signup invite.
+            </summary>
+            <param name="id">Invite id.</param>
+            <returns>Disabled invite.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController.DeleteInvite(System.String)">
+            <summary>
+            Deletes a native PiggieTV signup invite.
+            </summary>
+            <param name="id">Invite id.</param>
+            <returns>No content.</returns>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController">
             <summary>
             Minimal PiggieTV plugin API.
@@ -195,21 +288,6 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Redacted test result.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestSavedJfaGo(System.Threading.CancellationToken)">
-            <summary>
-            Tests saved jfa-go connectivity from the Jellyfin server.
-            </summary>
-            <param name="cancellationToken">Cancellation token.</param>
-            <returns>Redacted test result.</returns>
-        </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.TestJfaGo(Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch,System.Threading.CancellationToken)">
-            <summary>
-            Tests jfa-go connectivity from the Jellyfin server with optional unsaved settings.
-            </summary>
-            <param name="settingsOverride">Optional unsaved settings to test.</param>
-            <param name="cancellationToken">Cancellation token.</param>
-            <returns>Redacted test result.</returns>
-        </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SearchSeerr(System.String,System.Threading.CancellationToken)">
             <summary>
             Searches Jellyseerr through the PiggieTV backend proxy.
@@ -259,10 +337,15 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Redacted test result.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetArrCalendar">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetArrCalendar(System.Nullable{System.DateTimeOffset},System.Nullable{System.DateTimeOffset},System.Int32,System.Int32,System.Threading.CancellationToken)">
             <summary>
-            Gets an aggregated *Arr calendar placeholder through the PiggieTV backend.
+            Gets an aggregated *Arr calendar through the PiggieTV backend.
             </summary>
+            <param name="start">Optional start date.</param>
+            <param name="end">Optional end date.</param>
+            <param name="daysBefore">Days before today when start is omitted.</param>
+            <param name="daysAfter">Days after today when end is omitted.</param>
+            <param name="cancellationToken">Cancellation token.</param>
             <returns>Calendar status.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetArrDownloads">
@@ -352,9 +435,9 @@
             Gets or sets Jellyseerr request integration settings.
             </summary>
         </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.JfaGoSettings">
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.SignupSettings">
             <summary>
-            Gets or sets jfa-go account/invite integration settings.
+            Gets or sets native PiggieTV signup settings.
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.ArrSettings">
@@ -682,29 +765,6 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings.OpenExternalFallback">
             <summary>Gets or sets a value indicating whether external fallback should be offered.</summary>
         </member>
-        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings">
-            <summary>
-            PiggieTV jfa-go integration settings.
-            </summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.Enabled">
-            <summary>Gets or sets a value indicating whether jfa-go integration is enabled.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.DisplayName">
-            <summary>Gets or sets the display name shown in PiggieTV.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.InternalUrl">
-            <summary>Gets or sets the internal jfa-go URL used by the plugin backend.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.ExternalUrl">
-            <summary>Gets or sets the external jfa-go URL used as a browser fallback.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.ApiKey">
-            <summary>Gets or sets the jfa-go API key/token. This is write-only in public DTOs.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.JfaGoSettings.AllowSelfSignedTls">
-            <summary>Gets or sets a value indicating whether invalid/self-signed internal TLS certificates are allowed.</summary>
-        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ArrSettings">
             <summary>
             PiggieTV *Arr integration settings.
@@ -842,6 +902,312 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.Behavior">
             <summary>Gets or sets random action behavior.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings">
+            <summary>
+            PiggieTV native signup settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.Enabled">
+            <summary>Gets or sets whether native PiggieTV signup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.FailedAttemptLimit">
+            <summary>Gets or sets invite lockout threshold.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.LockoutMinutes">
+            <summary>Gets or sets invite lockout duration in minutes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.DefaultPolicyPresetId">
+            <summary>Gets or sets the default signup policy preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.DefaultEnabledFolderIds">
+            <summary>Gets or sets explicit default folder ids for new signups.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.EmailSettings">
+            <summary>Gets or sets email delivery settings for signup and password reset.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.PolicyPresets">
+            <summary>Gets or sets configured user policy presets.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.Invites">
+            <summary>Gets or sets native PiggieTV signup invites.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.Users">
+            <summary>Gets or sets users created by native PiggieTV signup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.PendingVerifications">
+            <summary>Gets or sets pending email verifications for native signup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.PasswordResetCodes">
+            <summary>Gets or sets pending password reset codes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.RateLimits">
+            <summary>Gets or sets public signup/reset API rate-limit counters.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings.CreateDefaultPolicyPresets">
+            <summary>
+            Creates default policy presets.
+            </summary>
+            <returns>Default signup policy presets.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings">
+            <summary>
+            PiggieTV signup SMTP/email settings.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.DefaultLogoUrl">
+            <summary>Gets or sets default public logo URL used in branded email templates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.Enabled">
+            <summary>Gets or sets a value indicating whether email delivery is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.SmtpHost">
+            <summary>Gets or sets SMTP host.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.SmtpPort">
+            <summary>Gets or sets SMTP port.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.UseSsl">
+            <summary>Gets or sets whether SMTP SSL/TLS is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.Username">
+            <summary>Gets or sets SMTP username.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.Password">
+            <summary>Gets or sets SMTP password. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.FromAddress">
+            <summary>Gets or sets sender email address.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.FromName">
+            <summary>Gets or sets sender display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.LogoUrl">
+            <summary>Gets or sets the public logo URL used in branded email templates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.ResetSubject">
+            <summary>Gets or sets password reset email subject.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.ResetCodeMinutes">
+            <summary>Gets or sets reset code lifetime in minutes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.VerificationSubject">
+            <summary>Gets or sets email verification subject.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings.VerificationLinkMinutes">
+            <summary>Gets or sets email verification link lifetime in minutes.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset">
+            <summary>
+            PiggieTV signup user policy preset.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.Id">
+            <summary>Gets or sets the preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.Name">
+            <summary>Gets or sets the display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.EnableAllFolders">
+            <summary>Gets or sets whether all folders are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.EnabledFolderIds">
+            <summary>Gets or sets enabled library folder ids when all folders are disabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.AllowDownloads">
+            <summary>Gets or sets whether downloads are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.AllowRemoteControl">
+            <summary>Gets or sets whether remote control permissions are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.AllowLiveTv">
+            <summary>Gets or sets whether Live TV access is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.AllowTranscoding">
+            <summary>Gets or sets whether transcoding is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.RemoteClientBitrateLimit">
+            <summary>Gets or sets optional max remote bitrate.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.MaxActiveSessions">
+            <summary>Gets or sets optional max active sessions.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset.MaxParentalRating">
+            <summary>Gets or sets optional max parental rating.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite">
+            <summary>
+            PiggieTV native signup invite.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.Id">
+            <summary>Gets or sets invite id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.CodeHash">
+            <summary>Gets or sets hashed invite code.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.CodePreview">
+            <summary>Gets or sets short non-secret code preview.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.Label">
+            <summary>Gets or sets invite label or group name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.CreatedAtUtc">
+            <summary>Gets or sets created timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.ExpiresAtUtc">
+            <summary>Gets or sets expiration timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.MaxUses">
+            <summary>Gets or sets maximum uses. Zero means unlimited.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.Disabled">
+            <summary>Gets or sets whether the invite is disabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.EmailRequired">
+            <summary>Gets or sets whether email is required during signup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.PolicyPresetId">
+            <summary>Gets or sets policy preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.EnabledFolderIds">
+            <summary>Gets or sets explicit library folder override ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.FailedAttempts">
+            <summary>Gets or sets failed validation attempt count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.LockedUntilUtc">
+            <summary>Gets or sets temporary lockout timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite.UsageRecords">
+            <summary>Gets or sets created user usage records.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupInviteUsageRecord">
+            <summary>
+            PiggieTV invite usage record.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInviteUsageRecord.UserId">
+            <summary>Gets or sets created Jellyfin user id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInviteUsageRecord.Username">
+            <summary>Gets or sets created username.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInviteUsageRecord.Email">
+            <summary>Gets or sets optional signup email.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInviteUsageRecord.UsedAtUtc">
+            <summary>Gets or sets usage timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupInviteUsageRecord.RemoteAddress">
+            <summary>Gets or sets remote address.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupUserRecord">
+            <summary>
+            PiggieTV native signup user record.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupUserRecord.UserId">
+            <summary>Gets or sets created Jellyfin user id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupUserRecord.Username">
+            <summary>Gets or sets created username.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupUserRecord.Email">
+            <summary>Gets or sets required signup email.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupUserRecord.PolicyPresetId">
+            <summary>Gets or sets policy preset id used for this signup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupUserRecord.CreatedAtUtc">
+            <summary>Gets or sets created timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupUserRecord.RemoteAddress">
+            <summary>Gets or sets remote address.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification">
+            <summary>
+            PiggieTV pending signup email verification record.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.Id">
+            <summary>Gets or sets verification id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.Username">
+            <summary>Gets or sets requested username.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.Email">
+            <summary>Gets or sets required signup email.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.ProtectedPassword">
+            <summary>Gets or sets protected pending password.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.TokenHash">
+            <summary>Gets or sets hashed verification token.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.PolicyPresetId">
+            <summary>Gets or sets policy preset id used for this signup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.EnabledFolderIds">
+            <summary>Gets or sets explicit enabled folders for this pending signup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.CreatedAtUtc">
+            <summary>Gets or sets created timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.ExpiresAtUtc">
+            <summary>Gets or sets expiration timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPendingVerification.RemoteAddress">
+            <summary>Gets or sets remote address.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode">
+            <summary>
+            PiggieTV password reset code record.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode.Email">
+            <summary>Gets or sets normalized email.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode.Username">
+            <summary>Gets or sets username for the reset target.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode.CodeHash">
+            <summary>Gets or sets hashed reset code.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode.CreatedAtUtc">
+            <summary>Gets or sets created timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode.ExpiresAtUtc">
+            <summary>Gets or sets expiration timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode.UsedAtUtc">
+            <summary>Gets or sets used timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode.FailedAttempts">
+            <summary>Gets or sets failed confirmation attempts.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupPasswordResetCode.RemoteAddress">
+            <summary>Gets or sets remote address.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupRateLimitRecord">
+            <summary>
+            PiggieTV public signup/reset rate-limit record. Keys are hashes, not raw IPs or emails.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupRateLimitRecord.Action">
+            <summary>Gets or sets the protected action name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupRateLimitRecord.KeyHash">
+            <summary>Gets or sets the hashed rate-limit key.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupRateLimitRecord.Count">
+            <summary>Gets or sets attempt count inside the current window.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupRateLimitRecord.WindowStartedAtUtc">
+            <summary>Gets or sets current rate-limit window start.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.SignupRateLimitRecord.LockedUntilUtc">
+            <summary>Gets or sets temporary lockout timestamp.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvContentCacheStatus">
             <summary>
@@ -1116,9 +1482,6 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.SeerrSettings">
             <summary>Gets or sets Jellyseerr settings.</summary>
         </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.JfaGoSettings">
-            <summary>Gets or sets jfa-go settings.</summary>
-        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.ArrSettings">
             <summary>Gets or sets *Arr integration settings.</summary>
         </member>
@@ -1169,9 +1532,6 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.SeerrSettings">
             <summary>Gets or sets Jellyseerr setting updates.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.JfaGoSettings">
-            <summary>Gets or sets jfa-go setting updates.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.ArrSettings">
             <summary>Gets or sets *Arr setting updates.</summary>
@@ -1333,32 +1693,6 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch.OpenExternalFallback">
             <summary>Gets or sets whether external fallback is enabled.</summary>
-        </member>
-        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch">
-            <summary>
-            Partial jfa-go settings patch. API key/token is write-only.
-            </summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.Enabled">
-            <summary>Gets or sets whether jfa-go integration is enabled.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.DisplayName">
-            <summary>Gets or sets the display name.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.InternalUrl">
-            <summary>Gets or sets the internal URL.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.ExternalUrl">
-            <summary>Gets or sets the external URL.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.ApiKey">
-            <summary>Gets or sets a write-only API key/token replacement.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.AllowSelfSignedTls">
-            <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvJfaGoSettingsPatch.InsecureTls">
-            <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvArrSettingsPatch">
             <summary>
@@ -1544,37 +1878,6 @@
             <summary>Creates public Jellyseerr settings.</summary>
             <param name="configuration">Plugin configuration.</param>
             <returns>Public Jellyseerr settings.</returns>
-        </member>
-        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings">
-            <summary>
-            Public jfa-go settings DTO that never returns the stored API key/token.
-            </summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.Enabled">
-            <summary>Gets or sets whether jfa-go integration is enabled.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.DisplayName">
-            <summary>Gets or sets the display name.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.InternalUrl">
-            <summary>Gets or sets the internal URL.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.ExternalUrl">
-            <summary>Gets or sets the external URL.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.ApiKeyConfigured">
-            <summary>Gets or sets whether an API key/token is configured.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.ApiKey">
-            <summary>Gets or sets a write-only API key/token replacement.</summary>
-        </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.AllowSelfSignedTls">
-            <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
-        </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicJfaGoSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
-            <summary>Creates public jfa-go settings.</summary>
-            <param name="configuration">Plugin configuration.</param>
-            <returns>Public jfa-go settings.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicArrSettings">
             <summary>
@@ -1788,6 +2091,396 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.GenerationTimeMs">
             <summary>Gets or sets generation time in milliseconds.</summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto">
+            <summary>
+            Public native signup invite DTO.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.Id">
+            <summary>Gets or sets invite id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.Code">
+            <summary>Gets or sets optional one-time clear code returned only after creation.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.CodePreview">
+            <summary>Gets or sets invite code preview.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.Label">
+            <summary>Gets or sets label.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.CreatedAtUtc">
+            <summary>Gets or sets created timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.ExpiresAtUtc">
+            <summary>Gets or sets expiration timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.MaxUses">
+            <summary>Gets or sets max uses.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.UsedCount">
+            <summary>Gets or sets used count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.Disabled">
+            <summary>Gets or sets whether disabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.EmailRequired">
+            <summary>Gets or sets whether email is required.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.PolicyPresetId">
+            <summary>Gets or sets selected policy preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.EnabledFolderIds">
+            <summary>Gets or sets explicit enabled library folder ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.Usable">
+            <summary>Gets or sets whether invite is currently usable.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.LockedUntilUtc">
+            <summary>Gets or sets temporary lockout timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.UsageRecords">
+            <summary>Gets or sets usage records.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteDto.FromInvite(Jellyfin.Plugin.PiggieTV.Configuration.SignupInvite,System.String)">
+            <summary>
+            Creates a public invite DTO.
+            </summary>
+            <param name="invite">Stored invite.</param>
+            <param name="clearCode">Optional clear code.</param>
+            <returns>Public invite DTO.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto">
+            <summary>
+            Signup policy preset DTO.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.Id">
+            <summary>Gets or sets preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.Name">
+            <summary>Gets or sets preset name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.EnableAllFolders">
+            <summary>Gets or sets whether all folders are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.EnabledFolderIds">
+            <summary>Gets or sets enabled folder ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.AllowDownloads">
+            <summary>Gets or sets whether downloads are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.AllowLiveTv">
+            <summary>Gets or sets whether Live TV is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.AllowRemoteControl">
+            <summary>Gets or sets whether remote control is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.AllowTranscoding">
+            <summary>Gets or sets whether transcoding is enabled.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPolicyPresetDto.FromPreset(Jellyfin.Plugin.PiggieTV.Configuration.SignupPolicyPreset)">
+            <summary>
+            Creates a preset DTO.
+            </summary>
+            <param name="preset">Preset.</param>
+            <returns>DTO.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto">
+            <summary>
+            Public signup email settings DTO. SMTP password is write-only.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.Enabled">
+            <summary>Gets or sets whether email delivery is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.SmtpHost">
+            <summary>Gets or sets SMTP host.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.SmtpPort">
+            <summary>Gets or sets SMTP port.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.UseSsl">
+            <summary>Gets or sets whether SSL/TLS is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.Username">
+            <summary>Gets or sets SMTP username.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.Password">
+            <summary>Gets or sets SMTP password when saving settings. Never returned by the backend.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.PasswordConfigured">
+            <summary>Gets or sets whether a password is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.FromAddress">
+            <summary>Gets or sets sender email address.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.FromName">
+            <summary>Gets or sets sender display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.LogoUrl">
+            <summary>Gets or sets public logo URL used in branded verification emails.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.ResetSubject">
+            <summary>Gets or sets password reset subject.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.ResetCodeMinutes">
+            <summary>Gets or sets reset code lifetime in minutes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.VerificationSubject">
+            <summary>Gets or sets email verification subject.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.VerificationLinkMinutes">
+            <summary>Gets or sets email verification link lifetime in minutes.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailSettingsDto.FromSettings(Jellyfin.Plugin.PiggieTV.Configuration.SignupEmailSettings)">
+            <summary>
+            Creates a redacted DTO from stored settings.
+            </summary>
+            <param name="settings">Stored settings.</param>
+            <returns>Redacted DTO.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto">
+            <summary>
+            Native signup user DTO.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto.UserId">
+            <summary>Gets or sets user id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto.Username">
+            <summary>Gets or sets username.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto.Email">
+            <summary>Gets or sets email.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto.EmailConfigured">
+            <summary>Gets or sets a value indicating whether PiggieTV has an email saved for this Jellyfin user.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto.PolicyPresetId">
+            <summary>Gets or sets policy preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto.Source">
+            <summary>Gets or sets where the mapping came from.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto.CreatedAtUtc">
+            <summary>Gets or sets created timestamp.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserDto.FromRecord(Jellyfin.Plugin.PiggieTV.Configuration.SignupUserRecord)">
+            <summary>
+            Creates a user DTO.
+            </summary>
+            <param name="record">Stored user record.</param>
+            <returns>DTO.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserEmailPatch">
+            <summary>
+            Admin patch for a Jellyfin user's PiggieTV email mapping.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserEmailPatch.UserId">
+            <summary>Gets or sets Jellyfin user id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupUserEmailPatch.Email">
+            <summary>Gets or sets email address. Blank clears the mapping.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupValidateInviteRequest">
+            <summary>
+            Validate invite request.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupValidateInviteRequest.InviteCode">
+            <summary>Gets or sets invite code.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest">
+            <summary>
+            Create user request.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest.InviteCode">
+            <summary>Gets or sets invite code.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest.Username">
+            <summary>Gets or sets username.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest.Password">
+            <summary>Gets or sets password.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest.ConfirmPassword">
+            <summary>Gets or sets confirm password.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest.Email">
+            <summary>Gets or sets required email.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest.VerificationBaseUrl">
+            <summary>Gets or sets verification link base URL.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailVerificationRequest">
+            <summary>
+            Email verification request.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailVerificationRequest.Token">
+            <summary>Gets or sets email verification token.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest">
+            <summary>
+            Password reset request.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest.Email">
+            <summary>Gets or sets account email.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest">
+            <summary>
+            Password reset confirmation request.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest.Email">
+            <summary>Gets or sets account email.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest.Code">
+            <summary>Gets or sets reset code.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest.Password">
+            <summary>Gets or sets new password.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest.ConfirmPassword">
+            <summary>Gets or sets confirmed new password.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest">
+            <summary>
+            Create invite request.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest.Label">
+            <summary>Gets or sets label.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest.ExpiresAtUtc">
+            <summary>Gets or sets expiration timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest.MaxUses">
+            <summary>Gets or sets max uses.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest.PolicyPresetId">
+            <summary>Gets or sets policy preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest.EmailRequired">
+            <summary>Gets or sets whether email is required.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest.EnabledFolderIds">
+            <summary>Gets or sets explicit enabled folder ids.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupResponse">
+            <summary>
+            Generic signup response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupResponse.Ok">
+            <summary>Gets or sets whether request succeeded.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupResponse.Message">
+            <summary>Gets or sets friendly message.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupResponse.UserId">
+            <summary>Gets or sets optional user id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupResponse.Username">
+            <summary>Gets or sets optional username.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteValidationResponse">
+            <summary>
+            Invite validation response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteValidationResponse.Valid">
+            <summary>Gets or sets whether invite is valid.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteValidationResponse.EmailRequired">
+            <summary>Gets or sets whether email is required.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteValidationResponse.Label">
+            <summary>Gets or sets invite label.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteValidationResponse.PolicyPresetName">
+            <summary>Gets or sets policy preset name.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteListResponse">
+            <summary>
+            Invite list response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteListResponse.Ok">
+            <summary>Gets or sets whether request succeeded.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteListResponse.Enabled">
+            <summary>Gets or sets whether native signup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteListResponse.Invites">
+            <summary>Gets or sets invites.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupInviteListResponse.PolicyPresets">
+            <summary>Gets or sets policy presets.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse">
+            <summary>
+            Native signup admin settings response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.Ok">
+            <summary>Gets or sets whether request succeeded.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.Enabled">
+            <summary>Gets or sets whether native signup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.DefaultPolicyPresetId">
+            <summary>Gets or sets default policy preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.DefaultEnabledFolderIds">
+            <summary>Gets or sets default enabled folder ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.PolicyPresets">
+            <summary>Gets or sets policy presets.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.EmailSettings">
+            <summary>Gets or sets email settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.Users">
+            <summary>Gets or sets native signup users.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.PendingResetCount">
+            <summary>Gets or sets pending reset code count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsResponse.PendingVerificationCount">
+            <summary>Gets or sets pending email verification count.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch">
+            <summary>
+            Native signup admin settings patch.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch.Enabled">
+            <summary>Gets or sets whether native signup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch.DefaultPolicyPresetId">
+            <summary>Gets or sets default policy preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch.DefaultEnabledFolderIds">
+            <summary>Gets or sets default enabled folder ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch.EmailSettings">
+            <summary>Gets or sets email settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch.Users">
+            <summary>Gets or sets optional Jellyfin user email mappings for password reset.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupTestEmailRequest">
+            <summary>
+            Test signup email request.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupTestEmailRequest.Recipient">
+            <summary>Gets or sets recipient email address.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse">
             <summary>
             PiggieTV plugin health response.
@@ -1993,6 +2686,16 @@
             Gets or sets the TMDb metadata subsystem status.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Integrations">
+            <summary>
+            Gets or sets integration route discovery for dashboard diagnostics.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Signup">
+            <summary>
+            Gets or sets redacted native signup diagnostics for dashboard debug reports.
+            </summary>
+        </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.FromStoreStatus(Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentStoreStatus,System.Boolean,Jellyfin.Plugin.PiggieTV.Models.PtvFeaturedContentRefreshStatus,Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus)">
             <summary>
             Creates a status response from a stored document.
@@ -2002,6 +2705,202 @@
             <param name="refreshStatus">Featured-content refresh worker status.</param>
             <param name="tmdbMetadata">TMDb metadata enrichment status.</param>
             <returns>Status response.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvStatusIntegrations">
+            <summary>
+            PiggieTV integration route discovery for dashboard diagnostics.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusIntegrations.ArrCalendar">
+            <summary>
+            Gets or sets *Arr calendar route status.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvStatusIntegrations.Create">
+            <summary>
+            Creates default integration route discovery.
+            </summary>
+            <returns>Integration route discovery.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup">
+            <summary>
+            Redacted PiggieTV native signup diagnostics for status/debug payloads.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.Enabled">
+            <summary>Gets or sets whether native PiggieTV signup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.EmailRequired">
+            <summary>Gets or sets whether signup requires email verification.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.EmailEnabled">
+            <summary>Gets or sets whether SMTP/email delivery is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.EmailConfigured">
+            <summary>Gets or sets whether the email engine has the minimum required settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.SmtpHostConfigured">
+            <summary>Gets or sets whether an SMTP host is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.SmtpPort">
+            <summary>Gets or sets SMTP port for diagnostics.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.UseSsl">
+            <summary>Gets or sets whether SMTP SSL/TLS is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.SmtpUsernameConfigured">
+            <summary>Gets or sets whether an SMTP username is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.SmtpPasswordConfigured">
+            <summary>Gets or sets whether an SMTP password is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.FromAddressConfigured">
+            <summary>Gets or sets whether a From address is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.LogoUrlConfigured">
+            <summary>Gets or sets whether a branded email logo URL is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.FromDomain">
+            <summary>Gets or sets the sender domain only, not the full address.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.ResetCodeMinutes">
+            <summary>Gets or sets reset-code lifetime in minutes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.VerificationLinkMinutes">
+            <summary>Gets or sets verification-link lifetime in minutes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.DefaultPolicyPresetId">
+            <summary>Gets or sets the default policy preset id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.DefaultEnabledFolderCount">
+            <summary>Gets or sets the number of explicit default library folders.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.PolicyPresetCount">
+            <summary>Gets or sets configured policy preset count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.InviteCount">
+            <summary>Gets or sets configured invite count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.ActiveInviteCount">
+            <summary>Gets or sets active invite count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.LockedInviteCount">
+            <summary>Gets or sets locked invite count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.NativeUserCount">
+            <summary>Gets or sets native signup-created user count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.PendingVerificationCount">
+            <summary>Gets or sets active pending verification count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.ExpiredPendingVerificationCount">
+            <summary>Gets or sets expired pending verification count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.PendingResetCount">
+            <summary>Gets or sets active pending password-reset code count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.ExpiredPendingResetCount">
+            <summary>Gets or sets expired pending password-reset code count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.ActiveRateLimitCount">
+            <summary>Gets or sets active public signup/reset rate-limit bucket count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.LastNativeUserCreatedAtUtc">
+            <summary>Gets or sets latest native signup creation timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.NextVerificationExpiresAtUtc">
+            <summary>Gets or sets next pending verification expiration timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.NextResetCodeExpiresAtUtc">
+            <summary>Gets or sets next pending reset-code expiration timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.Routes">
+            <summary>Gets or sets signup API route discovery.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.Create">
+            <summary>
+            Creates default redacted signup diagnostics.
+            </summary>
+            <returns>Default signup diagnostics.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvStatusSignup.Create(Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings)">
+            <summary>
+            Creates redacted signup diagnostics from saved settings.
+            </summary>
+            <param name="settings">Native signup settings.</param>
+            <returns>Redacted signup diagnostics.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus">
+            <summary>
+            PiggieTV signup route discovery.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.Available">
+            <summary>Gets or sets whether signup routes are available in this plugin build.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.CreateUser">
+            <summary>Gets or sets public create-user route.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.VerifyEmail">
+            <summary>Gets or sets public email verification route.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.PasswordResetRequest">
+            <summary>Gets or sets public password reset request route.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.PasswordResetConfirm">
+            <summary>Gets or sets public password reset confirmation route.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.AdminSettings">
+            <summary>Gets or sets admin signup settings route.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.AdminTestEmail">
+            <summary>Gets or sets admin test email route.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.Methods">
+            <summary>Gets or sets supported methods by route id.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvSignupRouteStatus.Create">
+            <summary>
+            Creates route discovery.
+            </summary>
+            <returns>Signup route discovery.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvIntegrationRouteStatus">
+            <summary>
+            Single integration route status.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvIntegrationRouteStatus.Enabled">
+            <summary>
+            Gets or sets a value indicating whether the integration is enabled in saved settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvIntegrationRouteStatus.TestRouteAvailable">
+            <summary>
+            Gets or sets a value indicating whether the plugin exposes the test route in this build.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvIntegrationRouteStatus.CanonicalRoute">
+            <summary>
+            Gets or sets the canonical plugin test route.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvIntegrationRouteStatus.Aliases">
+            <summary>
+            Gets or sets route aliases supported for backwards compatibility.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvIntegrationRouteStatus.Methods">
+            <summary>
+            Gets or sets HTTP methods supported by the route.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvIntegrationRouteStatus.CreateArrCalendar(System.Boolean)">
+            <summary>
+            Creates *Arr calendar route status.
+            </summary>
+            <param name="enabled">Whether at least one *Arr service can provide calendar data.</param>
+            <returns>*Arr calendar route status.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus">
             <summary>
@@ -2185,6 +3084,50 @@
             Resets plugin settings to defaults.
             </summary>
             <returns>Default public plugin settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService">
+            <summary>
+            Native PiggieTV signup service.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.ValidateInviteAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <summary>Validates an invite code.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.CreateUserAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest,System.String,System.Threading.CancellationToken)">
+            <summary>Creates a Jellyfin user from a valid invite.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.VerifyEmailAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailVerificationRequest,System.String,System.Threading.CancellationToken)">
+            <summary>Verifies a pending signup email and finalizes Jellyfin user creation.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.RequestPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest,System.String,System.Threading.CancellationToken)">
+            <summary>Requests a password reset email.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.ConfirmPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest,System.String,System.Threading.CancellationToken)">
+            <summary>Confirms a password reset code and changes the password.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.GetAdminSettings">
+            <summary>Gets admin signup and email settings.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.SaveAdminSettings(Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch)">
+            <summary>Saves admin signup and email settings.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.SendTestEmailAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupTestEmailRequest,System.Threading.CancellationToken)">
+            <summary>Sends a test email using saved settings.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.CleanupExpiredRecords">
+            <summary>Cleans expired pending verification/reset/rate-limit records.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.GetAdminInvites">
+            <summary>Gets admin invite state.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.CreateInvite(Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest,System.String)">
+            <summary>Creates an invite.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.DisableInvite(System.String)">
+            <summary>Disables an invite.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.DeleteInvite(System.String)">
+            <summary>Deletes an invite.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvTmdbMetadataService">
             <summary>
@@ -2421,6 +3364,73 @@
             <inheritdoc />
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.ResetSettings">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvSignupCleanupService">
+            <summary>
+            Periodically removes expired PiggieTV signup verification and reset records.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupCleanupService.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvSignupCleanupService},Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvSignupCleanupService"/> class.
+            </summary>
+            <param name="logger">Logger.</param>
+            <param name="signupService">Signup service.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupCleanupService.ExecuteAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService">
+            <summary>
+            Native PiggieTV signup service backed by Jellyfin local users.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvSignupService},MediaBrowser.Controller.Library.IUserManager,Microsoft.AspNetCore.DataProtection.IDataProtectionProvider)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService"/> class.
+            </summary>
+            <param name="logger">Logger.</param>
+            <param name="userManager">Jellyfin user manager.</param>
+            <param name="dataProtectionProvider">Data protection provider.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.ValidateInviteAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.CreateUserAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateUserRequest,System.String,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.VerifyEmailAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailVerificationRequest,System.String,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.RequestPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest,System.String,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.ConfirmPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest,System.String,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.GetAdminSettings">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.SaveAdminSettings(Jellyfin.Plugin.PiggieTV.Models.PtvSignupAdminSettingsPatch)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.SendTestEmailAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupTestEmailRequest,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.GetAdminInvites">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.CreateInvite(Jellyfin.Plugin.PiggieTV.Models.PtvSignupCreateInviteRequest,System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.DisableInvite(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.DeleteInvite(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.CleanupExpiredRecords">
             <inheritdoc />
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbItemFacts">

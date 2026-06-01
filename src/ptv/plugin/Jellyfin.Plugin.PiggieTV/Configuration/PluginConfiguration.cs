@@ -48,9 +48,9 @@ public class PiggieTVPluginConfiguration : BasePluginConfiguration
     public SeerrSettings SeerrSettings { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets jfa-go account/invite integration settings.
+    /// Gets or sets native PiggieTV signup settings.
     /// </summary>
-    public JfaGoSettings JfaGoSettings { get; set; } = new();
+    public SignupSettings SignupSettings { get; set; } = new();
 
     /// <summary>
     /// Gets or sets *Arr automation integration settings.
@@ -481,30 +481,6 @@ public sealed class SeerrSettings
 
     /// <summary>Gets or sets a value indicating whether external fallback should be offered.</summary>
     public bool OpenExternalFallback { get; set; } = true;
-}
-
-/// <summary>
-/// PiggieTV jfa-go integration settings.
-/// </summary>
-public sealed class JfaGoSettings
-{
-    /// <summary>Gets or sets a value indicating whether jfa-go integration is enabled.</summary>
-    public bool Enabled { get; set; }
-
-    /// <summary>Gets or sets the display name shown in PiggieTV.</summary>
-    public string DisplayName { get; set; } = "jfa-go";
-
-    /// <summary>Gets or sets the internal jfa-go URL used by the plugin backend.</summary>
-    public string InternalUrl { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the external jfa-go URL used as a browser fallback.</summary>
-    public string ExternalUrl { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the jfa-go API key/token. This is write-only in public DTOs.</summary>
-    public string? ApiKey { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether invalid/self-signed internal TLS certificates are allowed.</summary>
-    public bool AllowSelfSignedTls { get; set; }
 }
 
 /// <summary>

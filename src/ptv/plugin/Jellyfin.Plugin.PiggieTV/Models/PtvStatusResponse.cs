@@ -89,6 +89,7 @@ public sealed class PtvStatusResponse
         "featuredContentRefresh",
         "settings",
         "integrations",
+        "signup",
         "tags",
         "random"
     ];
@@ -104,6 +105,7 @@ public sealed class PtvStatusResponse
         ["featuredContentRefresh"] = true,
         ["settings"] = true,
         ["integrations"] = true,
+        ["signup"] = true,
         ["tags"] = true,
         ["random"] = true
     };
@@ -265,6 +267,18 @@ public sealed class PtvStatusResponse
     public PtvTmdbMetadataStatus TmdbMetadataStatus { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets integration route discovery for dashboard diagnostics.
+    /// </summary>
+    [JsonPropertyName("integrations")]
+    public PtvStatusIntegrations Integrations { get; set; } = PtvStatusIntegrations.Create();
+
+    /// <summary>
+    /// Gets or sets redacted native signup diagnostics for dashboard debug reports.
+    /// </summary>
+    [JsonPropertyName("signup")]
+    public PtvStatusSignup Signup { get; set; } = PtvStatusSignup.Create();
+
+    /// <summary>
     /// Creates a status response from a stored document.
     /// </summary>
     /// <param name="storeStatus">Featured-content store status.</param>
@@ -312,6 +326,358 @@ public sealed class PtvStatusResponse
             TmdbMetadata = tmdbMetadata ?? new PtvTmdbMetadataStatus(),
             TmdbMetadataStatus = tmdbMetadata ?? new PtvTmdbMetadataStatus(),
             Version = pluginVersion
+        };
+    }
+}
+
+/// <summary>
+/// PiggieTV integration route discovery for dashboard diagnostics.
+/// </summary>
+public sealed class PtvStatusIntegrations
+{
+    /// <summary>
+    /// Gets or sets *Arr calendar route status.
+    /// </summary>
+    [JsonPropertyName("arrCalendar")]
+    public PtvIntegrationRouteStatus ArrCalendar { get; set; } = PtvIntegrationRouteStatus.CreateArrCalendar(false);
+
+    /// <summary>
+    /// Creates default integration route discovery.
+    /// </summary>
+    /// <returns>Integration route discovery.</returns>
+    public static PtvStatusIntegrations Create()
+    {
+        return new PtvStatusIntegrations
+        {
+            ArrCalendar = PtvIntegrationRouteStatus.CreateArrCalendar(true)
+        };
+    }
+}
+
+/// <summary>
+/// Redacted PiggieTV native signup diagnostics for status/debug payloads.
+/// </summary>
+public sealed class PtvStatusSignup
+{
+    /// <summary>Gets or sets whether native PiggieTV signup is enabled.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+
+    /// <summary>Gets or sets whether signup requires email verification.</summary>
+    [JsonPropertyName("emailRequired")]
+    public bool EmailRequired { get; set; } = true;
+
+    /// <summary>Gets or sets whether SMTP/email delivery is enabled.</summary>
+    [JsonPropertyName("emailEnabled")]
+    public bool EmailEnabled { get; set; }
+
+    /// <summary>Gets or sets whether the email engine has the minimum required settings.</summary>
+    [JsonPropertyName("emailConfigured")]
+    public bool EmailConfigured { get; set; }
+
+    /// <summary>Gets or sets whether an SMTP host is configured.</summary>
+    [JsonPropertyName("smtpHostConfigured")]
+    public bool SmtpHostConfigured { get; set; }
+
+    /// <summary>Gets or sets SMTP port for diagnostics.</summary>
+    [JsonPropertyName("smtpPort")]
+    public int SmtpPort { get; set; }
+
+    /// <summary>Gets or sets whether SMTP SSL/TLS is enabled.</summary>
+    [JsonPropertyName("useSsl")]
+    public bool UseSsl { get; set; }
+
+    /// <summary>Gets or sets whether an SMTP username is configured.</summary>
+    [JsonPropertyName("smtpUsernameConfigured")]
+    public bool SmtpUsernameConfigured { get; set; }
+
+    /// <summary>Gets or sets whether an SMTP password is configured.</summary>
+    [JsonPropertyName("smtpPasswordConfigured")]
+    public bool SmtpPasswordConfigured { get; set; }
+
+    /// <summary>Gets or sets whether a From address is configured.</summary>
+    [JsonPropertyName("fromAddressConfigured")]
+    public bool FromAddressConfigured { get; set; }
+
+    /// <summary>Gets or sets whether a branded email logo URL is configured.</summary>
+    [JsonPropertyName("logoUrlConfigured")]
+    public bool LogoUrlConfigured { get; set; }
+
+    /// <summary>Gets or sets the sender domain only, not the full address.</summary>
+    [JsonPropertyName("fromDomain")]
+    public string? FromDomain { get; set; }
+
+    /// <summary>Gets or sets reset-code lifetime in minutes.</summary>
+    [JsonPropertyName("resetCodeMinutes")]
+    public int ResetCodeMinutes { get; set; }
+
+    /// <summary>Gets or sets verification-link lifetime in minutes.</summary>
+    [JsonPropertyName("verificationLinkMinutes")]
+    public int VerificationLinkMinutes { get; set; }
+
+    /// <summary>Gets or sets the default policy preset id.</summary>
+    [JsonPropertyName("defaultPolicyPresetId")]
+    public string DefaultPolicyPresetId { get; set; } = "standard";
+
+    /// <summary>Gets or sets the number of explicit default library folders.</summary>
+    [JsonPropertyName("defaultEnabledFolderCount")]
+    public int DefaultEnabledFolderCount { get; set; }
+
+    /// <summary>Gets or sets configured policy preset count.</summary>
+    [JsonPropertyName("policyPresetCount")]
+    public int PolicyPresetCount { get; set; }
+
+    /// <summary>Gets or sets configured invite count.</summary>
+    [JsonPropertyName("inviteCount")]
+    public int InviteCount { get; set; }
+
+    /// <summary>Gets or sets active invite count.</summary>
+    [JsonPropertyName("activeInviteCount")]
+    public int ActiveInviteCount { get; set; }
+
+    /// <summary>Gets or sets locked invite count.</summary>
+    [JsonPropertyName("lockedInviteCount")]
+    public int LockedInviteCount { get; set; }
+
+    /// <summary>Gets or sets native signup-created user count.</summary>
+    [JsonPropertyName("nativeUserCount")]
+    public int NativeUserCount { get; set; }
+
+    /// <summary>Gets or sets active pending verification count.</summary>
+    [JsonPropertyName("pendingVerificationCount")]
+    public int PendingVerificationCount { get; set; }
+
+    /// <summary>Gets or sets expired pending verification count.</summary>
+    [JsonPropertyName("expiredPendingVerificationCount")]
+    public int ExpiredPendingVerificationCount { get; set; }
+
+    /// <summary>Gets or sets active pending password-reset code count.</summary>
+    [JsonPropertyName("pendingResetCount")]
+    public int PendingResetCount { get; set; }
+
+    /// <summary>Gets or sets expired pending password-reset code count.</summary>
+    [JsonPropertyName("expiredPendingResetCount")]
+    public int ExpiredPendingResetCount { get; set; }
+
+    /// <summary>Gets or sets active public signup/reset rate-limit bucket count.</summary>
+    [JsonPropertyName("activeRateLimitCount")]
+    public int ActiveRateLimitCount { get; set; }
+
+    /// <summary>Gets or sets latest native signup creation timestamp.</summary>
+    [JsonPropertyName("lastNativeUserCreatedAtUtc")]
+    public DateTimeOffset? LastNativeUserCreatedAtUtc { get; set; }
+
+    /// <summary>Gets or sets next pending verification expiration timestamp.</summary>
+    [JsonPropertyName("nextVerificationExpiresAtUtc")]
+    public DateTimeOffset? NextVerificationExpiresAtUtc { get; set; }
+
+    /// <summary>Gets or sets next pending reset-code expiration timestamp.</summary>
+    [JsonPropertyName("nextResetCodeExpiresAtUtc")]
+    public DateTimeOffset? NextResetCodeExpiresAtUtc { get; set; }
+
+    /// <summary>Gets or sets signup API route discovery.</summary>
+    [JsonPropertyName("routes")]
+    public PtvSignupRouteStatus Routes { get; set; } = PtvSignupRouteStatus.Create();
+
+    /// <summary>
+    /// Creates default redacted signup diagnostics.
+    /// </summary>
+    /// <returns>Default signup diagnostics.</returns>
+    public static PtvStatusSignup Create() => new()
+    {
+        Routes = PtvSignupRouteStatus.Create()
+    };
+
+    /// <summary>
+    /// Creates redacted signup diagnostics from saved settings.
+    /// </summary>
+    /// <param name="settings">Native signup settings.</param>
+    /// <returns>Redacted signup diagnostics.</returns>
+    public static PtvStatusSignup Create(Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings settings)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var email = settings.EmailSettings;
+        var pendingVerifications = settings.PendingVerifications ?? [];
+        var resetCodes = settings.PasswordResetCodes ?? [];
+        var invites = settings.Invites ?? [];
+        var rateLimits = settings.RateLimits ?? [];
+        var activePendingVerifications = pendingVerifications
+            .Where(pending => pending.ExpiresAtUtc > now)
+            .ToList();
+        var activeResetCodes = resetCodes
+            .Where(code => code.UsedAtUtc is null && code.ExpiresAtUtc > now)
+            .ToList();
+        var activeInvites = invites.Count(invite =>
+            !invite.Disabled
+            && (invite.ExpiresAtUtc is null || invite.ExpiresAtUtc > now)
+            && (invite.MaxUses <= 0 || (invite.UsageRecords?.Count ?? 0) < invite.MaxUses)
+            && (invite.LockedUntilUtc is null || invite.LockedUntilUtc <= now));
+
+        return new PtvStatusSignup
+        {
+            ActiveInviteCount = activeInvites,
+            ActiveRateLimitCount = rateLimits.Count(record =>
+                (record.LockedUntilUtc is not null && record.LockedUntilUtc > now)
+                || record.WindowStartedAtUtc > now.AddHours(-1)),
+            DefaultEnabledFolderCount = settings.DefaultEnabledFolderIds?.Count ?? 0,
+            DefaultPolicyPresetId = settings.DefaultPolicyPresetId,
+            EmailConfigured = !string.IsNullOrWhiteSpace(email.SmtpHost)
+                && !string.IsNullOrWhiteSpace(email.FromAddress)
+                && !string.IsNullOrWhiteSpace(email.Password),
+            EmailEnabled = email.Enabled,
+            Enabled = settings.Enabled,
+            ExpiredPendingResetCount = resetCodes.Count(code => code.UsedAtUtc is null && code.ExpiresAtUtc <= now),
+            ExpiredPendingVerificationCount = pendingVerifications.Count(pending => pending.ExpiresAtUtc <= now),
+            FromAddressConfigured = !string.IsNullOrWhiteSpace(email.FromAddress),
+            FromDomain = GetEmailDomain(email.FromAddress),
+            InviteCount = invites.Count,
+            LastNativeUserCreatedAtUtc = settings.Users?.Count > 0
+                ? settings.Users.Max(user => user.CreatedAtUtc)
+                : null,
+            LockedInviteCount = invites.Count(invite => invite.LockedUntilUtc > now),
+            LogoUrlConfigured = !string.IsNullOrWhiteSpace(email.LogoUrl),
+            NativeUserCount = settings.Users?.Count ?? 0,
+            NextResetCodeExpiresAtUtc = activeResetCodes.Count > 0
+                ? activeResetCodes.Min(code => code.ExpiresAtUtc)
+                : null,
+            NextVerificationExpiresAtUtc = activePendingVerifications.Count > 0
+                ? activePendingVerifications.Min(pending => pending.ExpiresAtUtc)
+                : null,
+            PendingResetCount = activeResetCodes.Count,
+            PendingVerificationCount = activePendingVerifications.Count,
+            PolicyPresetCount = settings.PolicyPresets?.Count ?? 0,
+            ResetCodeMinutes = email.ResetCodeMinutes,
+            Routes = PtvSignupRouteStatus.Create(),
+            SmtpHostConfigured = !string.IsNullOrWhiteSpace(email.SmtpHost),
+            SmtpPasswordConfigured = !string.IsNullOrWhiteSpace(email.Password),
+            SmtpPort = email.SmtpPort,
+            SmtpUsernameConfigured = !string.IsNullOrWhiteSpace(email.Username),
+            UseSsl = email.UseSsl,
+            VerificationLinkMinutes = email.VerificationLinkMinutes
+        };
+    }
+
+    private static string? GetEmailDomain(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return null;
+        }
+
+        var atIndex = email.LastIndexOf('@');
+        if (atIndex < 0 || atIndex >= email.Length - 1)
+        {
+            return null;
+        }
+
+        return email[(atIndex + 1)..].Trim().ToLowerInvariant();
+    }
+}
+
+/// <summary>
+/// PiggieTV signup route discovery.
+/// </summary>
+public sealed class PtvSignupRouteStatus
+{
+    /// <summary>Gets or sets whether signup routes are available in this plugin build.</summary>
+    [JsonPropertyName("available")]
+    public bool Available { get; set; } = true;
+
+    /// <summary>Gets or sets public create-user route.</summary>
+    [JsonPropertyName("createUser")]
+    public string CreateUser { get; set; } = "/Ptv/v1/signup/create-user";
+
+    /// <summary>Gets or sets public email verification route.</summary>
+    [JsonPropertyName("verifyEmail")]
+    public string VerifyEmail { get; set; } = "/Ptv/v1/signup/verify-email";
+
+    /// <summary>Gets or sets public password reset request route.</summary>
+    [JsonPropertyName("passwordResetRequest")]
+    public string PasswordResetRequest { get; set; } = "/Ptv/v1/signup/password-reset/request";
+
+    /// <summary>Gets or sets public password reset confirmation route.</summary>
+    [JsonPropertyName("passwordResetConfirm")]
+    public string PasswordResetConfirm { get; set; } = "/Ptv/v1/signup/password-reset/confirm";
+
+    /// <summary>Gets or sets admin signup settings route.</summary>
+    [JsonPropertyName("adminSettings")]
+    public string AdminSettings { get; set; } = "/Ptv/v1/signup/admin/settings";
+
+    /// <summary>Gets or sets admin test email route.</summary>
+    [JsonPropertyName("adminTestEmail")]
+    public string AdminTestEmail { get; set; } = "/Ptv/v1/signup/admin/email/test";
+
+    /// <summary>Gets or sets supported methods by route id.</summary>
+    [JsonPropertyName("methods")]
+    public Dictionary<string, string[]> Methods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Creates route discovery.
+    /// </summary>
+    /// <returns>Signup route discovery.</returns>
+    public static PtvSignupRouteStatus Create() => new()
+    {
+        Methods = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["createUser"] = ["POST"],
+            ["verifyEmail"] = ["POST"],
+            ["passwordResetRequest"] = ["POST"],
+            ["passwordResetConfirm"] = ["POST"],
+            ["adminSettings"] = ["GET", "POST"],
+            ["adminTestEmail"] = ["POST"]
+        }
+    };
+}
+
+/// <summary>
+/// Single integration route status.
+/// </summary>
+public sealed class PtvIntegrationRouteStatus
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether the integration is enabled in saved settings.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the plugin exposes the test route in this build.
+    /// </summary>
+    [JsonPropertyName("testRouteAvailable")]
+    public bool TestRouteAvailable { get; set; }
+
+    /// <summary>
+    /// Gets or sets the canonical plugin test route.
+    /// </summary>
+    [JsonPropertyName("canonicalRoute")]
+    public string CanonicalRoute { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets route aliases supported for backwards compatibility.
+    /// </summary>
+    [JsonPropertyName("aliases")]
+    public string[] Aliases { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets HTTP methods supported by the route.
+    /// </summary>
+    [JsonPropertyName("methods")]
+    public string[] Methods { get; set; } = [];
+
+    /// <summary>
+    /// Creates *Arr calendar route status.
+    /// </summary>
+    /// <param name="enabled">Whether at least one *Arr service can provide calendar data.</param>
+    /// <returns>*Arr calendar route status.</returns>
+    public static PtvIntegrationRouteStatus CreateArrCalendar(bool enabled)
+    {
+        return new PtvIntegrationRouteStatus
+        {
+            Aliases = ["/Ptv/v1/integrations/arr/calendar"],
+            CanonicalRoute = "/Ptv/v1/calendar",
+            Enabled = enabled,
+            Methods = ["GET"],
+            TestRouteAvailable = true
         };
     }
 }

@@ -9,5 +9,6 @@ import './details';
 import './integrations/arrActions';
 import './request';
 import './signup';
+import './reader';
 import './theme-songs';
 import './playback';

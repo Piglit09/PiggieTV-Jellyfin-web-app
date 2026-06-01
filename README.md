@@ -4,7 +4,7 @@
   <img alt="PiggieTV banner" src="src/ptv/assets/logo/banner-light.png" width="420" />
 </p>
 
-PiggieTV is a custom Jellyfin Web experience focused on a polished, TV-friendly media interface. It keeps Jellyfin as the media server and playback foundation, while adding a PiggieTV frontend layer, server-side featured-content cache support, render profiles for low-power devices, and a dedicated PiggieTV admin dashboard.
+PiggieTV is a custom Jellyfin Web experience focused on a polished, TV-friendly media interface. It keeps Jellyfin as the media server and playback foundation, while adding a PiggieTV frontend layer, server-side featured-content cache support, a configurable home-row engine, native signup/email tools, release-calendar integrations, render profiles for low-power devices, and a dedicated PiggieTV admin dashboard.
 
 This repository is based on [Jellyfin Web](https://github.com/jellyfin/jellyfin-web), the official web frontend for the [Jellyfin](https://jellyfin.org) media server.
 
@@ -20,8 +20,8 @@ PiggieTV does not replace Jellyfin. It customizes and extends Jellyfin Web while
 
 - Custom PiggieTV branding, logo assets, favicon variants, and shell styling.
 - PiggieTV sidebar and drawer treatment.
-- PiggieTV top navigation tabs for Home, Favorites, and Request.
-- Native-feeling signup/invite route that embeds the jfa-go invite flow at `#/signup`.
+- PiggieTV top navigation tabs and sidebar entries for Home, Favorites, Request, Release Calendar, and Signup surfaces.
+- Native PiggieTV signup route at `#/signup` with email verification and password reset support.
 - PiggieTV media rows, hero presentation, cards, badges, controls, and dashboard styling.
 - Semantic token system for surfaces, text, elevation, density, states, motion, and theme evolution.
 - Scoped PTV styles under `src/ptv` to avoid unnecessary Jellyfin core file changes.
@@ -30,17 +30,21 @@ PiggieTV does not replace Jellyfin. It customizes and extends Jellyfin Web while
 
 - Shared featured-content system for hero and home rows.
 - User-specific Continue Watching remains separate from the shared featured cache.
+- Dashboard-driven Row Builder for default, latest, requested, genre, studio, collection, library, seasonal, and curated row rules.
+- Homepage row hierarchy for premium rows, curated discovery rows, and lower-weight deep catalog rows.
+- Desktop/browser row virtualization with lazy hydration so rows can be generated without mounting every row shell immediately.
 - Featured hero mix designed around:
   - Continue Watching
   - recommended shows
   - recommended movies
   - seasonal and holiday-aware content
 - Curated row support for brands and collections such as Disney, animation, cartoons, anime, horror, music, and franchise-style groupings.
-- Reusable media brand matcher direction, so future rows can be configuration-driven instead of one-off filters.
+- Duplicate-version cleanup so the same movie in multiple qualities appears once in rows while Jellyfin detail/playback can still choose quality.
+- Reusable media brand matcher and row-rule system so rows are configuration-driven instead of one-off filters.
 
 ### PiggieTV Jellyfin Plugin
 
-PiggieTV includes a minimal Jellyfin plugin companion in `src/ptv/plugin`.
+PiggieTV includes a Jellyfin plugin companion in `src/ptv/plugin`.
 
 Current versioned API surface:
 
@@ -57,9 +61,26 @@ GET    /Ptv/v1/integrations/status
 POST   /Ptv/v1/integrations/seerr/test
 GET    /Ptv/v1/integrations/seerr/search
 POST   /Ptv/v1/integrations/seerr/request
+GET    /Ptv/v1/integrations/seerr/requests
 POST   /Ptv/v1/integrations/{sonarr|radarr|lidarr|prowlarr}/test
+GET    /Ptv/v1/calendar
 GET    /Ptv/v1/integrations/arr/calendar
 GET    /Ptv/v1/integrations/arr/downloads
+GET    /Ptv/v1/rows
+POST   /Ptv/v1/rows
+POST   /Ptv/v1/rows/validate
+POST   /Ptv/v1/rows/preview
+POST   /Ptv/v1/signup/create-user
+POST   /Ptv/v1/signup/verify-email
+POST   /Ptv/v1/signup/password-reset/request
+POST   /Ptv/v1/signup/password-reset/confirm
+GET    /Ptv/v1/signup/admin/settings
+POST   /Ptv/v1/signup/admin/settings
+POST   /Ptv/v1/signup/admin/email/test
+GET    /Ptv/v1/signup/admin/invites
+POST   /Ptv/v1/signup/admin/invites
+POST   /Ptv/v1/signup/admin/invites/{id}/disable
+DELETE /Ptv/v1/signup/admin/invites/{id}
 GET    /Ptv/v1/tags
 GET    /Ptv/v1/tags/rows
 POST   /Ptv/v1/tags/rows
@@ -82,8 +103,9 @@ The plugin provides:
 - authenticated-user cache reads
 - structured error responses
 - fixed plugin-owned cache file path
-- server-side settings for Jellyseerr, Sonarr, Radarr, Lidarr, Prowlarr, qBittorrent-style downloads, tag rows, and random discovery
-- write-only secret handling for TMDb, Jellyseerr, *Arr, and download-provider credentials
+- server-side settings for native signup, SMTP email, Jellyseerr, Sonarr, Radarr, Lidarr, Prowlarr, downloads, tag rows, random discovery, and Row Builder
+- write-only secret handling for SMTP passwords, TMDb, Jellyseerr, *Arr, and download-provider credentials
+- redacted signup, integration, route, cache, provider, and debug diagnostics for dashboard troubleshooting
 
 Featured cache file:
 
@@ -99,7 +121,10 @@ PiggieTV now has a native integration foundation inspired by the UX direction of
 
 - Jellyseerr request/search settings with internal and external URL support.
 - Server-side Jellyseerr proxy routes for search, request actions, and connection tests.
+- Jellyseerr features auto-enable once a valid API key is saved.
 - Server-side *Arr connection settings and test routes for Sonarr, Radarr, Lidarr, and Prowlarr.
+- Release Calendar route and sidebar entry available to users, backed by configured Sonarr, Radarr, and Lidarr services.
+- *Arr calendar features auto-enable when an eligible *Arr service is configured.
 - Download provider settings for qBittorrent-style dashboards without exposing credentials to frontend JavaScript.
 - Tag-based smart row settings for rows such as Disney Animation, Anime Movies, Holiday, Halloween, Christmas, Marvel, DC, and Studio Ghibli.
 - Random discovery settings for movie, episode, anime, and current-library random actions.
@@ -122,20 +147,26 @@ The dashboard shows:
 - client profile flags
 - PTV debug and performance overlay controls
 - feature toggles for hero, home rows, dynamic backdrops, and low-power mode
-- signup and invite management entry point for the jfa-go invite engine
-- Jellyseerr, *Arr, download provider, tag row, random discovery, and TMDb controls with section-level save buttons
+- Row Builder controls, preview, diagnostics, performance estimates, and cache refresh flow
+- native signup defaults, email engine settings, email test action, pending verification/reset counters, and signup debug copy
+- Jellyseerr, *Arr, release calendar, download provider, tag row, random discovery, and TMDb controls with section-level save buttons
 
 ### Signup And Invites
 
-PiggieTV integrates [jfa-go](https://github.com/hrfee/jfa-go) as the account invite engine while keeping the UI native to PiggieTV.
+PiggieTV includes a native signup engine for creating normal local Jellyfin users through server-side plugin endpoints. Privileged Jellyfin user creation stays in the plugin backend; admin tokens and SMTP passwords are never shipped to browser JavaScript.
 
 - Public route: `#/signup`
-- Invite backend: `https://signup.piggietv.com`
-- Current invite flow: `https://signup.piggietv.com/invite/ysBDoDSMpv5fFMz9GPMxUL`
 - Admin route: `#/dashboard/users/signup-invites`
-- jfa-go admin/API secrets must stay server-side behind a PTV plugin/helper proxy.
-
-The first native dashboard version embeds the jfa-go admin panel and documents the secure proxy path for future native invite create/disable/copy actions.
+- Email is required for new native signups.
+- New accounts are held as pending verifications until the user clicks the verification email link; pending records expire and are cleaned up automatically.
+- Verification links return to `#/signup?verify=...`, then the backend finalizes Jellyfin user creation and shows a branded success page with a 10-second login redirect.
+- Verification email links expire after 30 minutes by default.
+- Verification emails use a branded HTML template with the PiggieTV logo, a centered Verify Email button, and a plain-text fallback.
+- Password reset emails send a random reset code that can reset the password through the signup route.
+- SMTP settings, sender identity, email logo URL, reset-code expiry, verification-link expiry, and test email are configured in the PiggieTV dashboard.
+- Signup debug output includes only redacted health data: configured flags, counts, sender domain, route discovery, rate-limit bucket counts, and timing.
+- Public signup, verification, and password-reset routes use server-side validation, hashed single-use tokens/codes, expiry cleanup, and basic IP/email rate limiting.
+- Native signup replaces the older external invite-engine integration path; signup/email settings live entirely in PiggieTV.
 
 ### Performance And Device Profiles
 
@@ -156,6 +187,8 @@ Performance-oriented behavior includes:
 - reduced blur/backdrop effects for weak GPUs
 - lazy loading for non-visible media assets
 - preload focus on current and next hero media
+- request dedupe and priority queues for hero, visible row, and offscreen row image loading
+- row virtualization with overscan and debug metrics for mounted/deferred/hydrated rows
 - WebP/static asset optimization direction
 - server-prepared featured payloads so TVs render instead of ranking/filtering large libraries
 
@@ -171,7 +204,7 @@ window.PTV?.debug?.report?.()
 window.PTV?.performanceOverlay?.(true)
 ```
 
-The goal is to make performance, cache behavior, route ownership, duplicate mounts, and fallback behavior observable instead of guessed.
+The goal is to make performance, cache behavior, route ownership, signup/email health, duplicate mounts, image churn, and fallback behavior observable instead of guessed. Debug reports redact secrets and include configured booleans instead of SMTP/API key values.
 
 ## Repository Layout
 
@@ -182,7 +215,7 @@ src/ptv/
   assets/       PiggieTV logos, icons, and backgrounds
   core/         config, plugin API, render profile, feature flags, events, logging
   docs/         PiggieTV architecture and API notes
-  modules/      cache, dashboard, shell, performance, request, and UI modules
+  modules/      cache, calendar, dashboard, integrations, reader, request, shell, signup, and UI modules
   pages/        PiggieTV page integrations such as home rows
   plugin/       Jellyfin plugin backend companion
   styles/       semantic tokens and PiggieTV Sass
@@ -270,7 +303,6 @@ PiggieTV architecture docs live in `src/ptv/docs`:
 - [Cache lifecycle](src/ptv/docs/cache-lifecycle.md)
 - [Plugin responsibilities](src/ptv/docs/plugin-responsibilities.md)
 - [Render profiles](src/ptv/docs/render-profiles.md)
-- [Signup integration](src/ptv/docs/signup-integration.md)
 - [Static assets](src/ptv/docs/static-assets.md)
 
 Plugin-specific notes:
@@ -291,7 +323,7 @@ Useful upstream links:
 ## Credits
 
 - Jellyfin and Jellyfin Web provide the media server and web client foundation.
-- [jfa-go](https://github.com/hrfee/jfa-go) provides the invite/signup engine used by PiggieTV's native signup surfaces.
+- [jfa-go](https://github.com/hrfee/jfa-go) inspired PiggieTV's native signup/invite idea.
 - [Jellyfin-PauseScreen](https://github.com/BobHasNoSoul/Jellyfin-PauseScreen) inspired PiggieTV's managed pause-screen feature behavior, including pause-only metadata/artwork presentation.
 - [Jellyfin-Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) inspired PiggieTV's quality tag treatment and the native request, automation, tag filtering, and random discovery integration direction.
 - [Home Screen Sections](https://github.com/IAmParadox27/jellyfin-plugin-home-sections) inspired PiggieTV's home row direction.
@@ -299,4 +331,3 @@ Useful upstream links:
 ## License
 
 Jellyfin Web is licensed under the GPL 2.0 license. PiggieTV modifications in this repository follow the same repository licensing unless otherwise noted in a specific file.
-

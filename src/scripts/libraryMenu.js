@@ -41,6 +41,12 @@ import '../styles/flexstyles.scss';
 
 const PTV_DEFAULT_MENU_LINKS = [
     {
+        name: 'Release Calendar',
+        url: '#/calendar',
+        icon: 'activity',
+        internal: true
+    },
+    {
         name: 'Request',
         url: 'https://request.piggietv.com',
         icon: 'request'
@@ -61,6 +67,38 @@ const PTV_DEFAULT_MENU_LINKS = [
         icon: 'discord'
     }
 ];
+
+const PTV_REQUIRED_MENU_LINKS = [
+    PTV_DEFAULT_MENU_LINKS[0]
+];
+
+function isInternalPtvMenuLink(link) {
+    return Boolean(link?.internal || String(link?.url || '').startsWith('#/'));
+}
+
+function hasReleaseCalendarLink(links) {
+    return links.some(link => {
+        const name = String(link?.name || '').trim().toLowerCase();
+        const url = String(link?.url || '').trim().toLowerCase();
+
+        return name === 'release calendar'
+            || url === '#/calendar'
+            || url.endsWith('/calendar');
+    });
+}
+
+function getPtvMenuLinksToRender(links) {
+    const configuredLinks = Array.isArray(links) && links.length ? links : PTV_DEFAULT_MENU_LINKS;
+
+    if (hasReleaseCalendarLink(configuredLinks)) {
+        return configuredLinks;
+    }
+
+    return [
+        ...PTV_REQUIRED_MENU_LINKS,
+        ...configuredLinks
+    ];
+}
 
 function getPtvDrawerIconName(icon, label = '') {
     return getPtvIconNameFromText(label, '')
@@ -514,7 +552,7 @@ function updateLibraryMenu(user) {
     const customMenuOptions = document.querySelector('.customMenuOptions');
     if (customMenuOptions) {
         getMenuLinks().then(links => {
-            const linksToRender = links.length ? links : PTV_DEFAULT_MENU_LINKS;
+            const linksToRender = getPtvMenuLinksToRender(links);
 
             customMenuOptions.innerHTML = '';
 
@@ -528,9 +566,12 @@ function updateLibraryMenu(user) {
             linksToRender.forEach(link => {
                 const option = document.createElement('a', 'emby-linkbutton');
                 option.classList.add('navMenuOption', 'lnkMediaFolder');
-                option.rel = 'noopener noreferrer';
-                option.target = '_blank';
                 option.href = link.url;
+
+                if (!isInternalPtvMenuLink(link)) {
+                    option.rel = 'noopener noreferrer';
+                    option.target = '_blank';
+                }
 
                 const icon = document.createElement('span');
                 const iconName = getPtvDrawerIconName(link.icon || 'link', link.name);

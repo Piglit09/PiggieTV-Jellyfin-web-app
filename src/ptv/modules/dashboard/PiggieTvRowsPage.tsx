@@ -28,6 +28,7 @@ import {
     FEATURED_CACHE_UPDATED_EVENT,
     getFeaturedContentCacheStatus
 } from '../cache/featuredContentCache';
+import { getPtvIntegrationSettings } from '../integrations/integrationsConfig';
 
 import './dashboard.scss';
 
@@ -462,7 +463,7 @@ function estimatePerformance(settings: PtvRowBuilderSettings): PerformanceEstima
     };
 }
 
-function localValidation(settings: PtvRowBuilderSettings) {
+function localValidation(settings: PtvRowBuilderSettings, seerrConfigured = false) {
     const errors: string[] = [];
     const warnings: string[] = [];
     const ids = new Set<string>();
@@ -484,7 +485,7 @@ function localValidation(settings: PtvRowBuilderSettings) {
             errors.push(`Rule '${rule.name}' needs a source value.`);
         }
 
-        if (rule.sourceType === 'requested') {
+        if (rule.sourceType === 'requested' && !seerrConfigured) {
             warnings.push(`Rule '${rule.name}' requires Jellyseerr/Jellyseer to be configured.`);
         }
     });
@@ -554,6 +555,7 @@ const PiggieTvRowsPage = () => {
     const [cacheStatus, setCacheStatus] = useState(() => getFeaturedContentCacheStatus());
     const [debugReport, setDebugReport] = useState(() => getPtvDebugReport());
     const [pluginDiagnostics, setPluginDiagnostics] = useState<PtvPluginApiDiagnostics>(() => getPtvPluginApiDiagnostics());
+    const [seerrConfigured, setSeerrConfigured] = useState(false);
     const [statusMessage, setStatusMessage] = useState<PtvStatusMessage | null>(null);
     const [loading, setLoading] = useState(true);
     const [previewing, setPreviewing] = useState(false);
@@ -561,7 +563,7 @@ const PiggieTvRowsPage = () => {
     const [saving, setSaving] = useState(false);
 
     const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(saved), [form, saved]);
-    const validation = useMemo(() => localValidation(form), [form]);
+    const validation = useMemo(() => localValidation(form, seerrConfigured), [form, seerrConfigured]);
     const estimate = useMemo(() => estimatePerformance(form), [form]);
     const imageTrackerResetCount = useMemo(() => (
         debugReport.events || []
@@ -597,6 +599,9 @@ const PiggieTvRowsPage = () => {
             }
 
             const normalizedRows = cloneSettings(rows || DEFAULT_SETTINGS);
+            const integrations = await getPtvIntegrationSettings({ force: true }).catch(() => null);
+
+            setSeerrConfigured(Boolean(integrations?.seerr.apiKeyConfigured));
             setForm(normalizedRows);
             setSaved(normalizedRows);
             setPreview(null);

@@ -211,38 +211,54 @@ Only Jellyfin admins/elevated users may call this endpoint.
 
 Restores default PiggieTV plugin settings. This resets the plugin configuration to defaults and returns the public settings DTO.
 
-### Planned jfa-go Proxy Endpoints
+### Native Signup Endpoints
 
-These endpoints are reserved for the native PiggieTV signup/invite dashboard. They are not a replacement for jfa-go; they are a server-side safety layer so frontend JavaScript never receives jfa-go admin secrets.
+PiggieTV owns native signup, email verification, password reset, and invite management through server-side plugin routes. Frontend JavaScript never receives Jellyfin admin tokens or SMTP credentials.
 
 ```text
-GET    /Ptv/v1/JfaGo/Status
-GET    /Ptv/v1/JfaGo/Invites
-POST   /Ptv/v1/JfaGo/Invites
-DELETE /Ptv/v1/JfaGo/Invites/{code}
+POST   /Ptv/v1/signup/create-user
+POST   /Ptv/v1/signup/verify-email
+POST   /Ptv/v1/signup/password-reset/request
+POST   /Ptv/v1/signup/password-reset/confirm
+GET    /Ptv/v1/signup/admin/settings
+POST   /Ptv/v1/signup/admin/settings
+POST   /Ptv/v1/signup/admin/email/test
+GET    /Ptv/v1/signup/admin/invites
+POST   /Ptv/v1/signup/admin/invites
+POST   /Ptv/v1/signup/admin/invites/{id}/disable
+DELETE /Ptv/v1/signup/admin/invites/{id}
 ```
 
-All jfa-go proxy endpoints should be admin-only. The proxy must validate Jellyfin admin permissions before forwarding to jfa-go.
+Admin signup routes require Jellyfin admin permissions. Public signup routes validate pending signup state, email verification tokens, and password reset codes server-side before creating or updating Jellyfin users.
 
-Expected invite DTO shape for future native UI:
+Signup security and cleanup notes:
+
+- Email verification is required for native signup.
+- Verification links expire after 30 minutes by default.
+- Verification emails are sent as branded HTML with a plain-text fallback.
+- Verification/reset tokens are generated with secure randomness and stored as hashes.
+- Tokens and reset codes are single-use; used or expired records are deleted during signup, verification, admin settings load, and a hosted cleanup timer.
+- Public signup and reset routes apply basic IP/email rate limiting with hashed rate-limit keys.
+- Signup debug/status payloads expose only redacted booleans, counts, sender domain, and route discovery.
+
+Invite DTO shape:
 
 ```json
 {
   "invites": [
     {
-      "code": "invite-code",
-      "link": "https://signup.piggietv.com/invite/invite-code",
-      "expiresAt": 0,
+      "id": "invite-id",
+      "code": "optional-code",
+      "label": "Friends",
+      "expiresAt": "2026-06-01T00:00:00Z",
       "maxUses": 10,
       "uses": 0,
-      "profile": "Default",
+      "preset": "Standard User",
       "disabled": false
     }
   ]
 }
 ```
-
-The current dashboard embeds the jfa-go admin panel until the backend proxy is implemented.
 
 ### Error Shape
 

@@ -1,180 +1,195 @@
-/* PiggieTV native signup/invite shell. jfa-go remains the invite engine. */
+/* PiggieTV native signup and invite management. */
 
-.ptv-signup-page {
-    position: fixed;
-    inset: 0;
-    z-index: calc(var(--ptv-shell-z-overlay, 1400) + 12);
-
-    display: grid;
-    min-width: 0;
-    min-height: 0;
-    padding: clamp(var(--ptv-space-3), 2vw, var(--ptv-space-6));
+.ptv-native-signup-page {
+    position: relative;
+    min-height: 100vh;
     overflow: hidden;
-
-    background:
-        radial-gradient(circle at 18% 18%, rgba(125, 214, 255, 0.18), transparent 26%),
-        radial-gradient(circle at 76% 24%, rgba(255, 141, 195, 0.14), transparent 28%),
-        linear-gradient(135deg, rgba(7, 5, 16, 0.96), rgba(15, 8, 30, 0.98));
+    color: var(--ptv-color-text-primary);
+    background: #06040e;
 }
 
-.ptv-signup-page::before {
+.ptv-native-signup-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background-position: center;
+    background-size: cover;
+}
+
+.ptv-native-signup-backdrop::after {
     content: '';
     position: absolute;
     inset: 0;
-    z-index: -1;
-
     background:
-        linear-gradient(120deg, rgba(125, 214, 255, 0.08), transparent 28%),
-        linear-gradient(240deg, rgba(167, 139, 250, 0.12), transparent 32%),
-        rgba(0, 0, 0, 0.38);
-    pointer-events: none;
+        radial-gradient(circle at 20% 24%, rgba(var(--ptv-color-focus-rgb), 0.2), transparent 28%),
+        radial-gradient(circle at 78% 18%, rgba(var(--ptv-color-accent-secondary-rgb), 0.18), transparent 30%),
+        linear-gradient(180deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.62));
 }
 
-.ptv-signup-shell {
+.ptv-native-signup-content {
+    position: relative;
+    z-index: 1;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: var(--ptv-space-4);
-    min-width: 0;
-    min-height: 0;
-    padding: clamp(var(--ptv-space-3), 2vw, var(--ptv-space-5));
+    min-height: 100vh;
+    padding: clamp(24px, 5vw, 72px);
+    place-items: center;
+}
 
-    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.2);
+.ptv-native-signup-card {
+    width: min(100%, 520px);
+    padding: clamp(24px, 4vw, 40px);
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.24);
     border-radius: var(--ptv-radius-xl);
     background:
-        linear-gradient(135deg, rgba(18, 12, 34, 0.84), rgba(8, 5, 18, 0.9)),
+        linear-gradient(135deg, rgba(23, 16, 42, 0.9), rgba(10, 6, 22, 0.94)),
         var(--ptv-elevation-3-surface);
     box-shadow:
         var(--ptv-elevation-3-shadow),
-        0 0 42px rgba(var(--ptv-color-accent-secondary-rgb), 0.16);
-    backdrop-filter: blur(22px) saturate(1.14);
+        0 0 54px rgba(var(--ptv-color-accent-secondary-rgb), 0.18);
+    backdrop-filter: blur(24px) saturate(1.12);
 }
 
-.ptv-signup-header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-        'title actions'
-        'subtitle actions';
-    gap: var(--ptv-space-1) var(--ptv-space-4);
-    align-items: center;
+.ptv-native-signup-logo {
+    display: block;
+    width: min(226px, 72vw);
+    height: auto;
+    margin: 0 0 var(--ptv-space-4);
+    object-fit: contain;
 }
 
-.ptv-signup-title {
-    grid-area: title;
+.ptv-native-signup-card h1 {
     margin: 0;
-
     color: var(--ptv-color-text-primary);
     font-family: var(--ptv-font-accent);
-    font-size: clamp(28px, 3vw, 48px);
+    font-size: clamp(32px, 5vw, 52px);
     font-weight: 900;
     letter-spacing: 0;
     line-height: var(--ptv-line-title);
 }
 
-.ptv-signup-subtitle {
-    grid-area: subtitle;
-    margin: 0;
-
+.ptv-native-signup-subtitle {
+    margin-top: var(--ptv-space-1);
     color: var(--ptv-color-text-secondary);
-    font-size: var(--ptv-text-body);
     font-weight: 750;
-    line-height: var(--ptv-line-body);
 }
 
-.ptv-signup-actions {
-    grid-area: actions;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--ptv-space-3);
-    align-items: center;
-    justify-content: flex-end;
-}
-
-.ptv-signup-open-link,
-.ptv-signup-close,
-.ptv-signup-fallback-link {
-    min-height: var(--ptv-control-height-md);
-    padding: 0 var(--ptv-space-4);
-    cursor: pointer;
-}
-
-.ptv-signup-frame-shell {
-    position: relative;
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-
-    border: 1px solid rgba(var(--ptv-color-accent-secondary-rgb), 0.24);
-    border-radius: var(--ptv-radius-panel);
-    background: rgba(5, 3, 12, 0.78);
-    box-shadow:
-        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.08),
-        0 20px 60px rgba(0, 0, 0, 0.3);
-}
-
-.ptv-signup-frame {
-    display: block;
-    width: 100%;
-    height: 100%;
-
-    border: 0;
-    background: #05050a;
-    color-scheme: dark;
-}
-
-.ptv-signup-state {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-
-    display: grid;
-    place-content: center;
-    gap: var(--ptv-space-3);
-    padding: var(--ptv-space-6);
-
-    color: var(--ptv-color-text-primary);
-    text-align: center;
+.ptv-native-signup-success {
+    padding: var(--ptv-space-4);
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.22);
+    border-radius: var(--ptv-radius-lg);
     background:
-        radial-gradient(circle at 50% 22%, rgba(var(--ptv-color-focus-rgb), 0.16), transparent 32%),
-        var(--ptv-elevation-3-surface-solid);
+        linear-gradient(145deg, rgba(31, 19, 59, 0.72), rgba(9, 6, 20, 0.84)),
+        rgba(255, 255, 255, 0.04);
+    box-shadow: inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.08);
 }
 
-.ptv-signup-state[hidden] {
-    display: none !important;
-}
-
-.ptv-signup-fallback h2 {
+.ptv-native-signup-success h2 {
     margin: 0;
-    font-size: var(--ptv-text-section);
-    line-height: var(--ptv-line-section);
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(24px, 4vw, 34px);
+    font-weight: 900;
+    letter-spacing: 0;
+    text-align: center;
 }
 
-.ptv-signup-fallback p {
-    max-width: 42rem;
-    margin: 0;
+.ptv-native-signup-countdown {
+    display: grid;
+    width: 64px;
+    height: 64px;
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.34);
+    border-radius: 999px;
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-accent);
+    font-size: 28px;
+    font-weight: 900;
+    place-items: center;
+    background: rgba(var(--ptv-color-focus-rgb), 0.12);
+    box-shadow: 0 0 34px rgba(var(--ptv-color-focus-rgb), 0.24);
+}
 
-    color: var(--ptv-color-text-secondary);
-    line-height: var(--ptv-line-body);
+.ptv-native-signup-card .MuiTextField-root,
+.ptv-signup-invites-page .MuiTextField-root {
+    min-width: 0;
+}
+
+.ptv-signup-invites-content {
+    padding-top: clamp(24px, 4vw, 48px);
+    padding-bottom: clamp(48px, 6vw, 88px);
+}
+
+.ptv-signup-invites-content h1 {
+    margin: 0;
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(32px, 4vw, 52px);
+    font-weight: 900;
+    letter-spacing: 0;
+}
+
+.ptv-signup-library-picker {
+    display: grid;
+    gap: var(--ptv-space-1);
+    padding: var(--ptv-space-3);
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.18);
+    border-radius: var(--ptv-radius-md);
+    background: rgba(8, 5, 18, 0.42);
+}
+
+.ptv-signup-library-picker h3 {
+    margin: 0 0 var(--ptv-space-1);
+    color: var(--ptv-color-text-primary);
+    font-size: var(--ptv-text-body);
+    font-weight: 900;
+}
+
+.ptv-signup-invite-row {
+    padding: var(--ptv-space-3);
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.18);
+    border-radius: var(--ptv-radius-panel);
+    background:
+        linear-gradient(135deg, rgba(25, 18, 45, 0.72), rgba(11, 7, 22, 0.76)),
+        rgba(0, 0, 0, 0.16);
+    box-shadow: inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.06);
+}
+
+.ptv-signup-invite-row h3 {
+    margin: 0;
+    color: var(--ptv-color-text-primary);
+    font-size: var(--ptv-text-subtitle);
+    font-weight: 900;
+}
+
+.ptv-signup-user-row {
+    display: grid;
+    gap: var(--ptv-space-2);
+    padding: var(--ptv-space-3);
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.18);
+    border-radius: var(--ptv-radius-panel);
+    background:
+        linear-gradient(135deg, rgba(25, 18, 45, 0.72), rgba(11, 7, 22, 0.76)),
+        rgba(0, 0, 0, 0.16);
+    box-shadow: inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.06);
+}
+
+.ptv-signup-user-row h3 {
+    margin: 0 0 var(--ptv-space-1);
+    color: var(--ptv-color-text-primary);
+    font-size: var(--ptv-text-subtitle);
+    font-weight: 900;
+}
+
+.ptv-signup-user-meta {
+    font-size: var(--ptv-text-caption);
 }
 
 @media (max-width: 720px) {
-    .ptv-signup-page {
-        padding: var(--ptv-space-2);
+    .ptv-native-signup-content {
+        align-items: start;
+        padding: var(--ptv-space-3);
     }
 
-    .ptv-signup-shell {
+    .ptv-native-signup-card {
+        margin-top: var(--ptv-space-6);
         border-radius: var(--ptv-radius-lg);
-    }
-
-    .ptv-signup-header {
-        grid-template-columns: 1fr;
-        grid-template-areas:
-            'title'
-            'subtitle'
-            'actions';
-    }
-
-    .ptv-signup-actions {
-        justify-content: flex-start;
     }
 }

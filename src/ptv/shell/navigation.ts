@@ -66,6 +66,13 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
         title: 'Piggie Hub',
         items: [
             {
+                id: 'calendar',
+                label: 'Release Calendar',
+                href: PTV_ROUTES.calendar,
+                icon: 'activity',
+                permission: 'authenticated'
+            },
+            {
                 id: 'request',
                 label: 'Request',
                 href: PTV_ROUTES.request,

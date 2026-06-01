@@ -466,7 +466,16 @@ function readPluginDocument() {
 
     return readPluginStatusForCache()
         .then(status => {
-            if (!hasPluginFeature(status, 'featuredContent')) {
+            const isFeaturedContentAdvertised = hasPluginFeature(status, 'featuredContent');
+
+            recordPtvEvent('cache', 'featured-cache-feature-advertised', {
+                featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
+                features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
+                isFeaturedContentAdvertised,
+                statusOk: status?.ok ?? null
+            });
+
+            if (!isFeaturedContentAdvertised) {
                 return Promise.reject(new Error('PTV plugin featured-content endpoint is not advertised by status.'));
             }
 
@@ -797,6 +806,29 @@ function refreshFeaturedContent(
 
 export function isFeaturedContentCacheFresh() {
     return Boolean(memoryCacheEntry && Date.now() < memoryCacheEntry.expiresAt);
+}
+
+export function getCachedFeaturedContentPayload(options: { allowStale?: boolean } = {}): Promise<FeaturedPayload | null> {
+    if (memoryCacheEntry && (options.allowStale || Date.now() < memoryCacheEntry.expiresAt)) {
+        recordPtvEvent('cache', Date.now() < memoryCacheEntry.expiresAt ? 'hit' : 'stale-hit', {
+            source: 'native-home-memory'
+        });
+
+        return Promise.resolve(memoryCacheEntry.payload);
+    }
+
+    return readServerCacheEntry()
+        .then(cached => {
+            if (!cached) return null;
+            if (!options.allowStale && Date.now() >= cached.expiresAt) return null;
+
+            recordPtvEvent('cache', Date.now() < cached.expiresAt ? 'hit' : 'stale-hit', {
+                source: 'native-home-server',
+                storage: lastCacheStorage
+            });
+
+            return cached.payload;
+        });
 }
 
 export function clearFeaturedContentCache() {

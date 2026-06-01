@@ -45,10 +45,6 @@ public sealed class PtvPluginSettingsDto
     [JsonPropertyName("seerrSettings")]
     public PtvPublicSeerrSettings SeerrSettings { get; set; } = new();
 
-    /// <summary>Gets or sets jfa-go settings.</summary>
-    [JsonPropertyName("jfaGoSettings")]
-    public PtvPublicJfaGoSettings JfaGoSettings { get; set; } = new();
-
     /// <summary>Gets or sets *Arr integration settings.</summary>
     [JsonPropertyName("arrSettings")]
     public PtvPublicArrSettings ArrSettings { get; set; } = new();
@@ -85,7 +81,6 @@ public sealed class PtvPluginSettingsDto
             Rows = configuration.Rows,
             TmdbSettings = PtvPublicTmdbSettings.FromConfiguration(configuration),
             SeerrSettings = PtvPublicSeerrSettings.FromConfiguration(configuration),
-            JfaGoSettings = PtvPublicJfaGoSettings.FromConfiguration(configuration),
             ArrSettings = PtvPublicArrSettings.FromConfiguration(configuration),
             DownloadSettings = PtvPublicDownloadSettings.FromConfiguration(configuration),
             TagSettings = configuration.TagSettings,
@@ -134,10 +129,6 @@ public sealed class PtvPluginSettingsPatchDto
     /// <summary>Gets or sets Jellyseerr setting updates.</summary>
     [JsonPropertyName("seerrSettings")]
     public PtvSeerrSettingsPatch? SeerrSettings { get; set; }
-
-    /// <summary>Gets or sets jfa-go setting updates.</summary>
-    [JsonPropertyName("jfaGoSettings")]
-    public PtvJfaGoSettingsPatch? JfaGoSettings { get; set; }
 
     /// <summary>Gets or sets *Arr setting updates.</summary>
     [JsonPropertyName("arrSettings")]
@@ -348,40 +339,6 @@ public sealed class PtvSeerrSettingsPatch
     /// <summary>Gets or sets whether external fallback is enabled.</summary>
     [JsonPropertyName("openExternalFallback")]
     public bool? OpenExternalFallback { get; set; }
-}
-
-/// <summary>
-/// Partial jfa-go settings patch. API key/token is write-only.
-/// </summary>
-public sealed class PtvJfaGoSettingsPatch
-{
-    /// <summary>Gets or sets whether jfa-go integration is enabled.</summary>
-    [JsonPropertyName("enabled")]
-    public bool? Enabled { get; set; }
-
-    /// <summary>Gets or sets the display name.</summary>
-    [JsonPropertyName("displayName")]
-    public string? DisplayName { get; set; }
-
-    /// <summary>Gets or sets the internal URL.</summary>
-    [JsonPropertyName("internalUrl")]
-    public string? InternalUrl { get; set; }
-
-    /// <summary>Gets or sets the external URL.</summary>
-    [JsonPropertyName("externalUrl")]
-    public string? ExternalUrl { get; set; }
-
-    /// <summary>Gets or sets a write-only API key/token replacement.</summary>
-    [JsonPropertyName("apiKey")]
-    public string? ApiKey { get; set; }
-
-    /// <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
-    [JsonPropertyName("allowSelfSignedTls")]
-    public bool? AllowSelfSignedTls { get; set; }
-
-    /// <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
-    [JsonPropertyName("insecureTls")]
-    public bool? InsecureTls { get; set; }
 }
 
 /// <summary>
@@ -654,59 +611,6 @@ public sealed class PtvPublicSeerrSettings
             InternalUrl = settings.InternalUrl,
             OpenExternalFallback = settings.OpenExternalFallback,
             OpenRequestsInPtv = settings.OpenRequestsInPtv
-        };
-    }
-}
-
-/// <summary>
-/// Public jfa-go settings DTO that never returns the stored API key/token.
-/// </summary>
-public sealed class PtvPublicJfaGoSettings
-{
-    /// <summary>Gets or sets whether jfa-go integration is enabled.</summary>
-    [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; }
-
-    /// <summary>Gets or sets the display name.</summary>
-    [JsonPropertyName("displayName")]
-    public string DisplayName { get; set; } = "jfa-go";
-
-    /// <summary>Gets or sets the internal URL.</summary>
-    [JsonPropertyName("internalUrl")]
-    public string InternalUrl { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the external URL.</summary>
-    [JsonPropertyName("externalUrl")]
-    public string ExternalUrl { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets whether an API key/token is configured.</summary>
-    [JsonPropertyName("apiKeyConfigured")]
-    public bool ApiKeyConfigured { get; set; }
-
-    /// <summary>Gets or sets a write-only API key/token replacement.</summary>
-    [JsonPropertyName("apiKey")]
-    public string? ApiKey { get; set; }
-
-    /// <summary>Gets or sets whether invalid/self-signed internal TLS certificates are allowed.</summary>
-    [JsonPropertyName("allowSelfSignedTls")]
-    public bool AllowSelfSignedTls { get; set; }
-
-    /// <summary>Creates public jfa-go settings.</summary>
-    /// <param name="configuration">Plugin configuration.</param>
-    /// <returns>Public jfa-go settings.</returns>
-    public static PtvPublicJfaGoSettings FromConfiguration(PluginConfiguration configuration)
-    {
-        var settings = configuration.JfaGoSettings;
-
-        return new PtvPublicJfaGoSettings
-        {
-            ApiKey = null,
-            ApiKeyConfigured = !string.IsNullOrWhiteSpace(settings.ApiKey),
-            AllowSelfSignedTls = settings.AllowSelfSignedTls,
-            DisplayName = settings.DisplayName,
-            Enabled = settings.Enabled,
-            ExternalUrl = settings.ExternalUrl,
-            InternalUrl = settings.InternalUrl
         };
     }
 }

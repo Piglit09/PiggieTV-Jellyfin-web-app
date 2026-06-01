@@ -97,7 +97,7 @@ function cleanUrl(value: unknown) {
 function normalizeService(service: IntegrationServiceSettings | undefined): IntegrationServiceSettings {
     return {
         apiKeyConfigured: Boolean(service?.apiKeyConfigured),
-        enabled: Boolean(service?.enabled),
+        enabled: Boolean(service?.enabled || service?.apiKeyConfigured),
         externalUrl: cleanUrl(service?.externalUrl),
         internalUrl: cleanUrl(service?.internalUrl)
     };

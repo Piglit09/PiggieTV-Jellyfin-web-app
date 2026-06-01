@@ -87,7 +87,7 @@ export const LEGACY_USER_ROUTES: LegacyRoute[] = [
             isThemeMediaSupported: true
         }
     }, {
-        path: 'home',
+        path: 'home.html',
         pageProps: {
             controller: 'home',
             view: 'home.html'

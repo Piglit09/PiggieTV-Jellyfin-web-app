@@ -6,7 +6,7 @@ import { resetRuntimeScope } from '../../core/scope';
 import { wasApplied, markApplied } from '../../utils/dom';
 
 const SIGN_UP_URL = PTV_SERVICES.signUpUrl;
-const ACCOUNT_URL = PTV_SERVICES.accountUrl;
+const PASSWORD_RESET_ROUTE = `${PTV_ROUTES.signup}?mode=reset`;
 const DISCORD_URL = PTV_SERVICES.discordUrl;
 const DISCORD_ICON_URL = getPtvStaticAssetUrl(PTV_ASSETS.icons.discord);
 const SIGN_UP_ROUTE = PTV_ROUTES.signup;
@@ -19,7 +19,7 @@ function createLoginActions(loginPage) {
     actions.className = 'ptv-extra-actions';
     actions.innerHTML = `
         <a class="ptv-extra-btn ptv-signup-trigger" href="${SIGN_UP_ROUTE}" data-ptv-signup-trigger="true" data-ptv-signup-url="${SIGN_UP_URL}">Sign Up</a>
-        <a class="ptv-extra-btn" href="${ACCOUNT_URL}" target="_blank" rel="noopener noreferrer">Forgot Password</a>
+        <a class="ptv-extra-btn ptv-signup-trigger" href="${PASSWORD_RESET_ROUTE}" data-ptv-signup-trigger="true">Forgot Password</a>
         <a class="ptv-extra-btn discord" href="${DISCORD_URL}" target="_blank" rel="noopener noreferrer">
             <img src="${DISCORD_ICON_URL}" class="ptv-btn-icon" alt="">
             <span>Discord</span>
@@ -79,6 +79,20 @@ function ensureLoginShell(loginPage, form) {
     return shell;
 }
 
+function forceManualLoginMode(loginPage) {
+    const manualForm = loginPage.querySelector('.manualLoginForm');
+    const visualForm = loginPage.querySelector('.visualLoginForm');
+    const manualButton = loginPage.querySelector('.btnManual');
+    const cancelButton = loginPage.querySelector('.btnCancel');
+
+    if (!manualForm) return;
+
+    manualForm.classList.remove('hide');
+    visualForm?.classList.add('hide');
+    manualButton?.classList.add('hide');
+    cancelButton?.classList.add('hide');
+}
+
 export function enhanceLoginPage(root = document) {
     const loginPage = root.matches?.('.loginPage, .manualLoginPage, #loginPage') ?
         root :
@@ -94,6 +108,7 @@ export function enhanceLoginPage(root = document) {
     const panel = shell?.querySelector('.ptv-login-panel');
 
     loginPage.classList.add('ptv-login-custom-actions');
+    forceManualLoginMode(loginPage);
 
     if (panel && !panel.querySelector('.ptv-extra-actions')) {
         panel.appendChild(createLoginActions(loginPage));

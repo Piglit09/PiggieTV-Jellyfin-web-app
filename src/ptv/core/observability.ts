@@ -101,10 +101,20 @@ const IMAGE_MAX_LIFECYCLE_MS = 2 * 60 * 1000;
 const IMAGE_TRACKER_RESET_DEDUPE_MS = 30 * 1000;
 const STATIC_LOGO_EVENT_SUPPRESSION_MS = 5 * 60 * 1000;
 const IMAGE_DEDUPE_LIMIT = 500;
+const ALWAYS_ON_DEBUG_TYPES = new Set<PtvDebugEventType>([
+    'api',
+    'cache',
+    'recommendation',
+    'render',
+    'route',
+    'row-fetch'
+]);
 
 let debugEnabled = false;
 let debugScope: ReturnType<typeof resetRuntimeScope> | null = null;
 let debugCacheStatusProvider: (() => unknown) | null = null;
+let debugShellStatusProvider: (() => unknown) | null = null;
+let debugSignupStatusProvider: (() => unknown) | null = null;
 let resourceObserver: PerformanceObserver | null = null;
 
 function now() {
@@ -699,7 +709,7 @@ export function setPtvDebug(enabled: boolean) {
 }
 
 export function recordPtvEvent(type: PtvDebugEventType, name: string, detail?: unknown) {
-    if (!debugEnabled) return;
+    if (!debugEnabled && !ALWAYS_ON_DEBUG_TYPES.has(type)) return;
 
     events.push({
         at: Date.now(),
@@ -716,7 +726,7 @@ export function recordPtvTiming(
     durationMs: number,
     detail?: unknown
 ) {
-    if (!debugEnabled) return;
+    if (!debugEnabled && !ALWAYS_ON_DEBUG_TYPES.has(type)) return;
 
     if (type === 'image' && durationMs > IMAGE_MAX_LIFECYCLE_MS) {
         recordPtvEvent('image', 'image-duration-discarded', {
@@ -749,8 +759,6 @@ export function timePtvAsync<T>(
     task: () => Promise<T>,
     detail?: unknown
 ): Promise<T> {
-    if (!debugEnabled) return task();
-
     const startedAt = performance.now();
 
     return Promise.resolve()
@@ -771,6 +779,14 @@ export function timePtvAsync<T>(
 
 export function registerPtvDebugCacheStatusProvider(provider: () => unknown) {
     debugCacheStatusProvider = provider;
+}
+
+export function registerPtvDebugShellStatusProvider(provider: (() => unknown) | null) {
+    debugShellStatusProvider = provider;
+}
+
+export function registerPtvDebugSignupStatusProvider(provider: (() => unknown) | null) {
+    debugSignupStatusProvider = provider;
 }
 
 export function getPtvDebugReport() {
@@ -815,6 +831,8 @@ export function getPtvDebugReport() {
         render: getTimingSummary('render'),
         renderProfile,
         rowFetch: getTimingSummary('row-fetch'),
+        shell: debugShellStatusProvider?.() || null,
+        signup: debugSignupStatusProvider?.() || null,
         timings: [...timings],
         timestamp: now()
     };

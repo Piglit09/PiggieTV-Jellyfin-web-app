@@ -236,6 +236,10 @@ function updateAlphaPickerState(instance) {
     }
 }
 
+function isBooksCollection(item) {
+    return item?.CollectionType === CollectionType.Books || String(item?.CollectionType || '').toLowerCase() === 'books';
+}
+
 function getItems(instance, params, item, sortBy, startIndex, limit) {
     const apiClient = ServerConnections.getApiClient(params.serverId);
 
@@ -332,9 +336,17 @@ function getItems(instance, params, item, sortBy, startIndex, limit) {
         SortBy: sortBy
     };
 
+    if (isBooksCollection(item)) {
+        instance.queryRecursive = true;
+        query.Recursive = true;
+        query.IncludeItemTypes = 'Book';
+        query.EnableImageTypes = 'Primary,Backdrop,Thumb';
+        query.Fields = 'PrimaryImageAspectRatio,SortName,Path,ChildCount,MediaSourceCount,MediaSources,Overview,Genres,Tags,ProviderIds';
+    }
+
     if (sortBy === 'Random') {
         instance.queryRecursive = true;
-        query.IncludeItemTypes = 'Video,Movie,Series,Music,MusicVideo';
+        query.IncludeItemTypes = isBooksCollection(item) ? 'Book' : 'Video,Movie,Series,Music,MusicVideo';
         query.Recursive = true;
     }
 
@@ -919,6 +931,13 @@ class ItemsView {
                     // Hide Queue button
                     hideOrShowAll(view.querySelectorAll('.btnQueue'), true);
                 }
+            }).catch(function (error) {
+                console.error('[ListPage] failed to load library items', error);
+                loading.hide();
+                self.itemsContainer.innerHTML = '<div class="noItemsMessage padded-top padded-bottom">This library could not be loaded. Try scanning the library, then refresh this page.</div>';
+                hideOrShowAll(view.querySelectorAll('.btnPlay'), true);
+                hideOrShowAll(view.querySelectorAll('.btnShuffle'), true);
+                hideOrShowAll(view.querySelectorAll('.btnQueue'), true);
             });
 
             if (!isRestored) {

@@ -1,0 +1,368 @@
+#ptvReaderPlayer.ptv-reader-dialog {
+    background: #020106;
+    color: #f6f2ff;
+}
+
+.ptv-reader-root,
+.ptv-reader {
+    min-height: 100%;
+    height: 100%;
+}
+
+.ptv-reader {
+    --ptv-reader-brightness: 1;
+
+    position: relative;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at top left, rgba(39, 200, 255, 0.18), transparent 34rem),
+        radial-gradient(circle at bottom right, rgba(253, 56, 192, 0.14), transparent 32rem),
+        #05020a;
+    color: #f6f2ff;
+    filter: brightness(var(--ptv-reader-brightness));
+}
+
+.ptv-reader--oled {
+    background: #000;
+}
+
+.ptv-reader--sepia {
+    background: #271809;
+    color: #ffe6bf;
+}
+
+.ptv-reader--day {
+    background: #fffaf3;
+    color: #151219;
+}
+
+.ptv-reader-backdrop {
+    position: absolute;
+    inset: 0;
+    background-position: center;
+    background-size: cover;
+    opacity: 0.16;
+    filter: blur(28px) saturate(1.1);
+    transform: scale(1.08);
+}
+
+.ptv-reader-view {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5.5rem 1.25rem 3.5rem;
+}
+
+.ptv-reader-epub {
+    width: min(980px, 100%);
+    height: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.18);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+}
+
+.ptv-reader-pdf,
+.ptv-reader-comic {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    overflow: auto;
+}
+
+.ptv-reader-pdf.is-continuous,
+.ptv-reader-comic--continuous {
+    align-items: center;
+    justify-content: flex-start;
+    flex-direction: column;
+    padding-bottom: 4rem;
+}
+
+.ptv-reader-pdf-page {
+    max-width: 100%;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+}
+
+.ptv-reader-comic-page {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 6px;
+    object-fit: contain;
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.46);
+}
+
+.ptv-reader-comic-page.is-fit-width {
+    width: min(100%, 1280px);
+    height: auto;
+}
+
+.ptv-reader-comic-page.is-fit-height {
+    width: auto;
+    height: 100%;
+}
+
+.ptv-reader-comic-page.is-fit-page {
+    width: auto;
+    height: auto;
+}
+
+.ptv-reader-toolbar {
+    position: absolute;
+    z-index: 5;
+    inset: 0 0 auto;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 180ms ease;
+}
+
+.ptv-reader-toolbar.is-visible {
+    pointer-events: auto;
+    opacity: 1;
+}
+
+.ptv-reader-toolbar__top,
+.ptv-reader-toolbar__bottom {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin: 0.75rem;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid rgba(133, 194, 255, 0.24);
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(18, 21, 38, 0.82), rgba(32, 9, 44, 0.78));
+    box-shadow: 0 14px 42px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(18px);
+}
+
+.ptv-reader-toolbar__bottom {
+    position: fixed;
+    inset: auto 0 1.1rem;
+    justify-content: center;
+    width: fit-content;
+    max-width: calc(100% - 2rem);
+    margin-inline: auto;
+}
+
+.ptv-reader-toolbar__title {
+    display: grid;
+    min-width: 0;
+    flex: 1;
+    gap: 0.1rem;
+}
+
+.ptv-reader-toolbar__title strong,
+.ptv-reader-toolbar__title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-reader-toolbar__title span {
+    color: rgba(246, 242, 255, 0.68);
+    font-size: 0.82rem;
+}
+
+.ptv-reader button,
+.ptv-reader a,
+.ptv-reader select {
+    min-height: 2.35rem;
+    border: 1px solid rgba(39, 200, 255, 0.42);
+    border-radius: 999px;
+    background: rgba(17, 20, 36, 0.9);
+    color: #25c7ff;
+    font: inherit;
+    font-weight: 700;
+    padding: 0 0.85rem;
+    text-decoration: none;
+}
+
+.ptv-reader button:hover,
+.ptv-reader a:hover {
+    background: linear-gradient(135deg, rgba(39, 200, 255, 0.22), rgba(253, 56, 192, 0.2));
+}
+
+.ptv-reader-settings {
+    position: absolute;
+    z-index: 6;
+    top: 5.2rem;
+    right: 1rem;
+    display: grid;
+    width: min(22rem, calc(100% - 2rem));
+    max-height: calc(100% - 8rem);
+    gap: 0.75rem;
+    overflow: auto;
+    padding: 1rem;
+    border: 1px solid rgba(133, 194, 255, 0.24);
+    border-radius: 8px;
+    background: linear-gradient(145deg, rgba(12, 13, 27, 0.96), rgba(32, 9, 44, 0.92));
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(20px);
+}
+
+.ptv-reader-settings h2 {
+    margin: 0;
+}
+
+.ptv-reader-settings label {
+    display: grid;
+    gap: 0.35rem;
+    color: rgba(246, 242, 255, 0.76);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.ptv-reader-settings input,
+.ptv-reader-settings select {
+    width: 100%;
+    border-radius: 8px;
+}
+
+.ptv-reader-progress {
+    position: absolute;
+    z-index: 7;
+    inset: auto 0 0;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.55rem 0.9rem;
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.ptv-reader-progress__track {
+    height: 0.22rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.ptv-reader-progress__bar {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #27c8ff, #fd38c0);
+}
+
+.ptv-reader-progress__label {
+    color: rgba(246, 242, 255, 0.78);
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.ptv-reader-loading,
+.ptv-reader-unsupported {
+    position: absolute;
+    z-index: 8;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    gap: 1rem;
+    padding: 2rem;
+    text-align: center;
+}
+
+.ptv-reader-unsupported {
+    max-width: 42rem;
+    margin: auto;
+}
+
+.ptv-reader-kicker {
+    margin: 0;
+    color: #25c7ff;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.ptv-reader-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.ptv-reader-spinner {
+    width: 3rem;
+    height: 3rem;
+    margin: auto;
+    border: 0.25rem solid rgba(255, 255, 255, 0.18);
+    border-top-color: #27c8ff;
+    border-radius: 50%;
+    animation: ptv-reader-spin 900ms linear infinite;
+}
+
+@keyframes ptv-reader-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (max-width: 700px) {
+    .ptv-reader-view {
+        padding-inline: 0.45rem;
+    }
+
+    .ptv-reader-toolbar__bottom {
+        overflow-x: auto;
+        justify-content: flex-start;
+    }
+}
+
+.ptv-reader-detail-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-right: 0.5rem;
+}
+
+.ptv-reader-detail-button {
+    display: inline-flex;
+    min-height: 2.45rem;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid rgba(39, 200, 255, 0.42);
+    border-radius: 999px;
+    background: rgba(16, 22, 41, 0.76);
+    color: #22c7ff;
+    font: inherit;
+    font-size: 0.86rem;
+    font-weight: 800;
+    padding: 0 0.8rem;
+}
+
+.ptv-reader-detail-button--primary {
+    background: linear-gradient(135deg, #23c7ff, #fb42c6);
+    color: #04030b;
+}
+
+.ptv-reader-detail-button .material-icons {
+    font-size: 1.1rem;
+}
+
+.ptv-reader-detail-badge,
+.ptv-reader-detail-source {
+    display: inline-flex;
+    min-height: 1.8rem;
+    align-items: center;
+    border: 1px solid rgba(133, 194, 255, 0.24);
+    border-radius: 999px;
+    background: rgba(9, 13, 24, 0.7);
+    color: rgba(246, 242, 255, 0.76);
+    font-size: 0.74rem;
+    font-weight: 800;
+    padding: 0 0.55rem;
+}
+
+.ptv-reader-detail-source {
+    color: rgba(246, 242, 255, 0.58);
+}

@@ -101,6 +101,7 @@ type PtvPluginStatus = {
     lastRefreshError?: string | null;
     lastRefreshWarning?: string | null;
     lastRefreshStartedAt?: number | null;
+    integrations?: Record<string, unknown>;
     maxCachePayloadBytes?: number;
     name?: string;
     nextRefreshAt?: number | null;
@@ -110,6 +111,16 @@ type PtvPluginStatus = {
     refreshInProgress?: boolean;
     serverTimeUtc?: string;
     settingsAvailable?: boolean;
+    signup?: {
+        emailConfigured?: boolean;
+        emailEnabled?: boolean;
+        enabled?: boolean;
+        fromDomain?: string | null;
+        nativeUserCount?: number;
+        pendingResetCount?: number;
+        pendingVerificationCount?: number;
+        smtpPasswordConfigured?: boolean;
+    };
     tmdbMetadata?: PtvTmdbMetadataStatus;
     tmdbMetadataStatus?: PtvTmdbMetadataStatus;
     version?: string;
@@ -174,16 +185,6 @@ type PtvSeerrSettingsDto = {
     internalUrl: string;
     openExternalFallback: boolean;
     openRequestsInPtv: boolean;
-};
-
-type PtvJfaGoSettingsDto = {
-    apiKey?: string | null;
-    apiKeyConfigured: boolean;
-    allowSelfSignedTls: boolean;
-    displayName: string;
-    enabled: boolean;
-    externalUrl: string;
-    internalUrl: string;
 };
 
 type PtvArrServiceSettingsDto = {
@@ -253,7 +254,6 @@ type PtvPluginSettings = {
     performanceSettings: PtvPerformanceSettingsDto;
     randomSettings: PtvRandomSettingsDto;
     rowSettings: PtvRowSettingsDto;
-    jfaGoSettings: PtvJfaGoSettingsDto;
     seerrSettings: PtvSeerrSettingsDto;
     tagSettings: PtvTagSettingsDto;
     tmdbSettings: PtvTmdbSettingsDto;
@@ -269,7 +269,6 @@ type PtvPluginSettingsPatch = {
     performanceSettings?: Partial<PtvPerformanceSettingsDto>;
     randomSettings?: Partial<PtvRandomSettingsDto>;
     rowSettings?: Partial<PtvRowSettingsDto>;
-    jfaGoSettings?: Partial<PtvJfaGoSettingsDto>;
     seerrSettings?: Partial<PtvSeerrSettingsDto>;
     tagSettings?: Partial<PtvTagSettingsDto>;
     tmdbSettings?: Partial<PtvTmdbSettingsDto>;
@@ -281,7 +280,6 @@ type PtvSettingsSection =
     | 'downloadSettings'
     | 'featureSettings'
     | 'heroSettings'
-    | 'jfaGoSettings'
     | 'performanceSettings'
     | 'randomSettings'
     | 'refreshInterval'
@@ -365,7 +363,8 @@ const PTV_SETTINGS_LIMITS = {
     rowRefreshHours: [1, 168]
 } as const;
 const ARR_SERVICE_NAMES = ['sonarr', 'radarr', 'lidarr', 'prowlarr'] as const;
-type PtvIntegrationTestKey = 'jfaGo' | 'seerr' | typeof ARR_SERVICE_NAMES[number];
+const ARR_CALENDAR_SERVICE_NAMES = ['sonarr', 'radarr', 'lidarr'] as const;
+type PtvIntegrationTestKey = 'seerr' | typeof ARR_SERVICE_NAMES[number];
 const DEFAULT_PLUGIN_SETTINGS: PtvPluginSettings = {
     arrSettings: {
         lidarr: {
@@ -450,15 +449,6 @@ const DEFAULT_PLUGIN_SETTINGS: PtvPluginSettings = {
         enableSeasonalRows: true,
         rowMaxItems: 16,
         rowRefreshHours: 12
-    },
-    jfaGoSettings: {
-        apiKey: null,
-        apiKeyConfigured: false,
-        allowSelfSignedTls: false,
-        displayName: 'jfa-go',
-        enabled: false,
-        externalUrl: '',
-        internalUrl: ''
     },
     seerrSettings: {
         apiKey: null,
@@ -583,10 +573,6 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
             ...DEFAULT_PLUGIN_SETTINGS.rowSettings,
             ...(settings.rowSettings || {})
         },
-        jfaGoSettings: {
-            ...DEFAULT_PLUGIN_SETTINGS.jfaGoSettings,
-            ...(settings.jfaGoSettings || {})
-        },
         seerrSettings: {
             ...DEFAULT_PLUGIN_SETTINGS.seerrSettings,
             ...(settings.seerrSettings || {})
@@ -636,12 +622,16 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
     nextSettings.tmdbSettings.tmdbLanguage = nextSettings.tmdbSettings.tmdbLanguage.trim() || 'en-US';
     nextSettings.tmdbSettings.tmdbRegion = nextSettings.tmdbSettings.tmdbRegion.trim() || 'US';
     nextSettings.tmdbSettings.tmdbApiToken = nextSettings.tmdbSettings.tmdbApiToken?.trim() || null;
-    nextSettings.jfaGoSettings.apiKey = null;
     nextSettings.seerrSettings.apiKey = null;
     nextSettings.arrSettings.sonarr.apiKey = null;
     nextSettings.arrSettings.radarr.apiKey = null;
     nextSettings.arrSettings.lidarr.apiKey = null;
     nextSettings.arrSettings.prowlarr.apiKey = null;
+    ARR_SERVICE_NAMES.forEach(serviceName => {
+        if (nextSettings.arrSettings[serviceName].apiKeyConfigured) {
+            nextSettings.arrSettings[serviceName].enabled = true;
+        }
+    });
     nextSettings.downloadSettings.username = null;
     nextSettings.downloadSettings.password = null;
 
@@ -702,32 +692,13 @@ function createSeerrSettingsPayload(
 
     if (apiKey) {
         seerrSettings.apiKey = apiKey;
+        seerrSettings.enabled = true;
+        seerrSettings.enableRequestsPage = true;
+        seerrSettings.enableSearchIntegration = true;
+        seerrSettings.openRequestsInPtv = true;
     }
 
     return seerrSettings;
-}
-
-function createJfaGoSettingsPayload(
-    settings: PtvJfaGoSettingsDto,
-    apiKeyInput: string
-): Partial<PtvJfaGoSettingsDto> {
-    const nextSettings = normalizePluginSettings({
-        jfaGoSettings: settings
-    });
-    const jfaGoSettings: Partial<PtvJfaGoSettingsDto> = {
-        allowSelfSignedTls: nextSettings.jfaGoSettings.allowSelfSignedTls,
-        displayName: nextSettings.jfaGoSettings.displayName,
-        enabled: nextSettings.jfaGoSettings.enabled,
-        externalUrl: nextSettings.jfaGoSettings.externalUrl,
-        internalUrl: nextSettings.jfaGoSettings.internalUrl
-    };
-    const apiKey = apiKeyInput.trim();
-
-    if (apiKey) {
-        jfaGoSettings.apiKey = apiKey;
-    }
-
-    return jfaGoSettings;
 }
 
 function createArrSettingsPayload(
@@ -744,6 +715,7 @@ function createArrSettingsPayload(
 
         if (apiKey) {
             arrSettings[serviceName].apiKey = apiKey;
+            arrSettings[serviceName].enabled = true;
         } else {
             delete arrSettings[serviceName].apiKey;
         }
@@ -767,6 +739,7 @@ function createArrServiceSettingsPayload(
 
     if (apiKey) {
         serviceSettings.apiKey = apiKey;
+        serviceSettings.enabled = true;
     }
 
     return serviceSettings;
@@ -1393,7 +1366,6 @@ const PiggieTvDashboardPage = () => {
     const [performanceSettingsDraft, setPerformanceSettingsDraft] = useState<PtvPerformanceSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.performanceSettings }));
     const [tmdbSettingsDraft, setTmdbSettingsDraft] = useState<PtvTmdbSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.tmdbSettings }));
     const [cacheSettingsDraft, setCacheSettingsDraft] = useState<PtvCacheSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.cacheSettings }));
-    const [jfaGoSettingsDraft, setJfaGoSettingsDraft] = useState<PtvJfaGoSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.jfaGoSettings }));
     const [seerrSettingsDraft, setSeerrSettingsDraft] = useState<PtvSeerrSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.seerrSettings }));
     const [arrSettingsDraft, setArrSettingsDraft] = useState<PtvArrSettingsDto>(() => clonePluginSettings(DEFAULT_PLUGIN_SETTINGS).arrSettings);
     const [downloadSettingsDraft, setDownloadSettingsDraft] = useState<PtvDownloadSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.downloadSettings }));
@@ -1403,7 +1375,6 @@ const PiggieTvDashboardPage = () => {
     const [settingsResetting, setSettingsResetting] = useState(false);
     const [settingsDirty, setSettingsDirtyState] = useState(false);
     const [tmdbTokenInput, setTmdbTokenInput] = useState('');
-    const [jfaGoApiKeyInput, setJfaGoApiKeyInput] = useState('');
     const [seerrApiKeyInput, setSeerrApiKeyInput] = useState('');
     const [arrApiKeyInputs, setArrApiKeyInputs] = useState<Record<keyof PtvArrSettingsDto, string>>({
         lidarr: '',
@@ -1444,6 +1415,14 @@ const PiggieTvDashboardPage = () => {
 
     const clientProfile = getPtvClientProfile();
     const performanceProfile = getPtvPerformanceProfile();
+    const arrCalendarReady = ARR_CALENDAR_SERVICE_NAMES.some(serviceName => {
+        const service = arrSettingsDraft[serviceName];
+
+        return Boolean(
+            service.internalUrl.trim()
+            && (service.apiKeyConfigured || arrApiKeyInputs[serviceName]?.trim())
+        );
+    });
 
     const syncCacheStatus = useCallback(() => {
         setCacheStatus(getFeaturedContentCacheStatus());
@@ -1469,14 +1448,12 @@ const PiggieTvDashboardPage = () => {
             setPerformanceSettingsDraft({ ...normalizedSettings.performanceSettings });
             setTmdbSettingsDraft({ ...normalizedSettings.tmdbSettings });
             setCacheSettingsDraft({ ...normalizedSettings.cacheSettings });
-            setJfaGoSettingsDraft({ ...normalizedSettings.jfaGoSettings });
             setSeerrSettingsDraft({ ...normalizedSettings.seerrSettings });
             setArrSettingsDraft(clonePluginSettings(normalizedSettings).arrSettings);
             setDownloadSettingsDraft({ ...normalizedSettings.downloadSettings });
             setSettingsDirty(false);
             settingsDirtyRef.current = false;
             setTmdbTokenInput('');
-            setJfaGoApiKeyInput('');
             setSeerrApiKeyInput('');
             setArrApiKeyInputs({
                 lidarr: '',
@@ -2047,12 +2024,6 @@ const PiggieTvDashboardPage = () => {
         }, 'seerrSettings', 'Jellyseerr settings saved.');
     }, [savePluginSettings, seerrApiKeyInput, seerrSettingsDraft]);
 
-    const saveJfaGoSettings = useCallback(() => {
-        void savePluginSettings({
-            jfaGoSettings: createJfaGoSettingsPayload(jfaGoSettingsDraft, jfaGoApiKeyInput)
-        }, 'jfaGoSettings', 'jfa-go settings saved.');
-    }, [jfaGoApiKeyInput, jfaGoSettingsDraft, savePluginSettings]);
-
     const saveArrSettings = useCallback(() => {
         void savePluginSettings({
             arrSettings: createArrSettingsPayload(arrSettingsDraft, arrApiKeyInputs)
@@ -2263,73 +2234,6 @@ const PiggieTvDashboardPage = () => {
         integrationTestRequestRef.current.seerr = testRequest;
     }, [seerrApiKeyInput, seerrSettingsDraft]);
 
-    const testJfaGoConnection = useCallback(() => {
-        if (integrationTestRequestRef.current.jfaGo) {
-            debugPluginSettingsSave('integration test deduped', {
-                origin: 'click',
-                service: 'jfa-go'
-            });
-            return;
-        }
-
-        const pluginApi = getCurrentPtvPluginApiClient();
-
-        if (!pluginApi?.testJfaGo) {
-            setIntegrationTestMessages(previous => ({
-                ...previous,
-                jfaGo: 'jfa-go test endpoint is unavailable.'
-            }));
-            return;
-        }
-
-        const testPayload = createJfaGoSettingsPayload(jfaGoSettingsDraft, jfaGoApiKeyInput);
-        const apiKey = jfaGoApiKeyInput.trim();
-        const abortController = createDashboardAbortController();
-
-        if (abortController) {
-            integrationTestAbortRef.current.jfaGo = abortController;
-        }
-
-        setIntegrationTesting(previous => ({ ...previous, jfaGo: true }));
-        setIntegrationTestMessages(previous => ({ ...previous, jfaGo: 'Testing jfa-go connection...' }));
-        debugPluginSettingsSave('integration test triggered', {
-            origin: 'click',
-            payload: testPayload,
-            service: 'jfa-go'
-        });
-
-        const testRequest = pluginApi.testJfaGo<Record<string, unknown>, Partial<PtvJfaGoSettingsDto>>(testPayload, {
-            signal: abortController?.signal
-        })
-            .then(result => {
-                const { message, ok } = getIntegrationTestResultMessage('jfa-go', result || {});
-                const saveHint = ok && apiKey ? ' Save jfa-go settings to store this token.' : '';
-
-                setIntegrationTestMessages(previous => ({ ...previous, jfaGo: `${message}${saveHint}` }));
-            })
-            .catch((err: unknown) => {
-                if (abortController?.signal.aborted) {
-                    debugPluginSettingsSave('integration test aborted', {
-                        origin: 'abort',
-                        service: 'jfa-go'
-                    });
-                    return;
-                }
-
-                setIntegrationTestMessages(previous => ({
-                    ...previous,
-                    jfaGo: `jfa-go test failed: ${getErrorMessage(err)}`
-                }));
-            })
-            .finally(() => {
-                delete integrationTestRequestRef.current.jfaGo;
-                delete integrationTestAbortRef.current.jfaGo;
-                setIntegrationTesting(previous => ({ ...previous, jfaGo: false }));
-            });
-
-        integrationTestRequestRef.current.jfaGo = testRequest;
-    }, [jfaGoApiKeyInput, jfaGoSettingsDraft]);
-
     const testArrConnection = useCallback((serviceName: keyof PtvArrSettingsDto) => {
         if (integrationTestRequestRef.current[serviceName]) {
             debugPluginSettingsSave('integration test deduped', {
@@ -2458,6 +2362,7 @@ const PiggieTvDashboardPage = () => {
         performanceReport: getPerformanceSnapshot(),
         pluginApi: getPtvPluginApiDiagnostics(),
         pluginState,
+        signup: pluginState.status?.signup || null,
         timestamp: new Date().toISOString()
     }, null, 2), [clientProfile, debugReport, featureSettings, pluginState]);
 
@@ -2659,6 +2564,9 @@ const PiggieTvDashboardPage = () => {
                                             <Typography>settingsAvailable: {String(pluginStatus?.settingsAvailable ?? false)}</Typography>
                                             <Typography>canReadFeaturedContent: {String(pluginStatus?.canReadFeaturedContent ?? false)}</Typography>
                                             <Typography>canWriteFeaturedContent: {String(pluginStatus?.canWriteFeaturedContent ?? false)}</Typography>
+                                            <Typography>Signup enabled: {String(pluginStatus?.signup?.enabled ?? false)}</Typography>
+                                            <Typography>Signup email configured: {String(pluginStatus?.signup?.emailConfigured ?? false)}</Typography>
+                                            <Typography>Signup pending verify/reset: {pluginStatus?.signup?.pendingVerificationCount ?? 0}/{pluginStatus?.signup?.pendingResetCount ?? 0}</Typography>
                                         </Stack>
                                         <WarningAlert message={pluginStatus?.cacheWriteError ? `Cache write error: ${pluginStatus.cacheWriteError}` : ''} />
                                         <Button
@@ -2832,113 +2740,6 @@ const PiggieTvDashboardPage = () => {
                                             Copy Debug Report
                                         </Button>
                                         <DebugReportPreview text={debugReportText} />
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
-                                            <Typography variant='h2'>jfa-go</Typography>
-                                            <Chip
-                                                className='ptv-status-badge ptv-status-badge-info'
-                                                label={getApiTokenBadgeLabel(jfaGoSettingsDraft, jfaGoApiKeyInput)}
-                                                size='small'
-                                            />
-                                        </Stack>
-                                        <Divider />
-                                        <FormControlLabel
-                                            control={(
-                                                <Switch
-                                                    checked={jfaGoSettingsDraft.enabled}
-                                                    disabled={settingsActionDisabled}
-                                                    onChange={event => {
-                                                        setJfaGoSettingsDraft(previous => ({ ...previous, enabled: event.target.checked }));
-                                                        setSettingsDirty(true);
-                                                    }}
-                                                />
-                                            )}
-                                            label='Enable jfa-go'
-                                        />
-                                        <Box className='ptv-settings-field-grid'>
-                                            <TextField
-                                                label='Display name'
-                                                size='small'
-                                                value={jfaGoSettingsDraft.displayName}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setJfaGoSettingsDraft(previous => ({ ...previous, displayName: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                            <TextField
-                                                label='Internal URL'
-                                                size='small'
-                                                value={jfaGoSettingsDraft.internalUrl}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setJfaGoSettingsDraft(previous => ({ ...previous, internalUrl: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                            <TextField
-                                                label='External URL'
-                                                size='small'
-                                                value={jfaGoSettingsDraft.externalUrl}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setJfaGoSettingsDraft(previous => ({ ...previous, externalUrl: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                        </Box>
-                                        <TextField
-                                            label='jfa-go API token'
-                                            size='small'
-                                            type='password'
-                                            value={jfaGoApiKeyInput}
-                                            disabled={settingsActionDisabled}
-                                            placeholder={jfaGoSettingsDraft.apiKeyConfigured ? 'Token configured - enter a new token to replace it' : 'Paste jfa-go API token'}
-                                            onChange={event => {
-                                                setJfaGoApiKeyInput(event.target.value);
-                                                setSettingsDirty(true);
-                                            }}
-                                            autoComplete='off'
-                                        />
-                                        <Typography variant='body2' color='text.secondary'>
-                                            PiggieTV stores the token in the plugin configuration and never returns it to the dashboard after saving.
-                                        </Typography>
-                                        <FormControlLabel
-                                            control={(
-                                                <Switch
-                                                    checked={jfaGoSettingsDraft.allowSelfSignedTls}
-                                                    disabled={settingsActionDisabled}
-                                                    onChange={event => {
-                                                        setJfaGoSettingsDraft(previous => ({ ...previous, allowSelfSignedTls: event.target.checked }));
-                                                        setSettingsDirty(true);
-                                                    }}
-                                                />
-                                            )}
-                                            label='Allow self-signed TLS for internal URL'
-                                        />
-                                        <Typography variant='body2' color='text.secondary'>
-                                            Use only for trusted LAN jfa-go endpoints with a private certificate.
-                                        </Typography>
-                                        <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
-                                            <Button type='button' variant='contained' onClick={saveJfaGoSettings} disabled={settingsActionDisabled}>
-                                                {settingsSavingSection === 'jfaGoSettings' ? 'Saving...' : 'Save jfa-go Settings'}
-                                            </Button>
-                                            <Button type='button' variant='outlined' onClick={testJfaGoConnection} disabled={settingsActionDisabled || Boolean(integrationTesting.jfaGo)}>
-                                                {integrationTesting.jfaGo ? 'Testing...' : 'Test Connection'}
-                                            </Button>
-                                            <Button type='button' variant='outlined' href={jfaGoSettingsDraft.externalUrl} target='_blank' rel='noreferrer' disabled={!jfaGoSettingsDraft.externalUrl}>
-                                                Open jfa-go
-                                            </Button>
-                                        </Stack>
-                                        <WarningAlert message={integrationTestMessages.jfaGo || ''} />
                                     </Stack>
                                 </CardContent>
                             </Card>
@@ -3348,6 +3149,11 @@ const PiggieTvDashboardPage = () => {
                                     <Stack spacing={2}>
                                         <Typography variant='h2'>*Arr Integrations</Typography>
                                         <Divider />
+                                        <Alert severity={arrCalendarReady ? 'success' : 'info'}>
+                                            {arrCalendarReady ?
+                                                'Calendar is enabled automatically for configured Sonarr, Radarr, and Lidarr services.' :
+                                                'Save a Sonarr, Radarr, or Lidarr API key to enable the PiggieTV calendar.'}
+                                        </Alert>
                                         {ARR_SERVICE_NAMES.map(serviceName => {
                                             const service = arrSettingsDraft[serviceName];
 

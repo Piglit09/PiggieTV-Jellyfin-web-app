@@ -1,3 +1,3 @@
-import SignupInvitesDashboardPage from 'ptv/modules/signup/SignupInvitesDashboardPage';
+import InviteAdminPage from 'ptv/modules/signup/InviteAdminPage';
 
-export const Component = SignupInvitesDashboardPage;
+export const Component = InviteAdminPage;
