@@ -1,8 +1,8 @@
 <!-- Licensed to the .NET Foundation under one or more agreements. The .NET Foundation licenses this file to you under the MIT license. -->
 <Project>
   <PropertyGroup>
-    <_RuntimePackInWorkloadVersionCurrent>9.0.16</_RuntimePackInWorkloadVersionCurrent>
-    <_RuntimePackInWorkloadVersion8>8.0.27</_RuntimePackInWorkloadVersion8>
+    <_RuntimePackInWorkloadVersionCurrent>9.0.17</_RuntimePackInWorkloadVersionCurrent>
+    <_RuntimePackInWorkloadVersion8>8.0.28</_RuntimePackInWorkloadVersion8>
     <_RuntimePackInWorkloadVersion7>7.0.20</_RuntimePackInWorkloadVersion7>
     <_RuntimePackInWorkloadVersion6>6.0.36</_RuntimePackInWorkloadVersion6>
 
@@ -17,7 +17,7 @@
     <TargetsNet6    Condition="'$(TargetFrameworkIdentifier)' == '.NETCoreApp' and $([MSBuild]::VersionEquals('$(TargetFrameworkVersion)', '6.0'))">true</TargetsNet6>
 
     <!-- override WorkloadDetectionWhen net7 == net8 -->
-    <WasmNativeWorkload7 Condition="'7.0.20' == '9.0.16'">$(WasmNativeWorkload8)</WasmNativeWorkload7>
+    <WasmNativeWorkload7 Condition="'7.0.20' == '9.0.17'">$(WasmNativeWorkload8)</WasmNativeWorkload7>
   </PropertyGroup>
 
   <Import Project="$(MSBuildThisFileDirectory)WorkloadManifest.Wasi.targets" Condition="'$(RuntimeIdentifier)' == 'wasi-wasm'" />

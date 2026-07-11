@@ -1,6 +1,6 @@
 import { getModuleDiagnostics } from '../core/lifecycle';
 import { getPtvImageManagerMetrics } from '../core/imageManager';
-import { getPtvDebugReport, isPtvDebugEnabled } from '../core/observability';
+import { getPtvDebugReport, shouldCollectDiagnostics } from '../core/observability';
 import { getRuntimeDiagnostics, resetRuntimeScope } from '../core/scope';
 
 const LOW_FX_CLASS = 'ptv-lowfx';
@@ -696,13 +696,15 @@ function installPerformanceApi() {
 }
 
 function shouldAutoStartPerformanceMonitor() {
-    return isPtvDebugEnabled()
-        || window.location.search.includes('ptvPerf=1')
-        || window.localStorage?.getItem(PTV_PERF_STORAGE_KEY) === '1';
+    if (window.location.search.includes('ptvPerf=1')) return true;
+
+    return shouldCollectDiagnostics() && window.localStorage?.getItem(PTV_PERF_STORAGE_KEY) === '1';
 }
 
 function shouldAutoStartPerformanceOverlay() {
-    return window.location.search.includes('ptvPerfOverlay=1') || window.localStorage?.getItem(PTV_PERF_OVERLAY_STORAGE_KEY) === '1';
+    if (window.location.search.includes('ptvPerfOverlay=1')) return true;
+
+    return shouldCollectDiagnostics() && window.localStorage?.getItem(PTV_PERF_OVERLAY_STORAGE_KEY) === '1';
 }
 
 applyPerformanceMode();
@@ -718,8 +720,10 @@ if (shouldAutoStartPerformanceOverlay()) {
 
 performanceScope.listen(window, 'resize', applyPerformanceMode, { passive: true });
 performanceScope.listen(window, 'ptv:debug:change', (event) => {
-    if (event.detail?.enabled) {
+    if (event.detail?.canCollectDiagnostics) {
         startPerformanceMonitor();
+    } else {
+        stopPerformanceMonitor();
     }
 });
 const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');

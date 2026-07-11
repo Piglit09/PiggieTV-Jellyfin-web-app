@@ -191,6 +191,63 @@
     background: linear-gradient(135deg, rgba(39, 200, 255, 0.22), rgba(253, 56, 192, 0.2));
 }
 
+.ptv-reader-toolbar-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-width: max-content;
+    color: #f8fbff;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.9rem;
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+
+.ptv-reader-toolbar-button__glyph {
+    display: inline-grid;
+    place-items: center;
+    min-width: 2rem;
+    height: 1.7rem;
+    border: 1px solid rgba(246, 242, 255, 0.22);
+    border-radius: 999px;
+    background: rgba(246, 242, 255, 0.11);
+    color: #f8fbff;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0;
+    line-height: 1;
+}
+
+.ptv-reader-toolbar-button__label {
+    display: inline-block;
+    color: #f8fbff;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-weight: 800;
+}
+
+.ptv-reader-toolbar-button--close .ptv-reader-toolbar-button__glyph {
+    background: rgba(255, 79, 111, 0.2);
+}
+
+.ptv-reader-toolbar-button--settings .ptv-reader-toolbar-button__glyph {
+    background: rgba(39, 200, 255, 0.2);
+}
+
+.ptv-reader-toolbar-button--previous .ptv-reader-toolbar-button__glyph,
+.ptv-reader-toolbar-button--next .ptv-reader-toolbar-button__glyph {
+    background: rgba(168, 85, 247, 0.2);
+}
+
+.ptv-reader-toolbar-button--bookmark .ptv-reader-toolbar-button__glyph {
+    background: rgba(255, 194, 71, 0.2);
+}
+
+.ptv-reader-toolbar-button--external .ptv-reader-toolbar-button__glyph {
+    background: rgba(49, 211, 132, 0.2);
+}
+
 .ptv-reader-settings {
     position: absolute;
     z-index: 6;
@@ -311,9 +368,17 @@
         padding-inline: 0.45rem;
     }
 
+    .ptv-reader-toolbar__top {
+        overflow-x: auto;
+    }
+
     .ptv-reader-toolbar__bottom {
         overflow-x: auto;
         justify-content: flex-start;
+    }
+
+    .ptv-reader-toolbar-button {
+        font-size: 0.82rem;
     }
 }
 

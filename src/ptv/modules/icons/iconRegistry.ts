@@ -39,6 +39,7 @@ export const PTV_ICON_REGISTRY = {
     grid: 'grid.svg',
     guide: 'dvr.svg',
     home: 'home.svg',
+    image: 'image.svg',
     libraries: 'libraries.svg',
     library: 'library.svg',
     link: 'link.svg',
@@ -259,6 +260,7 @@ const TEXT_ICON_MATCHERS: Array<[RegExp, PtvIconName]> = [
     [/back/, 'back'],
     [/menu|drawer/, 'menu'],
     [/music/, 'music'],
+    [/book|comic|manga|reader|reading/, 'books'],
     [/library/, 'library'],
     [/discord/, 'discord'],
     [/game/, 'games']

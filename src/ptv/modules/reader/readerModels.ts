@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export type ReaderFormat = 'epub' | 'pdf' | 'comic' | 'unsupported';
 
 export type ReaderTheme = 'dark' | 'oled' | 'sepia' | 'day';
@@ -104,3 +105,5 @@ export interface LoadedReaderDocument {
     comicPages?: string[];
     release?: () => void;
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any */

@@ -45,6 +45,8 @@ import './styles/dashboard.scss';
 import './styles/detailtable.scss';
 import './styles/librarybrowser.scss';
 
+// Base component styles that PTV intentionally overrides.
+import './elements/emby-scroller/emby-scroller.scss';
 // PiggieTV styles and runtime hooks. Keep this after stock styles so PTV owns the visual layer.
 import './ptv/styles/ptv.scss';
 import './ptv/modules/header';

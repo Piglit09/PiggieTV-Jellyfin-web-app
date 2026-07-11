@@ -23,7 +23,8 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
     {
         id: 'main',
         items: [
-            { id: 'home', label: 'Home', href: PTV_ROUTES.home, icon: 'home' }
+            { id: 'home', label: 'Home', href: PTV_ROUTES.home, icon: 'home' },
+            { id: 'recommendations', label: 'Recommendations', href: PTV_ROUTES.recommendations, icon: 'shuffle' }
         ]
     },
     {
@@ -36,6 +37,7 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
             { id: 'movies', label: 'Movies', href: '#/movies', icon: 'movies' },
             { id: 'shows', label: 'Shows', href: '#/tv', icon: 'shows' },
             { id: 'music', label: 'Music', href: '#/music', icon: 'music' },
+            { id: 'reading-library', label: 'PTV Reading', href: PTV_ROUTES.readingLibrary, icon: 'books' },
             { id: 'collections', label: 'Collections', href: '#/collections', icon: 'collections' },
             { id: 'livetv', label: 'Live TV', href: '#/livetv', icon: 'liveTv' },
             { id: 'guide', label: 'Guide', href: '#/livetv.html?tab=guide', icon: 'guide' },
@@ -48,6 +50,8 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
         items: [
             { id: 'dashboard', label: 'Dashboard', href: '#/dashboard', icon: 'dashboard', permission: 'admin' },
             { id: 'piggietv-dashboard', label: 'PiggieTV', href: '#/dashboard/piggietv', icon: 'piggieHub', permission: 'admin' },
+            { id: 'piggietv-row-builder', label: 'PiggieTV Row Builder', href: '#/dashboard/piggietv/rows', icon: 'dashboard', permission: 'admin' },
+            { id: 'piggietv-recommendations', label: 'PiggieTV Recommendations', href: '#/dashboard/piggietv/recommendations', icon: 'dashboard', permission: 'admin' },
             { id: 'signup-invites', label: 'Signup / Invites', href: '#/dashboard/users/signup-invites', icon: 'users', permission: 'admin' },
             { id: 'metadata-manager', label: 'Metadata Manager', href: '#/metadata', icon: 'metadata', permission: 'admin' }
         ]
@@ -106,7 +110,11 @@ function mergeNavigationSections(
             return;
         }
 
-        existing.items.push(...section.items);
+        section.items.forEach(item => {
+            if (existing.items.some(existingItem => existingItem.id === item.id)) return;
+
+            existing.items.push(item);
+        });
         existing.title ||= section.title;
     });
 

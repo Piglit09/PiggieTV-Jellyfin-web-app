@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Jellyfin.Plugin.PiggieTV.Configuration;
 using Jellyfin.Plugin.PiggieTV.Models;
 using MediaBrowser.Controller.Entities;
@@ -22,6 +23,11 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     private const string UnauthorizedErrorCode = "unauthorized";
     private const string ReadAccessTokenEnvironmentVariable = "PTV_TMDB_READ_ACCESS_TOKEN";
     private const string ApiKeyEnvironmentVariable = "PTV_TMDB_API_KEY";
+    private const string V3ApiKeyCredentialType = "v3-api-key";
+    private const string V4BearerCredentialType = "v4-bearer";
+    private static readonly Regex SensitiveResponsePattern = new(
+        "(\"?(?:api[_-]?key|token|authorization)\"?\\s*[:=]\\s*\"?)[^\"&,}\\s]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HttpClient Client = new()
     {
         Timeout = TimeSpan.FromSeconds(8)
@@ -34,6 +40,10 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     private long? _lastDurationMs;
     private string? _lastError;
     private string? _lastErrorCode;
+    private string? _credentialStatus;
+    private string? _lastErrorBody;
+    private int? _lastValidationStatusCode;
+    private DateTimeOffset? _lastValidatedAt;
 
     private sealed record TmdbRequest(BaseItem Item, string Endpoint, string TmdbId)
     {
@@ -85,7 +95,7 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             return new Dictionary<Guid, PtvTmdbItemFacts>();
         }
 
-        if (!await ValidateCredentialsAsync(credentials, cancellationToken).ConfigureAwait(false))
+        if (!await ValidateCredentialsCoreAsync(credentials, cancellationToken).ConfigureAwait(false))
         {
             return new Dictionary<Guid, PtvTmdbItemFacts>();
         }
@@ -146,6 +156,7 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     public PtvTmdbMetadataStatus GetStatus()
     {
         var credentials = GetCredentials();
+        var isEnabled = IsEnabled();
 
         return new PtvTmdbMetadataStatus
         {
@@ -153,14 +164,50 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             CacheMisses = Interlocked.Read(ref _cacheMisses),
             CacheSize = _factCache.Count,
             Configured = credentials.Configured,
-            Enabled = IsEnabled(),
+            CredentialLength = credentials.CredentialLength,
+            CredentialStatus = _credentialStatus ?? GetCredentialStatus(isEnabled, credentials.Configured),
+            CredentialType = credentials.CredentialType,
+            Enabled = isEnabled,
             LastErrorCode = _lastErrorCode,
             LastDurationMs = _lastDurationMs,
-            LastError = _lastError
+            LastError = _lastError,
+            LastErrorBody = _lastErrorBody,
+            LastStatusCode = _lastValidationStatusCode,
+            LastValidatedAt = _lastValidatedAt
         };
     }
 
-    private async Task<bool> ValidateCredentialsAsync(
+    /// <inheritdoc />
+    public async Task<PtvTmdbMetadataStatus> ValidateCredentialsAsync(CancellationToken cancellationToken)
+    {
+        var credentials = GetCredentials();
+
+        if (!IsEnabled())
+        {
+            _credentialStatus = "disabled";
+            _lastError = null;
+            _lastErrorCode = null;
+            _lastValidationStatusCode = null;
+            _lastValidatedAt = DateTimeOffset.UtcNow;
+            return GetStatus();
+        }
+
+        if (!credentials.Configured)
+        {
+            _credentialStatus = "missing";
+            _lastError = "TMDb metadata is enabled, but no TMDb read access token or API key is configured.";
+            _lastErrorCode = "missing-credential";
+            _lastValidationStatusCode = null;
+            _lastValidatedAt = DateTimeOffset.UtcNow;
+            return GetStatus();
+        }
+
+        await ValidateCredentialsCoreAsync(credentials, cancellationToken).ConfigureAwait(false);
+
+        return GetStatus();
+    }
+
+    private async Task<bool> ValidateCredentialsCoreAsync(
         TmdbCredentials credentials,
         CancellationToken cancellationToken)
     {
@@ -168,18 +215,29 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         {
             using var message = new HttpRequestMessage(HttpMethod.Get, BuildValidationUrl(credentials));
 
-            if (!string.IsNullOrWhiteSpace(credentials.ReadAccessToken))
-            {
-                message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.ReadAccessToken);
-            }
-
+            ApplyAuthorization(message, credentials);
             message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            _logger.LogInformation(
+                "PiggieTV TMDb credential validation started. CredentialType={CredentialType}; CredentialLength={CredentialLength}.",
+                credentials.CredentialType,
+                credentials.CredentialLength);
 
             using var response = await Client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            _lastValidationStatusCode = (int)response.StatusCode;
+            _lastValidatedAt = DateTimeOffset.UtcNow;
+            _lastErrorBody = response.IsSuccessStatusCode
+                ? null
+                : await ReadSanitizedResponseBodyAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "PiggieTV TMDb credential validation returned HTTP {StatusCode}. CredentialType={CredentialType}; CredentialLength={CredentialLength}; ErrorBody={ErrorBody}.",
+                (int)response.StatusCode,
+                credentials.CredentialType,
+                credentials.CredentialLength,
+                _lastErrorBody ?? "none");
 
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
-                MarkUnauthorized();
+                MarkUnauthorized(_lastErrorBody);
                 return false;
             }
 
@@ -187,23 +245,34 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             {
                 _lastError = $"TMDb credential validation returned {(int)response.StatusCode}. Metadata enrichment skipped for this refresh.";
                 _lastErrorCode = "validation-failed";
+                _credentialStatus = "invalid";
                 return false;
             }
 
             _lastError = null;
             _lastErrorCode = null;
+            _lastErrorBody = null;
+            _credentialStatus = "valid";
             return true;
         }
         catch (OperationCanceledException)
         {
             _lastError = "TMDb credential validation timed out or was canceled. Metadata enrichment skipped for this refresh.";
             _lastErrorCode = "canceled";
+            _lastErrorBody = null;
+            _credentialStatus = "timeout";
+            _lastValidationStatusCode = null;
+            _lastValidatedAt = DateTimeOffset.UtcNow;
             return false;
         }
         catch (Exception ex)
         {
             _lastError = $"TMDb credential validation failed: {ex.Message}";
             _lastErrorCode = "validation-failed";
+            _lastErrorBody = null;
+            _credentialStatus = "error";
+            _lastValidationStatusCode = null;
+            _lastValidatedAt = DateTimeOffset.UtcNow;
             _logger.LogDebug(ex, "PiggieTV TMDb credential validation failed.");
             return false;
         }
@@ -239,20 +308,26 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         var url = BuildUrl(request, credentials);
         using var message = new HttpRequestMessage(HttpMethod.Get, url);
 
-        if (!string.IsNullOrWhiteSpace(credentials.ReadAccessToken))
-        {
-            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.ReadAccessToken);
-        }
-
+        ApplyAuthorization(message, credentials);
         message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         using var response = await Client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
         {
+            _lastValidationStatusCode = (int)response.StatusCode;
+            _lastErrorBody = await ReadSanitizedResponseBodyAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            _logger.LogDebug(
+                "PiggieTV TMDb {Endpoint} request returned HTTP {StatusCode}. CredentialType={CredentialType}; CredentialLength={CredentialLength}; ErrorBody={ErrorBody}.",
+                request.Endpoint,
+                (int)response.StatusCode,
+                credentials.CredentialType,
+                credentials.CredentialLength,
+                _lastErrorBody ?? "none");
+
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
-                MarkUnauthorized();
+                MarkUnauthorized(_lastErrorBody);
             }
             else
             {
@@ -269,10 +344,20 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         return ParseFacts(json);
     }
 
-    private void MarkUnauthorized()
+    private void MarkUnauthorized(string? errorBody = null)
     {
-        _lastError = "TMDb metadata unauthorized. Check the TMDb read access token or API key.";
+        _lastError = "TMDb metadata unauthorized. Check the TMDb v4 Read Access Token or legacy v3 API key.";
         _lastErrorCode = UnauthorizedErrorCode;
+        _lastErrorBody = errorBody;
+        _credentialStatus = "unauthorized";
+    }
+
+    private static string GetCredentialStatus(bool enabled, bool configured)
+    {
+        if (!enabled) return "disabled";
+        if (!configured) return "missing";
+
+        return "unknown";
     }
 
     private static PtvTmdbItemFacts ParseFacts(JsonNode? json)
@@ -333,7 +418,7 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     {
         var query = "append_to_response=keywords";
 
-        if (string.IsNullOrWhiteSpace(credentials.ReadAccessToken) && !string.IsNullOrWhiteSpace(credentials.ApiKey))
+        if (credentials.CredentialType == V3ApiKeyCredentialType && !string.IsNullOrWhiteSpace(credentials.ApiKey))
         {
             query += $"&api_key={Uri.EscapeDataString(credentials.ApiKey)}";
         }
@@ -345,7 +430,7 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     {
         var query = "language=en-US";
 
-        if (string.IsNullOrWhiteSpace(credentials.ReadAccessToken) && !string.IsNullOrWhiteSpace(credentials.ApiKey))
+        if (credentials.CredentialType == V3ApiKeyCredentialType && !string.IsNullOrWhiteSpace(credentials.ApiKey))
         {
             query += $"&api_key={Uri.EscapeDataString(credentials.ApiKey)}";
         }
@@ -436,14 +521,69 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             apiKey = configuration.TmdbApiKey;
         }
 
-        return new TmdbCredentials(
-            CleanSecret(readAccessToken),
-            CleanSecret(apiKey));
+        var primaryCredential = CreateCredentials(readAccessToken);
+
+        return primaryCredential.Configured ? primaryCredential : CreateCredentials(apiKey);
     }
 
     private static string? CleanSecret(string? value)
     {
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        var cleaned = value.Trim();
+
+        if (cleaned.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            cleaned = cleaned[7..].Trim();
+        }
+
+        return string.Concat(cleaned.Where(character => !char.IsWhiteSpace(character)));
+    }
+
+    private static TmdbCredentials CreateCredentials(string? value)
+    {
+        var credential = CleanSecret(value);
+
+        if (string.IsNullOrWhiteSpace(credential))
+        {
+            return TmdbCredentials.Empty;
+        }
+
+        if (IsLegacyV3ApiKey(credential))
+        {
+            return new TmdbCredentials(null, credential, V3ApiKeyCredentialType, credential.Length);
+        }
+
+        return new TmdbCredentials(credential, null, V4BearerCredentialType, credential.Length);
+    }
+
+    private static bool IsLegacyV3ApiKey(string value)
+    {
+        return value.Length == 32 && value.All(Uri.IsHexDigit);
+    }
+
+    private static void ApplyAuthorization(HttpRequestMessage message, TmdbCredentials credentials)
+    {
+        if (credentials.CredentialType == V4BearerCredentialType && !string.IsNullOrWhiteSpace(credentials.ReadAccessToken))
+        {
+            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.ReadAccessToken);
+        }
+    }
+
+    private static async Task<string?> ReadSanitizedResponseBodyAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        var body = await content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        return SanitizeResponseBody(body);
+    }
+
+    private static string? SanitizeResponseBody(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+
+        var sanitized = SensitiveResponsePattern.Replace(body.Trim(), "$1[redacted]");
+
+        return sanitized.Length > 600 ? sanitized[..600] : sanitized;
     }
 
     private void TrimFactCache()
@@ -461,8 +601,10 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         }
     }
 
-    private sealed record TmdbCredentials(string? ReadAccessToken, string? ApiKey)
+    private sealed record TmdbCredentials(string? ReadAccessToken, string? ApiKey, string CredentialType, int CredentialLength)
     {
-        public bool Configured => !string.IsNullOrWhiteSpace(ReadAccessToken) || !string.IsNullOrWhiteSpace(ApiKey);
+        public static TmdbCredentials Empty { get; } = new(null, null, "missing", 0);
+
+        public bool Configured => CredentialLength > 0;
     }
 }

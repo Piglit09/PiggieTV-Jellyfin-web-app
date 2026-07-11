@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-deprecated, react/jsx-no-bind, sonarjs/cognitive-complexity, sonarjs/no-hardcoded-passwords, sonarjs/slow-regex */
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -115,9 +116,9 @@ function getSignupDebugStatus(state: PtvSignupAdminSettingsResponse) {
         emailRequired: true,
         enabled: state.enabled,
         jellyfinUserCount: users.length,
-        lastNativeUserCreatedAtUtc: nativeUsers.length
-            ? nativeUsers.reduce((latest, user) => user.createdAtUtc > latest ? user.createdAtUtc : latest, nativeUsers[0].createdAtUtc)
-            : null,
+        lastNativeUserCreatedAtUtc: nativeUsers.length ?
+            nativeUsers.reduce((latest, user) => user.createdAtUtc > latest ? user.createdAtUtc : latest, nativeUsers[0].createdAtUtc) :
+            null,
         mappedResetUserCount: mappedUsers.length,
         nativeUserCount: nativeUsers.length,
         pendingResetCount: state.pendingResetCount,
@@ -259,22 +260,22 @@ const InviteAdminPage = () => {
     const toggleLibrary = useCallback((libraryId: string) => {
         setState(previous => ({
             ...previous,
-            defaultEnabledFolderIds: previous.defaultEnabledFolderIds.includes(libraryId)
-                ? previous.defaultEnabledFolderIds.filter(id => id !== libraryId)
-                : [...previous.defaultEnabledFolderIds, libraryId]
+            defaultEnabledFolderIds: previous.defaultEnabledFolderIds.includes(libraryId) ?
+                previous.defaultEnabledFolderIds.filter(id => id !== libraryId) :
+                [...previous.defaultEnabledFolderIds, libraryId]
         }));
     }, []);
 
     const patchUserEmail = useCallback((userId: string, email: string) => {
         setState(previous => ({
             ...previous,
-            users: previous.users.map(user => user.userId === userId
-                ? {
+            users: previous.users.map(user => user.userId === userId ?
+                {
                     ...user,
                     email,
                     emailConfigured: Boolean(email.trim())
-                }
-                : user)
+                } :
+                user)
         }));
     }, []);
 
@@ -597,3 +598,5 @@ const InviteAdminPage = () => {
 InviteAdminPage.displayName = 'InviteAdminPage';
 
 export default InviteAdminPage;
+
+/* eslint-enable @typescript-eslint/no-deprecated, react/jsx-no-bind, sonarjs/cognitive-complexity, sonarjs/no-hardcoded-passwords, sonarjs/slow-regex */

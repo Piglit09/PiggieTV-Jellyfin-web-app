@@ -2,6 +2,7 @@ import { playbackManager } from 'components/playback/playbackmanager';
 
 import {
     getPtvCurrentUserId,
+    getPtvServerId,
     sendPtvJson
 } from './client';
 import type { PtvPlaybackActionOptions } from './types';
@@ -13,7 +14,7 @@ export function playPtvItems(options: PtvPlaybackActionOptions): Promise<unknown
 
     return playbackManager.play({
         ids: options.ids,
-        serverId: options.serverId || undefined,
+        serverId: getPtvServerId(options.serverId) || undefined,
         startPositionTicks: options.startPositionTicks || 0
     });
 }
@@ -99,4 +100,3 @@ export function getPtvCurrentPlaybackState(): unknown {
 
     return player ? playbackManager.getPlayerState?.(player) || null : null;
 }
-

@@ -3331,6 +3331,25 @@ export class PlaybackManager {
             startPlaybackProgressTimer(player);
         }
 
+        function triggerPlaybackAutoplayDecision(playbackStopInfo, allowed, reason, extra = {}) {
+            const currentItem = playbackStopInfo?.state?.NowPlayingItem || null;
+            const nextItem = playbackStopInfo?.nextItem || null;
+
+            Events.trigger(self, 'playbackautoplaydecision', [{
+                allowed,
+                currentItemId: currentItem?.Id || null,
+                currentItemName: currentItem?.Name || null,
+                nextItemId: nextItem?.Id || null,
+                nextItemName: nextItem?.Name || null,
+                nextMediaType: playbackStopInfo?.nextMediaType || null,
+                playbackSessionId: playbackStopInfo?.state?.PlayState?.PlaySessionId || null,
+                playMethod: playbackStopInfo?.state?.PlayState?.PlayMethod || null,
+                reason,
+                serverId: currentItem?.ServerId || nextItem?.ServerId || null,
+                ...extra
+            }]);
+        }
+
         function onPlaybackStoppedFromSelfManagingPlayer(e, playerStopInfo) {
             const player = this;
 
@@ -3364,6 +3383,7 @@ export class PlaybackManager {
 
             Events.trigger(player, 'playbackstop', [state]);
             Events.trigger(self, 'playbackstop', [playbackStopInfo]);
+            triggerPlaybackAutoplayDecision(playbackStopInfo, Boolean(nextItem), nextItem ? 'self-managing-player-next-item' : 'no-next-item');
 
             const nextItemPlayOptions = nextItem ? (nextItem.item.playOptions || getDefaultPlayOptions()) : getDefaultPlayOptions();
             const newPlayer = nextItem ? getPlayer(nextItem.item, nextItemPlayOptions) : null;
@@ -3414,12 +3434,13 @@ export class PlaybackManager {
                     const isRemoteSource = streamInfo.item.LocationType === 'Remote';
                     // force transcoding and only allow remuxing for remote source like liveTV, but only for initial trial
                     const tryVideoStreamCopy = isRemoteSource && !isAlreadyFallbacking;
+                    const forceAudioTranscode = !tryVideoStreamCopy || currentlyPreventsAudioStreamCopy || currentlyPreventsVideoStreamCopy;
 
                     changeStream(player, startTime, {
                         EnableDirectPlay: false,
                         EnableDirectStream: tryVideoStreamCopy,
                         AllowVideoStreamCopy: tryVideoStreamCopy,
-                        AllowAudioStreamCopy: currentlyPreventsAudioStreamCopy || currentlyPreventsVideoStreamCopy ? false : null
+                        AllowAudioStreamCopy: forceAudioTranscode ? false : null
                     });
 
                     return;
@@ -3490,15 +3511,28 @@ export class PlaybackManager {
             }
 
             if (errorOccurred) {
+                triggerPlaybackAutoplayDecision(playbackStopInfo, false, 'playback-error', {
+                    errorCode: displayErrorCode
+                });
                 showPlaybackInfoErrorMessage(self, 'PlaybackError' + displayErrorCode);
             } else if (nextItem) {
                 const apiClient = ServerConnections.getApiClient(nextItem.item.ServerId);
 
                 apiClient.getCurrentUser().then(function (user) {
-                    if (user.Configuration.EnableNextEpisodeAutoPlay || nextMediaType !== MediaType.Video) {
+                    const autoplayAllowed = user.Configuration.EnableNextEpisodeAutoPlay || nextMediaType !== MediaType.Video;
+
+                    triggerPlaybackAutoplayDecision(playbackStopInfo, autoplayAllowed, autoplayAllowed ? 'user-enabled-or-non-video' : 'user-disabled-video-autoplay');
+
+                    if (autoplayAllowed) {
                         self.nextTrack();
                     }
+                }).catch(function (err) {
+                    triggerPlaybackAutoplayDecision(playbackStopInfo, false, 'user-lookup-failed', {
+                        error: err?.message || String(err || '')
+                    });
                 });
+            } else {
+                triggerPlaybackAutoplayDecision(playbackStopInfo, false, 'no-next-item');
             }
         }
 

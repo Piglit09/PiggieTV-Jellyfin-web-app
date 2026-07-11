@@ -13,6 +13,7 @@ export default function PtvSettingsPage({
     className,
     density = 'dense',
     panel = true,
+    shellSection = 'settings',
     width = 'narrow',
     ...props
 }: PtvSettingsPageProps) {
@@ -21,6 +22,7 @@ export default function PtvSettingsPage({
             {...props}
             className={classNames('ptv-settings-layout', className)}
             density={density}
+            shellSection={shellSection}
             width={width}
         >
             {panel ? (

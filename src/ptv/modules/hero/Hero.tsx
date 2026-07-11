@@ -1,20 +1,26 @@
 import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { playbackManager } from '../../../components/playback/playbackmanager';
+import {
+    getPtvItemImageCandidates,
+    type PtvItem,
+    type PtvItemImageCandidate
+} from '../../api';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { PTV_BRANDING, PTV_ROUTES } from '../../core/config';
 import { syncPtvImagePreloads } from '../../core/images';
+import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
 import type { FeaturedPayload } from '../cache/featuredContentCache';
 import type { HeroApiClient, HeroItem } from './useHeroItem';
 import { useHeroItems } from './useHeroItems';
-
-import './hero.scss';
 
 type HeroProps = {
     apiClient?: HeroApiClient;
     user?: { Id?: string };
     featuredContentPromise?: Promise<FeaturedPayload>;
 };
+
+const failedHeroImageUrls = new Set<string>();
 
 function getDirectImageUrl(
     apiClient: HeroApiClient,
@@ -113,6 +119,40 @@ function getBackdropUrl(apiClient?: HeroApiClient, item?: HeroItem | null) {
     });
 }
 
+function getHeroBackdropCandidates(item?: HeroItem | null): PtvItemImageCandidate[] {
+    if (!item?.Id) return [];
+
+    const { heroBackdropMaxWidth } = getPtvPerformanceProfile();
+
+    return getPtvItemImageCandidates(item as PtvItem, {
+        baseOptions: {
+            maxWidth: heroBackdropMaxWidth,
+            quality: 92
+        },
+        order: ['Backdrop', 'Primary', 'Thumb', 'SeriesPrimary']
+    }).filter(candidate => !failedHeroImageUrls.has(candidate.url));
+}
+
+function recordHeroImageFallback(
+    item: HeroItem | null,
+    failedCandidate: PtvItemImageCandidate | undefined,
+    nextCandidate: PtvItemImageCandidate | undefined
+) {
+    if (!shouldCollectDiagnostics() || !failedCandidate) return;
+
+    recordPtvEvent('image', 'hero-image-fallback', {
+        attemptedUrl: failedCandidate.url,
+        imageTag: failedCandidate.tag || null,
+        itemId: item?.Id || null,
+        itemName: item?.Name || null,
+        itemType: item?.Type || null,
+        nextSelectedImageType: nextCandidate?.requestedType || null,
+        nextUrl: nextCandidate?.url || null,
+        selectedImageType: failedCandidate.requestedType,
+        staleTagDetected: Boolean(failedCandidate.tag && nextCandidate?.untaggedFallbackFor === failedCandidate.tag)
+    });
+}
+
 function getLogoUrl(apiClient?: HeroApiClient, item?: HeroItem | null) {
     if (!apiClient || !item) return '';
 
@@ -189,11 +229,13 @@ function getEndsAt(item?: HeroItem | null) {
     });
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity
 const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
     const performanceProfile = useMemo(() => getPtvPerformanceProfile(), []);
     const heroItems = useHeroItems(apiClient, user, featuredContentPromise);
     const [heroIndex, setHeroIndex] = useState(0);
     const [previousBackdropUrl, setPreviousBackdropUrl] = useState('');
+    const [backdropAttemptIndex, setBackdropAttemptIndex] = useState(0);
     const [isEntering, setIsEntering] = useState(false);
     const activeBackdropUrl = useRef('');
 
@@ -215,8 +257,13 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
     const heroItem = heroItems[heroIndex] || null;
     const nextHeroItem = heroItems.length > 1 ? heroItems[(heroIndex + 1) % heroItems.length] : null;
 
-    const backdropUrl = getBackdropUrl(apiClient, heroItem);
-    const nextBackdropUrl = getBackdropUrl(apiClient, nextHeroItem);
+    const backdropCandidates = useMemo(() => getHeroBackdropCandidates(heroItem), [heroItem]);
+    const nextBackdropCandidates = useMemo(() => getHeroBackdropCandidates(nextHeroItem), [nextHeroItem]);
+    const currentBackdropCandidate = backdropAttemptIndex < backdropCandidates.length ?
+        backdropCandidates[backdropAttemptIndex] :
+        undefined;
+    const backdropUrl = currentBackdropCandidate?.url || (backdropCandidates.length ? '' : getBackdropUrl(apiClient, heroItem));
+    const nextBackdropUrl = nextBackdropCandidates[0]?.url || getBackdropUrl(apiClient, nextHeroItem);
     const logoUrl = getLogoUrl(apiClient, heroItem);
     const heroTitle = getHeroTitle(heroItem);
     const heroType = getHeroType(heroItem);
@@ -232,6 +279,25 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
         () => `ptv-hero ${heroStateClass} ${transitionClass}`,
         [heroStateClass, transitionClass]
     );
+
+    useEffect(() => {
+        setBackdropAttemptIndex(0);
+    }, [heroKey]);
+
+    const handleBackdropError = useCallback(() => {
+        setBackdropAttemptIndex(previous => {
+            const failedCandidate = backdropCandidates[previous];
+            const next = previous + 1;
+
+            if (failedCandidate?.url) {
+                failedHeroImageUrls.add(failedCandidate.url);
+            }
+
+            recordHeroImageFallback(heroItem, failedCandidate, backdropCandidates[next]);
+
+            return next < backdropCandidates.length ? next : backdropCandidates.length;
+        });
+    }, [backdropCandidates, heroItem]);
     const handleWatchNow = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
         if (!heroItem?.Id) return;
 
@@ -310,6 +376,7 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
                     aria-hidden='true'
                     loading='eager'
                     decoding='async'
+                    onError={handleBackdropError}
                 />
             ) : (
                 <div className='ptv-hero-bg ptv-hero-bg-current' aria-hidden='true' />

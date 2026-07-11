@@ -84,6 +84,10 @@ public sealed class PtvRowPreviewItem
     [JsonPropertyName("sourceType")]
     public string SourceType { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets rule type for compact debug displays.</summary>
+    [JsonPropertyName("ruleType")]
+    public string RuleType { get; set; } = string.Empty;
+
     /// <summary>Gets or sets generation mode.</summary>
     [JsonPropertyName("generationMode")]
     public string GenerationMode { get; set; } = string.Empty;
@@ -134,6 +138,10 @@ public sealed class PtvRowGenerationDiagnostic
     [JsonPropertyName("sourceType")]
     public string SourceType { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets rule type for compact debug displays.</summary>
+    [JsonPropertyName("ruleType")]
+    public string RuleType { get; set; } = string.Empty;
+
     /// <summary>Gets or sets media type.</summary>
     [JsonPropertyName("mediaType")]
     public string MediaType { get; set; } = string.Empty;
@@ -158,9 +166,65 @@ public sealed class PtvRowGenerationDiagnostic
     [JsonPropertyName("providerError")]
     public string? ProviderError { get; set; }
 
+    /// <summary>Gets or sets the generated row id.</summary>
+    [JsonPropertyName("rowId")]
+    public string RowId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the generated row title.</summary>
+    [JsonPropertyName("rowTitle")]
+    public string RowTitle { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the planned row count for the rule.</summary>
+    [JsonPropertyName("plannedRowCount")]
+    public int PlannedRowCount { get; set; }
+
+    /// <summary>Gets or sets how many sources the rule generated before rendering.</summary>
+    [JsonPropertyName("generatedSourceCount")]
+    public int GeneratedSourceCount { get; set; }
+
+    /// <summary>Gets or sets how many planned sources did not produce a rendered row.</summary>
+    [JsonPropertyName("droppedSourceCount")]
+    public int DroppedSourceCount { get; set; }
+
+    /// <summary>Gets or sets the reason a planned source was dropped, when known.</summary>
+    [JsonPropertyName("dropReason")]
+    public string? DropReason { get; set; }
+
     /// <summary>Gets or sets item count.</summary>
     [JsonPropertyName("itemCount")]
     public int ItemCount { get; set; }
+
+    /// <summary>Gets or sets candidate count before source filtering.</summary>
+    [JsonPropertyName("candidateCount")]
+    public int CandidateCount { get; set; }
+
+    /// <summary>Gets or sets matched count before item selection/deduplication.</summary>
+    [JsonPropertyName("matchedCount")]
+    public int MatchedCount { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether fallback content was used.</summary>
+    [JsonPropertyName("fallbackUsed")]
+    public bool FallbackUsed { get; set; }
+
+    /// <summary>Gets or sets the backend query/filter summary used to generate this row.</summary>
+    [JsonPropertyName("queryUsed")]
+    public string QueryUsed { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the studio filter used for studio rows.</summary>
+    [JsonPropertyName("studioFilter")]
+    public string? StudioFilter { get; set; }
+
+    /// <summary>Gets or sets normalized Jellyfin metadata fields used for matching.</summary>
+    [JsonPropertyName("metadataSourceFieldsUsed")]
+    public List<string> MetadataSourceFieldsUsed { get; set; } = [];
+
+    /// <summary>Gets or sets the first generated item names for quick debugging.</summary>
+    [JsonPropertyName("first10ItemNames")]
+    public List<string> First10ItemNames { get; set; } = [];
+
+    /// <summary>Gets or sets the first matched item names before final selection/dedupe.</summary>
+    [JsonPropertyName("first10MatchedItemNames")]
+    public List<string> First10MatchedItemNames { get; set; } = [];
 
     /// <summary>Gets or sets filtered duplicate count.</summary>
     [JsonPropertyName("filteredDuplicateCount")]

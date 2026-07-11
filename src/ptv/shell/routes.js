@@ -30,6 +30,30 @@ const ROUTE_MATCHERS = [
             || document.documentElement.classList.contains('ptv-signup-active')
     },
     {
+        className: 'ptv-route-recommendations',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['dashboard', 'recommendations'],
+        id: 'recommendations',
+        layout: 'admin',
+        navigationItemId: 'piggietv-recommendations',
+        owner: 'dashboard',
+        pageType: 'recommendations',
+        pattern: context => matchesDashboardPtvRoute(context, 'recommendations')
+    },
+    {
+        className: 'ptv-route-row-builder',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['dashboard', 'row-builder'],
+        id: 'row-builder',
+        layout: 'admin',
+        navigationItemId: 'piggietv-row-builder',
+        owner: 'dashboard',
+        pageType: 'row-builder',
+        pattern: context => matchesDashboardPtvRoute(context, 'rows')
+    },
+    {
         className: 'ptv-route-dashboard',
         density: 'comfortable',
         elevation: 1,
@@ -63,6 +87,20 @@ const ROUTE_MATCHERS = [
         owner: 'details',
         pageType: 'details',
         pattern: ({ hash }) => hash.includes('/details') || hash.includes('/item')
+    },
+    {
+        className: 'ptv-route-recommendations-hub',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['recommendations'],
+        id: 'recommendations-hub',
+        layout: 'media-home',
+        navigationItemId: 'recommendations',
+        owner: 'recommendations',
+        pageType: 'recommendations',
+        pattern: ({ hash }) => hash === PTV_ROUTES.recommendations
+            || hash === PTV_ROUTES.recommendationsTypo
+            || /^#\/recomm?endations(?:[/?]|$)/i.test(hash)
     },
     {
         className: 'ptv-route-home',
@@ -101,6 +139,66 @@ const ROUTE_MATCHERS = [
         pattern: ({ hash }) => hash === PTV_ROUTES.calendar || hash.includes('/calendar')
     },
     {
+        className: 'ptv-route-music',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['music'],
+        id: 'music',
+        layout: 'media-home',
+        navigationItemId: 'music',
+        owner: 'music',
+        pageType: 'music',
+        pattern: ({ hash }) => /^#\/music(?:[/?]|$)/i.test(hash)
+    },
+    {
+        className: 'ptv-route-browse',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['browse', 'library', 'movies', 'shows', 'collections'],
+        id: 'browse',
+        layout: 'media-home',
+        navigationItemId: 'home',
+        owner: 'browse',
+        pageType: 'browse',
+        pattern: ({ hash }) => /^#\/(?:movies|shows|tv|collections)(?:[/?]|$)/i.test(hash)
+    },
+    {
+        className: 'ptv-route-books',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['books', 'library', 'reading'],
+        id: 'books',
+        layout: 'media-home',
+        navigationItemId: 'books',
+        owner: 'books',
+        pageType: 'books',
+        pattern: ({ hash }) => /^#\/books(?:[/?]|$)/i.test(hash)
+    },
+    {
+        className: 'ptv-route-comics',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['comics', 'library', 'reading'],
+        id: 'comics',
+        layout: 'media-home',
+        navigationItemId: 'comics',
+        owner: 'books',
+        pageType: 'comics',
+        pattern: ({ hash }) => /^#\/comics(?:[/?]|$)/i.test(hash)
+    },
+    {
+        className: 'ptv-route-manga',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['library', 'manga', 'reading'],
+        id: 'manga',
+        layout: 'media-home',
+        navigationItemId: 'manga',
+        owner: 'books',
+        pageType: 'manga',
+        pattern: ({ hash }) => /^#\/(?:manga|maga)(?:[/?]|$)/i.test(hash)
+    },
+    {
         className: 'ptv-route-playback',
         density: 'comfortable',
         elevation: 0,
@@ -124,6 +222,12 @@ const ROUTE_MATCHERS = [
     }
 ];
 
+console.info('[PTV Recommendations] Route registered', {
+    routeId: 'recommendations',
+    routeOrder: ROUTE_MATCHERS.findIndex(route => route.id === 'recommendations'),
+    source: 'ptv-shell-route-registry'
+});
+
 const FALLBACK_ROUTE = {
     className: 'ptv-route-generic',
     density: 'comfortable',
@@ -134,6 +238,13 @@ const FALLBACK_ROUTE = {
     owner: 'shell',
     pageType: 'generic'
 };
+
+function matchesDashboardPtvRoute(context, segment) {
+    const routeText = `${context.hash || ''} ${context.path || ''} ${context.full || ''}`;
+    const pattern = new RegExp(`(?:^|[#\\s])/?dashboard/piggietv/${segment}(?:[/?#\\s]|$)`, 'i');
+
+    return pattern.test(routeText);
+}
 
 export const PTV_ROUTE_REGISTRY = [...ROUTE_MATCHERS, FALLBACK_ROUTE];
 

@@ -217,6 +217,63 @@
     color: rgba(255, 255, 255, 0.62) !important;
 }
 
+.dashboardDocument .ptv-row-rule-line {
+    overflow-x: auto;
+    overflow-y: visible;
+    padding-bottom: var(--ptv-space-2);
+}
+
+.dashboardDocument .ptv-row-rule-editor {
+    display: grid;
+    grid-template-columns:
+        86px
+        minmax(168px, 1.25fr)
+        minmax(118px, 0.75fr)
+        minmax(160px, 1fr)
+        minmax(190px, 1.1fr)
+        minmax(128px, 0.82fr)
+        78px
+        86px
+        118px
+        minmax(168px, 1fr)
+        minmax(220px, 1.2fr)
+        minmax(172px, auto);
+    gap: var(--ptv-space-2);
+    align-items: center;
+
+    min-width: 1560px;
+}
+
+.dashboardDocument .ptv-row-rule-cell {
+    min-width: 0;
+}
+
+.dashboardDocument .ptv-row-rule-inline-helper {
+    margin: var(--ptv-space-2) 0 0;
+    color: rgba(255, 255, 255, 0.64);
+    line-height: 1.45;
+}
+
+.dashboardDocument .ptv-row-rule-cell-toggle .MuiFormControlLabel-root,
+.dashboardDocument .ptv-row-rule-actions .MuiFormControlLabel-root {
+    margin: 0;
+}
+
+.dashboardDocument .ptv-row-rule-cell-small {
+    min-width: 72px;
+}
+
+.dashboardDocument .ptv-row-rule-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--ptv-space-2);
+    min-width: max-content;
+}
+
+.dashboardDocument .ptv-row-rule-subrows {
+    width: 82px;
+}
+
 .dashboardDocument .emby-button,
 .dashboardDocument .button-submit,
 .dashboardDocument a[data-role='button'] {

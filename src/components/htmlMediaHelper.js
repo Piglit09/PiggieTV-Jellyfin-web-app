@@ -3,13 +3,26 @@ import browser from '../scripts/browser';
 import Events from '../utils/events.ts';
 import { MediaError } from 'types/mediaError';
 
+const DEFAULT_MEDIA_VOLUME_LEVEL = 50;
+const DEFAULT_MEDIA_VOLUME = Math.pow(DEFAULT_MEDIA_VOLUME_LEVEL / 100, 3);
+const HLS_NETWORK_RETRY_LIMIT = 6;
+const HLS_NETWORK_RETRYABLE_STATUS_CODES = new Set([0, 404, 408, 409, 425, 429, 500, 502, 503, 504]);
+
 export function getSavedVolume() {
-    return appSettings.get('volume') || 1;
+    const value = Number(appSettings.get('volume'));
+
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : DEFAULT_MEDIA_VOLUME;
+}
+
+export function getStartupVolume() {
+    return DEFAULT_MEDIA_VOLUME;
 }
 
 export function saveVolume(value) {
-    if (value) {
-        appSettings.set('volume', value);
+    const normalizedValue = Number(value);
+
+    if (Number.isFinite(normalizedValue)) {
+        appSettings.set('volume', Math.max(0, Math.min(1, normalizedValue)));
     }
 }
 
@@ -260,13 +273,23 @@ export function destroyFlvPlayer(instance) {
 }
 
 export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, reject) {
+    let pendingReject = reject;
+
     hls.on(Hls.Events.MANIFEST_PARSED, function () {
-        playWithPromise(elem, onErrorFn).then(resolve, function () {
-            if (reject) {
-                reject();
-                reject = null;
+        instance._hlsNetworkRetryCount = 0;
+        playWithPromise(elem, onErrorFn).then(function () {
+            pendingReject = null;
+            resolve();
+        }, function () {
+            if (pendingReject) {
+                pendingReject();
+                pendingReject = null;
             }
         });
+    });
+
+    hls.on(Hls.Events.FRAG_LOADED, function () {
+        instance._hlsNetworkRetryCount = 0;
     });
 
     hls.on(Hls.Events.ERROR, function (event, data) {
@@ -278,12 +301,17 @@ export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, r
         ) {
             console.debug('hls.js response error code: ' + data.response.code);
 
+            if (shouldRetryHlsNetworkError(instance, data.response.code)) {
+                retryHlsNetworkLoad(instance, hls, elem, data.response.code);
+                return;
+            }
+
             // Trigger failure differently depending on whether this is prior to start of playback, or after
             hls.destroy();
 
-            if (reject) {
-                reject(MediaError.SERVER_ERROR);
-                reject = null;
+            if (pendingReject) {
+                pendingReject(MediaError.SERVER_ERROR);
+                pendingReject = null;
             } else {
                 onErrorInternal(instance, MediaError.SERVER_ERROR);
             }
@@ -295,6 +323,11 @@ export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, r
             switch (data.type) {
                 case Hls.ErrorTypes.NETWORK_ERROR:
 
+                    if (shouldRetryHlsNetworkError(instance, data.response?.code || 0)) {
+                        retryHlsNetworkLoad(instance, hls, elem, data.response?.code || 0);
+                        return;
+                    }
+
                     if (data.response && data.response.code === 0) {
                         // This could be a CORS error related to access control response headers
 
@@ -303,9 +336,9 @@ export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, r
                         // Trigger failure differently depending on whether this is prior to start of playback, or after
                         hls.destroy();
 
-                        if (reject) {
-                            reject(MediaError.NETWORK_ERROR);
-                            reject = null;
+                        if (pendingReject) {
+                            pendingReject(MediaError.NETWORK_ERROR);
+                            pendingReject = null;
                         } else {
                             onErrorInternal(instance, MediaError.NETWORK_ERROR);
                         }
@@ -317,8 +350,8 @@ export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, r
                     break;
                 case Hls.ErrorTypes.MEDIA_ERROR:
                     console.debug('fatal media error encountered, try to recover');
-                    handleHlsJsMediaError(instance, reject);
-                    reject = null;
+                    handleHlsJsMediaError(instance, pendingReject);
+                    pendingReject = null;
                     break;
                 default:
 
@@ -327,9 +360,9 @@ export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, r
                     // Trigger failure differently depending on whether this is prior to start of playback, or after
                     hls.destroy();
 
-                    if (reject) {
-                        reject();
-                        reject = null;
+                    if (pendingReject) {
+                        pendingReject();
+                        pendingReject = null;
                     } else {
                         onErrorInternal(instance, MediaError.FATAL_HLS_ERROR);
                     }
@@ -337,6 +370,24 @@ export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, r
             }
         }
     });
+}
+
+function shouldRetryHlsNetworkError(instance, responseCode) {
+    const retryCount = instance._hlsNetworkRetryCount || 0;
+
+    return retryCount < HLS_NETWORK_RETRY_LIMIT
+        && HLS_NETWORK_RETRYABLE_STATUS_CODES.has(responseCode || 0);
+}
+
+function retryHlsNetworkLoad(instance, hls, elem, responseCode) {
+    instance._hlsNetworkRetryCount = (instance._hlsNetworkRetryCount || 0) + 1;
+    console.debug(`retrying hls.js network load after segment response ${responseCode}; attempt ${instance._hlsNetworkRetryCount}`);
+
+    try {
+        hls.startLoad(Number.isFinite(elem.currentTime) ? elem.currentTime : -1);
+    } catch (err) {
+        console.error('error retrying hls.js network load: ' + err);
+    }
 }
 
 export function onEndedInternal(instance, elem, onErrorFn) {

@@ -54,6 +54,7 @@ export type PtvNormalizedApiError = {
     endpoint?: string;
     kind: PtvNormalizedApiErrorKind;
     message: string;
+    responseBody?: string;
     status?: number;
     url?: string;
 };
@@ -66,6 +67,7 @@ export type PtvPluginFeaturedContentDocument = {
 };
 
 export type PtvPluginRequestOptions = {
+    bypassCache?: boolean;
     params?: Record<string, unknown>;
     signal?: AbortSignal;
 };
@@ -80,6 +82,11 @@ export type PtvPluginApiDiagnostics = {
         originKind: PtvRequestOriginKind;
         url: string;
     }>;
+    attemptedResponses: Array<{
+        responseBody: string | null;
+        status: number | null;
+        url: string;
+    }>;
     attemptedUrl: string | null;
     attemptedUrls: string[];
     authoritativePluginApiRoot: string | null;
@@ -87,6 +94,7 @@ export type PtvPluginApiDiagnostics = {
     lastError: PtvNormalizedApiError | null;
     lastFailedEndpoint: string | null;
     lastFailedStatusCode: number | null;
+    lastResponseBody: string | null;
     lastSuccessfulEndpoint: string | null;
     originDriftWarning: string | null;
     resolvedRoot: string | null;
@@ -103,8 +111,14 @@ let pluginUnavailableUntil = 0;
 let resolvedPluginApiRoot: string | null = null;
 let authoritativePluginApiRoot: string | null = null;
 const inFlightPluginRequests = new Map<string, Promise<unknown>>();
+const pluginReadResponseCache = new Map<string, {
+    expiresAt: number;
+    value: unknown;
+}>();
+let pluginReadResponseCacheRevision = 0;
 let pluginApiDiagnostics: PtvPluginApiDiagnostics = {
     attemptedOrigins: [],
+    attemptedResponses: [],
     attemptedUrl: null,
     attemptedUrls: [],
     authoritativePluginApiRoot: null,
@@ -112,6 +126,7 @@ let pluginApiDiagnostics: PtvPluginApiDiagnostics = {
     lastError: null,
     lastFailedEndpoint: null,
     lastFailedStatusCode: null,
+    lastResponseBody: null,
     lastSuccessfulEndpoint: null,
     originDriftWarning: null,
     resolvedRoot: null,
@@ -173,6 +188,55 @@ function getNestedString(value: unknown, key: 'code' | 'error' | 'message' | 'st
     );
 }
 
+function getNestedStringByKey(value: unknown, key: string, depth = 0): string {
+    if (!isRecord(value) || depth > 3) return '';
+
+    const carrier = value as Record<string, unknown>;
+    const directValue = getStringValue(carrier[key]);
+
+    if (directValue) return directValue;
+
+    return (
+        getNestedStringByKey(carrier.responseJSON, key, depth + 1)
+        || getNestedStringByKey(carrier.response, key, depth + 1)
+        || getNestedStringByKey(carrier.xhr, key, depth + 1)
+        || getNestedStringByKey(carrier.data, key, depth + 1)
+    );
+}
+
+function redactDiagnosticText(value: string) {
+    return value
+        .replace(/(authorization\s*[:=]\s*)(bearer\s+)?[^\s"',;]+/gi, '$1[redacted]')
+        .replace(/(api[-_ ]?key\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]')
+        .replace(/(token\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]')
+        .replace(/(password\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]');
+}
+
+function getErrorResponseBody(value: unknown): string {
+    const textBody = (
+        getNestedStringByKey(value, 'responseText')
+        || getNestedStringByKey(value, 'body')
+        || getNestedStringByKey(value, 'text')
+    );
+
+    if (textBody) return redactDiagnosticText(textBody).slice(0, 1200);
+
+    if (isRecord(value)) {
+        const carrier = value as HttpErrorLike;
+        const structuredBody = carrier.responseJSON || carrier.data || carrier.response;
+
+        if (structuredBody && !isJsonResponseLike(structuredBody)) {
+            try {
+                return redactDiagnosticText(JSON.stringify(structuredBody)).slice(0, 1200);
+            } catch {
+                return '';
+            }
+        }
+    }
+
+    return '';
+}
+
 function getErrorCode(value: unknown): string | undefined {
     return getNestedString(value, 'code') || undefined;
 }
@@ -192,12 +256,14 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
     const code = getErrorCode(error);
     const rawMessage = getRawErrorMessage(error);
     const lowerMessage = rawMessage.toLowerCase();
+    const responseBody = getErrorResponseBody(error) || undefined;
 
     if (status === 401) {
         return {
             code,
             kind: 'unauthorized',
             message: 'HTTP 401: Unauthorized',
+            responseBody,
             status
         };
     }
@@ -207,6 +273,7 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
             code,
             kind: 'forbidden',
             message: 'HTTP 403: Forbidden',
+            responseBody,
             status
         };
     }
@@ -216,6 +283,7 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
             code,
             kind: 'missing',
             message: 'HTTP 404: Plugin endpoint not found',
+            responseBody,
             status
         };
     }
@@ -227,6 +295,7 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
             message: rawMessage && rawMessage !== 'Bad Request' ?
                 `Bad request: ${rawMessage}` :
                 'Bad request: plugin rejected the payload',
+            responseBody,
             status
         };
     }
@@ -236,6 +305,7 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
             code,
             kind: 'timeout',
             message: 'Timeout: request timed out',
+            responseBody,
             status
         };
     }
@@ -245,6 +315,7 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
             code,
             kind: 'version_mismatch',
             message: rawMessage || 'Version mismatch: expected v1 but received another version',
+            responseBody,
             status
         };
     }
@@ -260,6 +331,7 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
             code,
             kind: 'network',
             message: 'Network failure: endpoint unreachable',
+            responseBody,
             status
         };
     }
@@ -268,6 +340,7 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
         code,
         kind: 'unknown',
         message: rawMessage || 'Unknown plugin API error',
+        responseBody,
         status
     };
 }
@@ -456,11 +529,73 @@ function getEndpointName(path: string) {
     return normalizedPath;
 }
 
-function getPluginRequestDedupeKey(method: string, path: string) {
+function getStableCachePart(value: unknown): string {
+    if (Array.isArray(value)) {
+        return `[${value.map(item => getStableCachePart(item)).join(',')}]`;
+    }
+
+    if (isRecord(value)) {
+        return `{${Object.keys(value)
+            .sort()
+            .map(key => `${key}:${getStableCachePart(value[key])}`)
+            .join(',')}}`;
+    }
+
+    return JSON.stringify(value) || 'undefined';
+}
+
+function getPluginRequestCacheKey(method: string, path: string, params?: Record<string, unknown>) {
+    return `${method}:${getEndpointName(path)}:${getStableCachePart(params || {})}`;
+}
+
+function getPluginCompatibilityPaths(path: string) {
+    const normalizedPath = normalizePluginPath(path).toLowerCase();
+
+    if (normalizedPath === 'ptv/v1/status') {
+        return ['Ptv/Status'];
+    }
+
+    if (normalizedPath === 'ptv/v1/featured') {
+        return [
+            'Ptv/v1/FeaturedContent',
+            'Ptv/FeaturedContent'
+        ];
+    }
+
+    if (normalizedPath === 'ptv/v1/featured/refresh') {
+        return [
+            'Ptv/v1/FeaturedContent/Refresh',
+            'Ptv/FeaturedContent/Refresh'
+        ];
+    }
+
+    return [];
+}
+
+function getPluginReadCacheTtlMs(method: string, path: string) {
+    if (method !== 'GET') return 0;
+
     const endpoint = getEndpointName(path);
 
-    if (method === 'GET' && endpoint === 'settings') {
-        return `${method}:${endpoint}`;
+    if (endpoint === 'featuredContent') return 3000;
+    if (endpoint === 'settings') return 30000;
+    if (endpoint === 'status') return 750;
+
+    return 0;
+}
+
+function getPluginRequestDedupeKey(method: string, path: string, params?: Record<string, unknown>) {
+    const endpoint = getEndpointName(path);
+
+    if (
+        method === 'GET'
+        && (
+            endpoint === 'featuredContent'
+            || endpoint === 'settings'
+            || endpoint === 'status'
+        )
+    ) {
+        return getPluginRequestCacheKey(method, path, params);
     }
 
     if (method === 'POST' && normalizedIntegrationTestPath(path)) {
@@ -468,6 +603,14 @@ function getPluginRequestDedupeKey(method: string, path: string) {
     }
 
     return null;
+}
+
+function clearPluginReadResponseCache() {
+    pluginReadResponseCacheRevision += 1;
+
+    if (pluginReadResponseCache.size) {
+        pluginReadResponseCache.clear();
+    }
 }
 
 function normalizedIntegrationTestPath(path: string) {
@@ -512,6 +655,9 @@ function getPluginUrlCandidates(
     const root = getAuthoritativePluginApiRoot(apiClient, path, params);
 
     addPluginApiCandidate(candidates, appendPluginPath(root, path, params));
+    getPluginCompatibilityPaths(path).forEach(compatibilityPath => {
+        addPluginApiCandidate(candidates, appendPluginPath(root, compatibilityPath, params));
+    });
 
     return candidates;
 }
@@ -617,13 +763,30 @@ function notePluginApiSuccess(url: string, path: string, candidates: string[]) {
 
 function notePluginApiFailure(err: unknown, path: string, url: string, candidates: string[]) {
     const normalizedError = withEndpointErrorDetail(err, getEndpointName(path), url);
+    const attemptedResponses = [
+        ...pluginApiDiagnostics.attemptedResponses,
+        {
+            responseBody: normalizedError.responseBody || null,
+            status: normalizedError.status || null,
+            url
+        }
+    ].slice(-40);
 
     updatePluginApiDiagnostics({
+        attemptedResponses,
         authoritativePluginApiRoot,
         candidates: [...candidates],
         lastError: normalizedError,
         lastFailedEndpoint: normalizedError.endpoint || null,
-        lastFailedStatusCode: normalizedError.status || null
+        lastFailedStatusCode: normalizedError.status || null,
+        lastResponseBody: normalizedError.responseBody || null
+    });
+
+    debugLog('plugin endpoint failed', {
+        error: normalizedError.message,
+        responseBody: normalizedError.responseBody || null,
+        status: normalizedError.status || null,
+        url
     });
 }
 
@@ -663,6 +826,7 @@ export function getPtvPluginApiDiagnostics(): PtvPluginApiDiagnostics {
     return {
         ...pluginApiDiagnostics,
         attemptedOrigins: [...pluginApiDiagnostics.attemptedOrigins],
+        attemptedResponses: [...pluginApiDiagnostics.attemptedResponses],
         attemptedUrls: [...pluginApiDiagnostics.attemptedUrls],
         candidates: [...pluginApiDiagnostics.candidates],
         lastError: pluginApiDiagnostics.lastError ? { ...pluginApiDiagnostics.lastError } : null
@@ -670,7 +834,7 @@ export function getPtvPluginApiDiagnostics(): PtvPluginApiDiagnostics {
 }
 
 export function getPtvPluginApiResolvedUrl(
-    path = PTV_PLUGIN_API.endpoints.status,
+    path: string = PTV_PLUGIN_API.endpoints.status,
     params?: Record<string, unknown>,
     apiClient = getCurrentApiClient()
 ) {
@@ -743,6 +907,12 @@ function requestPluginJson<T>(
 
     const method = options.method || 'GET';
     const candidates = getPluginUrlCandidates(apiClient, path, options.params);
+    const responseCacheTtlMs = getPluginReadCacheTtlMs(method, path);
+    const canUseResponseCache = responseCacheTtlMs > 0 && !options.bypassCache;
+    const responseCacheKey = canUseResponseCache
+        ? getPluginRequestCacheKey(method, path, options.params)
+        : null;
+    const responseCacheRevision = pluginReadResponseCacheRevision;
 
     if (options.signal?.aborted) {
         return Promise.reject(Object.assign(new Error('Plugin request aborted.'), {
@@ -754,7 +924,29 @@ function requestPluginJson<T>(
         return Promise.reject(new Error('Jellyfin API client cannot build plugin URLs.'));
     }
 
-    const dedupeKey = getPluginRequestDedupeKey(method, path);
+    if (method !== 'GET') {
+        clearPluginReadResponseCache();
+    } else if (responseCacheKey) {
+        const cachedResponse = pluginReadResponseCache.get(responseCacheKey);
+
+        if (cachedResponse && Date.now() < cachedResponse.expiresAt) {
+            debugLog('served plugin endpoint response from short cache', {
+                cacheKey: responseCacheKey,
+                method,
+                path
+            });
+
+            return Promise.resolve(cachedResponse.value as T);
+        }
+
+        if (cachedResponse) {
+            pluginReadResponseCache.delete(responseCacheKey);
+        }
+    }
+
+    const dedupeKey = options.bypassCache
+        ? null
+        : getPluginRequestDedupeKey(method, path, options.params);
     const inFlightRequest = dedupeKey ? inFlightPluginRequests.get(dedupeKey) : null;
 
     if (inFlightRequest) {
@@ -774,9 +966,30 @@ function requestPluginJson<T>(
 
         notePluginApiAttempt(url, candidates);
 
-        const request = method === 'GET' ?
-            apiClient.getJSON?.(url, true) :
-            apiClient.ajax?.({
+        let request: Promise<unknown> | undefined;
+
+        if (method === 'GET' && !options.signal) {
+            request = apiClient.getJSON?.(url, true);
+        } else if (method === 'GET') {
+            request = apiClient.fetch?.({
+                headers: {
+                    Accept: 'application/json'
+                },
+                method,
+                signal: options.signal,
+                type: method,
+                url
+            }, true) || apiClient.ajax?.({
+                headers: {
+                    Accept: 'application/json'
+                },
+                method,
+                signal: options.signal,
+                type: method,
+                url
+            });
+        } else {
+            request = apiClient.ajax?.({
                 contentType: 'application/json',
                 data: options.body === undefined ? undefined : JSON.stringify(options.body),
                 headers: {
@@ -797,6 +1010,7 @@ function requestPluginJson<T>(
                 type: method,
                 url
             }, true);
+        }
 
         if (!request) {
             return Promise.reject(new Error('Jellyfin API client cannot call plugin endpoints.'));
@@ -844,6 +1058,22 @@ function requestPluginJson<T>(
     };
 
     const request = runAttempt(0)
+        .then(result => {
+            if (method !== 'GET') {
+                clearPluginReadResponseCache();
+            } else if (
+                responseCacheKey
+                && responseCacheTtlMs > 0
+                && responseCacheRevision === pluginReadResponseCacheRevision
+            ) {
+                pluginReadResponseCache.set(responseCacheKey, {
+                    expiresAt: Date.now() + responseCacheTtlMs,
+                    value: result
+                });
+            }
+
+            return result;
+        })
         .finally(() => {
             if (dedupeKey) {
                 inFlightPluginRequests.delete(dedupeKey);
@@ -1003,6 +1233,7 @@ export function resetPtvPluginApiAvailability() {
     pluginUnavailableUntil = 0;
     pluginApiDiagnostics = {
         attemptedOrigins: pluginApiDiagnostics.attemptedOrigins,
+        attemptedResponses: pluginApiDiagnostics.attemptedResponses,
         attemptedUrl: null,
         attemptedUrls: pluginApiDiagnostics.attemptedUrls,
         authoritativePluginApiRoot,
@@ -1010,6 +1241,7 @@ export function resetPtvPluginApiAvailability() {
         lastError: null,
         lastFailedEndpoint: null,
         lastFailedStatusCode: null,
+        lastResponseBody: null,
         lastSuccessfulEndpoint: pluginApiDiagnostics.lastSuccessfulEndpoint,
         originDriftWarning: pluginApiDiagnostics.originDriftWarning,
         resolvedRoot: resolvedPluginApiRoot,
@@ -1038,11 +1270,12 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 options
             );
         },
-        getFeaturedContentCacheDocument() {
+        getFeaturedContentCacheDocument(options?: PtvPluginRequestOptions) {
             return requestPluginJsonWithMissingFallback<PtvPluginFeaturedContentDocument>(
                 apiClient,
                 PTV_PLUGIN_API.endpoints.featuredContent,
-                'Ptv/v1/FeaturedContent'
+                'Ptv/v1/FeaturedContent',
+                options
             );
         },
         getHeroBatch<T = unknown>(options?: PtvPluginRequestOptions) {
@@ -1062,6 +1295,16 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     method: options?.body === undefined ? 'GET' : 'POST'
+                }
+            );
+        },
+        searchMusicMetadata<T = unknown>(params: Record<string, unknown>, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.musicMetadataSearch,
+                {
+                    ...options,
+                    params
                 }
             );
         },
@@ -1169,6 +1412,16 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body: settings,
+                    method: 'POST'
+                }
+            );
+        },
+        testTmdbMetadata<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.tmdbTest,
+                {
+                    ...options,
                     method: 'POST'
                 }
             );

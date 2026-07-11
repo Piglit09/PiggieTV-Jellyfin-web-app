@@ -1,5 +1,6 @@
 import { dispatchPtvCustomEvent, on } from '../../core/events';
 import { PTV_EVENTS, PTV_ROUTES, PTV_SERVICES } from '../../core/config';
+/* eslint-disable compat/compat */
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
 
@@ -219,3 +220,5 @@ registerModule({
 
 registerSignupApi();
 scheduleSignupView();
+
+/* eslint-enable compat/compat */

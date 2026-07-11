@@ -1,9 +1,11 @@
 import type { LoadedReaderDocument, ReaderSource } from './readerModels';
-import { loadComicDocument } from './engines/comicReaderEngine';
-import { loadEpubDocument } from './engines/epubReaderEngine';
-import { loadPdfDocument } from './engines/pdfReaderEngine';
 
-export async function loadReaderDocument(source: ReaderSource): Promise<LoadedReaderDocument> {
+export async function loadReaderDocument(
+    source: ReaderSource,
+    options: {
+        signal?: AbortSignal;
+    } = {}
+): Promise<LoadedReaderDocument> {
     if (!source.supported || !source.downloadUrl) {
         return {
             format: 'unsupported',
@@ -13,9 +15,23 @@ export async function loadReaderDocument(source: ReaderSource): Promise<LoadedRe
         };
     }
 
-    if (source.format === 'epub') return loadEpubDocument(source);
-    if (source.format === 'pdf') return loadPdfDocument(source);
-    if (source.format === 'comic') return loadComicDocument(source);
+    if (source.format === 'epub') {
+        const { loadEpubDocument } = await import('./engines/epubReaderEngine');
+
+        return loadEpubDocument(source);
+    }
+
+    if (source.format === 'pdf') {
+        const { loadPdfDocument } = await import('./engines/pdfReaderEngine');
+
+        return loadPdfDocument(source);
+    }
+
+    if (source.format === 'comic') {
+        const { loadComicDocument } = await import('./engines/comicReaderEngine');
+
+        return loadComicDocument(source, options);
+    }
 
     return {
         format: 'unsupported',

@@ -7,7 +7,6 @@ import browser from '../../scripts/browser';
 import focusManager from '../../components/focusManager';
 import ScrollerFactory from 'lib/scroller';
 import ScrollButtons from '../emby-scrollbuttons/ScrollButtons';
-import './emby-scroller.scss';
 
 export interface ScrollerProps {
     className?: string;
@@ -248,4 +247,3 @@ const Scroller: FC<PropsWithChildren<ScrollerProps>> = ({
 };
 
 export default Scroller;
-

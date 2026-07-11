@@ -67,6 +67,8 @@ export type PtvItem = Record<string, unknown> & {
     RunTimeTicks?: number;
     ServerId?: string;
     SeriesName?: string;
+    Studios?: string[];
+    Tags?: string[];
     Type?: string;
     UserData?: PtvItemUserData;
 };
@@ -107,9 +109,11 @@ export type PtvImageOptions = {
 };
 
 export type PtvItemQuery = PtvApiQuery & {
+    EnableImages?: boolean;
     EnableImageTypes?: string;
     Fields?: string;
     Filters?: string;
+    ImageTypeLimit?: number;
     IncludeItemTypes?: string;
     Limit?: number;
     ParentId?: string;

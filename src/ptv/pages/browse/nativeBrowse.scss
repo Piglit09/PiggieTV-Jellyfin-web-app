@@ -1,0 +1,438 @@
+.ptv-native-browse-page {
+    --ptv-browse-glass: rgb(88 53 126 / 22%);
+    --ptv-browse-glass-strong: rgb(101 67 147 / 32%);
+    --ptv-browse-border: rgb(255 255 255 / 16%);
+    --ptv-browse-glow: rgb(159 92 255 / 28%);
+
+    min-height: 100vh;
+    overflow-x: hidden;
+    background:
+        radial-gradient(circle at 70% 0%, rgb(149 86 255 / 18%), transparent 34rem),
+        linear-gradient(180deg, rgb(4 6 12 / 92%), rgb(8 6 16 / 96%));
+    color: #f7f2ff;
+}
+
+.ptv-browse-hero {
+    position: relative;
+    min-height: clamp(28rem, 49vw, 43rem);
+    overflow: hidden;
+}
+
+.ptv-browse-hero-backdrop,
+.ptv-browse-hero-vignette {
+    position: absolute;
+    inset: 0;
+}
+
+.ptv-browse-hero-backdrop {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 32%;
+    opacity: 0.68;
+    transform: scale(1.018);
+}
+
+.ptv-browse-hero-vignette {
+    background:
+        radial-gradient(circle at 72% 28%, transparent 0, rgb(6 7 13 / 58%) 58%),
+        linear-gradient(90deg, rgb(4 5 10 / 92%) 0%, rgb(4 5 10 / 66%) 28%, rgb(4 5 10 / 16%) 70%),
+        linear-gradient(180deg, rgb(4 5 10 / 22%) 0%, rgb(4 5 10 / 34%) 62%, rgb(4 5 10 / 96%) 100%);
+}
+
+.ptv-browse-hero-copy {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    width: min(38rem, 46vw);
+    min-height: inherit;
+    padding: clamp(4.5rem, 7vw, 7.5rem) clamp(2rem, 4vw, 4.5rem);
+}
+
+.ptv-browse-hero-copy h1 {
+    max-width: 12ch;
+    margin: 0;
+    text-shadow: 0 1.4rem 3rem rgb(0 0 0 / 48%);
+    font-size: clamp(4.2rem, 8vw, 7.2rem);
+    line-height: 0.92;
+    letter-spacing: 0;
+}
+
+.ptv-browse-hero-logo {
+    width: min(31rem, 86%);
+    max-height: 13rem;
+    object-fit: contain;
+    object-position: left center;
+    filter: drop-shadow(0 1.3rem 2.5rem rgb(0 0 0 / 56%));
+}
+
+.ptv-browse-section-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.52rem;
+    margin-bottom: 0.42rem;
+    color: #8eeaff;
+    text-transform: uppercase;
+    text-shadow: 0 0 1rem rgb(103 218 255 / 48%);
+    font-weight: 800;
+    font-size: 0.86rem;
+    letter-spacing: 0;
+}
+
+.ptv-browse-section-kicker .ptv-icon {
+    width: 1rem;
+    height: 1rem;
+}
+
+.ptv-browse-hero-meta {
+    margin: 1.35rem 0 0;
+    color: rgb(255 255 255 / 82%);
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+.ptv-browse-hero-overview {
+    width: min(100%, 43rem);
+    margin: 1.1rem 0 0;
+    color: rgb(255 255 255 / 76%);
+    text-shadow: 0 0.8rem 1.8rem rgb(0 0 0 / 42%);
+    font-size: 1.08rem;
+    line-height: 1.52;
+}
+
+.ptv-browse-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.82rem;
+    margin-top: 1.7rem;
+}
+
+.ptv-browse-primary-action,
+.ptv-browse-secondary-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.58rem;
+    min-height: 3.2rem;
+    padding: 0 1.35rem;
+    border: 1px solid rgb(255 255 255 / 18%);
+    border-radius: 999px;
+    box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 34%);
+    text-decoration: none;
+    font-weight: 800;
+}
+
+.ptv-browse-primary-action {
+    background: linear-gradient(135deg, #b73cff, #6d7cff);
+    color: #fff;
+}
+
+.ptv-browse-secondary-action {
+    background: rgb(255 255 255 / 9%);
+    color: #fff;
+    backdrop-filter: blur(16px);
+}
+
+.ptv-browse-primary-action .ptv-icon,
+.ptv-browse-secondary-action .ptv-icon {
+    width: 1.1rem;
+    height: 1.1rem;
+}
+
+.ptv-browse-content {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    gap: 2rem;
+    margin-top: -2.5rem;
+    padding: 0 clamp(1rem, 2vw, 1.8rem) 4rem;
+}
+
+.ptv-browse-error {
+    padding: 0.9rem 1rem;
+    border: 1px solid rgb(255 202 87 / 26%);
+    border-radius: 1.1rem;
+    background: rgb(72 48 16 / 24%);
+    color: #ffe2a0;
+}
+
+.ptv-browse-row,
+.ptv-browse-tag-section,
+.ptv-browse-debug {
+    position: relative;
+    overflow: visible;
+    border: 1px solid var(--ptv-browse-border);
+    border-radius: 1.5rem;
+    background:
+        linear-gradient(180deg, rgb(255 255 255 / 9%), transparent 28%),
+        linear-gradient(135deg, var(--ptv-browse-glass), rgb(19 18 38 / 24%));
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 14%),
+        inset 0 -1px 0 rgb(0 0 0 / 26%),
+        0 1.6rem 4rem rgb(0 0 0 / 28%),
+        0 0 2.4rem var(--ptv-browse-glow);
+    backdrop-filter: blur(22px) saturate(138%);
+}
+
+.ptv-browse-row::before,
+.ptv-browse-tag-section::before {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background:
+        linear-gradient(90deg, rgb(255 255 255 / 8%), transparent 20%, transparent 72%, rgb(255 255 255 / 5%)),
+        repeating-linear-gradient(90deg, rgb(255 255 255 / 2%) 0 1px, transparent 1px 4px);
+    content: "";
+    opacity: 0.58;
+}
+
+.ptv-browse-row-header {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.35rem 1.4rem 0;
+}
+
+.ptv-browse-row-header h2 {
+    margin: 0;
+    color: #fff;
+    text-shadow: 0 0.55rem 1.4rem rgb(0 0 0 / 46%);
+    font-size: clamp(1.75rem, 2.2vw, 2.45rem);
+    line-height: 1;
+    letter-spacing: 0;
+}
+
+.ptv-browse-card-rail {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-auto-columns: clamp(9.4rem, 10vw, 12.7rem);
+    grid-auto-flow: column;
+    gap: 1rem;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 1.15rem 1.35rem 1.45rem;
+    scroll-padding-inline: 1.35rem;
+}
+
+.ptv-browse-card {
+    display: grid;
+    gap: 0.52rem;
+    min-width: 0;
+    padding: 0.58rem;
+    border: 1px solid rgb(255 255 255 / 13%);
+    border-radius: 1rem;
+    background:
+        linear-gradient(180deg, rgb(255 255 255 / 12%), rgb(255 255 255 / 3%)),
+        rgb(25 18 42 / 34%);
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 12%),
+        0 0.95rem 2.1rem rgb(0 0 0 / 32%);
+    color: #fff;
+    text-decoration: none;
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, filter 180ms ease;
+    backdrop-filter: blur(12px) saturate(135%);
+}
+
+.ptv-browse-card:hover,
+.ptv-browse-card:focus-visible {
+    z-index: 5;
+    border-color: rgb(211 167 255 / 52%);
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 18%),
+        0 1.3rem 3rem rgb(0 0 0 / 48%),
+        0 0 2.1rem rgb(177 90 255 / 34%);
+    filter: brightness(1.07);
+    outline: none;
+    transform: translateY(-0.55rem) scale(1.045);
+}
+
+.ptv-browse-card-art {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    border-radius: 0.74rem;
+    background: linear-gradient(145deg, #23283f, #160d23);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 9%);
+}
+
+.ptv-browse-card-art img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ptv-browse-card-fallback {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    color: rgb(255 255 255 / 76%);
+    font-weight: 900;
+    font-size: 4rem;
+}
+
+.ptv-browse-quality-stack {
+    position: absolute;
+    top: 0.42rem;
+    left: 0.42rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.22rem;
+}
+
+.ptv-browse-quality {
+    padding: 0.16rem 0.38rem;
+    border-radius: 0.35rem;
+    background: rgb(54 143 255 / 88%);
+    box-shadow: 0 0.35rem 0.7rem rgb(0 0 0 / 36%);
+    color: #fff;
+    text-shadow: 0 1px 0 rgb(0 0 0 / 30%);
+    font-weight: 900;
+    font-size: 0.62rem;
+}
+
+.ptv-browse-quality.is-video-feature {
+    background: rgb(168 77 255 / 88%);
+}
+
+.ptv-browse-quality.is-video-format {
+    background: rgb(35 176 120 / 88%);
+}
+
+.ptv-browse-quality.is-source {
+    background: rgb(70 117 175 / 88%);
+}
+
+.ptv-browse-quality.is-audio {
+    background: rgb(240 142 45 / 88%);
+}
+
+.ptv-browse-card-title,
+.ptv-browse-card-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-browse-card-title {
+    font-weight: 900;
+    font-size: 0.91rem;
+}
+
+.ptv-browse-card-meta {
+    color: rgb(255 255 255 / 62%);
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.ptv-browse-row-empty {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    min-height: 9rem;
+    place-items: center;
+    padding: 1rem;
+    color: rgb(255 255 255 / 62%);
+    font-weight: 700;
+}
+
+.ptv-browse-chip-grid {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.68rem;
+    padding: 1.1rem 1.35rem 1.45rem;
+}
+
+.ptv-browse-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.45rem;
+    padding: 0 1rem;
+    border: 1px solid rgb(255 255 255 / 14%);
+    border-radius: 999px;
+    background: rgb(255 255 255 / 8%);
+    color: #fff;
+    text-decoration: none;
+    font-weight: 800;
+}
+
+.ptv-browse-chip:hover,
+.ptv-browse-chip:focus-visible {
+    border-color: rgb(194 140 255 / 54%);
+    background: rgb(160 82 255 / 22%);
+    outline: none;
+}
+
+.ptv-browse-debug {
+    padding: 1rem;
+}
+
+.ptv-browse-debug summary {
+    cursor: pointer;
+    font-weight: 900;
+}
+
+.ptv-browse-debug dl {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.45rem 1rem;
+    margin: 1rem 0;
+}
+
+.ptv-browse-debug dt {
+    color: rgb(255 255 255 / 58%);
+    font-weight: 800;
+}
+
+.ptv-browse-debug dd {
+    margin: 0;
+}
+
+.ptv-browse-debug-list {
+    display: grid;
+    gap: 0.32rem;
+    color: rgb(255 255 255 / 72%);
+}
+
+@media (max-width: 900px) {
+    .ptv-browse-hero-copy {
+        width: min(100%, 34rem);
+        padding-inline: 1.35rem;
+    }
+
+    .ptv-browse-content {
+        margin-top: -1rem;
+    }
+
+    .ptv-browse-card-rail {
+        grid-auto-columns: 9.5rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-browse-card {
+        transition: none;
+    }
+}
+
+.layout-tv .ptv-native-browse-page,
+.ptv-render-profile-firetv .ptv-native-browse-page,
+.ptv-render-profile-low-power .ptv-native-browse-page {
+    .ptv-browse-row,
+    .ptv-browse-tag-section,
+    .ptv-browse-card,
+    .ptv-browse-secondary-action {
+        backdrop-filter: blur(10px);
+    }
+}

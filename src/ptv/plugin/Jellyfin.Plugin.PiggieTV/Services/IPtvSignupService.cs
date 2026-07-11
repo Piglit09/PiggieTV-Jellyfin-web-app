@@ -17,7 +17,7 @@ public interface IPtvSignupService
     Task<PtvSignupResponse> VerifyEmailAsync(PtvSignupEmailVerificationRequest request, string remoteAddress, CancellationToken cancellationToken);
 
     /// <summary>Requests a password reset email.</summary>
-    Task<PtvSignupResponse> RequestPasswordResetAsync(PtvSignupPasswordResetRequest request, string remoteAddress, CancellationToken cancellationToken);
+    Task<PtvSignupResponse> RequestPasswordResetAsync(PtvSignupPasswordResetRequest request, string remoteAddress, string resetPageUrl, CancellationToken cancellationToken);
 
     /// <summary>Confirms a password reset code and changes the password.</summary>
     Task<PtvSignupResponse> ConfirmPasswordResetAsync(PtvSignupPasswordResetConfirmRequest request, string remoteAddress, CancellationToken cancellationToken);

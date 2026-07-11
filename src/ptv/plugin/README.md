@@ -74,13 +74,13 @@ Build:
 dotnet publish src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj --configuration Release --output src/ptv/plugin/bin
 ```
 
-Install manually by copying the published DLLs into a Jellyfin plugin folder such as:
+Install manually by replacing the production plugin folder with the published files, including `meta.json`, such as:
 
 ```text
 <Jellyfin config>/plugins/PiggieTV/
 ```
 
-Then restart Jellyfin.
+Then restart Jellyfin. Replacing `meta.json` matters because Jellyfin persists plugin support status there; a stale `NotSupported` manifest can keep the plugin disabled even after the DLL is fixed.
 
 Architecture docs:
 

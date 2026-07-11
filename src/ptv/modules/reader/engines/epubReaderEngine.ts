@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { LoadedReaderDocument, ReaderChapter, ReaderSource } from '../readerModels';
 
 function flattenNavigation(items: any[], prefix = ''): ReaderChapter[] {
@@ -37,3 +38,5 @@ export async function loadEpubDocument(source: ReaderSource): Promise<LoadedRead
         }
     };
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any */

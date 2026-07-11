@@ -17,6 +17,7 @@ type PtvDebugEventType =
     | 'frame'
     | 'image'
     | 'memory'
+    | 'playback'
     | 'profile'
     | 'recommendation'
     | 'render'
@@ -55,12 +56,53 @@ type PtvDebugSummary = {
     p95Ms: number;
 };
 
+type PtvDebugRecommendationSummary = PtvDebugSummary & {
+    duplicateItemsRemoved: number;
+    recommendationEngineLoaded: boolean;
+    recommendationProfileLoaded: boolean;
+    recommendationProviderLoaded: boolean;
+    recommendationRowsGenerated: number;
+    recommendationRowsRendered: number;
+    rowOverlapPercentage: number;
+    scoreDistribution: unknown;
+    unresolvedArtistCount: number;
+};
+
+type PtvDebugHomeSummary = {
+    backgroundRefreshCompleted: boolean;
+    backgroundRefreshDurationMs: number | null;
+    backgroundRefreshStarted: boolean;
+    cacheHeroUsed: boolean;
+    cacheRenderMs: number | null;
+    cacheRowsUsed: boolean;
+    cacheUsedForHero: boolean;
+    cacheUsedForRows: boolean;
+    fallbackFetchesSkipped: string[];
+    firstInteractiveMs: number | null;
+    homeInitialRenderMs: number | null;
+    slowFetchesAborted: string[];
+};
+
+type PtvDebugReadingSummary = {
+    firstPageRenderMs: number | null;
+    readerOpenMs: number | null;
+    readingCacheRenderMs: number | null;
+    readingFirstShelfMs: number | null;
+    readingFullyLoadedMs: number | null;
+    readingImage: PtvDebugSummary;
+    readingInitialRenderMs: number | null;
+    readingLibraryDiscoveryMs: number | null;
+    readingShelfFetch: PtvDebugSummary;
+    readingSlowFetchesAborted: string[];
+};
+
 type PtvDebugApi = {
     clear: () => void;
     disable: () => void;
     enable: () => void;
     event: (type: PtvDebugEventType, name: string, detail?: unknown) => void;
     report: () => ReturnType<typeof getPtvDebugReport>;
+    shouldCollect: typeof shouldCollectDiagnostics;
     time: typeof timePtvAsync;
     timing: (type: PtvDebugEventType, name: string, durationMs: number, detail?: unknown) => void;
 };
@@ -101,16 +143,10 @@ const IMAGE_MAX_LIFECYCLE_MS = 2 * 60 * 1000;
 const IMAGE_TRACKER_RESET_DEDUPE_MS = 30 * 1000;
 const STATIC_LOGO_EVENT_SUPPRESSION_MS = 5 * 60 * 1000;
 const IMAGE_DEDUPE_LIMIT = 500;
-const ALWAYS_ON_DEBUG_TYPES = new Set<PtvDebugEventType>([
-    'api',
-    'cache',
-    'recommendation',
-    'render',
-    'route',
-    'row-fetch'
-]);
+const PTV_FORCE_DIAGNOSTICS_KEY = 'ptv:debug-force-diagnostics';
 
 let debugEnabled = false;
+let debugAdminAllowed = false;
 let debugScope: ReturnType<typeof resetRuntimeScope> | null = null;
 let debugCacheStatusProvider: (() => unknown) | null = null;
 let debugShellStatusProvider: (() => unknown) | null = null;
@@ -140,7 +176,25 @@ function getInitialDebugValue() {
         ptvWindow.PTV_DEBUG === true
         || window.location.search.includes('ptvDebug=1')
         || getStorage()?.getItem(PTV_DEBUG.storageKey) === '1'
+        || getStorage()?.getItem(PTV_DEBUG.legacyStorageKey) === '1'
     );
+}
+
+function getForceDiagnosticsValue() {
+    return Boolean(
+        window.location.search.includes('ptvForceDiagnostics=1')
+        || getStorage()?.getItem(PTV_FORCE_DIAGNOSTICS_KEY) === '1'
+    );
+}
+
+export function shouldCollectDiagnostics() {
+    if (!debugEnabled || !debugAdminAllowed) return false;
+
+    if (getForceDiagnosticsValue()) return true;
+
+    const profile = getPtvPerformanceProfile();
+
+    return !profile.isFireTv && !profile.isLowPower;
 }
 
 function getPtvGlobal() {
@@ -150,13 +204,13 @@ function getPtvGlobal() {
 }
 
 function debugConsole(message: string, detail?: unknown) {
-    if (!debugEnabled) return;
+    if (!shouldCollectDiagnostics()) return;
 
     console.debug(`[PiggieTV Debug] ${message}`, detail);
 }
 
 function warnDebug(message: string, detail?: unknown) {
-    if (!debugEnabled) return;
+    if (!shouldCollectDiagnostics()) return;
 
     console.warn(`[PiggieTV Debug] ${message}`, detail);
 }
@@ -182,7 +236,7 @@ function getActiveProfiles(): {
 }
 
 export function recordPtvStartupEvent() {
-    if (!debugEnabled) return;
+    if (!shouldCollectDiagnostics()) return;
 
     const {
         clientProfile,
@@ -260,6 +314,236 @@ function getEventCount(type: PtvDebugEventType, name: string) {
     return events.filter(event => event.type === type && event.name === name).length;
 }
 
+function getLatestEvent(type: PtvDebugEventType, name: string) {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+
+        if (event.type === type && event.name === name) return event;
+    }
+
+    return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function hasAnyRecommendationEvent(names: string[]) {
+    return names.some(name => getEventCount('recommendation', name) > 0);
+}
+
+function getFiniteNumber(value: unknown) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value !== 'string') return null;
+
+    const numericValue = Number(value);
+
+    return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function getRecordNumber(detail: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+        const numericValue = getFiniteNumber(detail[key]);
+
+        if (numericValue !== null) return numericValue;
+    }
+
+    return null;
+}
+
+function getRecordBoolean(detail: Record<string, unknown>, key: string) {
+    return typeof detail[key] === 'boolean' ? detail[key] as boolean : false;
+}
+
+function getRecordStringArray(detail: Record<string, unknown>, key: string) {
+    const value = detail[key];
+
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function getLatestRecommendationNumber(names: string[], keys: string[]) {
+    for (const name of names) {
+        const detail = getLatestEvent('recommendation', name)?.detail;
+
+        if (!isRecord(detail)) continue;
+
+        const numericValue = getRecordNumber(detail, keys);
+
+        if (numericValue !== null) return numericValue;
+    }
+
+    return 0;
+}
+
+function getLatestRecommendationValue(names: string[], key: string) {
+    for (const name of names) {
+        const detail = getLatestEvent('recommendation', name)?.detail;
+
+        if (!isRecord(detail) || !(key in detail)) continue;
+
+        return detail[key];
+    }
+
+    return null;
+}
+
+function getRecommendationSummary(): PtvDebugRecommendationSummary {
+    return {
+        ...getTimingSummary('recommendation'),
+        duplicateItemsRemoved: getLatestRecommendationNumber([
+            'native-home-recommendation-rows-loaded',
+            'music-recommendation-rows-loaded',
+            'recommendation-rows-generated',
+            'recommendation-dashboard-rendered'
+        ], [
+            'duplicateItemsRemoved'
+        ]),
+        recommendationEngineLoaded: hasAnyRecommendationEvent([
+            'recommendation-engine-created',
+            'recommendation-engine-run'
+        ]),
+        recommendationProfileLoaded: hasAnyRecommendationEvent([
+            'recommendation-profile-loaded'
+        ]),
+        recommendationProviderLoaded: hasAnyRecommendationEvent([
+            'recommendation-provider-created',
+            'recommendation-candidate-fetch-completed',
+            'recommendation-candidate-fetch-complete',
+            'recommendation-provider-loaded'
+        ]),
+        recommendationRowsGenerated: getLatestRecommendationNumber([
+            'recommendation-rows-generated'
+        ], [
+            'rowCount'
+        ]),
+        recommendationRowsRendered: getLatestRecommendationNumber([
+            'recommendation-dashboard-rendered',
+            'row-builder-recommendation-rows-loaded',
+            'music-recommendation-rows-loaded',
+            'native-home-recommendation-rows-loaded'
+        ], [
+            'recommendationRowsRendered',
+            'rowCount'
+        ]),
+        rowOverlapPercentage: getLatestRecommendationNumber([
+            'native-home-recommendation-rows-loaded',
+            'music-recommendation-rows-loaded',
+            'recommendation-rows-generated',
+            'recommendation-dashboard-rendered'
+        ], [
+            'rowOverlapPercentage'
+        ]),
+        scoreDistribution: getLatestRecommendationValue([
+            'native-home-recommendation-rows-loaded',
+            'music-recommendation-rows-loaded',
+            'recommendation-dashboard-rendered'
+        ], 'scoreDistribution'),
+        unresolvedArtistCount: getLatestRecommendationNumber([
+            'native-home-recommendation-rows-loaded',
+            'music-recommendation-rows-loaded',
+            'recommendation-dashboard-rendered'
+        ], [
+            'unresolvedArtistCount'
+        ])
+    };
+}
+
+function getHomeSummary(): PtvDebugHomeSummary {
+    const detail = getLatestEvent('render', 'native-home-interactive')?.detail;
+
+    if (!isRecord(detail)) {
+        return {
+            backgroundRefreshCompleted: false,
+            backgroundRefreshDurationMs: null,
+            backgroundRefreshStarted: false,
+            cacheHeroUsed: false,
+            cacheRenderMs: null,
+            cacheRowsUsed: false,
+            cacheUsedForHero: false,
+            cacheUsedForRows: false,
+            fallbackFetchesSkipped: [],
+            firstInteractiveMs: null,
+            homeInitialRenderMs: null,
+            slowFetchesAborted: []
+        };
+    }
+
+    return {
+        backgroundRefreshCompleted: getRecordBoolean(detail, 'backgroundRefreshCompleted'),
+        backgroundRefreshDurationMs: getRecordNumber(detail, ['backgroundRefreshDurationMs']),
+        backgroundRefreshStarted: getRecordBoolean(detail, 'backgroundRefreshStarted'),
+        cacheHeroUsed: getRecordBoolean(detail, 'cacheHeroUsed'),
+        cacheRenderMs: getRecordNumber(detail, ['cacheRenderMs']),
+        cacheRowsUsed: getRecordBoolean(detail, 'cacheRowsUsed'),
+        cacheUsedForHero: getRecordBoolean(detail, 'cacheUsedForHero'),
+        cacheUsedForRows: getRecordBoolean(detail, 'cacheUsedForRows'),
+        fallbackFetchesSkipped: getRecordStringArray(detail, 'fallbackFetchesSkipped'),
+        firstInteractiveMs: getRecordNumber(detail, ['firstInteractiveMs']),
+        homeInitialRenderMs: getRecordNumber(detail, ['homeInitialRenderMs']),
+        slowFetchesAborted: getRecordStringArray(detail, 'slowFetchesAborted')
+    };
+}
+
+function getLatestReadingDetail(names: string[]) {
+    for (const name of names) {
+        const detail = getLatestEvent('render', name)?.detail;
+
+        if (isRecord(detail)) return detail;
+    }
+
+    return null;
+}
+
+function getNamedTimingSummary(type: PtvDebugEventType, name: string): PtvDebugSummary {
+    const values = timings
+        .filter(timing => timing.type === type && timing.name === name)
+        .map(timing => timing.durationMs)
+        .sort((a, b) => a - b);
+
+    if (!values.length) {
+        return {
+            averageMs: 0,
+            count: 0,
+            maxMs: 0,
+            p95Ms: 0
+        };
+    }
+
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    const p95Index = Math.min(values.length - 1, Math.floor(values.length * 0.95));
+
+    return {
+        averageMs: Number(average.toFixed(1)),
+        count: values.length,
+        maxMs: Number(values[values.length - 1].toFixed(1)),
+        p95Ms: Number(values[p95Index].toFixed(1))
+    };
+}
+
+function getReadingSummary(): PtvDebugReadingSummary {
+    const interactiveDetail = getLatestReadingDetail([
+        'readingFullyLoadedMs',
+        'readingFirstShelfMs',
+        'reading-page-interactive',
+        'readingInitialRenderMs'
+    ]);
+    const firstPageDetail = getLatestReadingDetail(['firstPageRenderMs']);
+    const readerOpenDetail = getLatestReadingDetail(['readerOpenMs']);
+
+    return {
+        firstPageRenderMs: firstPageDetail ? getRecordNumber(firstPageDetail, ['firstPageRenderMs']) : null,
+        readerOpenMs: readerOpenDetail ? getRecordNumber(readerOpenDetail, ['readerOpenMs']) : null,
+        readingCacheRenderMs: interactiveDetail ? getRecordNumber(interactiveDetail, ['readingCacheRenderMs']) : null,
+        readingFirstShelfMs: interactiveDetail ? getRecordNumber(interactiveDetail, ['readingFirstShelfMs']) : null,
+        readingFullyLoadedMs: interactiveDetail ? getRecordNumber(interactiveDetail, ['readingFullyLoadedMs']) : null,
+        readingImage: getTimingSummary('image'),
+        readingInitialRenderMs: interactiveDetail ? getRecordNumber(interactiveDetail, ['readingInitialRenderMs']) : null,
+        readingLibraryDiscoveryMs: interactiveDetail ? getRecordNumber(interactiveDetail, ['readingLibraryDiscoveryMs']) : null,
+        readingShelfFetch: getNamedTimingSummary('api', 'readingShelfFetch'),
+        readingSlowFetchesAborted: interactiveDetail ? getRecordStringArray(interactiveDetail, 'readingSlowFetchesAborted') : []
+    };
+}
+
 function installDebugFlagAccessor() {
     const initialValue = getInitialDebugValue();
 
@@ -290,6 +574,8 @@ function setDebugStorage(enabled: boolean) {
         } else {
             storage.removeItem(PTV_DEBUG.storageKey);
         }
+
+        storage.removeItem(PTV_DEBUG.legacyStorageKey);
     } catch {
         // Storage can be blocked on some embedded TV browsers.
     }
@@ -327,6 +613,53 @@ function getImageSourceComponent(image: HTMLImageElement) {
     return 'image';
 }
 
+function getImageDatasetBoolean(value: string | undefined) {
+    if (value === undefined) return null;
+
+    return value === 'true';
+}
+
+function getImageDatasetDebugDetail(image: HTMLImageElement): Record<string, unknown> {
+    const {
+        ptvImageBackdropTagsPresent,
+        ptvImageHasBackdropTag,
+        ptvImageHasPrimaryTag,
+        ptvImageHasSeriesPrimaryTag,
+        ptvImageHasThumbTag,
+        ptvImageItemId,
+        ptvImageItemName,
+        ptvImageItemType,
+        ptvImageTag,
+        ptvImageTagsPresent,
+        ptvImageType,
+        ptvImageUrl
+    } = image.dataset;
+    const detail: Record<string, unknown> = {};
+
+    if (ptvImageItemId) detail.itemId = ptvImageItemId;
+    if (ptvImageItemName) detail.itemName = ptvImageItemName;
+    if (ptvImageItemType) detail.itemType = ptvImageItemType;
+    if (ptvImageUrl) detail.imageUrl = ptvImageUrl;
+    if (ptvImageType) detail.imageType = ptvImageType;
+    if (ptvImageTag) detail.imageTag = ptvImageTag;
+
+    const imageTagsPresent = getImageDatasetBoolean(ptvImageTagsPresent);
+    const backdropTagsPresent = getImageDatasetBoolean(ptvImageBackdropTagsPresent);
+    const hasPrimaryTag = getImageDatasetBoolean(ptvImageHasPrimaryTag);
+    const hasThumbTag = getImageDatasetBoolean(ptvImageHasThumbTag);
+    const hasBackdropTag = getImageDatasetBoolean(ptvImageHasBackdropTag);
+    const hasSeriesPrimaryTag = getImageDatasetBoolean(ptvImageHasSeriesPrimaryTag);
+
+    if (imageTagsPresent !== null) detail.imageTagsPresent = imageTagsPresent;
+    if (backdropTagsPresent !== null) detail.backdropTagsPresent = backdropTagsPresent;
+    if (hasPrimaryTag !== null) detail.hasPrimaryTag = hasPrimaryTag;
+    if (hasThumbTag !== null) detail.hasThumbTag = hasThumbTag;
+    if (hasBackdropTag !== null) detail.hasBackdropTag = hasBackdropTag;
+    if (hasSeriesPrimaryTag !== null) detail.hasSeriesPrimaryTag = hasSeriesPrimaryTag;
+
+    return detail;
+}
+
 function createImageTracker(
     image: HTMLImageElement,
     url: string,
@@ -344,7 +677,7 @@ function createImageTracker(
     };
 }
 
-function trimMap(map: Map<string, number>, maxEntries = IMAGE_DEDUPE_LIMIT) {
+function trimMap<TValue>(map: Map<string, TValue>, maxEntries = IMAGE_DEDUPE_LIMIT) {
     if (map.size <= maxEntries) return;
 
     const entriesToDelete = map.size - maxEntries;
@@ -363,6 +696,8 @@ function isResolvedImage(image: HTMLImageElement) {
 }
 
 function observeImage(image: HTMLImageElement) {
+    if (!shouldCollectDiagnostics()) return;
+
     const url = normalizeImageTrackerUrl(getImageUrl(image));
     if (!url) return;
 
@@ -380,6 +715,8 @@ function observeImage(image: HTMLImageElement) {
 }
 
 function observeImages(root: ParentNode = document) {
+    if (!shouldCollectDiagnostics()) return;
+
     root.querySelectorAll?.('img[src], img[data-src]').forEach(image => {
         if (image instanceof HTMLImageElement) {
             observeImage(image);
@@ -423,6 +760,8 @@ function getImageEventDetail(image: HTMLImageElement, url: string) {
 
     return {
         ...originDetail,
+        ...getImageDatasetDebugDetail(image),
+        imageUrl: image.dataset.ptvImageUrl || url,
         naturalHeight: image.naturalHeight,
         naturalWidth: image.naturalWidth,
         url
@@ -444,12 +783,13 @@ function handleImageError(image: HTMLImageElement, tracker: PtvImageTracker | un
     const failedAt = observedImageFailures.get(url);
     const suppressLoggedAt = observedImageRetrySuppressions.get(url);
     const isSuppressed = Boolean(failedAt && Date.now() - failedAt < IMAGE_ERROR_SUPPRESSION_MS);
+    const detail = getImageEventDetail(image, url);
 
     if (isSuppressed) {
         if (!suppressLoggedAt || Date.now() - suppressLoggedAt >= IMAGE_ERROR_SUPPRESSION_MS) {
             observedImageRetrySuppressions.set(url, Date.now());
             trimMap(observedImageRetrySuppressions);
-            recordPtvEvent('image', 'image-retry-suppressed', getImageEventDetail(image, url));
+            recordPtvEvent('image', 'image-retry-suppressed', detail);
         }
 
         return;
@@ -457,8 +797,8 @@ function handleImageError(image: HTMLImageElement, tracker: PtvImageTracker | un
 
     observedImageFailures.set(url, Date.now());
     trimMap(observedImageFailures);
-    recordPtvEvent('image', 'image-failed-once', getImageEventDetail(image, url));
-    warnDebug('Image failed to load.', getImageEventDetail(image, url));
+    recordPtvEvent('image', 'image-failed-once', detail);
+    warnDebug('Image failed to load.', detail);
 }
 
 function handleImageLoad(image: HTMLImageElement, tracker: PtvImageTracker | undefined, eventName: string, url: string) {
@@ -491,6 +831,7 @@ function handleImageLoad(image: HTMLImageElement, tracker: PtvImageTracker | und
 }
 
 function handleImageDone(event: Event) {
+    if (!shouldCollectDiagnostics()) return;
     if (!(event.target instanceof HTMLImageElement)) return;
 
     const image = event.target;
@@ -629,6 +970,7 @@ function stopResourceObserver() {
 }
 
 function startDebugObservers() {
+    if (!shouldCollectDiagnostics()) return;
     if (debugScope) return;
     if (!document.body) {
         window.addEventListener('DOMContentLoaded', startDebugObservers, { once: true });
@@ -685,6 +1027,49 @@ export function isPtvDebugEnabled() {
     return debugEnabled;
 }
 
+export function setPtvDebugAdminAccess(isAdmin: boolean) {
+    debugAdminAllowed = isAdmin;
+    document.documentElement.classList.toggle('ptv-debug-admin', isAdmin);
+
+    const canCollectDiagnostics = shouldCollectDiagnostics();
+
+    if (canCollectDiagnostics) {
+        startDebugObservers();
+        recordPtvStartupEvent();
+    } else {
+        stopDebugObservers();
+        clearPtvDebugReport();
+    }
+
+    dispatchDebugEvent(PTV_EVENTS.debugChange, {
+        canCollectDiagnostics,
+        enabled: debugEnabled,
+        isAdmin
+    });
+}
+
+export function getPtvDebugPersistenceState() {
+    const storage = getStorage();
+
+    if (!storage) {
+        return {
+            enabled: debugEnabled,
+            persisted: false,
+            storageAvailable: false,
+            storageKey: PTV_DEBUG.storageKey
+        };
+    }
+
+    const storedValue = storage.getItem(PTV_DEBUG.storageKey);
+
+    return {
+        enabled: debugEnabled,
+        persisted: debugEnabled ? storedValue === '1' : storedValue !== '1',
+        storageAvailable: true,
+        storageKey: PTV_DEBUG.storageKey
+    };
+}
+
 export function setPtvDebug(enabled: boolean) {
     if (debugEnabled === enabled) return debugEnabled;
 
@@ -692,15 +1077,19 @@ export function setPtvDebug(enabled: boolean) {
     setDebugStorage(enabled);
     document.documentElement.classList.toggle('ptv-debug-mode', enabled);
 
-    if (enabled) {
+    const canCollectDiagnostics = shouldCollectDiagnostics();
+
+    if (enabled && canCollectDiagnostics) {
         startDebugObservers();
         recordPtvStartupEvent();
         recordPtvEvent('profile', 'debug-enabled', getPtvClientProfile());
     } else {
         stopDebugObservers();
+        clearPtvDebugReport();
     }
 
     dispatchDebugEvent(PTV_EVENTS.debugChange, {
+        canCollectDiagnostics,
         enabled
     });
     debugConsole(enabled ? 'enabled' : 'disabled');
@@ -709,7 +1098,7 @@ export function setPtvDebug(enabled: boolean) {
 }
 
 export function recordPtvEvent(type: PtvDebugEventType, name: string, detail?: unknown) {
-    if (!debugEnabled && !ALWAYS_ON_DEBUG_TYPES.has(type)) return;
+    if (!shouldCollectDiagnostics()) return;
 
     events.push({
         at: Date.now(),
@@ -726,7 +1115,7 @@ export function recordPtvTiming(
     durationMs: number,
     detail?: unknown
 ) {
-    if (!debugEnabled && !ALWAYS_ON_DEBUG_TYPES.has(type)) return;
+    if (!shouldCollectDiagnostics()) return;
 
     if (type === 'image' && durationMs > IMAGE_MAX_LIFECYCLE_MS) {
         recordPtvEvent('image', 'image-duration-discarded', {
@@ -759,6 +1148,10 @@ export function timePtvAsync<T>(
     task: () => Promise<T>,
     detail?: unknown
 ): Promise<T> {
+    if (!shouldCollectDiagnostics()) {
+        return Promise.resolve().then(task);
+    }
+
     const startedAt = performance.now();
 
     return Promise.resolve()
@@ -790,6 +1183,56 @@ export function registerPtvDebugSignupStatusProvider(provider: (() => unknown) |
 }
 
 export function getPtvDebugReport() {
+    if (!shouldCollectDiagnostics()) {
+        return {
+            active: false,
+            cache: {
+                errors: 0,
+                hits: 0,
+                misses: 0,
+                status: null,
+                staleHits: 0,
+                timings: getTimingSummary('cache')
+            },
+            clientProfile: {
+                isFireTv: false,
+                isLowPower: false,
+                isMobile: false,
+                isTv: false,
+                isWebOs: false,
+                kind: 'desktop',
+                supportsBackdropFilter: false
+            },
+            events: [],
+            home: getHomeSummary(),
+            images: {
+                cachedFailures: 0,
+                errors: 0,
+                fallbackCount: 0,
+                nativeHomeFailures: 0,
+                resetCount: 0,
+                retryCount: 0,
+                rowBackdropFailures: 0,
+                timings: getTimingSummary('image')
+            },
+            memory: null,
+            origins: PTV_RUNTIME,
+            pluginApi: null,
+            reading: getReadingSummary(),
+            recommendations: getRecommendationSummary(),
+            render: getTimingSummary('render'),
+            renderProfile: {
+                id: 'disabled',
+                tier: 'disabled'
+            },
+            rowFetch: getTimingSummary('row-fetch'),
+            shell: null,
+            signup: null,
+            timings: [],
+            timestamp: now()
+        };
+    }
+
     const {
         clientProfile,
         performanceProfile
@@ -819,15 +1262,22 @@ export function getPtvDebugReport() {
             supportsBackdropFilter: clientProfile.supportsBackdropFilter
         },
         events: [...events],
+        home: getHomeSummary(),
         images: {
+            cachedFailures: getEventCount('image', 'image-url-failure-cached'),
             errors: getEventCount('image', 'image-error') + getEventCount('image', 'image-failed-once'),
+            fallbackCount: getEventCount('image', 'native-home-image-fallback') + getEventCount('image', 'row-backdrop-image-fallback'),
+            nativeHomeFailures: getEventCount('image', 'native-home-image-failed'),
             resetCount: getEventCount('image', 'image-tracker-reset'),
+            retryCount: getEventCount('image', 'image-retry-suppressed'),
+            rowBackdropFailures: getEventCount('image', 'row-backdrop-image-fallback'),
             timings: getTimingSummary('image')
         },
         memory: getMemorySnapshot(),
         origins: PTV_RUNTIME,
         pluginApi: getPtvPluginApiDiagnostics(),
-        recommendations: getTimingSummary('recommendation'),
+        reading: getReadingSummary(),
+        recommendations: getRecommendationSummary(),
         render: getTimingSummary('render'),
         renderProfile,
         rowFetch: getTimingSummary('row-fetch'),
@@ -852,6 +1302,7 @@ function installDebugApi() {
         enable: () => setPtvDebug(true),
         event: recordPtvEvent,
         report: getPtvDebugReport,
+        shouldCollect: shouldCollectDiagnostics,
         time: timePtvAsync,
         timing: recordPtvTiming
     };
@@ -865,7 +1316,7 @@ export function initPtvObservability() {
     installDebugApi();
     document.documentElement.classList.toggle('ptv-debug-mode', debugEnabled);
 
-    if (debugEnabled) {
+    if (debugEnabled && shouldCollectDiagnostics()) {
         startDebugObservers();
         recordPtvStartupEvent();
         recordPtvEvent('profile', 'debug-enabled', getPtvClientProfile());

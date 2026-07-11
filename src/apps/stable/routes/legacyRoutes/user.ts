@@ -26,12 +26,6 @@ export const LEGACY_USER_ROUTES: LegacyRoute[] = [
             view: 'lyrics.html'
         }
     }, {
-        path: 'music',
-        pageProps: {
-            controller: 'music/musicrecommended',
-            view: 'music/music.html'
-        }
-    }, {
         path: 'mypreferencescontrols',
         pageProps: {
             controller: 'user/controls/index',

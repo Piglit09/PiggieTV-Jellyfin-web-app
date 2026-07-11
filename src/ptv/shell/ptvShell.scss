@@ -1,0 +1,432 @@
+/* stylelint-disable no-descending-specificity -- Shared shell active states and profile overrides intentionally layer late. */
+html[data-ptv-route-native='true'] .ptv-app-header-root,
+html[data-ptv-route-native='true'] .skinHeader,
+html[data-ptv-route-native='true'] .mainDrawer,
+html[data-ptv-route-native='true'] .appfooter,
+html[data-ptv-route-native='true'] .appFooter {
+    display: none !important;
+}
+
+.ptv-shell-frame {
+    min-height: 100%;
+    position: relative;
+    z-index: 2;
+}
+
+.ptv-shell-page-content {
+    min-height: 100%;
+    position: relative;
+    z-index: 1;
+}
+
+.ptv-shell-header {
+    align-items: center;
+    display: grid;
+    gap: clamp(12px, 1.2vw, 22px);
+    grid-template-columns: minmax(96px, 170px) minmax(240px, 420px) minmax(520px, max-content);
+    left: clamp(20px, 2.4vw, 52px);
+    pointer-events: none;
+    position: absolute;
+    right: clamp(20px, 2.4vw, 52px);
+    top: clamp(16px, 2vw, 34px);
+    z-index: 9000;
+}
+
+.ptv-shell-brand,
+.ptv-shell-search,
+.ptv-shell-nav,
+.ptv-shell-context-nav,
+.ptv-shell-media-dock-slot {
+    pointer-events: auto;
+}
+
+.ptv-shell-brand {
+    align-items: center;
+    display: inline-flex;
+    min-height: 54px;
+    width: max-content;
+}
+
+.ptv-shell-brand img {
+    filter: drop-shadow(0 10px 26px rgba(162, 74, 255, 0.38));
+    max-height: clamp(34px, 4vw, 58px);
+    max-width: clamp(112px, 10vw, 176px);
+    object-fit: contain;
+}
+
+.ptv-shell-search {
+    align-items: center;
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.11), rgba(108, 48, 173, 0.08)),
+        rgba(10, 8, 20, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 14px 34px rgba(0, 0, 0, 0.28);
+    display: flex;
+    gap: 10px;
+    min-height: 50px;
+    padding: 0 18px;
+    transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+    backdrop-filter: blur(22px) saturate(1.35);
+}
+
+.ptv-shell-search:focus-within {
+    border-color: rgba(183, 124, 255, 0.48);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.16),
+        0 0 0 1px rgba(159, 92, 255, 0.16),
+        0 18px 44px rgba(117, 63, 220, 0.22);
+    transform: translateY(-1px);
+}
+
+.ptv-shell-search .ptv-icon {
+    --ptv-icon-size: 19px;
+
+    opacity: 0.9;
+}
+
+.ptv-shell-search input {
+    background: transparent;
+    border: 0;
+    color: rgba(255, 255, 255, 0.94);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    min-width: 0;
+    outline: 0;
+    width: 100%;
+}
+
+.ptv-shell-search input::placeholder {
+    color: rgba(255, 255, 255, 0.56);
+}
+
+.ptv-shell-nav {
+    justify-self: end;
+    max-width: 100%;
+    position: relative;
+    z-index: 9200;
+}
+
+.ptv-shell-nav-primary {
+    align-items: center;
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(133, 69, 215, 0.08)),
+        rgba(8, 6, 17, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 18px 48px rgba(0, 0, 0, 0.34),
+        0 0 42px rgba(143, 74, 255, 0.12);
+    display: flex;
+    gap: 6px;
+    min-height: 54px;
+    padding: 6px;
+    backdrop-filter: blur(24px) saturate(1.42);
+}
+
+.ptv-shell-nav-button,
+.ptv-shell-icon-button {
+    align-items: center;
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.88);
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 900;
+    gap: 9px;
+    min-height: 42px;
+    padding: 0 17px;
+    text-decoration: none;
+    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.35);
+    transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease, transform 180ms ease;
+    white-space: nowrap;
+}
+
+.ptv-shell-icon-button {
+    height: 42px;
+    justify-content: center;
+    padding: 0;
+    width: 42px;
+}
+
+.ptv-shell-nav-button:hover,
+.ptv-shell-nav-button:focus-visible,
+.ptv-shell-icon-button:hover,
+.ptv-shell-icon-button:focus-visible {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(205, 169, 255, 0.28);
+    box-shadow: 0 0 24px rgba(163, 85, 255, 0.24);
+    color: #fff;
+    outline: 0;
+    transform: translateY(-1px);
+}
+
+.ptv-shell-nav-button.is-active,
+.ptv-shell-nav-dropdown.is-active > .ptv-shell-nav-button {
+    background: linear-gradient(135deg, rgba(170, 79, 255, 0.94), rgba(106, 80, 255, 0.78));
+    border-color: rgba(255, 255, 255, 0.24);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.2),
+        0 0 32px rgba(156, 72, 255, 0.42);
+    color: #fff;
+}
+
+.ptv-shell-nav-button .ptv-icon,
+.ptv-shell-icon-button .ptv-icon,
+.ptv-shell-dropdown-link .ptv-icon,
+.ptv-shell-context-link .ptv-icon,
+.ptv-shell-user-panel .ptv-icon {
+    --ptv-icon-size: 18px;
+
+    flex: 0 0 auto;
+}
+
+.ptv-shell-nav-dropdown,
+.ptv-shell-user-menu {
+    position: relative;
+}
+
+.ptv-shell-nav-dropdown > summary,
+.ptv-shell-user-menu > summary {
+    list-style: none;
+}
+
+.ptv-shell-nav-dropdown > summary::-webkit-details-marker,
+.ptv-shell-user-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.ptv-shell-nav-caret {
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    display: inline-block;
+    height: 7px;
+    margin-top: -3px;
+    transform: rotate(45deg);
+    transition: transform 180ms ease;
+    width: 7px;
+}
+
+.ptv-shell-nav-dropdown[open] .ptv-shell-nav-caret {
+    transform: translateY(3px) rotate(225deg);
+}
+
+.ptv-shell-dropdown-panel,
+.ptv-shell-user-panel {
+    background:
+        linear-gradient(150deg, rgba(255, 255, 255, 0.18), rgba(122, 64, 200, 0.1)),
+        rgba(12, 8, 25, 0.58);
+    border: 1px solid rgba(222, 196, 255, 0.22);
+    border-radius: 18px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 26px 70px rgba(0, 0, 0, 0.52),
+        0 0 54px rgba(147, 78, 255, 0.2);
+    display: grid;
+    gap: 8px;
+    min-width: 220px;
+    padding: 12px;
+    position: absolute;
+    right: auto;
+    top: calc(100% + 10px);
+    z-index: 10000;
+    backdrop-filter: blur(28px) saturate(1.45);
+}
+
+.ptv-shell-user-panel {
+    min-width: 210px;
+    right: 0;
+}
+
+.ptv-shell-dropdown-link,
+.ptv-shell-user-panel a {
+    align-items: center;
+    border-radius: 12px;
+    color: rgba(255, 255, 255, 0.9);
+    display: flex;
+    font-size: 14px;
+    font-weight: 800;
+    gap: 12px;
+    min-height: 40px;
+    padding: 0 12px;
+    text-decoration: none;
+    transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.ptv-shell-dropdown-link:hover,
+.ptv-shell-dropdown-link:focus-visible,
+.ptv-shell-user-panel a:hover,
+.ptv-shell-user-panel a:focus-visible {
+    background: rgba(179, 116, 255, 0.18);
+    color: #fff;
+    outline: 0;
+    transform: translateX(2px);
+}
+
+.ptv-shell-actions {
+    align-items: center;
+    display: flex;
+    gap: 4px;
+}
+
+.ptv-shell-context-nav {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    left: clamp(20px, 2.4vw, 52px);
+    pointer-events: auto;
+    position: absolute;
+    right: clamp(20px, 2.4vw, 52px);
+    top: clamp(82px, 8.6vw, 118px);
+    z-index: 8800;
+}
+
+.ptv-shell-context-link {
+    align-items: center;
+    background: rgba(14, 9, 26, 0.26);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.78);
+    display: inline-flex;
+    font-size: 13px;
+    font-weight: 850;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 14px;
+    text-decoration: none;
+    transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease, transform 180ms ease;
+    backdrop-filter: blur(18px) saturate(1.32);
+}
+
+.ptv-shell-context-link:hover,
+.ptv-shell-context-link:focus-visible,
+.ptv-shell-context-link.is-active {
+    background: rgba(150, 83, 255, 0.28);
+    border-color: rgba(218, 193, 255, 0.3);
+    box-shadow: 0 0 24px rgba(141, 80, 255, 0.2);
+    color: #fff;
+    outline: 0;
+    transform: translateY(-1px);
+}
+
+.ptv-shell-media-dock-slot {
+    position: relative;
+    z-index: 8500;
+}
+
+.ptv-admin-shell.ptv-shell-frame-dashboard .ptv-shell-page-content,
+.ptv-admin-shell.ptv-shell-frame-settings .ptv-shell-page-content {
+    padding-top: clamp(7.5rem, 11vw, 10rem);
+}
+
+@media (max-width: 1380px) {
+    .ptv-shell-header {
+        grid-template-columns: minmax(86px, 140px) minmax(180px, 320px) minmax(420px, max-content);
+    }
+
+    .ptv-shell-search {
+        min-height: 46px;
+    }
+
+    .ptv-shell-nav-button {
+        padding: 0 13px;
+    }
+}
+
+@media (max-width: 1080px) {
+    .ptv-shell-header {
+        align-items: start;
+        grid-template-columns: minmax(96px, 132px) 1fr;
+        row-gap: 10px;
+    }
+
+    .ptv-shell-search {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .ptv-shell-nav {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        justify-self: stretch;
+    }
+
+    .ptv-shell-nav-primary {
+        justify-content: flex-end;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .ptv-shell-nav-primary::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+@media (max-width: 720px) {
+    .ptv-shell-header {
+        left: 14px;
+        right: 14px;
+        top: 12px;
+    }
+
+    .ptv-shell-brand img {
+        max-height: 36px;
+        max-width: 118px;
+    }
+
+    .ptv-shell-search {
+        display: none;
+    }
+
+    .ptv-shell-nav-button span:not(.ptv-shell-nav-caret),
+    .ptv-shell-context-link span {
+        display: none;
+    }
+
+    .ptv-shell-nav-button {
+        min-width: 44px;
+        padding: 0 12px;
+    }
+
+    .ptv-shell-dropdown-panel {
+        left: 0;
+        right: auto;
+    }
+
+    .ptv-shell-context-nav {
+        justify-content: flex-start;
+        overflow-x: auto;
+        top: 76px;
+    }
+}
+
+html[data-ptv-render-profile='low-power'] .ptv-shell-search,
+html[data-ptv-render-profile='low-power'] .ptv-shell-nav-primary,
+html[data-ptv-render-profile='low-power'] .ptv-shell-dropdown-panel,
+html[data-ptv-render-profile='low-power'] .ptv-shell-user-panel,
+html[data-ptv-render-profile='low-power'] .ptv-shell-context-link,
+html[data-ptv-client-kind='tv'] .ptv-shell-search,
+html[data-ptv-client-kind='tv'] .ptv-shell-nav-primary,
+html[data-ptv-client-kind='tv'] .ptv-shell-dropdown-panel,
+html[data-ptv-client-kind='tv'] .ptv-shell-user-panel,
+html[data-ptv-client-kind='tv'] .ptv-shell-context-link {
+    backdrop-filter: none;
+}
+
+html[data-ptv-render-profile='low-power'] .ptv-shell-nav-button,
+html[data-ptv-render-profile='low-power'] .ptv-shell-icon-button,
+html[data-ptv-render-profile='low-power'] .ptv-shell-context-link,
+html[data-ptv-client-kind='tv'] .ptv-shell-nav-button,
+html[data-ptv-client-kind='tv'] .ptv-shell-icon-button,
+html[data-ptv-client-kind='tv'] .ptv-shell-context-link {
+    transition: none;
+}

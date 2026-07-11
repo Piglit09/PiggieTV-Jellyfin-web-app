@@ -656,8 +656,8 @@ export default function (options) {
 
     const mp4VideoCodecs = [];
     const webmVideoCodecs = [];
-    const hlsInTsVideoCodecs = [];
-    const hlsInFmp4VideoCodecs = [];
+    let hlsInTsVideoCodecs = [];
+    let hlsInFmp4VideoCodecs = [];
 
     if (canPlayAv1(videoTestElement)
         && (browser.safari || (!browser.mobile && (browser.edgeChromium || browser.firefox || browser.chrome || browser.opera)))) {
@@ -734,6 +734,14 @@ export default function (options) {
     if ((!browser.safari && canPlayVp8) || browser.tizen) {
         videoAudioCodecs.push('vorbis');
     }
+
+    hlsInTsVideoCodecs = hlsInTsVideoCodecs.filter(function (c) {
+        return (options.disableHlsVideoCodecs || []).indexOf(c) === -1;
+    });
+
+    hlsInFmp4VideoCodecs = hlsInFmp4VideoCodecs.filter(function (c) {
+        return (options.disableHlsVideoCodecs || []).indexOf(c) === -1;
+    });
 
     if (webmVideoCodecs.length) {
         profile.DirectPlayProfiles.push({

@@ -51,6 +51,16 @@ function publishShellStatus() {
 }
 
 export function getPtvShellFoundationStatus(): PtvShellFoundationStatus {
+    const currentRoute = getPtvRouteControllerState();
+
+    if (status.route.full !== currentRoute.full || status.currentRoute !== currentRoute.routeId) {
+        return {
+            ...status,
+            currentRoute: currentRoute.routeId,
+            route: currentRoute
+        };
+    }
+
     return status;
 }
 
@@ -118,9 +128,9 @@ export function startPtvShellFoundation() {
     });
 
     const root = window.PTV || (window.PTV = {});
-    const existingShell = root.shell && typeof root.shell === 'object'
-        ? root.shell as Record<string, unknown>
-        : {};
+    const existingShell = root.shell && typeof root.shell === 'object' ?
+        root.shell as Record<string, unknown> :
+        {};
 
     root.shell = {
         ...existingShell,

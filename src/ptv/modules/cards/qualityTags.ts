@@ -441,7 +441,7 @@ export function getPtvQualityTags(item: PtvQualityItem, options: PtvQualityOptio
     return tags.slice(0, options.maxTags || DEFAULT_MAX_TAGS);
 }
 
-function getPtvQualityPillClass(tag: PtvQualityTag): string {
+export function getPtvQualityPillClass(tag: PtvQualityTag): string {
     return [
         'ptv-card-quality-pill',
         `ptv-card-quality-pill-${tag.category}`,

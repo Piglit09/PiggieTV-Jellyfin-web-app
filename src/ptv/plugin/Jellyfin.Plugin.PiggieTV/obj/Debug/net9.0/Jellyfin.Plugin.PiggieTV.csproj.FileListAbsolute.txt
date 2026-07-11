@@ -1,0 +1,16 @@
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.csproj.AssemblyReference.cache
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.AssemblyInfoInputs.cache
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.AssemblyInfo.cs
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.csproj.CoreCompileInputs.cache
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.sourcelink.json
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\bin\Debug\net9.0\Jellyfin.Plugin.PiggieTV.deps.json
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\bin\Debug\net9.0\Jellyfin.Plugin.PiggieTV.dll
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\bin\Debug\net9.0\Jellyfin.Plugin.PiggieTV.pdb
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\bin\Debug\net9.0\Jellyfin.Plugin.PiggieTV.xml
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.dll
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\refint\Jellyfin.Plugin.PiggieTV.dll
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.xml
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\Jellyfin.Plugin.PiggieTV.pdb
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\obj\Debug\net9.0\ref\Jellyfin.Plugin.PiggieTV.dll
+C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\Jellyfin.Plugin.PiggieTV\bin\Debug\net9.0\meta.json

@@ -32,6 +32,7 @@ import {
     getPtvIconNameFromText,
     normalizePtvIconName
 } from '../ptv/modules/icons/iconRegistry';
+import { PTV_ROUTES } from '../ptv/core/config';
 
 import '../elements/emby-button/paper-icon-button-light';
 
@@ -57,9 +58,10 @@ const PTV_DEFAULT_MENU_LINKS = [
         icon: 'games'
     },
     {
-        name: 'Library',
-        url: 'https://books.piggietv.com',
-        icon: 'library'
+        name: 'PTV Reading',
+        url: PTV_ROUTES.readingLibrary,
+        icon: 'books',
+        internal: true
     },
     {
         name: 'Discord',
@@ -71,6 +73,8 @@ const PTV_DEFAULT_MENU_LINKS = [
 const PTV_REQUIRED_MENU_LINKS = [
     PTV_DEFAULT_MENU_LINKS[0]
 ];
+const PTV_READING_LIBRARY_ID = 'ptv-reading-library';
+const PTV_READING_LIBRARY_PATTERN = /\b(?:book|books|comic|comics|manga|maga|manhwa|manhua|reader|reading)\b/i;
 
 function isInternalPtvMenuLink(link) {
     return Boolean(link?.internal || String(link?.url || '').startsWith('#/'));
@@ -109,6 +113,48 @@ function getPtvDrawerIconHtml(icon, label = '') {
     const iconName = getPtvDrawerIconName(icon, label);
 
     return `<span class="navMenuOptionIcon ptv-icon ptv-drawer-icon" data-ptv-icon="${iconName}" data-icon="${iconName}" aria-hidden="true"></span>`;
+}
+
+function isPtvReadingLibraryItem(item) {
+    const collectionType = String(item?.CollectionType || '').trim().toLowerCase();
+    const name = String(item?.Name || '').trim();
+
+    return collectionType === 'books' || PTV_READING_LIBRARY_PATTERN.test(name);
+}
+
+function getPtvDrawerMediaItems(items) {
+    const readingLibraries = items.filter(isPtvReadingLibraryItem);
+
+    if (!readingLibraries.length) {
+        return items;
+    }
+
+    const [primaryReadingLibrary] = readingLibraries;
+    const otherLibraries = items.filter(item => !isPtvReadingLibraryItem(item));
+
+    return [
+        {
+            ...primaryReadingLibrary,
+            CollectionType: 'books',
+            Id: PTV_READING_LIBRARY_ID,
+            Name: 'PTV Reading',
+            PtvHref: PTV_ROUTES.readingLibrary,
+            icon: 'books'
+        },
+        ...otherLibraries
+    ];
+}
+
+function getPtvLibraryMenuItemHref(item) {
+    if (item?.PtvHref) {
+        return item.PtvHref;
+    }
+
+    if (isPtvReadingLibraryItem(item)) {
+        return PTV_ROUTES.readingLibrary;
+    }
+
+    return getItemHref(item, item.CollectionType);
 }
 
 function getPtvHeaderIconHtml(ptvIcon) {
@@ -598,13 +644,13 @@ function updateLibraryMenu(user) {
 
     if (libraryMenuOptions) {
         getUserViews(apiClient, userId).then(function (result) {
-            const items = result;
+            const items = getPtvDrawerMediaItems(result);
             let html = `<h3 class="sidebarHeader">${globalize.translate('HeaderMedia')}</h3>`;
             html += items.map(function (i) {
                 const icon = i.icon || imageHelper.getLibraryIcon(i.CollectionType);
                 const itemId = i.Id;
 
-                return `<a is="emby-linkbutton" data-itemid="${itemId}" class="lnkMediaFolder navMenuOption" href="${getItemHref(i, i.CollectionType)}">
+                return `<a is="emby-linkbutton" data-itemid="${itemId}" class="lnkMediaFolder navMenuOption" href="${getPtvLibraryMenuItemHref(i)}">
                                     ${getPtvDrawerIconHtml(icon, i.Name)}
                                     <span class="sectionName navMenuOptionText">${escapeHtml(i.Name)}</span>
                                   </a>`;
@@ -676,13 +722,16 @@ function updateLibraryNavLinks(page) {
     const isEditorPage = page.classList.contains('metadataEditorPage');
     const isMySyncPage = page.classList.contains('mySyncPage');
     const id = isLiveTvPage || isChannelsPage || isEditorPage || isMySyncPage || page.classList.contains('allLibraryPage') ? '' : getTopParentId() || '';
+    const isPtvReadingPage = /^#\/(?:books|comics|manga|maga)(?:[/?]|$)/i.test(window.location.hash || '');
     const elems = document.getElementsByClassName('lnkMediaFolder');
 
     for (let i = 0, length = elems.length; i < length; i++) {
         const lnkMediaFolder = elems[i];
         const itemId = lnkMediaFolder.getAttribute('data-itemid');
 
-        if (isChannelsPage && itemId === 'channels') {
+        if (isPtvReadingPage && itemId === PTV_READING_LIBRARY_ID) {
+            lnkMediaFolder.classList.add('navMenuOption-selected');
+        } else if (isChannelsPage && itemId === 'channels') {
             lnkMediaFolder.classList.add('navMenuOption-selected');
         } else if (isLiveTvPage && itemId === 'livetv') {
             lnkMediaFolder.classList.add('navMenuOption-selected');

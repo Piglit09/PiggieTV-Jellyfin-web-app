@@ -1,0 +1,177 @@
+.ptv-recommendations-page {
+    background: #08080d;
+    color: #f8fafc;
+}
+
+.ptv-recommendations-hub {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    min-height: 100vh;
+    padding: clamp(1rem, 2vw, 2rem);
+}
+
+.ptv-recommendations-hero,
+.ptv-recommendations-section-heading,
+.ptv-recommendations-row-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.ptv-recommendations-hero {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 1rem 0 1.5rem;
+}
+
+.ptv-recommendations-hero p,
+.ptv-recommendations-row-heading p {
+    color: #8dd9ff;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    margin: 0 0 0.35rem;
+    text-transform: uppercase;
+}
+
+.ptv-recommendations-hero h1,
+.ptv-recommendations-section-heading h2,
+.ptv-recommendations-row-heading h3 {
+    margin: 0;
+}
+
+.ptv-recommendations-hero h1 {
+    font-size: clamp(2rem, 4vw, 4rem);
+}
+
+.ptv-recommendations-hero span,
+.ptv-recommendations-row-heading span {
+    color: rgba(248, 250, 252, 0.72);
+}
+
+.ptv-recommendations-hero button,
+.ptv-recommendations-section-heading a {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    color: #fff;
+    display: inline-flex;
+    gap: 0.45rem;
+    min-height: 2.5rem;
+    padding: 0 0.85rem;
+    text-decoration: none;
+}
+
+.ptv-recommendations-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.ptv-recommendations-tabs a {
+    align-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    color: rgba(248, 250, 252, 0.74);
+    display: inline-flex;
+    font-weight: 800;
+    min-height: 2.35rem;
+    padding: 0 0.8rem;
+    text-decoration: none;
+}
+
+.ptv-recommendations-tabs a:hover,
+.ptv-recommendations-tabs a:focus-visible,
+.ptv-recommendations-tab-active {
+    background: rgba(255, 255, 255, 0.13) !important;
+    border-color: rgba(255, 255, 255, 0.28) !important;
+    color: #fff !important;
+}
+
+.ptv-recommendations-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+}
+
+.ptv-recommendations-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.ptv-recommendations-rail {
+    display: grid;
+    gap: 0.85rem;
+    grid-auto-columns: minmax(150px, 180px);
+    grid-auto-flow: column;
+    overflow-x: auto;
+    padding-bottom: 0.35rem;
+    scroll-snap-type: x proximity;
+}
+
+.ptv-recommendations-card {
+    color: inherit;
+    display: grid;
+    gap: 0.45rem;
+    min-width: 0;
+    text-decoration: none;
+}
+
+.ptv-recommendations-card-art {
+    align-items: center;
+    aspect-ratio: 2 / 3;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.ptv-recommendations-card-art img {
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
+.ptv-recommendations-card strong,
+.ptv-recommendations-card small,
+.ptv-recommendations-card em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-recommendations-card small,
+.ptv-recommendations-card em {
+    color: rgba(248, 250, 252, 0.68);
+    font-size: 0.78rem;
+}
+
+.ptv-recommendations-card em {
+    font-style: normal;
+}
+
+.ptv-recommendations-error,
+.ptv-recommendations-loading {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+@media (max-width: 640px) {
+    .ptv-recommendations-hero,
+    .ptv-recommendations-section-heading,
+    .ptv-recommendations-row-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .ptv-recommendations-rail {
+        grid-auto-columns: minmax(132px, 42vw);
+    }
+}

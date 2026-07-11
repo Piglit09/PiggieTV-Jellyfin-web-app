@@ -81,7 +81,15 @@ const ServerDrawerSection = () => {
                     <ListItemIcon>
                         <Dashboard />
                     </ListItemIcon>
-                    <ListItemText primary='PiggieTV Rows' />
+                    <ListItemText primary='PiggieTV Row Builder' />
+                </ListItemLink>
+            </ListItem>
+            <ListItem disablePadding>
+                <ListItemLink to='/dashboard/piggietv/recommendations'>
+                    <ListItemIcon>
+                        <Dashboard />
+                    </ListItemIcon>
+                    <ListItemText primary='PiggieTV Recommendations' />
                 </ListItemLink>
             </ListItem>
             <ListItem disablePadding>

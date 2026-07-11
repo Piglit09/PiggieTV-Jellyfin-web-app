@@ -30,6 +30,11 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     private const int RowItemLimit = 16;
     private const int MaxCandidateItems = 1200;
     private const int MaxTextLength = 700;
+    private const int MinRecommendationRowItems = 12;
+    private const int MaxRecommendationAlbumRepeats = 2;
+    private const int MaxRecommendationArtistRepeats = 1;
+    private const int MaxRecommendationSeriesRepeats = 2;
+    private const string RowVariantDelimiter = "||";
     private static readonly TimeSpan TmdbMetadataTimeout = TimeSpan.FromSeconds(20);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -169,9 +174,19 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         string ProviderUsed,
         string? ProviderError,
         IReadOnlyList<BaseItem> Items,
+        int CandidateCount,
+        int MatchedCount,
+        bool FallbackUsed,
+        string QueryUsed,
+        IReadOnlyList<string> MetadataSourceFieldsUsed,
+        IReadOnlyList<string> First10MatchedItemNames,
         int FilteredDuplicateCount,
         long GenerationTimeMs,
-        string? EmptyResultReason);
+        string? EmptyResultReason,
+        int PlannedRowCount,
+        int GeneratedSourceCount,
+        int SourceIndex,
+        string? DropReason);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PtvFeaturedContentRefreshService"/> class.
@@ -229,7 +244,14 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     {
         if (!await _refreshGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
         {
-            return await _store.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            var queuedAt = Stopwatch.StartNew();
+
+            _logger.LogInformation("PiggieTV featured-content refresh requested while another refresh is running; waiting to rebuild.");
+            await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            queuedAt.Stop();
+            _logger.LogInformation(
+                "PiggieTV featured-content refresh acquired after waiting {WaitDurationMs} ms.",
+                queuedAt.ElapsedMilliseconds);
         }
 
         var startedAt = DateTimeOffset.UtcNow;
@@ -260,12 +282,18 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             var document = CreateFeaturedContentDocument(payload, startedAt, refreshIntervalMs);
 
             document = TrimDocumentToMaxSize(document);
+            var preWriteStatus = PtvFeaturedContentStatus.FromDocument(document);
             _logger.LogInformation(
-                "PiggieTV featured-content payload size before write: {PayloadBytes} bytes.",
-                GetDocumentSize(document));
+                "PiggieTV featured-content payload before write. PayloadBytes={PayloadBytes}. HasPayload={HasPayload}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}.",
+                GetDocumentSize(document),
+                preWriteStatus.HasPayload,
+                preWriteStatus.HeroCount,
+                preWriteStatus.SectionCount,
+                preWriteStatus.ItemCount);
 
             var storedDocument = await _store.WriteAsync(document, refreshToken).ConfigureAwait(false);
             var status = await _store.GetStatusAsync(refreshToken).ConfigureAwait(false);
+            var storedContentStatus = PtvFeaturedContentStatus.FromDocument(storedDocument);
             var completedAt = DateTimeOffset.UtcNow;
 
             stopwatch.Stop();
@@ -275,8 +303,14 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             _nextRefreshAt = PtvFeaturedContentStatus.FromDocument(storedDocument).ExpiresAt;
 
             _logger.LogInformation(
-                "PiggieTV featured-content cache refreshed in {DurationMs} ms.",
-                _lastRefreshDurationMs);
+                "PiggieTV featured-content cache refreshed in {DurationMs} ms. CacheExists={CacheExists}. CachePayloadBytes={CachePayloadBytes}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}. CacheWriteError={CacheWriteError}.",
+                _lastRefreshDurationMs,
+                status.FeaturedCacheExists,
+                status.CachePayloadBytes,
+                storedContentStatus.HeroCount,
+                storedContentStatus.SectionCount,
+                storedContentStatus.ItemCount,
+                status.CacheWriteError);
 
             return status;
         }
@@ -320,10 +354,14 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         var validation = ValidateRowBuilderSettings(rowSettings);
         var candidates = GetCandidateItems();
         var tmdbFacts = await GetTmdbFactsSafelyAsync(candidates).ConfigureAwait(false);
+        var peopleByItemId = NeedsPeopleMetadata(rowSettings)
+            ? BuildPeopleMetadataIndex(candidates)
+            : new Dictionary<Guid, IReadOnlyList<string>>();
         var generatedRows = BuildConfiguredRows(
             rowSettings,
             candidates,
             tmdbFacts,
+            peopleByItemId,
             configuration.RowSettings.RowMaxItems,
             includeEmptyRows: true,
             cancellationToken: cancellationToken);
@@ -677,29 +715,50 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             .Take(heroMaxItems)
             .ToArray();
         var rowSettings = PtvPluginSettingsNormalizer.NormalizeRowBuilderSettings(configuration.Rows);
-        var generatedRows = BuildConfiguredRows(
-            rowSettings,
-            candidates,
-            tmdbFacts,
-            rowLimit,
-            includeEmptyRows: true,
-            cancellationToken: cancellationToken);
+        var recommendationSettings = PtvPluginSettingsNormalizer.NormalizeRecommendationSettings(configuration.Recommendations);
+        var rowConfigHash = ComputeRowConfigHash(rowSettings);
+        var recommendationConfigHash = string.IsNullOrWhiteSpace(recommendationSettings.RecommendationConfigHash)
+            ? ComputeRecommendationConfigHash(recommendationSettings)
+            : recommendationSettings.RecommendationConfigHash;
         var rowConfigApplied = rowSettings.SchemaVersion >= 2;
+        var includeConfiguredRows = rowConfigApplied && rowSettings.Enabled;
+        var peopleByItemId = includeConfiguredRows && NeedsPeopleMetadata(rowSettings)
+            ? BuildPeopleMetadataIndex(candidates)
+            : new Dictionary<Guid, IReadOnlyList<string>>();
+        var generatedRows = includeConfiguredRows
+            ? BuildConfiguredRows(
+                rowSettings,
+                candidates,
+                tmdbFacts,
+                peopleByItemId,
+                rowLimit,
+                includeEmptyRows: true,
+                cancellationToken: cancellationToken)
+            : [];
         var sectionItems = rowConfigApplied
             ? ToSectionItemsJson(generatedRows)
             : BuildLegacySectionItems(configuration, candidates, albums, tmdbFacts, rowLimit);
         var sectionDefinitions = rowConfigApplied
-            ? ToSectionDefinitionsJson(generatedRows)
+            ? ToSectionDefinitionsJson(generatedRows, rowConfigHash)
             : ToLegacySectionDefinitionsJson(sectionItems);
         var rowDiagnostics = rowConfigApplied
-            ? ToDiagnosticsJson(generatedRows)
+            ? ToDiagnosticsJson(generatedRows, rowConfigHash)
             : [];
+        var appendedRecommendationRows = AppendRecommendationRows(
+            sectionItems,
+            sectionDefinitions,
+            rowDiagnostics,
+            recommendationSettings,
+            configuration.RowSettings.EnableRecommendedRows,
+            recommendationConfigHash);
 
+        LogFinalSections(sectionDefinitions);
         _logger.LogInformation(
-            "PiggieTV featured-content heroes selected: {HeroCount}/{HeroMaxItems}. Sections built: {SectionCount}.",
+            "PiggieTV featured-content heroes selected: {HeroCount}/{HeroMaxItems}. Sections built: {SectionCount}. RecommendationRows={RecommendationRows}.",
             heroItems.Length,
             heroMaxItems,
-            sectionItems.Count);
+            sectionItems.Count,
+            appendedRecommendationRows);
 
         return new JsonObject
         {
@@ -707,6 +766,9 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             ["sectionItems"] = sectionItems,
             ["sections"] = sectionDefinitions,
             ["rowConfigApplied"] = rowConfigApplied,
+            ["rowConfigHash"] = rowConfigHash,
+            ["recommendationConfigHash"] = recommendationConfigHash,
+            ["rowConfigVersion"] = rowSettings.SchemaVersion,
             ["rowDiagnostics"] = rowDiagnostics
         };
     }
@@ -766,6 +828,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         RowBuilderSettings settings,
         IReadOnlyList<BaseItem> candidates,
         IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>> peopleByItemId,
         int rowLimit,
         bool includeEmptyRows,
         CancellationToken cancellationToken)
@@ -778,8 +841,6 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         }
 
         var rows = new List<GeneratedRow>();
-        var seenRowIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seenSourceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var rule in settings.Rules.Where(rule => rule.Enabled).OrderBy(rule => rule.SortPriority))
         {
@@ -787,23 +848,68 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
             if (IsVirtualRowRule(rule))
             {
-                rows.Add(CreateVirtualRuleRow(rule, seenRowIds));
+                rows.Add(CreateVirtualRuleRow(rule));
                 continue;
             }
 
-            var sources = GetRuleSources(rule, candidates, tmdbFacts)
-                .Where(source => seenSourceKeys.Add(GetSourceDeduplicationKey(rule, source)))
+            var sources = GetRuleSources(rule, candidates, tmdbFacts, peopleByItemId)
+                .Where(source => !string.IsNullOrWhiteSpace(source))
                 .ToArray();
+            var plannedRowCount = GetPlannedRuleRowCount(rule);
+            var generatedSourceCount = sources.Length;
 
-            foreach (var source in sources)
+            for (var sourceIndex = 0; sourceIndex < sources.Length; sourceIndex++)
             {
+                var source = sources[sourceIndex];
+
                 cancellationToken.ThrowIfCancellationRequested();
                 var stopwatch = Stopwatch.StartNew();
-                var matchingItems = candidates.Where(item =>
-                    IsAllowedForRule(item, rule, tmdbFacts)
-                    && MatchesRuleSource(item, rule, source, tmdbFacts));
-                var selectedItems = SelectRuleItems(matchingItems, rule, rowLimit, out var duplicateCount);
+                var ruleCandidates = candidates
+                    .Where(item => IsAllowedForRule(item, rule, tmdbFacts))
+                    .ToArray();
+                var matchingItems = ruleCandidates
+                    .Where(item => MatchesRuleSource(item, rule, source, tmdbFacts, peopleByItemId))
+                    .ToArray();
+                var selectionItems = matchingItems;
+                var fallbackUsed = false;
+
+                if (ShouldFallbackToBaseGenre(rule, source, matchingItems))
+                {
+                    selectionItems = ruleCandidates
+                        .Where(item => MatchesRuleSource(item, rule, rule.SourceValue, tmdbFacts, peopleByItemId))
+                        .ToArray();
+                    fallbackUsed = selectionItems.Length > 0;
+                }
+
+                var selectedItems = SelectRuleItems(selectionItems, rule, rowLimit, source, out var duplicateCount);
+                var metadataSourceFieldsUsed = GetMetadataSourceFieldsUsed(rule);
+                var emptyResultReason = selectedItems.Count == 0
+                    ? GetEmptyResultReason(rule, source, ruleCandidates, selectionItems, tmdbFacts, peopleByItemId)
+                    : null;
+                var dropReason = selectedItems.Count == 0 ? emptyResultReason : null;
+                var queryUsed = GetRuleQueryDebug(rule, source, fallbackUsed);
+                var first10MatchedItems = (matchingItems.Length > 0 ? matchingItems : selectionItems)
+                    .Take(10)
+                    .Select(item => item.Name)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .ToArray();
+                var rowTitle = GetRuleRowTitle(rule, source, fallbackUsed, sourceIndex);
                 stopwatch.Stop();
+
+                if (string.Equals(rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation(
+                        "PiggieTV studio row generated. RowId={RowId}; RowTitle={RowTitle}; RuleType={RuleType}; StudioFilter={StudioFilter}; QueryUsed={QueryUsed}; CandidateCount={CandidateCount}; MatchedCount={MatchedCount}; FallbackUsed={FallbackUsed}; First10ItemNames={First10ItemNames}.",
+                        rule.Id,
+                        rowTitle,
+                        rule.SourceType,
+                        source,
+                        queryUsed,
+                        ruleCandidates.Length,
+                        selectionItems.Length,
+                        fallbackUsed,
+                        string.Join(" | ", matchingItems.Take(10).Select(item => item.Name)));
+                }
 
                 if (!includeEmptyRows && selectedItems.Count == 0)
                 {
@@ -811,37 +917,55 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 }
 
                 rows.Add(new GeneratedRow(
-                    MakeRowId(rule, source, seenRowIds),
-                    GetRuleRowTitle(rule, source),
+                    MakeRowId(rule, source, sourceIndex),
+                    rowTitle,
                     rule,
                     source,
                     "featured",
                     GetProviderUsed(rule, tmdbFacts),
                     GetProviderError(rule),
                     selectedItems,
+                    ruleCandidates.Length,
+                    selectionItems.Length,
+                    fallbackUsed,
+                    queryUsed,
+                    metadataSourceFieldsUsed,
+                    first10MatchedItems,
                     duplicateCount,
                     stopwatch.ElapsedMilliseconds,
-                    selectedItems.Count == 0 ? "No matching Jellyfin items were found." : null));
+                    emptyResultReason,
+                    plannedRowCount,
+                    generatedSourceCount,
+                    sourceIndex,
+                    dropReason));
             }
         }
 
-        return rows;
+        LogGeneratedRows("expandedRowsBeforeDedupe", rows);
+        var dedupedRows = DeduplicateRowsById(rows);
+        LogGeneratedRows("dedupedRows", dedupedRows);
+
+        return dedupedRows;
     }
 
     private static bool IsVirtualRowRule(RowBuilderRule rule)
     {
         return string.Equals(rule.SourceType, "continueWatching", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(rule.SourceType, "becauseYouWatched", StringComparison.OrdinalIgnoreCase)
             || string.Equals(rule.SourceType, "requested", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static GeneratedRow CreateVirtualRuleRow(RowBuilderRule rule, ISet<string> seenRowIds)
+    private static GeneratedRow CreateVirtualRuleRow(RowBuilderRule rule)
     {
-        var sectionType = string.Equals(rule.SourceType, "requested", StringComparison.OrdinalIgnoreCase)
-            ? "seerr-requests"
-            : "continue";
+        var sectionType = rule.SourceType.ToLowerInvariant() switch
+        {
+            "requested" => "seerr-requests",
+            "becauseyouwatched" => "because-you-watched",
+            _ => "continue"
+        };
 
         return new GeneratedRow(
-            MakeRowId(rule, rule.SourceValue, seenRowIds),
+            MakeRowId(rule, rule.SourceValue, 0),
             rule.Name,
             rule,
             rule.SourceValue,
@@ -851,9 +975,22 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             [],
             0,
             0,
-            string.Equals(rule.SourceType, "requested", StringComparison.OrdinalIgnoreCase)
-                ? "No requests found or Jellyseerr is not configured."
-                : null);
+            false,
+            $"virtual:{rule.SourceType}",
+            GetMetadataSourceFieldsUsed(rule),
+            [],
+            0,
+            0,
+            rule.SourceType.ToLowerInvariant() switch
+            {
+                "requested" => "No requests found or Jellyseerr is not configured.",
+                "becauseyouwatched" => "No watched content found for this user yet.",
+                _ => null
+            },
+            1,
+            1,
+            0,
+            null);
     }
 
     private static RowBuilderSettings CloneRowBuilderSettings(RowBuilderSettings settings)
@@ -863,6 +1000,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             SchemaVersion = settings.SchemaVersion,
             Enabled = settings.Enabled,
             DefaultsInitialized = settings.DefaultsInitialized,
+            ShowConfiguredRowsOnHome = settings.ShowConfiguredRowsOnHome,
             Rules = settings.Rules
                 .Select(rule => new RowBuilderRule
                 {
@@ -910,28 +1048,72 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         };
     }
 
-    private static string GetSourceDeduplicationKey(RowBuilderCategory category, string source)
+    private void LogGeneratedRows(string stage, IReadOnlyList<GeneratedRow> rows)
     {
-        return string.Join(
-            '|',
-            NormalizeSearchText(category.MediaType),
-            NormalizeSearchText(category.SourceType),
-            NormalizeSearchText(source));
+        _logger.LogInformation(
+            "PiggieTV Row Rules {Stage}: {Rows}",
+            stage,
+            JsonSerializer.Serialize(rows.Select(row => new
+            {
+                row.Id,
+                row.Title,
+                RuleId = row.Rule.Id,
+                row.Rule.SourceType,
+                row.Rule.SourceValue,
+                row.Source,
+                row.QueryUsed,
+                ItemCount = row.Items.Count,
+                row.CandidateCount,
+                row.MatchedCount,
+                row.FallbackUsed,
+                row.PlannedRowCount,
+                row.GeneratedSourceCount,
+                row.SourceIndex,
+                row.DropReason,
+                row.EmptyResultReason
+            }), JsonOptions));
     }
 
-    private static string GetSourceDeduplicationKey(RowBuilderRule rule, string source)
+    private static List<GeneratedRow> DeduplicateRowsById(IEnumerable<GeneratedRow> rows)
     {
-        return string.Join(
-            '|',
-            NormalizeSearchText(rule.MediaType),
-            NormalizeSearchText(rule.SourceType),
-            NormalizeSearchText(source));
+        var seenRowIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var dedupedRows = new List<GeneratedRow>();
+
+        foreach (var row in rows)
+        {
+            if (!seenRowIds.TryGetValue(row.Id, out var duplicateCount))
+            {
+                seenRowIds[row.Id] = 0;
+                dedupedRows.Add(row);
+                continue;
+            }
+
+            duplicateCount += 1;
+            seenRowIds[row.Id] = duplicateCount;
+            var uniqueId = $"{row.Id}-{duplicateCount}";
+
+            while (seenRowIds.ContainsKey(uniqueId))
+            {
+                duplicateCount += 1;
+                seenRowIds[row.Id] = duplicateCount;
+                uniqueId = $"{row.Id}-{duplicateCount}";
+            }
+
+            seenRowIds[uniqueId] = 0;
+            dedupedRows.Add(row with
+            {
+                Id = uniqueId
+            });
+        }
+
+        return dedupedRows;
     }
 
     private static IReadOnlyList<string> GetRuleSources(
         RowBuilderRule rule,
         IReadOnlyList<BaseItem> candidates,
-        IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts)
+        IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>> peopleByItemId)
     {
         if (string.Equals(rule.SourceType, "seasonal", StringComparison.OrdinalIgnoreCase))
         {
@@ -944,14 +1126,9 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         }
 
         if (string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(rule.GenerationMode, "random", StringComparison.OrdinalIgnoreCase)
-            && rule.IncludeSubgenres)
+            && string.Equals(rule.GenerationMode, "random", StringComparison.OrdinalIgnoreCase))
         {
-            var subgenres = GetSubgenres(rule.SourceValue)
-                .Take(Math.Max(1, rule.SubgenreRowCount > 0 ? rule.SubgenreRowCount : rule.RowCount))
-                .ToArray();
-
-            return subgenres.Length > 0 ? subgenres : [rule.SourceValue];
+            return GetGeneratedGenreSources(rule, candidates, tmdbFacts, peopleByItemId);
         }
 
         if (!string.IsNullOrWhiteSpace(rule.SourceValue))
@@ -961,7 +1138,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
         var sources = candidates
             .Where(item => IsAllowedForRule(item, rule, tmdbFacts))
-            .SelectMany(item => GetSourceValues(item, rule.SourceType))
+            .SelectMany(item => GetSourceValues(item, rule.SourceType, tmdbFacts, peopleByItemId))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .GroupBy(NormalizeSearchText)
             .Where(group => !string.IsNullOrWhiteSpace(group.Key))
@@ -1014,11 +1191,255 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         return sources.Length > 0 ? sources : category.SourcePoolFilters.Take(Math.Max(1, category.RowCount)).ToArray();
     }
 
-    private static IEnumerable<string> GetSourceValues(BaseItem item, string sourceType)
+    private static IReadOnlyList<string> GetGeneratedGenreSources(
+        RowBuilderRule rule,
+        IReadOnlyList<BaseItem> candidates,
+        IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>> peopleByItemId)
+    {
+        var baseSource = rule.SourceValue;
+
+        if (string.IsNullOrWhiteSpace(baseSource))
+        {
+            return [rule.Name];
+        }
+
+        var baseRows = Math.Max(1, rule.RowCount);
+        var sources = new List<string> { baseSource };
+        var subgenreRowLimit = rule.IncludeSubgenres
+            ? Math.Min(Math.Max(0, rule.SubgenreRowCount), Math.Max(0, baseRows - 1))
+            : 0;
+
+        if (subgenreRowLimit > 0)
+        {
+            sources.AddRange(GetGeneratedSubgenreSources(
+                rule,
+                baseSource,
+                candidates,
+                tmdbFacts,
+                peopleByItemId,
+                subgenreRowLimit));
+        }
+
+        while (sources.Count < baseRows)
+        {
+            sources.Add(CreateGenreVariationSource(baseSource, sources.Count + 1));
+        }
+
+        return sources.Take(baseRows).ToArray();
+    }
+
+    private static IReadOnlyList<string> GetGeneratedSubgenreSources(
+        RowBuilderRule rule,
+        string baseSource,
+        IReadOnlyList<BaseItem> candidates,
+        IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>> peopleByItemId,
+        int limit)
+    {
+        if (limit <= 0)
+        {
+            return [];
+        }
+
+        var normalizedBase = NormalizeSearchText(baseSource);
+        var allowedCandidates = candidates
+            .Where(item => IsAllowedForRule(item, rule, tmdbFacts))
+            .Where(item => MatchesRuleSource(item, rule, baseSource, tmdbFacts, peopleByItemId))
+            .ToArray();
+        var observedSubgenres = allowedCandidates
+            .SelectMany(item => item.Genres ?? Array.Empty<string>())
+            .Where(genre => !string.IsNullOrWhiteSpace(genre))
+            .Where(genre => !string.Equals(NormalizeSearchText(genre), normalizedBase, StringComparison.Ordinal))
+            .GroupBy(NormalizeSearchText)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .Select(group => new
+            {
+                Name = group.First(),
+                Count = group.Count(),
+                CuratedRank = GetSubgenreRank(baseSource, group.First())
+            })
+            .OrderBy(source => source.CuratedRank < 0 ? int.MaxValue : source.CuratedRank)
+            .ThenByDescending(source => source.Count)
+            .ThenBy(source => source.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(source => source.Name);
+        var curatedSubgenres = GetSubgenres(baseSource)
+            .Where(subgenre => !string.IsNullOrWhiteSpace(subgenre))
+            .Where(subgenre => !string.Equals(NormalizeSearchText(subgenre), normalizedBase, StringComparison.Ordinal))
+            .Where(subgenre => allowedCandidates.Any(item => MatchesRuleSource(item, rule, subgenre, tmdbFacts, peopleByItemId)));
+        var sources = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in observedSubgenres.Concat(curatedSubgenres))
+        {
+            var key = NormalizeSearchText(source);
+
+            if (string.IsNullOrWhiteSpace(key) || !seen.Add(key))
+            {
+                continue;
+            }
+
+            sources.Add(source);
+
+            if (sources.Count >= limit)
+            {
+                break;
+            }
+        }
+
+        return sources;
+    }
+
+    private static int GetSubgenreRank(string baseSource, string candidate)
+    {
+        var normalizedCandidate = NormalizeSearchText(candidate);
+        var curated = GetSubgenres(baseSource);
+
+        for (var index = 0; index < curated.Count; index++)
+        {
+            var normalizedCurated = NormalizeSearchText(curated[index]);
+
+            if (string.Equals(normalizedCandidate, normalizedCurated, StringComparison.Ordinal)
+                || normalizedCandidate.Contains(normalizedCurated, StringComparison.Ordinal)
+                || normalizedCurated.Contains(normalizedCandidate, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int GetPlannedRuleRowCount(RowBuilderRule rule)
+    {
+        if (!rule.Enabled)
+        {
+            return 0;
+        }
+
+        if (IsVirtualRowRule(rule))
+        {
+            return 1;
+        }
+
+        if (string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(rule.GenerationMode, "random", StringComparison.OrdinalIgnoreCase))
+        {
+            return Math.Max(1, rule.RowCount);
+        }
+
+        if (!string.IsNullOrWhiteSpace(rule.SourceValue))
+        {
+            return 1;
+        }
+
+        return Math.Max(1, rule.RowCount);
+    }
+
+    private static string CreateGenreVariationSource(string baseSource, int rowNumber)
+    {
+        return $"{baseSource}{RowVariantDelimiter}mix-{rowNumber}";
+    }
+
+    private static bool ShouldFallbackToBaseGenre(RowBuilderRule rule, string source, IReadOnlyList<BaseItem> matchingItems)
+    {
+        return matchingItems.Count == 0
+            && string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(rule.GenerationMode, "random", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(rule.SourceValue)
+            && !string.Equals(GetRuleMatchSource(source), rule.SourceValue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetRuleMatchSource(string source)
+    {
+        var delimiterIndex = source.IndexOf(RowVariantDelimiter, StringComparison.Ordinal);
+
+        return delimiterIndex > 0 ? source[..delimiterIndex] : source;
+    }
+
+    private static bool IsRuleVariantSource(string source)
+    {
+        return source.IndexOf(RowVariantDelimiter, StringComparison.Ordinal) > 0;
+    }
+
+    private static string GetRuleSourceDisplayLabel(string source)
+    {
+        var delimiterIndex = source.IndexOf(RowVariantDelimiter, StringComparison.Ordinal);
+
+        if (delimiterIndex <= 0)
+        {
+            return GetRowTitle(source);
+        }
+
+        var variation = source[(delimiterIndex + RowVariantDelimiter.Length)..];
+
+        if (variation.StartsWith("mix-", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(variation[4..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mixNumber))
+        {
+            return $"Mix {mixNumber}";
+        }
+
+        return GetRowTitle(variation.Replace('-', ' '));
+    }
+
+    private static IEnumerable<string> GetSourceValues(
+        BaseItem item,
+        string sourceType,
+        IReadOnlyDictionary<Guid, PtvTmdbItemFacts>? tmdbFacts = null,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>>? peopleByItemId = null)
     {
         if (string.Equals(sourceType, "studio", StringComparison.OrdinalIgnoreCase))
         {
             return item.Studios ?? Array.Empty<string>();
+        }
+
+        if (string.Equals(sourceType, "genre", StringComparison.OrdinalIgnoreCase))
+        {
+            return item.Genres ?? Array.Empty<string>();
+        }
+
+        if (string.Equals(sourceType, "tag", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceType, "tags", StringComparison.OrdinalIgnoreCase))
+        {
+            return item.Tags ?? Array.Empty<string>();
+        }
+
+        if (string.Equals(sourceType, "providerId", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceType, "providerIds", StringComparison.OrdinalIgnoreCase))
+        {
+            return GetProviderIdSourceValues(item);
+        }
+
+        if (string.Equals(sourceType, "person", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceType, "people", StringComparison.OrdinalIgnoreCase))
+        {
+            return GetPeopleSourceValues(item, peopleByItemId);
+        }
+
+        if (string.Equals(sourceType, "productionYear", StringComparison.OrdinalIgnoreCase))
+        {
+            return item.ProductionYear is null ? [] : [item.ProductionYear.Value.ToString(CultureInfo.InvariantCulture)];
+        }
+
+        if (string.Equals(sourceType, "officialRating", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.IsNullOrWhiteSpace(item.OfficialRating) ? [] : [item.OfficialRating];
+        }
+
+        if (string.Equals(sourceType, "communityRating", StringComparison.OrdinalIgnoreCase))
+        {
+            return item.CommunityRating is null ? [] : [item.CommunityRating.Value.ToString("0.0", CultureInfo.InvariantCulture)];
+        }
+
+        if (string.Equals(sourceType, "premiereDate", StringComparison.OrdinalIgnoreCase))
+        {
+            return GetDateSourceValues(item.PremiereDate);
+        }
+
+        if (string.Equals(sourceType, "image", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceType, "images", StringComparison.OrdinalIgnoreCase))
+        {
+            return GetImageSourceValues(item);
         }
 
         if (string.Equals(sourceType, "collection", StringComparison.OrdinalIgnoreCase)
@@ -1033,6 +1454,138 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         }
 
         return item.Genres ?? Array.Empty<string>();
+    }
+
+    private static IEnumerable<string> GetProviderIdSourceValues(BaseItem item)
+    {
+        if (item.ProviderIds is null || item.ProviderIds.Count == 0)
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+
+        foreach (var providerId in item.ProviderIds)
+        {
+            var normalizedProvider = NormalizeProviderIdKey(providerId.Key);
+
+            if (normalizedProvider is null || string.IsNullOrWhiteSpace(providerId.Value))
+            {
+                continue;
+            }
+
+            values.Add($"{normalizedProvider}:{providerId.Value}");
+            values.Add(providerId.Value);
+            values.Add(normalizedProvider);
+        }
+
+        return values;
+    }
+
+    private static string? NormalizeProviderIdKey(string provider)
+    {
+        return provider.ToLowerInvariant() switch
+        {
+            "tmdb" or "themoviedb" or "moviedb" => "Tmdb",
+            "imdb" => "Imdb",
+            "tvdb" or "thetvdb" => "Tvdb",
+            _ => null
+        };
+    }
+
+    private static IEnumerable<string> GetPeopleSourceValues(
+        BaseItem item,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>>? peopleByItemId)
+    {
+        return peopleByItemId is not null && peopleByItemId.TryGetValue(item.Id, out var people)
+            ? people
+            : [];
+    }
+
+    private static IEnumerable<string> GetDateSourceValues(DateTime? value)
+    {
+        if (value is null)
+        {
+            return [];
+        }
+
+        return [
+            value.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            value.Value.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+            value.Value.Year.ToString(CultureInfo.InvariantCulture)
+        ];
+    }
+
+    private static IEnumerable<string> GetImageSourceValues(BaseItem item)
+    {
+        var values = new List<string>();
+
+        if (GetImageTag(item, ImageType.Primary) is not null)
+        {
+            values.AddRange(["any", "images", "primary", "imageTags.primary"]);
+        }
+
+        if (GetImageTag(item, ImageType.Thumb) is not null)
+        {
+            values.AddRange(["any", "images", "thumb", "imageTags.thumb"]);
+        }
+
+        if (GetImageTag(item, ImageType.Logo) is not null)
+        {
+            values.AddRange(["any", "images", "logo", "imageTags.logo"]);
+        }
+
+        if (GetImageTag(item, ImageType.Backdrop) is not null)
+        {
+            values.AddRange(["any", "images", "backdrop", "backdropImageTags"]);
+        }
+
+        return values;
+    }
+
+    private static bool NeedsPeopleMetadata(RowBuilderSettings settings)
+    {
+        return settings.Rules.Any(rule => rule.Enabled
+            && (string.Equals(rule.SourceType, "person", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(rule.SourceType, "people", StringComparison.OrdinalIgnoreCase)))
+            || settings.Categories.Any(category => category.Enabled
+                && (string.Equals(category.SourceType, "person", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(category.SourceType, "people", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private IReadOnlyDictionary<Guid, IReadOnlyList<string>> BuildPeopleMetadataIndex(IReadOnlyList<BaseItem> candidates)
+    {
+        var peopleByItemId = new Dictionary<Guid, IReadOnlyList<string>>();
+
+        foreach (var item in candidates)
+        {
+            try
+            {
+                var values = _libraryManager.GetPeople(item)
+                    .SelectMany(person => new[]
+                    {
+                        person.Name,
+                        person.Role,
+                        string.IsNullOrWhiteSpace(person.Type.ToString()) || string.IsNullOrWhiteSpace(person.Name)
+                            ? string.Empty
+                            : $"{person.Type}:{person.Name}"
+                    })
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                if (values.Length > 0)
+                {
+                    peopleByItemId[item.Id] = values;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "PiggieTV could not read people metadata for item {ItemId}.", item.Id);
+            }
+        }
+
+        return peopleByItemId;
     }
 
     private static bool IsAllowedForRule(
@@ -1102,8 +1655,11 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         BaseItem item,
         RowBuilderRule rule,
         string source,
-        IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts)
+        IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>> peopleByItemId)
     {
+        var matchSource = GetRuleMatchSource(source);
+
         if (string.Equals(rule.SourceType, "latest", StringComparison.OrdinalIgnoreCase))
         {
             return true;
@@ -1111,32 +1667,36 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
         if (string.Equals(rule.SourceType, "seasonal", StringComparison.OrdinalIgnoreCase))
         {
-            return MatchesAny(item, GetSeasonalTerms(source), tmdbFacts);
+            return MatchesAny(item, GetSeasonalTerms(matchSource), tmdbFacts);
         }
 
         if (string.Equals(rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase))
         {
-            return item.Studios?.Any(studio => MatchesSourceValue(studio, source)) == true;
+            return MatchesMetadataSource(item, "studio", matchSource, tmdbFacts, peopleByItemId);
         }
 
         if (string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase))
         {
-            return item.Genres?.Any(genre => MatchesSourceValue(genre, source)) == true
-                || MatchesAny(item, [source], tmdbFacts);
+            return MatchesMetadataSource(item, "genre", matchSource, tmdbFacts, peopleByItemId);
         }
 
         if (string.Equals(rule.SourceType, "library", StringComparison.OrdinalIgnoreCase))
         {
-            return MatchesSourceValue(GetItemType(item), source)
-                || (!string.IsNullOrWhiteSpace(item.Path) && item.Path.Contains(source, StringComparison.OrdinalIgnoreCase));
+            return MatchesSourceValue(GetItemType(item), matchSource)
+                || (!string.IsNullOrWhiteSpace(item.Path) && item.Path.Contains(matchSource, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (IsStructuredMetadataSource(rule.SourceType))
+        {
+            return MatchesMetadataSource(item, rule.SourceType, matchSource, tmdbFacts, peopleByItemId);
         }
 
         if (string.Equals(rule.SourceType, "collection", StringComparison.OrdinalIgnoreCase))
         {
-            return MatchesAny(item, [source], tmdbFacts);
+            return MatchesAny(item, [matchSource], tmdbFacts);
         }
 
-        return MatchesAny(item, [source], tmdbFacts);
+        return MatchesAny(item, [matchSource], tmdbFacts);
     }
 
     private static bool MatchesCategorySource(
@@ -1147,7 +1707,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     {
         if (string.Equals(category.SourceType, "studio", StringComparison.OrdinalIgnoreCase))
         {
-            return item.Studios?.Any(studio => MatchesSourceValue(studio, source)) == true;
+            return MatchesMetadataSource(item, "studio", source, tmdbFacts, null);
         }
 
         if (string.Equals(category.SourceType, "genre", StringComparison.OrdinalIgnoreCase))
@@ -1163,8 +1723,122 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         var normalizedValue = NormalizeSearchText(value);
         var normalizedSource = NormalizeSearchText(source);
 
+        if (string.IsNullOrWhiteSpace(normalizedValue) || string.IsNullOrWhiteSpace(normalizedSource))
+        {
+            return false;
+        }
+
         return normalizedValue.Contains(normalizedSource, StringComparison.Ordinal)
             || normalizedSource.Contains(normalizedValue, StringComparison.Ordinal);
+    }
+
+    private static bool IsStructuredMetadataSource(string sourceType)
+    {
+        return sourceType.Equals("studio", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("genre", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("tag", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("tags", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("providerId", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("providerIds", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("person", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("people", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("productionYear", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("officialRating", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("communityRating", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("premiereDate", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("image", StringComparison.OrdinalIgnoreCase)
+            || sourceType.Equals("images", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesMetadataSource(
+        BaseItem item,
+        string sourceType,
+        string source,
+        IReadOnlyDictionary<Guid, PtvTmdbItemFacts>? tmdbFacts,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>>? peopleByItemId)
+    {
+        if (string.Equals(sourceType, "communityRating", StringComparison.OrdinalIgnoreCase)
+            && MatchesNumericSource(item.CommunityRating, source))
+        {
+            return true;
+        }
+
+        if (string.Equals(sourceType, "productionYear", StringComparison.OrdinalIgnoreCase)
+            && item.ProductionYear is not null
+            && MatchesIntegerSource(item.ProductionYear.Value, source))
+        {
+            return true;
+        }
+
+        return GetSourceValues(item, sourceType, tmdbFacts, peopleByItemId)
+            .Any(value => MatchesSourceValue(value, source));
+    }
+
+    private static bool HasExactMetadataSourceValue(
+        BaseItem item,
+        string sourceType,
+        string source,
+        IReadOnlyDictionary<Guid, PtvTmdbItemFacts>? tmdbFacts,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>>? peopleByItemId)
+    {
+        var normalizedSource = NormalizeSearchText(source);
+
+        return !string.IsNullOrWhiteSpace(normalizedSource)
+            && GetSourceValues(item, sourceType, tmdbFacts, peopleByItemId)
+                .Any(value => string.Equals(NormalizeSearchText(value), normalizedSource, StringComparison.Ordinal));
+    }
+
+    private static bool MatchesNumericSource(float? value, string source)
+    {
+        if (value is null)
+        {
+            return false;
+        }
+
+        var trimmed = source.Trim();
+
+        if (trimmed.StartsWith(">=", StringComparison.Ordinal)
+            && float.TryParse(trimmed[2..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var minimum))
+        {
+            return value.Value >= minimum;
+        }
+
+        if (trimmed.StartsWith("<=", StringComparison.Ordinal)
+            && float.TryParse(trimmed[2..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var maximum))
+        {
+            return value.Value <= maximum;
+        }
+
+        if (trimmed.StartsWith(">", StringComparison.Ordinal)
+            && float.TryParse(trimmed[1..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var greaterThan))
+        {
+            return value.Value > greaterThan;
+        }
+
+        if (trimmed.StartsWith("<", StringComparison.Ordinal)
+            && float.TryParse(trimmed[1..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var lessThan))
+        {
+            return value.Value < lessThan;
+        }
+
+        return float.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var exact)
+            && Math.Abs(value.Value - exact) < 0.05;
+    }
+
+    private static bool MatchesIntegerSource(int value, string source)
+    {
+        var trimmed = source.Trim();
+        var rangeParts = trimmed.Split('-', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        if (rangeParts.Length == 2
+            && int.TryParse(rangeParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var minimum)
+            && int.TryParse(rangeParts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var maximum))
+        {
+            return value >= Math.Min(minimum, maximum) && value <= Math.Max(minimum, maximum);
+        }
+
+        return int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var exact)
+            && value == exact;
     }
 
     private static IReadOnlyList<BaseItem> SelectRankedDistinctItems(
@@ -1199,6 +1873,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         IEnumerable<BaseItem> items,
         RowBuilderRule rule,
         int rowLimit,
+        string source,
         out int duplicateCount)
     {
         var limit = Math.Clamp(rule.ItemLimit > 0 ? rule.ItemLimit : rowLimit, 1, Math.Max(1, rowLimit));
@@ -1207,10 +1882,29 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             "latest" => items.OrderByDescending(GetSortDate),
             "highestRated" => items.OrderByDescending(GetRatingScore).ThenByDescending(GetSortDate),
             "popular" => items.OrderByDescending(GetTrendScore).ThenByDescending(GetSortDate),
-            _ => items.OrderBy(_ => Guid.NewGuid())
+            _ => items.OrderBy(item => GetStableRandomSortKey(item, $"{rule.Id}:{rule.SourceType}:{source}"))
+                .ThenByDescending(GetTrendScore)
         };
 
         return SelectDistinctItems(orderedItems, limit, out duplicateCount);
+    }
+
+    private static uint GetStableRandomSortKey(BaseItem item, string seed)
+    {
+        var text = $"{seed}:{item.Id:N}:{item.Name}:{item.ProductionYear ?? item.PremiereDate?.Year ?? 0}";
+
+        unchecked
+        {
+            uint hash = 2166136261;
+
+            foreach (var character in text)
+            {
+                hash ^= character;
+                hash *= 16777619;
+            }
+
+            return hash;
+        }
     }
 
     private static IReadOnlyList<BaseItem> SelectDistinctItems(
@@ -1262,31 +1956,247 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         return NormalizeSearchText($"{GetItemType(item)} {item.Name} {item.ProductionYear ?? item.PremiereDate?.Year ?? 0}");
     }
 
-    private static string MakeRowId(RowBuilderRule rule, string source, ISet<string> seenRowIds)
+    private static string MakeRowId(RowBuilderRule rule, string source, int sourceIndex)
     {
-        var baseId = Slugify(string.Equals(rule.SourceValue, source, StringComparison.OrdinalIgnoreCase)
-            ? rule.Id
-            : $"{rule.Id}-{source}");
-        var rowId = baseId;
-        var suffix = 2;
-
-        while (!seenRowIds.Add(rowId))
+        if (string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(rule.GenerationMode, "random", StringComparison.OrdinalIgnoreCase))
         {
-            rowId = $"{baseId}-{suffix++}";
+            var genreId = Slugify(GetRuleMatchSource(rule.SourceValue));
+
+            if (string.IsNullOrWhiteSpace(genreId))
+            {
+                genreId = Slugify(rule.Name);
+            }
+
+            if (string.IsNullOrWhiteSpace(genreId))
+            {
+                genreId = Slugify(rule.Id);
+            }
+
+            return $"{genreId}-{sourceIndex}";
         }
 
-        return rowId;
+        return Slugify(string.Equals(rule.SourceValue, source, StringComparison.OrdinalIgnoreCase)
+            ? rule.Id
+            : $"{rule.Id}-{source}");
     }
 
-    private static string GetRuleRowTitle(RowBuilderRule rule, string source)
+    private static string ComputeRowConfigHash(RowBuilderSettings settings)
     {
+        var node = JsonSerializer.SerializeToNode(settings, JsonOptions);
+        return ComputeStableHash(node);
+    }
+
+    private static string ComputeRecommendationConfigHash(RecommendationRowSettings settings)
+    {
+        var hashableSettings = new RecommendationRowSettings
+        {
+            Enabled = settings.Enabled,
+            GeneratedAt = settings.GeneratedAt,
+            RowDiagnostics = settings.RowDiagnostics,
+            RowConfigHash = settings.RowConfigHash,
+            SchemaVersion = settings.SchemaVersion,
+            SourceCounts = settings.SourceCounts,
+            SourceTimingsJson = settings.SourceTimingsJson,
+            Rows = settings.Rows.Select(row => new RecommendationRowDefinition
+            {
+                Accepted = row.Accepted,
+                Diagnostics = row.Diagnostics,
+                Draft = row.Draft,
+                Enabled = row.Enabled,
+                Explanation = row.Explanation,
+                GeneratedAt = row.GeneratedAt,
+                Id = row.Id,
+                Items = row.Items,
+                MediaType = row.MediaType,
+                RowConfigHash = row.RowConfigHash,
+                SourceCounts = row.SourceCounts,
+                SourceTimingsJson = row.SourceTimingsJson,
+                Title = row.Title
+            }).ToList()
+        };
+        var node = JsonSerializer.SerializeToNode(hashableSettings, JsonOptions);
+        return ComputeStableHash(node);
+    }
+
+    private static string ComputeStableHash(JsonNode? node)
+    {
+        var stableJson = ToStableJson(node);
+        long hash = 5381;
+
+        foreach (var character in stableJson)
+        {
+            hash = ((hash * 33) + character) % int.MaxValue;
+        }
+
+        return hash.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static string ToStableJson(JsonNode? node)
+    {
+        if (node is null)
+        {
+            return "null";
+        }
+
+        if (node is JsonArray array)
+        {
+            return $"[{string.Join(",", array.Select(ToStableJson))}]";
+        }
+
+        if (node is JsonObject jsonObject)
+        {
+            return $"{{{string.Join(",", jsonObject
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .Select(entry => $"{JsonSerializer.Serialize(entry.Key, JsonOptions)}:{ToStableJson(entry.Value)}"))}}}";
+        }
+
+        return node.ToJsonString(JsonOptions);
+    }
+
+    private static string GetRuleRowTitle(
+        RowBuilderRule rule,
+        string source,
+        bool fallbackUsed = false,
+        int sourceIndex = 0)
+    {
+        if (string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(rule.GenerationMode, "random", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(rule.SourceValue, GetRuleMatchSource(source), StringComparison.OrdinalIgnoreCase)
+                && !IsRuleVariantSource(source))
+            {
+                return rule.Name;
+            }
+
+            var label = GetRuleSourceDisplayLabel(source);
+
+            if (fallbackUsed)
+            {
+                return IsRuleVariantSource(source)
+                    ? $"{rule.Name} {label}"
+                    : label;
+            }
+
+            return IsRuleVariantSource(source)
+                ? $"{rule.Name} {label}"
+                : label;
+        }
+
         if (!string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(rule.SourceValue, source, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(rule.SourceValue, GetRuleMatchSource(source), StringComparison.OrdinalIgnoreCase)
+            && !IsRuleVariantSource(source))
         {
             return rule.Name;
         }
 
-        return GetRowTitle(source);
+        return IsRuleVariantSource(source)
+            ? $"{rule.Name} {GetRuleSourceDisplayLabel(source)}"
+            : $"{rule.Name}: {GetRuleSourceDisplayLabel(source)}";
+    }
+
+    private static string GetRuleQueryDebug(RowBuilderRule rule, string source, bool fallbackUsed = false)
+    {
+        var fields = string.Join(",", GetMetadataSourceFieldsUsed(rule));
+        var matchSource = GetRuleMatchSource(source);
+        var variation = IsRuleVariantSource(source)
+            ? $"; variation=\"{GetRuleSourceDisplayLabel(source)}\""
+            : string.Empty;
+        var fallback = fallbackUsed && !string.IsNullOrWhiteSpace(rule.SourceValue)
+            ? $"; fallbackGenreFilter=\"{rule.SourceValue}\""
+            : string.Empty;
+
+        if (string.Equals(rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"mediaType={rule.MediaType}; sourceType=studio; studioFilter=\"{matchSource}\"; matchFields={fields}; mode={rule.GenerationMode}{variation}{fallback}";
+        }
+
+        if (string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"mediaType={rule.MediaType}; sourceType=genre; genreFilter=\"{matchSource}\"; matchFields={fields}; mode={rule.GenerationMode}{variation}{fallback}";
+        }
+
+        if (IsStructuredMetadataSource(rule.SourceType))
+        {
+            return $"mediaType={rule.MediaType}; sourceType={rule.SourceType}; source=\"{matchSource}\"; matchFields={fields}; mode={rule.GenerationMode}{variation}{fallback}";
+        }
+
+        return $"mediaType={rule.MediaType}; sourceType={rule.SourceType}; source=\"{matchSource}\"; mode={rule.GenerationMode}{variation}{fallback}";
+    }
+
+    private static IReadOnlyList<string> GetMetadataSourceFieldsUsed(RowBuilderRule rule)
+    {
+        return rule.SourceType.ToLowerInvariant() switch
+        {
+            "studio" => ["Studios"],
+            "genre" => ["Genres"],
+            "tag" or "tags" => ["Tags"],
+            "providerid" or "providerids" => ["ProviderIds.Tmdb", "ProviderIds.Imdb", "ProviderIds.Tvdb"],
+            "person" or "people" => ["People.Name", "People.Role", "People.Type"],
+            "productionyear" => ["ProductionYear"],
+            "officialrating" => ["OfficialRating"],
+            "communityrating" => ["CommunityRating"],
+            "premieredate" => ["PremiereDate"],
+            "image" or "images" => ["ImageTags", "BackdropImageTags"],
+            "collection" => ["Tags", "Genres"],
+            "library" => ["Path", "Type"],
+            "latest" => ["DateCreated", "PremiereDate"],
+            "seasonal" => ["Name", "Overview", "Genres", "Tags", "Studios"],
+            _ => ["Genres", "Tags", "Name", "Overview"]
+        };
+    }
+
+    private static string? GetEmptyResultReason(
+        RowBuilderRule rule,
+        string source,
+        IReadOnlyList<BaseItem> candidates,
+        IReadOnlyList<BaseItem> matchingItems,
+        IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts,
+        IReadOnlyDictionary<Guid, IReadOnlyList<string>> peopleByItemId)
+    {
+        var matchSource = GetRuleMatchSource(source);
+
+        if (matchingItems.Count > 0)
+        {
+            return "No matching Jellyfin items remained after duplicate filtering.";
+        }
+
+        if (!IsStructuredMetadataSource(rule.SourceType))
+        {
+            return $"No items matched '{matchSource}'.";
+        }
+
+        var hasMetadata = candidates.Any(item => GetSourceValues(item, rule.SourceType, tmdbFacts, peopleByItemId).Any());
+        var label = GetMetadataSourceLabel(rule.SourceType);
+
+        if (!hasMetadata)
+        {
+            return string.Equals(rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase)
+                ? "No studio metadata found."
+                : $"No {label} metadata found.";
+        }
+
+        return string.Equals(rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase)
+            ? $"No items matched studio '{matchSource}'."
+            : $"No items matched {label} '{matchSource}'.";
+    }
+
+    private static string GetMetadataSourceLabel(string sourceType)
+    {
+        return sourceType.ToLowerInvariant() switch
+        {
+            "studio" => "studio",
+            "genre" => "genre",
+            "tag" or "tags" => "tag",
+            "providerid" or "providerids" => "provider id",
+            "person" or "people" => "person",
+            "productionyear" => "production year",
+            "officialrating" => "official rating",
+            "communityrating" => "community rating",
+            "premieredate" => "premiere date",
+            "image" or "images" => "image",
+            _ => sourceType
+        };
     }
 
     private static string Slugify(string value)
@@ -1318,6 +2228,11 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         RowBuilderRule rule,
         IReadOnlyDictionary<Guid, PtvTmdbItemFacts> tmdbFacts)
     {
+        if (IsStructuredMetadataSource(rule.SourceType))
+        {
+            return "jellyfin";
+        }
+
         if (string.Equals(rule.MediaType, "movies", StringComparison.OrdinalIgnoreCase) && tmdbFacts.Count > 0)
         {
             return "tmdb";
@@ -1333,6 +2248,11 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
     private string? GetProviderError(RowBuilderRule rule)
     {
+        if (IsStructuredMetadataSource(rule.SourceType))
+        {
+            return null;
+        }
+
         if (!string.Equals(rule.MediaType, "movies", StringComparison.OrdinalIgnoreCase))
         {
             return null;
@@ -1353,7 +2273,346 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         return sectionItems;
     }
 
-    private static JsonArray ToSectionDefinitionsJson(IEnumerable<GeneratedRow> rows)
+    private static int AppendRecommendationRows(
+        JsonObject sectionItems,
+        JsonArray sectionDefinitions,
+        JsonArray rowDiagnostics,
+        RecommendationRowSettings recommendationSettings,
+        bool recommendationFeatureEnabled,
+        string recommendationConfigHash)
+    {
+        if (!recommendationFeatureEnabled || !recommendationSettings.Enabled)
+        {
+            var reason = recommendationFeatureEnabled ? "recommendation-settings-disabled" : "recommendation-feature-disabled";
+
+            foreach (var row in recommendationSettings.Rows)
+            {
+                AddRecommendationDiagnostic(rowDiagnostics, row, $"recommendation-{Slugify(row.Id)}", recommendationConfigHash, 0, reason);
+            }
+
+            return 0;
+        }
+
+        var appended = 0;
+        var seenRecommendationSectionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in recommendationSettings.Rows)
+        {
+            var sectionId = $"recommendation-{Slugify(row.Id)}";
+
+            if (!seenRecommendationSectionIds.Add(sectionId))
+            {
+                AddRecommendationDiagnostic(rowDiagnostics, row, sectionId, recommendationConfigHash, 0, "duplicate-recommendation-section-id");
+                continue;
+            }
+
+            if (!row.Accepted || row.Draft)
+            {
+                AddRecommendationDiagnostic(rowDiagnostics, row, sectionId, recommendationConfigHash, 0, "recommendation-row-draft");
+                continue;
+            }
+
+            if (!row.Enabled)
+            {
+                AddRecommendationDiagnostic(rowDiagnostics, row, sectionId, recommendationConfigHash, 0, "recommendation-row-disabled");
+                continue;
+            }
+
+            var dedupedItems = DeduplicateRecommendationItems(row.Items).ToArray();
+            var items = ToRecommendationItemsJson(dedupedItems);
+            var cacheDedupeRemovals = Math.Max(0, row.Items.Count - dedupedItems.Length);
+            var finalDedupeRemovals = Math.Max(0, row.Diagnostics.DedupeRemovals + cacheDedupeRemovals);
+
+            if (items.Count < MinRecommendationRowItems)
+            {
+                AddRecommendationDiagnostic(rowDiagnostics, row, sectionId, recommendationConfigHash, items.Count, "below-minimum-items-after-dedupe");
+                continue;
+            }
+
+            if (sectionItems.ContainsKey(sectionId))
+            {
+                AddRecommendationDiagnostic(rowDiagnostics, row, sectionId, recommendationConfigHash, items.Count, "duplicate-cache-section-id");
+                continue;
+            }
+
+            sectionItems[sectionId] = items;
+            sectionDefinitions.Add(new JsonObject
+            {
+                ["id"] = sectionId,
+                ["title"] = row.Title,
+                ["rowType"] = "generated-recommendation",
+                ["type"] = "recommendation",
+                ["ruleName"] = row.Title,
+                ["mediaType"] = row.MediaType,
+                ["sourceType"] = "recommendation",
+                ["generationMode"] = "persisted",
+                ["rowKicker"] = "RECOMMENDED",
+                ["source"] = row.Id,
+                ["sourceValue"] = row.Id,
+                ["sourceGroupId"] = "recommendation-rows",
+                ["sourceRecommendationId"] = row.Id,
+                ["recommendationConfigHash"] = recommendationConfigHash,
+                ["rowConfigHash"] = row.RowConfigHash ?? recommendationSettings.RowConfigHash,
+                ["configHash"] = recommendationConfigHash,
+                ["cacheHash"] = recommendationConfigHash,
+                ["enabled"] = true,
+                ["candidateCount"] = row.Diagnostics.CandidateCount,
+                ["dedupeRemovals"] = finalDedupeRemovals,
+                ["hydrationRemovals"] = row.Diagnostics.HydrationRemovals,
+                ["itemCount"] = items.Count,
+                ["finalRenderedCount"] = items.Count,
+                ["primaryCandidateCount"] = row.Diagnostics.PrimaryCandidateCount,
+                ["secondaryFallbackCount"] = row.Diagnostics.SecondaryFallbackCount,
+                ["discoveryFallbackCount"] = row.Diagnostics.DiscoveryFallbackCount,
+                ["showWhenEmpty"] = false,
+                ["emptyResultReason"] = null,
+                ["shape"] = GetRowShape(row.MediaType),
+                ["generatedAt"] = row.GeneratedAt ?? recommendationSettings.GeneratedAt
+            });
+            AddRecommendationDiagnostic(rowDiagnostics, row, sectionId, recommendationConfigHash, items.Count, null);
+            appended += 1;
+        }
+
+        return appended;
+    }
+
+    private static void AddRecommendationDiagnostic(
+        JsonArray rowDiagnostics,
+        RecommendationRowDefinition row,
+        string sectionId,
+        string recommendationConfigHash,
+        int itemCount,
+        string? skipReason)
+    {
+        rowDiagnostics.Add(new JsonObject
+        {
+            ["categoryId"] = row.Id,
+            ["rowId"] = sectionId,
+            ["rowTitle"] = row.Title,
+            ["rowType"] = "generated-recommendation",
+            ["sourceType"] = "recommendation",
+            ["sourceValue"] = row.Id,
+            ["sourceGroupId"] = "recommendation-rows",
+            ["sourceRecommendationId"] = row.Id,
+            ["sourceRuleId"] = null,
+            ["recommendationConfigHash"] = recommendationConfigHash,
+            ["configHash"] = recommendationConfigHash,
+            ["cacheHash"] = recommendationConfigHash,
+            ["enabled"] = row.Enabled && row.Accepted && !row.Draft && skipReason is null,
+            ["candidateCount"] = row.Diagnostics.CandidateCount,
+            ["dedupeRemovals"] = itemCount > 0
+                ? Math.Max(0, row.Diagnostics.DedupeRemovals + row.Items.Count - itemCount)
+                : row.Diagnostics.DedupeRemovals,
+            ["hydrationRemovals"] = row.Diagnostics.HydrationRemovals,
+            ["itemCount"] = itemCount,
+            ["finalRenderedCount"] = itemCount,
+            ["primaryCandidateCount"] = row.Diagnostics.PrimaryCandidateCount,
+            ["secondaryFallbackCount"] = row.Diagnostics.SecondaryFallbackCount,
+            ["discoveryFallbackCount"] = row.Diagnostics.DiscoveryFallbackCount,
+            ["generationMode"] = "persisted",
+            ["dropReason"] = skipReason,
+            ["generatedAt"] = row.GeneratedAt
+        });
+    }
+
+    private static IEnumerable<RecommendationItemSnapshot> DeduplicateRecommendationItems(IEnumerable<RecommendationItemSnapshot> items)
+    {
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var albumCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var artistCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var seriesCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            var exactKeys = GetRecommendationExactDedupeKeys(item, includeAlbumAndSeries: false)
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .ToArray();
+
+            if (exactKeys.Any(key => seenKeys.Contains(key)))
+            {
+                continue;
+            }
+
+            var seriesKey = GetRecommendationSeriesDedupeKey(item);
+            if (!string.IsNullOrWhiteSpace(seriesKey)
+                && seriesCounts.TryGetValue(seriesKey, out var seriesCount)
+                && seriesCount >= MaxRecommendationSeriesRepeats)
+            {
+                continue;
+            }
+
+            var albumKey = GetRecommendationAlbumDedupeKey(item);
+            if (!string.IsNullOrWhiteSpace(albumKey)
+                && albumCounts.TryGetValue(albumKey, out var albumCount)
+                && albumCount >= MaxRecommendationAlbumRepeats)
+            {
+                continue;
+            }
+
+            var artistKeys = GetRecommendationArtistKeys(item).ToArray();
+
+            if (artistKeys.Any(key => artistCounts.TryGetValue(key, out var count) && count >= MaxRecommendationArtistRepeats))
+            {
+                continue;
+            }
+
+            foreach (var key in exactKeys)
+            {
+                seenKeys.Add(key);
+            }
+
+            if (!string.IsNullOrWhiteSpace(seriesKey))
+            {
+                seriesCounts[seriesKey] = seriesCounts.TryGetValue(seriesKey, out var count) ? count + 1 : 1;
+            }
+
+            if (!string.IsNullOrWhiteSpace(albumKey))
+            {
+                albumCounts[albumKey] = albumCounts.TryGetValue(albumKey, out var count) ? count + 1 : 1;
+            }
+
+            foreach (var artistKey in artistKeys)
+            {
+                artistCounts[artistKey] = artistCounts.TryGetValue(artistKey, out var count) ? count + 1 : 1;
+            }
+
+            yield return item;
+        }
+    }
+
+    private static IEnumerable<string> GetRecommendationExactDedupeKeys(RecommendationItemSnapshot item, bool includeAlbumAndSeries = true)
+    {
+        var itemKey = NormalizeRecommendationKey(item.Id);
+        if (!string.IsNullOrWhiteSpace(itemKey))
+        {
+            yield return $"item:{itemKey}";
+        }
+
+        if (!includeAlbumAndSeries)
+        {
+            yield break;
+        }
+
+        var seriesKey = GetRecommendationSeriesDedupeKey(item);
+        if (!string.IsNullOrWhiteSpace(seriesKey))
+        {
+            yield return seriesKey;
+        }
+
+        var albumKey = GetRecommendationAlbumDedupeKey(item);
+        if (!string.IsNullOrWhiteSpace(albumKey))
+        {
+            yield return albumKey;
+        }
+    }
+
+    private static string GetRecommendationSeriesDedupeKey(RecommendationItemSnapshot item)
+    {
+        var type = NormalizeRecommendationKey(item.Type);
+        var seriesId = NormalizeRecommendationKey(item.SeriesId);
+        var seriesName = NormalizeRecommendationKey(item.SeriesName);
+
+        if (string.IsNullOrWhiteSpace(seriesId) && string.IsNullOrWhiteSpace(seriesName))
+        {
+            return string.Empty;
+        }
+
+        if (type is "episode" or "season")
+        {
+            return $"series:{seriesId}:{seriesName}";
+        }
+
+        return !string.IsNullOrWhiteSpace(seriesId) && !string.Equals(seriesId, NormalizeRecommendationKey(item.Id), StringComparison.OrdinalIgnoreCase)
+            ? $"series:{seriesId}"
+            : string.Empty;
+    }
+
+    private static string GetRecommendationAlbumDedupeKey(RecommendationItemSnapshot item)
+    {
+        var type = NormalizeRecommendationKey(item.Type);
+
+        if (type is not ("audio" or "music"))
+        {
+            return string.Empty;
+        }
+
+        var albumId = NormalizeRecommendationKey(item.AlbumId);
+        var album = NormalizeRecommendationKey(item.Album);
+
+        return string.IsNullOrWhiteSpace(albumId) && string.IsNullOrWhiteSpace(album)
+            ? string.Empty
+            : $"album:{albumId}:{album}";
+    }
+
+    private static IEnumerable<string> GetRecommendationArtistKeys(RecommendationItemSnapshot item)
+    {
+        return (item.Artists ?? [])
+            .Concat([item.AlbumArtist ?? string.Empty])
+            .Select(NormalizeRecommendationKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRecommendationKey(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : string.Join(' ', value.Trim().ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static JsonArray ToRecommendationItemsJson(IEnumerable<RecommendationItemSnapshot> items)
+    {
+        var jsonItems = new JsonArray();
+
+        foreach (var item in items)
+        {
+            var imageTags = new JsonObject();
+
+            if (!string.IsNullOrWhiteSpace(item.ImageTags.Primary)) imageTags["Primary"] = item.ImageTags.Primary;
+            if (!string.IsNullOrWhiteSpace(item.ImageTags.Thumb)) imageTags["Thumb"] = item.ImageTags.Thumb;
+            if (!string.IsNullOrWhiteSpace(item.ImageTags.Logo)) imageTags["Logo"] = item.ImageTags.Logo;
+
+            var jsonItem = new JsonObject
+            {
+                ["Id"] = item.Id,
+                ["Name"] = item.Name,
+                ["Type"] = item.Type,
+                ["MediaType"] = item.MediaType,
+                ["Overview"] = item.Overview,
+                ["ImageTags"] = imageTags,
+                ["BackdropImageTags"] = ToStringArray(item.BackdropImageTags),
+                ["ParentBackdropImageTags"] = ToStringArray(item.ParentBackdropImageTags),
+                ["Genres"] = ToStringArray(item.Genres),
+                ["Studios"] = ToStringArray(item.Studios),
+                ["Artists"] = ToStringArray(item.Artists),
+                ["AlbumArtist"] = item.AlbumArtist,
+                ["Album"] = item.Album,
+                ["AlbumId"] = item.AlbumId,
+                ["AlbumPrimaryImageItemId"] = item.AlbumPrimaryImageItemId,
+                ["AlbumPrimaryImageTag"] = item.AlbumPrimaryImageTag,
+                ["ParentPrimaryImageItemId"] = item.ParentPrimaryImageItemId,
+                ["ParentPrimaryImageTag"] = item.ParentPrimaryImageTag,
+                ["ParentThumbItemId"] = item.ParentThumbItemId,
+                ["ParentThumbImageTag"] = item.ParentThumbImageTag,
+                ["ParentId"] = item.ParentId,
+                ["SeriesId"] = item.SeriesId,
+                ["SeriesName"] = item.SeriesName,
+                ["SeriesPrimaryImageTag"] = item.SeriesPrimaryImageTag,
+                ["ProductionYear"] = item.ProductionYear,
+                ["CommunityRating"] = item.CommunityRating,
+                ["PrimaryImageAspectRatio"] = item.PrimaryImageAspectRatio,
+                ["RunTimeTicks"] = item.RunTimeTicks,
+                ["DateCreated"] = item.DateCreated,
+                ["PremiereDate"] = item.PremiereDate
+            };
+
+            jsonItems.Add(jsonItem);
+        }
+
+        return jsonItems;
+    }
+
+    private static JsonArray ToSectionDefinitionsJson(IEnumerable<GeneratedRow> rows, string rowConfigHash)
     {
         var definitions = new JsonArray();
 
@@ -1363,14 +2622,34 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             {
                 ["id"] = row.Id,
                 ["title"] = row.Title,
+                ["rowType"] = "configured-rule",
                 ["type"] = row.SectionType,
                 ["ruleId"] = row.Rule.Id,
                 ["ruleName"] = row.Rule.Name,
                 ["mediaType"] = row.Rule.MediaType,
                 ["sourceType"] = row.Rule.SourceType,
                 ["generationMode"] = row.Rule.GenerationMode,
+                ["rowKicker"] = GetRowKicker(row.Rule),
                 ["source"] = row.Source,
                 ["sourceValue"] = row.Rule.SourceValue,
+                ["sourceRuleId"] = row.Rule.Id,
+                ["sourceGroupId"] = string.IsNullOrWhiteSpace(row.Rule.GroupTitle) ? "configured-rules" : Slugify(row.Rule.GroupTitle),
+                ["rowConfigHash"] = rowConfigHash,
+                ["configHash"] = rowConfigHash,
+                ["cacheHash"] = rowConfigHash,
+                ["enabled"] = row.Rule.Enabled,
+                ["candidateCount"] = row.CandidateCount,
+                ["matchedCount"] = row.MatchedCount,
+                ["fallbackUsed"] = row.FallbackUsed,
+                ["plannedRowCount"] = row.PlannedRowCount,
+                ["generatedSourceCount"] = row.GeneratedSourceCount,
+                ["sourceIndex"] = row.SourceIndex,
+                ["dropReason"] = row.DropReason,
+                ["queryUsed"] = row.QueryUsed,
+                ["metadataSourceFieldsUsed"] = ToStringArray(row.MetadataSourceFieldsUsed),
+                ["studioFilter"] = string.Equals(row.Rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase) ? row.Source : null,
+                ["first10ItemNames"] = ToStringArray(row.First10MatchedItemNames),
+                ["first10MatchedItemNames"] = ToStringArray(row.First10MatchedItemNames),
                 ["tier"] = row.Rule.Tier,
                 ["presentation"] = row.Rule.Presentation,
                 ["groupTitle"] = row.Rule.GroupTitle,
@@ -1383,6 +2662,38 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         }
 
         return definitions;
+    }
+
+    private void LogFinalSections(JsonArray sectionDefinitions)
+    {
+        _logger.LogInformation(
+            "PiggieTV Row Rules finalSections: {FinalSections}",
+            JsonSerializer.Serialize(sectionDefinitions
+                .OfType<JsonObject>()
+                .Select(section => new
+                {
+                    Id = section["id"]?.ToString(),
+                    Title = section["title"]?.ToString(),
+                    RuleId = section["ruleId"]?.ToString(),
+                    SourceType = section["sourceType"]?.ToString(),
+                    RowKicker = section["rowKicker"]?.ToString(),
+                    ItemCount = section["itemCount"]?.ToString()
+                }), JsonOptions));
+    }
+
+    private static string GetRowKicker(RowBuilderRule rule)
+    {
+        if (string.Equals(rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase))
+        {
+            return "STUDIOS";
+        }
+
+        if (string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase))
+        {
+            return "GENRE";
+        }
+
+        return "FEATURED";
     }
 
     private static JsonArray ToLegacySectionDefinitionsJson(JsonObject sectionItems)
@@ -1407,7 +2718,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         return definitions;
     }
 
-    private static JsonArray ToDiagnosticsJson(IEnumerable<GeneratedRow> rows)
+    private static JsonArray ToDiagnosticsJson(IEnumerable<GeneratedRow> rows, string rowConfigHash)
     {
         var diagnostics = new JsonArray();
 
@@ -1416,13 +2727,36 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             diagnostics.Add(new JsonObject
             {
                 ["categoryId"] = row.Rule.Id,
+                ["rowId"] = row.Id,
                 ["ruleId"] = row.Rule.Id,
                 ["ruleName"] = row.Rule.Name,
+                ["rowTitle"] = row.Title,
+                ["rowType"] = "configured-rule",
                 ["sourceType"] = row.Rule.SourceType,
+                ["ruleType"] = row.Rule.SourceType,
+                ["sourceRuleId"] = row.Rule.Id,
+                ["sourceGroupId"] = string.IsNullOrWhiteSpace(row.Rule.GroupTitle) ? "configured-rules" : Slugify(row.Rule.GroupTitle),
+                ["rowConfigHash"] = rowConfigHash,
+                ["configHash"] = rowConfigHash,
+                ["cacheHash"] = rowConfigHash,
+                ["enabled"] = row.Rule.Enabled,
                 ["mediaType"] = row.Rule.MediaType,
                 ["generationMode"] = row.Rule.GenerationMode,
                 ["searchTerm"] = row.Source,
                 ["sourceValue"] = row.Rule.SourceValue,
+                ["studioFilter"] = string.Equals(row.Rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase) ? row.Source : null,
+                ["queryUsed"] = row.QueryUsed,
+                ["candidateCount"] = row.CandidateCount,
+                ["matchedCount"] = row.MatchedCount,
+                ["fallbackUsed"] = row.FallbackUsed,
+                ["plannedRowCount"] = row.PlannedRowCount,
+                ["generatedSourceCount"] = row.GeneratedSourceCount,
+                ["droppedSourceCount"] = Math.Max(0, row.PlannedRowCount - row.GeneratedSourceCount),
+                ["sourceIndex"] = row.SourceIndex,
+                ["dropReason"] = row.DropReason,
+                ["metadataSourceFieldsUsed"] = ToStringArray(row.MetadataSourceFieldsUsed),
+                ["first10ItemNames"] = ToStringArray(row.First10MatchedItemNames),
+                ["first10MatchedItemNames"] = ToStringArray(row.First10MatchedItemNames),
                 ["providerUsed"] = row.ProviderUsed,
                 ["providerError"] = row.ProviderError,
                 ["itemCount"] = row.Items.Count,
@@ -1490,10 +2824,25 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             RuleId = row.Rule.Id,
             RuleName = row.Rule.Name,
             SourceType = row.Rule.SourceType,
+            RuleType = row.Rule.SourceType,
             MediaType = row.Rule.MediaType,
             GenerationMode = row.Rule.GenerationMode,
+            RowId = row.Id,
+            RowTitle = row.Title,
             SearchTerm = row.Source,
             SourceValue = row.Rule.SourceValue,
+            StudioFilter = string.Equals(row.Rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase) ? row.Source : null,
+            QueryUsed = row.QueryUsed,
+            CandidateCount = row.CandidateCount,
+            MatchedCount = row.MatchedCount,
+            FallbackUsed = row.FallbackUsed,
+            PlannedRowCount = row.PlannedRowCount,
+            GeneratedSourceCount = row.GeneratedSourceCount,
+            DroppedSourceCount = Math.Max(0, row.PlannedRowCount - row.GeneratedSourceCount),
+            DropReason = row.DropReason,
+            MetadataSourceFieldsUsed = row.MetadataSourceFieldsUsed.ToList(),
+            First10ItemNames = row.First10MatchedItemNames.ToList(),
+            First10MatchedItemNames = row.First10MatchedItemNames.ToList(),
             ProviderUsed = row.ProviderUsed,
             ProviderError = row.ProviderError,
             ItemCount = row.Items.Count,
@@ -1531,7 +2880,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 result.Warnings.Add($"Rule '{rule.Name}' depends on a configured Jellyseerr/Jellyseer integration.");
             }
 
-            if (rule.RowCount > 30 || rule.SubgenreRowCount > 20 || rule.ItemLimit > 60)
+            if (rule.RowCount > 30 || rule.ItemLimit > 60)
             {
                 result.Warnings.Add($"Rule '{rule.Name}' may be heavy. Preview before refreshing the cache.");
             }
@@ -1544,7 +2893,8 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
     private static bool RequiresSourceValue(RowBuilderRule rule)
     {
-        return rule.SourceType is "genre" or "studio" or "library" or "collection";
+        return IsStructuredMetadataSource(rule.SourceType)
+            || rule.SourceType is "library" or "collection";
     }
 
     private static IReadOnlyList<string> GetSubgenres(string genre)
@@ -1555,8 +2905,8 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         {
             return [
                 "Supernatural Horror",
-                "Slasher",
-                "Creature Feature",
+                "Slasher Horror",
+                "Creature Horror",
                 "Psychological Horror",
                 "Horror Comedy",
                 "Vampire",
@@ -1569,6 +2919,11 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             || normalizedGenre.Contains("sci fi", StringComparison.Ordinal))
         {
             return ["Space Opera", "Cyberpunk", "Dystopian", "Time Travel", "Alien", "Robot", "Post Apocalyptic"];
+        }
+
+        if (normalizedGenre.Contains("action", StringComparison.Ordinal))
+        {
+            return ["Action Adventure", "Martial Arts Action", "Superhero Action", "Action Thriller", "Spy Action", "Crime Action"];
         }
 
         if (normalizedGenre.Contains("fantasy", StringComparison.Ordinal))
@@ -2038,7 +3393,8 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             ["ImageTags"] = GetImageTags(item),
             ["BackdropImageTags"] = GetBackdropImageTags(item),
             ["Studios"] = ToStringArray(item.Studios),
-            ["Genres"] = ToStringArray(item.Genres)
+            ["Genres"] = ToStringArray(item.Genres),
+            ["Tags"] = ToStringArray(item.Tags)
         };
 
         AddValue(json, "CommunityRating", item.CommunityRating);

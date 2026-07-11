@@ -25,6 +25,10 @@ public sealed class PtvPluginSettingsDto
     [JsonPropertyName("rows")]
     public RowBuilderSettings Rows { get; set; } = RowBuilderSettings.CreateDefault();
 
+    /// <summary>Gets or sets persisted generated recommendation rows.</summary>
+    [JsonPropertyName("recommendations")]
+    public RecommendationRowSettings Recommendations { get; set; } = RecommendationRowSettings.CreateDefault();
+
     /// <summary>Gets or sets featured cache settings.</summary>
     [JsonPropertyName("cacheSettings")]
     public CacheSettings CacheSettings { get; set; } = new();
@@ -40,6 +44,10 @@ public sealed class PtvPluginSettingsDto
     /// <summary>Gets or sets TMDb settings.</summary>
     [JsonPropertyName("tmdbSettings")]
     public PtvPublicTmdbSettings TmdbSettings { get; set; } = new();
+
+    /// <summary>Gets or sets music metadata lookup settings.</summary>
+    [JsonPropertyName("musicMetadataSettings")]
+    public PtvPublicMusicMetadataSettings MusicMetadataSettings { get; set; } = new();
 
     /// <summary>Gets or sets Jellyseerr settings.</summary>
     [JsonPropertyName("seerrSettings")]
@@ -79,7 +87,9 @@ public sealed class PtvPluginSettingsDto
             PerformanceSettings = configuration.PerformanceSettings,
             RowSettings = configuration.RowSettings,
             Rows = configuration.Rows,
+            Recommendations = configuration.Recommendations,
             TmdbSettings = PtvPublicTmdbSettings.FromConfiguration(configuration),
+            MusicMetadataSettings = PtvPublicMusicMetadataSettings.FromConfiguration(configuration),
             SeerrSettings = PtvPublicSeerrSettings.FromConfiguration(configuration),
             ArrSettings = PtvPublicArrSettings.FromConfiguration(configuration),
             DownloadSettings = PtvPublicDownloadSettings.FromConfiguration(configuration),
@@ -110,6 +120,10 @@ public sealed class PtvPluginSettingsPatchDto
     [JsonPropertyName("rows")]
     public RowBuilderSettings? Rows { get; set; }
 
+    /// <summary>Gets or sets persisted recommendation row updates.</summary>
+    [JsonPropertyName("recommendations")]
+    public RecommendationRowSettings? Recommendations { get; set; }
+
     /// <summary>Gets or sets featured cache setting updates.</summary>
     [JsonPropertyName("cacheSettings")]
     public PtvCacheSettingsPatch? CacheSettings { get; set; }
@@ -125,6 +139,10 @@ public sealed class PtvPluginSettingsPatchDto
     /// <summary>Gets or sets TMDb setting updates.</summary>
     [JsonPropertyName("tmdbSettings")]
     public PtvTmdbSettingsPatch? TmdbSettings { get; set; }
+
+    /// <summary>Gets or sets music metadata lookup setting updates.</summary>
+    [JsonPropertyName("musicMetadataSettings")]
+    public PtvMusicMetadataSettingsPatch? MusicMetadataSettings { get; set; }
 
     /// <summary>Gets or sets Jellyseerr setting updates.</summary>
     [JsonPropertyName("seerrSettings")]
@@ -167,6 +185,10 @@ public sealed class PtvFeatureSettingsPatch
     /// <summary>Gets or sets whether TV low-power mode is enabled.</summary>
     [JsonPropertyName("tvLowPowerModeEnabled")]
     public bool? TvLowPowerModeEnabled { get; set; }
+
+    /// <summary>Gets or sets the PiggieTV playback profile mode.</summary>
+    [JsonPropertyName("playbackMode")]
+    public string? PlaybackMode { get; set; }
 
     /// <summary>Gets or sets whether debug mode is enabled.</summary>
     [JsonPropertyName("debugModeEnabled")]
@@ -293,6 +315,28 @@ public sealed class PtvTmdbSettingsPatch
     /// <summary>Gets or sets whether TMDb influences row accuracy.</summary>
     [JsonPropertyName("useTmdbForRowAccuracy")]
     public bool? UseTmdbForRowAccuracy { get; set; }
+}
+
+/// <summary>
+/// Partial music metadata lookup settings patch. Discogs token is write-only.
+/// </summary>
+public sealed class PtvMusicMetadataSettingsPatch
+{
+    /// <summary>Gets or sets whether MusicBrainz lookup is enabled.</summary>
+    [JsonPropertyName("musicBrainzEnabled")]
+    public bool? MusicBrainzEnabled { get; set; }
+
+    /// <summary>Gets or sets whether Discogs lookup is enabled.</summary>
+    [JsonPropertyName("discogsEnabled")]
+    public bool? DiscogsEnabled { get; set; }
+
+    /// <summary>Gets or sets a write-only Discogs token replacement.</summary>
+    [JsonPropertyName("discogsToken")]
+    public string? DiscogsToken { get; set; }
+
+    /// <summary>Gets or sets the maximum candidate count per lookup.</summary>
+    [JsonPropertyName("maxResults")]
+    public int? MaxResults { get; set; }
 }
 
 /// <summary>
@@ -538,6 +582,51 @@ public sealed class PtvPublicTmdbSettings
             TmdbLanguage = tmdbSettings.TmdbLanguage,
             TmdbRegion = tmdbSettings.TmdbRegion,
             UseTmdbForRowAccuracy = tmdbSettings.UseTmdbForRowAccuracy
+        };
+    }
+}
+
+/// <summary>
+/// Public music metadata lookup settings DTO that never returns the stored Discogs token.
+/// </summary>
+public sealed class PtvPublicMusicMetadataSettings
+{
+    /// <summary>Gets or sets a value indicating whether MusicBrainz lookup is enabled.</summary>
+    [JsonPropertyName("musicBrainzEnabled")]
+    public bool MusicBrainzEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether Discogs lookup is enabled.</summary>
+    [JsonPropertyName("discogsEnabled")]
+    public bool DiscogsEnabled { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether a Discogs token is configured.</summary>
+    [JsonPropertyName("discogsTokenConfigured")]
+    public bool DiscogsTokenConfigured { get; set; }
+
+    /// <summary>Gets or sets a write-only Discogs token replacement.</summary>
+    [JsonPropertyName("discogsToken")]
+    public string? DiscogsToken { get; set; }
+
+    /// <summary>Gets or sets the maximum candidate count per lookup.</summary>
+    [JsonPropertyName("maxResults")]
+    public int MaxResults { get; set; } = 6;
+
+    /// <summary>
+    /// Creates public music metadata lookup settings.
+    /// </summary>
+    /// <param name="configuration">Plugin configuration.</param>
+    /// <returns>Public music metadata settings.</returns>
+    public static PtvPublicMusicMetadataSettings FromConfiguration(PluginConfiguration configuration)
+    {
+        var settings = configuration.MusicMetadataSettings;
+
+        return new PtvPublicMusicMetadataSettings
+        {
+            DiscogsEnabled = settings.DiscogsEnabled,
+            DiscogsToken = null,
+            DiscogsTokenConfigured = !string.IsNullOrWhiteSpace(settings.DiscogsToken),
+            MaxResults = settings.MaxResults,
+            MusicBrainzEnabled = settings.MusicBrainzEnabled
         };
     }
 }

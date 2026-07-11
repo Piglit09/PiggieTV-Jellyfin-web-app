@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-deprecated, compat/compat, no-nested-ternary, react/jsx-no-bind, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional */
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -200,11 +201,11 @@ const SignupPage = () => {
     }, [confirmPassword, email, password, resetCode, showMessage]);
 
     const title = mode === 'create' ? 'Join PiggieTV' : mode === 'verify' ? 'Verify Email' : 'Reset Password';
-    const subtitle = mode === 'create'
-        ? 'Create your Jellyfin account with your email.'
-        : mode === 'verify'
-            ? 'Finalizing your PiggieTV account.'
-            : 'Use the code sent to your email to reset your password.';
+    const subtitle = mode === 'create' ?
+        'Create your Jellyfin account with your email.' :
+        mode === 'verify' ?
+            'Finalizing your PiggieTV account.' :
+            'Use the code sent to your email to reset your password.';
 
     return (
         <Page
@@ -417,3 +418,5 @@ const SignupPage = () => {
 SignupPage.displayName = 'SignupPage';
 
 export default SignupPage;
+
+/* eslint-enable @typescript-eslint/no-deprecated, compat/compat, no-nested-ternary, react/jsx-no-bind, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional */

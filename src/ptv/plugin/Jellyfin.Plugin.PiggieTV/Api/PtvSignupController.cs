@@ -104,7 +104,7 @@ public sealed class PtvSignupController : BaseJellyfinApiController
         }
 
         return Ok(await _signupService
-            .RequestPasswordResetAsync(request, GetRemoteAddress(), cancellationToken)
+            .RequestPasswordResetAsync(request, GetRemoteAddress(), GetPasswordResetPageUrl(), cancellationToken)
             .ConfigureAwait(false));
     }
 
@@ -282,6 +282,18 @@ public sealed class PtvSignupController : BaseJellyfinApiController
     private string GetRemoteAddress()
     {
         return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    }
+
+    private string GetPasswordResetPageUrl()
+    {
+        if (!Request.Host.HasValue)
+        {
+            return "/web/#/signup?mode=reset";
+        }
+
+        var pathBase = Request.PathBase.HasValue ? Request.PathBase.Value : string.Empty;
+
+        return $"{Request.Scheme}://{Request.Host}{pathBase}/web/#/signup?mode=reset";
     }
 
     private async Task<bool> CanAdminAsync()

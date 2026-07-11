@@ -139,7 +139,7 @@ function showNewItemNotification(item, apiClient) {
 }
 
 function onLibraryChanged(data, apiClient) {
-    const newItems = data.ItemsAdded;
+    const newItems = Array.isArray(data?.ItemsAdded) ? data.ItemsAdded.slice() : [];
 
     if (!newItems.length) {
         return;
@@ -167,6 +167,8 @@ function onLibraryChanged(data, apiClient) {
         for (const item of items) {
             showNewItemNotification(item, apiClient);
         }
+    }).catch(function (error) {
+        console.warn('[notifications] Failed to load library change items for notification', error);
     });
 }
 
@@ -272,4 +274,3 @@ Events.on(serverNotifications, 'RestartRequired', function (e, apiClient) {
 
     showNotification(notification, 0, apiClient);
 });
-

@@ -2,6 +2,7 @@ export {
     getPtvNavigationSections,
     PTV_NAVIGATION_SECTIONS
 } from './navigation';
+export { default as PTVShell } from './PTVShell';
 export {
     getPtvRouteClassNames,
     getPtvRouteOwnership,
@@ -27,6 +28,11 @@ export type {
     PtvNavigationPermission,
     PtvNavigationSection
 } from './navigation';
+export type {
+    PtvShellNavLink,
+    PtvShellSection,
+    PTVShellProps
+} from './PTVShell';
 export type {
     PtvNativeRouteRegistration,
     PtvRouteControllerState,

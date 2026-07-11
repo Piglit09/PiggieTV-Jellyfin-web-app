@@ -8,11 +8,13 @@ import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Grid from '@mui/material/Grid2';
+import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import Page from 'components/Page';
 import { getUserViewsQuery } from 'hooks/useUserViews';
@@ -24,9 +26,11 @@ import { getPtvClientProfile, getPtvPerformanceProfile } from '../../core/client
 import { PTV_CACHE, PTV_PLUGIN_API } from '../../core/config';
 import {
     getPtvFeatureSettings,
+    isPtvPlaybackMode,
     PTV_FEATURE_SETTINGS_CHANGE_EVENT,
     setPtvFeatureSetting,
-    type PtvFeatureSettings
+    type PtvFeatureSettings,
+    type PtvPlaybackMode
 } from '../../core/featureSettings';
 import { getPtvDebugReport, isPtvDebugEnabled, setPtvDebug } from '../../core/observability';
 import {
@@ -52,6 +56,7 @@ import {
     PTV_HOME_ROWS
 } from '../../pages/home/ptvRows';
 import { clearPtvIntegrationSettingsCache } from '../integrations/integrationsConfig';
+import { normalizePtvRecommendationRowSettings } from '../recommendations/recommendationSettings';
 
 type PtvPluginFeaturedStatus = {
     cacheVersion?: number;
@@ -69,10 +74,16 @@ type PtvTmdbMetadataStatus = {
     cacheMisses?: number;
     cacheSize?: number;
     configured?: boolean;
+    credentialLength?: number;
+    credentialStatus?: string | null;
+    credentialType?: string | null;
     enabled?: boolean;
     lastDurationMs?: number | null;
     lastError?: string | null;
+    lastErrorBody?: string | null;
     lastErrorCode?: string | null;
+    lastStatusCode?: number | null;
+    lastValidatedAt?: string | null;
 };
 
 type PtvPluginStatus = {
@@ -131,6 +142,7 @@ type PtvFeatureSettingsDto = {
     dynamicBackdropsEnabled: boolean;
     heroEnabled: boolean;
     homeRowsEnabled: boolean;
+    playbackMode: PtvPlaybackMode;
     tvLowPowerModeEnabled: boolean;
 };
 
@@ -171,6 +183,14 @@ type PtvTmdbSettingsDto = {
     tmdbLanguage: string;
     tmdbRegion: string;
     useTmdbForRowAccuracy: boolean;
+};
+
+type PtvMusicMetadataSettingsDto = {
+    discogsEnabled: boolean;
+    discogsToken?: string | null;
+    discogsTokenConfigured: boolean;
+    maxResults: number;
+    musicBrainzEnabled: boolean;
 };
 
 type PtvSeerrSettingsDto = {
@@ -251,6 +271,7 @@ type PtvPluginSettings = {
     downloadSettings: PtvDownloadSettingsDto;
     featureSettings: PtvFeatureSettingsDto;
     heroSettings: PtvHeroSettingsDto;
+    musicMetadataSettings: PtvMusicMetadataSettingsDto;
     performanceSettings: PtvPerformanceSettingsDto;
     randomSettings: PtvRandomSettingsDto;
     rowSettings: PtvRowSettingsDto;
@@ -266,6 +287,7 @@ type PtvPluginSettingsPatch = {
     downloadSettings?: Partial<PtvDownloadSettingsDto>;
     featureSettings?: Partial<PtvFeatureSettingsDto>;
     heroSettings?: Partial<PtvHeroSettingsDto>;
+    musicMetadataSettings?: Partial<PtvMusicMetadataSettingsDto>;
     performanceSettings?: Partial<PtvPerformanceSettingsDto>;
     randomSettings?: Partial<PtvRandomSettingsDto>;
     rowSettings?: Partial<PtvRowSettingsDto>;
@@ -280,6 +302,7 @@ type PtvSettingsSection =
     | 'downloadSettings'
     | 'featureSettings'
     | 'heroSettings'
+    | 'musicMetadataSettings'
     | 'performanceSettings'
     | 'randomSettings'
     | 'refreshInterval'
@@ -287,6 +310,11 @@ type PtvSettingsSection =
     | 'seerrSettings'
     | 'tagSettings'
     | 'tmdbSettings';
+
+const PTV_ROW_BUILDER_HASH = '#/dashboard/piggietv/rows';
+const PTV_RECOMMENDATIONS_HASH = '#/dashboard/piggietv/recommendations';
+const PTV_ROW_BUILDER_PATH = '/dashboard/piggietv/rows';
+const PTV_RECOMMENDATIONS_PATH = '/dashboard/piggietv/recommendations';
 
 type ApplyPluginSettingsStateOptions = {
     forceDraftHydration?: boolean;
@@ -317,6 +345,14 @@ type PluginState = {
     error: string;
     loading: boolean;
     status: PtvPluginStatus | null;
+};
+
+type DashboardDebugState = 'active' | 'degraded' | 'disabled' | 'disconnected' | 'initializing';
+
+type DashboardDebugSourceDetail = {
+    note?: string;
+    source: string;
+    timestamp: string;
 };
 
 type PtvGlobal = Record<string, unknown> & {
@@ -359,12 +395,13 @@ const PTV_SETTINGS_LIMITS = {
     heroRotationSeconds: [5, 120],
     imagePreloadLimit: [1, 10],
     maxCachePayloadBytes: [1048576, 52428800],
+    musicMetadataResults: [1, 12],
     rowMaxItems: [5, 100],
     rowRefreshHours: [1, 168]
 } as const;
 const ARR_SERVICE_NAMES = ['sonarr', 'radarr', 'lidarr', 'prowlarr'] as const;
 const ARR_CALENDAR_SERVICE_NAMES = ['sonarr', 'radarr', 'lidarr'] as const;
-type PtvIntegrationTestKey = 'seerr' | typeof ARR_SERVICE_NAMES[number];
+type PtvIntegrationTestKey = 'discogs' | 'seerr' | 'tmdb' | typeof ARR_SERVICE_NAMES[number];
 const DEFAULT_PLUGIN_SETTINGS: PtvPluginSettings = {
     arrSettings: {
         lidarr: {
@@ -414,6 +451,7 @@ const DEFAULT_PLUGIN_SETTINGS: PtvPluginSettings = {
         dynamicBackdropsEnabled: true,
         heroEnabled: true,
         homeRowsEnabled: true,
+        playbackMode: 'auto',
         tvLowPowerModeEnabled: true
     },
     heroSettings: {
@@ -422,6 +460,13 @@ const DEFAULT_PLUGIN_SETTINGS: PtvPluginSettings = {
         heroLogoMaxWidth: 800,
         heroMaxItems: 15,
         heroRotationSeconds: 12
+    },
+    musicMetadataSettings: {
+        discogsEnabled: false,
+        discogsToken: null,
+        discogsTokenConfigured: false,
+        maxResults: 6,
+        musicBrainzEnabled: true
     },
     performanceSettings: {
         enableAnimatedRows: true,
@@ -524,6 +569,10 @@ function clampNumberWithFallback(value: number, fallback: number, min: number, m
     return clampNumber(value, min, max);
 }
 
+function normalizePtvPlaybackMode(value: unknown): PtvPlaybackMode {
+    return isPtvPlaybackMode(value) ? value : 'auto';
+}
+
 function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPluginSettings {
     const incomingCacheSettings = settings.cacheSettings || settings.cache || {};
     const nextSettings = clonePluginSettings({
@@ -561,6 +610,10 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
             ...DEFAULT_PLUGIN_SETTINGS.heroSettings,
             ...(settings.heroSettings || {})
         },
+        musicMetadataSettings: {
+            ...DEFAULT_PLUGIN_SETTINGS.musicMetadataSettings,
+            ...(settings.musicMetadataSettings || {})
+        },
         performanceSettings: {
             ...DEFAULT_PLUGIN_SETTINGS.performanceSettings,
             ...(settings.performanceSettings || {})
@@ -591,6 +644,7 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
         nextSettings.cacheSettings.refreshIntervalHours = settings.rowSettings.rowRefreshHours;
     }
 
+    nextSettings.featureSettings.playbackMode = normalizePtvPlaybackMode(nextSettings.featureSettings.playbackMode);
     nextSettings.heroSettings.heroRotationSeconds = clampNumber(
         nextSettings.heroSettings.heroRotationSeconds,
         ...PTV_SETTINGS_LIMITS.heroRotationSeconds
@@ -619,6 +673,11 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
         nextSettings.performanceSettings.maxCachePayloadBytes,
         ...PTV_SETTINGS_LIMITS.maxCachePayloadBytes
     );
+    nextSettings.musicMetadataSettings.maxResults = clampNumber(
+        nextSettings.musicMetadataSettings.maxResults,
+        ...PTV_SETTINGS_LIMITS.musicMetadataResults
+    );
+    nextSettings.musicMetadataSettings.discogsToken = null;
     nextSettings.tmdbSettings.tmdbLanguage = nextSettings.tmdbSettings.tmdbLanguage.trim() || 'en-US';
     nextSettings.tmdbSettings.tmdbRegion = nextSettings.tmdbSettings.tmdbRegion.trim() || 'US';
     nextSettings.tmdbSettings.tmdbApiToken = nextSettings.tmdbSettings.tmdbApiToken?.trim() || null;
@@ -639,11 +698,11 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
 }
 
 function applyPluginFeatureSettings(settings: PtvFeatureSettingsDto) {
-    setPtvDebug(settings.debugModeEnabled);
     setPtvFeatureSetting('heroEnabled', settings.heroEnabled);
     setPtvFeatureSetting('homeRowsEnabled', settings.homeRowsEnabled);
     setPtvFeatureSetting('dynamicBackdropsEnabled', settings.dynamicBackdropsEnabled);
     setPtvFeatureSetting('tvLowPowerModeEnabled', settings.tvLowPowerModeEnabled);
+    setPtvFeatureSetting('playbackMode', settings.playbackMode);
 }
 
 function getIntegrationTestResultMessage(serviceName: string, result: Record<string, unknown>) {
@@ -668,6 +727,12 @@ function getApiTokenBadgeLabel(service: { apiKeyConfigured: boolean }, apiKeyInp
     if (apiKeyInput.trim()) return 'Unsaved token';
 
     return service.apiKeyConfigured ? 'Token configured' : 'No token';
+}
+
+function getDiscogsCredentialLabel(settings: PtvMusicMetadataSettingsDto, discogsTokenInput: string) {
+    if (discogsTokenInput.trim()) return 'Unsaved Discogs token';
+
+    return settings.discogsTokenConfigured ? 'Discogs token configured' : 'Discogs token missing';
 }
 
 function createSeerrSettingsPayload(
@@ -743,6 +808,28 @@ function createArrServiceSettingsPayload(
     }
 
     return serviceSettings;
+}
+
+function createMusicMetadataSettingsPayload(
+    settings: PtvMusicMetadataSettingsDto,
+    discogsTokenInput: string
+): Partial<PtvMusicMetadataSettingsDto> {
+    const nextSettings = normalizePluginSettings({
+        musicMetadataSettings: settings
+    });
+    const musicMetadataSettings: Partial<PtvMusicMetadataSettingsDto> = {
+        discogsEnabled: nextSettings.musicMetadataSettings.discogsEnabled,
+        maxResults: nextSettings.musicMetadataSettings.maxResults,
+        musicBrainzEnabled: nextSettings.musicMetadataSettings.musicBrainzEnabled
+    };
+    const discogsToken = discogsTokenInput.trim();
+
+    if (discogsToken) {
+        musicMetadataSettings.discogsToken = discogsToken;
+        musicMetadataSettings.discogsEnabled = true;
+    }
+
+    return musicMetadataSettings;
 }
 
 function redactSettingsForDebug<T>(value: T): T {
@@ -865,23 +952,63 @@ function getTmdbMetadataStatus(status: PtvPluginStatus | null | undefined): PtvT
 }
 
 function isTmdbUnauthorized(status: PtvTmdbMetadataStatus | null | undefined) {
-    const errorText = `${status?.lastErrorCode || ''} ${status?.lastError || ''}`.toLowerCase();
+    const errorText = [
+        status?.credentialStatus,
+        status?.lastErrorCode,
+        status?.lastError,
+        status?.lastStatusCode
+    ].join(' ').toLowerCase();
 
     return errorText.includes('unauthorized') || errorText.includes('401') || errorText.includes('403');
+}
+
+function getTmdbCredentialLabel(status: PtvTmdbMetadataStatus | null | undefined, settings: PtvTmdbSettingsDto) {
+    const configured = status?.configured ?? settings.tmdbApiTokenConfigured;
+    const credentialStatus = status?.credentialStatus;
+
+    if (credentialStatus === 'valid') return 'Credential valid';
+    if (credentialStatus === 'unauthorized') return 'Unauthorized';
+    if (credentialStatus === 'missing') return 'No token';
+    if (credentialStatus === 'disabled') return 'Disabled';
+    if (credentialStatus === 'timeout') return 'Validation timed out';
+    if (credentialStatus === 'invalid' || credentialStatus === 'error') return 'Credential failed';
+
+    return configured ? 'Token configured' : 'No token';
+}
+
+function sanitizeTmdbCredentialInput(value: string) {
+    const withoutBearerPrefix = value.trim().replace(/^Bearer\s+/i, '');
+
+    return withoutBearerPrefix.replace(/\s+/g, '');
+}
+
+function getTmdbCredentialExpectation(status: PtvTmdbMetadataStatus | null | undefined) {
+    if (status?.credentialType === 'v3-api-key') {
+        return 'TMDb is testing a legacy v3 API key using api_key= mode.';
+    }
+
+    if (status?.credentialType === 'v4-bearer') {
+        return 'TMDb is testing a v4 Read Access Token using Authorization: Bearer.';
+    }
+
+    return 'TMDb expects a v4 Read Access Token. Legacy v3 API keys are only used when the saved value looks like a 32-character hex key.';
 }
 
 function getTmdbMetadataWarning(status: PtvTmdbMetadataStatus | null | undefined) {
     if (!status?.enabled) return '';
 
     if (!status.configured) {
-        return 'TMDb metadata is enabled, but no read access token or API key is configured.';
+        return 'TMDb metadata is enabled, but no v4 Read Access Token or legacy v3 API key is configured.';
+    }
+
+    if (isTmdbUnauthorized(status)) {
+        const statusCode = status.lastStatusCode ? ` HTTP ${status.lastStatusCode}.` : '';
+        const expectation = getTmdbCredentialExpectation(status);
+
+        return `TMDb metadata failed: unauthorized.${statusCode} ${expectation}`;
     }
 
     if (!status.lastError) return '';
-
-    if (isTmdbUnauthorized(status)) {
-        return 'TMDb metadata failed: unauthorized. Check the TMDb read access token or API key.';
-    }
 
     return `TMDb metadata failed: ${status.lastError}`;
 }
@@ -953,6 +1080,19 @@ function formatDate(timestamp?: number | null) {
     if (!timestamp) return 'n/a';
 
     return new Date(timestamp).toLocaleString(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+    });
+}
+
+function formatDateTimeString(timestamp?: string | null) {
+    if (!timestamp) return 'n/a';
+
+    const date = new Date(timestamp);
+
+    if (Number.isNaN(date.getTime())) return 'n/a';
+
+    return date.toLocaleString(undefined, {
         dateStyle: 'medium',
         timeStyle: 'short'
     });
@@ -1038,12 +1178,192 @@ function getNestedRecord(source: unknown, key: string) {
     return isRecord(value) ? value : null;
 }
 
+function getNestedBoolean(source: unknown, key: string) {
+    if (!isRecord(source)) return null;
+
+    const value = source[key];
+
+    return typeof value === 'boolean' ? value : null;
+}
+
 function getNumberValue(source: unknown, key: string) {
     if (!isRecord(source)) return null;
 
     const value = source[key];
 
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function getArrayValue(source: unknown, key: string) {
+    if (!isRecord(source)) return [];
+
+    const value = source[key];
+
+    return Array.isArray(value) ? value : [];
+}
+
+function getPersistedRecommendationRowCount(settings: unknown) {
+    return normalizePtvRecommendationRowSettings(settings)?.rows?.length || 0;
+}
+
+function getDebugSourceDetail(source: string, note?: string): DashboardDebugSourceDetail {
+    return {
+        note,
+        source,
+        timestamp: new Date().toISOString()
+    };
+}
+
+function formatDebugReportTimestamp(report: unknown) {
+    const timestamp = getNumberValue(report, 'timestamp');
+
+    if (!timestamp) return 'n/a';
+    if (timestamp > 1000000000000) return formatDate(timestamp);
+
+    return `${Math.round(timestamp)} ms after runtime start`;
+}
+
+function hasUsableDashboardCacheStatus(status: ReturnType<typeof getFeaturedContentCacheStatus>) {
+    return Boolean(
+        status
+        && (
+            status.storage !== 'none'
+            || status.heroCount
+            || status.itemCount
+            || status.sectionCount
+            || status.ttlMs
+        )
+    );
+}
+
+function getDashboardDebugState(
+    report: unknown,
+    pluginState: PluginState,
+    cacheStatus: ReturnType<typeof getFeaturedContentCacheStatus>,
+    debugEnabled: boolean
+): DashboardDebugState {
+    const reportActive = getNestedBoolean(report, 'active');
+
+    if (pluginState.loading) return 'initializing';
+    if (!pluginState.connected) return 'disconnected';
+    if (pluginState.connectionState === 'degraded' || pluginState.error || cacheStatus.writeError || cacheStatus.lastRefreshError) return 'degraded';
+    if (reportActive === false && pluginState.connected) return 'initializing';
+    if (!debugEnabled && reportActive !== true) return hasUsableDashboardCacheStatus(cacheStatus) ? 'initializing' : 'disabled';
+
+    return 'active';
+}
+
+function getDashboardDebugStateMessage(state: DashboardDebugState, report: unknown, pluginState: PluginState) {
+    if (state === 'initializing' && getNestedBoolean(report, 'active') === false && pluginState.connected) {
+        return 'PTV runtime not initialized yet.';
+    }
+
+    return {
+        active: 'PTV diagnostics are active.',
+        degraded: 'PTV is connected, but one or more live status sources reported a warning.',
+        disabled: 'PTV debug collection is disabled.',
+        disconnected: 'PTV plugin is disconnected.',
+        initializing: 'PTV diagnostics are initializing from live plugin and cache state.'
+    }[state];
+}
+
+function getDashboardDebugStateColor(state: DashboardDebugState): 'default' | 'error' | 'info' | 'success' | 'warning' {
+    return {
+        active: 'success',
+        degraded: 'warning',
+        disabled: 'default',
+        disconnected: 'error',
+        initializing: 'info'
+    }[state] as 'default' | 'error' | 'info' | 'success' | 'warning';
+}
+
+function getDashboardDebugAlertSeverity(state: DashboardDebugState): 'error' | 'info' | 'success' | 'warning' {
+    const color = getDashboardDebugStateColor(state);
+
+    return color === 'default' ? 'info' : color;
+}
+
+function getDashboardDebugSectionSources(
+    report: unknown,
+    pluginState: PluginState,
+    cacheStatus: ReturnType<typeof getFeaturedContentCacheStatus>
+) {
+    const reportActive = getNestedBoolean(report, 'active');
+
+    return {
+        cache: getDebugSourceDetail('live cacheStatus', cacheStatus.readInProgress ? 'read in progress' : cacheStatus.storage),
+        clientProfile: getDebugSourceDetail('live clientProfile'),
+        debugReport: getDebugSourceDetail(
+            report ? 'debug report snapshot' : 'not captured',
+            report ? `active=${String(reportActive)}, timestamp=${formatDebugReportTimestamp(report)}` : 'waiting for capture'
+        ),
+        pluginApi: getDebugSourceDetail('live pluginApi diagnostics'),
+        pluginState: getDebugSourceDetail('live pluginState', pluginState.connectionState),
+        recommendations: getDebugSourceDetail('plugin settings persistence'),
+        renderProfile: getDebugSourceDetail('live performance profile'),
+        shell: getDebugSourceDetail(getNestedRecord(report, 'shell') ? 'debug report shell provider' : 'not initialized')
+    };
+}
+
+function mergeDashboardDebugReport(options: {
+    cacheStatus: ReturnType<typeof getFeaturedContentCacheStatus>;
+    clientProfile: ReturnType<typeof getPtvClientProfile>;
+    debugEnabled: boolean;
+    performanceProfile: ReturnType<typeof getPtvPerformanceProfile>;
+    persistedRecommendationRows: number;
+    pluginApi: ReturnType<typeof getPtvPluginApiDiagnostics>;
+    pluginState: PluginState;
+    report: unknown;
+}) {
+    const {
+        cacheStatus,
+        clientProfile,
+        debugEnabled,
+        performanceProfile,
+        persistedRecommendationRows,
+        pluginApi,
+        pluginState,
+        report
+    } = options;
+    const baseReport = isRecord(report) ? report : {};
+    const cache = {
+        ...(getNestedRecord(baseReport, 'cache') || {}),
+        status: cacheStatus
+    };
+    const recommendations = {
+        ...(getNestedRecord(baseReport, 'recommendations') || {}),
+        persistedRecommendationRows,
+        persistedRowsLoaded: persistedRecommendationRows > 0
+    };
+    const debugState = getDashboardDebugState(baseReport, pluginState, cacheStatus, debugEnabled);
+    const sectionSources = getDashboardDebugSectionSources(baseReport, pluginState, cacheStatus);
+
+    return {
+        ...baseReport,
+        cache,
+        clientProfile,
+        debugState,
+        debugStateMessage: getDashboardDebugStateMessage(debugState, baseReport, pluginState),
+        pluginApi,
+        pluginState,
+        recommendations,
+        renderProfile: performanceProfile.renderProfile,
+        sectionSources,
+        source: 'dashboard-live-merged',
+        sourceTimestamp: new Date().toISOString()
+    };
+}
+
+function getDebugSectionSourceText(sources: unknown, key: string) {
+    const source = getNestedRecord(sources, key);
+
+    if (!source) return 'source: n/a';
+
+    const label = typeof source.source === 'string' ? source.source : 'n/a';
+    const timestamp = typeof source.timestamp === 'string' ? source.timestamp : 'n/a';
+    const note = typeof source.note === 'string' && source.note ? `, ${source.note}` : '';
+
+    return `source: ${label}, captured: ${timestamp}${note}`;
 }
 
 function getPerformanceSnapshot() {
@@ -1348,6 +1668,7 @@ function DebugReportPreview({ text }: Readonly<{ text: string }>) {
 
 // eslint-disable-next-line sonarjs/cognitive-complexity
 const PiggieTvDashboardPage = () => {
+    const navigate = useNavigate();
     const [pluginState, setPluginState] = useState<PluginState>(EMPTY_PLUGIN_STATE);
     const [cacheStatus, setCacheStatus] = useState(getFeaturedContentCacheStatus);
     const [debugEnabled, setDebugEnabledState] = useState(isPtvDebugEnabled);
@@ -1356,6 +1677,7 @@ const PiggieTvDashboardPage = () => {
     const [statusMessage, setStatusMessage] = useState('');
     const [debugReport, setDebugReport] = useState<unknown>(null);
     const [performanceReport, setPerformanceReport] = useState<unknown>(getPerformanceSnapshot);
+    const [persistedRecommendationRows, setPersistedRecommendationRows] = useState(0);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [featuredRefreshState, setFeaturedRefreshState] = useState<FeaturedRefreshState>('idle');
     const [isClearing, setIsClearing] = useState(false);
@@ -1363,8 +1685,10 @@ const PiggieTvDashboardPage = () => {
     const [pluginSettings, setPluginSettings] = useState<PtvPluginSettings | null>(null);
     const [featureSettingsDraft, setFeatureSettingsDraft] = useState<PtvFeatureSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.featureSettings }));
     const [heroSettingsDraft, setHeroSettingsDraft] = useState<PtvHeroSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.heroSettings }));
+    const [rowSettingsDraft, setRowSettingsDraft] = useState<PtvRowSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.rowSettings }));
     const [performanceSettingsDraft, setPerformanceSettingsDraft] = useState<PtvPerformanceSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.performanceSettings }));
     const [tmdbSettingsDraft, setTmdbSettingsDraft] = useState<PtvTmdbSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.tmdbSettings }));
+    const [musicMetadataSettingsDraft, setMusicMetadataSettingsDraft] = useState<PtvMusicMetadataSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.musicMetadataSettings }));
     const [cacheSettingsDraft, setCacheSettingsDraft] = useState<PtvCacheSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.cacheSettings }));
     const [seerrSettingsDraft, setSeerrSettingsDraft] = useState<PtvSeerrSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.seerrSettings }));
     const [arrSettingsDraft, setArrSettingsDraft] = useState<PtvArrSettingsDto>(() => clonePluginSettings(DEFAULT_PLUGIN_SETTINGS).arrSettings);
@@ -1375,6 +1699,7 @@ const PiggieTvDashboardPage = () => {
     const [settingsResetting, setSettingsResetting] = useState(false);
     const [settingsDirty, setSettingsDirtyState] = useState(false);
     const [tmdbTokenInput, setTmdbTokenInput] = useState('');
+    const [discogsTokenInput, setDiscogsTokenInput] = useState('');
     const [seerrApiKeyInput, setSeerrApiKeyInput] = useState('');
     const [arrApiKeyInputs, setArrApiKeyInputs] = useState<Record<keyof PtvArrSettingsDto, string>>({
         lidarr: '',
@@ -1399,6 +1724,44 @@ const PiggieTvDashboardPage = () => {
     const initialHydrationStartedRef = useRef(false);
     const pluginSettingsLoadedRef = useRef(false);
 
+    const openPtvDashboardRoute = useCallback((
+        path: string,
+        hash: string,
+        event?: React.MouseEvent<HTMLElement>
+    ) => {
+        event?.preventDefault();
+        console.info('[PTV Recommendations] Dashboard navigation requested', {
+            currentHash: window.location.hash,
+            currentPathname: window.location.pathname,
+            targetHash: hash,
+            targetPath: path
+        });
+        navigate(path);
+        window.setTimeout(() => {
+            if (window.location.hash !== hash) {
+                window.location.hash = hash;
+            }
+
+            const routeController = (window as unknown as {
+                PTV?: {
+                    routeController?: {
+                        refresh?: () => unknown;
+                    };
+                };
+            }).PTV?.routeController;
+
+            routeController?.refresh?.();
+        }, 0);
+    }, [navigate]);
+
+    const openPtvRowBuilder = useCallback((event?: React.MouseEvent<HTMLElement>) => {
+        openPtvDashboardRoute(PTV_ROW_BUILDER_PATH, PTV_ROW_BUILDER_HASH, event);
+    }, [openPtvDashboardRoute]);
+
+    const openPtvRecommendations = useCallback((event?: React.MouseEvent<HTMLElement>) => {
+        openPtvDashboardRoute(PTV_RECOMMENDATIONS_PATH, PTV_RECOMMENDATIONS_HASH, event);
+    }, [openPtvDashboardRoute]);
+
     const setSettingsDirty = useCallback((nextValue: boolean) => {
         settingsDirtyRef.current = nextValue;
         setSettingsDirtyState(nextValue);
@@ -1413,8 +1776,8 @@ const PiggieTvDashboardPage = () => {
         settingsDirtyRef.current = settingsDirty;
     }, [settingsDirty]);
 
-    const clientProfile = getPtvClientProfile();
-    const performanceProfile = getPtvPerformanceProfile();
+    const clientProfile = useMemo(() => getPtvClientProfile(), []);
+    const performanceProfile = useMemo(() => getPtvPerformanceProfile(), []);
     const arrCalendarReady = ARR_CALENDAR_SERVICE_NAMES.some(serviceName => {
         const service = arrSettingsDraft[serviceName];
 
@@ -1445,8 +1808,10 @@ const PiggieTvDashboardPage = () => {
         if (shouldHydrateDrafts) {
             setFeatureSettingsDraft({ ...normalizedSettings.featureSettings });
             setHeroSettingsDraft({ ...normalizedSettings.heroSettings });
+            setRowSettingsDraft({ ...normalizedSettings.rowSettings });
             setPerformanceSettingsDraft({ ...normalizedSettings.performanceSettings });
             setTmdbSettingsDraft({ ...normalizedSettings.tmdbSettings });
+            setMusicMetadataSettingsDraft({ ...normalizedSettings.musicMetadataSettings });
             setCacheSettingsDraft({ ...normalizedSettings.cacheSettings });
             setSeerrSettingsDraft({ ...normalizedSettings.seerrSettings });
             setArrSettingsDraft(clonePluginSettings(normalizedSettings).arrSettings);
@@ -1454,6 +1819,7 @@ const PiggieTvDashboardPage = () => {
             setSettingsDirty(false);
             settingsDirtyRef.current = false;
             setTmdbTokenInput('');
+            setDiscogsTokenInput('');
             setSeerrApiKeyInput('');
             setArrApiKeyInputs({
                 lidarr: '',
@@ -1507,6 +1873,7 @@ const PiggieTvDashboardPage = () => {
 
         const settingsRequest = pluginApi.getSettings<PtvPluginSettings>()
             .then(settings => {
+                setPersistedRecommendationRows(getPersistedRecommendationRowCount(settings));
                 debugPluginSettingsSave('plugin settings fetch completed', {
                     dirtyBeforeHydration: settingsDirtyRef.current,
                     origin,
@@ -1895,6 +2262,7 @@ const PiggieTvDashboardPage = () => {
                     settings: normalizedSettings
                 });
                 setStatusMessage(successMessage);
+                return normalizedSettings;
             })
             .catch((err: unknown) => {
                 debugPluginSettingsSave('plugin settings save failed', {
@@ -1987,6 +2355,16 @@ const PiggieTvDashboardPage = () => {
         }, 'heroSettings', 'Hero settings saved.');
     }, [heroSettingsDraft, pluginSettings, savePluginSettings]);
 
+    const saveRowSettings = useCallback(() => {
+        const nextSettings = normalizePluginSettings({
+            rowSettings: rowSettingsDraft
+        });
+
+        void savePluginSettings({
+            rowSettings: nextSettings.rowSettings
+        }, 'rowSettings', 'Row settings saved.');
+    }, [rowSettingsDraft, savePluginSettings]);
+
     const savePerformanceSettings = useCallback(() => {
         const nextSettings = normalizePluginSettings({
             performanceSettings: performanceSettingsDraft
@@ -1998,6 +2376,7 @@ const PiggieTvDashboardPage = () => {
     }, [performanceSettingsDraft, savePluginSettings]);
 
     const saveTmdbSettings = useCallback(() => {
+        const wasConfigured = tmdbSettingsDraft.tmdbApiTokenConfigured;
         const nextSettings = normalizePluginSettings({
             tmdbSettings: tmdbSettingsDraft
         });
@@ -2007,7 +2386,7 @@ const PiggieTvDashboardPage = () => {
             tmdbRegion: nextSettings.tmdbSettings.tmdbRegion,
             useTmdbForRowAccuracy: nextSettings.tmdbSettings.useTmdbForRowAccuracy
         };
-        const token = tmdbTokenInput.trim();
+        const token = sanitizeTmdbCredentialInput(tmdbTokenInput);
 
         if (token) {
             tmdbSettings.tmdbApiToken = token;
@@ -2015,8 +2394,122 @@ const PiggieTvDashboardPage = () => {
 
         void savePluginSettings({
             tmdbSettings
-        }, 'tmdbSettings', 'TMDB settings saved.');
+        }, 'tmdbSettings', 'TMDB settings saved.')
+            .then(savedSettings => {
+                if (!savedSettings) return;
+
+                const isConfigured = savedSettings.tmdbSettings.tmdbApiTokenConfigured;
+                const changedText = token ?
+                    ` Credential configured: ${String(wasConfigured)} -> ${String(isConfigured)}.` :
+                    '';
+
+                setIntegrationTestMessages(previous => ({
+                    ...previous,
+                    tmdb: `TMDb settings saved.${changedText} ${getTmdbCredentialExpectation(null)}`
+                }));
+                setTmdbTokenInput('');
+            });
     }, [savePluginSettings, tmdbSettingsDraft, tmdbTokenInput]);
+
+    const saveMusicMetadataSettings = useCallback(() => {
+        void savePluginSettings({
+            musicMetadataSettings: createMusicMetadataSettingsPayload(musicMetadataSettingsDraft, discogsTokenInput)
+        }, 'musicMetadataSettings', 'Music metadata settings saved.')
+            .then(savedSettings => {
+                if (!savedSettings) return;
+
+                const discogsConfigured = savedSettings.musicMetadataSettings.discogsTokenConfigured;
+
+                setIntegrationTestMessages(previous => ({
+                    ...previous,
+                    discogs: discogsConfigured ? 'Discogs token is configured for backend song metadata lookup.' : 'Discogs token is not configured.'
+                }));
+                setDiscogsTokenInput('');
+            });
+    }, [discogsTokenInput, musicMetadataSettingsDraft, savePluginSettings]);
+
+    const testTmdbConnection = useCallback(() => {
+        if (integrationTestRequestRef.current.tmdb) {
+            debugPluginSettingsSave('integration test deduped', {
+                origin: 'click',
+                service: 'tmdb'
+            });
+            return;
+        }
+
+        const pluginApi = getCurrentPtvPluginApiClient();
+
+        if (!pluginApi?.testTmdbMetadata) {
+            setIntegrationTestMessages(previous => ({
+                ...previous,
+                tmdb: 'TMDb test endpoint is unavailable.'
+            }));
+            return;
+        }
+
+        const abortController = createDashboardAbortController();
+        const hasUnsavedToken = Boolean(sanitizeTmdbCredentialInput(tmdbTokenInput));
+
+        if (abortController) {
+            integrationTestAbortRef.current.tmdb = abortController;
+        }
+
+        setIntegrationTesting(previous => ({ ...previous, tmdb: true }));
+        setIntegrationTestMessages(previous => ({ ...previous, tmdb: 'Testing TMDb credential...' }));
+        debugPluginSettingsSave('integration test triggered', {
+            origin: 'click',
+            service: 'tmdb'
+        });
+
+        const testRequest = pluginApi.testTmdbMetadata<PtvTmdbMetadataStatus>({
+            signal: abortController?.signal
+        })
+            .then(result => {
+                setPluginState(previousState => ({
+                    ...previousState,
+                    status: previousState.status ?
+                        {
+                            ...previousState.status,
+                            tmdbMetadata: result,
+                            tmdbMetadataStatus: result
+                        } :
+                        previousState.status
+                }));
+
+                const statusCode = result.lastStatusCode ? ` HTTP ${result.lastStatusCode}.` : '';
+                const credentialStatus = result.credentialStatus || (result.configured ? 'unknown' : 'missing');
+                const expectation = getTmdbCredentialExpectation(result);
+                const tmdbErrorBody = result.lastErrorBody ? ` TMDb said: ${result.lastErrorBody}` : '';
+                const fallbackMessage = `TMDb credential status: ${credentialStatus}.${statusCode}`;
+                const message = result.credentialStatus === 'valid' ?
+                    `TMDb credential validated successfully. ${expectation}` :
+                    `${result.lastError || fallbackMessage} ${expectation}${tmdbErrorBody}`;
+                const saveHint = hasUnsavedToken ? ' Save TMDB settings before testing the new token.' : '';
+
+                setIntegrationTestMessages(previous => ({ ...previous, tmdb: `${message}${saveHint}` }));
+            })
+            .catch((err: unknown) => {
+                if (abortController?.signal.aborted) {
+                    debugPluginSettingsSave('integration test aborted', {
+                        origin: 'abort',
+                        service: 'tmdb'
+                    });
+                    return;
+                }
+
+                setIntegrationTestMessages(previous => ({
+                    ...previous,
+                    tmdb: `TMDb test failed: ${getErrorMessage(err)}`
+                }));
+            })
+            .finally(() => {
+                delete integrationTestRequestRef.current.tmdb;
+                delete integrationTestAbortRef.current.tmdb;
+                setIntegrationTesting(previous => ({ ...previous, tmdb: false }));
+            });
+
+        integrationTestRequestRef.current.tmdb = testRequest;
+    }, [tmdbTokenInput]);
 
     const saveSeerrSettings = useCallback(() => {
         void savePluginSettings({
@@ -2072,6 +2565,11 @@ const PiggieTvDashboardPage = () => {
         setSettingsDirty(true);
     }, [setSettingsDirty]);
 
+    const handleRecommendedRowsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setRowSettingsDraft(previousSettings => ({ ...previousSettings, enableRecommendedRows: event.target.checked }));
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
     const handleDynamicBackdropsEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setFeatureSettingsDraft(previousSettings => ({ ...previousSettings, dynamicBackdropsEnabled: event.target.checked }));
         setSettingsDirty(true);
@@ -2079,6 +2577,14 @@ const PiggieTvDashboardPage = () => {
 
     const handleTvLowPowerModeEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setFeatureSettingsDraft(previousSettings => ({ ...previousSettings, tvLowPowerModeEnabled: event.target.checked }));
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
+    const handlePlaybackModeChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setFeatureSettingsDraft(previousSettings => ({
+            ...previousSettings,
+            playbackMode: normalizePtvPlaybackMode(event.target.value)
+        }));
         setSettingsDirty(true);
     }, [setSettingsDirty]);
 
@@ -2164,6 +2670,26 @@ const PiggieTvDashboardPage = () => {
 
     const handleTmdbTokenInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setTmdbTokenInput(event.target.value);
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
+    const handleMusicBrainzEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setMusicMetadataSettingsDraft(previousSettings => ({ ...previousSettings, musicBrainzEnabled: event.target.checked }));
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
+    const handleDiscogsEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setMusicMetadataSettingsDraft(previousSettings => ({ ...previousSettings, discogsEnabled: event.target.checked }));
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
+    const handleMusicMetadataMaxResultsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setMusicMetadataSettingsDraft(previousSettings => ({ ...previousSettings, maxResults: Number(event.target.value || 0) }));
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
+    const handleDiscogsTokenInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setDiscogsTokenInput(event.target.value);
         setSettingsDirty(true);
     }, [setSettingsDirty]);
 
@@ -2343,8 +2869,29 @@ const PiggieTvDashboardPage = () => {
         setOverlayEnabled(isPerformanceOverlayActive());
     }, []);
 
+    const getMergedDebugReport = useCallback((report?: unknown, overrides: {
+        cacheStatus?: ReturnType<typeof getFeaturedContentCacheStatus>;
+        pluginApi?: ReturnType<typeof getPtvPluginApiDiagnostics>;
+    } = {}) => mergeDashboardDebugReport({
+        cacheStatus: overrides.cacheStatus || cacheStatus,
+        clientProfile,
+        debugEnabled,
+        performanceProfile,
+        persistedRecommendationRows,
+        pluginApi: overrides.pluginApi || getPtvPluginApiDiagnostics(),
+        pluginState,
+        report: report || getPtvGlobal()?.debug?.report?.() || getPtvDebugReport()
+    }), [
+        cacheStatus,
+        clientProfile,
+        debugEnabled,
+        performanceProfile,
+        persistedRecommendationRows,
+        pluginState
+    ]);
+
     const runDebugReport = useCallback(() => {
-        const report = getPtvGlobal()?.debug?.report?.() || getPtvDebugReport();
+        const report = getMergedDebugReport();
 
         setDebugReport(report);
         setPerformanceReport(getPerformanceSnapshot());
@@ -2352,19 +2899,32 @@ const PiggieTvDashboardPage = () => {
         if (isDebugLoggingEnabled()) {
             console.info('[PTV Debug Report]', report);
         }
-    }, []);
+    }, [getMergedDebugReport]);
 
-    const buildDebugSnapshot = useCallback(() => JSON.stringify({
-        cacheStatus: getFeaturedContentCacheStatus(),
-        clientProfile,
-        debugReport: debugReport || getPtvDebugReport(),
-        featureSettings,
-        performanceReport: getPerformanceSnapshot(),
-        pluginApi: getPtvPluginApiDiagnostics(),
-        pluginState,
-        signup: pluginState.status?.signup || null,
-        timestamp: new Date().toISOString()
-    }, null, 2), [clientProfile, debugReport, featureSettings, pluginState]);
+    const buildDebugSnapshot = useCallback(() => {
+        const liveCacheStatus = getFeaturedContentCacheStatus();
+        const livePluginApi = getPtvPluginApiDiagnostics();
+        const liveDebugReport = getMergedDebugReport(debugReport, {
+            cacheStatus: liveCacheStatus,
+            pluginApi: livePluginApi
+        });
+
+        return JSON.stringify({
+            cacheStatus: liveCacheStatus,
+            clientProfile,
+            debugReport: liveDebugReport,
+            debugState: getDashboardDebugState(liveDebugReport, pluginState, liveCacheStatus, debugEnabled),
+            featureSettings,
+            performanceReport: getPerformanceSnapshot(),
+            persistedRecommendationRows,
+            pluginApi: livePluginApi,
+            pluginState,
+            sectionSources: getNestedRecord(liveDebugReport, 'sectionSources'),
+            source: 'dashboard-live-merged',
+            signup: pluginState.status?.signup || null,
+            timestamp: new Date().toISOString()
+        }, null, 2);
+    }, [clientProfile, debugEnabled, debugReport, featureSettings, getMergedDebugReport, persistedRecommendationRows, pluginState]);
 
     const copyDebugSnapshot = useCallback(() => {
         copyTextToClipboard(buildDebugSnapshot())
@@ -2377,7 +2937,7 @@ const PiggieTvDashboardPage = () => {
     }, [buildDebugSnapshot]);
 
     const copyDebugReport = useCallback(() => {
-        const report = debugReport || getPtvGlobal()?.debug?.report?.() || getPtvDebugReport();
+        const report = getMergedDebugReport(debugReport);
 
         copyTextToClipboard(JSON.stringify(report, null, 2))
             .then(() => {
@@ -2386,7 +2946,7 @@ const PiggieTvDashboardPage = () => {
             .catch((err: unknown) => {
                 setStatusMessage(`Debug report copy failed: ${getErrorMessage(err)}`);
             });
-    }, [debugReport]);
+    }, [debugReport, getMergedDebugReport]);
 
     const copyPluginInstallNote = useCallback(() => {
         copyTextToClipboard(PTV_PLUGIN_INSTALL_NOTE)
@@ -2454,6 +3014,28 @@ const PiggieTvDashboardPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    useEffect(() => {
+        if (pluginState.loading) return undefined;
+
+        const timeoutId = window.setTimeout(() => {
+            setDebugReport(getMergedDebugReport());
+            setPerformanceReport(getPerformanceSnapshot());
+        }, 0);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [
+        cacheStatus.createdAt,
+        cacheStatus.heroCount,
+        cacheStatus.itemCount,
+        cacheStatus.storage,
+        getMergedDebugReport,
+        pluginState.connected,
+        pluginState.connectionState,
+        pluginState.loading
+    ]);
+
     const pluginStatus = pluginState.status;
     const tmdbMetadataStatus = getTmdbMetadataStatus(pluginStatus);
     const tmdbMetadataWarning = getTmdbMetadataWarning(tmdbMetadataStatus);
@@ -2482,7 +3064,13 @@ const PiggieTvDashboardPage = () => {
     const itemCount = cacheStatus.itemCount || pluginFeaturedStatus?.itemCount || 0;
     const sectionCount = cacheStatus.sectionCount || pluginFeaturedStatus?.sectionCount || 0;
     const lastRefreshDurationMs = pluginStatus?.lastRefreshDurationMs || cacheStatus.lastRefreshDurationMs;
-    const performanceDebug = getNestedRecord(performanceReport, 'debug') || getPtvDebugReport();
+    const mergedDebugReport = getMergedDebugReport(debugReport || getPtvDebugReport());
+    const dashboardDebugState = getDashboardDebugState(mergedDebugReport, pluginState, cacheStatus, debugEnabled);
+    const dashboardDebugMessage = getDashboardDebugStateMessage(dashboardDebugState, mergedDebugReport, pluginState);
+    const debugSectionSources = getNestedRecord(mergedDebugReport, 'sectionSources');
+    const debugRecommendations = getNestedRecord(mergedDebugReport, 'recommendations');
+    const recommendationEngineLoaded = getNestedBoolean(debugRecommendations, 'recommendationEngineLoaded') === true;
+    const performanceDebug = getNestedRecord(performanceReport, 'debug') || mergedDebugReport;
     const imageManagerMetrics = getNestedRecord(performanceReport, 'imageManager');
     const currentFps = getNumberValue(performanceReport, 'currentFps');
     const averageFps = getNumberValue(performanceReport, 'averageFps');
@@ -2493,7 +3081,7 @@ const PiggieTvDashboardPage = () => {
     const imageCacheMisses = getNumberValue(imageManagerMetrics, 'cacheMisses');
     const imageDedupeHits = getNumberValue(imageManagerMetrics, 'dedupeHits');
     const imageFailedSuppressions = getNumberValue(imageManagerMetrics, 'failedImageSuppressions');
-    const debugReportText = debugReport ? JSON.stringify(debugReport, null, 2) : '';
+    const debugReportText = mergedDebugReport ? JSON.stringify(mergedDebugReport, null, 2) : '';
     const canEditPluginSettings = pluginState.connected && pluginStatus?.canWriteFeaturedContent !== false;
     const settingsActionDisabled = settingsSaving || settingsLoading || !canEditPluginSettings || !pluginSettings;
 
@@ -2510,9 +3098,14 @@ const PiggieTvDashboardPage = () => {
                         <Typography variant='body1' color='text.secondary'>
                             Plugin, cache, status, and performance controls.
                         </Typography>
-                        <Button href='/dashboard/piggietv/rows' variant='outlined' className='ptv-button' sx={{ mt: 1 }}>
-                            Open Row Builder
-                        </Button>
+                        <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap sx={{ mt: 1 }}>
+                            <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} variant='outlined' className='ptv-button'>
+                                Open Row Builder
+                            </Button>
+                            <Button href={PTV_RECOMMENDATIONS_HASH} onClick={openPtvRecommendations} variant='outlined' className='ptv-button'>
+                                Open Recommendations
+                            </Button>
+                        </Stack>
                     </Box>
 
                     <StatusMessageAlert message={statusMessage} />
@@ -2688,18 +3281,43 @@ const PiggieTvDashboardPage = () => {
                                     <Stack className='ptv-control-stack ptv-control-stack-compact' spacing={1.25}>
                                         <Stack direction='row' justifyContent='space-between' alignItems='center'>
                                             <Typography variant='h2'>Performance / Debug</Typography>
-                                            <Chip
-                                                className='ptv-render-profile-badge'
-                                                data-ptv-render-profile={performanceProfile.renderProfile.id}
-                                                label={performanceProfile.renderProfile.id}
-                                                size='small'
-                                            />
+                                            <Stack direction='row' spacing={1} flexWrap='wrap' justifyContent='flex-end'>
+                                                <Chip
+                                                    className='ptv-live-status-chip'
+                                                    color={getDashboardDebugStateColor(dashboardDebugState)}
+                                                    label={dashboardDebugState}
+                                                    size='small'
+                                                />
+                                                <Chip
+                                                    className='ptv-render-profile-badge'
+                                                    data-ptv-render-profile={performanceProfile.renderProfile.id}
+                                                    label={performanceProfile.renderProfile.id}
+                                                    size='small'
+                                                />
+                                            </Stack>
                                         </Stack>
                                         <Divider />
+                                        <Alert severity={getDashboardDebugAlertSeverity(dashboardDebugState)}>
+                                            {dashboardDebugMessage}
+                                        </Alert>
                                         <Box className='ptv-badge-row'>
                                             <Chip className='ptv-status-badge ptv-status-badge-info' label={`client: ${clientProfile.kind}`} size='small' />
                                             <Chip className='ptv-status-badge ptv-status-badge-backend' label={`cache: ${getCacheTimingLabel(performanceDebug)}`} size='small' />
+                                            <Chip className='ptv-status-badge ptv-status-badge-info' label={`persisted rec rows: ${persistedRecommendationRows}`} size='small' />
                                         </Box>
+                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
+                                            <Typography>Debug state: {dashboardDebugState}</Typography>
+                                            <Typography>Debug collector active: {String(getNestedBoolean(mergedDebugReport, 'active') === true)}</Typography>
+                                            <Typography>Runtime connected: {String(pluginState.connected)}</Typography>
+                                            <Typography>Plugin state source: {getDebugSectionSourceText(debugSectionSources, 'pluginState')}</Typography>
+                                            <Typography>Plugin API source: {getDebugSectionSourceText(debugSectionSources, 'pluginApi')}</Typography>
+                                            <Typography>Cache source: {getDebugSectionSourceText(debugSectionSources, 'cache')}</Typography>
+                                            <Typography>Client profile source: {getDebugSectionSourceText(debugSectionSources, 'clientProfile')}</Typography>
+                                            <Typography>Render profile source: {getDebugSectionSourceText(debugSectionSources, 'renderProfile')}</Typography>
+                                            <Typography>Shell source: {getDebugSectionSourceText(debugSectionSources, 'shell')}</Typography>
+                                            <Typography>Recommendation engine loaded: {String(recommendationEngineLoaded)}</Typography>
+                                            <Typography>Persisted recommendation rows: {persistedRecommendationRows}</Typography>
+                                        </Stack>
                                         <Typography>Render profile: {performanceProfile.renderProfile.id}</Typography>
                                         <Typography>Client profile: {clientProfile.kind}</Typography>
                                         <Typography>
@@ -2739,7 +3357,76 @@ const PiggieTvDashboardPage = () => {
                                         >
                                             Copy Debug Report
                                         </Button>
-                                        <DebugReportPreview text={debugReportText} />
+                                        {debugEnabled || debugReport ? (
+                                            <DebugReportPreview text={debugReportText} />
+                                        ) : (
+                                            <Typography color='text.secondary'>Enable PTV_DEBUG to collect detailed event history. Live plugin, cache, profile, and persisted recommendation state is shown above.</Typography>
+                                        )}
+                                    </Stack>
+                                </CardContent>
+                            </Card>
+                        </Grid>
+
+                        <Grid size={{ xs: 12, lg: 6 }}>
+                            <Card className='ptv-dashboard-card ptv-control-card'>
+                                <CardContent>
+                                    <Stack spacing={2}>
+                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
+                                            <Typography variant='h2'>Music Metadata</Typography>
+                                            <Chip
+                                                className='ptv-status-badge ptv-status-badge-info'
+                                                label={getDiscogsCredentialLabel(musicMetadataSettingsDraft, discogsTokenInput)}
+                                                size='small'
+                                            />
+                                        </Stack>
+                                        <Divider />
+                                        <WarningAlert message={integrationTestMessages.discogs || ''} />
+                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
+                                            <Typography>MusicBrainz enabled: {String(musicMetadataSettingsDraft.musicBrainzEnabled)}</Typography>
+                                            <Typography>Discogs enabled: {String(musicMetadataSettingsDraft.discogsEnabled)}</Typography>
+                                            <Typography>Discogs token configured: {String(musicMetadataSettingsDraft.discogsTokenConfigured)}</Typography>
+                                            <Typography>Lookup candidates per provider: {musicMetadataSettingsDraft.maxResults}</Typography>
+                                        </Stack>
+                                        <FormControlLabel
+                                            control={<Switch checked={musicMetadataSettingsDraft.musicBrainzEnabled} disabled={settingsActionDisabled} onChange={handleMusicBrainzEnabledChange} />}
+                                            label='Enable MusicBrainz'
+                                        />
+                                        <FormControlLabel
+                                            control={<Switch checked={musicMetadataSettingsDraft.discogsEnabled} disabled={settingsActionDisabled} onChange={handleDiscogsEnabledChange} />}
+                                            label='Enable Discogs'
+                                        />
+                                        <TextField
+                                            label='Lookup results per provider'
+                                            size='small'
+                                            type='number'
+                                            value={musicMetadataSettingsDraft.maxResults}
+                                            disabled={settingsActionDisabled}
+                                            slotProps={{ htmlInput: { min: PTV_SETTINGS_LIMITS.musicMetadataResults[0], max: PTV_SETTINGS_LIMITS.musicMetadataResults[1] } }}
+                                            onChange={handleMusicMetadataMaxResultsChange}
+                                        />
+                                        <TextField
+                                            label='Discogs personal access token'
+                                            size='small'
+                                            type='password'
+                                            value={discogsTokenInput}
+                                            disabled={settingsActionDisabled}
+                                            placeholder={musicMetadataSettingsDraft.discogsTokenConfigured ? 'Token configured - enter a new token to replace it' : 'Paste Discogs token'}
+                                            onChange={handleDiscogsTokenInputChange}
+                                            autoComplete='off'
+                                        />
+                                        <Typography variant='body2' color='text.secondary'>
+                                            MusicBrainz works without a token. Discogs requires a personal access token and is called only from the PiggieTV backend.
+                                        </Typography>
+                                        <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
+                                            <Button
+                                                type='button'
+                                                variant='contained'
+                                                onClick={saveMusicMetadataSettings}
+                                                disabled={settingsActionDisabled}
+                                            >
+                                                {settingsSavingSection === 'musicMetadataSettings' ? 'Saving...' : 'Save Music Metadata Settings'}
+                                            </Button>
+                                        </Stack>
                                     </Stack>
                                 </CardContent>
                             </Card>
@@ -2774,6 +3461,19 @@ const PiggieTvDashboardPage = () => {
                                             control={<Switch checked={featureSettingsDraft.tvLowPowerModeEnabled} disabled={settingsActionDisabled} onChange={handleTvLowPowerModeEnabledChange} />}
                                             label='TV low-power mode enabled'
                                         />
+                                        <TextField
+                                            select
+                                            fullWidth
+                                            helperText='Auto lets Jellyfin decide, Compatible favors stable H264/AAC playback, Performance favors direct play/direct stream.'
+                                            label='PTV Playback Mode'
+                                            value={featureSettingsDraft.playbackMode}
+                                            onChange={handlePlaybackModeChange}
+                                            disabled={settingsActionDisabled}
+                                        >
+                                            <MenuItem value='auto'>Auto</MenuItem>
+                                            <MenuItem value='compatible'>Compatible</MenuItem>
+                                            <MenuItem value='performance'>Performance</MenuItem>
+                                        </TextField>
                                         <FormControlLabel
                                             control={<Switch checked={featureSettingsDraft.debugModeEnabled} disabled={settingsActionDisabled} onChange={handleDebugModeEnabledChange} />}
                                             label='Debug mode enabled'
@@ -2870,11 +3570,28 @@ const PiggieTvDashboardPage = () => {
                                         <Typography variant='h2'>Rows</Typography>
                                         <Divider />
                                         <Typography variant='body2' color='text.secondary'>
-                                            Row categories, random generation, custom entries, preview, and row diagnostics now live in the dedicated Row Builder.
+                                            Row categories, random generation, recommendation rows, preview, and diagnostics live in the dedicated Row Builder.
                                         </Typography>
-                                        <Button href='/dashboard/piggietv/rows' type='button' variant='contained'>
-                                            Open Row Builder
-                                        </Button>
+                                        <FormControlLabel
+                                            control={<Switch checked={rowSettingsDraft.enableRecommendedRows} disabled={settingsActionDisabled} onChange={handleRecommendedRowsChange} />}
+                                            label='Recommendation rows'
+                                        />
+                                        <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
+                                            <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
+                                                Open Row Builder
+                                            </Button>
+                                            <Button href={PTV_RECOMMENDATIONS_HASH} onClick={openPtvRecommendations} type='button' variant='outlined'>
+                                                Open Recommendations
+                                            </Button>
+                                            <Button
+                                                type='button'
+                                                variant='outlined'
+                                                onClick={saveRowSettings}
+                                                disabled={settingsActionDisabled}
+                                            >
+                                                {settingsSavingSection === 'rowSettings' ? 'Saving...' : 'Save Row Settings'}
+                                            </Button>
+                                        </Stack>
                                     </Stack>
                                 </CardContent>
                             </Card>
@@ -2943,19 +3660,26 @@ const PiggieTvDashboardPage = () => {
                                             <Typography variant='h2'>TMDB Settings</Typography>
                                             <Chip
                                                 className='ptv-status-badge ptv-status-badge-info'
-                                                label={tmdbMetadataStatus?.configured || tmdbSettingsDraft.tmdbApiTokenConfigured ? 'Token configured' : 'No token'}
+                                                label={getTmdbCredentialLabel(tmdbMetadataStatus, tmdbSettingsDraft)}
                                                 size='small'
                                             />
                                         </Stack>
                                         <Divider />
                                         <WarningAlert message={tmdbMetadataWarning} />
+                                        <WarningAlert message={integrationTestMessages.tmdb || ''} />
                                         <Stack className='ptv-dashboard-status-list' spacing={0.5}>
                                             <Typography>Metadata enabled: {String(tmdbMetadataStatus?.enabled ?? tmdbSettingsDraft.tmdbEnabled)}</Typography>
                                             <Typography>Credential configured: {String(tmdbMetadataStatus?.configured ?? tmdbSettingsDraft.tmdbApiTokenConfigured)}</Typography>
+                                            <Typography>Credential status: {tmdbMetadataStatus?.credentialStatus || 'not tested'}</Typography>
+                                            <Typography>Credential type: {tmdbMetadataStatus?.credentialType || 'not detected'}</Typography>
+                                            <Typography>Credential length: {tmdbMetadataStatus?.credentialLength ?? 'n/a'}</Typography>
+                                            <Typography>Last TMDb status code: {tmdbMetadataStatus?.lastStatusCode ?? 'n/a'}</Typography>
+                                            <Typography>Last validated: {formatDateTimeString(tmdbMetadataStatus?.lastValidatedAt)}</Typography>
                                             <Typography>Cache hits: {tmdbMetadataStatus?.cacheHits ?? 0}</Typography>
                                             <Typography>Cache misses: {tmdbMetadataStatus?.cacheMisses ?? 0}</Typography>
                                             <Typography>Last TMDb duration: {formatDuration(tmdbMetadataStatus?.lastDurationMs)}</Typography>
                                             <Typography>Last TMDb error: {tmdbMetadataStatus?.lastError || 'none'}</Typography>
+                                            <Typography>Last TMDb error body: {tmdbMetadataStatus?.lastErrorBody || 'none'}</Typography>
                                         </Stack>
                                         <FormControlLabel
                                             control={<Switch checked={tmdbSettingsDraft.tmdbEnabled} disabled={settingsActionDisabled} onChange={handleTmdbEnabledChange} />}
@@ -2992,7 +3716,10 @@ const PiggieTvDashboardPage = () => {
                                             autoComplete='off'
                                         />
                                         <Typography variant='body2' color='text.secondary'>
-                                            Use a TMDb v4 read access token when possible. Legacy v3 API keys are supported by server environment/plugin legacy config. The existing token is stored by the plugin and is never returned to this page.
+                                            Paste a TMDb v4 Read Access Token when possible. Legacy v3 API keys are only used when the saved value looks like a 32-character hex key. You can paste with or without &quot;Bearer&quot;; whitespace and newlines are removed before saving.
+                                        </Typography>
+                                        <Typography variant='body2' color='text.secondary'>
+                                            {getTmdbCredentialExpectation(tmdbMetadataStatus)}
                                         </Typography>
                                         <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
                                             <Button
@@ -3006,9 +3733,10 @@ const PiggieTvDashboardPage = () => {
                                             <Button
                                                 type='button'
                                                 variant='outlined'
-                                                disabled
+                                                onClick={testTmdbConnection}
+                                                disabled={settingsActionDisabled || Boolean(integrationTesting.tmdb)}
                                             >
-                                                Test TMDB Connection
+                                                {integrationTesting.tmdb ? 'Testing...' : 'Test TMDB Connection'}
                                             </Button>
                                         </Stack>
                                     </Stack>
@@ -3348,7 +4076,7 @@ const PiggieTvDashboardPage = () => {
                                         <Typography variant='body2' color='text.secondary'>
                                             Tag/search based rows are configured as Row Builder categories with source type Custom Tag/Search.
                                         </Typography>
-                                        <Button href='/dashboard/piggietv/rows' type='button' variant='contained'>
+                                        <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
                                             Open Row Builder
                                         </Button>
                                     </Stack>
@@ -3365,7 +4093,7 @@ const PiggieTvDashboardPage = () => {
                                         <Typography variant='body2' color='text.secondary'>
                                             Random row generation is now category based. Choose media type, source type, and row count in Row Builder.
                                         </Typography>
-                                        <Button href='/dashboard/piggietv/rows' type='button' variant='contained'>
+                                        <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
                                             Open Row Builder
                                         </Button>
                                     </Stack>

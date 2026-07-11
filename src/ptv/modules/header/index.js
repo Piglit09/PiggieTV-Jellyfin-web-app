@@ -3,6 +3,7 @@ import { dispatchPtvCustomEvent } from '../../core/events';
 import { applyPtvResponsiveImage } from '../../core/images';
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
+import { appRouter } from '../../../components/router/appRouter';
 import { create } from '../../utils/dom';
 import { createIcon, iconNameFromText, runIconEngine } from '../../utils/icons';
 import { startPtvIconEngine } from '../icons';
@@ -45,9 +46,21 @@ const TOP_TABS = [
         label: 'Favorites'
     },
     {
+        icon: 'music',
+        id: 'music',
+        index: 2,
+        label: 'Music'
+    },
+    {
+        icon: 'books',
+        id: 'reading',
+        index: 3,
+        label: 'PTV Reading'
+    },
+    {
         icon: 'request',
         id: 'request',
-        index: 2,
+        index: 4,
         label: 'Request'
     }
 ];
@@ -70,16 +83,28 @@ function isRequestRoute() {
 }
 
 function isHomeTabsRoute() {
-    return isHomeRoute() || isRequestRoute();
+    return isHomeRoute() || isRequestRoute() || isMusicRoute() || isReadingRoute();
 }
 
 function getActiveTopTab() {
     const hash = window.location.hash || '';
 
     if (isRequestRoute()) return 'request';
+    if (isReadingRoute()) return 'reading';
+    if (isMusicRoute()) return 'music';
     if (hash.startsWith(PTV_ROUTES.favoritesLegacy) || hash.includes('tab=1')) return 'favorites';
 
     return 'home';
+}
+
+function isMusicRoute() {
+    const hash = window.location.hash || '';
+
+    return hash === PTV_ROUTES.music || hash.startsWith(`${PTV_ROUTES.music}/`) || hash.startsWith(`${PTV_ROUTES.music}?`);
+}
+
+function isReadingRoute() {
+    return /^#\/(?:books|comics|manga|maga)(?:[/?]|$)/i.test(window.location.hash || '');
 }
 
 function openRequestTab(event) {
@@ -88,6 +113,26 @@ function openRequestTab(event) {
     event?.stopImmediatePropagation?.();
     openRequestPortal();
     dispatchPtvCustomEvent(PTV_EVENTS.requestOpen);
+}
+
+function openMusicTab() {
+    closeRequestForHomeTab();
+    setOwnedTabActive('music');
+
+    void appRouter.show('music/').catch(() => {
+        window.location.hash = '#/music/';
+        dispatchSyntheticHashChange();
+    });
+}
+
+function openReadingTab() {
+    closeRequestForHomeTab();
+    setOwnedTabActive('reading');
+
+    void appRouter.show('books/library').catch(() => {
+        window.location.hash = PTV_ROUTES.readingLibrary;
+        dispatchSyntheticHashChange();
+    });
 }
 
 function closeRequestForHomeTab() {
@@ -171,6 +216,16 @@ function selectHomeTab(tabId, event) {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation?.();
+
+    if (tabId === 'music') {
+        openMusicTab();
+        return;
+    }
+
+    if (tabId === 'reading') {
+        openReadingTab();
+        return;
+    }
 
     if (tabId === 'request') {
         openRequestTab(event);

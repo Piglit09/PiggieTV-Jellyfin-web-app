@@ -17,9 +17,26 @@ const SERVER_CACHE_DOCUMENT_VERSION = 1;
 
 export type FeaturedPayload = {
     heroItems: unknown[];
+    recommendationConfigHash?: string;
+    rowConfigApplied?: boolean;
+    rowConfigHash?: string;
+    rowConfigVersion?: number;
     rowDiagnostics?: unknown[];
     sections?: unknown[];
     sectionItems: Record<string, unknown[]>;
+};
+
+type FeaturedPayloadRowSourceSummary = {
+    configuredRowCount: number;
+    fallbackRowCount: number;
+    recommendationRowCount: number;
+    skippedRows: Array<{
+        reason: string;
+        rowId: string;
+        rowTitle: string;
+        rowType: string;
+    }>;
+    totalRenderedRowCount: number;
 };
 
 type FeaturedCacheEntry = {
@@ -48,6 +65,11 @@ type PtvPluginStatusForCache = {
     ok?: boolean;
 };
 
+type PtvAbortControllerLike = {
+    abort: () => void;
+    signal: AbortSignal;
+};
+
 let inflightFeaturedContent: Promise<FeaturedPayload> | null = null;
 let inflightServerRead: Promise<FeaturedCacheEntry | null> | null = null;
 let inflightPluginStatus: Promise<PtvPluginStatusForCache | null> | null = null;
@@ -72,6 +94,8 @@ const MAX_SERVER_READ_RETRY_COUNT = 5;
 const SERVER_READ_BACKOFF_BASE_MS = 1000;
 const SERVER_READ_BACKOFF_MAX_MS = 5 * 60 * 1000;
 const SERVER_EMPTY_READ_SUPPRESSION_MS = 30000;
+const SERVER_CACHE_READ_TIMEOUT_MS = 12000;
+const SERVER_STATUS_READ_TIMEOUT_MS = 6000;
 const PLUGIN_STATUS_CACHE_MS = 30000;
 const featuredCacheScope = getRuntimeScope('featured-cache');
 
@@ -80,6 +104,7 @@ const CACHE_ITEM_FIELDS = new Set([
     'AlbumArtist',
     'AlbumArtists',
     'AlbumId',
+    'AlbumPrimaryImageItemId',
     'AlbumPrimaryImageTag',
     'ArtistItems',
     'Artists',
@@ -200,6 +225,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function stableStringifyForHash(value: unknown): string {
+    if (Array.isArray(value)) {
+        return `[${value.map(stableStringifyForHash).join(',')}]`;
+    }
+
+    if (isRecord(value)) {
+        return `{${Object.keys(value)
+            .sort((first, second) => first.localeCompare(second))
+            .map(key => `${JSON.stringify(key)}:${stableStringifyForHash(value[key])}`)
+            .join(',')}}`;
+    }
+
+    return JSON.stringify(value) ?? 'null';
+}
+
+export function getPtvFeaturedRowConfigHash(value: unknown) {
+    const text = stableStringifyForHash(value);
+    let hash = 5381;
+
+    for (let index = 0; index < text.length; index += 1) {
+        hash = ((hash * 33) + text.charCodeAt(index)) % 2147483647;
+    }
+
+    return String(hash);
+}
+
 function normalizeSectionItems(value: unknown): Record<string, unknown[]> {
     if (!isRecord(value)) return {};
 
@@ -217,6 +268,10 @@ function normalizeSectionItems(value: unknown): Record<string, unknown[]> {
 function normalizePayload(payload: FeaturedPayload): FeaturedPayload {
     return {
         heroItems: Array.isArray(payload.heroItems) ? payload.heroItems : [],
+        recommendationConfigHash: typeof payload.recommendationConfigHash === 'string' && payload.recommendationConfigHash.trim() ? payload.recommendationConfigHash.trim() : undefined,
+        rowConfigApplied: typeof payload.rowConfigApplied === 'boolean' ? payload.rowConfigApplied : undefined,
+        rowConfigHash: typeof payload.rowConfigHash === 'string' && payload.rowConfigHash.trim() ? payload.rowConfigHash.trim() : undefined,
+        rowConfigVersion: typeof payload.rowConfigVersion === 'number' ? payload.rowConfigVersion : undefined,
         rowDiagnostics: Array.isArray(payload.rowDiagnostics) ? payload.rowDiagnostics : [],
         sections: Array.isArray(payload.sections) ? payload.sections : [],
         sectionItems: normalizeSectionItems(payload.sectionItems)
@@ -276,6 +331,10 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
 
     return {
         heroItems: normalizedPayload.heroItems.map(compactCacheItem),
+        recommendationConfigHash: normalizedPayload.recommendationConfigHash,
+        rowConfigApplied: normalizedPayload.rowConfigApplied,
+        rowConfigHash: normalizedPayload.rowConfigHash,
+        rowConfigVersion: normalizedPayload.rowConfigVersion,
         rowDiagnostics: normalizedPayload.rowDiagnostics,
         sections: normalizedPayload.sections,
         sectionItems: Object.keys(normalizedPayload.sectionItems).reduce<Record<string, unknown[]>>(
@@ -297,6 +356,143 @@ function getPayloadItemCount(payload: FeaturedPayload) {
     }, 0);
 }
 
+function getPayloadRecordString(value: unknown, ...keys: string[]) {
+    if (!isRecord(value)) return '';
+
+    for (const key of keys) {
+        const candidate = value[key];
+
+        if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    }
+
+    return '';
+}
+
+function getSectionId(section: unknown) {
+    return getPayloadRecordString(section, 'id', 'Id', 'key', 'Key', 'sectionId', 'SectionId');
+}
+
+function getPayloadRecordNumber(value: unknown, ...keys: string[]) {
+    if (!isRecord(value)) return null;
+
+    for (const key of keys) {
+        const candidate = value[key];
+
+        if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+    }
+
+    return null;
+}
+
+function getSectionItemCount(section: unknown, sectionItems: Record<string, unknown[]>) {
+    const sectionId = getSectionId(section);
+    const explicitCount = getPayloadRecordNumber(section, 'itemCount', 'ItemCount');
+
+    if (explicitCount !== null && explicitCount > 0) return explicitCount;
+    if (sectionId && Array.isArray(sectionItems[sectionId])) return sectionItems[sectionId].length;
+    if (isRecord(section) && Array.isArray(section.items)) return section.items.length;
+    if (explicitCount !== null) return explicitCount;
+
+    return 0;
+}
+
+function getSectionRowType(section: unknown) {
+    const explicitType = getPayloadRecordString(section, 'rowType', 'RowType');
+
+    if (explicitType) return explicitType;
+
+    const sourceType = getPayloadRecordString(section, 'sourceType', 'SourceType').toLowerCase();
+    const sectionType = getPayloadRecordString(section, 'type', 'Type').toLowerCase();
+
+    if (sourceType === 'recommendation' || sectionType === 'recommendation') return 'generated-recommendation';
+    if (sourceType === 'legacy') return 'fallback';
+
+    return 'configured-rule';
+}
+
+function getPayloadRowSourceSummary(payload: FeaturedPayload | null | undefined): FeaturedPayloadRowSourceSummary {
+    const normalizedPayload = payload ? normalizePayload(payload) : null;
+    const sections = normalizedPayload?.sections || [];
+    const sectionItems = normalizedPayload?.sectionItems || {};
+    const renderedSections = sections.length ?
+        sections :
+        Object.keys(sectionItems).map(sectionId => ({
+            id: sectionId,
+            itemCount: sectionItems[sectionId]?.length || 0,
+            rowType: 'fallback',
+            title: sectionId
+        }));
+    const counts = renderedSections.reduce<FeaturedPayloadRowSourceSummary>(
+        (summary, section) => {
+            const rowType = getSectionRowType(section);
+            const itemCount = getSectionItemCount(section, sectionItems);
+
+            if (itemCount <= 0) return summary;
+
+            if (rowType === 'generated-recommendation') summary.recommendationRowCount += 1;
+            else if (rowType === 'fallback') summary.fallbackRowCount += 1;
+            else summary.configuredRowCount += 1;
+
+            summary.totalRenderedRowCount += 1;
+
+            return summary;
+        },
+        {
+            configuredRowCount: 0,
+            fallbackRowCount: 0,
+            recommendationRowCount: 0,
+            skippedRows: [] as FeaturedPayloadRowSourceSummary['skippedRows'],
+            totalRenderedRowCount: 0
+        }
+    );
+    const skippedRows = (normalizedPayload?.rowDiagnostics || [])
+        .filter(diagnostic => getPayloadRecordString(diagnostic, 'dropReason', 'DropReason'))
+        .map(diagnostic => ({
+            reason: getPayloadRecordString(diagnostic, 'dropReason', 'DropReason'),
+            rowId: getPayloadRecordString(diagnostic, 'rowId', 'RowId'),
+            rowTitle: getPayloadRecordString(diagnostic, 'rowTitle', 'RowTitle'),
+            rowType: getSectionRowType(diagnostic)
+        }));
+
+    return {
+        ...counts,
+        skippedRows
+    };
+}
+
+function getPayloadSummary(payload: FeaturedPayload | null | undefined) {
+    const rowSourceSummary = getPayloadRowSourceSummary(payload);
+
+    return {
+        configuredRowCount: rowSourceSummary.configuredRowCount,
+        fallbackRowCount: rowSourceSummary.fallbackRowCount,
+        heroCount: payload?.heroItems.length || 0,
+        itemCount: payload ? getPayloadItemCount(payload) : 0,
+        recommendationRowCount: rowSourceSummary.recommendationRowCount,
+        sectionCount: payload ? Object.keys(payload.sectionItems).length : 0,
+        skippedRows: rowSourceSummary.skippedRows,
+        totalRenderedRowCount: rowSourceSummary.totalRenderedRowCount
+    };
+}
+
+function getDocumentPayloadSummary(document: FeaturedServerCacheDocument) {
+    const entry = parseCacheEntryValue(document.featuredContent);
+
+    return {
+        ...getPayloadSummary(entry?.payload),
+        hasFeaturedContent: Boolean(entry),
+        updatedAt: document.updatedAt ?? null
+    };
+}
+
+function getSerializedByteSize(value: unknown) {
+    try {
+        return JSON.stringify(value).length;
+    } catch {
+        return 0;
+    }
+}
+
 function getErrorMessage(err: unknown) {
     const normalizedError = normalizePtvApiError(err);
 
@@ -305,6 +501,37 @@ function getErrorMessage(err: unknown) {
     }
 
     return err instanceof Error ? err.message : 'Unable to store featured cache.';
+}
+
+function createPluginTimeoutError(message: string) {
+    return Object.assign(new Error(message), {
+        code: 'PTV_PLUGIN_TIMEOUT'
+    });
+}
+
+function runPluginRequestWithTimeout<T>(
+    task: (signal?: AbortSignal) => Promise<T>,
+    timeoutMs: number,
+    message: string
+) {
+    let timeoutId = 0;
+    const AbortControllerCtor = (window as unknown as {
+        AbortController?: new () => PtvAbortControllerLike;
+    }).AbortController;
+    const controller = AbortControllerCtor ? new AbortControllerCtor() : null;
+    const timeout = new Promise<T>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+            controller?.abort();
+            reject(createPluginTimeoutError(message));
+        }, timeoutMs);
+    });
+
+    return Promise.race([
+        task(controller?.signal),
+        timeout
+    ]).finally(() => {
+        window.clearTimeout(timeoutId);
+    });
 }
 
 function mergePayload(payload: FeaturedPayload, fallbackPayload?: FeaturedPayload): FeaturedPayload {
@@ -329,6 +556,10 @@ function mergePayload(payload: FeaturedPayload, fallbackPayload?: FeaturedPayloa
         heroItems: normalizedPayload.heroItems.length ?
             normalizedPayload.heroItems :
             normalizedFallbackPayload.heroItems,
+        recommendationConfigHash: normalizedPayload.recommendationConfigHash || normalizedFallbackPayload.recommendationConfigHash,
+        rowConfigApplied: normalizedPayload.rowConfigApplied ?? normalizedFallbackPayload.rowConfigApplied,
+        rowConfigHash: normalizedPayload.rowConfigHash || normalizedFallbackPayload.rowConfigHash,
+        rowConfigVersion: normalizedPayload.rowConfigVersion ?? normalizedFallbackPayload.rowConfigVersion,
         rowDiagnostics: normalizedPayload.rowDiagnostics?.length ?
             normalizedPayload.rowDiagnostics :
             normalizedFallbackPayload.rowDiagnostics,
@@ -362,19 +593,67 @@ function parseCacheSettings(value: unknown): FeaturedCacheSettings {
     };
 }
 
+function getRecordField(source: Record<string, unknown>, ...keys: string[]) {
+    for (const key of keys) {
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+            return source[key];
+        }
+    }
+
+    return undefined;
+}
+
+function getServerDocumentSource(value: unknown) {
+    if (!isRecord(value)) return null;
+
+    const directFeaturedContent = getRecordField(value, 'featuredContent', 'FeaturedContent');
+    const directSettings = getRecordField(value, 'featuredContentSettings', 'FeaturedContentSettings');
+    const directUpdatedAt = getRecordField(value, 'updatedAt', 'UpdatedAt');
+    const nestedDocument = getRecordField(value, 'document', 'Document');
+    const storeStatus = getRecordField(value, 'storeStatus', 'StoreStatus');
+    const hasFeaturedContentField =
+        Object.prototype.hasOwnProperty.call(value, 'featuredContent')
+        || Object.prototype.hasOwnProperty.call(value, 'FeaturedContent');
+    const hasSettingsField =
+        Object.prototype.hasOwnProperty.call(value, 'featuredContentSettings')
+        || Object.prototype.hasOwnProperty.call(value, 'FeaturedContentSettings');
+    const hasUpdatedAtField =
+        Object.prototype.hasOwnProperty.call(value, 'updatedAt')
+        || Object.prototype.hasOwnProperty.call(value, 'UpdatedAt');
+
+    if (isRecord(nestedDocument)) return nestedDocument;
+    if (isRecord(storeStatus)) {
+        const storeDocument = getRecordField(storeStatus, 'document', 'Document');
+
+        if (isRecord(storeDocument)) return storeDocument;
+    }
+
+    const isDocumentLike = (hasFeaturedContentField && (parseCacheEntryValue(directFeaturedContent) || directFeaturedContent == null))
+        || (hasSettingsField && isRecord(directSettings))
+        || (hasUpdatedAtField && typeof directUpdatedAt === 'number');
+
+    return isDocumentLike ? value : null;
+}
+
 function normalizeServerDocument(value: unknown): FeaturedServerCacheDocument {
-    if (!isRecord(value)) {
+    const document = getServerDocumentSource(value);
+
+    if (!document) {
         return {
             version: SERVER_CACHE_DOCUMENT_VERSION
         };
     }
 
+    const featuredContent = getRecordField(document, 'featuredContent', 'FeaturedContent');
+    const featuredContentSettings = getRecordField(document, 'featuredContentSettings', 'FeaturedContentSettings');
+    const updatedAt = getRecordField(document, 'updatedAt', 'UpdatedAt');
+
     return {
-        ...value,
+        ...document,
         version: SERVER_CACHE_DOCUMENT_VERSION,
-        featuredContent: parseCacheEntryValue(value.featuredContent),
-        featuredContentSettings: parseCacheSettings(value.featuredContentSettings),
-        updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : undefined
+        featuredContent: parseCacheEntryValue(featuredContent),
+        featuredContentSettings: parseCacheSettings(featuredContentSettings),
+        updatedAt: typeof updatedAt === 'number' ? updatedAt : undefined
     };
 }
 
@@ -436,7 +715,11 @@ function readPluginStatusForCache() {
         return Promise.resolve(null);
     }
 
-    inflightPluginStatus = pluginApi.getStatus<PtvPluginStatusForCache>()
+    inflightPluginStatus = runPluginRequestWithTimeout(
+        signal => pluginApi.getStatus<PtvPluginStatusForCache>({ signal }),
+        SERVER_STATUS_READ_TIMEOUT_MS,
+        'PiggieTV plugin status request timed out.'
+    )
         .then(status => {
             lastPluginStatus = status;
             lastPluginStatusReadAt = Date.now();
@@ -467,20 +750,58 @@ function readPluginDocument() {
     return readPluginStatusForCache()
         .then(status => {
             const isFeaturedContentAdvertised = hasPluginFeature(status, 'featuredContent');
+            const hasStatusCapabilities = Boolean(
+                status
+                && (
+                    status.featureFlags
+                    || status.features
+                )
+            );
 
             recordPtvEvent('cache', 'featured-cache-feature-advertised', {
                 featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
                 features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
+                hasStatusCapabilities,
                 isFeaturedContentAdvertised,
                 statusOk: status?.ok ?? null
             });
 
-            if (!isFeaturedContentAdvertised) {
-                return Promise.reject(new Error('PTV plugin featured-content endpoint is not advertised by status.'));
+            if (hasStatusCapabilities && !isFeaturedContentAdvertised) {
+                recordPtvEvent('cache', 'featured-cache-feature-not-advertised', {
+                    action: 'try-featured-directly',
+                    featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
+                    features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
+                    statusOk: status?.ok ?? null
+                });
             }
 
-            return pluginApi.getFeaturedContentCacheDocument()
-                .then(document => normalizeServerDocument(document));
+            if (!hasStatusCapabilities) {
+                recordPtvEvent('cache', 'featured-cache-status-unavailable', {
+                    action: 'try-featured-directly'
+                });
+            }
+
+            return runPluginRequestWithTimeout(
+                signal => pluginApi.getFeaturedContentCacheDocument({ signal }),
+                SERVER_CACHE_READ_TIMEOUT_MS,
+                'PiggieTV featured cache read timed out.'
+            )
+                .then(document => {
+                    const normalizedDocument = normalizeServerDocument(document);
+                    const entry = parseCacheEntryValue(normalizedDocument.featuredContent);
+
+                    recordPtvEvent('cache', 'featured-cache-document-read', {
+                        hasFeaturedContent: Boolean(entry),
+                        heroCount: entry?.payload.heroItems.length || 0,
+                        itemCount: entry ? getPayloadItemCount(entry.payload) : 0,
+                        payloadSize: getSerializedByteSize(normalizedDocument.featuredContent),
+                        sectionCount: entry ? Object.keys(entry.payload.sectionItems).length : 0,
+                        storage: getSuccessfulServerStorage(),
+                        updatedAt: normalizedDocument.updatedAt ?? null
+                    });
+
+                    return normalizedDocument;
+                });
         });
 }
 
@@ -524,6 +845,36 @@ function noteServerReadSuccess(hasCache: boolean) {
     recordPtvPluginApiRetryState(serverReadRetryCount, serverReadRetryBackoffMs);
 }
 
+function applyServerCacheDocument(document: unknown, source: string) {
+    const normalizedDocument = normalizeServerDocument(document);
+
+    memoryCacheSettings = parseCacheSettings(normalizedDocument.featuredContentSettings);
+    memoryCacheEntry = parseCacheEntryValue(normalizedDocument.featuredContent);
+    lastCacheStorage = memoryCacheEntry ? getSuccessfulServerStorage() : null;
+    lastCacheWriteError = null;
+    lastCacheReadError = null;
+    noteServerReadSuccess(Boolean(memoryCacheEntry));
+
+    debugLog('applied server cache document', {
+        hasCache: Boolean(memoryCacheEntry),
+        source,
+        storage: lastCacheStorage,
+        ttlMs: getFeaturedContentCacheTtlMs()
+    });
+    recordPtvEvent('cache', 'featured-cache-server-read-result', {
+        hasCache: Boolean(memoryCacheEntry),
+        heroCount: memoryCacheEntry?.payload.heroItems.length || 0,
+        itemCount: memoryCacheEntry ? getPayloadItemCount(memoryCacheEntry.payload) : 0,
+        payloadSize: getSerializedByteSize(memoryCacheEntry),
+        sectionCount: memoryCacheEntry ? Object.keys(memoryCacheEntry.payload.sectionItems).length : 0,
+        source,
+        storage: lastCacheStorage || 'none',
+        ttlMs: getFeaturedContentCacheTtlMs()
+    });
+
+    return memoryCacheEntry;
+}
+
 function noteServerReadFailure() {
     serverReadRetryCount += 1;
     serverReadRetryBackoffMs = Math.min(
@@ -545,9 +896,41 @@ function writeServerDocument(nextDocument: FeaturedServerCacheDocument) {
         version: SERVER_CACHE_DOCUMENT_VERSION,
         updatedAt: Date.now()
     };
+    const writeSummary = getDocumentPayloadSummary(normalizedDocument);
+    const payloadSize = getSerializedByteSize(normalizedDocument);
 
+    recordPtvEvent('cache', 'featured-cache-write-start', {
+        ...writeSummary,
+        payloadSize
+    });
     return writePluginDocument(normalizedDocument)
-        .then(() => undefined);
+        .then(() => readPluginDocument())
+        .then(readbackDocument => {
+            const normalizedReadback = normalizeServerDocument(readbackDocument);
+            const readbackSummary = getDocumentPayloadSummary(normalizedReadback);
+
+            recordPtvEvent('cache', 'featured-cache-write-success', {
+                ...readbackSummary,
+                payloadSize,
+                requestedHeroCount: writeSummary.heroCount,
+                requestedItemCount: writeSummary.itemCount,
+                requestedSectionCount: writeSummary.sectionCount
+            });
+            recordPtvEvent('cache', 'featured-cache-write-readback-result', {
+                ...readbackSummary,
+                payloadSize
+            });
+
+            return normalizedReadback;
+        })
+        .catch((err: unknown) => {
+            recordPtvEvent('cache', 'featured-cache-write-failure', {
+                ...writeSummary,
+                error: getErrorMessage(err),
+                payloadSize
+            });
+            throw err;
+        });
 }
 
 function clearServerDocument() {
@@ -563,6 +946,12 @@ function readServerCacheEntry() {
             retryBackoffMs: serverReadRetryBackoffMs,
             retryCount: serverReadRetryCount
         });
+        recordPtvEvent('cache', 'featured-cache-read-suppressed', {
+            hasMemoryCache: Boolean(memoryCacheEntry),
+            nextServerReadAllowedAt,
+            retryBackoffMs: serverReadRetryBackoffMs,
+            retryCount: serverReadRetryCount
+        });
 
         if (memoryCacheEntry) {
             lastCacheStorage = 'memory';
@@ -573,20 +962,7 @@ function readServerCacheEntry() {
 
     inflightServerRead = timePtvAsync('cache', 'read-server-cache', () => readServerDocument())
         .then(document => {
-            memoryCacheSettings = parseCacheSettings(document.featuredContentSettings);
-            memoryCacheEntry = parseCacheEntryValue(document.featuredContent);
-            lastCacheStorage = memoryCacheEntry ? getSuccessfulServerStorage() : null;
-            lastCacheWriteError = null;
-            lastCacheReadError = null;
-            noteServerReadSuccess(Boolean(memoryCacheEntry));
-
-            debugLog('read server cache', {
-                hasCache: Boolean(memoryCacheEntry),
-                storage: lastCacheStorage,
-                ttlMs: getFeaturedContentCacheTtlMs()
-            });
-
-            return memoryCacheEntry;
+            return applyServerCacheDocument(document, 'server-read');
         })
         .catch((err: unknown) => {
             lastCacheWriteError = null;
@@ -611,12 +987,35 @@ function readServerCacheEntry() {
     return inflightServerRead;
 }
 
+export function hydrateFeaturedContentCacheFromDocument(document: unknown, reason = 'manual') {
+    const entry = applyServerCacheDocument(document, `hydrate:${reason}`);
+
+    recordPtvEvent('cache', 'featured-cache-memory-hydrated', {
+        hasCache: Boolean(entry),
+        reason
+    });
+    dispatchCacheUpdated();
+
+    return entry;
+}
+
 export function primeFeaturedContentCacheStatus() {
     if (memoryCacheEntry || inflightServerRead) {
+        recordPtvEvent('cache', 'status-prime-skipped', {
+            hasMemoryCache: Boolean(memoryCacheEntry),
+            reason: memoryCacheEntry ? 'memory-cache-present' : 'read-in-flight'
+        });
         return inflightServerRead || Promise.resolve(memoryCacheEntry);
     }
 
     if (!getCurrentApiClient() || !canReadServerCacheNow()) {
+        recordPtvEvent('cache', 'status-prime-skipped', {
+            hasApiClient: Boolean(getCurrentApiClient()),
+            nextServerReadAllowedAt,
+            reason: getCurrentApiClient() ? 'read-backoff' : 'missing-api-client',
+            retryBackoffMs: serverReadRetryBackoffMs,
+            retryCount: serverReadRetryCount
+        });
         return Promise.resolve(null);
     }
 
@@ -702,8 +1101,15 @@ function writeCacheEntry(payload: FeaturedPayload) {
         expiresAt: createdAt + getFeaturedContentCacheTtlMs(),
         payload: compactPayload(payload)
     };
+    const payloadSummary = getPayloadSummary(entry.payload);
+    const payloadSize = getSerializedByteSize(entry);
 
     memoryCacheEntry = entry;
+    nextServerReadAllowedAt = 0;
+    recordPtvEvent('cache', 'featured-cache-entry-write-start', {
+        ...payloadSummary,
+        payloadSize
+    });
 
     return persistServerState(entry)
         .then(() => {
@@ -723,6 +1129,12 @@ function writeCacheEntry(payload: FeaturedPayload) {
                 sections: Object.keys(entry.payload.sectionItems).length,
                 storage: lastCacheStorage
             }, 'FeaturedCache');
+            recordPtvEvent('cache', 'featured-cache-entry-write-success', {
+                ...payloadSummary,
+                payloadSize,
+                storage: lastCacheStorage
+            });
+            nextServerReadAllowedAt = 0;
 
             return entry;
         })
@@ -732,6 +1144,12 @@ function writeCacheEntry(payload: FeaturedPayload) {
             recordPtvEvent('cache', 'error', {
                 error: getErrorMessage(err),
                 operation: 'write'
+            });
+            recordPtvEvent('cache', 'featured-cache-entry-write-failure', {
+                ...payloadSummary,
+                error: getErrorMessage(err),
+                payloadSize,
+                storage: lastCacheStorage
             });
             debugLog('failed to store payload on server', err);
 
@@ -854,9 +1272,24 @@ export function clearFeaturedContentCache() {
     dispatchCacheUpdated();
 }
 
+export function invalidateFeaturedContentMemoryCache(reason = 'manual') {
+    inflightFeaturedContent = null;
+    inflightServerRead = null;
+    memoryCacheEntry = null;
+    nextServerReadAllowedAt = 0;
+    lastCacheReadError = null;
+
+    recordPtvEvent('cache', 'featured-cache-memory-invalidated', {
+        reason
+    });
+    debugLog('invalidated local featured cache', { reason });
+    dispatchCacheUpdated();
+}
+
 export function getFeaturedContentCacheStatus() {
     const cached = memoryCacheEntry;
     const now = Date.now();
+    const rowSourceSummary = getPayloadRowSourceSummary(cached?.payload);
 
     if (!cached && !inflightServerRead && canReadServerCacheNow()) {
         void primeFeaturedContentCacheStatus();
@@ -865,12 +1298,17 @@ export function getFeaturedContentCacheStatus() {
     return {
         createdAt: cached?.createdAt || null,
         expiresAt: cached?.expiresAt || null,
+        configuredRowCount: rowSourceSummary.configuredRowCount,
+        fallbackRowCount: rowSourceSummary.fallbackRowCount,
         heroCount: cached?.payload.heroItems.length || 0,
         isStored: lastCacheStorage === 'plugin-file',
         isFresh: Boolean(cached && now < cached.expiresAt),
         itemCount: cached ? getPayloadItemCount(cached.payload) : 0,
+        recommendationRowCount: rowSourceSummary.recommendationRowCount,
         sectionCount: cached ? Object.keys(cached.payload.sectionItems).length : 0,
+        skippedRows: rowSourceSummary.skippedRows,
         storage: lastCacheStorage || 'none',
+        totalRenderedRowCount: rowSourceSummary.totalRenderedRowCount,
         readError: lastCacheReadError,
         readInProgress: Boolean(inflightServerRead),
         writeError: lastCacheWriteError,

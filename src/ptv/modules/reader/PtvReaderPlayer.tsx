@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-floating-promises, prefer-promise-reject-errors, react/jsx-no-bind */
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
@@ -5,7 +6,8 @@ import dialogHelper from '../../../components/dialogHelper/dialogHelper';
 import { PluginType } from '../../../types/plugin';
 import Events from '../../../utils/events';
 
-import { ReaderApp } from './ReaderApp';
+import { recordPtvEvent } from '../../core/observability';
+
 import type { ReaderSource } from './readerModels';
 import { isPiggieTvReaderItem, resolveReaderSource } from './sourceResolver';
 
@@ -25,6 +27,8 @@ export default class PtvReaderPlayer {
     streamInfo: Record<string, any> | null = null;
 
     play(options: Record<string, any>): Promise<void> {
+        const startedAt = performance.now();
+
         this.stopping = false;
         this.progress = 0;
         this.item = options.items?.[0] || options.item || null;
@@ -43,7 +47,11 @@ export default class PtvReaderPlayer {
         };
 
         return resolveReaderSource(this.item)
-            .then(source => {
+            .then(async source => {
+                const { ReaderApp } = await import('./ReaderApp');
+
+                if (this.stopping) return;
+
                 this.source = source;
                 const element = this.createMediaElement();
                 const rootHost = element.querySelector('.ptv-reader-root');
@@ -53,6 +61,7 @@ export default class PtvReaderPlayer {
                 this.root = createRoot(rootHost);
                 this.root.render(
                     <ReaderApp
+                        openedAt={startedAt}
                         source={source}
                         onClose={() => this.stop()}
                         onProgress={(percent) => {
@@ -61,6 +70,11 @@ export default class PtvReaderPlayer {
                         }}
                     />
                 );
+                recordPtvEvent('render', 'readerOpenMs', {
+                    itemId: this.item?.Id || null,
+                    readerOpenMs: Math.max(0, Math.round(performance.now() - startedAt)),
+                    sourceFormat: source.format
+                });
             });
     }
 
@@ -164,3 +178,5 @@ export default class PtvReaderPlayer {
         return element;
     }
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-floating-promises, prefer-promise-reject-errors, react/jsx-no-bind */

@@ -13,12 +13,14 @@ const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
 export class PtvApiError extends Error {
     endpoint: string;
     statusCode: number | null;
+    responseBody: string;
 
-    constructor(message: string, endpoint: string, statusCode: number | null = null) {
+    constructor(message: string, endpoint: string, statusCode: number | null = null, responseBody = '') {
         super(message);
         this.name = 'PtvApiError';
         this.endpoint = endpoint;
         this.statusCode = statusCode;
+        this.responseBody = responseBody;
     }
 }
 
@@ -109,7 +111,8 @@ export function getPtvApiUrl(
 function getErrorStatus(error: unknown): number | null {
     if (!isRecord(error)) return null;
 
-    const statusCode = error.statusCode || error.status || error.statusText;
+    const response = isRecord(error.response) ? error.response : null;
+    const statusCode = error.statusCode || error.status || response?.status || error.statusText;
 
     return typeof statusCode === 'number' ? statusCode : null;
 }
@@ -118,8 +121,75 @@ function getErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === 'string' && error) return error;
     if (isRecord(error) && typeof error.message === 'string') return error.message;
+    if (isRecord(error)) {
+        const response = isRecord(error.response) ? error.response : null;
+        const status = typeof error.status === 'number' ? error.status : response?.status;
+        const statusText = typeof error.statusText === 'string' ? error.statusText : response?.statusText;
+
+        if (typeof status === 'number') {
+            return `Jellyfin API request failed with HTTP ${status}${statusText ? ` ${statusText}` : ''}.`;
+        }
+    }
 
     return fallback;
+}
+
+function redactDiagnosticText(value: string) {
+    return value
+        .replace(/(authorization\s*[:=]\s*)(bearer\s+)?[^\s"',;]+/gi, '$1[redacted]')
+        .replace(/(api[-_ ]?key\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]')
+        .replace(/(token\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]')
+        .replace(/(password\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]');
+}
+
+function getErrorResponseBody(error: unknown): string {
+    if (!isRecord(error)) return '';
+
+    const candidates = [
+        error.responseText,
+        error.responseBody,
+        error.body,
+        error.data,
+        error.response
+    ];
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+            return redactDiagnosticText(candidate).slice(0, 2000);
+        }
+
+        if (isRecord(candidate)) {
+            try {
+                return redactDiagnosticText(JSON.stringify(candidate)).slice(0, 2000);
+            } catch {
+                return '[unserializable response body]';
+            }
+        }
+    }
+
+    return '';
+}
+
+async function getErrorResponseBodyAsync(error: unknown): Promise<string> {
+    const syncBody = getErrorResponseBody(error);
+
+    if (syncBody) return syncBody;
+    if (!isRecord(error)) return '';
+
+    const responseLike = typeof error.text === 'function' ? error : error.response;
+
+    if (isRecord(responseLike) && typeof responseLike.text === 'function') {
+        try {
+            const clone = typeof responseLike.clone === 'function' ? responseLike.clone() : responseLike;
+            const text = await (clone.text as () => Promise<string>)();
+
+            return redactDiagnosticText(text).slice(0, 2000);
+        } catch {
+            return '';
+        }
+    }
+
+    return '';
 }
 
 export function normalizePtvApiLayerError(error: unknown, endpoint: string): PtvApiError {
@@ -128,7 +198,19 @@ export function normalizePtvApiLayerError(error: unknown, endpoint: string): Ptv
     return new PtvApiError(
         getErrorMessage(error, 'Jellyfin API request failed.'),
         endpoint,
-        getErrorStatus(error)
+        getErrorStatus(error),
+        getErrorResponseBody(error)
+    );
+}
+
+async function normalizePtvApiLayerErrorAsync(error: unknown, endpoint: string): Promise<PtvApiError> {
+    if (error instanceof PtvApiError) return error;
+
+    return new PtvApiError(
+        getErrorMessage(error, 'Jellyfin API request failed.'),
+        endpoint,
+        getErrorStatus(error),
+        await getErrorResponseBodyAsync(error)
     );
 }
 
@@ -153,8 +235,8 @@ export function requestPtvJson<T = unknown>(
     }
 
     return apiClient.getJSON<T>(url, options.includeAuthorization !== false)
-        .catch(error => {
-            throw normalizePtvApiLayerError(error, url);
+        .catch(async error => {
+            throw await normalizePtvApiLayerErrorAsync(error, url);
         });
 }
 
@@ -188,8 +270,8 @@ export function sendPtvJson<T = unknown>(
     };
 
     return apiClient.ajax<T>(ajaxOptions)
-        .catch(error => {
-            throw normalizePtvApiLayerError(error, url);
+        .catch(async error => {
+            throw await normalizePtvApiLayerErrorAsync(error, url);
         });
 }
 

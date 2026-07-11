@@ -4,19 +4,36 @@ import { playbackManager } from '../../../components/playback/playbackmanager';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { isPiggieTvReaderItem, resolveReaderSource } from '../reader/sourceResolver';
 import { loadReaderProgress } from '../reader/readerProgressStore';
+import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
 
 import './details.scss';
 
 const DETAIL_PAGE_SELECTOR = '#itemDetailPage, .itemDetailPage';
 const READER_ACTIONS_CLASS = 'ptv-reader-detail-actions';
+const repairedDetailImageUrls = new Set();
 
 function getHashParams() {
     const hash = window.location.hash || '';
     const queryIndex = hash.indexOf('?');
+    const values = new Map();
 
-    if (queryIndex === -1) return new URLSearchParams();
+    if (queryIndex === -1) {
+        return {
+            get: () => ''
+        };
+    }
 
-    return new URLSearchParams(hash.slice(queryIndex + 1));
+    hash.slice(queryIndex + 1).split('&').forEach(pair => {
+        const [rawKey, ...rawValueParts] = pair.split('=');
+        const key = decodeURIComponent((rawKey || '').replace(/\+/g, ' '));
+        const value = decodeURIComponent(rawValueParts.join('=').replace(/\+/g, ' '));
+
+        if (key) values.set(key, value);
+    });
+
+    return {
+        get: key => values.get(key) || ''
+    };
 }
 
 function getApiClient(serverId) {
@@ -25,12 +42,35 @@ function getApiClient(serverId) {
     return window.ApiClient;
 }
 
+function isFilenameCharacter(value) {
+    const code = value.charCodeAt(0);
+
+    return (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+}
+
+function getSafeFilenameBase(value) {
+    let result = '';
+    let previousDash = false;
+
+    String(value || 'book').toLowerCase().split('').forEach(character => {
+        if (isFilenameCharacter(character)) {
+            result += character;
+            previousDash = false;
+            return;
+        }
+
+        if (!previousDash && result) {
+            result += '-';
+            previousDash = true;
+        }
+    });
+
+    return result.endsWith('-') ? result.slice(0, -1) : result || 'book';
+}
+
 function getFilename(item, source) {
     const extension = source.extension || source.metadata.fileExtension || 'book';
-    return `${source.metadata.title || item.Name || 'book'}`
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '') + `.${extension}`;
+    return `${getSafeFilenameBase(source.metadata.title || item.Name)}.${extension}`;
 }
 
 function normalizeDetailButtons(page) {
@@ -48,6 +88,146 @@ function normalizeDetailButtons(page) {
     });
 }
 
+function createDetailImageAnchor(source) {
+    const anchor = document.createElement('a');
+    anchor.href = source;
+
+    return anchor;
+}
+
+function getDetailImageParts(pathname) {
+    const segments = pathname.split('/').filter(Boolean);
+    const itemsIndex = segments.findIndex(segment => segment.toLowerCase() === 'items');
+    const imagesIndex = segments.findIndex((segment, index) => index > itemsIndex && segment.toLowerCase() === 'images');
+
+    if (itemsIndex === -1 || imagesIndex === -1) return null;
+
+    const itemId = segments[itemsIndex + 1];
+    const imageType = segments[imagesIndex + 1];
+
+    if (!itemId || !imageType) return null;
+
+    return {
+        imageType,
+        imagesIndex,
+        itemId,
+        segments
+    };
+}
+
+function removeQueryParameter(search, keyToRemove) {
+    const normalizedKey = keyToRemove.toLowerCase();
+    const query = search.startsWith('?') ? search.slice(1) : search;
+    const nextPairs = query
+        .split('&')
+        .filter(pair => {
+            const [rawKey] = pair.split('=');
+            return decodeURIComponent((rawKey || '').replace(/\+/g, ' ')).toLowerCase() !== normalizedKey;
+        });
+
+    return nextPairs.length ? `?${nextPairs.join('&')}` : '';
+}
+
+function replaceDetailImageType(anchor, parts, nextType) {
+    const nextSegments = [...parts.segments];
+    nextSegments[parts.imagesIndex + 1] = nextType;
+
+    if (nextType !== 'Backdrop') {
+        nextSegments.splice(parts.imagesIndex + 2);
+    } else {
+        nextSegments[parts.imagesIndex + 2] = '0';
+    }
+
+    anchor.pathname = `/${nextSegments.join('/')}`;
+
+    return anchor.href;
+}
+
+function getDetailImageRepairTarget(image) {
+    const source = image.currentSrc || image.src;
+
+    if (!source || !source.toLowerCase().includes('/items/') || !source.toLowerCase().includes('/images/')) return null;
+
+    const anchor = createDetailImageAnchor(source);
+    const parts = getDetailImageParts(anchor.pathname);
+
+    if (!parts) return null;
+
+    const { imageType, itemId } = parts;
+    const normalizedType = imageType.toLowerCase();
+    const currentStep = Number(image.dataset.ptvImageRepairStep || 0);
+
+    if (anchor.search.toLowerCase().includes('tag=')) {
+        anchor.search = removeQueryParameter(anchor.search, 'tag');
+        return {
+            attemptedUrl: source,
+            itemId,
+            nextImageType: imageType,
+            nextStep: currentStep + 1,
+            nextUrl: anchor.href,
+            staleTagDetected: true
+        };
+    }
+
+    if (normalizedType === 'primary') {
+        return {
+            attemptedUrl: source,
+            itemId,
+            nextImageType: 'Thumb',
+            nextStep: currentStep + 1,
+            nextUrl: replaceDetailImageType(anchor, parts, 'Thumb'),
+            staleTagDetected: false
+        };
+    }
+
+    if (normalizedType === 'thumb') {
+        return {
+            attemptedUrl: source,
+            itemId,
+            nextImageType: 'Backdrop',
+            nextStep: currentStep + 1,
+            nextUrl: replaceDetailImageType(anchor, parts, 'Backdrop'),
+            staleTagDetected: false
+        };
+    }
+
+    return null;
+}
+
+function handleDetailImageError(event) {
+    const image = event.currentTarget;
+
+    if (!(image instanceof HTMLImageElement)) return;
+
+    const target = getDetailImageRepairTarget(image);
+
+    if (!target || repairedDetailImageUrls.has(target.nextUrl)) return;
+
+    repairedDetailImageUrls.add(target.nextUrl);
+    image.dataset.ptvImageRepairStep = String(target.nextStep);
+
+    if (shouldCollectDiagnostics()) {
+        recordPtvEvent('image', 'details-image-repair', {
+            attemptedUrl: target.attemptedUrl,
+            itemId: target.itemId,
+            nextImageType: target.nextImageType,
+            nextUrl: target.nextUrl,
+            staleTagDetected: target.staleTagDetected
+        });
+    }
+
+    image.src = target.nextUrl;
+}
+
+function repairDetailImages(page) {
+    page.querySelectorAll('img').forEach(image => {
+        if (image.dataset.ptvImageRepairInstalled === 'true') return;
+
+        image.dataset.ptvImageRepairInstalled = 'true';
+        image.addEventListener('error', handleDetailImageError);
+    });
+}
+
 function enhanceDetails() {
     const page = document.querySelector(DETAIL_PAGE_SELECTOR);
 
@@ -55,6 +235,7 @@ function enhanceDetails() {
 
     page.classList.add('ptv-detail-page');
     normalizeDetailButtons(page);
+    repairDetailImages(page);
     enhanceReaderActions(page);
     runIconEngine(page);
 }

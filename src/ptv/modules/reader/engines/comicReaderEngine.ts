@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, array-callback-return, compat/compat */
 import { Archive } from 'libarchive.js';
 import { appRouter } from '../../../../components/router/appRouter';
 
@@ -25,12 +26,19 @@ function isImageFile(name: string) {
     return index !== -1 && IMAGE_EXTENSIONS.has(name.slice(index + 1).toLowerCase());
 }
 
-export async function loadComicDocument(source: ReaderSource): Promise<LoadedReaderDocument> {
+export async function loadComicDocument(
+    source: ReaderSource,
+    options: {
+        signal?: AbortSignal;
+    } = {}
+): Promise<LoadedReaderDocument> {
     Archive.init({
         workerUrl: `${appRouter.baseUrl()}/libraries/worker-bundle.js`
     });
 
-    const response = await fetch(source.downloadUrl || '');
+    const response = await fetch(source.downloadUrl || '', {
+        signal: options.signal
+    });
     if (!response.ok) {
         throw new Error(`Comic download failed with HTTP ${response.status}`);
     }
@@ -61,3 +69,5 @@ export async function loadComicDocument(source: ReaderSource): Promise<LoadedRea
         }
     };
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any, array-callback-return, compat/compat */

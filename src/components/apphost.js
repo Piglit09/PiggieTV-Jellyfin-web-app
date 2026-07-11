@@ -6,6 +6,7 @@ import * as webSettings from '../scripts/settings/webSettings';
 import globalize from '../lib/globalize';
 import profileBuilder from '../scripts/browserDeviceProfile';
 import { AppFeature } from 'constants/appFeature';
+import { getPtvPlaybackMode } from '../ptv/core/featureSettings';
 
 const appName = 'Jellyfin Web';
 
@@ -24,9 +25,61 @@ const BrowserName = {
     opera: 'Opera',
     safari: 'Safari'
 };
+const PTV_FIRE_TV_PATTERN = /(aft[a-z0-9]*|fire\s?tv|amazonwebappplatform|silk\/)/i;
+
+function getQueryFlag(name) {
+    const search = window.location.search ? window.location.search.substring(1) : '';
+    const parts = search.split('&');
+
+    for (const part of parts) {
+        const pair = part.split('=');
+
+        try {
+            if (decodeURIComponent(pair[0] || '') === name) {
+                return decodeURIComponent(pair.slice(1).join('=') || '');
+            }
+        } catch {
+            // Ignore malformed query values.
+        }
+    }
+
+    return null;
+}
+
+function getPtvRequestedPlaybackMode() {
+    const runtimeOverride = window.__PTV_SAFE_PLAYBACK__;
+
+    if (runtimeOverride === false || runtimeOverride === '0') return 'performance';
+    if (runtimeOverride === true || runtimeOverride === '1') return 'compatible';
+
+    const queryValue = getQueryFlag('ptvPlaybackMode');
+
+    if (queryValue === 'auto' || queryValue === 'compatible' || queryValue === 'performance') return queryValue;
+
+    const safePlaybackQueryValue = getQueryFlag('ptvSafePlayback');
+
+    if (safePlaybackQueryValue === '0' || safePlaybackQueryValue === 'false') return 'performance';
+    if (safePlaybackQueryValue === '1' || safePlaybackQueryValue === 'true') return 'compatible';
+
+    return getPtvPlaybackMode();
+}
+
+function isPtvConservativeHevcClient() {
+    const userAgent = navigator.userAgent || '';
+
+    return browser.android
+        || browser.mobile
+        || browser.chrome
+        || browser.edgeChromium
+        || browser.firefox
+        || PTV_FIRE_TV_PATTERN.test(userAgent);
+}
 
 function getBaseProfileOptions(item) {
     const disableHlsVideoAudioCodecs = [];
+    const disableHlsVideoCodecs = [];
+    const playbackMode = item?.MediaType === 'Video' ? getPtvRequestedPlaybackMode() : 'auto';
+    const compatiblePlaybackMode = playbackMode === 'compatible';
 
     if (item && htmlMediaHelper.enableHlsJsPlayer(item.RunTimeTicks, item.MediaType)) {
         if (browser.edge) {
@@ -41,9 +94,24 @@ function getBaseProfileOptions(item) {
         }
     }
 
+    if (compatiblePlaybackMode) {
+        disableHlsVideoAudioCodecs.push('eac3');
+
+        if (!browser.tizen && !browser.web0s) {
+            disableHlsVideoAudioCodecs.push('ac3');
+        }
+
+        if (isPtvConservativeHevcClient()) {
+            disableHlsVideoCodecs.push('hevc');
+        }
+    }
+
     return {
         enableMkvProgressive: false,
-        disableHlsVideoAudioCodecs: disableHlsVideoAudioCodecs
+        disableHlsVideoAudioCodecs: Array.from(new Set(disableHlsVideoAudioCodecs)),
+        disableHlsVideoCodecs: Array.from(new Set(disableHlsVideoCodecs)),
+        ptvPlaybackMode: playbackMode,
+        ptvSafePlaybackMode: compatiblePlaybackMode
     };
 }
 
@@ -455,4 +523,3 @@ if (window.addEventListener) {
     window.addEventListener('focus', onAppVisible);
     window.addEventListener('blur', onAppHidden);
 }
-

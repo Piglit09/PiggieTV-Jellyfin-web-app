@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.PiggieTV.Configuration;
@@ -28,6 +29,11 @@ public class PiggieTVPluginConfiguration : BasePluginConfiguration
     public RowBuilderSettings Rows { get; set; } = RowBuilderSettings.CreateDefault();
 
     /// <summary>
+    /// Gets or sets persisted generated recommendation rows.
+    /// </summary>
+    public RecommendationRowSettings Recommendations { get; set; } = RecommendationRowSettings.CreateDefault();
+
+    /// <summary>
     /// Gets or sets featured cache settings.
     /// </summary>
     public CacheSettings CacheSettings { get; set; } = new();
@@ -41,6 +47,11 @@ public class PiggieTVPluginConfiguration : BasePluginConfiguration
     /// Gets or sets metadata provider settings.
     /// </summary>
     public TmdbSettings TmdbSettings { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets music metadata provider settings.
+    /// </summary>
+    public MusicMetadataSettings MusicMetadataSettings { get; set; } = new();
 
     /// <summary>
     /// Gets or sets Jellyseerr request integration settings.
@@ -117,6 +128,9 @@ public sealed class FeatureSettings
     /// <summary>Gets or sets a value indicating whether TV low-power mode is enabled.</summary>
     public bool TvLowPowerModeEnabled { get; set; } = true;
 
+    /// <summary>Gets or sets the PiggieTV playback profile mode.</summary>
+    public string PlaybackMode { get; set; } = "auto";
+
     /// <summary>Gets or sets a value indicating whether backend debug mode is enabled.</summary>
     public bool DebugModeEnabled { get; set; }
 }
@@ -167,23 +181,351 @@ public sealed class RowSettings
 }
 
 /// <summary>
+/// Persisted generated recommendation row settings.
+/// </summary>
+public sealed class RecommendationRowSettings
+{
+    /// <summary>Gets or sets the recommendation settings schema version.</summary>
+    [JsonPropertyName("schemaVersion")]
+    public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>Gets or sets a value indicating whether persisted recommendation rows are enabled.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Gets or sets the last generation timestamp.</summary>
+    [JsonPropertyName("generatedAt")]
+    public long? GeneratedAt { get; set; }
+
+    /// <summary>Gets or sets the row-builder hash used when rows were generated.</summary>
+    [JsonPropertyName("rowConfigHash")]
+    public string? RowConfigHash { get; set; }
+
+    /// <summary>Gets or sets the persisted recommendation config hash.</summary>
+    [JsonPropertyName("recommendationConfigHash")]
+    public string? RecommendationConfigHash { get; set; }
+
+    /// <summary>Gets or sets source item counts from the last generation.</summary>
+    [JsonPropertyName("sourceCounts")]
+    public List<RecommendationSourceCount> SourceCounts { get; set; } = [];
+
+    /// <summary>Gets or sets row diagnostics indexed by recommendation row id.</summary>
+    [JsonPropertyName("rowDiagnostics")]
+    public List<RecommendationRowDiagnostics> RowDiagnostics { get; set; } = [];
+
+    /// <summary>Gets or sets legacy source timing diagnostics. Normalization clears this before storage.</summary>
+    [JsonPropertyName("sourceTimingsJson")]
+    public string SourceTimingsJson { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets persisted generated rows.</summary>
+    [JsonPropertyName("rows")]
+    public List<RecommendationRowDefinition> Rows { get; set; } = [];
+
+    /// <summary>
+    /// Creates default recommendation row settings.
+    /// </summary>
+    /// <returns>Default recommendation settings.</returns>
+    public static RecommendationRowSettings CreateDefault() => new()
+    {
+        SchemaVersion = 1,
+        Enabled = true,
+        Rows = []
+    };
+}
+
+/// <summary>
+/// Persisted generated recommendation row.
+/// </summary>
+public sealed class RecommendationRowDefinition
+{
+    /// <summary>Gets or sets the stable recommendation row id.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets a value indicating whether this recommendation row is enabled.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether this generated row has been explicitly accepted for Home.</summary>
+    [JsonPropertyName("accepted")]
+    public bool Accepted { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether this generated row is still a draft.</summary>
+    [JsonPropertyName("draft")]
+    public bool Draft { get; set; } = true;
+
+    /// <summary>Gets or sets the row title.</summary>
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "Recommended";
+
+    /// <summary>Gets or sets a short explanation for the generated row.</summary>
+    [JsonPropertyName("explanation")]
+    public string Explanation { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the recommendation row media type.</summary>
+    [JsonPropertyName("mediaType")]
+    public string MediaType { get; set; } = "mixed";
+
+    /// <summary>Gets or sets the row generation timestamp.</summary>
+    [JsonPropertyName("generatedAt")]
+    public long? GeneratedAt { get; set; }
+
+    /// <summary>Gets or sets the row-builder hash used when this row was generated.</summary>
+    [JsonPropertyName("rowConfigHash")]
+    public string? RowConfigHash { get; set; }
+
+    /// <summary>Gets or sets the persisted recommendation config hash.</summary>
+    [JsonPropertyName("recommendationConfigHash")]
+    public string? RecommendationConfigHash { get; set; }
+
+    /// <summary>Gets or sets source item counts from generation.</summary>
+    [JsonPropertyName("sourceCounts")]
+    public List<RecommendationSourceCount> SourceCounts { get; set; } = [];
+
+    /// <summary>Gets or sets row generation and hydration diagnostics.</summary>
+    [JsonPropertyName("diagnostics")]
+    public RecommendationRowDiagnostics Diagnostics { get; set; } = new();
+
+    /// <summary>Gets or sets legacy source timing diagnostics. Normalization clears this before storage.</summary>
+    [JsonPropertyName("sourceTimingsJson")]
+    public string SourceTimingsJson { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets Jellyfin items backing this row.</summary>
+    [JsonPropertyName("items")]
+    public List<RecommendationItemSnapshot> Items { get; set; } = [];
+}
+
+/// <summary>
+/// Persisted recommendation row diagnostics.
+/// </summary>
+public sealed class RecommendationRowDiagnostics
+{
+    /// <summary>Gets or sets the recommendation row id this diagnostic describes.</summary>
+    [JsonPropertyName("rowId")]
+    public string RowId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the recommendation row title this diagnostic describes.</summary>
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets candidate count before row selection.</summary>
+    [JsonPropertyName("candidateCount")]
+    public int CandidateCount { get; set; }
+
+    /// <summary>Gets or sets item removals caused by row-level dedupe/diversity.</summary>
+    [JsonPropertyName("dedupeRemovals")]
+    public int DedupeRemovals { get; set; }
+
+    /// <summary>Gets or sets item removals caused by hydration/persistence.</summary>
+    [JsonPropertyName("hydrationRemovals")]
+    public int HydrationRemovals { get; set; }
+
+    /// <summary>Gets or sets final rendered item count.</summary>
+    [JsonPropertyName("finalRenderedCount")]
+    public int FinalRenderedCount { get; set; }
+
+    /// <summary>Gets or sets current persisted item count.</summary>
+    [JsonPropertyName("itemCount")]
+    public int ItemCount { get; set; }
+
+    /// <summary>Gets or sets primary candidate count before fallback fill.</summary>
+    [JsonPropertyName("primaryCandidateCount")]
+    public int PrimaryCandidateCount { get; set; }
+
+    /// <summary>Gets or sets secondary fallback item count used during fill.</summary>
+    [JsonPropertyName("secondaryFallbackCount")]
+    public int SecondaryFallbackCount { get; set; }
+
+    /// <summary>Gets or sets discovery fallback item count used during fill.</summary>
+    [JsonPropertyName("discoveryFallbackCount")]
+    public int DiscoveryFallbackCount { get; set; }
+}
+
+/// <summary>
+/// Persisted recommendation source count.
+/// </summary>
+public sealed class RecommendationSourceCount
+{
+    /// <summary>Gets or sets the source name.</summary>
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the source item count.</summary>
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+}
+
+/// <summary>
+/// Persisted item image tags for generated recommendation rows.
+/// </summary>
+public sealed class RecommendationItemImageTags
+{
+    /// <summary>Gets or sets the primary image tag.</summary>
+    [JsonPropertyName("Primary")]
+    public string? Primary { get; set; }
+
+    /// <summary>Gets or sets the thumb image tag.</summary>
+    [JsonPropertyName("Thumb")]
+    public string? Thumb { get; set; }
+
+    /// <summary>Gets or sets the logo image tag.</summary>
+    [JsonPropertyName("Logo")]
+    public string? Logo { get; set; }
+}
+
+/// <summary>
+/// Persisted Jellyfin item snapshot for generated recommendation rows.
+/// </summary>
+public sealed class RecommendationItemSnapshot
+{
+    /// <summary>Gets or sets the Jellyfin item id.</summary>
+    [JsonPropertyName("Id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the item name.</summary>
+    [JsonPropertyName("Name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the Jellyfin item type.</summary>
+    [JsonPropertyName("Type")]
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the media type.</summary>
+    [JsonPropertyName("MediaType")]
+    public string? MediaType { get; set; }
+
+    /// <summary>Gets or sets the overview.</summary>
+    [JsonPropertyName("Overview")]
+    public string? Overview { get; set; }
+
+    /// <summary>Gets or sets image tags.</summary>
+    [JsonPropertyName("ImageTags")]
+    public RecommendationItemImageTags ImageTags { get; set; } = new();
+
+    /// <summary>Gets or sets backdrop image tags.</summary>
+    [JsonPropertyName("BackdropImageTags")]
+    public List<string> BackdropImageTags { get; set; } = [];
+
+    /// <summary>Gets or sets parent backdrop image tags.</summary>
+    [JsonPropertyName("ParentBackdropImageTags")]
+    public List<string> ParentBackdropImageTags { get; set; } = [];
+
+    /// <summary>Gets or sets genres.</summary>
+    [JsonPropertyName("Genres")]
+    public List<string> Genres { get; set; } = [];
+
+    /// <summary>Gets or sets studios.</summary>
+    [JsonPropertyName("Studios")]
+    public List<string> Studios { get; set; } = [];
+
+    /// <summary>Gets or sets artists.</summary>
+    [JsonPropertyName("Artists")]
+    public List<string> Artists { get; set; } = [];
+
+    /// <summary>Gets or sets album artist.</summary>
+    [JsonPropertyName("AlbumArtist")]
+    public string? AlbumArtist { get; set; }
+
+    /// <summary>Gets or sets album name.</summary>
+    [JsonPropertyName("Album")]
+    public string? Album { get; set; }
+
+    /// <summary>Gets or sets album id.</summary>
+    [JsonPropertyName("AlbumId")]
+    public string? AlbumId { get; set; }
+
+    /// <summary>Gets or sets album primary image item id.</summary>
+    [JsonPropertyName("AlbumPrimaryImageItemId")]
+    public string? AlbumPrimaryImageItemId { get; set; }
+
+    /// <summary>Gets or sets album primary image tag.</summary>
+    [JsonPropertyName("AlbumPrimaryImageTag")]
+    public string? AlbumPrimaryImageTag { get; set; }
+
+    /// <summary>Gets or sets parent primary image item id.</summary>
+    [JsonPropertyName("ParentPrimaryImageItemId")]
+    public string? ParentPrimaryImageItemId { get; set; }
+
+    /// <summary>Gets or sets parent primary image tag.</summary>
+    [JsonPropertyName("ParentPrimaryImageTag")]
+    public string? ParentPrimaryImageTag { get; set; }
+
+    /// <summary>Gets or sets parent thumb item id.</summary>
+    [JsonPropertyName("ParentThumbItemId")]
+    public string? ParentThumbItemId { get; set; }
+
+    /// <summary>Gets or sets parent thumb image tag.</summary>
+    [JsonPropertyName("ParentThumbImageTag")]
+    public string? ParentThumbImageTag { get; set; }
+
+    /// <summary>Gets or sets parent id.</summary>
+    [JsonPropertyName("ParentId")]
+    public string? ParentId { get; set; }
+
+    /// <summary>Gets or sets series id.</summary>
+    [JsonPropertyName("SeriesId")]
+    public string? SeriesId { get; set; }
+
+    /// <summary>Gets or sets series name.</summary>
+    [JsonPropertyName("SeriesName")]
+    public string? SeriesName { get; set; }
+
+    /// <summary>Gets or sets series primary image tag.</summary>
+    [JsonPropertyName("SeriesPrimaryImageTag")]
+    public string? SeriesPrimaryImageTag { get; set; }
+
+    /// <summary>Gets or sets production year.</summary>
+    [JsonPropertyName("ProductionYear")]
+    public int? ProductionYear { get; set; }
+
+    /// <summary>Gets or sets community rating.</summary>
+    [JsonPropertyName("CommunityRating")]
+    public float? CommunityRating { get; set; }
+
+    /// <summary>Gets or sets primary image aspect ratio.</summary>
+    [JsonPropertyName("PrimaryImageAspectRatio")]
+    public double? PrimaryImageAspectRatio { get; set; }
+
+    /// <summary>Gets or sets runtime ticks.</summary>
+    [JsonPropertyName("RunTimeTicks")]
+    public long? RunTimeTicks { get; set; }
+
+    /// <summary>Gets or sets date created.</summary>
+    [JsonPropertyName("DateCreated")]
+    public string? DateCreated { get; set; }
+
+    /// <summary>Gets or sets premiere date.</summary>
+    [JsonPropertyName("PremiereDate")]
+    public string? PremiereDate { get; set; }
+}
+
+/// <summary>
 /// PiggieTV versioned row-builder settings.
 /// </summary>
 public sealed class RowBuilderSettings
 {
     /// <summary>Gets or sets the row-builder schema version.</summary>
+    [JsonPropertyName("schemaVersion")]
     public int SchemaVersion { get; set; } = 2;
 
     /// <summary>Gets or sets a value indicating whether configured homepage rows are enabled.</summary>
+    [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
 
     /// <summary>Gets or sets a value indicating whether default rule initialization has run.</summary>
+    [JsonPropertyName("defaultsInitialized")]
     public bool DefaultsInitialized { get; set; } = true;
 
+    /// <summary>Gets or sets a value indicating whether configured Row Builder rows should render on Home.</summary>
+    [JsonPropertyName("showConfiguredRowsOnHome")]
+    public bool ShowConfiguredRowsOnHome { get; set; }
+
     /// <summary>Gets or sets configured row rules.</summary>
+    [JsonPropertyName("rules")]
     public List<RowBuilderRule> Rules { get; set; } = [];
 
     /// <summary>Gets or sets legacy configured row categories. Used only for migration from schema v1.</summary>
+    [JsonPropertyName("categories")]
     public List<RowBuilderCategory> Categories { get; set; } = [];
 
     /// <summary>
@@ -291,54 +633,71 @@ public sealed class RowBuilderSettings
 public sealed class RowBuilderRule
 {
     /// <summary>Gets or sets the stable rule id.</summary>
+    [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
     /// <summary>Gets or sets a value indicating whether this rule is enabled.</summary>
+    [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
 
     /// <summary>Gets or sets the display row name.</summary>
+    [JsonPropertyName("name")]
     public string Name { get; set; } = "New Row";
 
     /// <summary>Gets or sets the media type: movies, shows, cartoons, anime, music, books, liveTv, or mixed.</summary>
+    [JsonPropertyName("mediaType")]
     public string MediaType { get; set; } = "movies";
 
     /// <summary>Gets or sets the source type.</summary>
+    [JsonPropertyName("sourceType")]
     public string SourceType { get; set; } = "genre";
 
     /// <summary>Gets or sets the source value for the selected source type.</summary>
+    [JsonPropertyName("sourceValue")]
     public string SourceValue { get; set; } = string.Empty;
 
     /// <summary>Gets or sets the generation mode.</summary>
+    [JsonPropertyName("generationMode")]
     public string GenerationMode { get; set; } = "random";
 
     /// <summary>Gets or sets the item limit for a generated row.</summary>
+    [JsonPropertyName("itemLimit")]
     public int ItemLimit { get; set; } = 16;
 
     /// <summary>Gets or sets how many rows or subrows this rule can generate.</summary>
+    [JsonPropertyName("rowCount")]
     public int RowCount { get; set; } = 1;
 
     /// <summary>Gets or sets a value indicating whether genre subrows should be generated.</summary>
+    [JsonPropertyName("includeSubgenres")]
     public bool IncludeSubgenres { get; set; }
 
     /// <summary>Gets or sets how many subgenre rows should be generated.</summary>
+    [JsonPropertyName("subgenreRowCount")]
     public int SubgenreRowCount { get; set; }
 
     /// <summary>Gets or sets optional seasonal settings.</summary>
+    [JsonPropertyName("seasonal")]
     public RowSeasonalSettings? Seasonal { get; set; }
 
     /// <summary>Gets or sets provider hints that may enrich matching.</summary>
+    [JsonPropertyName("providerHints")]
     public List<string> ProviderHints { get; set; } = [];
 
     /// <summary>Gets or sets a stable sort priority. Lower values render earlier.</summary>
+    [JsonPropertyName("sortPriority")]
     public int SortPriority { get; set; }
 
     /// <summary>Gets or sets the visual tier. Use 0 for automatic tiering.</summary>
+    [JsonPropertyName("tier")]
     public int Tier { get; set; }
 
     /// <summary>Gets or sets the row presentation: auto, featured, standard, compact, mini, or library-hub.</summary>
+    [JsonPropertyName("presentation")]
     public string Presentation { get; set; } = "auto";
 
     /// <summary>Gets or sets an optional homepage group label.</summary>
+    [JsonPropertyName("groupTitle")]
     public string GroupTitle { get; set; } = string.Empty;
 }
 
@@ -348,18 +707,23 @@ public sealed class RowBuilderRule
 public sealed class RowSeasonalSettings
 {
     /// <summary>Gets or sets the seasonal mode.</summary>
+    [JsonPropertyName("mode")]
     public string Mode { get; set; } = "auto";
 
     /// <summary>Gets or sets the custom start month.</summary>
+    [JsonPropertyName("startMonth")]
     public int? StartMonth { get; set; }
 
     /// <summary>Gets or sets the custom start day.</summary>
+    [JsonPropertyName("startDay")]
     public int? StartDay { get; set; }
 
     /// <summary>Gets or sets the custom end month.</summary>
+    [JsonPropertyName("endMonth")]
     public int? EndMonth { get; set; }
 
     /// <summary>Gets or sets the custom end day.</summary>
+    [JsonPropertyName("endDay")]
     public int? EndDay { get; set; }
 }
 
@@ -369,27 +733,35 @@ public sealed class RowSeasonalSettings
 public sealed class RowBuilderCategory
 {
     /// <summary>Gets or sets the stable category id.</summary>
+    [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
     /// <summary>Gets or sets a value indicating whether this category is enabled.</summary>
+    [JsonPropertyName("enabled")]
     public bool Enabled { get; set; } = true;
 
     /// <summary>Gets or sets the media type: movies, shows, cartoons, anime, or mixed.</summary>
+    [JsonPropertyName("mediaType")]
     public string MediaType { get; set; } = "movies";
 
     /// <summary>Gets or sets the source type: genre, studio, or customTag.</summary>
+    [JsonPropertyName("sourceType")]
     public string SourceType { get; set; } = "genre";
 
     /// <summary>Gets or sets the generation mode: random or specific.</summary>
+    [JsonPropertyName("generationMode")]
     public string GenerationMode { get; set; } = "random";
 
     /// <summary>Gets or sets how many rows to generate in random mode.</summary>
+    [JsonPropertyName("rowCount")]
     public int RowCount { get; set; } = 6;
 
     /// <summary>Gets or sets specific row entries.</summary>
+    [JsonPropertyName("entries")]
     public List<string> Entries { get; set; } = [];
 
     /// <summary>Gets or sets optional source-pool filters for random mode.</summary>
+    [JsonPropertyName("sourcePoolFilters")]
     public List<string> SourcePoolFilters { get; set; } = [];
 }
 
@@ -445,6 +817,24 @@ public sealed class TmdbSettings
 
     /// <summary>Gets or sets a value indicating whether TMDb should influence row matching.</summary>
     public bool UseTmdbForRowAccuracy { get; set; } = true;
+}
+
+/// <summary>
+/// PiggieTV music metadata lookup settings.
+/// </summary>
+public sealed class MusicMetadataSettings
+{
+    /// <summary>Gets or sets a value indicating whether MusicBrainz lookups are enabled.</summary>
+    public bool MusicBrainzEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether Discogs lookups are enabled.</summary>
+    public bool DiscogsEnabled { get; set; }
+
+    /// <summary>Gets or sets the Discogs personal access token. This is write-only in public DTOs.</summary>
+    public string? DiscogsToken { get; set; }
+
+    /// <summary>Gets or sets the maximum number of candidates returned per lookup.</summary>
+    public int MaxResults { get; set; } = 6;
 }
 
 /// <summary>

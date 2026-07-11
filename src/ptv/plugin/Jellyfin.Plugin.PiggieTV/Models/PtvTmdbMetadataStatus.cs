@@ -20,6 +20,24 @@ public sealed class PtvTmdbMetadataStatus
     public bool Configured { get; set; }
 
     /// <summary>
+    /// Gets or sets the last credential validation state.
+    /// </summary>
+    [JsonPropertyName("credentialStatus")]
+    public string? CredentialStatus { get; set; }
+
+    /// <summary>
+    /// Gets or sets the detected credential type.
+    /// </summary>
+    [JsonPropertyName("credentialType")]
+    public string? CredentialType { get; set; }
+
+    /// <summary>
+    /// Gets or sets the sanitized credential length.
+    /// </summary>
+    [JsonPropertyName("credentialLength")]
+    public int CredentialLength { get; set; }
+
+    /// <summary>
     /// Gets or sets the number of cached TMDb fact entries in memory.
     /// </summary>
     [JsonPropertyName("cacheSize")]
@@ -50,8 +68,26 @@ public sealed class PtvTmdbMetadataStatus
     public string? LastErrorCode { get; set; }
 
     /// <summary>
+    /// Gets or sets the last TMDb HTTP status code observed during credential validation.
+    /// </summary>
+    [JsonPropertyName("lastStatusCode")]
+    public int? LastStatusCode { get; set; }
+
+    /// <summary>
+    /// Gets or sets a sanitized TMDb error response body, if available.
+    /// </summary>
+    [JsonPropertyName("lastErrorBody")]
+    public string? LastErrorBody { get; set; }
+
+    /// <summary>
     /// Gets or sets the last TMDb enrichment duration in milliseconds.
     /// </summary>
     [JsonPropertyName("lastDurationMs")]
     public long? LastDurationMs { get; set; }
+
+    /// <summary>
+    /// Gets or sets when credentials were last validated.
+    /// </summary>
+    [JsonPropertyName("lastValidatedAt")]
+    public DateTimeOffset? LastValidatedAt { get; set; }
 }

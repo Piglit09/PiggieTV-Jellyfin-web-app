@@ -1602,7 +1602,7 @@
     "C:\\Users\\Piggie\\.nuget\\packages\\": {}
   },
   "project": {
-    "version": "1.0.0",
+    "version": "10.11.8.1",
     "restore": {
       "projectUniqueName": "C:\\Users\\Piggie\\Documents\\GitHub\\Jellyfin-Web-PiggieTV\\src\\ptv\\plugin\\Jellyfin.Plugin.PiggieTV\\Jellyfin.Plugin.PiggieTV.csproj",
       "projectName": "Jellyfin.Plugin.PiggieTV",

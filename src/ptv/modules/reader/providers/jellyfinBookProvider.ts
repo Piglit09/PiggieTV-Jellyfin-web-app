@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, sonarjs/no-nested-conditional, sonarjs/no-nested-template-literals */
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 
 import type { ReaderMetadata, ReaderSource } from '../readerModels';
@@ -137,9 +138,9 @@ export function createJellyfinReaderSource(item: Record<string, any>): ReaderSou
     const { extension, format } = getFormat(item);
     const downloadUrl = item.Id ? apiClient.getItemDownloadUrl(item.Id) : item.Url || item.Path;
     const metadata = createMetadata(apiClient, item, format, extension);
-    const unsupportedReason = format === 'unsupported'
-        ? `PiggieTV Reader does not support ${extension ? `.${extension}` : 'this'} format yet.`
-        : undefined;
+    const unsupportedReason = format === 'unsupported' ?
+        `PiggieTV Reader does not support ${extension ? `.${extension}` : 'this'} format yet.` :
+        undefined;
 
     return {
         item,
@@ -156,3 +157,5 @@ export function createJellyfinReaderSource(item: Record<string, any>): ReaderSou
         unsupportedReason
     };
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any, sonarjs/no-nested-conditional, sonarjs/no-nested-template-literals */

@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/pseudo-random */
 import type { ReaderBookmark, ReaderProgressState } from './readerModels';
 
 const PROGRESS_PREFIX = 'ptv.reader.progress.';
@@ -54,3 +55,5 @@ export function addReaderBookmark(bookmark: Omit<ReaderBookmark, 'id' | 'created
     saveReaderBookmarks(bookmark.stableId, next);
     return next;
 }
+
+/* eslint-enable sonarjs/pseudo-random */

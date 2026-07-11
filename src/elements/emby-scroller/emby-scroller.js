@@ -5,7 +5,6 @@ import inputManager from '../../scripts/inputManager';
 import focusManager from '../../components/focusManager';
 import browser from '../../scripts/browser';
 import 'webcomponents.js/webcomponents-lite';
-import './emby-scroller.scss';
 
 const ScrollerPrototype = Object.create(HTMLDivElement.prototype);
 
@@ -195,4 +194,3 @@ document.registerElement('emby-scroller', {
     prototype: ScrollerPrototype,
     extends: 'div'
 });
-

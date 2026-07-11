@@ -1,10 +1,32 @@
 import { AsyncRoute } from '../../../../components/router/AsyncRoute';
 
 export const ASYNC_USER_ROUTES: AsyncRoute[] = [
+    { path: 'books', page: 'books' },
+    { path: 'books/*', page: 'books' },
     { path: 'calendar', page: 'calendar' },
+    { path: 'collections', page: 'collections' },
+    { path: 'collections/*', page: 'collections' },
+    { path: 'comics', page: 'comics' },
+    { path: 'comics/*', page: 'comics' },
     { path: 'home', page: 'home' },
+    { path: 'maga', page: 'maga' },
+    { path: 'maga/*', page: 'maga' },
+    { path: 'manga', page: 'manga' },
+    { path: 'manga/*', page: 'manga' },
+    { path: 'movies', page: 'movies' },
+    { path: 'movies/*', page: 'movies' },
+    { path: 'music', page: 'music' },
+    { path: 'music/*', page: 'music' },
+    { path: 'recomendations', page: 'recommendations' },
+    { path: 'recomendations/*', page: 'recommendations' },
+    { path: 'recommendations', page: 'recommendations' },
+    { path: 'recommendations/*', page: 'recommendations' },
     { path: 'mypreferencesmenu', page: 'user/settings' },
     { path: 'quickconnect', page: 'quickConnect' },
     { path: 'search', page: 'search' },
+    { path: 'shows', page: 'shows' },
+    { path: 'shows/*', page: 'shows' },
+    { path: 'tv', page: 'tv' },
+    { path: 'tv/*', page: 'tv' },
     { path: 'userprofile', page: 'user/userprofile' }
 ];

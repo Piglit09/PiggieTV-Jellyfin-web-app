@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Nodes;
 
@@ -25,6 +26,13 @@ namespace Jellyfin.Plugin.PiggieTV.Api;
 [Route("Ptv/v1")]
 public sealed class PtvStatusController : BaseJellyfinApiController
 {
+    private static readonly JsonSerializerOptions SettingsPatchJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        AllowTrailingCommas = true,
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip
+    };
+
     private readonly ILogger<PtvStatusController> _logger;
     private readonly IServiceProvider _serviceProvider;
 
@@ -41,7 +49,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         _serviceProvider = serviceProvider;
 
         _logger.LogInformation(
-            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
+            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
     }
 
     /// <summary>
@@ -64,6 +72,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 _logger.LogInformation("PiggieTV status safe-mode: skipping cache/config/settings/DTO hydration.");
                 _logger.LogInformation("Advertising feature: status");
                 _logger.LogInformation("Advertising feature: settings");
+                _logger.LogInformation("Advertising feature: rows");
                 _logger.LogInformation("Advertising feature: featuredContent");
                 _logger.LogInformation("Advertising feature: featuredContentRefresh");
                 _logger.LogInformation("Advertising feature: integrations");
@@ -81,8 +90,10 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                     {
                         ["status"] = true,
                         ["settings"] = true,
+                        ["rows"] = true,
                         ["featuredContent"] = true,
                         ["featuredContentRefresh"] = true,
+                        ["musicMetadata"] = true,
                         ["integrations"] = true,
                         ["signup"] = true,
                         ["tags"] = true,
@@ -92,8 +103,10 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                     {
                         "status",
                         "settings",
+                        "rows",
                         "featuredContent",
                         "featuredContentRefresh",
+                        "musicMetadata",
                         "integrations",
                         "signup",
                         "tags",
@@ -173,6 +186,112 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             fallbackResponse.Signup = PtvStatusSignup.Create();
 
             return Ok(fallbackResponse);
+        }
+    }
+
+    /// <summary>
+    /// Diagnoses Jellyfin's stored image metadata and image endpoint health for one item.
+    /// </summary>
+    /// <param name="itemId">Jellyfin item id from the route.</param>
+    /// <param name="queryItemId">Jellyfin item id from the query string.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Image storage diagnostics.</returns>
+    [HttpGet("diagnostics/images/{itemId}")]
+    [HttpGet("diagnostics/images")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PtvItemImageDiagnosticResponse>> GetItemImageDiagnostics(
+        [FromRoute] string? itemId,
+        [FromQuery(Name = "itemId")] string? queryItemId,
+        CancellationToken cancellationToken)
+    {
+        if (!await CanWriteFeaturedContentSafeAsync(PtvApiRoutes.V1ImageDiagnostics).ConfigureAwait(false))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                Error("PTV_IMAGE_DIAGNOSTIC_FORBIDDEN", "Only Jellyfin administrators can inspect server image diagnostics."));
+        }
+
+        var requestedItemId = (itemId ?? queryItemId)?.Trim();
+
+        if (string.IsNullOrWhiteSpace(requestedItemId))
+        {
+            return BadRequest(Error("PTV_IMAGE_DIAGNOSTIC_ITEM_REQUIRED", "An itemId is required."));
+        }
+
+        if (!TryParseItemId(requestedItemId, out var parsedItemId))
+        {
+            return BadRequest(Error("PTV_IMAGE_DIAGNOSTIC_BAD_ITEM_ID", "The itemId is not a valid Jellyfin item id."));
+        }
+
+        try
+        {
+            var libraryManager = GetRequiredService<ILibraryManager>(PtvApiRoutes.V1ImageDiagnostics);
+            var item = libraryManager.GetItemById(parsedItemId);
+
+            if (item is null)
+            {
+                return NotFound(Error("PTV_IMAGE_DIAGNOSTIC_ITEM_NOT_FOUND", "The requested Jellyfin item was not found."));
+            }
+
+            using var httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(8)
+            };
+
+            var primaryEntry = await BuildImageDiagnosticEntryAsync(
+                httpClient,
+                item,
+                ImageType.Primary,
+                0,
+                cancellationToken).ConfigureAwait(false);
+
+            var response = new PtvItemImageDiagnosticResponse
+            {
+                Ok = true,
+                ItemId = item.Id.ToString("N"),
+                ItemName = item.Name,
+                ItemType = item.GetType().Name,
+                MediaType = item.MediaType.ToString(),
+                PrimaryImageTag = primaryEntry.ImageTag,
+                PrimaryImagePath = primaryEntry.ImagePath,
+                PrimaryImageFileExists = primaryEntry.FileExists,
+                PrimaryImageEndpointStatus = primaryEntry.ImageTag is null
+                    ? primaryEntry.UntaggedEndpointStatus
+                    : primaryEntry.TaggedEndpointStatus
+            };
+
+            response.Images.Add(primaryEntry);
+            response.Images.Add(await BuildImageDiagnosticEntryAsync(httpClient, item, ImageType.Thumb, 0, cancellationToken).ConfigureAwait(false));
+            response.Images.Add(await BuildImageDiagnosticEntryAsync(httpClient, item, ImageType.Logo, 0, cancellationToken).ConfigureAwait(false));
+            response.Images.Add(await BuildImageDiagnosticEntryAsync(httpClient, item, ImageType.Backdrop, 0, cancellationToken).ConfigureAwait(false));
+
+            for (var backdropIndex = 1; backdropIndex < 3; backdropIndex++)
+            {
+                var backdrop = GetImageInfoSafe(item, ImageType.Backdrop, backdropIndex);
+
+                if (backdrop is null)
+                {
+                    break;
+                }
+
+                response.Images.Add(await BuildImageDiagnosticEntryAsync(httpClient, item, ImageType.Backdrop, backdropIndex, cancellationToken).ConfigureAwait(false));
+            }
+
+            AddImageDiagnosticWarnings(response);
+
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure(PtvApiRoutes.V1ImageDiagnostics, ex);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                DiagnosticError("PTV_IMAGE_DIAGNOSTIC_FAILED", PtvApiRoutes.V1ImageDiagnostics, ex));
         }
     }
 
@@ -375,16 +494,62 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     }
 
     /// <summary>
+    /// Searches MusicBrainz and Discogs for administrator song metadata repair.
+    /// </summary>
+    /// <param name="request">Lookup request from query string.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Music metadata candidates.</returns>
+    [HttpGet("music/metadata/search")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<PtvMusicMetadataLookupResponse>> SearchMusicMetadata(
+        [FromQuery] PtvMusicMetadataLookupRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!await CanWriteFeaturedContentSafeAsync(PtvApiRoutes.V1MusicMetadataSearch).ConfigureAwait(false))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                Error("PTV_MUSIC_METADATA_FORBIDDEN", "Only Jellyfin administrators can search server-side song metadata providers."));
+        }
+
+        if (request is null)
+        {
+            return BadRequest(Error("PTV_MUSIC_METADATA_NULL_QUERY", "A music metadata lookup query is required."));
+        }
+
+        try
+        {
+            var metadataLookupService = GetRequiredService<IPtvMusicMetadataLookupService>(PtvApiRoutes.V1MusicMetadataSearch);
+
+            return Ok(await metadataLookupService.SearchAsync(request, cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure(PtvApiRoutes.V1MusicMetadataSearch, ex);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                DiagnosticError("PTV_MUSIC_METADATA_LOOKUP_FAILED", PtvApiRoutes.V1MusicMetadataSearch, ex));
+        }
+    }
+
+    /// <summary>
     /// Saves PiggieTV plugin settings from the dashboard.
     /// </summary>
-    /// <param name="settings">Incoming plugin settings patch.</param>
+    /// <param name="settingsPayload">Incoming plugin settings patch JSON.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Saved public plugin settings.</returns>
     [HttpPost("settings")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
-    public async Task<ActionResult<PtvPluginSettingsDto>> SaveSettings([FromBody] PtvPluginSettingsPatchDto? settings)
+    public async Task<ActionResult<PtvPluginSettingsDto>> SaveSettings(
+        [FromBody] JsonElement? settingsPayload,
+        CancellationToken cancellationToken)
     {
         if (!await CanWriteFeaturedContentSafeAsync(PtvApiRoutes.V1Settings).ConfigureAwait(false))
         {
@@ -393,16 +558,104 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 Error("PTV_SETTINGS_WRITE_FORBIDDEN", "Only Jellyfin administrators can save PiggieTV plugin settings."));
         }
 
+        if (!settingsPayload.HasValue
+            || settingsPayload.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return BadRequest(Error("PTV_SETTINGS_NULL_PAYLOAD", "PiggieTV plugin settings are required."));
+        }
+
+        var payloadBytes = GetJsonPayloadByteCount(settingsPayload.Value);
+        var topLevelKeys = DescribeJsonTopLevelKeys(settingsPayload.Value);
+        var recommendationPayloadSummary = DescribeRecommendationPayload(settingsPayload.Value);
+
+        _logger.LogInformation(
+            "PiggieTV settings save payload received. PayloadBytes={PayloadBytes}; TopLevelKeys={TopLevelKeys}; RecommendationRows={RecommendationRows}; RecommendationItemCounts={RecommendationItemCounts}.",
+            payloadBytes,
+            topLevelKeys,
+            recommendationPayloadSummary.RowCount,
+            recommendationPayloadSummary.ItemCounts);
+
+        PtvPluginSettingsPatchDto? settings;
+
+        try
+        {
+            settings = settingsPayload.Value.Deserialize<PtvPluginSettingsPatchDto>(SettingsPatchJsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "PiggieTV settings payload rejected during DTO binding. PayloadBytes={PayloadBytes}; TopLevelKeys={TopLevelKeys}; JsonPath={JsonPath}; BytePosition={BytePosition}.",
+                payloadBytes,
+                topLevelKeys,
+                ex.Path,
+                ex.BytePositionInLine);
+
+            return BadRequest(new
+            {
+                code = "PTV_SETTINGS_INVALID_PAYLOAD",
+                error = "PiggieTV plugin settings payload could not be deserialized.",
+                jsonPath = ex.Path,
+                message = RedactSecrets(ex.Message),
+                payloadBytes,
+                topLevelKeys
+            });
+        }
+
         if (settings is null)
         {
             return BadRequest(Error("PTV_SETTINGS_NULL_PAYLOAD", "PiggieTV plugin settings are required."));
         }
 
+        var recommendationValidationErrors = ValidateRecommendationSettingsPatch(settings.Recommendations);
+        if (recommendationValidationErrors.Count > 0)
+        {
+            _logger.LogWarning(
+                "PiggieTV settings payload rejected by recommendation validation. PayloadBytes={PayloadBytes}; Errors={Errors}; RecommendationRows={RecommendationRows}; RecommendationItemCounts={RecommendationItemCounts}.",
+                payloadBytes,
+                string.Join(" | ", recommendationValidationErrors),
+                recommendationPayloadSummary.RowCount,
+                recommendationPayloadSummary.ItemCounts);
+
+            return BadRequest(new
+            {
+                code = "PTV_SETTINGS_INVALID_RECOMMENDATIONS",
+                error = "Recommendation settings payload failed validation.",
+                errors = recommendationValidationErrors,
+                payloadBytes,
+                recommendationItemCounts = recommendationPayloadSummary.ItemCounts,
+                recommendationRows = recommendationPayloadSummary.RowCount,
+                topLevelKeys
+            });
+        }
+
         try
         {
             var settingsService = GetRequiredService<IPtvPluginSettingsService>(PtvApiRoutes.V1Settings);
+            var saved = settingsService.SaveSettings(settings);
+            var shouldRefreshFeaturedCache =
+                settings.Rows is not null ||
+                settings.RowSettings is not null ||
+                settings.Recommendations is not null;
 
-            return Ok(settingsService.SaveSettings(settings));
+            if (settings.Rows is not null)
+            {
+                LogSavedRules("settings", saved.Rows);
+            }
+
+            if (shouldRefreshFeaturedCache)
+            {
+                await RefreshFeaturedCacheAfterRowsSaveAsync("settings", cancellationToken).ConfigureAwait(false);
+            }
+
+            _logger.LogInformation(
+                "PiggieTV settings save completed. PayloadBytes={PayloadBytes}; RecommendationRows={RecommendationRows}; RecommendationItemCounts={RecommendationItemCounts}; FeaturedRefreshRequested={FeaturedRefreshRequested}.",
+                payloadBytes,
+                saved.Recommendations.Rows.Count,
+                DescribeRecommendationItemCounts(saved.Recommendations),
+                shouldRefreshFeaturedCache);
+
+            return Ok(saved);
         }
         catch (Exception ex)
         {
@@ -437,9 +690,12 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     /// Saves PiggieTV row-builder settings.
     /// </summary>
     /// <param name="settings">Row-builder settings.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Saved row-builder settings.</returns>
     [HttpPost("rows")]
-    public async Task<ActionResult<RowBuilderSettings>> SaveRows([FromBody] RowBuilderSettings? settings)
+    public async Task<ActionResult<RowBuilderSettings>> SaveRows(
+        [FromBody] RowBuilderSettings? settings,
+        CancellationToken cancellationToken)
     {
         if (!await CanWriteFeaturedContentSafeAsync("rows").ConfigureAwait(false))
         {
@@ -458,8 +714,47 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         {
             Rows = settings
         });
+        LogSavedRules("rows", saved.Rows);
+        await RefreshFeaturedCacheAfterRowsSaveAsync("rows", cancellationToken).ConfigureAwait(false);
 
         return Ok(saved.Rows);
+    }
+
+    private void LogSavedRules(string route, RowBuilderSettings rows)
+    {
+        _logger.LogInformation(
+            "PiggieTV Row Rules savedRules via {Route}: {SavedRules}",
+            route,
+            JsonSerializer.Serialize(rows.Rules.Select(rule => new
+            {
+                rule.Id,
+                rule.Name,
+                rule.Enabled,
+                rule.MediaType,
+                rule.SourceType,
+                rule.SourceValue,
+                rule.GenerationMode,
+                rule.RowCount,
+                rule.IncludeSubgenres,
+                rule.SubgenreRowCount,
+                rule.ItemLimit,
+                rule.SortPriority,
+                rule.GroupTitle
+            })));
+    }
+
+    private async Task RefreshFeaturedCacheAfterRowsSaveAsync(string route, CancellationToken cancellationToken)
+    {
+        var refreshService = GetOptionalService<IPtvFeaturedContentRefreshService>(route);
+
+        if (refreshService is null)
+        {
+            _logger.LogWarning("PiggieTV homepage row settings saved via {Route}, but featured cache refresh service is unavailable.", route);
+            return;
+        }
+
+        _logger.LogInformation("PiggieTV homepage row settings saved via {Route}; rebuilding featured cache immediately.", route);
+        await refreshService.RefreshAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -507,6 +802,40 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         var previewService = GetRequiredService<IPtvFeaturedContentRefreshService>("rows/preview");
 
         return Ok(await previewService.PreviewRowsAsync(settings, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Validates the configured TMDb credential and returns redacted provider status.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>TMDb metadata status.</returns>
+    [HttpGet("tmdb/test")]
+    [HttpPost("tmdb/test")]
+    public async Task<ActionResult<PtvTmdbMetadataStatus>> TestTmdbMetadata(CancellationToken cancellationToken)
+    {
+        const string route = "tmdb/test";
+
+        if (!await CanWriteFeaturedContentSafeAsync(route).ConfigureAwait(false))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                Error("PTV_TMDB_TEST_FORBIDDEN", "Only Jellyfin administrators can test TMDb credentials."));
+        }
+
+        try
+        {
+            var tmdbMetadataService = GetRequiredService<IPtvTmdbMetadataService>(route);
+
+            return Ok(await tmdbMetadataService.ValidateCredentialsAsync(cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure(route, ex);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                DiagnosticError("PTV_TMDB_TEST_FAILED", route, ex));
+        }
     }
 
     /// <summary>
@@ -1721,6 +2050,194 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         }
     }
 
+    private async Task<PtvItemImageDiagnosticEntry> BuildImageDiagnosticEntryAsync(
+        HttpClient httpClient,
+        BaseItem item,
+        ImageType imageType,
+        int imageIndex,
+        CancellationToken cancellationToken)
+    {
+        var imageInfo = GetImageInfoSafe(item, imageType, imageIndex);
+        var imageTag = GetImageTag(imageInfo);
+        var entry = new PtvItemImageDiagnosticEntry
+        {
+            ImageType = imageType.ToString(),
+            ImageIndex = imageIndex,
+            ImageTag = imageTag,
+            ImagePath = imageInfo?.Path,
+            FileExists = FileExistsSafe(imageInfo?.Path)
+        };
+
+        if (imageInfo is null)
+        {
+            return entry;
+        }
+
+        entry.UntaggedEndpoint = BuildImageEndpoint(item.Id, imageType, imageIndex, null);
+        entry.TaggedEndpoint = imageTag is null
+            ? null
+            : BuildImageEndpoint(item.Id, imageType, imageIndex, imageTag);
+
+        if (entry.TaggedEndpoint is not null)
+        {
+            entry.TaggedEndpointStatus = await ProbeImageEndpointStatusAsync(
+                httpClient,
+                entry.TaggedEndpoint,
+                entry,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        entry.UntaggedEndpointStatus = await ProbeImageEndpointStatusAsync(
+            httpClient,
+            entry.UntaggedEndpoint,
+            entry,
+            cancellationToken).ConfigureAwait(false);
+
+        return entry;
+    }
+
+    private static ItemImageInfo? GetImageInfoSafe(BaseItem item, ImageType imageType, int imageIndex = 0)
+    {
+        try
+        {
+            return item.GetImageInfo(imageType, imageIndex);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static string? GetImageTag(ItemImageInfo? imageInfo)
+    {
+        return imageInfo?.DateModified.Ticks.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static bool FileExistsSafe(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            return System.IO.File.Exists(path);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string BuildImageEndpoint(Guid itemId, ImageType imageType, int imageIndex, string? imageTag)
+    {
+        var imageSegment = imageType == ImageType.Backdrop
+            ? $"{imageType}/{imageIndex}"
+            : imageType.ToString();
+        var endpoint = $"/Items/{itemId:N}/Images/{imageSegment}";
+
+        return string.IsNullOrWhiteSpace(imageTag)
+            ? endpoint
+            : $"{endpoint}?tag={Uri.EscapeDataString(imageTag)}";
+    }
+
+    private async Task<int?> ProbeImageEndpointStatusAsync(
+        HttpClient httpClient,
+        string? relativeEndpoint,
+        PtvItemImageDiagnosticEntry entry,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(relativeEndpoint))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, BuildCurrentServerUri(relativeEndpoint));
+            CopyProbeAuthenticationHeaders(request);
+
+            using var response = await httpClient
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+
+            return (int)response.StatusCode;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            entry.ProbeError = string.IsNullOrWhiteSpace(entry.ProbeError)
+                ? RedactSecrets(ex.Message)
+                : $"{entry.ProbeError} | {RedactSecrets(ex.Message)}";
+
+            return null;
+        }
+    }
+
+    private Uri BuildCurrentServerUri(string relativeEndpoint)
+    {
+        var normalizedEndpoint = relativeEndpoint.StartsWith("/", StringComparison.Ordinal)
+            ? relativeEndpoint
+            : $"/{relativeEndpoint}";
+        var pathBase = Request.PathBase.HasValue ? Request.PathBase.Value : string.Empty;
+
+        return new Uri(
+            $"{Request.Scheme}://{Request.Host}{pathBase}{normalizedEndpoint}",
+            UriKind.Absolute);
+    }
+
+    private void CopyProbeAuthenticationHeaders(HttpRequestMessage request)
+    {
+        foreach (var headerName in new[] { "Authorization", "X-Emby-Authorization", "X-Emby-Token", "Cookie" })
+        {
+            if (Request.Headers.TryGetValue(headerName, out var values))
+            {
+                request.Headers.TryAddWithoutValidation(headerName, values.ToArray());
+            }
+        }
+    }
+
+    private static bool TryParseItemId(string value, out Guid itemId)
+    {
+        var normalized = value.Trim();
+
+        return Guid.TryParse(normalized, out itemId)
+            || Guid.TryParseExact(normalized, "N", out itemId);
+    }
+
+    private static void AddImageDiagnosticWarnings(PtvItemImageDiagnosticResponse response)
+    {
+        var primary = response.Images.FirstOrDefault(image =>
+            image.ImageType.Equals(ImageType.Primary.ToString(), StringComparison.OrdinalIgnoreCase)
+            && image.ImageIndex == 0);
+
+        if (primary is null || string.IsNullOrWhiteSpace(primary.ImagePath))
+        {
+            response.Warnings.Add("No Primary image metadata is recorded for this item.");
+            return;
+        }
+
+        if (!primary.FileExists)
+        {
+            response.Warnings.Add("The Primary image path recorded by Jellyfin does not exist on disk. This often means the database was copied without the matching metadata/image cache folders, or the Jellyfin process cannot read the file.");
+        }
+
+        if (primary.StaleTagDetected)
+        {
+            response.Warnings.Add("The tagged Primary image endpoint returned 404, but the untagged endpoint worked. The image tag is stale and metadata/image cache should be refreshed.");
+        }
+
+        if (primary.TaggedEndpointStatus == StatusCodes.Status404NotFound && primary.UntaggedEndpointStatus == StatusCodes.Status404NotFound)
+        {
+            response.Warnings.Add("Both tagged and untagged Primary image endpoints returned 404. Restore the missing image files or refresh metadata with image replacement for this item.");
+        }
+
+        if (primary.FileExists && primary.TaggedEndpointStatus == StatusCodes.Status404NotFound && primary.UntaggedEndpointStatus == StatusCodes.Status404NotFound)
+        {
+            response.Warnings.Add("The Primary image file exists, but Jellyfin still returns 404. Check Jellyfin file permissions, image provider state, and metadata cache consistency.");
+        }
+    }
+
     private static string[] GetBackdropImageTags(BaseItem item)
     {
         var tags = new List<string>();
@@ -2337,6 +2854,152 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             routeName,
             exception.GetType().FullName,
             RedactSecrets(exception.ToString()));
+    }
+
+    private static int GetJsonPayloadByteCount(JsonElement payload)
+    {
+        try
+        {
+            return JsonSerializer.SerializeToUtf8Bytes(payload).Length;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static string DescribeJsonTopLevelKeys(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return payload.ValueKind.ToString();
+        }
+
+        return string.Join(
+            ",",
+            payload.EnumerateObject()
+                .Select(property => property.Name)
+                .Take(40));
+    }
+
+    private static (int RowCount, string ItemCounts) DescribeRecommendationPayload(JsonElement payload)
+    {
+        if (!TryGetJsonProperty(payload, "recommendations", out var recommendations)
+            || !TryGetJsonProperty(recommendations, "rows", out var rows)
+            || rows.ValueKind != JsonValueKind.Array)
+        {
+            return (0, string.Empty);
+        }
+
+        var counts = new List<string>();
+        var rowCount = 0;
+
+        foreach (var row in rows.EnumerateArray())
+        {
+            rowCount++;
+            var rowId = TryGetJsonProperty(row, "id", out var idProperty) && idProperty.ValueKind == JsonValueKind.String
+                ? idProperty.GetString() ?? $"row-{rowCount}"
+                : $"row-{rowCount}";
+            var itemCount = TryGetJsonProperty(row, "items", out var items) && items.ValueKind == JsonValueKind.Array
+                ? items.GetArrayLength()
+                : 0;
+
+            counts.Add($"{rowId}:{itemCount}");
+        }
+
+        return (rowCount, string.Join(",", counts));
+    }
+
+    private static bool TryGetJsonProperty(JsonElement element, string propertyName, out JsonElement property)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var currentProperty in element.EnumerateObject())
+            {
+                if (string.Equals(currentProperty.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    property = currentProperty.Value;
+                    return true;
+                }
+            }
+        }
+
+        property = default;
+        return false;
+    }
+
+    private static List<string> ValidateRecommendationSettingsPatch(RecommendationRowSettings? settings)
+    {
+        var errors = new List<string>();
+
+        if (settings is null)
+        {
+            return errors;
+        }
+
+        var rows = settings.Rows ?? [];
+
+        if (rows.Count > 40)
+        {
+            errors.Add("recommendations.rows must contain 40 or fewer rows.");
+        }
+
+        var seenRowIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        {
+            var row = rows[rowIndex];
+
+            if (row is null)
+            {
+                errors.Add($"row[{rowIndex}] cannot be null.");
+                continue;
+            }
+
+            var items = row.Items ?? [];
+            var rowLabel = string.IsNullOrWhiteSpace(row.Id) ? $"row[{rowIndex}]" : row.Id;
+
+            if (string.IsNullOrWhiteSpace(row.Id))
+            {
+                errors.Add($"{rowLabel}.id is required.");
+            }
+            else if (!seenRowIds.Add(row.Id))
+            {
+                errors.Add($"{rowLabel}.id is duplicated.");
+            }
+
+            if (string.IsNullOrWhiteSpace(row.Title))
+            {
+                errors.Add($"{rowLabel}.title is required.");
+            }
+
+            if (items.Count == 0)
+            {
+                errors.Add($"{rowLabel}.items must contain at least one item reference.");
+            }
+
+            if (items.Count > PtvPluginSettingsNormalizer.MaxRowMaxItems)
+            {
+                errors.Add($"{rowLabel}.items must contain {PtvPluginSettingsNormalizer.MaxRowMaxItems} or fewer item references.");
+            }
+
+            for (var itemIndex = 0; itemIndex < items.Count; itemIndex++)
+            {
+                if (items[itemIndex] is null || string.IsNullOrWhiteSpace(items[itemIndex].Id))
+                {
+                    errors.Add($"{rowLabel}.items[{itemIndex}].Id is required.");
+                }
+            }
+        }
+
+        return errors.Take(30).ToList();
+    }
+
+    private static string DescribeRecommendationItemCounts(RecommendationRowSettings settings)
+    {
+        return string.Join(
+            ",",
+            settings.Rows.Select(row => $"{row.Id}:{row.Items.Count}"));
     }
 
     private static string RedactSecrets(string value)

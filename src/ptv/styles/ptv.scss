@@ -10,8 +10,13 @@
 @use '../modules/header/header';
 @use '../modules/icons/icons';
 @use '../modules/sidebar/sidebar';
+@use '../modules/cards/card-hover';
+@use '../modules/cards/card-overlay';
 @use '../modules/cards/cards';
+@use '../modules/cards/card-layout';
+@use '../modules/cards/card-metadata';
 @use '../modules/hero/hero';
+@use '../pages/home/nativeHome';
 @use '../modules/media-bar/media-bar';
 @use '../modules/dashboard/dashboard';
 @use '../modules/settings/settings';

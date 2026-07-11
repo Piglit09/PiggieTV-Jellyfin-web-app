@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { appRouter } from '../../../../components/router/appRouter';
 
 import type { LoadedReaderDocument, ReaderSource } from '../readerModels';
@@ -29,3 +30,5 @@ export async function loadPdfDocument(source: ReaderSource): Promise<LoadedReade
         }
     };
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any */

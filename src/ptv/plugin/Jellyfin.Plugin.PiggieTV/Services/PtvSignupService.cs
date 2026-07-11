@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Mail;
 using System.Net.Mime;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -20,6 +21,7 @@ namespace Jellyfin.Plugin.PiggieTV.Services;
 /// </summary>
 public sealed class PtvSignupService : IPtvSignupService
 {
+    private const string DuplicateUsernameMessage = "That username is already taken.";
     private const string ExpiredVerificationMessage = "This verification link has expired. Please sign up again.";
     private const string ResetSuccessMessage = "If that email belongs to a PiggieTV account, a reset code has been sent.";
     private const string TooManyAttemptsMessage = "Too many attempts. Please wait a few minutes and try again.";
@@ -149,9 +151,9 @@ public sealed class PtvSignupService : IPtvSignupService
                 return Fail(passwordError);
             }
 
-            if (_userManager.GetUserByName(username) is not null)
+            if (UserNameExists(username))
             {
-                return Fail("That username is already taken.");
+                return Fail(DuplicateUsernameMessage);
             }
 
             if (EmailExists(signup, email))
@@ -260,11 +262,11 @@ public sealed class PtvSignupService : IPtvSignupService
                 return Fail(ExpiredVerificationMessage);
             }
 
-            if (_userManager.GetUserByName(pending.Username) is not null)
+            if (UserNameExists(pending.Username))
             {
                 signup.PendingVerifications.Remove(pending);
                 SaveConfiguration(configuration);
-                return Fail("That username is already taken.");
+                return Fail(DuplicateUsernameMessage);
             }
 
             if (EmailExists(signup, pending.Email))
@@ -293,7 +295,7 @@ public sealed class PtvSignupService : IPtvSignupService
 
             try
             {
-                await _userManager.ChangePassword(createdUser, password).ConfigureAwait(false);
+                await ChangePasswordAsync(createdUser, password).ConfigureAwait(false);
                 await ApplyPolicyAsync(createdUser.Id, new UserPolicy(), preset, pending.EnabledFolderIds, cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -346,11 +348,13 @@ public sealed class PtvSignupService : IPtvSignupService
     public async Task<PtvSignupResponse> RequestPasswordResetAsync(
         PtvSignupPasswordResetRequest request,
         string remoteAddress,
+        string resetPageUrl,
         CancellationToken cancellationToken)
     {
         SignupEmailSettings emailSettings;
         SignupUserRecord? userRecord;
         string resetCode;
+        var cleanedResetPageUrl = CleanPasswordResetPageUrl(resetPageUrl);
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -407,7 +411,7 @@ public sealed class PtvSignupService : IPtvSignupService
 
         try
         {
-            await SendResetEmailAsync(emailSettings, userRecord!, resetCode, cancellationToken).ConfigureAwait(false);
+            await SendResetEmailAsync(emailSettings, userRecord!, resetCode, cleanedResetPageUrl, cancellationToken).ConfigureAwait(false);
             return new PtvSignupResponse { Ok = true, Message = ResetSuccessMessage };
         }
         catch (Exception ex)
@@ -485,7 +489,7 @@ public sealed class PtvSignupService : IPtvSignupService
                 return Fail("The account for this reset code was not found.");
             }
 
-            await _userManager.ChangePassword(user, request.Password!).ConfigureAwait(false);
+            await ChangePasswordAsync(user, request.Password!).ConfigureAwait(false);
             signup.PasswordResetCodes.Remove(reset);
             SaveConfiguration(configuration);
 
@@ -833,7 +837,7 @@ public sealed class PtvSignupService : IPtvSignupService
             .Where(user => !string.IsNullOrWhiteSpace(user.UserId) || !string.IsNullOrWhiteSpace(user.Username))
             .GroupBy(user => !string.IsNullOrWhiteSpace(user.UserId) ? $"id:{user.UserId}" : $"name:{user.Username}", StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.OrderByDescending(user => user.CreatedAtUtc).First(), StringComparer.OrdinalIgnoreCase);
-        var jellyfinUsers = _userManager.Users
+        var jellyfinUsers = GetJellyfinUsers()
             .OrderBy(user => user.Username, StringComparer.OrdinalIgnoreCase)
             .Take(1000)
             .Select(user =>
@@ -871,7 +875,7 @@ public sealed class PtvSignupService : IPtvSignupService
     private void ApplyUserEmailMappings(SignupSettings signup, IReadOnlyCollection<PtvSignupUserEmailPatch> userMappings)
     {
         var seenEmails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var jellyfinUsersById = _userManager.Users
+        var jellyfinUsersById = GetJellyfinUsers()
             .ToDictionary(user => user.Id.ToString("N"), StringComparer.OrdinalIgnoreCase);
 
         foreach (var mapping in userMappings.Where(mapping => mapping is not null))
@@ -1094,6 +1098,64 @@ public sealed class PtvSignupService : IPtvSignupService
             string.Equals(record.Email, email, StringComparison.OrdinalIgnoreCase));
     }
 
+    private async Task ChangePasswordAsync(User user, string password)
+    {
+        var managerType = _userManager.GetType();
+        var method = FindChangePasswordMethod(managerType, typeof(User))
+            ?? FindChangePasswordMethod(managerType, typeof(Guid));
+
+        if (method is null)
+        {
+            throw new MissingMethodException(managerType.FullName, "ChangePassword");
+        }
+
+        object target = method.GetParameters()[0].ParameterType == typeof(Guid) ? user.Id : user;
+        var result = method.Invoke(_userManager, [target, password]);
+
+        if (result is Task task)
+        {
+            await task.ConfigureAwait(false);
+        }
+    }
+
+    private IReadOnlyList<User> GetJellyfinUsers()
+    {
+        var managerType = _userManager.GetType();
+        var getUsersMethod = managerType.GetMethod("GetUsers", BindingFlags.Instance | BindingFlags.Public, Type.EmptyTypes);
+
+        if (getUsersMethod?.Invoke(_userManager, null) is IEnumerable<User> methodUsers)
+        {
+            return methodUsers.ToList();
+        }
+
+        var usersProperty = managerType.GetProperty("Users", BindingFlags.Instance | BindingFlags.Public);
+
+        if (usersProperty?.GetValue(_userManager) is IEnumerable<User> propertyUsers)
+        {
+            return propertyUsers.ToList();
+        }
+
+        throw new MissingMemberException(managerType.FullName, "GetUsers/Users");
+    }
+
+    private static MethodInfo? FindChangePasswordMethod(Type managerType, Type firstParameterType)
+    {
+        return managerType
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(method =>
+            {
+                if (!string.Equals(method.Name, "ChangePassword", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var parameters = method.GetParameters();
+                return parameters.Length == 2
+                    && parameters[0].ParameterType == firstParameterType
+                    && parameters[1].ParameterType == typeof(string);
+            });
+    }
+
     private User? FindJellyfinUser(SignupUserRecord record)
     {
         if (Guid.TryParse(record.UserId, out var userId))
@@ -1109,6 +1171,34 @@ public sealed class PtvSignupService : IPtvSignupService
         return _userManager.GetUserByName(record.Username);
     }
 
+    private bool UserNameExists(string username)
+    {
+        if (_userManager.GetUserByName(username) is not null)
+        {
+            return true;
+        }
+
+        var normalizedUsername = NormalizeUsernameForUniqueIndex(username);
+
+        try
+        {
+            return GetJellyfinUsers().Any(user =>
+                string.Equals(
+                    NormalizeUsernameForUniqueIndex(user.Username),
+                    normalizedUsername,
+                    StringComparison.Ordinal));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "PiggieTV signup could not enumerate Jellyfin users for normalized username collision check. Username={Username}.",
+                username);
+
+            return false;
+        }
+    }
+
     private static bool EmailExists(SignupSettings signup, string email)
     {
         return signup.Users.Any(record => string.Equals(record.Email, email, StringComparison.OrdinalIgnoreCase))
@@ -1119,8 +1209,13 @@ public sealed class PtvSignupService : IPtvSignupService
 
     private static bool PendingSignupExists(SignupSettings signup, string username, string email)
     {
+        var normalizedUsername = NormalizeUsernameForUniqueIndex(username);
+
         return signup.PendingVerifications.Any(record =>
-            string.Equals(record.Username, username, StringComparison.OrdinalIgnoreCase)
+            string.Equals(
+                NormalizeUsernameForUniqueIndex(record.Username),
+                normalizedUsername,
+                StringComparison.Ordinal)
             || string.Equals(record.Email, email, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -1215,6 +1310,7 @@ public sealed class PtvSignupService : IPtvSignupService
         SignupEmailSettings settings,
         SignupUserRecord userRecord,
         string resetCode,
+        string resetPageUrl,
         CancellationToken cancellationToken)
     {
         var body = new StringBuilder()
@@ -1224,11 +1320,15 @@ public sealed class PtvSignupService : IPtvSignupService
             .AppendLine()
             .AppendLine(resetCode)
             .AppendLine()
+            .AppendLine("Open PiggieTV to enter the code and choose a new password:")
+            .AppendLine(resetPageUrl)
+            .AppendLine()
             .AppendLine($"This code expires in {settings.ResetCodeMinutes} minutes.")
             .AppendLine("If you did not request this, you can ignore this email.")
             .ToString();
+        var html = BuildResetEmailHtml(settings, userRecord, resetCode, resetPageUrl);
 
-        await SendEmailAsync(settings, userRecord.Email, settings.ResetSubject, body, cancellationToken).ConfigureAwait(false);
+        await SendEmailAsync(settings, userRecord.Email, settings.ResetSubject, body, cancellationToken, html).ConfigureAwait(false);
     }
 
     private static string BuildVerificationEmailHtml(
@@ -1275,6 +1375,68 @@ public sealed class PtvSignupService : IPtvSignupService
             <td style="padding:0 34px 30px;text-align:center;">
               <p style="margin:0;color:#bcb4d7;font-size:13px;line-height:1.5;">{{WebUtility.HtmlEncode(expiryText)}}</p>
               <p style="margin:12px 0 0;color:#827996;font-size:12px;line-height:1.5;">If you did not request this account, you can safely ignore this email.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+""";
+    }
+
+    private static string BuildResetEmailHtml(
+        SignupEmailSettings settings,
+        SignupUserRecord userRecord,
+        string resetCode,
+        string resetPageUrl)
+    {
+        var logoUrl = ResolveEmailLogoUrl(settings.LogoUrl, resetPageUrl);
+        var safeLogoUrl = WebUtility.HtmlEncode(logoUrl);
+        var safeResetCode = WebUtility.HtmlEncode(resetCode);
+        var safeResetPageUrl = WebUtility.HtmlEncode(resetPageUrl);
+        var safeUsername = WebUtility.HtmlEncode(userRecord.Username);
+        var expiryText = $"This code expires in {settings.ResetCodeMinutes} minutes.";
+
+        return $$"""
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reset your PiggieTV password</title>
+</head>
+<body style="margin:0;background:#08050f;color:#f7f4ff;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#08050f;padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:linear-gradient(145deg,#151126,#231036);border:1px solid #3a2a66;border-radius:22px;box-shadow:0 20px 70px rgba(36,16,76,.45);overflow:hidden;">
+          <tr>
+            <td align="center" style="padding:34px 28px 10px;">
+              <img src="{{safeLogoUrl}}" alt="PiggieTV" width="220" style="display:block;max-width:220px;width:70%;height:auto;border:0;">
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 34px 4px;text-align:center;">
+              <h1 style="margin:0 0 12px;font-size:30px;line-height:1.2;color:#ffffff;">Reset your password</h1>
+              <p style="margin:0;color:#ddd7f2;font-size:16px;line-height:1.6;">Hi {{safeUsername}}, use this PiggieTV code to choose a new password.</p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:28px 34px 18px;">
+              <div style="display:inline-block;min-width:220px;background:#0f0a1b;border:1px solid #4d3b7c;border-radius:18px;padding:18px 26px;color:#ffffff;font-size:34px;line-height:1.1;font-weight:800;letter-spacing:8px;font-family:'Courier New',Courier,monospace;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04),0 14px 34px rgba(0,0,0,.28);">{{safeResetCode}}</div>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:8px 34px 30px;">
+              <a href="{{safeResetPageUrl}}" style="display:inline-block;background:#20aee5;color:#05040a;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:16px 30px;border-radius:999px;box-shadow:0 0 28px rgba(32,174,229,.42);">Reset Password</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 34px 30px;text-align:center;">
+              <p style="margin:0;color:#bcb4d7;font-size:13px;line-height:1.5;">{{WebUtility.HtmlEncode(expiryText)}}</p>
+              <p style="margin:12px 0 0;color:#827996;font-size:12px;line-height:1.5;">If you did not request this, you can safely ignore this email.</p>
             </td>
           </tr>
         </table>
@@ -1468,7 +1630,7 @@ public sealed class PtvSignupService : IPtvSignupService
         return $"{baseUrl}{separator}verify={Uri.EscapeDataString(token)}";
     }
 
-    private static string ResolveEmailLogoUrl(string? logoUrl, string verificationLink)
+    private static string ResolveEmailLogoUrl(string? logoUrl, string referenceUrl)
     {
         var cleanedLogo = CleanEmailLogoUrl(logoUrl);
 
@@ -1478,9 +1640,9 @@ public sealed class PtvSignupService : IPtvSignupService
             return absoluteLogo.ToString();
         }
 
-        if (Uri.TryCreate(verificationLink, UriKind.Absolute, out var verificationUri))
+        if (Uri.TryCreate(referenceUrl, UriKind.Absolute, out var referenceUri))
         {
-            return new Uri(verificationUri, cleanedLogo).ToString();
+            return new Uri(referenceUri, cleanedLogo).ToString();
         }
 
         return cleanedLogo;
@@ -1497,6 +1659,9 @@ public sealed class PtvSignupService : IPtvSignupService
 
         return UsernameRegex.IsMatch(cleaned) ? cleaned : null;
     }
+
+    private static string NormalizeUsernameForUniqueIndex(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
 
     private static string? CleanEmail(string? value)
     {
@@ -1545,6 +1710,19 @@ public sealed class PtvSignupService : IPtvSignupService
         }
 
         return "/web/#/signup";
+    }
+
+    private static string CleanPasswordResetPageUrl(string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value)
+            && Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            var cleaned = uri.ToString();
+            return cleaned.Length > 320 ? cleaned[..320] : cleaned;
+        }
+
+        return "/web/#/signup?mode=reset";
     }
 
     private static string CleanEmailLogoUrl(string? value)

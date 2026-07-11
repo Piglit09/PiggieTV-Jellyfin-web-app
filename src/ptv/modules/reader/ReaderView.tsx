@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any, jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions, no-nested-ternary, react/jsx-no-bind, sonarjs/no-nested-conditional, sonarjs/prefer-read-only-props */
+import React, { useEffect, useMemo, useRef } from 'react';
 
 import type { LoadedReaderDocument, ReaderProgressState, ReaderSettings } from './readerModels';
 
@@ -149,20 +150,51 @@ function ComicReader({
     onNavigate
 }: ReaderViewProps) {
     const pages = document.comicPages || [];
-    const spread = settings.spreadMode === 'double' && pages[pageIndex + 1]
-        ? [pages[pageIndex], pages[pageIndex + 1]]
-        : [pages[pageIndex]];
+    const spread = settings.spreadMode === 'double' && pages[pageIndex + 1] ?
+        [pages[pageIndex], pages[pageIndex + 1]] :
+        [pages[pageIndex]];
+    const nearbyPages = useMemo(() => {
+        const start = Math.max(0, pageIndex);
+        const end = Math.min(pages.length - 1, pageIndex + 3);
+        const nextPages = [];
+
+        for (let index = start; index <= end; index += 1) {
+            nextPages.push({
+                index,
+                url: pages[index]
+            });
+        }
+
+        return nextPages;
+    }, [pageIndex, pages]);
 
     useEffect(() => {
         const percent = pages.length ? ((pageIndex + 1) / pages.length) * 100 : 0;
         onNavigate(pageIndex, `page:${pageIndex}`, percent);
     }, [onNavigate, pageIndex, pages.length]);
 
+    useEffect(() => {
+        const preloaders = nearbyPages.slice(1).map(page => {
+            const image = new Image();
+
+            image.decoding = 'async';
+            image.src = page.url;
+
+            return image;
+        });
+
+        return () => {
+            preloaders.forEach(image => {
+                image.src = '';
+            });
+        };
+    }, [nearbyPages]);
+
     if (settings.flow === 'continuous') {
         return (
             <div className='ptv-reader-comic ptv-reader-comic--continuous'>
-                {pages.map((url, index) => (
-                    <img key={url} loading='lazy' src={url} alt={`Page ${index + 1}`} className={`ptv-reader-comic-page is-fit-${settings.fitMode}`} />
+                {nearbyPages.map(page => (
+                    <img key={page.url} loading='lazy' src={page.url} alt={`Page ${page.index + 1}`} className={`ptv-reader-comic-page is-fit-${settings.fitMode}`} />
                 ))}
             </div>
         );
@@ -222,3 +254,5 @@ export function ReaderView(props: ReaderViewProps) {
         </main>
     );
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any, jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions, no-nested-ternary, react/jsx-no-bind, sonarjs/no-nested-conditional, sonarjs/prefer-read-only-props */

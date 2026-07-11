@@ -31,7 +31,7 @@ import {
     seekOnPlaybackStart,
     onErrorInternal,
     handleHlsJsMediaError,
-    getSavedVolume,
+    getStartupVolume,
     isValidDuration,
     getBufferedRanges
 } from '../../components/htmlMediaHelper';
@@ -1644,7 +1644,7 @@ export class HtmlVideoPlayer {
 
                 // TODO: Move volume control to PlaybackManager. Player should just be a wrapper that translates commands into API calls.
                 if (!appHost.supports(AppFeature.PhysicalVolumeControl)) {
-                    videoElement.volume = getSavedVolume();
+                    videoElement.volume = getStartupVolume();
                 }
 
                 videoElement.addEventListener('timeupdate', this.onTimeUpdate);

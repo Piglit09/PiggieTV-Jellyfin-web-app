@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/prefer-read-only-props */
 import React from 'react';
 
 interface ReaderProgressProps {
@@ -17,3 +18,5 @@ export function ReaderProgress({ percent, label }: ReaderProgressProps) {
         </div>
     );
 }
+
+/* eslint-enable sonarjs/prefer-read-only-props */

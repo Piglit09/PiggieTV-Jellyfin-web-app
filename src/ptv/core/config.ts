@@ -99,19 +99,32 @@ export const PTV_SERVICES = {
 } as const;
 
 export const PTV_ROUTES = {
+    books: '#/books',
+    comics: '#/comics',
+    collections: '#/collections',
     displayPreferences: '#/mypreferencesdisplay',
     favorites: '#/home?tab=1',
     favoritesLegacy: '#/favorites',
     home: '#/home',
     homeHtml: '#/home.html',
+    animeMovies: '#/movies?topParentId=animemovies',
+    animeShows: '#/shows?topParentId=anime',
+    cartoons: '#/shows?topParentId=cartoons',
+    manga: '#/manga',
+    movies: '#/movies',
+    music: '#/music',
     profilePreferences: '#/mypreferencesmenu',
     calendar: '#/calendar',
     randomItem: '#/list?sortBy=Random',
+    readingLibrary: '#/books/library',
+    recommendationsTypo: '#/recomendations',
+    recommendations: '#/recommendations',
     request: '#/requests',
     requestFallback: '#/ptv/request',
     requestLegacy: '#/request',
     requestSafe: '#/home',
     search: '#/search',
+    shows: '#/shows',
     signup: '#/signup',
     signupFallback: '#/login'
 } as const;
@@ -129,17 +142,18 @@ export const PTV_EVENTS = {
 } as const;
 
 export const PTV_DEBUG = {
+    legacyStorageKey: 'ptv:debug',
     maxEvents: 120,
     maxTimings: 240,
     resourceTimingBufferSize: 600,
-    storageKey: 'ptv:debug'
+    storageKey: 'ptv:debug:enabled'
 } as const;
 
 export const PTV_CACHE = {
-    featuredContentKey: 'ptv:featured-content:v7',
+    featuredContentKey: 'ptv:featured-content:v8',
     featuredContentSettingsKey: 'ptv:featured-content:settings:v1',
     featuredContentTtlMs: 12 * 60 * 60 * 1000,
-    featuredContentVersion: 7,
+    featuredContentVersion: 8,
     maxFeaturedContentTtlMs: 7 * 24 * 60 * 60 * 1000,
     minFeaturedContentTtlMs: 60 * 60 * 1000
 } as const;
@@ -154,6 +168,7 @@ export const PTV_PLUGIN_API = {
         imageProxy: 'Ptv/v1/ImageProxy',
         integrationsStatus: 'Ptv/v1/integrations/status',
         integrationTestBase: 'Ptv/v1/integrations',
+        musicMetadataSearch: 'Ptv/v1/music/metadata/search',
         seerrRequest: 'Ptv/v1/integrations/seerr/request',
         seerrRequests: 'Ptv/v1/integrations/seerr/requests',
         seerrSearch: 'Ptv/v1/integrations/seerr/search',
@@ -162,7 +177,9 @@ export const PTV_PLUGIN_API = {
         signupAdminSettings: 'Ptv/v1/signup/admin/settings',
         signupAdminTestEmail: 'Ptv/v1/signup/admin/email/test',
         signupCreateUser: 'Ptv/v1/signup/create-user',
+        // eslint-disable-next-line sonarjs/no-hardcoded-passwords -- Public route name, not a secret.
         signupPasswordResetConfirm: 'Ptv/v1/signup/password-reset/confirm',
+        // eslint-disable-next-line sonarjs/no-hardcoded-passwords -- Public route name, not a secret.
         signupPasswordResetRequest: 'Ptv/v1/signup/password-reset/request',
         signupVerifyEmail: 'Ptv/v1/signup/verify-email',
         arrCalendar: 'Ptv/v1/calendar',
@@ -175,6 +192,7 @@ export const PTV_PLUGIN_API = {
         rowsValidate: 'Ptv/v1/rows/validate',
         tags: 'Ptv/v1/tags',
         tagRows: 'Ptv/v1/tags/rows',
+        tmdbTest: 'Ptv/v1/tmdb/test',
         recommendations: 'Ptv/v1/Recommendations',
         settings: 'Ptv/v1/settings',
         settingsReset: 'Ptv/v1/settings/reset',
@@ -188,9 +206,9 @@ export const PTV_PERFORMANCE = {
     default: {
         enableHeroAutoRotate: true,
         enableRowBackdrops: true,
-        featuredFetchConcurrency: 6,
-        featuredRowLimit: 20,
-        forceLoadRowImages: true,
+        featuredFetchConcurrency: 4,
+        featuredRowLimit: 16,
+        forceLoadRowImages: false,
         heroBackdropMaxWidth: 1920,
         heroBucketQueryLimit: 48,
         heroLogoMaxWidth: 800,
@@ -198,10 +216,10 @@ export const PTV_PERFORMANCE = {
         heroSeasonalSearchTermLimit: 5,
         recommendationLookupTimeoutMs: 2500,
         rowBackdropMaxWidth: 1280,
-        homeInitialRowCount: 4,
-        homeRowViewportRootMargin: '520px 0px',
+        homeInitialRowCount: 3,
+        homeRowViewportRootMargin: '340px 0px',
         homeRowLimit: 0,
-        rowItemLimit: 16,
+        rowItemLimit: 14,
         rowPrimaryMaxWidth: 900,
         searchTermLimit: 12,
         seasonalLookupTimeoutMs: 2200,
@@ -212,7 +230,7 @@ export const PTV_PERFORMANCE = {
         enableHeroAutoRotate: false,
         enableRowBackdrops: false,
         featuredFetchConcurrency: 2,
-        featuredRowLimit: 8,
+        featuredRowLimit: 6,
         forceLoadRowImages: false,
         heroBackdropMaxWidth: 960,
         heroBucketQueryLimit: 18,
@@ -223,8 +241,8 @@ export const PTV_PERFORMANCE = {
         rowBackdropMaxWidth: 720,
         homeInitialRowCount: 2,
         homeRowViewportRootMargin: '260px 0px',
-        homeRowLimit: 12,
-        rowItemLimit: 8,
+        homeRowLimit: 6,
+        rowItemLimit: 12,
         rowPrimaryMaxWidth: 520,
         searchTermLimit: 5,
         seasonalLookupTimeoutMs: 1400,
@@ -252,6 +270,29 @@ export const PTV_PERFORMANCE = {
         searchTermLimit: 6,
         seasonalLookupTimeoutMs: 1600,
         sectionResumeBatchDelayMs: 100,
+        sectionResumeBatchSize: 3
+    },
+    mobile: {
+        enableHeroAutoRotate: false,
+        enableRowBackdrops: false,
+        featuredFetchConcurrency: 3,
+        featuredRowLimit: 10,
+        forceLoadRowImages: false,
+        heroBackdropMaxWidth: 1280,
+        heroBucketQueryLimit: 24,
+        heroLogoMaxWidth: 520,
+        heroRecommendationPoolLimit: 12,
+        heroSeasonalSearchTermLimit: 4,
+        recommendationLookupTimeoutMs: 1800,
+        rowBackdropMaxWidth: 760,
+        homeInitialRowCount: 2,
+        homeRowViewportRootMargin: '260px 0px',
+        homeRowLimit: 12,
+        rowItemLimit: 10,
+        rowPrimaryMaxWidth: 620,
+        searchTermLimit: 6,
+        seasonalLookupTimeoutMs: 1600,
+        sectionResumeBatchDelayMs: 80,
         sectionResumeBatchSize: 3
     },
     webOs: {

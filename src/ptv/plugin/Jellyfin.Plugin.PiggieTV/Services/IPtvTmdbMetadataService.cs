@@ -24,6 +24,13 @@ public interface IPtvTmdbMetadataService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Validates the configured TMDb credential without enriching any Jellyfin items.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>TMDb metadata status after validation.</returns>
+    Task<PtvTmdbMetadataStatus> ValidateCredentialsAsync(CancellationToken cancellationToken);
+
+    /// <summary>
     /// Gets the current TMDb enrichment status.
     /// </summary>
     /// <returns>TMDb enrichment status.</returns>

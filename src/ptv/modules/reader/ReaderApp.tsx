@@ -1,4 +1,7 @@
+/* eslint-disable @typescript-eslint/no-shadow, react/jsx-no-bind, sonarjs/prefer-read-only-props */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+
+import { recordPtvEvent } from '../../core/observability';
 
 import { ReaderProgress } from './ReaderProgress';
 import { ReaderSettingsPanel } from './ReaderSettingsPanel';
@@ -10,6 +13,7 @@ import { addReaderBookmark, loadReaderBookmarks, loadReaderProgress, saveReaderP
 import { loadReaderSettings, saveReaderSettings } from './readerSettingsStore';
 
 interface ReaderAppProps {
+    openedAt?: number;
     source: ReaderSource;
     onClose: () => void;
     onProgress: (percent: number) => void;
@@ -33,7 +37,7 @@ function openExternal(source: ReaderSource) {
     window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-export function ReaderApp({ source, onClose, onProgress }: ReaderAppProps) {
+export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppProps) {
     const [settings, setSettings] = useState<ReaderSettings>(() => ({
         ...loadReaderSettings(),
         direction: source.metadata.readingDirection || loadReaderSettings().direction
@@ -61,11 +65,14 @@ export function ReaderApp({ source, onClose, onProgress }: ReaderAppProps) {
         }
 
         let cancelled = false;
+        const abortController = typeof AbortController === 'function' ? new AbortController() : null;
 
         setLoading(true);
         setLoadError('');
 
-        loadReaderDocument(source)
+        loadReaderDocument(source, {
+            signal: abortController?.signal
+        })
             .then(loadedDocument => {
                 if (cancelled) {
                     loadedDocument.release?.();
@@ -74,6 +81,12 @@ export function ReaderApp({ source, onClose, onProgress }: ReaderAppProps) {
 
                 setReaderDocument(loadedDocument);
                 setLoading(false);
+                recordPtvEvent('render', 'firstPageRenderMs', {
+                    firstPageRenderMs: Math.max(0, Math.round(performance.now() - (openedAt || performance.now()))),
+                    format: loadedDocument.format,
+                    pageCount: loadedDocument.pageCount,
+                    title: loadedDocument.title
+                });
             })
             .catch(error => {
                 if (cancelled) return;
@@ -83,8 +96,9 @@ export function ReaderApp({ source, onClose, onProgress }: ReaderAppProps) {
 
         return () => {
             cancelled = true;
+            abortController?.abort();
         };
-    }, [source]);
+    }, [openedAt, source]);
 
     useEffect(() => () => {
         readerDocument?.release?.();
@@ -251,3 +265,5 @@ export function ReaderApp({ source, onClose, onProgress }: ReaderAppProps) {
         </div>
     );
 }
+
+/* eslint-enable @typescript-eslint/no-shadow, react/jsx-no-bind, sonarjs/prefer-read-only-props */

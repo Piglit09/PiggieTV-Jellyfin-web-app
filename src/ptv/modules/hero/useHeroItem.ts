@@ -87,7 +87,7 @@ function getHeroItems(apiClient: HeroApiClient, userId: string) {
     const query = {
         Limit: 24,
         Recursive: true,
-        Fields: 'Overview,Genres,PrimaryImageAspectRatio,CommunityRating,CriticRating,OfficialRating,RunTimeTicks',
+        Fields: 'Overview,Genres,PrimaryImageAspectRatio,CommunityRating,CriticRating',
         ImageTypeLimit: 1,
         EnableImageTypes: 'Primary,Backdrop,Logo',
         EnableTotalRecordCount: false,
@@ -104,7 +104,7 @@ function getHeroItems(apiClient: HeroApiClient, userId: string) {
         return apiClient.getResumableItems(userId, {
             Limit: 12,
             Recursive: true,
-            Fields: 'Overview,Genres,PrimaryImageAspectRatio,CommunityRating,CriticRating,OfficialRating,RunTimeTicks',
+            Fields: 'Overview,Genres,PrimaryImageAspectRatio,CommunityRating,CriticRating',
             ImageTypeLimit: 1,
             EnableImageTypes: 'Primary,Backdrop,Logo',
             EnableTotalRecordCount: false,

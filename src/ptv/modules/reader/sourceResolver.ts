@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ReaderSource } from './readerModels';
 import { createJellyfinReaderSource, isPotentialReaderItem } from './providers/jellyfinBookProvider';
 import { enrichWithPluginMetadata } from './providers/pluginMetadataProvider';
@@ -10,3 +11,5 @@ export async function resolveReaderSource(item: Record<string, any>): Promise<Re
     const source = createJellyfinReaderSource(item);
     return enrichWithPluginMetadata(source);
 }
+
+/* eslint-enable @typescript-eslint/no-explicit-any */

@@ -44,9 +44,11 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         configuration.HeroSettings ??= new HeroSettings();
         configuration.RowSettings ??= new RowSettings();
         configuration.Rows ??= RowBuilderSettings.CreateDefault();
+        configuration.Recommendations ??= RecommendationRowSettings.CreateDefault();
         configuration.CacheSettings ??= new CacheSettings();
         configuration.PerformanceSettings ??= new PerformanceSettings();
         configuration.TmdbSettings ??= new TmdbSettings();
+        configuration.MusicMetadataSettings ??= new MusicMetadataSettings();
         configuration.SeerrSettings ??= new SeerrSettings();
         configuration.ArrSettings ??= new ArrSettings();
         configuration.DownloadSettings ??= new DownloadSettings();
@@ -61,9 +63,11 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         ApplyHeroSettingsPatch(configuration.HeroSettings, settings.HeroSettings);
         ApplyRowSettingsPatch(configuration.RowSettings, settings.RowSettings);
         ApplyRowsPatch(configuration, settings.Rows);
+        ApplyRecommendationsPatch(configuration, settings.Recommendations);
         ApplyCacheSettingsPatch(configuration.CacheSettings, settings.CacheSettings ?? settings.Cache);
         ApplyPerformanceSettingsPatch(configuration.PerformanceSettings, settings.PerformanceSettings);
         ApplyTmdbSettingsPatch(configuration, settings.TmdbSettings);
+        ApplyMusicMetadataSettingsPatch(configuration.MusicMetadataSettings, settings.MusicMetadataSettings);
         ApplySeerrSettingsPatch(configuration.SeerrSettings, settings.SeerrSettings);
         ApplyArrSettingsPatch(configuration.ArrSettings, settings.ArrSettings);
         ApplyDownloadSettingsPatch(configuration.DownloadSettings, settings.DownloadSettings);
@@ -81,6 +85,11 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
             oldHeroMaxItems,
             configuration.HeroSettings.HeroMaxItems);
         SaveConfiguration(configuration);
+        _logger.LogInformation(
+            "PiggieTV plugin settings save finished. Storage=plugin-configuration; RecommendationRows={RecommendationRows}; RecommendationItemCounts={RecommendationItemCounts}; RecommendationGeneratedAt={RecommendationGeneratedAt}.",
+            configuration.Recommendations.Rows.Count,
+            DescribeRecommendationItemCounts(configuration.Recommendations),
+            configuration.Recommendations.GeneratedAt);
 
         return PtvPluginSettingsDto.FromConfiguration(configuration);
     }
@@ -112,6 +121,26 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         Plugin.Instance.UpdateConfiguration(configuration);
     }
 
+    private static string DescribeRecommendationItemCounts(RecommendationRowSettings settings)
+    {
+        return string.Join(
+            ",",
+            (settings.Rows ?? []).Select(row => $"{row.Id}:{row.Items?.Count ?? 0}"));
+    }
+
+    private static string? NormalizePlaybackMode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "auto" => "auto",
+            "compatible" => "compatible",
+            "performance" => "performance",
+            _ => null
+        };
+    }
+
     private static void ApplyFeatureSettingsPatch(FeatureSettings target, PtvFeatureSettingsPatch? patch)
     {
         if (patch is null) return;
@@ -120,6 +149,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         target.HomeRowsEnabled = patch.HomeRowsEnabled ?? target.HomeRowsEnabled;
         target.DynamicBackdropsEnabled = patch.DynamicBackdropsEnabled ?? target.DynamicBackdropsEnabled;
         target.TvLowPowerModeEnabled = patch.TvLowPowerModeEnabled ?? target.TvLowPowerModeEnabled;
+        target.PlaybackMode = NormalizePlaybackMode(patch.PlaybackMode) ?? target.PlaybackMode;
         target.DebugModeEnabled = patch.DebugModeEnabled ?? target.DebugModeEnabled;
     }
 
@@ -153,6 +183,13 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         configuration.Rows = PtvPluginSettingsNormalizer.NormalizeRowBuilderSettings(patch);
     }
 
+    private static void ApplyRecommendationsPatch(PluginConfiguration configuration, RecommendationRowSettings? patch)
+    {
+        if (patch is null) return;
+
+        configuration.Recommendations = PtvPluginSettingsNormalizer.NormalizeRecommendationSettings(patch);
+    }
+
     private static void ApplyCacheSettingsPatch(CacheSettings target, PtvCacheSettingsPatch? patch)
     {
         if (patch is null) return;
@@ -184,8 +221,37 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
 
         if (!string.IsNullOrWhiteSpace(patch.TmdbApiToken))
         {
-            configuration.TmdbSettings.TmdbApiToken = patch.TmdbApiToken.Trim();
+            configuration.TmdbSettings.TmdbApiToken = CleanTmdbCredential(patch.TmdbApiToken);
             configuration.TmdbReadAccessToken = configuration.TmdbSettings.TmdbApiToken;
+        }
+    }
+
+    private static string? CleanTmdbCredential(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        var cleaned = value.Trim();
+
+        if (cleaned.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            cleaned = cleaned[7..].Trim();
+        }
+
+        return string.Concat(cleaned.Where(character => !char.IsWhiteSpace(character)));
+    }
+
+    private static void ApplyMusicMetadataSettingsPatch(MusicMetadataSettings target, PtvMusicMetadataSettingsPatch? patch)
+    {
+        if (patch is null) return;
+
+        target.MusicBrainzEnabled = patch.MusicBrainzEnabled ?? target.MusicBrainzEnabled;
+        target.DiscogsEnabled = patch.DiscogsEnabled ?? target.DiscogsEnabled;
+        target.MaxResults = patch.MaxResults ?? target.MaxResults;
+
+        if (!string.IsNullOrWhiteSpace(patch.DiscogsToken))
+        {
+            target.DiscogsToken = patch.DiscogsToken.Trim();
+            target.DiscogsEnabled = true;
         }
     }
 
@@ -298,10 +364,12 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         if (settings.HeroSettings is not null) sections.Add("heroSettings");
         if (settings.RowSettings is not null) sections.Add("rowSettings");
         if (settings.Rows is not null) sections.Add("rows");
+        if (settings.Recommendations is not null) sections.Add("recommendations");
         if (settings.CacheSettings is not null) sections.Add("cacheSettings");
         if (settings.Cache is not null) sections.Add("cache");
         if (settings.PerformanceSettings is not null) sections.Add("performanceSettings");
         if (settings.TmdbSettings is not null) sections.Add("tmdbSettings");
+        if (settings.MusicMetadataSettings is not null) sections.Add("musicMetadataSettings");
         if (settings.SeerrSettings is not null) sections.Add("seerrSettings");
         if (settings.ArrSettings is not null) sections.Add("arrSettings");
         if (settings.DownloadSettings is not null) sections.Add("downloadSettings");
@@ -321,6 +389,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
             AddIfPresent(keys, featureSettings.HomeRowsEnabled, "featureSettings.homeRowsEnabled");
             AddIfPresent(keys, featureSettings.DynamicBackdropsEnabled, "featureSettings.dynamicBackdropsEnabled");
             AddIfPresent(keys, featureSettings.TvLowPowerModeEnabled, "featureSettings.tvLowPowerModeEnabled");
+            AddIfPresent(keys, featureSettings.PlaybackMode, "featureSettings.playbackMode");
             AddIfPresent(keys, featureSettings.DebugModeEnabled, "featureSettings.debugModeEnabled");
         }
 
@@ -347,7 +416,16 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         {
             keys.Add($"rows.schemaVersion:{rows.SchemaVersion}");
             keys.Add($"rows.enabled:{rows.Enabled}");
+            keys.Add($"rows.rules:{rows.Rules.Count}");
             keys.Add($"rows.categories:{rows.Categories.Count}");
+        }
+
+        if (settings.Recommendations is { } recommendations)
+        {
+            keys.Add($"recommendations.schemaVersion:{recommendations.SchemaVersion}");
+            keys.Add($"recommendations.enabled:{recommendations.Enabled}");
+            keys.Add($"recommendations.rows:{recommendations.Rows.Count}");
+            keys.Add($"recommendations.generatedAt:{recommendations.GeneratedAt}");
         }
 
         if ((settings.CacheSettings ?? settings.Cache) is { } cacheSettings)
@@ -375,6 +453,18 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
             if (tmdbSettings.TmdbApiToken is not null)
             {
                 keys.Add("tmdbSettings.tmdbApiToken:<redacted>");
+            }
+        }
+
+        if (settings.MusicMetadataSettings is { } musicMetadataSettings)
+        {
+            AddIfPresent(keys, musicMetadataSettings.MusicBrainzEnabled, "musicMetadataSettings.musicBrainzEnabled");
+            AddIfPresent(keys, musicMetadataSettings.DiscogsEnabled, "musicMetadataSettings.discogsEnabled");
+            AddIfPresent(keys, musicMetadataSettings.MaxResults, "musicMetadataSettings.maxResults");
+
+            if (musicMetadataSettings.DiscogsToken is not null)
+            {
+                keys.Add("musicMetadataSettings.discogsToken:<redacted>");
             }
         }
 

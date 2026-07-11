@@ -4,6 +4,12 @@ import cardBuilder from 'components/cardbuilder/cardBuilder';
 import imageLoader from 'components/images/imageLoader';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { getPtvPerformanceProfile } from 'ptv/core/clientProfile';
+import {
+    getPtvImageFailureDiagnostics,
+    hasPtvImageUrlFailed,
+    markPtvImageUrlFailed,
+    recordPtvImageFallback
+} from 'ptv/api/images';
 import { PTV_ROUTES } from 'ptv/core/config';
 import {
     cleanupPtvLazyImages,
@@ -11,7 +17,7 @@ import {
     loadPtvImage,
     observePtvLazyImages
 } from 'ptv/core/imageManager';
-import { isPtvDebugEnabled, recordPtvEvent, timePtvAsync } from 'ptv/core/observability';
+import { recordPtvEvent, shouldCollectDiagnostics, timePtvAsync } from 'ptv/core/observability';
 import { getCurrentPtvPluginApiClient } from 'ptv/core/pluginApi';
 import { getFeaturedContent } from 'ptv/modules/cache/featuredContentCache';
 import { getPtvQualityTags } from 'ptv/modules/cards/qualityTags';
@@ -50,9 +56,28 @@ const rowBackdropLoads = new WeakMap();
 const rowBackdropTokens = new WeakMap();
 const continueRowCache = new Map();
 const continueRowInFlight = new Map();
+const failedRowBackdropUrls = new Set();
+const MAX_FAILED_ROW_BACKDROP_URLS = 400;
 
 function getHomePerformanceProfile(options = {}) {
     return options.performanceProfile || getPtvPerformanceProfile();
+}
+
+function rememberFailedRowBackdropUrl(url) {
+    if (!url) return;
+
+    markPtvImageUrlFailed(url);
+
+    if (failedRowBackdropUrls.has(url)) return;
+
+    failedRowBackdropUrls.add(url);
+
+    if (failedRowBackdropUrls.size <= MAX_FAILED_ROW_BACKDROP_URLS) return;
+
+    for (const failedUrl of failedRowBackdropUrls) {
+        failedRowBackdropUrls.delete(failedUrl);
+        break;
+    }
 }
 
 function clampLimit(value, maxValue) {
@@ -976,7 +1001,7 @@ function getRandomIndex(length) {
 }
 
 function debugRowBackdrop(message, details) {
-    if (!isPtvDebugEnabled()) return;
+    if (!shouldCollectDiagnostics()) return;
 
     console.debug(`[PTV Rows] row backdrop ${message}`, details);
 }
@@ -1013,20 +1038,16 @@ function getDirectImageUrl(apiClient, itemId, type, options) {
 function getImageUrlCandidates(apiClient, itemId, type, options) {
     if (!apiClient || !itemId) return [];
 
-    const untaggedOptions = {
-        ...options
-    };
-
-    delete untaggedOptions.tag;
-
-    return Array.from(new Set([
+    const candidates = [
         getDirectImageUrl(apiClient, itemId, type, options),
-        getDirectImageUrl(apiClient, itemId, type, untaggedOptions),
         apiClient.getScaledImageUrl?.(itemId, {
             type,
             ...options
         })
-    ].filter(Boolean)));
+    ];
+
+    return Array.from(new Set(candidates.filter(Boolean)))
+        .filter(url => !failedRowBackdropUrls.has(url) && !hasPtvImageUrlFailed(url));
 }
 
 function getBackdropUrls(apiClient, item, options = {}) {
@@ -1083,6 +1104,12 @@ function loadBackdropCandidate(urls) {
     const [url, ...fallbackUrls] = urls;
 
     if (!url) {
+        if (shouldCollectDiagnostics()) {
+            recordPtvEvent('image', 'row-backdrop-fallback-exhausted', {
+                imageDiagnostics: getPtvImageFailureDiagnostics()
+            });
+        }
+
         return Promise.resolve('');
     }
 
@@ -1091,7 +1118,21 @@ function loadBackdropCandidate(urls) {
         .then(didLoad => {
             if (didLoad) return url;
 
-            debugRowBackdrop('candidate failed', { url });
+            rememberFailedRowBackdropUrl(url);
+            recordPtvImageFallback();
+
+            if (shouldCollectDiagnostics()) {
+                debugRowBackdrop('candidate failed', {
+                    imageDiagnostics: getPtvImageFailureDiagnostics(),
+                    url
+                });
+                recordPtvEvent('image', 'row-backdrop-image-fallback', {
+                    attemptedUrl: url,
+                    imageDiagnostics: getPtvImageFailureDiagnostics(),
+                    nextUrl: fallbackUrls[0] || null
+                });
+            }
+
             return loadBackdropCandidate(fallbackUrls);
         });
 }

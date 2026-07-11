@@ -57,6 +57,18 @@ public static class PtvPluginSettingsNormalizer
     /// <summary>Maximum cache payload size in bytes.</summary>
     public const int MaxMaxCachePayloadBytes = 52_428_800;
 
+    /// <summary>Minimum music metadata candidate count.</summary>
+    public const int MinMusicMetadataResults = 1;
+
+    /// <summary>Maximum music metadata candidate count.</summary>
+    public const int MaxMusicMetadataResults = 12;
+
+    private const int MinRecommendationRowItems = 12;
+    private const int MaxRecommendationAlbumRepeats = 2;
+    private const int MaxRecommendationArtistRepeats = 1;
+    private const int MaxRecommendationSeriesRepeats = 2;
+    private const string SubgenresDisabledProviderHint = "ptv-subgenres-disabled";
+
     /// <summary>
     /// Normalizes a plugin configuration in place.
     /// </summary>
@@ -68,9 +80,11 @@ public static class PtvPluginSettingsNormalizer
         configuration.HeroSettings ??= new HeroSettings();
         configuration.RowSettings ??= new RowSettings();
         configuration.Rows ??= RowBuilderSettings.CreateDefault();
+        configuration.Recommendations ??= RecommendationRowSettings.CreateDefault();
         configuration.CacheSettings ??= new CacheSettings();
         configuration.PerformanceSettings ??= new PerformanceSettings();
         configuration.TmdbSettings ??= new TmdbSettings();
+        configuration.MusicMetadataSettings ??= new MusicMetadataSettings();
         configuration.SeerrSettings ??= new SeerrSettings();
         configuration.SignupSettings ??= new SignupSettings();
         configuration.ArrSettings ??= new ArrSettings();
@@ -81,6 +95,8 @@ public static class PtvPluginSettingsNormalizer
         configuration.ArrSettings.Radarr ??= new ArrServiceSettings();
         configuration.ArrSettings.Lidarr ??= new ArrServiceSettings();
         configuration.ArrSettings.Prowlarr ??= new ArrServiceSettings();
+
+        configuration.FeatureSettings.PlaybackMode = CleanPlaybackMode(configuration.FeatureSettings.PlaybackMode);
 
         configuration.HeroSettings.HeroRotationSeconds = Clamp(
             configuration.HeroSettings.HeroRotationSeconds,
@@ -105,6 +121,7 @@ public static class PtvPluginSettingsNormalizer
             MinRowRefreshHours,
             MaxRowRefreshHours);
         NormalizeRowBuilderSettings(configuration.Rows);
+        NormalizeRecommendationSettings(configuration.Recommendations);
         configuration.CacheSettings.RefreshIntervalHours = Clamp(
             configuration.CacheSettings.RefreshIntervalHours,
             MinCacheRefreshHours,
@@ -121,7 +138,13 @@ public static class PtvPluginSettingsNormalizer
 
         configuration.TmdbSettings.TmdbLanguage = CleanText(configuration.TmdbSettings.TmdbLanguage, "en-US");
         configuration.TmdbSettings.TmdbRegion = CleanText(configuration.TmdbSettings.TmdbRegion, "US");
-        configuration.TmdbSettings.TmdbApiToken = CleanSecret(configuration.TmdbSettings.TmdbApiToken);
+        configuration.TmdbSettings.TmdbApiToken = CleanTmdbCredential(configuration.TmdbSettings.TmdbApiToken);
+
+        configuration.MusicMetadataSettings.DiscogsToken = CleanSecret(configuration.MusicMetadataSettings.DiscogsToken);
+        configuration.MusicMetadataSettings.MaxResults = Clamp(
+            configuration.MusicMetadataSettings.MaxResults,
+            MinMusicMetadataResults,
+            MaxMusicMetadataResults);
 
         configuration.SeerrSettings.DisplayName = CleanText(configuration.SeerrSettings.DisplayName, "Jellyseerr", 48);
         configuration.SeerrSettings.InternalUrl = CleanUrl(configuration.SeerrSettings.InternalUrl, "http://10.16.0.226:5055");
@@ -153,7 +176,7 @@ public static class PtvPluginSettingsNormalizer
         configuration.RandomSettings.Behavior = CleanRandomBehavior(configuration.RandomSettings.Behavior);
 
         configuration.EnableTmdbMetadata = configuration.TmdbSettings.TmdbEnabled;
-        configuration.TmdbReadAccessToken = configuration.TmdbSettings.TmdbApiToken ?? CleanSecret(configuration.TmdbReadAccessToken);
+        configuration.TmdbReadAccessToken = configuration.TmdbSettings.TmdbApiToken ?? CleanTmdbCredential(configuration.TmdbReadAccessToken);
         configuration.TmdbApiKey = CleanSecret(configuration.TmdbApiKey);
         configuration.TmdbMaxEnrichmentItems = Clamp(
             configuration.TmdbMaxEnrichmentItems,
@@ -194,14 +217,384 @@ public static class PtvPluginSettingsNormalizer
             .ThenBy(rule => rule.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (settings.Rules.Count == 0)
-        {
-            settings.Rules = RowBuilderSettings.CreateDefault().Rules;
-        }
-
         settings.Categories = [];
 
         return settings;
+    }
+
+    /// <summary>
+    /// Normalizes persisted recommendation row settings in place.
+    /// </summary>
+    /// <param name="settings">Recommendation settings.</param>
+    /// <returns>Normalized recommendation settings.</returns>
+    public static RecommendationRowSettings NormalizeRecommendationSettings(RecommendationRowSettings? settings)
+    {
+        settings ??= RecommendationRowSettings.CreateDefault();
+        settings.SchemaVersion = 1;
+        settings.RowConfigHash = CleanOptionalText(settings.RowConfigHash, 128);
+        settings.RecommendationConfigHash = CleanOptionalText(settings.RecommendationConfigHash, 128);
+        settings.SourceCounts = NormalizeSourceCounts(settings.SourceCounts, 80);
+        settings.SourceTimingsJson = string.Empty;
+        var diagnosticsByRowId = NormalizeRecommendationRowDiagnostics(settings.RowDiagnostics);
+        settings.Rows = (settings.Rows ?? [])
+            .Where(row => row is not null)
+            .Select(row => NormalizeRecommendationRow(row, diagnosticsByRowId))
+            .Where(row => !string.IsNullOrWhiteSpace(row.Id) && row.Items.Count >= MinRecommendationRowItems)
+            .DistinctBy(row => row.Id, StringComparer.OrdinalIgnoreCase)
+            .Take(40)
+            .ToList();
+        settings.RowDiagnostics = settings.Rows
+            .Select(row => NormalizeRecommendationDiagnostic(row.Diagnostics, row.Id, row.Title, row.Items.Count))
+            .ToList();
+
+        return settings;
+    }
+
+    private static RecommendationRowDefinition NormalizeRecommendationRow(
+        RecommendationRowDefinition row,
+        IReadOnlyDictionary<string, RecommendationRowDiagnostics> diagnosticsByRowId)
+    {
+        var wasAccepted = row.Accepted;
+        row.Id = CleanIdentifier(row.Id, row.Title);
+        row.Title = CleanText(row.Title, "Recommended", 120);
+        row.Explanation = CleanText(row.Explanation, string.Empty, 300);
+        row.MediaType = CleanChoice(
+            row.MediaType,
+            "mixed",
+            ["anime", "audiobook", "book", "comic", "game", "manga", "movie", "music", "show", "mixed", "unknown"]);
+        row.RowConfigHash = CleanOptionalText(row.RowConfigHash, 128);
+        row.RecommendationConfigHash = CleanOptionalText(row.RecommendationConfigHash, 128);
+        row.SourceCounts = NormalizeSourceCounts(row.SourceCounts, 80);
+        row.SourceTimingsJson = string.Empty;
+        diagnosticsByRowId.TryGetValue(row.Id, out var fallbackDiagnostic);
+        row.Diagnostics = MergeRecommendationDiagnostic(
+            row.Diagnostics,
+            fallbackDiagnostic,
+            row.Id,
+            row.Title,
+            row.Items?.Count ?? 0);
+        var normalizedItems = (row.Items ?? [])
+            .Where(item => item is not null)
+            .Select(NormalizeRecommendationItem)
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id) && !string.IsNullOrWhiteSpace(item.Name))
+            .ToList();
+        row.Items = DeduplicateRecommendationItems(normalizedItems)
+            .Take(MaxRowMaxItems)
+            .ToList();
+        row.Diagnostics.CandidateCount = Math.Max(row.Diagnostics.CandidateCount, normalizedItems.Count);
+        row.Diagnostics.DedupeRemovals = Math.Max(0, row.Diagnostics.DedupeRemovals + normalizedItems.Count - row.Items.Count);
+        row.Diagnostics.FinalRenderedCount = row.Items.Count;
+        row.Diagnostics.HydrationRemovals = Math.Max(0, row.Diagnostics.HydrationRemovals);
+        row.Diagnostics.PrimaryCandidateCount = Math.Max(row.Diagnostics.PrimaryCandidateCount, row.Diagnostics.CandidateCount);
+        row.Diagnostics.SecondaryFallbackCount = Math.Max(0, row.Diagnostics.SecondaryFallbackCount);
+        row.Diagnostics.DiscoveryFallbackCount = Math.Max(0, row.Diagnostics.DiscoveryFallbackCount);
+        row.Diagnostics.RowId = row.Id;
+        row.Diagnostics.Title = row.Title;
+        row.Diagnostics.ItemCount = row.Items.Count;
+
+        if (row.Items.Count >= MinRecommendationRowItems)
+        {
+            row.Accepted = true;
+            row.Draft = false;
+            row.Enabled = wasAccepted ? row.Enabled : true;
+        }
+        else
+        {
+            row.Enabled = false;
+            row.Accepted = false;
+            row.Draft = true;
+        }
+
+        return row;
+    }
+
+    private static IReadOnlyDictionary<string, RecommendationRowDiagnostics> NormalizeRecommendationRowDiagnostics(
+        IEnumerable<RecommendationRowDiagnostics>? diagnostics)
+    {
+        var normalized = new Dictionary<string, RecommendationRowDiagnostics>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var diagnostic in diagnostics ?? [])
+        {
+            if (diagnostic is null)
+            {
+                continue;
+            }
+
+            var rowId = CleanIdentifier(diagnostic.RowId, diagnostic.Title);
+
+            if (string.IsNullOrWhiteSpace(rowId))
+            {
+                continue;
+            }
+
+            normalized[rowId] = NormalizeRecommendationDiagnostic(
+                diagnostic,
+                rowId,
+                CleanText(diagnostic.Title, string.Empty, 120),
+                diagnostic.ItemCount);
+        }
+
+        return normalized;
+    }
+
+    private static RecommendationRowDiagnostics MergeRecommendationDiagnostic(
+        RecommendationRowDiagnostics? primary,
+        RecommendationRowDiagnostics? fallback,
+        string rowId,
+        string title,
+        int itemCount)
+    {
+        return new RecommendationRowDiagnostics
+        {
+            RowId = rowId,
+            Title = title,
+            CandidateCount = Math.Max(primary?.CandidateCount ?? 0, fallback?.CandidateCount ?? 0),
+            DedupeRemovals = Math.Max(primary?.DedupeRemovals ?? 0, fallback?.DedupeRemovals ?? 0),
+            DiscoveryFallbackCount = Math.Max(primary?.DiscoveryFallbackCount ?? 0, fallback?.DiscoveryFallbackCount ?? 0),
+            FinalRenderedCount = Math.Max(primary?.FinalRenderedCount ?? 0, fallback?.FinalRenderedCount ?? itemCount),
+            HydrationRemovals = Math.Max(primary?.HydrationRemovals ?? 0, fallback?.HydrationRemovals ?? 0),
+            ItemCount = Math.Max(primary?.ItemCount ?? 0, fallback?.ItemCount ?? itemCount),
+            PrimaryCandidateCount = Math.Max(primary?.PrimaryCandidateCount ?? 0, fallback?.PrimaryCandidateCount ?? 0),
+            SecondaryFallbackCount = Math.Max(primary?.SecondaryFallbackCount ?? 0, fallback?.SecondaryFallbackCount ?? 0)
+        };
+    }
+
+    private static RecommendationRowDiagnostics NormalizeRecommendationDiagnostic(
+        RecommendationRowDiagnostics? diagnostic,
+        string rowId,
+        string title,
+        int itemCount)
+    {
+        diagnostic ??= new RecommendationRowDiagnostics();
+
+        return new RecommendationRowDiagnostics
+        {
+            RowId = CleanIdentifier(rowId, title),
+            Title = CleanText(title, string.Empty, 120),
+            CandidateCount = Math.Max(0, diagnostic.CandidateCount),
+            DedupeRemovals = Math.Max(0, diagnostic.DedupeRemovals),
+            DiscoveryFallbackCount = Math.Max(0, diagnostic.DiscoveryFallbackCount),
+            FinalRenderedCount = Math.Max(0, diagnostic.FinalRenderedCount),
+            HydrationRemovals = Math.Max(0, diagnostic.HydrationRemovals),
+            ItemCount = Math.Max(0, itemCount),
+            PrimaryCandidateCount = Math.Max(0, diagnostic.PrimaryCandidateCount),
+            SecondaryFallbackCount = Math.Max(0, diagnostic.SecondaryFallbackCount)
+        };
+    }
+
+    private static IEnumerable<RecommendationItemSnapshot> DeduplicateRecommendationItems(IEnumerable<RecommendationItemSnapshot> items)
+    {
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var albumCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var artistCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var seriesCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            var exactKeys = GetRecommendationExactDedupeKeys(item, includeAlbumAndSeries: false)
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .ToArray();
+
+            if (exactKeys.Any(key => seenKeys.Contains(key)))
+            {
+                continue;
+            }
+
+            var seriesKey = GetRecommendationSeriesDedupeKey(item);
+            if (!string.IsNullOrWhiteSpace(seriesKey)
+                && seriesCounts.TryGetValue(seriesKey, out var seriesCount)
+                && seriesCount >= MaxRecommendationSeriesRepeats)
+            {
+                continue;
+            }
+
+            var albumKey = GetRecommendationAlbumDedupeKey(item);
+            if (!string.IsNullOrWhiteSpace(albumKey)
+                && albumCounts.TryGetValue(albumKey, out var albumCount)
+                && albumCount >= MaxRecommendationAlbumRepeats)
+            {
+                continue;
+            }
+
+            var artistKeys = GetRecommendationArtistKeys(item).ToArray();
+
+            if (artistKeys.Any(key => artistCounts.TryGetValue(key, out var count) && count >= MaxRecommendationArtistRepeats))
+            {
+                continue;
+            }
+
+            foreach (var key in exactKeys)
+            {
+                seenKeys.Add(key);
+            }
+
+            if (!string.IsNullOrWhiteSpace(seriesKey))
+            {
+                seriesCounts[seriesKey] = seriesCounts.TryGetValue(seriesKey, out var count) ? count + 1 : 1;
+            }
+
+            if (!string.IsNullOrWhiteSpace(albumKey))
+            {
+                albumCounts[albumKey] = albumCounts.TryGetValue(albumKey, out var count) ? count + 1 : 1;
+            }
+
+            foreach (var artistKey in artistKeys)
+            {
+                artistCounts[artistKey] = artistCounts.TryGetValue(artistKey, out var count) ? count + 1 : 1;
+            }
+
+            yield return item;
+        }
+    }
+
+    private static IEnumerable<string> GetRecommendationExactDedupeKeys(RecommendationItemSnapshot item, bool includeAlbumAndSeries = true)
+    {
+        var itemKey = NormalizeRecommendationKey(item.Id);
+        if (!string.IsNullOrWhiteSpace(itemKey))
+        {
+            yield return $"item:{itemKey}";
+        }
+
+        if (!includeAlbumAndSeries)
+        {
+            yield break;
+        }
+
+        var seriesKey = GetRecommendationSeriesDedupeKey(item);
+        if (!string.IsNullOrWhiteSpace(seriesKey))
+        {
+            yield return seriesKey;
+        }
+
+        var albumKey = GetRecommendationAlbumDedupeKey(item);
+        if (!string.IsNullOrWhiteSpace(albumKey))
+        {
+            yield return albumKey;
+        }
+    }
+
+    private static string GetRecommendationSeriesDedupeKey(RecommendationItemSnapshot item)
+    {
+        var type = NormalizeRecommendationKey(item.Type);
+        var seriesId = NormalizeRecommendationKey(item.SeriesId);
+        var seriesName = NormalizeRecommendationKey(item.SeriesName);
+
+        if (string.IsNullOrWhiteSpace(seriesId) && string.IsNullOrWhiteSpace(seriesName))
+        {
+            return string.Empty;
+        }
+
+        if (type is "episode" or "season")
+        {
+            return $"series:{seriesId}:{seriesName}";
+        }
+
+        return !string.IsNullOrWhiteSpace(seriesId) && !string.Equals(seriesId, NormalizeRecommendationKey(item.Id), StringComparison.OrdinalIgnoreCase)
+            ? $"series:{seriesId}"
+            : string.Empty;
+    }
+
+    private static string GetRecommendationAlbumDedupeKey(RecommendationItemSnapshot item)
+    {
+        var type = NormalizeRecommendationKey(item.Type);
+
+        if (type is not ("audio" or "music"))
+        {
+            return string.Empty;
+        }
+
+        var albumId = NormalizeRecommendationKey(item.AlbumId);
+        var album = NormalizeRecommendationKey(item.Album);
+
+        return string.IsNullOrWhiteSpace(albumId) && string.IsNullOrWhiteSpace(album)
+            ? string.Empty
+            : $"album:{albumId}:{album}";
+    }
+
+    private static IEnumerable<string> GetRecommendationArtistKeys(RecommendationItemSnapshot item)
+    {
+        return (item.Artists ?? [])
+            .Concat([item.AlbumArtist ?? string.Empty])
+            .Select(NormalizeRecommendationKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRecommendationKey(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : string.Join(' ', value.Trim().ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static RecommendationItemSnapshot NormalizeRecommendationItem(RecommendationItemSnapshot item)
+    {
+        item.Id = CleanText(item.Id, string.Empty, 64);
+        item.Name = CleanText(item.Name, "Untitled", 160);
+        item.Type = CleanText(item.Type, string.Empty, 40);
+        item.MediaType = CleanOptionalText(item.MediaType, 40);
+        item.Overview = CleanOptionalText(item.Overview, 700);
+        item.ImageTags ??= new RecommendationItemImageTags();
+        item.ImageTags.Primary = CleanOptionalText(item.ImageTags.Primary, 80);
+        item.ImageTags.Thumb = CleanOptionalText(item.ImageTags.Thumb, 80);
+        item.ImageTags.Logo = CleanOptionalText(item.ImageTags.Logo, 80);
+        item.BackdropImageTags = CleanStringList(item.BackdropImageTags, 20);
+        item.ParentBackdropImageTags = CleanStringList(item.ParentBackdropImageTags, 20);
+        item.Genres = CleanStringList(item.Genres, 40);
+        item.Studios = CleanStringList(item.Studios, 40);
+        item.Artists = CleanStringList(item.Artists, 40);
+        item.AlbumArtist = CleanOptionalText(item.AlbumArtist, 160);
+        item.Album = CleanOptionalText(item.Album, 160);
+        item.AlbumId = CleanOptionalText(item.AlbumId, 64);
+        item.AlbumPrimaryImageItemId = CleanOptionalText(item.AlbumPrimaryImageItemId, 64);
+        item.AlbumPrimaryImageTag = CleanOptionalText(item.AlbumPrimaryImageTag, 80);
+        item.ParentPrimaryImageItemId = CleanOptionalText(item.ParentPrimaryImageItemId, 64);
+        item.ParentPrimaryImageTag = CleanOptionalText(item.ParentPrimaryImageTag, 80);
+        item.ParentThumbItemId = CleanOptionalText(item.ParentThumbItemId, 64);
+        item.ParentThumbImageTag = CleanOptionalText(item.ParentThumbImageTag, 80);
+        item.ParentId = CleanOptionalText(item.ParentId, 64);
+        item.SeriesId = CleanOptionalText(item.SeriesId, 64);
+        item.SeriesName = CleanOptionalText(item.SeriesName, 160);
+        item.SeriesPrimaryImageTag = CleanOptionalText(item.SeriesPrimaryImageTag, 80);
+        item.ProductionYear = item.ProductionYear is null ? null : Math.Max(0, item.ProductionYear.Value);
+        item.CommunityRating = item.CommunityRating is null ? null : Math.Max(0, item.CommunityRating.Value);
+        item.PrimaryImageAspectRatio = item.PrimaryImageAspectRatio is null ? null : Math.Max(0, item.PrimaryImageAspectRatio.Value);
+        item.RunTimeTicks = item.RunTimeTicks is null ? null : Math.Max(0, item.RunTimeTicks.Value);
+        item.DateCreated = CleanOptionalText(item.DateCreated, 64);
+        item.PremiereDate = CleanOptionalText(item.PremiereDate, 64);
+
+        return item;
+    }
+
+    private static List<RecommendationSourceCount> NormalizeSourceCounts(List<RecommendationSourceCount>? sourceCounts, int maxCount)
+    {
+        if (sourceCounts is null || sourceCounts.Count == 0)
+        {
+            return [];
+        }
+
+        return sourceCounts
+            .Where(entry => entry is not null && !string.IsNullOrWhiteSpace(entry.Source))
+            .Select(entry => new
+            {
+                Count = Math.Max(0, entry.Count),
+                Key = CleanIdentifier(entry.Source, "source")
+            })
+            .GroupBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(maxCount)
+            .Select(group => new RecommendationSourceCount
+            {
+                Count = group.Sum(entry => entry.Count),
+                Source = group.Key
+            })
+            .ToList();
+    }
+
+    private static string? CleanOptionalText(string? value, int maxLength)
+    {
+        var cleaned = CleanText(value, string.Empty, maxLength);
+
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 
     private static int Clamp(int value, int minimum, int maximum)
@@ -466,7 +859,29 @@ public static class PtvPluginSettingsNormalizer
         rule.SourceType = CleanChoice(
             rule.SourceType,
             "genre",
-            ["genre", "studio", "library", "collection", "requested", "continueWatching", "latest", "seasonal"]);
+            [
+                "genre",
+                "studio",
+                "library",
+                "collection",
+                "tag",
+                "tags",
+                "providerId",
+                "providerIds",
+                "person",
+                "people",
+                "productionYear",
+                "officialRating",
+                "communityRating",
+                "premiereDate",
+                "image",
+                "images",
+                "becauseYouWatched",
+                "requested",
+                "continueWatching",
+                "latest",
+                "seasonal"
+            ]);
         rule.GenerationMode = CleanChoice(
             rule.GenerationMode,
             "random",
@@ -476,8 +891,25 @@ public static class PtvPluginSettingsNormalizer
         rule.SourceValue = CleanText(GetDefaultRuleSourceValue(rule), string.Empty, 120);
         rule.ItemLimit = Clamp(rule.ItemLimit, 1, MaxRowMaxItems);
         rule.RowCount = Math.Max(0, rule.RowCount);
-        rule.SubgenreRowCount = Math.Max(0, rule.SubgenreRowCount);
         rule.ProviderHints = CleanStringList(rule.ProviderHints, 32);
+        var isRandomGenreRule = string.Equals(rule.SourceType, "genre", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(rule.GenerationMode, "random", StringComparison.OrdinalIgnoreCase);
+        var subgenresExplicitlyDisabled = rule.ProviderHints.Any(
+            hint => string.Equals(hint, SubgenresDisabledProviderHint, StringComparison.OrdinalIgnoreCase));
+        if (isRandomGenreRule && (rule.IncludeSubgenres || (!subgenresExplicitlyDisabled && rule.RowCount > 1)))
+        {
+            rule.IncludeSubgenres = true;
+            rule.ProviderHints.RemoveAll(hint => string.Equals(hint, SubgenresDisabledProviderHint, StringComparison.OrdinalIgnoreCase));
+            var maximumSubgenreRows = Math.Max(0, rule.RowCount - 1);
+            rule.SubgenreRowCount = rule.SubgenreRowCount <= 0
+                ? maximumSubgenreRows
+                : Clamp(rule.SubgenreRowCount, 0, maximumSubgenreRows);
+        }
+        else
+        {
+            rule.IncludeSubgenres = false;
+            rule.SubgenreRowCount = 0;
+        }
         rule.Tier = Clamp(rule.Tier, 0, 3);
         rule.Presentation = CleanChoice(
             rule.Presentation,
@@ -520,6 +952,7 @@ public static class PtvPluginSettingsNormalizer
         return rule.SourceType switch
         {
             "continueWatching" => "continue",
+            "becauseYouWatched" => "watched",
             "latest" => rule.MediaType,
             "requested" => "jellyseerr",
             "seasonal" => rule.Seasonal?.Mode ?? "auto",
@@ -684,6 +1117,13 @@ public static class PtvPluginSettingsNormalizer
         return cleaned is "play" or "details" ? cleaned : "details";
     }
 
+    private static string CleanPlaybackMode(string? value)
+    {
+        var cleaned = CleanText(value, "auto", 16).ToLowerInvariant();
+
+        return cleaned is "auto" or "compatible" or "performance" ? cleaned : "auto";
+    }
+
     private static string CleanChoice(string? value, string fallback, IReadOnlyCollection<string> allowedValues)
     {
         var cleaned = CleanText(value, fallback, 32);
@@ -695,5 +1135,19 @@ public static class PtvPluginSettingsNormalizer
     private static string? CleanSecret(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string? CleanTmdbCredential(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        var cleaned = value.Trim();
+
+        if (cleaned.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            cleaned = cleaned[7..].Trim();
+        }
+
+        return string.Concat(cleaned.Where(character => !char.IsWhiteSpace(character)));
     }
 }

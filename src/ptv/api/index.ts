@@ -40,6 +40,7 @@ import {
     getPtvResumeItems
 } from './items';
 import {
+    getPtvItemImageCandidates,
     getPtvItemImageUrl,
     getPtvStableImageKey,
     getPtvUserImageUrl
@@ -70,6 +71,7 @@ installPtvApiNamespace({
     getCurrentUserId: getPtvCurrentUserId,
     getFavoriteItems: getPtvFavoriteItems,
     getItem: getPtvItem,
+    getItemImageCandidates: getPtvItemImageCandidates,
     getItemImageUrl: getPtvItemImageUrl,
     getItems: getPtvItems,
     getLibraryById: getPtvLibraryById,
@@ -98,4 +100,3 @@ installPtvApiNamespace({
     setPlayed: setPtvPlayed,
     shuffleItems: shufflePtvItems
 });
-

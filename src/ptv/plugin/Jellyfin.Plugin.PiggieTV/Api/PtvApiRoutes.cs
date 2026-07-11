@@ -61,6 +61,16 @@ public static class PtvApiRoutes
     public const string V1SettingsReset = $"{V1}/settings/reset";
 
     /// <summary>
+    /// Versioned item image diagnostics route.
+    /// </summary>
+    public const string V1ImageDiagnostics = $"{V1}/diagnostics/images";
+
+    /// <summary>
+    /// Versioned music metadata lookup route.
+    /// </summary>
+    public const string V1MusicMetadataSearch = $"{V1}/music/metadata/search";
+
+    /// <summary>
     /// Legacy unversioned status route.
     /// </summary>
     public const string LegacyStatus = "Status";

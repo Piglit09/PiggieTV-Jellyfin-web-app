@@ -3,9 +3,13 @@ import React from 'react';
 import { classNames } from '../primitives/classNames';
 import { getPtvDensityClass } from '../primitives/PtvPrimitiveContract';
 import { PtvSectionTitle } from '../primitives';
+import PTVShell, { type PtvShellSection } from '../shell/PTVShell';
 import type { PtvLayoutBaseProps } from './layout.types';
 
-export type PtvAdminPageProps = PtvLayoutBaseProps;
+export type PtvAdminPageProps = PtvLayoutBaseProps & {
+    shell?: boolean;
+    shellSection?: PtvShellSection;
+};
 
 export default function PtvAdminPage({
     action,
@@ -14,6 +18,8 @@ export default function PtvAdminPage({
     density = 'comfortable',
     description,
     eyebrow,
+    shell = true,
+    shellSection = 'dashboard',
     title,
     width = 'medium',
     ...props
@@ -35,7 +41,7 @@ export default function PtvAdminPage({
         </div>
     ) : null;
 
-    return (
+    const content = (
         <section
             {...props}
             className={classNames(
@@ -63,5 +69,17 @@ export default function PtvAdminPage({
                 {children}
             </div>
         </section>
+    );
+
+    if (!shell) return content;
+
+    return (
+        <PTVShell
+            className='ptv-admin-shell'
+            section={shellSection}
+            title={typeof title === 'string' ? title : 'Dashboard'}
+        >
+            {content}
+        </PTVShell>
     );
 }

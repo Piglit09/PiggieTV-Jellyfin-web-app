@@ -10,5 +10,7 @@ import './integrations/arrActions';
 import './request';
 import './signup';
 import './reader';
+import './music';
+import './books';
 import './theme-songs';
 import './playback';

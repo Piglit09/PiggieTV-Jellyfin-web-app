@@ -78,6 +78,10 @@ function isFavoritesRoute(): boolean {
     return hash.startsWith(PTV_ROUTES.favoritesLegacy) || hash.includes('tab=1');
 }
 
+function isReadingRoute(): boolean {
+    return /^#\/(?:books|comics|manga|maga)(?:[/?]|$)/i.test(window.location.hash || '');
+}
+
 const AppHeader: FC<AppHeaderParams> = ({
     isHidden = false
 }) => {
@@ -187,6 +191,24 @@ const AppHeader: FC<AppHeaderParams> = ({
                         }`}
                     >
                         Home
+                    </a>
+
+                    <a
+                        href={PTV_ROUTES.music}
+                        className={`ptv-nav-link ${
+                            !isRequestActive && isActiveRoute(PTV_ROUTES.music) ? 'ptv-nav-link-active' : ''
+                        }`}
+                    >
+                        Music
+                    </a>
+
+                    <a
+                        href={PTV_ROUTES.readingLibrary}
+                        className={`ptv-nav-link ${
+                            !isRequestActive && isReadingRoute() ? 'ptv-nav-link-active' : ''
+                        }`}
+                    >
+                        PTV Reading
                     </a>
 
                     <a

@@ -155,10 +155,12 @@ export function getPtvPerformanceProfile(): PtvPerformanceProfile {
     const featureSettings = getPtvFeatureSettings();
     const shouldUseLowPowerProfile = featureSettings.tvLowPowerModeEnabled && client.isLowPower;
     const lowPowerOverrides = shouldUseLowPowerProfile ? PTV_PERFORMANCE.lowPower : {};
+    const mobileOverrides = client.kind === 'mobile' ? PTV_PERFORMANCE.mobile : {};
     const webOsOverrides = featureSettings.tvLowPowerModeEnabled && client.isWebOs ? PTV_PERFORMANCE.webOs : {};
     const fireTvOverrides = featureSettings.tvLowPowerModeEnabled && client.isFireTv ? PTV_PERFORMANCE.fireTv : {};
     const performanceProfile = {
         ...PTV_PERFORMANCE.default,
+        ...mobileOverrides,
         ...lowPowerOverrides,
         ...webOsOverrides,
         ...fireTvOverrides

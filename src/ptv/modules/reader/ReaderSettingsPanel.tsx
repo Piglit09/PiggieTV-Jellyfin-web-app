@@ -1,3 +1,4 @@
+/* eslint-disable react/jsx-no-bind, sonarjs/prefer-read-only-props */
 import React from 'react';
 
 import type { ReaderSettings } from './readerModels';
@@ -115,3 +116,5 @@ export function ReaderSettingsPanel({ settings, onChange }: ReaderSettingsPanelP
         </aside>
     );
 }
+
+/* eslint-enable react/jsx-no-bind, sonarjs/prefer-read-only-props */

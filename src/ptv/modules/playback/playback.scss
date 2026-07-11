@@ -5,41 +5,124 @@
     --ptv-player-gradient: linear-gradient(90deg, #7dd6ff, #a78bfa 52%, #ff8dc3);
 }
 
-#videoOsdPage.ptv-player-page,
-.videoOsdPage.ptv-player-page {
-    position: relative;
-    overflow: hidden;
+html.ptv-playback-active,
+body.ptv-playback-active,
+html.ptv-player-page,
+body.ptv-player-page {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    overflow: hidden !important;
     background: #000 !important;
 }
 
-:is(#videoOsdPage.ptv-player-page, .videoOsdPage.ptv-player-page) .videoPlayerContainer {
+body.ptv-player-page > .videoPlayerContainer,
+body.ptv-playback-active > .videoPlayerContainer {
+    z-index: 1000 !important;
+}
+
+body.ptv-player-page > #reactRoot,
+body.ptv-playback-active > #reactRoot {
     position: fixed !important;
     inset: 0 !important;
-    z-index: 0;
+    z-index: 1100 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    overflow: hidden !important;
+    background: transparent !important;
+}
+
+body.ptv-player-page > #reactRoot > :not(#videoOsdPage, .videoOsdPage, .ptv-player-page-host),
+body.ptv-playback-active > #reactRoot > :not(#videoOsdPage, .videoOsdPage, .ptv-player-page-host),
+body.ptv-player-page > :is(.skinBody, .appfooter, .backgroundContainer, .backdropContainer),
+body.ptv-playback-active > :is(.skinBody, .appfooter, .backgroundContainer, .backdropContainer) {
+    display: none !important;
+}
+
+body.ptv-player-page > #reactRoot > .ptv-player-page-host,
+body.ptv-playback-active > #reactRoot > .ptv-player-page-host {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 1100 !important;
+    display: block !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    background: transparent !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+}
+
+#videoOsdPage.ptv-player-page,
+.videoOsdPage.ptv-player-page {
+    position: fixed !important;
+    inset: 0 !important;
+    overflow: hidden !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    min-width: 100vw !important;
+    min-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    z-index: 1100 !important;
+    background: transparent !important;
+    transform: none !important;
+}
+
+.ptv-playback-active :is(.videoPlayerContainer, .videoPlayerContainer-onTop),
+.ptv-player-page :is(.videoPlayerContainer, .videoPlayerContainer-onTop),
+:is(#videoOsdPage.ptv-player-page, .videoOsdPage.ptv-player-page) :is(.videoPlayerContainer, .videoPlayerContainer-onTop) {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 1000 !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     width: 100vw !important;
     height: 100vh !important;
+    min-width: 100vw !important;
+    min-height: 100vh !important;
     margin: 0 !important;
     padding: 0 !important;
+    overflow: hidden !important;
     transform: none !important;
     opacity: 1 !important;
     visibility: visible !important;
 }
 
-:is(#videoOsdPage.ptv-player-page, .videoOsdPage.ptv-player-page) .htmlvideoplayer,
-:is(#videoOsdPage.ptv-player-page, .videoOsdPage.ptv-player-page) .htmlVideoPlayer,
-:is(#videoOsdPage.ptv-player-page, .videoOsdPage.ptv-player-page) video {
+:is(#videoOsdPage.ptv-player-page, .videoOsdPage.ptv-player-page) :is(.videoPlayerContainer, .videoPlayerContainer-onTop) {
+    z-index: 0 !important;
+}
+
+.ptv-playback-active video.htmlvideoplayer,
+.ptv-playback-active video.htmlVideoPlayer,
+.ptv-playback-active .videoPlayerContainer video,
+.ptv-playback-active .videoPlayerContainer-onTop video,
+.ptv-player-page video.htmlvideoplayer,
+.ptv-player-page video.htmlVideoPlayer,
+.ptv-player-page .videoPlayerContainer video,
+.ptv-player-page .videoPlayerContainer-onTop video,
+.videoOsdPage.ptv-player-page .htmlvideoplayer,
+.videoOsdPage.ptv-player-page .htmlVideoPlayer,
+.videoOsdPage.ptv-player-page video,
+#videoOsdPage.ptv-player-page .htmlvideoplayer,
+#videoOsdPage.ptv-player-page .htmlVideoPlayer,
+#videoOsdPage.ptv-player-page video {
     position: relative !important;
+    inset: auto !important;
     top: auto !important;
     right: auto !important;
     bottom: auto !important;
     left: auto !important;
     z-index: 0;
     display: block !important;
-    width: 100vw !important;
-    height: 100vh !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
     max-width: 100vw !important;
     max-height: 100vh !important;
     margin: 0 !important;
@@ -126,6 +209,36 @@ html:not(.ptv-player-osd-visible) :is(#videoOsdPage.ptv-player-page, .videoOsdPa
     inset: 0;
     z-index: 2200;
     pointer-events: none;
+}
+
+.ptv-player-reconnecting {
+    position: fixed;
+    top: 92px;
+    left: 50%;
+    z-index: 4;
+
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 0 16px;
+    border: 1px solid rgba(125, 214, 255, 0.22);
+    border-radius: 999px;
+    background: rgba(5, 4, 12, 0.78);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
+    color: rgba(248, 250, 255, 0.96);
+    font-size: 13px;
+    font-weight: 760;
+    opacity: 0;
+    transform: translate(-50%, -8px);
+    transition:
+        opacity var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
+        transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+    backdrop-filter: blur(16px) saturate(1.1);
+}
+
+.ptv-player-reconnecting-visible .ptv-player-reconnecting {
+    opacity: 1;
+    transform: translate(-50%, 0);
 }
 
 .ptv-player-topbar {
@@ -324,14 +437,15 @@ html:not(.ptv-player-osd-visible) :is(#videoOsdPage.ptv-player-page, .videoOsdPa
     padding: 10px 14px 12px !important;
 }
 
-.ptv-player-paused .videoOsdBottom,
-.ptv-player-paused .osdControls,
-.ptv-player-paused :is(#videoOsdPage.ptv-player-page, .videoOsdPage.ptv-player-page) .videoOsdBottom,
-.ptv-player-paused :is(#videoOsdPage.ptv-player-page, .videoOsdPage.ptv-player-page) .osdControls {
-    visibility: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-    transform: translateY(18px) !important;
+.videoOsdPage.ptv-player-page .videoOsdBottom.ptv-player-chrome-forced-visible,
+.videoOsdPage.ptv-player-page .osdControls.ptv-player-chrome-forced-visible,
+#videoOsdPage.ptv-player-page .videoOsdBottom.ptv-player-chrome-forced-visible,
+#videoOsdPage.ptv-player-page .osdControls.ptv-player-chrome-forced-visible {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: none !important;
 }
 
 :is(.ptv-player-page, .ptv-playback-active) .buttons {
