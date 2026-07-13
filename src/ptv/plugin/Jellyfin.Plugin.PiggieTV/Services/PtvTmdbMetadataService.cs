@@ -30,13 +30,17 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HttpClient Client = new()
     {
-        Timeout = TimeSpan.FromSeconds(8)
+        Timeout = TimeSpan.FromSeconds(4)
     };
+    private static readonly TimeSpan NegativeFactCacheTtl = TimeSpan.FromMinutes(30);
 
     private readonly ConcurrentDictionary<string, PtvTmdbItemFacts> _factCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _negativeFactCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<PtvTmdbMetadataService> _logger;
     private long _cacheHits;
     private long _cacheMisses;
+    private long _negativeCacheHits;
+    private long _negativeCacheWrites;
     private long? _lastDurationMs;
     private string? _lastError;
     private string? _lastErrorCode;
@@ -49,6 +53,8 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     {
         public string CacheKey => $"{Endpoint}:{TmdbId}";
     }
+
+    private sealed record TmdbFetchResult(PtvTmdbItemFacts Facts, bool CacheNegative);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PtvTmdbMetadataService"/> class.
@@ -163,6 +169,9 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             CacheHits = Interlocked.Read(ref _cacheHits),
             CacheMisses = Interlocked.Read(ref _cacheMisses),
             CacheSize = _factCache.Count,
+            NegativeCacheSize = _negativeFactCache.Count,
+            NegativeCacheHits = Interlocked.Read(ref _negativeCacheHits),
+            NegativeCacheWrites = Interlocked.Read(ref _negativeCacheWrites),
             Configured = credentials.Configured,
             CredentialLength = credentials.CredentialLength,
             CredentialStatus = _credentialStatus ?? GetCredentialStatus(isEnabled, credentials.Configured),
@@ -289,18 +298,38 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             return cachedFacts;
         }
 
+        if (TryGetNegativeCachedFacts(request.CacheKey))
+        {
+            Interlocked.Increment(ref _cacheHits);
+            Interlocked.Increment(ref _negativeCacheHits);
+            return PtvTmdbItemFacts.Empty;
+        }
+
         Interlocked.Increment(ref _cacheMisses);
-        var facts = await FetchFactsAsync(request, credentials, cancellationToken).ConfigureAwait(false);
+        var result = await FetchFactsAsync(request, credentials, cancellationToken).ConfigureAwait(false);
+        var facts = result.Facts;
 
         if (facts.HasFacts)
         {
             _factCache[request.CacheKey] = facts;
         }
+        else if (result.CacheNegative)
+        {
+            _negativeFactCache[request.CacheKey] = DateTimeOffset.UtcNow.Add(NegativeFactCacheTtl);
+            Interlocked.Increment(ref _negativeCacheWrites);
+            _logger.LogInformation(
+                "PiggieTV TMDb negative cache stored. Endpoint={Endpoint}. TmdbId={TmdbId}. CacheKey={CacheKey}. NegativeCacheSize={NegativeCacheSize}. TtlMinutes={TtlMinutes}.",
+                request.Endpoint,
+                request.TmdbId,
+                request.CacheKey,
+                _negativeFactCache.Count,
+                NegativeFactCacheTtl.TotalMinutes);
+        }
 
         return facts;
     }
 
-    private async Task<PtvTmdbItemFacts> FetchFactsAsync(
+    private async Task<TmdbFetchResult> FetchFactsAsync(
         TmdbRequest request,
         TmdbCredentials credentials,
         CancellationToken cancellationToken)
@@ -335,13 +364,32 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
                 _lastErrorCode = "request-failed";
             }
 
-            return PtvTmdbItemFacts.Empty;
+            return new TmdbFetchResult(
+                PtvTmdbItemFacts.Empty,
+                response.StatusCode == HttpStatusCode.NotFound);
         }
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var json = JsonNode.Parse(body);
 
-        return ParseFacts(json);
+        return new TmdbFetchResult(ParseFacts(json), false);
+    }
+
+    private bool TryGetNegativeCachedFacts(string cacheKey)
+    {
+        if (!_negativeFactCache.TryGetValue(cacheKey, out var expiresAt))
+        {
+            return false;
+        }
+
+        if (expiresAt > DateTimeOffset.UtcNow)
+        {
+            return true;
+        }
+
+        _negativeFactCache.TryRemove(cacheKey, out _);
+
+        return false;
     }
 
     private void MarkUnauthorized(string? errorBody = null)
@@ -598,6 +646,14 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         foreach (var key in _factCache.Keys.Take(trimCount))
         {
             _factCache.TryRemove(key, out _);
+        }
+
+        foreach (var expiredKey in _negativeFactCache
+            .Where(entry => entry.Value <= DateTimeOffset.UtcNow)
+            .Select(entry => entry.Key)
+            .ToArray())
+        {
+            _negativeFactCache.TryRemove(expiredKey, out _);
         }
     }
 

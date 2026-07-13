@@ -18,6 +18,9 @@ import itemIdentifier from '../components/itemidentifier/itemidentifier';
 import { getLocationSearch } from './url.ts';
 import { queryClient } from './query/queryClient';
 import { PTV_CONFIG } from 'ptv/core/config';
+import { isPtvWebpackDevServerOrigin } from 'ptv/core/urlOrigins';
+
+const SERVER_DISCOVERY_TIMEOUT_MS = 2200;
 
 export function getCurrentUser() {
     return window.ApiClient.getCurrentUser(false);
@@ -28,11 +31,27 @@ export async function serverAddress() {
     const apiClient = window.ApiClient;
 
     if (apiClient) {
-        return Promise.resolve(apiClient.serverAddress());
+        const currentServerAddress = apiClient.serverAddress();
+
+        if (!isDevStaticServerUrl(currentServerAddress)) {
+            return Promise.resolve(currentServerAddress);
+        }
     }
 
     // Use servers specified in config.json
-    const urls = await webSettings.getServers();
+    const configuredUrls = await webSettings.getServers();
+    const urls = [];
+
+    function addServerUrl(url) {
+        const normalizedUrl = trimTrailingSlash(String(url || '').trim());
+
+        if (normalizedUrl && !urls.includes(normalizedUrl)) {
+            urls.push(normalizedUrl);
+        }
+    }
+
+    (PTV_CONFIG.runtime.jellyfinServerUrlCandidates || [PTV_CONFIG.serverUrl]).forEach(addServerUrl);
+    configuredUrls.forEach(addServerUrl);
 
     if (urls.length === 0) {
         // Otherwise use computed base URL
@@ -55,37 +74,81 @@ export async function serverAddress() {
 
     console.debug('URL candidates:', urls);
 
-    const promises = urls.map(url => {
-        return fetch(`${PTV_CONFIG.serverUrl}/System/Info/Public`, { cache: 'no-cache' })
-            .then(async resp => {
-                if (!resp.ok) {
-                    return;
-                }
-
-                let config;
-                try {
-                    config = await resp.json();
-                } catch {
-                    return;
-                }
-
-                return {
-                    url,
-                    config
-                };
-            }).catch(error => {
-                console.error(error);
-            });
-    });
+    const promises = urls.map(url => fetchServerInfoWithTimeout(url));
 
     return Promise.all(promises).then(responses => {
         return responses.filter(obj => obj?.config);
     }).then(configs => {
         const selection = configs.find(obj => !obj.config.StartupWizardCompleted) || configs[0];
-        return selection?.url;
+        return selection?.url || getFallbackServerUrl(urls);
     }).catch(error => {
         console.error(error);
+
+        return getFallbackServerUrl(urls);
     });
+}
+
+function fetchServerInfo(url) {
+    return fetch(`${url}/System/Info/Public`, { cache: 'no-cache' })
+        .then(async resp => {
+            if (!resp.ok) {
+                return;
+            }
+
+            let config;
+            try {
+                config = await resp.json();
+            } catch {
+                return;
+            }
+
+            return {
+                url,
+                config
+            };
+        }).catch(error => {
+            console.debug('[PTV] Server discovery candidate failed:', url, error);
+        });
+}
+
+function fetchServerInfoWithTimeout(url) {
+    return Promise.race([
+        fetchServerInfo(url),
+        new Promise(resolve => {
+            window.setTimeout(() => {
+                console.debug('[PTV] Server discovery candidate timed out:', url);
+                resolve(undefined);
+            }, SERVER_DISCOVERY_TIMEOUT_MS);
+        })
+    ]);
+}
+
+function getFallbackServerUrl(urls) {
+    return urls.find(url => !isDevStaticServerUrl(url)) || urls[0];
+}
+
+function isDevStaticServerUrl(url) {
+    if (!url) return false;
+
+    try {
+        const parsedUrl = document.createElement('a');
+
+        parsedUrl.href = url;
+
+        return isPtvWebpackDevServerOrigin(parsedUrl.hostname, parsedUrl.port);
+    } catch {
+        return false;
+    }
+}
+
+function trimTrailingSlash(value) {
+    let nextValue = value;
+
+    while (nextValue.endsWith('/')) {
+        nextValue = nextValue.slice(0, -1);
+    }
+
+    return nextValue;
 }
 
 export function getCurrentUserId() {

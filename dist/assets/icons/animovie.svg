@@ -1,0 +1,15 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="ptvGrad" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#31D8FF"/>
+    <stop offset="0.52" stop-color="#7E6CFF"/>
+    <stop offset="1" stop-color="#FF43D1"/>
+  </linearGradient>
+</defs>
+
+<path d="M7.2 8.4L8.9 5.6L10.4 7.1L12 4.2L13.4 6.7L15.2 4.9L16.8 8.1L18.2 9.3C18.55 9.6 18.35 10.2 17.88 10.2H6.18C5.72 10.2 5.5 9.62 5.84 9.31L7.2 8.4Z" fill="url(#ptvGrad)"/>
+<path d="M8.3 10.2H15.7C16.96 10.2 18 11.24 18 12.5V13.3C18 16.55 15.31 19 12 19C8.69 19 6 16.55 6 13.3V12.5C6 11.24 7.04 10.2 8.3 10.2Z" fill="url(#ptvGrad)"/>
+<path d="M9.15 13.1H10.55M13.45 13.1H14.85" stroke="white" stroke-opacity="0.92" stroke-width="1.1" stroke-linecap="round"/>
+<path d="M10.3 15.45C10.8 15.8 11.38 16 12 16C12.62 16 13.2 15.8 13.7 15.45" stroke="white" stroke-opacity="0.88" stroke-width="1.15" stroke-linecap="round"/>
+
+</svg>

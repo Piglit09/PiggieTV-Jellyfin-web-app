@@ -7,6 +7,7 @@ export * from './images';
 export * from './search';
 export * from './playback';
 export * from './admin';
+export * from './itemFieldProfiles';
 
 import {
     cleanPtvQuery,

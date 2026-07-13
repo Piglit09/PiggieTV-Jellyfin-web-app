@@ -1,0 +1,361 @@
+.ptv-native-search-page {
+    min-height: 100vh;
+    overflow-x: hidden;
+    background: transparent;
+    color: #f7f2ff;
+}
+
+.ptv-search-page {
+    display: grid;
+    gap: clamp(1.4rem, 2vw, 2.3rem);
+    min-height: 100vh;
+    padding: clamp(8rem, 12vw, 11rem) clamp(1rem, 2vw, 2rem) 4rem;
+}
+
+.ptv-search-hero {
+    display: grid;
+    gap: 0.9rem;
+    max-width: 58rem;
+    padding-inline: clamp(0.2rem, 1vw, 1rem);
+}
+
+.ptv-search-hero > p {
+    margin: 0;
+    color: #8eeaff;
+    font-weight: 900;
+    text-transform: uppercase;
+    text-shadow: 0 0 1rem rgb(103 218 255 / 42%);
+}
+
+.ptv-search-hero h1 {
+    margin: 0;
+    color: #fff;
+    font-size: clamp(4rem, 8vw, 7.2rem);
+    line-height: 0.92;
+    letter-spacing: 0;
+    text-shadow: 0 1.4rem 3rem rgb(0 0 0 / 48%);
+}
+
+.ptv-search-hero-form {
+    align-items: center;
+    display: flex;
+    gap: 0.9rem;
+    width: min(100%, 48rem);
+    min-height: 4rem;
+    padding: 0 1.25rem;
+    border: 1px solid rgb(222 202 255 / 17%);
+    border-radius: 1.4rem;
+    background:
+        linear-gradient(135deg, rgb(255 255 255 / 10%), rgb(123 63 207 / 8%)),
+        rgb(10 8 22 / 22%);
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 10%),
+        0 1.4rem 3.4rem rgb(0 0 0 / 30%);
+    backdrop-filter: blur(18px) saturate(1.2);
+}
+
+.ptv-search-hero-form .ptv-icon {
+    width: 1.3rem;
+    height: 1.3rem;
+}
+
+.ptv-search-hero-form input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: #fff;
+    font: inherit;
+    font-size: 1.12rem;
+    font-weight: 800;
+}
+
+.ptv-search-hero-form input::placeholder {
+    color: rgb(255 255 255 / 54%);
+}
+
+.ptv-search-summary,
+.ptv-search-suggestions {
+    margin: 0;
+    color: rgb(255 255 255 / 72%);
+    font-weight: 700;
+}
+
+.ptv-search-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+    align-items: center;
+}
+
+.ptv-search-suggestions a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.35rem;
+    padding: 0 0.9rem;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 999px;
+    background: rgb(255 255 255 / 8%);
+    color: #fff;
+    text-decoration: none;
+}
+
+.ptv-search-groups {
+    display: grid;
+    gap: 1.5rem;
+}
+
+.ptv-search-group,
+.ptv-search-debug {
+    position: relative;
+    overflow: visible;
+    border: 1px solid rgb(210 190 255 / 14%);
+    border-radius: 1.5rem;
+    background:
+        linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 28%),
+        linear-gradient(135deg, rgb(76 59 112 / 17%), rgb(25 19 44 / 12%));
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 7%),
+        0 1.25rem 3.1rem rgb(0 0 0 / 24%);
+    backdrop-filter: blur(14px) saturate(1.08);
+}
+
+.ptv-search-group.is-empty,
+.ptv-search-group.is-queued,
+.ptv-search-group.is-timeout,
+.ptv-search-group.is-cancelled,
+.ptv-search-group.is-error {
+    min-height: auto;
+}
+
+.ptv-search-group.is-empty p,
+.ptv-search-group.is-queued p,
+.ptv-search-group.is-timeout p,
+.ptv-search-group.is-cancelled p,
+.ptv-search-group.is-error p {
+    margin: 0.8rem 0 0;
+    color: rgb(255 255 255 / 68%);
+    font-weight: 750;
+}
+
+.ptv-search-group-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.15rem 1.25rem 0;
+}
+
+.ptv-search-group-header span {
+    display: inline-block;
+    margin-bottom: 0.28rem;
+    color: #8eeaff;
+    font-size: 0.78rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    text-shadow: 0 0 0.9rem rgb(103 218 255 / 44%);
+}
+
+.ptv-search-group-header h2 {
+    margin: 0;
+    color: #fff;
+    font-size: clamp(1.65rem, 2.1vw, 2.35rem);
+    line-height: 1;
+    letter-spacing: 0;
+}
+
+.ptv-search-group-header small {
+    color: rgb(255 255 255 / 54%);
+    font-weight: 800;
+}
+
+.ptv-search-card-rail {
+    display: grid;
+    grid-auto-columns: clamp(9.2rem, 9.7vw, 12rem);
+    grid-auto-flow: column;
+    gap: 1rem;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding: 1rem 1.25rem 1.35rem;
+    scroll-padding-inline: 1.25rem;
+}
+
+.ptv-search-card {
+    display: grid;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.55rem;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 1rem;
+    background:
+        linear-gradient(180deg, rgb(255 255 255 / 11%), rgb(255 255 255 / 3%)),
+        rgb(25 18 42 / 26%);
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 10%),
+        0 0.95rem 2.1rem rgb(0 0 0 / 30%);
+    color: #fff;
+    text-decoration: none;
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, filter 180ms ease;
+    backdrop-filter: blur(10px) saturate(1.24);
+}
+
+.ptv-search-card:hover,
+.ptv-search-card:focus-visible {
+    z-index: 3;
+    border-color: rgb(211 167 255 / 48%);
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 16%),
+        0 1.3rem 3rem rgb(0 0 0 / 45%),
+        0 0 2rem rgb(177 90 255 / 30%);
+    filter: brightness(1.06);
+    outline: none;
+    transform: translateY(-0.48rem) scale(1.035);
+}
+
+.ptv-search-card-art {
+    position: relative;
+    display: grid;
+    overflow: hidden;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    place-items: center;
+    border-radius: 0.74rem;
+    background: linear-gradient(145deg, #23283f, #160d23);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 9%);
+}
+
+.ptv-search-card-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ptv-search-card-art > span:not(.ptv-search-quality-stack) {
+    color: rgb(255 255 255 / 72%);
+    font-size: 4rem;
+    font-weight: 900;
+}
+
+.ptv-search-quality-stack {
+    position: absolute;
+    top: 0.42rem;
+    left: 0.42rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.22rem;
+}
+
+.ptv-search-quality {
+    padding: 0.16rem 0.38rem;
+    border-radius: 0.35rem;
+    background: rgb(54 143 255 / 88%);
+    box-shadow: 0 0.35rem 0.7rem rgb(0 0 0 / 36%);
+    color: #fff;
+    text-shadow: 0 1px 0 rgb(0 0 0 / 30%);
+    font-weight: 900;
+    font-size: 0.62rem;
+}
+
+.ptv-search-card-title,
+.ptv-search-card-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-search-card-title {
+    font-weight: 900;
+    font-size: 0.9rem;
+}
+
+.ptv-search-card-meta {
+    color: rgb(255 255 255 / 62%);
+    font-size: 0.74rem;
+    font-weight: 650;
+}
+
+.ptv-search-card-skeleton {
+    pointer-events: none;
+}
+
+.ptv-search-card-skeleton .ptv-search-card-art,
+.ptv-search-skeleton-line {
+    background:
+        linear-gradient(90deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 14%), rgb(255 255 255 / 7%)),
+        rgb(255 255 255 / 7%);
+    background-size: 220% 100%;
+    animation: ptv-search-skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+.ptv-search-skeleton-line {
+    display: block;
+    height: 0.75rem;
+    border-radius: 999px;
+}
+
+.ptv-search-skeleton-title {
+    width: 76%;
+}
+
+.ptv-search-skeleton-meta {
+    width: 54%;
+    opacity: 0.72;
+}
+
+.ptv-search-debug {
+    padding: 1rem;
+}
+
+.ptv-search-debug dl {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.35rem 1rem;
+}
+
+.ptv-search-debug dd {
+    margin: 0;
+}
+
+.ptv-search-debug > div {
+    display: grid;
+    gap: 0.28rem;
+    color: rgb(255 255 255 / 70%);
+}
+
+@keyframes ptv-search-skeleton-shimmer {
+    from {
+        background-position: 140% 0;
+    }
+
+    to {
+        background-position: -80% 0;
+    }
+}
+
+@media (max-width: 760px) {
+    .ptv-search-page {
+        padding-top: 7rem;
+    }
+
+    .ptv-search-card-rail {
+        grid-auto-columns: 9rem;
+    }
+}
+
+html.ptv-client-firetv .ptv-search-card,
+html.ptv-client-low-power .ptv-search-card,
+html.ptv-client-firetv .ptv-search-group,
+html.ptv-client-low-power .ptv-search-group,
+html.ptv-client-firetv .ptv-search-hero-form,
+html.ptv-client-low-power .ptv-search-hero-form {
+    backdrop-filter: none;
+}
+
+html.ptv-client-firetv .ptv-search-card-skeleton .ptv-search-card-art,
+html.ptv-client-low-power .ptv-search-card-skeleton .ptv-search-card-art,
+html.ptv-client-firetv .ptv-search-skeleton-line,
+html.ptv-client-low-power .ptv-search-skeleton-line {
+    animation: none;
+}

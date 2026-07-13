@@ -2,10 +2,8 @@
     --ptv-native-home-page-edge: clamp(12px, 0.95vw, 18px);
     --ptv-native-home-hero-edge: clamp(44px, 3vw, 56px);
     --ptv-native-home-edge: var(--ptv-native-home-page-edge);
-    background:
-        radial-gradient(circle at 18% 0%, rgba(92, 59, 160, 0.32), transparent 34rem),
-        radial-gradient(circle at 86% 18%, rgba(19, 127, 170, 0.2), transparent 36rem),
-        linear-gradient(180deg, #080914 0%, #12071d 48%, #070914 100%);
+    --ptv-hero-section-overlap: 0;
+    background: transparent;
     color: #f5f6ff;
     isolation: isolate;
     min-height: 100vh;
@@ -132,7 +130,6 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 }
 
 .ptv-native-home-hero {
-    min-height: clamp(400px, 46vh, 540px);
     overflow: visible;
     position: relative;
 }
@@ -487,7 +484,7 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
     min-height: 0;
     padding: 0;
     position: absolute;
-    bottom: clamp(34px, 4vh, 52px);
+    bottom: clamp(76px, 8vh, 118px);
     z-index: 3;
 }
 
@@ -681,7 +678,7 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 .ptv-native-home-rows {
     display: grid;
     gap: clamp(28px, 1.8vw, 36px);
-    margin-top: clamp(10px, 1.15vw, 22px);
+    margin-top: var(--ptv-hero-section-overlap);
     padding: 0 0 3.5rem;
     position: relative;
     z-index: 3;
@@ -1829,6 +1826,16 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
     }
 }
 
+@media (min-width: 48rem) and (max-width: 74.9375rem) {
+    .ptv-native-home-hero-content {
+        bottom: clamp(68px, 7vh, 96px);
+    }
+
+    .ptv-native-home-rows {
+        margin-top: 0;
+    }
+}
+
 @keyframes ptvNativeHomeDropdownIn {
     from {
         opacity: 0;
@@ -1886,6 +1893,10 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
         max-width: calc(100% - 2rem);
         padding: 0;
         right: var(--ptv-native-home-page-edge);
+    }
+
+    .ptv-native-home-rows {
+        margin-top: 0;
     }
 
     .ptv-native-home-title-logo,

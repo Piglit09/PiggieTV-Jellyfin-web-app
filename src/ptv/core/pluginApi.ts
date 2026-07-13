@@ -1,7 +1,7 @@
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 
 import { PTV_PLUGIN_API, PTV_RUNTIME } from './config';
-import { classifyPtvRequestUrl, isPtvLocalDevHost, type PtvRequestOriginKind } from './urlOrigins';
+import { classifyPtvRequestUrl, isPtvLocalDevHost, isPtvWebpackDevServerOrigin, type PtvRequestOriginKind } from './urlOrigins';
 
 type PtvApiRequest = {
     contentType?: string;
@@ -423,10 +423,23 @@ function getConfiguredJellyfinRoot() {
     return PTV_RUNTIME.jellyfinServerUrl ? stripJellyfinWebPath(PTV_RUNTIME.jellyfinServerUrl) : '';
 }
 
+function getConfiguredJellyfinRoots() {
+    const configuredRoots: string[] = [];
+
+    (PTV_RUNTIME.jellyfinServerUrlCandidates || [PTV_RUNTIME.jellyfinServerUrl]).forEach(candidate => {
+        const root = candidate ? stripJellyfinWebPath(candidate) : '';
+
+        addCandidate(configuredRoots, root);
+    });
+
+    return configuredRoots;
+}
+
 function isLocalDevPluginCandidate(url: string) {
     const parsedUrl = getAnchorUrl(url);
 
-    return isPtvLocalDevHost(parsedUrl.hostname);
+    return isPtvLocalDevHost(parsedUrl.hostname)
+        || isPtvWebpackDevServerOrigin(parsedUrl.hostname, parsedUrl.port);
 }
 
 function addPluginApiCandidate(candidates: string[], url: string) {
@@ -461,6 +474,27 @@ function getPluginRootFromApiClient(apiClient: PtvJellyfinApiClient, path: strin
     return serverAddress ? stripJellyfinWebPath(serverAddress) : '';
 }
 
+function getPluginRootCandidates(
+    apiClient: PtvJellyfinApiClient,
+    path: string,
+    params?: Record<string, unknown>
+) {
+    const rootCandidates: string[] = [];
+
+    addCandidate(rootCandidates, authoritativePluginApiRoot || '');
+    addCandidate(rootCandidates, resolvedPluginApiRoot || '');
+    addCandidate(rootCandidates, getPluginRootFromApiClient(apiClient, path, params));
+    getConfiguredJellyfinRoots().forEach(root => {
+        addCandidate(rootCandidates, root);
+    });
+
+    if (!isPtvWebpackDevServerOrigin()) {
+        addCandidate(rootCandidates, getServerRootFromWindow());
+    }
+
+    return rootCandidates;
+}
+
 function setAuthoritativePluginApiRoot(root: string, source: string) {
     const normalizedRoot = stripJellyfinWebPath(root);
 
@@ -489,34 +523,6 @@ function setAuthoritativePluginApiRoot(root: string, source: string) {
     return authoritativePluginApiRoot;
 }
 
-function getAuthoritativePluginApiRoot(
-    apiClient: PtvJellyfinApiClient,
-    path: string,
-    params?: Record<string, unknown>
-) {
-    if (authoritativePluginApiRoot) {
-        return authoritativePluginApiRoot;
-    }
-
-    const configuredJellyfinRoot = getConfiguredJellyfinRoot();
-
-    if (configuredJellyfinRoot) {
-        return setAuthoritativePluginApiRoot(configuredJellyfinRoot, 'configured-jellyfin-root');
-    }
-
-    if (resolvedPluginApiRoot) {
-        return setAuthoritativePluginApiRoot(resolvedPluginApiRoot, 'resolved-root');
-    }
-
-    const apiClientRoot = getPluginRootFromApiClient(apiClient, path, params);
-
-    if (apiClientRoot) {
-        return setAuthoritativePluginApiRoot(apiClientRoot, 'jellyfin-api-client');
-    }
-
-    return setAuthoritativePluginApiRoot(getServerRootFromWindow(), 'window-server-root');
-}
-
 function getEndpointName(path: string) {
     const normalizedPath = normalizePluginPath(path).toLowerCase();
 
@@ -536,7 +542,7 @@ function getStableCachePart(value: unknown): string {
 
     if (isRecord(value)) {
         return `{${Object.keys(value)
-            .sort()
+            .sort((leftKey, rightKey) => leftKey.localeCompare(rightKey))
             .map(key => `${key}:${getStableCachePart(value[key])}`)
             .join(',')}}`;
     }
@@ -577,9 +583,9 @@ function getPluginReadCacheTtlMs(method: string, path: string) {
 
     const endpoint = getEndpointName(path);
 
-    if (endpoint === 'featuredContent') return 3000;
+    if (endpoint === 'featuredContent') return 10000;
     if (endpoint === 'settings') return 30000;
-    if (endpoint === 'status') return 750;
+    if (endpoint === 'status') return 30000;
 
     return 0;
 }
@@ -652,11 +658,12 @@ function getPluginUrlCandidates(
     params?: Record<string, unknown>
 ) {
     const candidates: string[] = [];
-    const root = getAuthoritativePluginApiRoot(apiClient, path, params);
 
-    addPluginApiCandidate(candidates, appendPluginPath(root, path, params));
-    getPluginCompatibilityPaths(path).forEach(compatibilityPath => {
-        addPluginApiCandidate(candidates, appendPluginPath(root, compatibilityPath, params));
+    getPluginRootCandidates(apiClient, path, params).forEach(root => {
+        addPluginApiCandidate(candidates, appendPluginPath(root, path, params));
+        getPluginCompatibilityPaths(path).forEach(compatibilityPath => {
+            addPluginApiCandidate(candidates, appendPluginPath(root, compatibilityPath, params));
+        });
     });
 
     return candidates;
@@ -896,6 +903,7 @@ function parsePluginResponse<T>(response: unknown): Promise<T> {
     return Promise.resolve(response as T);
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity
 function requestPluginJson<T>(
     apiClient: PtvJellyfinApiClient,
     path: string,
@@ -909,9 +917,9 @@ function requestPluginJson<T>(
     const candidates = getPluginUrlCandidates(apiClient, path, options.params);
     const responseCacheTtlMs = getPluginReadCacheTtlMs(method, path);
     const canUseResponseCache = responseCacheTtlMs > 0 && !options.bypassCache;
-    const responseCacheKey = canUseResponseCache
-        ? getPluginRequestCacheKey(method, path, options.params)
-        : null;
+    const responseCacheKey = canUseResponseCache ?
+        getPluginRequestCacheKey(method, path, options.params) :
+        null;
     const responseCacheRevision = pluginReadResponseCacheRevision;
 
     if (options.signal?.aborted) {
@@ -944,9 +952,9 @@ function requestPluginJson<T>(
         }
     }
 
-    const dedupeKey = options.bypassCache
-        ? null
-        : getPluginRequestDedupeKey(method, path, options.params);
+    const dedupeKey = options.bypassCache ?
+        null :
+        getPluginRequestDedupeKey(method, path, options.params);
     const inFlightRequest = dedupeKey ? inFlightPluginRequests.get(dedupeKey) : null;
 
     if (inFlightRequest) {
@@ -1302,6 +1310,16 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
             return requestPluginJson<T>(
                 apiClient,
                 PTV_PLUGIN_API.endpoints.musicMetadataSearch,
+                {
+                    ...options,
+                    params
+                }
+            );
+        },
+        searchGoogleBooksMetadata<T = unknown>(params: Record<string, unknown>, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.googleBooksMetadataSearch,
                 {
                     ...options,
                     params

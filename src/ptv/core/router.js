@@ -1,5 +1,6 @@
 import { emit, on } from './events';
 import { recordPtvEvent, recordPtvTiming } from './observability';
+import { registerPtvRuntimeListener } from './runtime';
 import { schedule } from './scheduler';
 import { resetRuntimeScope } from './scope';
 import { getPtvRouteClassNames, getPtvRouteOwnership } from '../shell/routes';
@@ -82,21 +83,18 @@ function patchHistory() {
     };
 }
 
-on('moduleregistered', () => {
-    scheduleRouteCheck(true);
-});
-
 export function startRouter() {
     if (startedRouter) return;
 
     startedRouter = true;
     patchHistory();
 
+    registerPtvRuntimeListener('router:moduleregistered', () => on('moduleregistered', () => {
+        scheduleRouteCheck(true);
+    }));
     routerScope.listen(window, 'hashchange', () => scheduleRouteCheck());
     routerScope.listen(window, 'popstate', () => scheduleRouteCheck());
 
     currentPath = '';
     checkRoute();
 }
-
-startRouter();

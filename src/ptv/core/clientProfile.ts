@@ -12,6 +12,22 @@ type NavigatorWithHardwareHints = Navigator & {
 };
 
 export type PtvClientKind = 'desktop' | 'firetv' | 'mobile' | 'tv' | 'webos';
+export type PtvLayoutMode = 'compact-mobile' | 'desktop' | 'mobile' | 'tablet' | 'ten-foot';
+export type PtvPointerType = 'coarse' | 'fine' | 'none' | 'unknown';
+export type PtvHoverCapability = 'hover' | 'none' | 'unknown';
+
+export type PtvResponsiveSignals = {
+    devicePixelRatio: number;
+    hoverCapability: PtvHoverCapability;
+    innerHeight: number;
+    innerWidth: number;
+    layoutMode: PtvLayoutMode;
+    layoutModeReason: string;
+    matchedMediaQuery: string;
+    pointerType: PtvPointerType;
+    visualViewportHeight: number;
+    visualViewportWidth: number;
+};
 
 export type PtvClientProfile = {
     isAndroidTv: boolean;
@@ -26,7 +42,9 @@ export type PtvClientProfile = {
     isTv: boolean;
     isWebOs: boolean;
     kind: PtvClientKind;
+    layoutMode: PtvLayoutMode;
     renderProfile: PtvRenderProfileContract;
+    responsive: PtvResponsiveSignals;
     supportsBackdropFilter: boolean;
 };
 
@@ -79,6 +97,93 @@ function hasCoarsePointer() {
         || window.matchMedia('(hover: none)').matches;
 }
 
+function matchesMediaQuery(query: string) {
+    return typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia(query).matches;
+}
+
+function getViewportNumber(value: unknown) {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function getPointerType(): PtvPointerType {
+    if (matchesMediaQuery('(pointer: coarse)')) return 'coarse';
+    if (matchesMediaQuery('(pointer: fine)')) return 'fine';
+    if (matchesMediaQuery('(pointer: none)')) return 'none';
+
+    return 'unknown';
+}
+
+function getHoverCapability(): PtvHoverCapability {
+    if (matchesMediaQuery('(hover: hover)')) return 'hover';
+    if (matchesMediaQuery('(hover: none)')) return 'none';
+
+    return 'unknown';
+}
+
+function getResponsiveSignals(
+    hasTenFootSignal: boolean,
+    hasMobileUserAgent: boolean,
+    hasTabletUserAgent: boolean
+): PtvResponsiveSignals {
+    const innerWidth = getViewportNumber(typeof window !== 'undefined' ? window.innerWidth : 0);
+    const innerHeight = getViewportNumber(typeof window !== 'undefined' ? window.innerHeight : 0);
+    const visualViewportWidth = getViewportNumber(typeof window !== 'undefined' ? window.visualViewport?.width : 0);
+    const visualViewportHeight = getViewportNumber(typeof window !== 'undefined' ? window.visualViewport?.height : 0);
+    const viewportWidth = visualViewportWidth || innerWidth;
+    const viewportHeight = visualViewportHeight || innerHeight;
+    const pointerType = getPointerType();
+    const hoverCapability = getHoverCapability();
+    const devicePixelRatio = getViewportNumber(typeof window !== 'undefined' ? window.devicePixelRatio : 0) || 1;
+    let layoutMode: PtvLayoutMode = 'desktop';
+    let layoutModeReason = 'desktop-default';
+    let matchedMediaQuery = '(min-width: 1025px)';
+
+    if (hasTenFootSignal) {
+        layoutMode = 'ten-foot';
+        layoutModeReason = 'ten-foot-signal';
+        matchedMediaQuery = 'tv-or-ten-foot';
+    } else if (viewportWidth > 0 && viewportWidth <= 390) {
+        layoutMode = 'compact-mobile';
+        layoutModeReason = 'viewport-width<=390';
+        matchedMediaQuery = '(max-width: 390px)';
+    } else if (viewportWidth > 0 && viewportWidth <= 600) {
+        layoutMode = 'mobile';
+        layoutModeReason = 'viewport-width<=600';
+        matchedMediaQuery = '(max-width: 600px)';
+    } else if (viewportWidth > 0 && viewportWidth <= 1024) {
+        layoutMode = 'tablet';
+        layoutModeReason = 'viewport-width<=1024';
+        matchedMediaQuery = '(max-width: 1024px)';
+    } else if (hasMobileUserAgent) {
+        layoutMode = 'mobile';
+        layoutModeReason = 'mobile-user-agent';
+        matchedMediaQuery = 'mobile-user-agent';
+    } else if (hasTabletUserAgent) {
+        layoutMode = 'tablet';
+        layoutModeReason = 'tablet-user-agent';
+        matchedMediaQuery = 'tablet-user-agent';
+    } else if (pointerType === 'coarse' && viewportWidth > 0 && viewportWidth <= 1366 && viewportHeight <= 1024) {
+        layoutMode = 'tablet';
+        layoutModeReason = 'coarse-pointer-tablet-viewport';
+        matchedMediaQuery = '(pointer: coarse) and (max-width: 1366px)';
+    }
+
+    return {
+        devicePixelRatio,
+        hoverCapability,
+        innerHeight,
+        innerWidth,
+        layoutMode,
+        layoutModeReason,
+        matchedMediaQuery,
+        pointerType,
+        visualViewportHeight,
+        visualViewportWidth
+    };
+}
+
 function isConstrainedHardware(nav: NavigatorWithHardwareHints | null) {
     if (!nav) return false;
 
@@ -123,8 +228,20 @@ export function getPtvClientProfile(): PtvClientProfile {
         || isRoku
         || isTenFootClient
         || TV_CLIENT_PATTERNS.some(pattern => pattern.test(userAgent));
-    const isTablet = TABLET_CLIENT_PATTERN.test(userAgent);
-    const isMobile = !isTv && MOBILE_CLIENT_PATTERN.test(userAgent);
+    const responsive = getResponsiveSignals(
+        isFireTv || isWebOs || isAndroidTv || isRoku || isTenFootClient || isTv,
+        MOBILE_CLIENT_PATTERN.test(userAgent),
+        TABLET_CLIENT_PATTERN.test(userAgent)
+    );
+    const isTablet = !isTv && (
+        TABLET_CLIENT_PATTERN.test(userAgent)
+        || responsive.layoutMode === 'tablet'
+    );
+    const isMobile = !isTv && (
+        MOBILE_CLIENT_PATTERN.test(userAgent)
+        || responsive.layoutMode === 'compact-mobile'
+        || responsive.layoutMode === 'mobile'
+    );
     const isCoarsePointer = hasCoarsePointer();
     const constrainedHardware = isConstrainedHardware(nav);
     const isLowPower = isFireTv || isTv || (!isMobile && !isTablet && constrainedHardware);
@@ -140,6 +257,8 @@ export function getPtvClientProfile(): PtvClientProfile {
         isTenFootClient,
         isTv,
         isWebOs,
+        layoutMode: responsive.layoutMode,
+        responsive,
         supportsBackdropFilter: supportsBackdropFilter()
     };
 
@@ -194,7 +313,12 @@ export function applyPtvClientProfileClasses(profile = getPtvClientProfile()) {
     root.classList.toggle('ptv-client-low-power', profile.isLowPower);
     root.classList.toggle('ptv-client-constrained-hardware', profile.isConstrainedHardware);
     root.classList.toggle('ptv-no-backdrop-filter', !profile.supportsBackdropFilter);
+    (['compact-mobile', 'mobile', 'tablet', 'desktop', 'ten-foot'] as const).forEach(mode => {
+        root.classList.toggle(`ptv-layout-${mode}`, profile.layoutMode === mode);
+    });
     root.dataset.ptvClientProfile = profile.kind;
+    root.dataset.ptvLayoutMode = profile.layoutMode;
+    root.dataset.ptvLayoutReason = profile.responsive.layoutModeReason;
     applyPtvRenderProfileClasses(root, profile.renderProfile);
 
     return profile;

@@ -71,6 +71,11 @@ public static class PtvApiRoutes
     public const string V1MusicMetadataSearch = $"{V1}/music/metadata/search";
 
     /// <summary>
+    /// Versioned Google Books metadata lookup route.
+    /// </summary>
+    public const string V1GoogleBooksMetadataSearch = $"{V1}/reading/metadata/googlebooks/search";
+
+    /// <summary>
     /// Legacy unversioned status route.
     /// </summary>
     public const string LegacyStatus = "Status";

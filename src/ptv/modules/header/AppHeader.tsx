@@ -6,6 +6,7 @@ import { dispatchPtvCustomEvent } from '../../core/events';
 import { applyPtvResponsiveImage } from '../../core/images';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
 import { openRequestPortal } from '../request';
+import { playPtvItem } from '../../api';
 
 interface AppHeaderParams {
     isHidden?: boolean;
@@ -53,9 +54,12 @@ function navigateToRandom(event: React.MouseEvent<HTMLAnchorElement>): void {
                 return;
             }
 
-            window.location.hash = response.behavior === 'play' ?
-                `#/playback?itemId=${encodeURIComponent(itemId)}` :
-                `#/details?id=${encodeURIComponent(itemId)}`;
+            if (response.behavior === 'play') {
+                playPtvItem(itemId).catch(fallback);
+                return;
+            }
+
+            window.location.hash = `#/details?id=${encodeURIComponent(itemId)}`;
         })
         .catch(fallback);
 }
@@ -79,7 +83,7 @@ function isFavoritesRoute(): boolean {
 }
 
 function isReadingRoute(): boolean {
-    return /^#\/(?:books|comics|manga|maga)(?:[/?]|$)/i.test(window.location.hash || '');
+    return /^#\/(?:reading|books|comics|manga|maga)(?:[/?]|$)/i.test(window.location.hash || '');
 }
 
 const AppHeader: FC<AppHeaderParams> = ({
@@ -203,7 +207,7 @@ const AppHeader: FC<AppHeaderParams> = ({
                     </a>
 
                     <a
-                        href={PTV_ROUTES.readingLibrary}
+                        href={PTV_ROUTES.reading}
                         className={`ptv-nav-link ${
                             !isRequestActive && isReadingRoute() ? 'ptv-nav-link-active' : ''
                         }`}

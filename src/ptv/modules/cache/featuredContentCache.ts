@@ -14,6 +14,7 @@ const DEFAULT_FEATURED_CACHE_TTL_MS = PTV_CACHE.featuredContentTtlMs;
 const MIN_FEATURED_CACHE_TTL_MS = PTV_CACHE.minFeaturedContentTtlMs;
 const MAX_FEATURED_CACHE_TTL_MS = PTV_CACHE.maxFeaturedContentTtlMs;
 const SERVER_CACHE_DOCUMENT_VERSION = 1;
+const SUPPORTED_FEATURED_CACHE_VERSIONS: number[] = [FEATURED_CACHE_VERSION];
 
 export type FeaturedPayload = {
     heroItems: unknown[];
@@ -70,6 +71,13 @@ type PtvAbortControllerLike = {
     signal: AbortSignal;
 };
 
+type FeaturedCacheAdoptionResult =
+    | 'adopted'
+    | 'empty'
+    | 'none'
+    | 'preserved-memory'
+    | 'rejected';
+
 let inflightFeaturedContent: Promise<FeaturedPayload> | null = null;
 let inflightServerRead: Promise<FeaturedCacheEntry | null> | null = null;
 let inflightPluginStatus: Promise<PtvPluginStatusForCache | null> | null = null;
@@ -83,6 +91,13 @@ let lastCacheWriteError: string | null = null;
 let lastCacheReadError: string | null = null;
 let lastRefreshDurationMs: number | null = null;
 let lastRefreshError: string | null = null;
+let lastServerCacheAdoptionResult: FeaturedCacheAdoptionResult = 'none';
+let lastServerCacheRejectionReason: string | null = null;
+let lastServerCacheRawByteSize: number | null = null;
+let lastServerCacheRawTopLevelKeys: string[] = [];
+let lastServerCacheNormalizedTopLevelKeys: string[] = [];
+let lastServerCacheRenderSource = 'none';
+let lastServerCacheDetectedVersion: number | null = null;
 let initialCachePrimeScheduled = false;
 let serverReadRetryBackoffMs = 0;
 let serverReadRetryCount = 0;
@@ -265,16 +280,47 @@ function normalizeSectionItems(value: unknown): Record<string, unknown[]> {
     }, {});
 }
 
-function normalizePayload(payload: FeaturedPayload): FeaturedPayload {
+function coerceFiniteNumber(value: unknown) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+
+    if (typeof value === 'string' && value.trim()) {
+        const parsedValue = Number(value);
+
+        return Number.isFinite(parsedValue) ? parsedValue : null;
+    }
+
+    return null;
+}
+
+function coerceVersion(value: unknown) {
+    const parsedValue = coerceFiniteNumber(value);
+
+    return parsedValue === null ? null : Math.round(parsedValue);
+}
+
+function getPayloadField(payload: unknown, ...keys: string[]) {
+    return isRecord(payload) ? getRecordField(payload, ...keys) : undefined;
+}
+
+function normalizePayload(payload: FeaturedPayload | Record<string, unknown>): FeaturedPayload {
+    const heroItems = getPayloadField(payload, 'heroItems', 'HeroItems');
+    const recommendationConfigHash = getPayloadField(payload, 'recommendationConfigHash', 'RecommendationConfigHash');
+    const rowConfigApplied = getPayloadField(payload, 'rowConfigApplied', 'RowConfigApplied');
+    const rowConfigHash = getPayloadField(payload, 'rowConfigHash', 'RowConfigHash');
+    const rowConfigVersion = getPayloadField(payload, 'rowConfigVersion', 'RowConfigVersion');
+    const rowDiagnostics = getPayloadField(payload, 'rowDiagnostics', 'RowDiagnostics');
+    const sections = getPayloadField(payload, 'sections', 'Sections');
+    const sectionItems = getPayloadField(payload, 'sectionItems', 'SectionItems');
+
     return {
-        heroItems: Array.isArray(payload.heroItems) ? payload.heroItems : [],
-        recommendationConfigHash: typeof payload.recommendationConfigHash === 'string' && payload.recommendationConfigHash.trim() ? payload.recommendationConfigHash.trim() : undefined,
-        rowConfigApplied: typeof payload.rowConfigApplied === 'boolean' ? payload.rowConfigApplied : undefined,
-        rowConfigHash: typeof payload.rowConfigHash === 'string' && payload.rowConfigHash.trim() ? payload.rowConfigHash.trim() : undefined,
-        rowConfigVersion: typeof payload.rowConfigVersion === 'number' ? payload.rowConfigVersion : undefined,
-        rowDiagnostics: Array.isArray(payload.rowDiagnostics) ? payload.rowDiagnostics : [],
-        sections: Array.isArray(payload.sections) ? payload.sections : [],
-        sectionItems: normalizeSectionItems(payload.sectionItems)
+        heroItems: Array.isArray(heroItems) ? heroItems : [],
+        recommendationConfigHash: typeof recommendationConfigHash === 'string' && recommendationConfigHash.trim() ? recommendationConfigHash.trim() : undefined,
+        rowConfigApplied: typeof rowConfigApplied === 'boolean' ? rowConfigApplied : undefined,
+        rowConfigHash: typeof rowConfigHash === 'string' && rowConfigHash.trim() ? rowConfigHash.trim() : undefined,
+        rowConfigVersion: typeof rowConfigVersion === 'number' ? rowConfigVersion : undefined,
+        rowDiagnostics: Array.isArray(rowDiagnostics) ? rowDiagnostics : [],
+        sections: Array.isArray(sections) ? sections : [],
+        sectionItems: normalizeSectionItems(sectionItems)
     };
 }
 
@@ -493,6 +539,55 @@ function getSerializedByteSize(value: unknown) {
     }
 }
 
+function getTopLevelKeys(value: unknown) {
+    return isRecord(value) ? Object.keys(value).slice(0, 32) : [];
+}
+
+function isSupportedFeaturedCacheVersion(value: unknown): value is number {
+    const version = coerceVersion(value);
+
+    return version !== null && SUPPORTED_FEATURED_CACHE_VERSIONS.includes(version);
+}
+
+function getCacheEntryVersion(value: unknown) {
+    if (!isRecord(value)) return null;
+
+    return coerceVersion(getRecordField(value, 'version', 'Version', 'cacheVersion', 'CacheVersion'));
+}
+
+function hasLegacyFeaturedCacheShape(payload: unknown) {
+    return isRecord(payload)
+        && Array.isArray(getPayloadField(payload, 'heroItems', 'HeroItems'))
+        && isRecord(getPayloadField(payload, 'sectionItems', 'SectionItems'));
+}
+
+function explainCacheEntryRejection(value: unknown) {
+    if (value === undefined) return 'missing-featured-content';
+    if (value === null) return 'empty-featured-content';
+    if (!isRecord(value)) return 'featured-content-not-object';
+    const payload = getRecordField(value, 'payload', 'Payload');
+    const version = getRecordField(value, 'version', 'Version', 'cacheVersion', 'CacheVersion');
+
+    if (!isSupportedFeaturedCacheVersion(version) && !(coerceVersion(version) === null && hasLegacyFeaturedCacheShape(payload))) return 'unsupported-cache-version';
+    if (coerceFiniteNumber(getRecordField(value, 'createdAt', 'CreatedAt')) === null) return 'missing-created-at';
+    if (coerceFiniteNumber(getRecordField(value, 'expiresAt', 'ExpiresAt')) === null) return 'missing-expires-at';
+    if (!isRecord(payload)) return 'missing-payload';
+
+    return 'unknown-cache-entry-rejection';
+}
+
+function explainServerDocumentRejection(rawDocument: unknown, normalizedDocument: FeaturedServerCacheDocument) {
+    if (!isRecord(rawDocument)) return 'server-response-not-object';
+    if (!getTopLevelKeys(rawDocument).length) return 'empty-object-response';
+
+    const document = getServerDocumentSource(rawDocument);
+    if (!document) return 'missing-cache-document';
+
+    const featuredContent = getRecordField(document, 'featuredContent', 'FeaturedContent');
+
+    return explainCacheEntryRejection(featuredContent);
+}
+
 function getErrorMessage(err: unknown) {
     const normalizedError = normalizePtvApiError(err);
 
@@ -572,16 +667,22 @@ function mergePayload(payload: FeaturedPayload, fallbackPayload?: FeaturedPayloa
 
 function parseCacheEntryValue(value: unknown): FeaturedCacheEntry | null {
     if (!isRecord(value)) return null;
-    if (value.version !== FEATURED_CACHE_VERSION) return null;
-    if (typeof value.createdAt !== 'number') return null;
-    if (typeof value.expiresAt !== 'number') return null;
-    if (!isRecord(value.payload)) return null;
+
+    const version = getCacheEntryVersion(value);
+    const createdAt = coerceFiniteNumber(getRecordField(value, 'createdAt', 'CreatedAt'));
+    const expiresAt = coerceFiniteNumber(getRecordField(value, 'expiresAt', 'ExpiresAt'));
+    const payload = getRecordField(value, 'payload', 'Payload');
+
+    if (!isSupportedFeaturedCacheVersion(version) && !(version === null && hasLegacyFeaturedCacheShape(payload))) return null;
+    if (createdAt === null) return null;
+    if (expiresAt === null) return null;
+    if (!isRecord(payload)) return null;
 
     return {
         version: FEATURED_CACHE_VERSION,
-        createdAt: value.createdAt,
-        expiresAt: value.expiresAt,
-        payload: normalizePayload(value.payload as FeaturedPayload)
+        createdAt,
+        expiresAt,
+        payload: normalizePayload(payload)
     };
 }
 
@@ -628,7 +729,7 @@ function getServerDocumentSource(value: unknown) {
         if (isRecord(storeDocument)) return storeDocument;
     }
 
-    const isDocumentLike = (hasFeaturedContentField && (parseCacheEntryValue(directFeaturedContent) || directFeaturedContent == null))
+    const isDocumentLike = hasFeaturedContentField
         || (hasSettingsField && isRecord(directSettings))
         || (hasUpdatedAtField && typeof directUpdatedAt === 'number');
 
@@ -787,14 +888,28 @@ function readPluginDocument() {
                 'PiggieTV featured cache read timed out.'
             )
                 .then(document => {
+                    const rawResponseByteSize = getSerializedByteSize(document);
+                    const rawTopLevelKeys = getTopLevelKeys(document);
                     const normalizedDocument = normalizeServerDocument(document);
                     const entry = parseCacheEntryValue(normalizedDocument.featuredContent);
+                    const normalizedTopLevelKeys = getTopLevelKeys(normalizedDocument);
+                    const rejectionReason = entry ? null : explainServerDocumentRejection(document, normalizedDocument);
+
+                    lastServerCacheRawByteSize = rawResponseByteSize;
+                    lastServerCacheRawTopLevelKeys = rawTopLevelKeys;
+                    lastServerCacheNormalizedTopLevelKeys = normalizedTopLevelKeys;
+                    lastServerCacheRejectionReason = rejectionReason;
 
                     recordPtvEvent('cache', 'featured-cache-document-read', {
+                        cacheVersion: entry?.version ?? null,
                         hasFeaturedContent: Boolean(entry),
                         heroCount: entry?.payload.heroItems.length || 0,
                         itemCount: entry ? getPayloadItemCount(entry.payload) : 0,
+                        normalizedTopLevelKeys,
                         payloadSize: getSerializedByteSize(normalizedDocument.featuredContent),
+                        rawResponseByteSize,
+                        rawTopLevelKeys,
+                        rejectionReason,
                         sectionCount: entry ? Object.keys(entry.payload.sectionItems).length : 0,
                         storage: getSuccessfulServerStorage(),
                         updatedAt: normalizedDocument.updatedAt ?? null
@@ -847,28 +962,66 @@ function noteServerReadSuccess(hasCache: boolean) {
 
 function applyServerCacheDocument(document: unknown, source: string) {
     const normalizedDocument = normalizeServerDocument(document);
+    const previousEntry = memoryCacheEntry;
+    const rawDocumentSource = isRecord(document) ? getServerDocumentSource(document) : null;
+    const rawFeaturedContent = rawDocumentSource ? getRecordField(rawDocumentSource, 'featuredContent', 'FeaturedContent') : undefined;
+    const detectedVersion = getCacheEntryVersion(rawFeaturedContent);
+    const nextEntry = parseCacheEntryValue(normalizedDocument.featuredContent);
+    const rejectionReason = nextEntry ? null : explainServerDocumentRejection(document, normalizedDocument);
 
     memoryCacheSettings = parseCacheSettings(normalizedDocument.featuredContentSettings);
-    memoryCacheEntry = parseCacheEntryValue(normalizedDocument.featuredContent);
-    lastCacheStorage = memoryCacheEntry ? getSuccessfulServerStorage() : null;
+    lastServerCacheRawByteSize = getSerializedByteSize(document);
+    lastServerCacheRawTopLevelKeys = getTopLevelKeys(document);
+    lastServerCacheNormalizedTopLevelKeys = getTopLevelKeys(normalizedDocument);
+    lastServerCacheRejectionReason = rejectionReason;
+    lastServerCacheRenderSource = source;
+    lastServerCacheDetectedVersion = detectedVersion;
+
+    if (nextEntry) {
+        memoryCacheEntry = nextEntry;
+        lastCacheStorage = getSuccessfulServerStorage();
+        lastCacheReadError = null;
+        lastServerCacheAdoptionResult = 'adopted';
+    } else if (previousEntry) {
+        memoryCacheEntry = previousEntry;
+        lastCacheStorage = lastCacheStorage || 'memory';
+        lastCacheReadError = rejectionReason;
+        lastServerCacheAdoptionResult = 'preserved-memory';
+    } else {
+        memoryCacheEntry = null;
+        lastCacheStorage = null;
+        lastCacheReadError = rejectionReason && rejectionReason !== 'empty-featured-content' ? rejectionReason : null;
+        lastServerCacheAdoptionResult = rejectionReason === 'empty-featured-content' ? 'empty' : 'rejected';
+    }
+
     lastCacheWriteError = null;
-    lastCacheReadError = null;
     noteServerReadSuccess(Boolean(memoryCacheEntry));
 
     debugLog('applied server cache document', {
+        adoptionResult: lastServerCacheAdoptionResult,
         hasCache: Boolean(memoryCacheEntry),
+        rejectionReason,
         source,
         storage: lastCacheStorage,
         ttlMs: getFeaturedContentCacheTtlMs()
     });
     recordPtvEvent('cache', 'featured-cache-server-read-result', {
+        adoptionResult: lastServerCacheAdoptionResult,
+        cacheVersion: memoryCacheEntry?.version ?? null,
+        detectedCacheVersion: lastServerCacheDetectedVersion,
         hasCache: Boolean(memoryCacheEntry),
         heroCount: memoryCacheEntry?.payload.heroItems.length || 0,
         itemCount: memoryCacheEntry ? getPayloadItemCount(memoryCacheEntry.payload) : 0,
+        normalizedTopLevelKeys: lastServerCacheNormalizedTopLevelKeys,
         payloadSize: getSerializedByteSize(memoryCacheEntry),
+        rawResponseByteSize: lastServerCacheRawByteSize,
+        rawTopLevelKeys: lastServerCacheRawTopLevelKeys,
+        rejectionReason,
+        renderSource: lastServerCacheRenderSource,
         sectionCount: memoryCacheEntry ? Object.keys(memoryCacheEntry.payload.sectionItems).length : 0,
         source,
         storage: lastCacheStorage || 'none',
+        supportedCacheVersions: SUPPORTED_FEATURED_CACHE_VERSIONS,
         ttlMs: getFeaturedContentCacheTtlMs()
     });
 
@@ -1298,6 +1451,8 @@ export function getFeaturedContentCacheStatus() {
     return {
         createdAt: cached?.createdAt || null,
         expiresAt: cached?.expiresAt || null,
+        adoptionResult: lastServerCacheAdoptionResult,
+        cacheVersion: cached?.version ?? null,
         configuredRowCount: rowSourceSummary.configuredRowCount,
         fallbackRowCount: rowSourceSummary.fallbackRowCount,
         heroCount: cached?.payload.heroItems.length || 0,
@@ -1309,6 +1464,13 @@ export function getFeaturedContentCacheStatus() {
         skippedRows: rowSourceSummary.skippedRows,
         storage: lastCacheStorage || 'none',
         totalRenderedRowCount: rowSourceSummary.totalRenderedRowCount,
+        lastRawResponseByteSize: lastServerCacheRawByteSize,
+        lastRawTopLevelKeys: lastServerCacheRawTopLevelKeys,
+        lastNormalizedTopLevelKeys: lastServerCacheNormalizedTopLevelKeys,
+        lastRejectionReason: lastServerCacheRejectionReason,
+        detectedCacheVersion: lastServerCacheDetectedVersion,
+        supportedCacheVersions: SUPPORTED_FEATURED_CACHE_VERSIONS,
+        renderSource: lastServerCacheRenderSource,
         readError: lastCacheReadError,
         readInProgress: Boolean(inflightServerRead),
         writeError: lastCacheWriteError,

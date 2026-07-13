@@ -49,6 +49,7 @@ import {
     getEmptyNativeHomeAdaptiveDebug,
     type NativeHomeAdaptiveDebug
 } from './services/homeLayoutService';
+import { resolveNativeHomeDerivedRowSourceValue } from './rowSourceValue';
 
 export type NativeHomeRowKind = 'items' | 'libraries';
 export type NativeHomeRowSource = 'adaptive-today' | 'because-you-watched' | 'continue-listening' | 'continue-reading' | 'featured-cache' | 'featured-endpoint' | 'libraries' | 'next-up' | 'recently-added' | 'recommendation' | 'resume';
@@ -158,15 +159,24 @@ export type NativeHomePerformanceDebug = {
     backgroundRefreshDurationMs: number | null;
     backgroundRefreshStarted: boolean;
     cacheHeroUsed: boolean;
+    cacheCommitDelayMs: number | null;
     cacheRenderMs: number | null;
+    cacheResponseReceivedAt: number | null;
     cacheRowsUsed: boolean;
+    cacheStateCommittedAt: number | null;
     cacheUsedForHero: boolean;
     cacheUsedForRows: boolean;
+    cachedHeroCount: number;
+    cachedItemCount: number;
+    cachedRowCount: number;
     fallbackFetchesSkipped: string[];
+    firstVisibleContentMs: number | null;
     firstInteractiveMs: number | null;
     homeInitialRenderMs: number | null;
     slowFetchesAborted: string[];
 };
+
+let lastUsableNativeHomeState: NativeHomeState | null = null;
 
 const ITEM_FIELDS = [
     'Overview',
@@ -350,7 +360,6 @@ const NATIVE_HOME_ROW_MOUNT_ROOT_MARGIN_PX = 1200;
 const NATIVE_HOME_ROW_INITIAL_BUFFER = 4;
 const NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED = false;
 const NATIVE_HOME_ROW_FALLBACK_MOUNT_COUNT = 8;
-const NATIVE_HOME_ROW_LAYOUT_SETTLE_DELAYS_MS = [120, 360, 900, 1600];
 
 function getNativeHomeRootMarginPx(rootMargin: string | undefined, fallback: number) {
     const firstValue = String(rootMargin || '').trim().split(/\s+/)[0] || '';
@@ -1710,58 +1719,22 @@ export function getNativeHomeRowDiagnostics(row: NativeHomeRow): NativeHomeRowDi
     };
 }
 
-function recordNativeHomeRowDetail(
-    stage: string,
-    row: NativeHomeRow,
-    details: {
-        index?: number;
-        mounted?: boolean;
-        mountReason?: string | null;
-        planned?: boolean;
-    } = {}
-) {
-    if (!shouldCollectDiagnostics()) return;
-
-    const filteredReason = row.filteredReason ?? getRowFilteredReason(row);
-    const rowDiagnostics = getNativeHomeRowDiagnostics(row);
-
-    recordPtvEvent('render', 'native-home-row-details', {
-        ...rowDiagnostics,
-        filteredReason,
-        index: details.index ?? null,
-        moreUrl: row.moreUrl || null,
-        mounted: details.mounted ?? false,
-        mountReason: details.mountReason ?? null,
-        planned: details.planned ?? !filteredReason,
-        renderedSource: rowDiagnostics.source,
-        ruleId: row.ruleId || null,
-        rowId: row.id,
-        source: row.source,
-        sourceCacheSectionId: row.sourceCacheSectionId || null,
-        sourceConfigHash: row.sourceConfigHash || null,
-        sourceGroupTitle: rowDiagnostics.sourceGroupTitle,
-        sourceRecommendationId: rowDiagnostics.sourceRecommendationId,
-        sourceRuleId: rowDiagnostics.sourceRuleId,
-        sourceType: row.sourceType || null,
-        sourceValue: rowDiagnostics.sourceValue,
-        stage,
-        title: row.title
-    });
-}
-
 function finalizeNativeHomeRows(stage: string, rows: NativeHomeRow[]) {
     const rowsWithReasons = rows.map(row => ({
         ...row,
         filteredReason: getRowFilteredReason(row)
     }));
 
-    rowsWithReasons.forEach((row, index) => {
-        recordNativeHomeRowDetail(stage, row, {
-            index,
-            mounted: false,
-            planned: !row.filteredReason
+    if (shouldCollectDiagnostics()) {
+        const filteredCount = rowsWithReasons.filter(row => row.filteredReason).length;
+
+        recordPtvEvent('render', 'native-home-rows-finalized', {
+            filteredCount,
+            renderableCount: rowsWithReasons.length - filteredCount,
+            rowCount: rowsWithReasons.length,
+            stage
         });
-    });
+    }
 
     return rowsWithReasons.filter(row => !row.filteredReason);
 }
@@ -2105,15 +2078,41 @@ function getEmptyNativeHomePerformanceDebug(): NativeHomePerformanceDebug {
         backgroundRefreshDurationMs: null,
         backgroundRefreshStarted: false,
         cacheHeroUsed: false,
+        cacheCommitDelayMs: null,
         cacheRenderMs: null,
+        cacheResponseReceivedAt: null,
         cacheRowsUsed: false,
+        cacheStateCommittedAt: null,
         cacheUsedForHero: false,
         cacheUsedForRows: false,
+        cachedHeroCount: 0,
+        cachedItemCount: 0,
+        cachedRowCount: 0,
         fallbackFetchesSkipped: [],
+        firstVisibleContentMs: null,
         firstInteractiveMs: null,
         homeInitialRenderMs: null,
         slowFetchesAborted: []
     };
+}
+
+function hasRenderableNativeHomeRows(rows: NativeHomeRow[]) {
+    return rows.some(row => row.items.length > 0);
+}
+
+function rememberUsableNativeHomeState(state: NativeHomeState, reason: string) {
+    if (!hasRenderableNativeHomeRows(state.rows)) return;
+
+    lastUsableNativeHomeState = state;
+    recordPtvEvent('render', 'native-home-last-good-state-updated', {
+        heroItemId: state.heroItem?.Id || null,
+        reason,
+        rowCount: state.rows.length
+    });
+}
+
+function getLastUsableNativeHomeState() {
+    return lastUsableNativeHomeState;
 }
 
 function getAdaptiveNativeHomeLayout(
@@ -2719,9 +2718,12 @@ function createRowsFromFeaturedPayload(
             const ruleId = getSectionRuleId(section);
             const sourceType = getSectionSourceType(section);
             const title = getSectionTitle(section, sectionId || `Featured ${index + 1}`);
-            const sourceValue = getSectionExplicitSourceValue(section)
-                || rule?.sourceValue?.trim()
-                || (isNativeHomeStudioSource(sourceType) ? title : getSectionSourceValue(section));
+            const sourceValue = resolveNativeHomeDerivedRowSourceValue({
+                ruleSourceValue: rule?.sourceValue,
+                sectionSourceValue: getSectionExplicitSourceValue(section) || getSectionSourceValue(section),
+                sourceType,
+                title
+            });
             const mediaType = getSectionMediaType(section);
             const rowItems = recommendationId ? dedupeNativeHomeRecommendationItems(rawItems as PtvItem[]) : rawItems;
             const configuredLimit = recommendationRow ? recommendationRow.items.length : getRuleItemLimit(rule);
@@ -3315,6 +3317,9 @@ export function useNativeHomeData(): NativeHomeState {
             recordPtvEvent('render', 'native-home-background-refresh-started', {
                 reason
             });
+            recordPtvEvent('render', 'home-background-enrichment-started', {
+                reason
+            });
         };
         const markBackgroundRefreshCompleted = (reason: string, detail: Record<string, unknown> = {}) => {
             const durationMs = backgroundRefreshStartedAt === null ?
@@ -3322,6 +3327,11 @@ export function useNativeHomeData(): NativeHomeState {
                 Math.round(performance.now() - backgroundRefreshStartedAt);
 
             recordPtvEvent('render', 'native-home-background-refresh-completed', {
+                ...detail,
+                durationMs,
+                reason
+            });
+            recordPtvEvent('render', 'home-background-enrichment-completed', {
                 ...detail,
                 durationMs,
                 reason
@@ -3359,21 +3369,55 @@ export function useNativeHomeData(): NativeHomeState {
         recordPtvEvent('render', 'native-home-mount-start', {
             route: window.location.hash || window.location.pathname
         });
+        recordPtvEvent('render', 'home-route-entered', {
+            route: window.location.hash || window.location.pathname
+        });
         recordPtvEvent('row-fetch', 'native-home-data-fetch-start', {
             route: window.location.hash || window.location.pathname
         });
         setPtvShellLoading(true);
         clearPtvShellStatus();
-        setState(previous => ({
-            ...previous,
-            debug: {
-                home: getEmptyNativeHomeAdaptiveDebug(),
-                performance: getEmptyNativeHomePerformanceDebug(),
-                recommendations: getEmptyRecommendationDebug()
-            },
-            error: null,
-            isLoading: true
-        }));
+        setState(previous => {
+            const lastUsableState = getLastUsableNativeHomeState();
+
+            if (lastUsableState && !hasRenderableNativeHomeRows(previous.rows)) {
+                const restoredAt = Math.round(performance.now() - startedAt);
+
+                recordPtvEvent('render', 'native-home-last-good-state-restored', {
+                    restoreMs: restoredAt,
+                    rowCount: lastUsableState.rows.length
+                });
+
+                return {
+                    ...lastUsableState,
+                    debug: {
+                        ...lastUsableState.debug,
+                        performance: {
+                            ...lastUsableState.debug.performance,
+                            backgroundRefreshStarted: true,
+                            cacheRenderMs: restoredAt,
+                            cacheRowsUsed: true,
+                            cacheUsedForRows: true,
+                            firstInteractiveMs: restoredAt,
+                            homeInitialRenderMs: restoredAt
+                        }
+                    },
+                    error: null,
+                    isLoading: false
+                };
+            }
+
+            return {
+                ...previous,
+                debug: {
+                    home: getEmptyNativeHomeAdaptiveDebug(),
+                    performance: getEmptyNativeHomePerformanceDebug(),
+                    recommendations: getEmptyRecommendationDebug()
+                },
+                error: null,
+                isLoading: true
+            };
+        });
 
         const slowFetchesAborted = new Set<string>();
         const fallbackFetchesSkipped = new Set<string>();
@@ -3489,12 +3533,14 @@ export function useNativeHomeData(): NativeHomeState {
                                     orderFocusedNativeHomeRows(mergedRows);
                                 const adaptiveSupplemental = getAdaptiveNativeHomeLayout(rowsWithRecommendations, user, performance.now());
                                 const adaptiveRows = adaptiveSupplemental.rows;
+                                const safeRows = hasRenderableNativeHomeRows(adaptiveRows) ?
+                                    adaptiveRows :
+                                    previous.rows;
                                 const fallbackHeroItems = getUsableHeroItemsFromRows(adaptiveRows);
                                 const heroItems = previous.heroItems.length ?
                                     previous.heroItems :
                                     buildNativeHomeHeroItems([], fallbackHeroItems);
-
-                                return {
+                                const nextState = {
                                     ...previous,
                                     debug: {
                                         ...previous.debug,
@@ -3508,10 +3554,21 @@ export function useNativeHomeData(): NativeHomeState {
                                             backgroundRefreshStarted: true
                                         }
                                     },
-                                    heroItem: previous.heroItem || heroItems[0] || firstUsableHeroItem(adaptiveRows),
+                                    heroItem: previous.heroItem || heroItems[0] || firstUsableHeroItem(safeRows),
                                     heroItems,
-                                    rows: adaptiveRows
+                                    rows: safeRows
                                 };
+
+                                if (!hasRenderableNativeHomeRows(adaptiveRows) && hasRenderableNativeHomeRows(previous.rows)) {
+                                    recordPtvEvent('render', 'native-home-empty-supplemental-ignored', {
+                                        previousRows: previous.rows.length,
+                                        reason: 'preserve-last-visible-rows'
+                                    });
+                                }
+
+                                rememberUsableNativeHomeState(nextState, 'supplemental-rows');
+
+                                return nextState;
                             });
                             markBackgroundRefreshCompleted('supplemental-rows', {
                                 cachedRows: cachedRows.length,
@@ -3524,10 +3581,20 @@ export function useNativeHomeData(): NativeHomeState {
         };
         const renderFromFeaturedCache = async (
             featuredPayload: FeaturedPayload | null,
-            rowSettings: PtvRowsEndpointSettings | null = null
+            rowSettings: PtvRowsEndpointSettings | null = null,
+            options: { mode?: 'cache-only' | 'settings-validated' } = {}
         ) => {
             if (disposed || renderedFromCache || !hasUsableFeaturedPayload(featuredPayload)) return false;
-            if (!isFeaturedPayloadCurrentForRows(featuredPayload, rowSettings)) {
+            const cacheResponseReceivedAt = Math.round(performance.now() - startedAt);
+            const cacheRenderMode = options.mode || 'settings-validated';
+            const cacheOnly = cacheRenderMode === 'cache-only';
+
+            recordPtvEvent('render', 'home-cache-response-received', {
+                cacheRenderMode,
+                responseMs: cacheResponseReceivedAt
+            });
+
+            if (!cacheOnly && !isFeaturedPayloadCurrentForRows(featuredPayload, rowSettings)) {
                 recordPtvEvent('cache', 'native-home-cache-render-skipped', {
                     payloadHash: featuredPayload?.rowConfigHash || null,
                     reason: 'row-config-hash-mismatch',
@@ -3538,13 +3605,10 @@ export function useNativeHomeData(): NativeHomeState {
             }
 
             const cacheRowsResult = createRowsFromFeaturedPayload(featuredPayload, {
-                rowSettings,
+                rowSettings: cacheOnly ? null : rowSettings,
                 source: 'featured-cache'
             });
-            const settingsRecommendationRows = await hydrateNativeHomeRecommendationItems(
-                createUserSpecificRecommendationRows(rowSettings),
-                { source: 'recommendation-settings-cache-render' }
-            );
+            const settingsRecommendationRows = cacheOnly ? [] : createUserSpecificRecommendationRows(rowSettings);
 
             if (disposed || renderedFromCache) return false;
 
@@ -3552,7 +3616,10 @@ export function useNativeHomeData(): NativeHomeState {
                 insertNativeHomeRecommendationRows(cacheRowsResult.rows, settingsRecommendationRows) :
                 orderFocusedNativeHomeRows(cacheRowsResult.rows);
             const recommendationDebug = createUserSpecificRecommendationDebug(rowSettings, settingsRecommendationRows);
-            const adaptiveCache = getAdaptiveNativeHomeLayout(focusedCacheRows, null, startedAt);
+            const adaptiveCache = cacheOnly ? {
+                debug: getEmptyNativeHomeAdaptiveDebug(),
+                rows: focusedCacheRows
+            } : getAdaptiveNativeHomeLayout(focusedCacheRows, null, startedAt);
             const adaptiveCacheRows = adaptiveCache.rows;
 
             if (!focusedCacheRows.length) {
@@ -3584,31 +3651,31 @@ export function useNativeHomeData(): NativeHomeState {
             const heroItems = buildNativeHomeHeroItems(preferredHeroItems, fallbackHeroItems);
             const heroItem = heroItems[0] || firstUsableHeroItem(adaptiveCacheRows);
             const cacheRenderMs = Math.round(performance.now() - startedAt);
+            const cachedItemCount = adaptiveCacheRows.reduce((total, row) => total + row.items.length, 0);
             const performanceDebug: NativeHomePerformanceDebug = {
                 backgroundRefreshCompleted: false,
                 backgroundRefreshDurationMs: null,
                 backgroundRefreshStarted: true,
                 cacheHeroUsed: Boolean(preferredHeroItems.length),
+                cacheCommitDelayMs: Math.max(0, cacheRenderMs - cacheResponseReceivedAt),
                 cacheRenderMs,
+                cacheResponseReceivedAt,
                 cacheRowsUsed: true,
+                cacheStateCommittedAt: cacheRenderMs,
                 cacheUsedForHero: Boolean(preferredHeroItems.length),
                 cacheUsedForRows: true,
+                cachedHeroCount: heroItems.length,
+                cachedItemCount,
+                cachedRowCount: adaptiveCacheRows.length,
                 fallbackFetchesSkipped: Array.from(fallbackFetchesSkipped),
+                firstVisibleContentMs: cacheRenderMs,
                 firstInteractiveMs: cacheRenderMs,
                 homeInitialRenderMs: cacheRenderMs,
                 slowFetchesAborted: Array.from(slowFetchesAborted)
             };
 
-            if (shouldCollectDiagnostics()) {
-                adaptiveCacheRows.forEach((row, index) => {
-                    recordNativeHomeRowDetail('cache-render', row, {
-                        index,
-                        mounted: false,
-                        planned: true
-                    });
-                });
-            }
             recordPtvEvent('render', 'native-home-cache-rendered', {
+                cacheRenderMode,
                 cacheRenderMs,
                 heroCount: heroItems.length,
                 itemCount: getFeaturedPayloadItemCount(featuredPayload),
@@ -3626,11 +3693,24 @@ export function useNativeHomeData(): NativeHomeState {
                 source: 'featured-cache'
             });
             recordPtvEvent('render', 'native-home-interactive', performanceDebug);
+            recordPtvEvent('render', 'home-cache-state-committed', {
+                cacheRenderMode,
+                commitMs: cacheRenderMs,
+                rowCount: adaptiveCacheRows.length
+            });
+            recordPtvEvent('render', 'home-first-visible-content', {
+                cacheRenderMode,
+                firstVisibleContentMs: cacheRenderMs
+            });
+            recordPtvEvent('render', 'home-first-interactive', {
+                cacheRenderMode,
+                firstInteractiveMs: cacheRenderMs
+            });
             recordPtvTiming('render', 'native-home-cache-render', cacheRenderMs, performanceDebug);
             recordPtvTiming('render', 'native-home-initial-render', cacheRenderMs, performanceDebug);
             clearPtvShellStatus();
             setPtvShellLoading(false);
-            setState({
+            const nextState = {
                 debug: {
                     home: adaptiveCache.debug,
                     performance: performanceDebug,
@@ -3642,10 +3722,16 @@ export function useNativeHomeData(): NativeHomeState {
                 isLoading: false,
                 rows: adaptiveCacheRows,
                 user: null
-            });
+            };
+
+            rememberUsableNativeHomeState(nextState, 'featured-cache');
+            setState(nextState);
             return true;
         };
 
+        recordPtvEvent('render', 'home-cache-request-start', {
+            route: window.location.hash || window.location.pathname
+        });
         const featuredPayloadPromise = createNativeRowFetch(
             'native-home-featured-cache',
             () => getCachedFeaturedContentPayload({ allowStale: false }),
@@ -3663,11 +3749,15 @@ export function useNativeHomeData(): NativeHomeState {
             null
         );
 
+        void featuredPayloadPromise
+            .then(featuredPayload => renderFromFeaturedCache(featuredPayload, null, { mode: 'cache-only' }))
+            .catch(() => undefined);
+
         void Promise.all([
             featuredPayloadPromise,
             rowSettingsPromise
         ])
-            .then(([featuredPayload, rowSettings]) => renderFromFeaturedCache(featuredPayload, rowSettings))
+            .then(([featuredPayload, rowSettings]) => renderFromFeaturedCache(featuredPayload, rowSettings, { mode: 'settings-validated' }))
             .catch(() => undefined);
 
         currentUserPromise
@@ -3824,27 +3914,45 @@ export function useNativeHomeData(): NativeHomeState {
                     const adaptiveBackground = getAdaptiveNativeHomeLayout(rowsWithUserRecommendations, payload.user, performance.now());
 
                     recordPtvEvent('render', 'native-home-background-refresh-ready', {
+                        backgroundRows: adaptiveBackground.rows.length,
                         cachedRows: supplementalCachedRows.length,
                         hasUser: Boolean(payload.user?.Id),
                         recommendationRows: payload.userRecommendationRows.length,
                         shouldLoadSupplementalRows: payload.shouldLoadSupplementalRows
                     });
-                    setState(previous => ({
-                        ...previous,
-                        debug: {
-                            ...previous.debug,
-                            home: adaptiveBackground.debug,
-                            performance: {
-                                ...previous.debug.performance,
-                                backgroundRefreshStarted: true,
-                                fallbackFetchesSkipped: Array.from(fallbackFetchesSkipped),
-                                slowFetchesAborted: Array.from(slowFetchesAborted)
+                    setState(previous => {
+                        const safeRows = hasRenderableNativeHomeRows(adaptiveBackground.rows) ?
+                            adaptiveBackground.rows :
+                            previous.rows;
+                        const nextState = {
+                            ...previous,
+                            debug: {
+                                ...previous.debug,
+                                home: adaptiveBackground.debug,
+                                performance: {
+                                    ...previous.debug.performance,
+                                    backgroundRefreshStarted: true,
+                                    fallbackFetchesSkipped: Array.from(fallbackFetchesSkipped),
+                                    slowFetchesAborted: Array.from(slowFetchesAborted)
+                                },
+                                recommendations: payload.recommendationDebug
                             },
-                            recommendations: payload.recommendationDebug
-                        },
-                        rows: adaptiveBackground.rows,
-                        user: payload.user
-                    }));
+                            rows: safeRows,
+                            user: payload.user
+                        };
+
+                        if (!hasRenderableNativeHomeRows(adaptiveBackground.rows) && hasRenderableNativeHomeRows(previous.rows)) {
+                            recordPtvEvent('render', 'native-home-empty-background-refresh-ignored', {
+                                cachedRows: supplementalCachedRows.length,
+                                previousRows: previous.rows.length,
+                                reason: 'preserve-cache-render'
+                            });
+                        }
+
+                        rememberUsableNativeHomeState(nextState, 'background-refresh');
+
+                        return nextState;
+                    });
 
                     if (payload.shouldLoadSupplementalRows) {
                         scheduleSupplementalRows(payload.user, payload.rowSettings, supplementalCachedRows);
@@ -3880,12 +3988,10 @@ export function useNativeHomeData(): NativeHomeState {
                 ];
 
                 if (shouldCollectDiagnostics()) {
-                    adaptiveRows.forEach((row, index) => {
-                        recordNativeHomeRowDetail('planner-output:merged', row, {
-                            index,
-                            mounted: false,
-                            planned: true
-                        });
+                    recordPtvEvent('render', 'native-home-planner-output-merged', {
+                        plannedRowCount: adaptiveRows.length,
+                        recommendationRows: payload.userRecommendationRows.length,
+                        userRowCount: userRows.length
                     });
                 }
                 recordRowRulesDebug(
@@ -3915,11 +4021,18 @@ export function useNativeHomeData(): NativeHomeState {
                     backgroundRefreshDurationMs: null,
                     backgroundRefreshStarted: false,
                     cacheHeroUsed: payload.cacheUsedForHero,
+                    cacheCommitDelayMs: null,
                     cacheRenderMs: null,
+                    cacheResponseReceivedAt: null,
                     cacheRowsUsed: payload.cacheUsedForRows,
+                    cacheStateCommittedAt: null,
                     cacheUsedForHero: payload.cacheUsedForHero,
                     cacheUsedForRows: payload.cacheUsedForRows,
+                    cachedHeroCount: payload.cacheUsedForHero ? preferredHeroItems.length : 0,
+                    cachedItemCount: payload.cacheUsedForRows ? adaptiveRows.reduce((total, row) => total + row.items.length, 0) : 0,
+                    cachedRowCount: payload.cacheUsedForRows ? adaptiveRows.length : 0,
                     fallbackFetchesSkipped: Array.from(fallbackFetchesSkipped),
+                    firstVisibleContentMs: firstInteractiveMs,
                     firstInteractiveMs,
                     homeInitialRenderMs: firstInteractiveMs,
                     slowFetchesAborted: Array.from(slowFetchesAborted)
@@ -3948,7 +4061,7 @@ export function useNativeHomeData(): NativeHomeState {
                 });
                 recordPtvEvent('render', 'native-home-interactive', performanceDebug);
                 recordPtvTiming('render', 'native-home-initial-render', firstInteractiveMs, performanceDebug);
-                setState({
+                const nextState = {
                     debug: {
                         home: adaptiveHome.debug,
                         performance: performanceDebug,
@@ -3960,7 +4073,10 @@ export function useNativeHomeData(): NativeHomeState {
                     isLoading: false,
                     rows: adaptiveRows,
                     user: payload.user
-                });
+                };
+
+                rememberUsableNativeHomeState(nextState, 'fresh-home');
+                setState(nextState);
                 if (payload.shouldLoadSupplementalRows) {
                     scheduleSupplementalRows(payload.user, payload.rowSettings, payload.cachedRows);
                 }
@@ -3976,6 +4092,31 @@ export function useNativeHomeData(): NativeHomeState {
                     });
                     markBackgroundRefreshCompleted('background-error', {
                         error: message
+                    });
+                    return;
+                }
+
+                const lastUsableState = getLastUsableNativeHomeState();
+
+                if (lastUsableState) {
+                    recordPtvEvent('render', 'native-home-fallback-preserved-last-good-state', {
+                        error: message,
+                        rowCount: lastUsableState.rows.length
+                    });
+                    setState({
+                        ...lastUsableState,
+                        debug: {
+                            ...lastUsableState.debug,
+                            performance: {
+                                ...lastUsableState.debug.performance,
+                                backgroundRefreshCompleted: true,
+                                backgroundRefreshStarted: true,
+                                fallbackFetchesSkipped: Array.from(fallbackFetchesSkipped),
+                                slowFetchesAborted: Array.from(slowFetchesAborted)
+                            }
+                        },
+                        error: null,
+                        isLoading: false
                     });
                     return;
                 }
@@ -4015,35 +4156,18 @@ export function useNativeHomeData(): NativeHomeState {
         };
     }, []);
 
-    useEffect(() => {
-        if (state.isLoading || state.error) return;
-        if (!shouldCollectDiagnostics()) return;
-
-        state.rows.forEach((row, index) => {
-            recordNativeHomeRowDetail('react-state', row, {
-                index,
-                mounted: false,
-                planned: true
-            });
-        });
-    }, [state.error, state.isLoading, state.rows]);
-
     return state;
 }
 
 export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
     const performanceProfile = useMemo(() => getPtvPerformanceProfile(), []);
-    const initialRowCount = Math.max(1, performanceProfile.homeInitialRowCount || NATIVE_HOME_ROW_INITIAL_BUFFER);
+    const initialRowCount = Math.max(1, Math.min(3, performanceProfile.homeInitialRowCount || NATIVE_HOME_ROW_INITIAL_BUFFER));
     const fallbackMountCount = Math.max(1, Math.min(NATIVE_HOME_ROW_FALLBACK_MOUNT_COUNT, initialRowCount));
     const rowMountRootMarginPx = getNativeHomeRootMarginPx(
         performanceProfile.homeRowViewportRootMargin,
         NATIVE_HOME_ROW_MOUNT_ROOT_MARGIN_PX
     );
     const observerRootMargin = performanceProfile.homeRowViewportRootMargin || `${rowMountRootMarginPx}px 0px`;
-    const layoutSettleDelays = useMemo(
-        () => (performanceProfile.isFireTv || performanceProfile.isLowPower ? [240, 720] : NATIVE_HOME_ROW_LAYOUT_SETTLE_DELAYS_MS),
-        [performanceProfile.isFireTv, performanceProfile.isLowPower]
-    );
     const [mountedRowIds, setMountedRowIds] = useState<Set<string>>(() => new Set());
     const [mountedRowReasons, setMountedRowReasons] = useState<Map<string, string>>(() => new Map());
     const mountedRowIdsRef = useRef(mountedRowIds);
@@ -4055,14 +4179,23 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
     const rowsLengthRef = useRef(rows.length);
     const scrollRootRef = useRef<Element | null>(null);
     const lastManualViewportPassAtRef = useRef(0);
+    const manualViewportFallbackRanRef = useRef(false);
+    const rowIdsKey = useMemo(
+        () => rows.map(row => row.id).join('|'),
+        [rows]
+    );
+    const rowIdList = useMemo(
+        () => rows.map(row => row.id),
+        [rowIdsKey]
+    );
 
     const initialRowIds = useMemo(
-        () => rows.slice(0, initialRowCount).map(row => row.id),
-        [initialRowCount, rows]
+        () => rowIdList.slice(0, initialRowCount),
+        [initialRowCount, rowIdList]
     );
     const forcedMountedRowIds = useMemo(
-        () => new Set(rows.map(row => row.id)),
-        [rows]
+        () => new Set(rowIdList),
+        [rowIdList]
     );
 
     useEffect(() => {
@@ -4074,14 +4207,14 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
     }, [rows.length]);
 
     useEffect(() => {
-        const rowIds = new Set(rows.map(row => row.id));
+        const currentRowIds = new Set(rowIdList);
 
         setMountedRowIds(previous => {
             let changed = false;
             const next = new Set<string>();
 
             previous.forEach(rowId => {
-                if (rowIds.has(rowId)) {
+                if (currentRowIds.has(rowId)) {
                     next.add(rowId);
                     return;
                 }
@@ -4096,7 +4229,7 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
             const next = new Map<string, string>();
 
             previous.forEach((reason, rowId) => {
-                if (rowIds.has(rowId)) {
+                if (currentRowIds.has(rowId)) {
                     next.set(rowId, reason);
                     return;
                 }
@@ -4106,55 +4239,10 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
 
             return changed ? next : previous;
         });
-    }, [rows]);
+    }, [rowIdList]);
 
-    const recordVirtualizationDecision = useCallback((
-        rowId: string,
-        reason: string,
-        viewportPosition: NativeHomeViewportPosition,
-        mounted: boolean,
-        details: {
-            rowIndex?: number;
-            shouldMountByFallback?: boolean;
-            shouldMountByViewport?: boolean;
-            wouldMount?: boolean;
-        } = {}
-    ) => {
-        if (!shouldCollectDiagnostics()) return;
-
-        recordPtvEvent('render', 'native-home-row-virtualization-decision', {
-            deferredReason: mounted ? null : 'row-placeholder-rendered',
-            mountThreshold: rowMountRootMarginPx,
-            observerState: {
-                hasObserver: Boolean(observerRef.current),
-                root: getNativeHomeElementLabel(scrollRootRef.current),
-                rootMargin: observerRootMargin,
-                scrollRoot: getNativeHomeScrollRootDebug(scrollRootRef.current),
-                triggerCount: observerTriggerCountRef.current
-            },
-            rowId,
-            shouldRenderCards: mounted,
-            shouldRenderPlaceholder: !mounted,
-            virtualizationState: {
-                actualMounted: mounted,
-                manualViewportPassCount: manualViewportPassCountRef.current,
-                mountedRowCount: NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED ?
-                    rowsLengthRef.current :
-                    mountedRowIdsRef.current.size,
-                reason,
-                rowIndex: details.rowIndex ?? null,
-                shouldMountByFallback: details.shouldMountByFallback ?? false,
-                shouldMountByViewport: details.shouldMountByViewport ?? false,
-                totalRows: rowsLengthRef.current,
-                virtualizationDisabled: NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED,
-                wouldMount: details.wouldMount ?? mounted
-            },
-            viewportPosition
-        });
-    }, [observerRootMargin, rowMountRootMarginPx]);
-
-    const mountRows = useCallback((rowIds: string[], reason: string) => {
-        const uniqueRowIds = Array.from(new Set(rowIds.filter(Boolean)));
+    const mountRows = useCallback((idsToMount: string[], reason: string) => {
+        const uniqueRowIds = Array.from(new Set(idsToMount.filter(Boolean)));
         if (!uniqueRowIds.length) return;
 
         uniqueRowIds.forEach(rowId => {
@@ -4195,11 +4283,18 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
         if (!NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED && mountedRowIdsRef.current.size >= rowsLengthRef.current) {
             return;
         }
+        if (!NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED && manualViewportFallbackRanRef.current) {
+            return;
+        }
+        manualViewportFallbackRanRef.current = true;
 
         manualViewportPassCountRef.current += 1;
         scrollRootRef.current = getNativeHomeScrollRoot();
 
         const rowIdsToMount: string[] = [];
+        let alreadyMountedCount = 0;
+        let fallbackHitCount = 0;
+        let viewportHitCount = 0;
         const nodeEntries = Array.from(nodeMap.current.entries())
             .filter(([rowId]) => NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED || !mountedRowIdsRef.current.has(rowId));
 
@@ -4213,26 +4308,38 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
             const shouldMountByViewport = viewportPosition.inThreshold;
             const shouldMountByFallback = !NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED
                 && observerTriggerCountRef.current === 0
-                && /fallback|initial|layout-settle|listeners-attached|row-registered/.test(reason)
+                && /fallback|initial|observer-created/.test(reason)
                 && rowIndex < fallbackMountCount;
-            const shouldMount = isMounted || shouldMountByViewport || shouldMountByFallback;
 
+            if (isMounted) alreadyMountedCount += 1;
+            if (shouldMountByViewport) viewportHitCount += 1;
+            if (shouldMountByFallback) fallbackHitCount += 1;
             if (!NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED && (shouldMountByViewport || shouldMountByFallback) && !isMounted) {
                 rowIdsToMount.push(rowId);
             }
-
-            recordVirtualizationDecision(rowId, reason, viewportPosition, shouldMount, {
-                rowIndex,
-                shouldMountByFallback,
-                shouldMountByViewport,
-                wouldMount: mountedRowIdsRef.current.has(rowId) || shouldMountByViewport || shouldMountByFallback
-            });
         });
+
+        if (shouldCollectDiagnostics()) {
+            recordPtvEvent('render', 'native-home-row-virtualization-manual-pass', {
+                alreadyMountedCount,
+                fallbackHitCount,
+                inspectedRowCount: nodeEntries.length,
+                manualViewportPassCount: manualViewportPassCountRef.current,
+                mountedRowCount: mountedRowIdsRef.current.size,
+                mountThreshold: rowMountRootMarginPx,
+                reason,
+                rowIdsMounted: rowIdsToMount.slice(0, 12),
+                scrollRoot: getNativeHomeScrollRootDebug(scrollRootRef.current),
+                totalRows: rowsLengthRef.current,
+                viewportHitCount,
+                virtualizationDisabled: NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED
+            });
+        }
 
         if (!NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED) {
             mountRows(rowIdsToMount, `manual-viewport:${reason}`);
         }
-    }, [fallbackMountCount, mountRows, recordVirtualizationDecision, rowMountRootMarginPx]);
+    }, [fallbackMountCount, mountRows, rowMountRootMarginPx]);
 
     const scheduleManualViewportPass = useCallback((reason: string) => {
         if (!NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED && mountedRowIdsRef.current.size >= rowsLengthRef.current) return;
@@ -4241,7 +4348,7 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
         pendingManualViewportFrame.current = window.requestAnimationFrame(() => {
             const now = performance.now();
 
-            if (now - lastManualViewportPassAtRef.current < 120 && !/initial|observer-created|layout-settle|row-registered/.test(reason)) {
+            if (now - lastManualViewportPassAtRef.current < 120 && !/initial|observer-created/.test(reason)) {
                 pendingManualViewportFrame.current = null;
                 return;
             }
@@ -4255,9 +4362,7 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
         if (!NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED) {
             mountRows(initialRowIds, 'initial-buffer');
         }
-
-        scheduleManualViewportPass('initial-buffer');
-    }, [initialRowIds, mountRows, scheduleManualViewportPass]);
+    }, [initialRowIds, mountRows]);
 
     useEffect(() => {
         if (!NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED || !rows.length) return;
@@ -4287,7 +4392,7 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
             });
 
             if (!NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED) {
-                mountRows(rows.map(row => row.id), 'intersection-observer-unavailable');
+                mountRows(rowIdList, 'intersection-observer-unavailable');
             }
 
             return undefined;
@@ -4311,7 +4416,7 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
                     .map(entry => (entry.target as HTMLElement).dataset.ptvNativeRowId)
                     .filter(Boolean) as string[];
 
-                if (shouldCollectDiagnostics()) {
+                if (shouldCollectDiagnostics() && enteredIds.length) {
                     recordPtvEvent('render', 'observer-callback', {
                         enteredIds,
                         entryCount: entries.length,
@@ -4366,55 +4471,16 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
                 virtualizationDisabled: NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED
             });
         };
-    }, [mountRows, observerRootMargin, rows, scheduleManualViewportPass]);
+    }, [mountRows, observerRootMargin, rowIdList, rowIdsKey, rows.length, scheduleManualViewportPass]);
 
     useEffect(() => {
-        const scrollRoots = getNativeHomeScrollRootCandidateEntries()
-            .filter(candidate => candidate.debug.canScroll)
-            .map(candidate => candidate.element);
-        const uniqueScrollRoots = Array.from(new Set(scrollRoots));
-        const handleViewportChange = () => scheduleManualViewportPass('viewport-change');
-        const captureOptions: AddEventListenerOptions = { capture: true, passive: true };
-        const shouldListenOnDocument = !uniqueScrollRoots.length;
-
-        window.addEventListener('resize', handleViewportChange, { passive: true });
-        if (shouldListenOnDocument) {
-            document.addEventListener('scroll', handleViewportChange, captureOptions);
-        }
-        uniqueScrollRoots.forEach(scrollRoot => {
-            scrollRoot.addEventListener('scroll', handleViewportChange, { passive: true });
-        });
-        scheduleManualViewportPass('listeners-attached');
-
         return () => {
-            window.removeEventListener('resize', handleViewportChange);
-            if (shouldListenOnDocument) {
-                document.removeEventListener('scroll', handleViewportChange, true);
-            }
-            uniqueScrollRoots.forEach(scrollRoot => {
-                scrollRoot.removeEventListener('scroll', handleViewportChange);
-            });
-
             if (pendingManualViewportFrame.current !== null) {
                 window.cancelAnimationFrame(pendingManualViewportFrame.current);
                 pendingManualViewportFrame.current = null;
             }
         };
-    }, [scheduleManualViewportPass]);
-
-    useEffect(() => {
-        if (!rows.length) return undefined;
-
-        const timers = layoutSettleDelays.map(delay => window.setTimeout(() => {
-            scheduleManualViewportPass(`layout-settle-${delay}`);
-        }, delay));
-
-        return () => {
-            timers.forEach(timer => {
-                window.clearTimeout(timer);
-            });
-        };
-    }, [layoutSettleDelays, rows.length, scheduleManualViewportPass]);
+    }, []);
 
     const registerRowRef = useCallback((rowId: string) => (node: HTMLElement | null) => {
         const previousNode = nodeMap.current.get(rowId);
@@ -4437,8 +4503,7 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
         }
 
         observerRef.current?.observe(node);
-        scheduleManualViewportPass('row-registered');
-    }, [scheduleManualViewportPass]);
+    }, []);
 
     const isRowMounted = useCallback(
         (rowId: string) => NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED ?

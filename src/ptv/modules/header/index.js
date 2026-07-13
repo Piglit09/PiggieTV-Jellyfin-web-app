@@ -104,7 +104,7 @@ function isMusicRoute() {
 }
 
 function isReadingRoute() {
-    return /^#\/(?:books|comics|manga|maga)(?:[/?]|$)/i.test(window.location.hash || '');
+    return /^#\/(?:reading|books|comics|manga|maga)(?:[/?]|$)/i.test(window.location.hash || '');
 }
 
 function openRequestTab(event) {
@@ -129,8 +129,8 @@ function openReadingTab() {
     closeRequestForHomeTab();
     setOwnedTabActive('reading');
 
-    void appRouter.show('books/library').catch(() => {
-        window.location.hash = PTV_ROUTES.readingLibrary;
+    void appRouter.show('reading').catch(() => {
+        window.location.hash = PTV_ROUTES.reading;
         dispatchSyntheticHashChange();
     });
 }

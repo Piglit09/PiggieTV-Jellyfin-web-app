@@ -44,6 +44,7 @@ export type PtvMusicItem = PtvItem & {
     MusicBrainzArtistNames?: string[];
     MusicBrainzTitle?: string;
     ParentIndexNumber?: number;
+    ParentBackdropImageTags?: string[];
     ParentPrimaryImageItemId?: string;
     ParentPrimaryImageTag?: string;
     ProviderIds?: Record<string, string>;
@@ -150,7 +151,10 @@ export type PtvMusicSectionTiming = {
     status: 'error' | 'ok';
 };
 
+export type PtvMusicHomeCompleteness = 'complete' | 'degraded' | 'initial-usable';
+
 export type PtvMusicHomeData = {
+    completeness?: PtvMusicHomeCompleteness;
     debug?: PtvRecommendationSurfaceDebug;
     generatedAt: number;
     isPartial?: boolean;
@@ -159,6 +163,8 @@ export type PtvMusicHomeData = {
         name: string;
     } | null;
     libraryDebug?: PtvMusicLibraryDebug;
+    nextEligibleRefreshAt?: number;
+    refreshReason?: string;
     sectionTimings?: PtvMusicSectionTiming[];
     sections: PtvMusicSection[];
     stats: {

@@ -715,6 +715,33 @@ function showRecordingFields(instance, page, item, user) {
     }
 }
 
+function normalizeExternalLinkProviderName(name) {
+    return String(name || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+function normalizeExternalLinkUrl(url) {
+    let output = String(url || '').trim();
+
+    while (output.endsWith('/')) {
+        output = output.slice(0, -1);
+    }
+
+    return output.toLowerCase();
+}
+
+function dedupeExternalUrls(urls) {
+    const seen = new Set();
+
+    return (Array.isArray(urls) ? urls : []).filter(url => {
+        const key = `${normalizeExternalLinkProviderName(url?.Name)}|${normalizeExternalLinkUrl(url?.Url)}`;
+
+        if (!url?.Url || seen.has(key)) return false;
+
+        seen.add(key);
+        return true;
+    });
+}
+
 function renderLinks(page, item) {
     const externalLinksElem = page.querySelector('.itemExternalLinks');
 
@@ -725,7 +752,7 @@ function renderLinks(page, item) {
     }
 
     if (item.ExternalUrls) {
-        for (const url of item.ExternalUrls) {
+        for (const url of dedupeExternalUrls(item.ExternalUrls)) {
             links.push(`<a is="emby-linkbutton" class="button-link" href="${url.Url}" target="_blank">${escapeHtml(url.Name)}</a>`);
         }
     }
@@ -768,7 +795,7 @@ function renderImage(page, item, apiClient) {
 }
 
 function setPeopleHeader(page, item) {
-    if (item.MediaType == 'Audio' || item.Type == 'MusicAlbum' || item.MediaType == 'Book' || item.MediaType == 'Photo') {
+    if (item.MediaType == 'Audio' || item.Type == 'MusicAlbum' || item.Type == 'Book' || item.MediaType == 'Photo') {
         page.querySelector('#peopleHeader').innerHTML = globalize.translate('People');
     } else {
         page.querySelector('#peopleHeader').innerHTML = globalize.translate('HeaderCastAndCrew');
@@ -928,10 +955,14 @@ function renderOverview(page, item) {
 }
 
 function renderGenres(page, item, context = inferContext(item)) {
-    const genres = item.GenreItems || [];
+    const genreItems = item.GenreItems || [];
+    const genreNames = Array.isArray(item.Genres) ? item.Genres : [];
+    const genres = genreItems.length ? genreItems : genreNames.map(name => ({ Name: name }));
     const type = context === 'music' ? 'MusicGenre' : 'Genre';
 
     const html = genres.map(function (p) {
+        if (!p.Id) return escapeHtml(p.Name || '');
+
         return '<a style="color:inherit;" class="button-link" is="emby-linkbutton" href="' + appRouter.getRouteUrl({
             Name: p.Name,
             Type: type,

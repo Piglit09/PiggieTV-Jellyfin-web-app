@@ -6,6 +6,7 @@ import type {
 } from './types';
 
 export type PtvSearchOptions = {
+    fields?: string;
     includeItemTypes?: string;
     limit?: number;
     parentId?: string;
@@ -19,6 +20,9 @@ export function searchPtvItems<TItem = PtvItem>(
     options: PtvSearchOptions
 ): Promise<PtvItemsResult<TItem>> {
     const query: PtvItemQuery = {
+        EnableImages: false,
+        Fields: options.fields,
+        ImageTypeLimit: 0,
         IncludeItemTypes: options.includeItemTypes,
         Limit: options.limit || 50,
         ParentId: options.parentId,
@@ -31,4 +35,3 @@ export function searchPtvItems<TItem = PtvItem>(
         userId: options.userId
     });
 }
-

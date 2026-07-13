@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <defs>
+    <linearGradient id="ptvRightGradient" x1="6" y1="6" x2="18" y2="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff4fd8"></stop>
+      <stop offset="50%" stop-color="#b86cff"></stop>
+      <stop offset="100%" stop-color="#59d6ff"></stop>
+    </linearGradient>
+  </defs>
+  <path d="M9 6l6 6-6 6" stroke="url(#ptvRightGradient)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>

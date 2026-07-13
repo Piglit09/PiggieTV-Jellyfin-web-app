@@ -12,6 +12,17 @@ registerModule({
     name: 'books',
     route: [
         {
+            className: 'ptv-route-reading',
+            density: 'comfortable',
+            features: ['books', 'comics', 'library', 'manga', 'reading'],
+            id: 'reading',
+            layout: 'media-home',
+            navigationItemId: 'reading',
+            owner: 'reading',
+            pageType: 'reading',
+            pattern: ({ hash }: { hash?: string }) => /^#\/reading(?:[/?]|$)/i.test(hash || '')
+        },
+        {
             className: 'ptv-route-books',
             density: 'comfortable',
             features: ['books', 'library', 'reading'],

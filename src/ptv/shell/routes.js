@@ -163,6 +163,18 @@ const ROUTE_MATCHERS = [
         pattern: ({ hash }) => /^#\/(?:movies|shows|tv|collections)(?:[/?]|$)/i.test(hash)
     },
     {
+        className: 'ptv-route-reading',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['books', 'comics', 'library', 'manga', 'reading'],
+        id: 'reading',
+        layout: 'media-home',
+        navigationItemId: 'reading',
+        owner: 'reading',
+        pageType: 'reading',
+        pattern: ({ hash }) => /^#\/reading(?:[/?]|$)/i.test(hash)
+    },
+    {
         className: 'ptv-route-books',
         density: 'comfortable',
         elevation: 1,
@@ -239,8 +251,24 @@ const FALLBACK_ROUTE = {
     pageType: 'generic'
 };
 
+function normalizeRouteSegment(value) {
+    const trimmed = String(value || '').trim();
+
+    if (!trimmed) return '';
+
+    const pathOnly = trimmed.replace(/^https?:\/\/[^/]+/i, '').split(/[?#]/)[0] || '';
+
+    if (!pathOnly || pathOnly === '/') return '/';
+
+    return pathOnly.startsWith('/') ? pathOnly : `/${pathOnly}`;
+}
+
+function getHashPath(hash) {
+    return normalizeRouteSegment(String(hash || '').replace(/^#/, ''));
+}
+
 function matchesDashboardPtvRoute(context, segment) {
-    const routeText = `${context.hash || ''} ${context.path || ''} ${context.full || ''}`;
+    const routeText = `${context.hash || ''} ${context.hashPath || ''} ${context.path || ''} ${context.full || ''}`;
     const pattern = new RegExp(`(?:^|[#\\s])/?dashboard/piggietv/${segment}(?:[/?#\\s]|$)`, 'i');
 
     return pattern.test(routeText);
@@ -285,8 +313,10 @@ function findNavigationItem(route) {
 export function getPtvRouteOwnership(location = window.location) {
     const path = location.pathname || '';
     const hash = location.hash || '';
+    const hashPath = getHashPath(hash);
+    const normalizedPath = hashPath && hashPath !== '/' ? hashPath : normalizeRouteSegment(path);
     const full = `${path}${hash}`;
-    const context = { full, hash, path };
+    const context = { full, hash, hashPath, normalizedPath, path };
     const playbackActive = document.documentElement.classList.contains('ptv-playing');
     const routeRegistry = getPtvRouteRegistry();
     const playbackRoute = routeRegistry.find(entry => entry.id === 'playback');
@@ -312,6 +342,7 @@ export function getPtvRouteOwnership(location = window.location) {
         hash,
         layout: route.layout,
         navigation,
+        normalizedPath,
         owner: route.owner,
         pageType: route.pageType,
         path,

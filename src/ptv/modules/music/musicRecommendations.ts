@@ -459,6 +459,35 @@ function capRepeatedArtists(items: PtvMusicItem[], seedItem: PtvMusicItem, limit
     return capped;
 }
 
+function getLocalMusicEnrichment(): PtvMusicMetadataEnrichment {
+    return {
+        artistIds: [],
+        artistNames: [],
+        genres: [],
+        releaseGroupIds: [],
+        releaseIds: [],
+        source: 'jellyfin',
+        tags: []
+    };
+}
+
+function scoreLocalRelatedTracks(seedItem: PtvMusicItem, pool: PtvMusicItem[], limit: number) {
+    const enrichment = getLocalMusicEnrichment();
+
+    return capRepeatedArtists(
+        uniquePtvMusicItems(pool)
+            .map(item => ({
+                item,
+                score: scoreRelatedTrack(seedItem, enrichment, item)
+            }))
+            .filter(entry => entry.score > 0)
+            .sort((left, right) => right.score - left.score || getPtvMusicTitle(left.item).localeCompare(getPtvMusicTitle(right.item)))
+            .map(entry => entry.item),
+        seedItem,
+        limit
+    );
+}
+
 export function buildPtvMusicRelatedTracks(
     seedItem: PtvMusicItem,
     options: PtvMusicRelatedOptions = {}
@@ -466,13 +495,46 @@ export function buildPtvMusicRelatedTracks(
     const limit = Math.max(1, Math.min(options.limit || 24, 50));
 
     return timePtvAsync('recommendation', 'music-metadata-up-next-built', async () => {
+        const startedAt = performance.now();
+        const localCandidateStartedAt = performance.now();
+        const localCandidates = uniquePtvMusicItems([
+            ...(options.pool || []),
+            ...getPtvLikedMusicItems()
+        ]);
+        const localItems = scoreLocalRelatedTracks(seedItem, localCandidates, limit);
+        const candidateNormalizeMs = Number((performance.now() - localCandidateStartedAt).toFixed(1));
+
+        if (localItems.length >= Math.min(limit, 12)) {
+            recordPtvEvent('recommendation', 'music-metadata-up-next-built', {
+                candidateCount: localCandidates.length,
+                candidateFetchMs: 0,
+                candidateNormalizeMs,
+                count: localItems.length,
+                dedupeMs: 0,
+                enrichmentWaitMs: 0,
+                finalizationMs: Number((performance.now() - startedAt).toFixed(1)),
+                itemId: seedItem.Id || null,
+                musicBrainzSource: 'skipped-cache-pool',
+                scoreMs: candidateNormalizeMs
+            });
+
+            return localItems;
+        }
+
+        const enrichmentStartedAt = performance.now();
         const enrichment = await enrichPtvMusicMetadataTrack(seedItem);
+        const enrichmentWaitMs = Number((performance.now() - enrichmentStartedAt).toFixed(1));
+        const candidateFetchStartedAt = performance.now();
         const fetchedCandidates = await Promise.all(getRelatedCandidateQueries(seedItem, enrichment)
             .map(query => fetchPtvMusicTracksForGenerator(query, 80).catch(() => [])));
+        const candidateFetchMs = Number((performance.now() - candidateFetchStartedAt).toFixed(1));
+        const normalizeStartedAt = performance.now();
         const sourceItems = uniquePtvMusicItems([
             ...(options.pool || []),
             ...fetchedCandidates.reduce<PtvMusicItem[]>((items, candidateItems) => items.concat(candidateItems), [])
         ]);
+        const networkCandidateNormalizeMs = Number((performance.now() - normalizeStartedAt).toFixed(1));
+        const scoreStartedAt = performance.now();
         const scoredItems = sourceItems
             .map(item => ({
                 item,
@@ -481,15 +543,24 @@ export function buildPtvMusicRelatedTracks(
             .filter(entry => entry.score > 0)
             .sort((left, right) => right.score - left.score || getPtvMusicTitle(left.item).localeCompare(getPtvMusicTitle(right.item)))
             .map(entry => entry.item);
+        const scoreMs = Number((performance.now() - scoreStartedAt).toFixed(1));
+        const dedupeStartedAt = performance.now();
         const relatedItems = capRepeatedArtists(scoredItems, seedItem, limit);
+        const dedupeMs = Number((performance.now() - dedupeStartedAt).toFixed(1));
 
         recordPtvEvent('recommendation', 'music-metadata-up-next-built', {
+            candidateFetchMs,
+            candidateNormalizeMs: networkCandidateNormalizeMs,
             candidateCount: sourceItems.length,
             count: relatedItems.length,
+            dedupeMs,
             discogsSource: enrichment.discogs?.source || 'none',
+            enrichmentWaitMs,
+            finalizationMs: Number((performance.now() - startedAt).toFixed(1)),
             genreCount: enrichment.genres.length,
             itemId: seedItem.Id || null,
             musicBrainzSource: enrichment.source,
+            scoreMs,
             tagCount: enrichment.tags.length
         });
 

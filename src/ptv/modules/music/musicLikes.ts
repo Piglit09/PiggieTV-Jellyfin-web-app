@@ -4,6 +4,10 @@ import {
     setPtvFavorite
 } from '../../api';
 import { recordPtvEvent } from '../../core/observability';
+import {
+    readPtvLocalStorageJson,
+    writePtvLocalStorageJson
+} from '../../services/runtimeStability';
 
 import type { PtvMusicItem } from './musicTypes';
 
@@ -14,13 +18,13 @@ type PtvLikedMusicEntry = {
 
 type PtvLikedMusicPayload = {
     items: PtvLikedMusicEntry[];
-    version: 1;
+    version: 2;
 };
 
 type PtvLikedMusicListener = (items: PtvMusicItem[]) => void;
 
-const LIKED_MUSIC_STORAGE_PREFIX = 'ptv.music.liked.v1';
-const MAX_STORED_LIKED_SONGS = 500;
+const LIKED_MUSIC_STORAGE_PREFIX = 'ptv.music.liked.v2';
+const MAX_STORED_LIKED_SONGS = 200;
 const listeners = new Set<PtvLikedMusicListener>();
 
 function getLikedMusicStorageKey() {
@@ -42,33 +46,67 @@ function isPtvLikedMusicEntry(value: unknown): value is PtvLikedMusicEntry {
         && typeof value.likedAt === 'number';
 }
 
+function compactLikedMusicItem(item: PtvMusicItem): PtvMusicItem {
+    return {
+        Album: item.Album,
+        AlbumArtist: item.AlbumArtist,
+        AlbumArtists: item.AlbumArtists,
+        AlbumId: item.AlbumId,
+        AlbumPrimaryImageItemId: item.AlbumPrimaryImageItemId,
+        AlbumPrimaryImageTag: item.AlbumPrimaryImageTag,
+        Artist: item.Artist,
+        ArtistItems: item.ArtistItems,
+        Artists: item.Artists,
+        BackdropImageTags: item.BackdropImageTags,
+        Container: item.Container,
+        DateCreated: item.DateCreated,
+        Id: item.Id,
+        ImageTags: item.ImageTags,
+        IndexNumber: item.IndexNumber,
+        MediaType: item.MediaType,
+        Name: item.Name,
+        ParentIndexNumber: item.ParentIndexNumber,
+        ParentPrimaryImageItemId: item.ParentPrimaryImageItemId,
+        ParentPrimaryImageTag: item.ParentPrimaryImageTag,
+        ProductionYear: item.ProductionYear,
+        RunTimeTicks: item.RunTimeTicks,
+        ServerId: item.ServerId,
+        SortName: item.SortName,
+        Type: item.Type,
+        UserData: {
+            ...(item.UserData || {}),
+            IsFavorite: true
+        }
+    };
+}
+
 function getStoredLikedMusicEntries() {
-    try {
-        const rawValue = window.localStorage.getItem(getLikedMusicStorageKey());
-        if (!rawValue) return [];
+    const payload = readPtvLocalStorageJson<Partial<PtvLikedMusicPayload>>(getLikedMusicStorageKey(), {});
 
-        const payload = JSON.parse(rawValue) as Partial<PtvLikedMusicPayload>;
-
-        return Array.isArray(payload.items) ? payload.items.filter(isPtvLikedMusicEntry) : [];
-    } catch {
-        return [];
-    }
+    return Array.isArray(payload.items) ? payload.items.filter(isPtvLikedMusicEntry) : [];
 }
 
 function writeStoredLikedMusicEntries(entries: PtvLikedMusicEntry[]) {
     const payload: PtvLikedMusicPayload = {
         items: entries
             .filter(entry => Boolean(entry.item.Id))
+            .map(entry => ({
+                item: compactLikedMusicItem(entry.item),
+                likedAt: entry.likedAt
+            }))
             .sort((left, right) => right.likedAt - left.likedAt)
             .slice(0, MAX_STORED_LIKED_SONGS),
-        version: 1
+        version: 2
     };
 
-    try {
-        window.localStorage.setItem(getLikedMusicStorageKey(), JSON.stringify(payload));
-    } catch (error) {
+    const stored = writePtvLocalStorageJson(getLikedMusicStorageKey(), payload, {
+        maxBytes: 96_000,
+        namespace: 'music-liked'
+    });
+
+    if (!stored) {
         recordPtvEvent('render', 'music-liked-storage-failed', {
-            error: error instanceof Error ? error.message : String(error)
+            reason: 'safe-storage-rejected'
         });
     }
 }

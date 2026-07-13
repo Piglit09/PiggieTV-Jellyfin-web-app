@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Jellyfin.Plugin.PiggieTV.Models;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
@@ -267,9 +268,10 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
         try
         {
             await using var stream = File.OpenRead(_filePath);
-            var document = await JsonSerializer
-                .DeserializeAsync<PtvFeaturedContentDocument>(stream, JsonOptions, cancellationToken)
+            var root = await JsonSerializer
+                .DeserializeAsync<JsonObject>(stream, JsonOptions, cancellationToken)
                 .ConfigureAwait(false);
+            var document = CreateDocumentFromStoredJson(root);
 
             return PtvFeaturedContentValidator.NormalizeStoredDocument(document);
         }
@@ -280,6 +282,57 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
 
             return PtvFeaturedContentValidator.CreateEmptyDocument();
         }
+    }
+
+    private static PtvFeaturedContentDocument CreateDocumentFromStoredJson(JsonObject? root)
+    {
+        if (root is null)
+        {
+            return PtvFeaturedContentValidator.CreateEmptyDocument();
+        }
+
+        if (root["featuredContent"] is not null || root["featuredContentSettings"] is not null)
+        {
+            return new PtvFeaturedContentDocument
+            {
+                FeaturedContent = root["featuredContent"]?.DeepClone(),
+                FeaturedContentSettings = root["featuredContentSettings"]?.DeepClone(),
+                UpdatedAt = ReadLong(root, "updatedAt") ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Version = ReadInt(root, "version") ?? PtvFeaturedContentValidator.DocumentVersion
+            };
+        }
+
+        if (root["payload"] is JsonObject)
+        {
+            return new PtvFeaturedContentDocument
+            {
+                FeaturedContent = root.DeepClone(),
+                UpdatedAt = ReadLong(root, "updatedAt")
+                    ?? ReadLong(root, "createdAt")
+                    ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Version = PtvFeaturedContentValidator.DocumentVersion
+            };
+        }
+
+        return PtvFeaturedContentValidator.CreateEmptyDocument();
+    }
+
+    private static int? ReadInt(JsonObject source, string propertyName)
+    {
+        return source.TryGetPropertyValue(propertyName, out var value)
+            && value is JsonValue jsonValue
+            && jsonValue.TryGetValue<int>(out var result)
+            ? result
+            : null;
+    }
+
+    private static long? ReadLong(JsonObject source, string propertyName)
+    {
+        return source.TryGetPropertyValue(propertyName, out var value)
+            && value is JsonValue jsonValue
+            && jsonValue.TryGetValue<long>(out var result)
+            ? result
+            : null;
     }
 
     private long GetCachePayloadBytes()

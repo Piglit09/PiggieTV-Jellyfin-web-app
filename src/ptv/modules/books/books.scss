@@ -135,16 +135,16 @@ body.ptv-route-reading-mounted .skinHeader {
 
 .ptv-books-app-shell {
     grid-template-rows: minmax(0, 1fr);
+    background: transparent;
 }
 
 .ptv-books-app-shell .ptv-books-body {
     min-height: 100vh;
-    padding-top: clamp(92px, 8.4vw, 126px);
+    padding-top: clamp(132px, 10vw, 164px);
 }
 
 .ptv-books-app-shell .ptv-books-sidebar {
-    top: clamp(92px, 8.4vw, 126px);
-    height: calc(100vh - clamp(92px, 8.4vw, 126px));
+    display: none;
 }
 
 .ptv-books-app-shell .ptv-books-main {
@@ -177,11 +177,15 @@ body.ptv-route-reading-mounted .skinHeader {
         linear-gradient(180deg, rgba(4, 4, 4, 0.7), rgba(2, 2, 3, 0.96));
 }
 
+.ptv-books-app-shell .ptv-books-page-backdrop {
+    display: none;
+}
+
 .ptv-books-body {
     position: relative;
     z-index: 2;
     display: grid;
-    grid-template-columns: var(--ptv-books-sidebar-width) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     min-height: calc(100vh - var(--ptv-books-top-height));
 }
 
@@ -255,6 +259,118 @@ body.ptv-route-reading-mounted .skinHeader {
     color: var(--ptv-books-muted);
 }
 
+.ptv-books-browse-tools {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(150px, auto)) auto;
+    align-items: end;
+    gap: 12px;
+    border: 1px solid var(--ptv-books-line);
+    border-radius: var(--ptv-books-radius-lg);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025)),
+        rgba(16, 12, 30, 0.52);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 46px rgba(0, 0, 0, 0.2);
+    padding: 14px;
+    backdrop-filter: blur(20px) saturate(1.12);
+}
+
+.ptv-books-browse-tools label {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.ptv-books-browse-tools label > span,
+.ptv-books-browse-tools p {
+    margin: 0;
+    color: var(--ptv-books-muted);
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.ptv-books-browse-tools input,
+.ptv-books-browse-tools select {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid var(--ptv-books-line);
+    border-radius: var(--ptv-books-radius);
+    outline: 0;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--ptv-books-text);
+    padding: 0 12px;
+    font-weight: 850;
+}
+
+.ptv-books-browse-tools select {
+    appearance: none;
+    background:
+        linear-gradient(45deg, transparent 50%, var(--ptv-books-muted) 50%) calc(100% - 17px) 18px / 6px 6px no-repeat,
+        linear-gradient(135deg, var(--ptv-books-muted) 50%, transparent 50%) calc(100% - 11px) 18px / 6px 6px no-repeat,
+        rgba(255, 255, 255, 0.08);
+    padding-right: 32px;
+}
+
+.ptv-books-browse-tools input:focus-visible,
+.ptv-books-browse-tools select:focus-visible {
+    border-color: var(--ptv-books-accent);
+    box-shadow: 0 0 0 3px rgba(103, 232, 249, 0.16);
+}
+
+.ptv-books-browse-search {
+    position: relative;
+}
+
+.ptv-books-browse-search .ptv-icon {
+    position: absolute;
+    left: 12px;
+    bottom: 11px;
+    width: 18px;
+    height: 18px;
+    color: var(--ptv-books-accent);
+    pointer-events: none;
+}
+
+.ptv-books-browse-search input {
+    padding-left: 38px;
+}
+
+.ptv-books-browse-tools p {
+    align-self: center;
+    justify-self: end;
+    white-space: nowrap;
+}
+
+.ptv-books-view-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    border: 1px solid var(--ptv-books-line);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 4px;
+}
+
+.ptv-books-view-mode-toggle button {
+    min-height: 34px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ptv-books-muted);
+    padding: 0 14px;
+    font-size: 0.78rem;
+    font-weight: 950;
+    white-space: nowrap;
+}
+
+.ptv-books-view-mode-toggle button:hover,
+.ptv-books-view-mode-toggle button:focus-visible,
+.ptv-books-view-mode-toggle button.is-active {
+    background: linear-gradient(135deg, rgba(103, 232, 249, 0.22), rgba(250, 204, 21, 0.18));
+    color: var(--ptv-books-text);
+}
+
 .ptv-books-top-actions,
 .ptv-books-section-heading,
 .ptv-books-row-controls,
@@ -306,7 +422,8 @@ body.ptv-route-reading-mounted .skinHeader {
 .ptv-books-top-actions a,
 .ptv-books-row-controls button,
 .ptv-books-card-actions button,
-.ptv-books-card-actions a {
+.ptv-books-card-actions a,
+.ptv-books-card-overflow summary {
     display: inline-grid;
     place-items: center;
     width: 42px;
@@ -317,6 +434,67 @@ body.ptv-route-reading-mounted .skinHeader {
     border-radius: 50%;
     background: var(--ptv-books-control);
     padding: 0;
+}
+
+.ptv-books-card-overflow {
+    position: relative;
+}
+
+.ptv-books-card-overflow summary {
+    cursor: pointer;
+    list-style: none;
+}
+
+.ptv-books-card-overflow summary::-webkit-details-marker {
+    display: none;
+}
+
+.ptv-books-card-overflow-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    z-index: 12;
+    display: grid;
+    gap: 6px;
+    min-width: 172px;
+    border: 1px solid var(--ptv-books-line-strong);
+    border-radius: var(--ptv-books-radius);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)),
+        rgba(9, 7, 18, 0.92);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42), 0 0 24px rgba(103, 232, 249, 0.12);
+    padding: 8px;
+}
+
+.ptv-books-card-overflow:not([open]) .ptv-books-card-overflow-menu {
+    display: none;
+}
+
+.ptv-books-card-overflow-menu a,
+.ptv-books-card-overflow-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    min-height: 36px;
+    border: 0;
+    border-radius: calc(var(--ptv-books-radius) - 4px);
+    background: transparent;
+    color: var(--ptv-books-text);
+    padding: 0 10px;
+    font-size: 0.84rem;
+    font-weight: 900;
+    text-align: left;
+}
+
+.ptv-books-card-overflow-menu a:hover,
+.ptv-books-card-overflow-menu a:focus-visible,
+.ptv-books-card-overflow-menu button:hover,
+.ptv-books-card-overflow-menu button:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+    outline: 0;
 }
 
 .ptv-books-row-controls .ptv-books-view-all-link {
@@ -435,7 +613,7 @@ body.ptv-route-reading-mounted .skinHeader {
 }
 
 .ptv-books-main-scroll {
-    width: min(100%, 1540px);
+    width: min(100%, 1760px);
     margin: 0 auto;
     padding: 28px clamp(18px, 4vw, 46px) 46px;
 }
@@ -446,6 +624,11 @@ body.ptv-route-reading-mounted .skinHeader {
     justify-content: space-between;
     gap: 18px;
     margin-bottom: 26px;
+}
+
+.ptv-books-main-toolbar-compact {
+    justify-content: flex-end;
+    margin-bottom: 18px;
 }
 
 .ptv-books-main-toolbar h1,
@@ -673,8 +856,13 @@ body.ptv-route-reading-mounted .skinHeader {
     padding: 2px 2px 20px;
     scroll-padding-inline: 16px;
     scroll-snap-type: x proximity;
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    touch-action: pan-x pan-y;
     -webkit-overflow-scrolling: touch;
+}
+
+.ptv-books-row::-webkit-scrollbar {
+    display: none;
 }
 
 .ptv-books-row-skeleton {
@@ -692,6 +880,10 @@ body.ptv-route-reading-mounted .skinHeader {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
     gap: 24px 18px;
+}
+
+.ptv-books-series-grid {
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
 }
 
 .ptv-books-load-more {
@@ -724,6 +916,15 @@ body.ptv-route-reading-mounted .skinHeader {
     scroll-snap-align: start;
 }
 
+.ptv-books-series-card .ptv-books-card-cover::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 0;
+    height: 42%;
+    background: linear-gradient(180deg, rgba(5, 5, 8, 0), rgba(5, 5, 8, 0.86));
+    pointer-events: none;
+}
+
 .ptv-books-card-cover {
     position: relative;
     display: block;
@@ -738,6 +939,7 @@ body.ptv-route-reading-mounted .skinHeader {
 
 .ptv-books-card-cover > span {
     position: absolute;
+    z-index: 4;
     right: 9px;
     bottom: 9px;
     display: grid;
@@ -969,6 +1171,29 @@ body.ptv-route-reading-mounted .skinHeader {
     font-weight: 800;
 }
 
+.ptv-books-series-hero {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 24px;
+    align-items: center;
+}
+
+.ptv-books-series-hero-cover {
+    width: min(180px, 28vw);
+    overflow: hidden;
+    border: 1px solid var(--ptv-books-line);
+    border-radius: var(--ptv-books-radius);
+    background: var(--ptv-books-panel-2);
+    box-shadow: var(--ptv-books-shadow);
+}
+
+.ptv-books-series-hero-cover img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+}
+
 .ptv-books-detail-hero > div {
     display: grid;
     gap: 14px;
@@ -1040,6 +1265,14 @@ body.ptv-route-reading-mounted .skinHeader {
         grid-template-columns: minmax(190px, var(--ptv-books-sidebar-width)) minmax(220px, 1fr) auto auto;
     }
 
+    .ptv-books-browse-tools {
+        grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(145px, auto));
+    }
+
+    .ptv-books-browse-tools p {
+        justify-self: start;
+    }
+
     .ptv-books-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     }
@@ -1088,6 +1321,14 @@ body.ptv-route-reading-mounted .skinHeader {
         order: 3;
     }
 
+    .ptv-books-browse-tools {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ptv-books-browse-search {
+        grid-column: 1 / -1;
+    }
+
     .ptv-books-home-hero,
     .ptv-books-detail-hero {
         grid-template-columns: 1fr;
@@ -1129,6 +1370,10 @@ body.ptv-route-reading-mounted .skinHeader {
         flex-direction: column;
     }
 
+    .ptv-books-browse-tools {
+        grid-template-columns: 1fr;
+    }
+
     .ptv-books-main-toolbar h1,
     .ptv-books-library-hero h1,
     .ptv-books-detail-hero h1 {
@@ -1141,11 +1386,18 @@ body.ptv-route-reading-mounted .skinHeader {
 
     .ptv-books-row {
         grid-auto-columns: minmax(150px, 62vw);
+        padding-bottom: 26px;
     }
 
     .ptv-books-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 20px 12px;
+    }
+
+    .ptv-books-row-controls {
+        align-self: stretch;
+        justify-content: flex-end;
+        width: 100%;
     }
 }
 
@@ -1162,6 +1414,8 @@ html.ptv-client-firetv .ptv-books-top,
 html.ptv-client-low-power .ptv-books-top,
 html.ptv-client-firetv .ptv-books-sidebar,
 html.ptv-client-low-power .ptv-books-sidebar,
+html.ptv-client-firetv .ptv-books-browse-tools,
+html.ptv-client-low-power .ptv-books-browse-tools,
 html.ptv-client-firetv .ptv-books-home-hero,
 html.ptv-client-low-power .ptv-books-home-hero {
     backdrop-filter: none;

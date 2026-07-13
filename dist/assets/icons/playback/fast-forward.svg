@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <linearGradient id="ptvGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6FE7FF"/>
+      <stop offset="45%" stop-color="#B16CFF"/>
+      <stop offset="100%" stop-color="#FF4FD8"/>
+    </linearGradient>
+    <filter id="ptvGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="1.2" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 0.45 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <path d="M6 6l8 6-8 6V6z" fill="url(#ptvGrad)" filter="url(#ptvGlow)"/>
+  <path d="M12 6l8 6-8 6V6z" fill="url(#ptvGrad)" filter="url(#ptvGlow)" opacity="0.96"/>
+</svg>

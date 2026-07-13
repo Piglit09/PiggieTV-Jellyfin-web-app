@@ -7,10 +7,66 @@ html[data-ptv-route-native='true'] .appFooter {
     display: none !important;
 }
 
+:root {
+    --ptv-header-safe-height: 88px;
+    --ptv-hero-desktop-min-height: 650px;
+    --ptv-hero-desktop-target-height: 72vh;
+    --ptv-hero-desktop-max-height: 860px;
+    --ptv-hero-tablet-min-height: 620px;
+    --ptv-hero-tablet-target-height: 72vh;
+    --ptv-hero-tablet-max-height: 780px;
+    --ptv-hero-mobile-min-height: 620px;
+}
+
+.ptv-cinematic-hero {
+    height:
+        clamp(
+            var(--ptv-hero-desktop-min-height),
+            var(--ptv-hero-desktop-target-height),
+            var(--ptv-hero-desktop-max-height)
+        );
+    min-height: var(--ptv-hero-desktop-min-height);
+}
+
+@media (min-width: 48rem) and (max-width: 74.9375rem) {
+    .ptv-cinematic-hero {
+        height:
+            clamp(
+                var(--ptv-hero-tablet-min-height),
+                var(--ptv-hero-tablet-target-height),
+                var(--ptv-hero-tablet-max-height)
+            );
+        min-height: var(--ptv-hero-tablet-min-height);
+    }
+}
+
+@media (max-width: 47.9375rem) {
+    .ptv-cinematic-hero {
+        height: auto;
+        min-height: var(--ptv-hero-mobile-min-height);
+    }
+}
+
 .ptv-shell-frame {
+    isolation: isolate;
     min-height: 100%;
     position: relative;
     z-index: 2;
+
+    --ptv-shell-glass-tint: rgb(82 58 126 / 16%);
+    --ptv-shell-glass-tint-soft: rgb(14 10 27 / 18%);
+    --ptv-shell-glass-border: rgb(221 202 255 / 14%);
+    --ptv-shell-glass-highlight: rgb(255 255 255 / 8%);
+    --ptv-shell-search-collapsed-width: 46px;
+    --ptv-shell-search-expanded-width: clamp(240px, 28vw, 340px);
+    --ptv-glass-shell-bg: linear-gradient(135deg, rgb(255 255 255 / 9%), rgb(133 69 215 / 7%)), rgb(14 10 27 / 18%);
+    --ptv-glass-panel-bg: linear-gradient(180deg, rgb(255 255 255 / 8%), rgb(136 82 215 / 6%)), rgb(24 16 42 / 22%);
+    --ptv-glass-card-bg: linear-gradient(180deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 3%)), rgb(18 12 31 / 26%);
+    --ptv-glass-border: rgb(221 202 255 / 14%);
+    --ptv-glass-blur: 22px;
+    --ptv-glass-shadow: inset 0 1px 0 rgb(255 255 255 / 14%), 0 18px 48px rgb(0 0 0 / 34%), 0 0 42px rgb(143 74 255 / 12%);
+    --ptv-backdrop-overlay: linear-gradient(90deg, rgb(3 4 9 / 84%) 0%, rgb(3 4 9 / 45%) 32%, rgb(3 4 9 / 68%) 100%);
+    --ptv-backdrop-bottom-fade: linear-gradient(180deg, rgb(3 4 9 / 12%) 0%, rgb(3 4 9 / 46%) 72%, rgb(3 4 9 / 76%) 100%);
 }
 
 .ptv-shell-page-content {
@@ -19,12 +75,64 @@ html[data-ptv-route-native='true'] .appFooter {
     z-index: 1;
 }
 
+.ptv-shell-backdrop {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+    background:
+        radial-gradient(circle at 76% 10%, rgb(164 89 255 / 18%), transparent 34rem),
+        linear-gradient(180deg, #050710 0%, #080511 100%);
+}
+
+.ptv-shell-backdrop-image {
+    position: absolute;
+    inset: -4%;
+    width: 108%;
+    height: 108%;
+    object-fit: cover;
+    object-position: center;
+    opacity: 0;
+    filter: blur(24px) saturate(1.02) brightness(0.82);
+    transform: scale(1.075);
+    transition: opacity 720ms ease, transform 840ms ease, filter 720ms ease;
+}
+
+.ptv-shell-backdrop-image.is-visible {
+    opacity: 0.42;
+    transform: scale(1.095);
+}
+
+.ptv-shell-backdrop-overlay,
+.ptv-shell-noise {
+    position: absolute;
+    inset: 0;
+}
+
+.ptv-shell-backdrop-overlay {
+    background:
+        radial-gradient(circle at 74% 18%, transparent 0 16rem, rgb(5 6 13 / 42%) 48rem),
+        var(--ptv-backdrop-overlay),
+        var(--ptv-backdrop-bottom-fade);
+}
+
+.ptv-shell-noise {
+    opacity: 0.12;
+    background-image:
+        linear-gradient(90deg, rgb(255 255 255 / 3%) 1px, transparent 1px),
+        linear-gradient(0deg, rgb(255 255 255 / 2%) 1px, transparent 1px);
+    background-size: 4px 4px;
+    mix-blend-mode: overlay;
+}
+
 .ptv-shell-header {
     align-items: center;
     display: grid;
     gap: clamp(12px, 1.2vw, 22px);
-    grid-template-columns: minmax(96px, 170px) minmax(240px, 420px) minmax(520px, max-content);
+    grid-template-columns: max-content minmax(0, 1fr) max-content;
     left: clamp(20px, 2.4vw, 52px);
+    min-height: 60px;
     pointer-events: none;
     position: absolute;
     right: clamp(20px, 2.4vw, 52px);
@@ -33,11 +141,44 @@ html[data-ptv-route-native='true'] .appFooter {
 }
 
 .ptv-shell-brand,
+.ptv-shell-header-left,
+.ptv-shell-header-primary,
+.ptv-shell-header-right,
 .ptv-shell-search,
 .ptv-shell-nav,
 .ptv-shell-context-nav,
 .ptv-shell-media-dock-slot {
     pointer-events: auto;
+}
+
+.ptv-shell-header-left {
+    align-items: center;
+    display: flex;
+    grid-column: 1;
+    justify-content: flex-start;
+    min-width: 0;
+}
+
+.ptv-shell-header-primary {
+    grid-column: 2;
+    justify-self: end;
+    max-width: 100%;
+    min-width: 0;
+    overflow: visible;
+    position: relative;
+}
+
+.ptv-shell-header-right {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    grid-column: 3;
+    justify-content: flex-end;
+    justify-self: end;
+    max-width: min(42vw, 640px);
+    min-width: 0;
+    position: relative;
+    z-index: 9300;
 }
 
 .ptv-shell-brand {
@@ -56,22 +197,26 @@ html[data-ptv-route-native='true'] .appFooter {
 
 .ptv-shell-search {
     align-items: center;
-    background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.11), rgba(108, 48, 173, 0.08)),
-        rgba(10, 8, 20, 0.34);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: var(--ptv-glass-shell-bg);
+    border: 1px solid var(--ptv-glass-border);
     border-radius: 999px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.12),
         0 14px 34px rgba(0, 0, 0, 0.28);
     display: flex;
-    gap: 10px;
-    min-height: 50px;
-    padding: 0 18px;
-    transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
-    backdrop-filter: blur(22px) saturate(1.35);
+    flex: 0 0 auto;
+    gap: 0;
+    justify-self: end;
+    min-height: 46px;
+    overflow: hidden;
+    padding: 0;
+    position: relative;
+    transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease, width 220ms ease-out, padding 220ms ease-out;
+    width: var(--ptv-shell-search-collapsed-width);
+    backdrop-filter: blur(calc(var(--ptv-glass-blur) - 2px)) saturate(1.24);
 }
 
+.ptv-shell-search.is-expanded,
 .ptv-shell-search:focus-within {
     border-color: rgba(183, 124, 255, 0.48);
     box-shadow:
@@ -81,7 +226,41 @@ html[data-ptv-route-native='true'] .appFooter {
     transform: translateY(-1px);
 }
 
-.ptv-shell-search .ptv-icon {
+.ptv-shell-search.is-expanded {
+    gap: 9px;
+    padding: 0 10px 0 4px;
+    width: var(--ptv-shell-search-expanded-width);
+}
+
+.ptv-shell-search-trigger,
+.ptv-shell-search-clear {
+    align-items: center;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 auto;
+    height: 42px;
+    justify-content: center;
+    padding: 0;
+    transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+    width: 42px;
+}
+
+.ptv-shell-search-trigger:hover,
+.ptv-shell-search-trigger:focus-visible,
+.ptv-shell-search-clear:hover,
+.ptv-shell-search-clear:focus-visible {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    outline: 0;
+}
+
+.ptv-shell-search-trigger .ptv-icon,
+.ptv-shell-search-clear .ptv-icon {
     --ptv-icon-size: 19px;
 
     opacity: 0.9;
@@ -91,11 +270,21 @@ html[data-ptv-route-native='true'] .appFooter {
     background: transparent;
     border: 0;
     color: rgba(255, 255, 255, 0.94);
+    flex: 1 1 auto;
     font: inherit;
     font-size: 14px;
     font-weight: 700;
     min-width: 0;
+    opacity: 0;
     outline: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease-out, width 220ms ease-out;
+    width: 0;
+}
+
+.ptv-shell-search.is-expanded input {
+    opacity: 1;
+    pointer-events: auto;
     width: 100%;
 }
 
@@ -104,28 +293,41 @@ html[data-ptv-route-native='true'] .appFooter {
 }
 
 .ptv-shell-nav {
-    justify-self: end;
+    justify-self: center;
     max-width: 100%;
+    min-width: 0;
     position: relative;
     z-index: 9200;
 }
 
 .ptv-shell-nav-primary {
     align-items: center;
-    background:
-        linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(133, 69, 215, 0.08)),
-        rgba(8, 6, 17, 0.34);
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: var(--ptv-glass-shell-bg);
+    border: 1px solid var(--ptv-glass-border);
     border-radius: 999px;
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.14),
-        0 18px 48px rgba(0, 0, 0, 0.34),
-        0 0 42px rgba(143, 74, 255, 0.12);
+    box-shadow: var(--ptv-glass-shadow);
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
+    max-width: 100%;
     min-height: 54px;
+    overflow: visible;
     padding: 6px;
-    backdrop-filter: blur(24px) saturate(1.42);
+    touch-action: pan-x pan-y;
+    backdrop-filter: blur(var(--ptv-glass-blur)) saturate(1.28);
+}
+
+html.ptv-client-mobile .ptv-shell-nav-primary,
+html.ptv-layout-mobile .ptv-shell-nav-primary {
+    overflow-x: auto;
+    overflow-y: visible;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+}
+
+html.ptv-client-mobile .ptv-shell-nav-primary::-webkit-scrollbar,
+html.ptv-layout-mobile .ptv-shell-nav-primary::-webkit-scrollbar {
+    display: none;
 }
 
 .ptv-shell-nav-button,
@@ -194,16 +396,6 @@ html[data-ptv-route-native='true'] .appFooter {
     position: relative;
 }
 
-.ptv-shell-nav-dropdown > summary,
-.ptv-shell-user-menu > summary {
-    list-style: none;
-}
-
-.ptv-shell-nav-dropdown > summary::-webkit-details-marker,
-.ptv-shell-user-menu > summary::-webkit-details-marker {
-    display: none;
-}
-
 .ptv-shell-nav-caret {
     border: solid currentColor;
     border-width: 0 2px 2px 0;
@@ -215,16 +407,17 @@ html[data-ptv-route-native='true'] .appFooter {
     width: 7px;
 }
 
-.ptv-shell-nav-dropdown[open] .ptv-shell-nav-caret {
+.ptv-shell-nav-dropdown.is-open .ptv-shell-nav-caret {
     transform: translateY(3px) rotate(225deg);
 }
 
 .ptv-shell-dropdown-panel,
+.ptv-shell-notification-panel,
 .ptv-shell-user-panel {
     background:
-        linear-gradient(150deg, rgba(255, 255, 255, 0.18), rgba(122, 64, 200, 0.1)),
-        rgba(12, 8, 25, 0.58);
-    border: 1px solid rgba(222, 196, 255, 0.22);
+        linear-gradient(150deg, rgb(255 255 255 / 13%), rgb(122 64 200 / 10%)),
+        rgb(12 8 25 / 44%);
+    border: 1px solid rgb(222 196 255 / 22%);
     border-radius: 18px;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.14),
@@ -238,12 +431,31 @@ html[data-ptv-route-native='true'] .appFooter {
     right: auto;
     top: calc(100% + 10px);
     z-index: 10000;
-    backdrop-filter: blur(28px) saturate(1.45);
+    backdrop-filter: blur(calc(var(--ptv-glass-blur) + 2px)) saturate(1.32);
+}
+
+html.ptv-client-mobile .ptv-shell-dropdown-panel,
+html.ptv-layout-mobile .ptv-shell-dropdown-panel {
+    left: var(--ptv-shell-dropdown-left, 14px);
+    max-width: calc(100vw - 28px);
+    min-width: var(--ptv-shell-dropdown-min-width, 220px);
+    position: fixed;
+    right: auto;
+    top: var(--ptv-shell-dropdown-top, 128px);
+    width: var(--ptv-shell-dropdown-width, min(280px, calc(100vw - 28px)));
+    z-index: 10050;
 }
 
 .ptv-shell-user-panel {
     min-width: 210px;
     right: 0;
+}
+
+.ptv-shell-notification-panel {
+    gap: 0;
+    min-width: min(360px, calc(100vw - 32px));
+    right: 0;
+    top: calc(100% + 12px);
 }
 
 .ptv-shell-dropdown-link,
@@ -275,6 +487,236 @@ html[data-ptv-route-native='true'] .appFooter {
     align-items: center;
     display: flex;
     gap: 4px;
+    flex: 0 0 auto;
+    position: relative;
+}
+
+.ptv-shell-actions.is-search-expanded .ptv-shell-icon-button:not(.ptv-shell-notification-trigger) {
+    opacity: 0.42;
+    transform: scale(0.94);
+}
+
+.ptv-shell-notification-trigger {
+    position: relative;
+}
+
+.ptv-shell-notification-badge {
+    align-items: center;
+    background: linear-gradient(135deg, #ff5f8f, #ffcf4a);
+    border: 1px solid rgb(255 255 255 / 56%);
+    border-radius: 999px;
+    box-shadow: 0 0 1rem rgb(255 92 166 / 42%);
+    color: #120516;
+    display: inline-flex;
+    font-size: 0.62rem;
+    font-weight: 950;
+    justify-content: center;
+    min-height: 1.05rem;
+    min-width: 1.05rem;
+    padding: 0 0.22rem;
+    position: absolute;
+    right: -0.08rem;
+    top: -0.14rem;
+}
+
+.ptv-shell-notification-panel-header {
+    align-items: flex-start;
+    border-bottom: 1px solid rgb(255 255 255 / 10%);
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: 0.35rem 0.35rem 0.85rem;
+}
+
+.ptv-shell-notification-panel-header span,
+.ptv-shell-notification-empty span {
+    color: rgb(142 234 255 / 78%);
+    font-size: 0.68rem;
+    font-weight: 950;
+    text-transform: uppercase;
+}
+
+.ptv-shell-notification-panel-header strong {
+    color: #fff;
+    display: block;
+    font-size: 0.92rem;
+    margin-top: 0.08rem;
+}
+
+.ptv-shell-notification-actions {
+    display: flex;
+    gap: 0.36rem;
+}
+
+.ptv-shell-notification-actions button {
+    appearance: none;
+    background: rgb(255 255 255 / 8%);
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 999px;
+    color: rgb(255 255 255 / 86%);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.68rem;
+    font-weight: 900;
+    min-height: 1.8rem;
+    padding: 0 0.7rem;
+}
+
+.ptv-shell-notification-actions button:hover,
+.ptv-shell-notification-actions button:focus-visible {
+    background: rgb(162 87 255 / 20%);
+    border-color: rgb(218 193 255 / 34%);
+    color: #fff;
+    outline: 0;
+}
+
+.ptv-shell-notification-list {
+    display: grid;
+    gap: 0.38rem;
+    max-height: min(28rem, 64vh);
+    overflow: auto;
+    padding-top: 0.72rem;
+}
+
+.ptv-shell-notification-item {
+    border: 1px solid rgb(255 255 255 / 10%);
+    border-radius: 0.9rem;
+    color: rgb(255 255 255 / 88%);
+    display: grid;
+    gap: 0.22rem;
+    padding: 0.72rem;
+    text-decoration: none;
+    transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.ptv-shell-notification-item:hover,
+.ptv-shell-notification-item:focus-visible {
+    background: rgb(160 82 255 / 18%);
+    border-color: rgb(218 193 255 / 28%);
+    outline: 0;
+    transform: translateX(2px);
+}
+
+.ptv-shell-notification-item.is-read {
+    opacity: 0.66;
+}
+
+.ptv-shell-notification-severity {
+    width: max-content;
+    border-radius: 999px;
+    color: #061018;
+    font-size: 0.58rem;
+    font-weight: 950;
+    padding: 0.12rem 0.46rem;
+    text-transform: uppercase;
+}
+
+.ptv-shell-notification-severity.is-info {
+    background: #8eeaff;
+}
+
+.ptv-shell-notification-severity.is-success {
+    background: #84f2a7;
+}
+
+.ptv-shell-notification-severity.is-warning {
+    background: #ffd76b;
+}
+
+.ptv-shell-notification-severity.is-error {
+    background: #ff8ca8;
+}
+
+.ptv-shell-notification-item strong {
+    color: #fff;
+    font-size: 0.86rem;
+}
+
+.ptv-shell-notification-item span:not(.ptv-shell-notification-severity),
+.ptv-shell-notification-item small {
+    color: rgb(255 255 255 / 66%);
+    font-size: 0.72rem;
+    font-weight: 750;
+    line-height: 1.28;
+}
+
+.ptv-shell-notification-item-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.34rem;
+    padding-top: 0.25rem;
+}
+
+.ptv-shell-notification-item-actions a,
+.ptv-shell-notification-item-actions button {
+    appearance: none;
+    background: rgb(255 255 255 / 8%);
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 999px;
+    color: rgb(255 255 255 / 86%);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.64rem;
+    font-weight: 920;
+    line-height: 1;
+    min-height: 1.62rem;
+    padding: 0 0.58rem;
+    text-decoration: none;
+}
+
+.ptv-shell-notification-item-actions a:hover,
+.ptv-shell-notification-item-actions a:focus-visible,
+.ptv-shell-notification-item-actions button:hover,
+.ptv-shell-notification-item-actions button:focus-visible {
+    background: rgb(162 87 255 / 20%);
+    border-color: rgb(218 193 255 / 34%);
+    color: #fff;
+    outline: 0;
+}
+
+.ptv-shell-notification-item-actions button:disabled {
+    cursor: progress;
+    opacity: 0.56;
+}
+
+.ptv-shell-notification-details {
+    background: rgb(0 0 0 / 24%);
+    border: 1px solid rgb(255 255 255 / 10%);
+    border-radius: 0.7rem;
+    color: rgb(230 241 255 / 78%);
+    font-size: 0.66rem;
+    line-height: 1.35;
+    margin: 0.18rem 0 0;
+    max-height: 10rem;
+    overflow: auto;
+    padding: 0.56rem;
+    white-space: pre-wrap;
+}
+
+.ptv-shell-notification-empty {
+    align-items: center;
+    color: rgb(255 255 255 / 76%);
+    display: grid;
+    justify-items: center;
+    min-height: 9rem;
+    padding: 1rem;
+    text-align: center;
+}
+
+.ptv-shell-notification-empty .ptv-icon {
+    --ptv-icon-size: 2rem;
+}
+
+.ptv-shell-notification-live {
+    border: 0;
+    clip: rect(0 0 0 0);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
 }
 
 .ptv-shell-context-nav {
@@ -292,8 +734,8 @@ html[data-ptv-route-native='true'] .appFooter {
 
 .ptv-shell-context-link {
     align-items: center;
-    background: rgba(14, 9, 26, 0.26);
-    border: 1px solid rgba(255, 255, 255, 0.13);
+    background: var(--ptv-glass-panel-bg);
+    border: 1px solid var(--ptv-glass-border);
     border-radius: 999px;
     color: rgba(255, 255, 255, 0.78);
     display: inline-flex;
@@ -304,7 +746,7 @@ html[data-ptv-route-native='true'] .appFooter {
     padding: 0 14px;
     text-decoration: none;
     transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease, transform 180ms ease;
-    backdrop-filter: blur(18px) saturate(1.32);
+    backdrop-filter: blur(calc(var(--ptv-glass-blur) - 6px)) saturate(1.2);
 }
 
 .ptv-shell-context-link:hover,
@@ -318,9 +760,199 @@ html[data-ptv-route-native='true'] .appFooter {
     transform: translateY(-1px);
 }
 
+.ptv-runtime-root,
+.ptv-runtime-media-dock-slot {
+    pointer-events: none;
+}
+
+.ptv-runtime-media-dock-slot .ptv-media-dock {
+    pointer-events: auto;
+}
+
 .ptv-shell-media-dock-slot {
     position: relative;
     z-index: 8500;
+}
+
+.ptv-media-dock {
+    align-items: center;
+    backdrop-filter: blur(22px) saturate(1.24);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035) 48%, rgba(0, 0, 0, 0.14)),
+        rgba(27, 14, 43, 0.52);
+    border: 1px solid rgba(232, 205, 255, 0.25);
+    border-radius: 1.1rem;
+    bottom: clamp(1rem, 2vw, 1.6rem);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.2),
+        inset 0 0 1.4rem rgba(170, 94, 255, 0.1),
+        0 1.1rem 2.5rem rgba(0, 0, 0, 0.36),
+        0 0 2rem rgba(151, 84, 255, 0.18);
+    color: #fff;
+    display: grid;
+    gap: 0.72rem;
+    grid-template-columns: 3.25rem minmax(0, 1fr) auto;
+    max-width: min(34rem, calc(100vw - 2rem));
+    opacity: 0.96;
+    overflow: hidden;
+    padding: 0.58rem;
+    position: fixed;
+    right: clamp(1rem, 2vw, 1.6rem);
+    transform: translateY(0);
+    transition: opacity 200ms ease, transform 220ms ease, box-shadow 200ms ease;
+    width: min(34rem, calc(100vw - 2rem));
+    z-index: 8500;
+}
+
+.ptv-media-dock:hover,
+.ptv-media-dock:focus-within {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 0 1.6rem rgba(180, 103, 255, 0.14),
+        0 1.25rem 3rem rgba(0, 0, 0, 0.42),
+        0 0 2.5rem rgba(151, 84, 255, 0.26);
+    opacity: 1;
+    transform: translateY(-2px);
+}
+
+.ptv-media-dock-art {
+    appearance: none;
+    aspect-ratio: 2 / 3;
+    background:
+        radial-gradient(circle at 30% 20%, rgba(142, 220, 255, 0.2), transparent 48%),
+        rgba(8, 6, 14, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 0.72rem;
+    color: rgba(255, 255, 255, 0.82);
+    cursor: pointer;
+    display: grid;
+    font: inherit;
+    font-size: 1.4rem;
+    font-weight: 950;
+    overflow: hidden;
+    padding: 0;
+    place-items: center;
+    text-decoration: none;
+}
+
+.ptv-media-dock-art img {
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
+.ptv-media-dock-copy {
+    align-self: center;
+    display: grid;
+    gap: 0.18rem;
+    min-width: 0;
+}
+
+.ptv-media-dock-copy button {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    display: grid;
+    gap: 0.08rem;
+    min-width: 0;
+    padding: 0;
+    text-align: left;
+}
+
+.ptv-media-dock-copy > span {
+    color: #8ee8ff;
+    font-size: 0.62rem;
+    font-weight: 950;
+    text-transform: uppercase;
+}
+
+.ptv-media-dock-copy strong {
+    font-size: 0.88rem;
+    line-height: 1.12;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-media-dock-copy em,
+.ptv-media-dock-copy small {
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 0.68rem;
+    font-style: normal;
+    font-weight: 750;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-media-dock-copy small {
+    color: rgba(142, 232, 255, 0.78);
+}
+
+.ptv-media-dock-progress {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0.35rem 1rem rgba(0, 0, 0, 0.28);
+    height: 0.24rem;
+    margin-top: 0.18rem;
+    overflow: hidden;
+    position: relative;
+    width: min(12rem, 100%);
+}
+
+.ptv-media-dock-progress span {
+    background: linear-gradient(90deg, #82eaff, #a36aff 54%, #ec58ff);
+    border-radius: inherit;
+    box-shadow: 0 0 0.9rem rgba(165, 90, 255, 0.38);
+    display: block;
+    height: 100%;
+}
+
+.ptv-media-dock-actions {
+    display: flex;
+    gap: 0.38rem;
+    grid-column: 3;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 180ms ease, transform 200ms ease;
+}
+
+.ptv-media-dock:hover .ptv-media-dock-actions,
+.ptv-media-dock:focus-within .ptv-media-dock-actions {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.ptv-media-dock-actions button {
+    align-items: center;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.09);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    color: #fff;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    font-size: 0.66rem;
+    font-weight: 950;
+    gap: 0.32rem;
+    min-height: 1.6rem;
+    padding: 0.24rem 0.68rem;
+    text-decoration: none;
+}
+
+.ptv-media-dock-actions button .ptv-icon {
+    --ptv-icon-size: 0.78rem;
+}
+
+.ptv-media-dock-actions .ptv-media-dock-primary {
+    background: linear-gradient(135deg, rgba(32, 192, 255, 0.92), rgba(205, 82, 255, 0.9));
+    color: #05060d;
 }
 
 .ptv-admin-shell.ptv-shell-frame-dashboard .ptv-shell-page-content,
@@ -329,8 +961,9 @@ html[data-ptv-route-native='true'] .appFooter {
 }
 
 @media (max-width: 1380px) {
-    .ptv-shell-header {
-        grid-template-columns: minmax(86px, 140px) minmax(180px, 320px) minmax(420px, max-content);
+    .ptv-shell-frame {
+        --ptv-shell-search-expanded-width: clamp(220px, 24vw, 300px);
+        --ptv-glass-blur: 18px;
     }
 
     .ptv-shell-search {
@@ -338,20 +971,39 @@ html[data-ptv-route-native='true'] .appFooter {
     }
 
     .ptv-shell-nav-button {
-        padding: 0 13px;
+        gap: 7px;
+        padding: 0 12px;
+    }
+
+    .ptv-shell-nav-primary {
+        gap: 4px;
+    }
+
+    .ptv-shell-header-right {
+        max-width: min(38vw, 520px);
     }
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1240px) {
+    .ptv-shell-frame {
+        --ptv-shell-search-expanded-width: clamp(220px, 38vw, 300px);
+    }
+
     .ptv-shell-header {
         align-items: start;
-        grid-template-columns: minmax(96px, 132px) 1fr;
+        grid-template-columns: auto minmax(0, 1fr) auto;
         row-gap: 10px;
     }
 
-    .ptv-shell-search {
-        grid-column: 2;
+    .ptv-shell-header-left {
+        grid-column: 1;
         grid-row: 1;
+    }
+
+    .ptv-shell-header-right {
+        grid-column: 3;
+        grid-row: 1;
+        max-width: min(48vw, 540px);
     }
 
     .ptv-shell-nav {
@@ -362,20 +1014,41 @@ html[data-ptv-route-native='true'] .appFooter {
 
     .ptv-shell-nav-primary {
         justify-content: flex-end;
-        overflow-x: auto;
-        scrollbar-width: none;
-    }
-
-    .ptv-shell-nav-primary::-webkit-scrollbar {
-        display: none;
     }
 }
 
 @media (max-width: 720px) {
+    .ptv-shell-frame {
+        --ptv-shell-search-expanded-width: calc(100vw - 28px);
+    }
+
     .ptv-shell-header {
+        background:
+            linear-gradient(180deg, rgb(22 14 36 / 72%), rgb(9 7 18 / 48%)),
+            rgb(9 7 18 / 36%);
+        border-bottom: 1px solid rgb(221 202 255 / 12%);
+        box-shadow:
+            inset 0 1px 0 rgb(255 255 255 / 8%),
+            0 14px 34px rgb(0 0 0 / 28%);
+        column-gap: 8px;
+        grid-template-columns: minmax(0, 1fr) auto;
         left: 14px;
+        margin: 0;
+        min-height: 0;
+        padding: 8px 0 10px;
+        pointer-events: auto;
+        position: sticky;
         right: 14px;
-        top: 12px;
+        row-gap: 8px;
+        top: 0;
+        z-index: 9800;
+        backdrop-filter: blur(18px) saturate(1.2);
+    }
+
+    .ptv-shell-header-left {
+        grid-column: 1;
+        grid-row: 1;
+        min-height: 48px;
     }
 
     .ptv-shell-brand img {
@@ -383,50 +1056,158 @@ html[data-ptv-route-native='true'] .appFooter {
         max-width: 118px;
     }
 
-    .ptv-shell-search {
-        display: none;
+    .ptv-shell-header-right {
+        gap: 6px;
+        grid-column: 2;
+        grid-row: 1;
+        max-width: none;
+        min-height: 48px;
     }
 
-    .ptv-shell-nav-button span:not(.ptv-shell-nav-caret),
-    .ptv-shell-context-link span {
+    .ptv-shell-actions {
+        gap: 5px;
+    }
+
+    .ptv-shell-icon-button,
+    .ptv-shell-search {
+        min-height: 42px;
+        width: 42px;
+    }
+
+    .ptv-shell-icon-button {
+        height: 42px;
+    }
+
+    .ptv-shell-search.is-expanded {
+        left: 14px;
+        position: fixed;
+        right: 14px;
+        top: 62px;
+        width: calc(100vw - 28px);
+        z-index: 9900;
+    }
+
+    .ptv-shell-nav {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        justify-self: stretch;
+        overflow: hidden;
+    }
+
+    .ptv-shell-nav-primary {
+        border-radius: 18px;
+        flex-wrap: nowrap;
+        gap: 6px;
+        justify-content: flex-start;
+        min-height: 52px;
+        overflow-x: auto;
+        overflow-y: visible;
+        padding: 4px;
+        scrollbar-width: none;
+    }
+
+    .ptv-shell-nav-primary::-webkit-scrollbar {
         display: none;
     }
 
     .ptv-shell-nav-button {
+        flex: 0 0 auto;
+        font-size: 12.5px;
+        gap: 7px;
+        min-height: 44px;
         min-width: 44px;
         padding: 0 12px;
     }
 
+    .ptv-shell-nav-button .ptv-icon,
+    .ptv-shell-icon-button .ptv-icon,
+    .ptv-shell-dropdown-link .ptv-icon,
+    .ptv-shell-context-link .ptv-icon {
+        --ptv-icon-size: 19px;
+    }
+
+    .ptv-shell-nav-caret {
+        height: 6px;
+        width: 6px;
+    }
+
     .ptv-shell-dropdown-panel {
-        left: 0;
+        left: var(--ptv-shell-dropdown-left, 14px);
+        max-width: calc(100vw - 28px);
+        min-width: var(--ptv-shell-dropdown-min-width, 220px);
+        position: fixed;
         right: auto;
+        top: var(--ptv-shell-dropdown-top, 128px);
+        width: var(--ptv-shell-dropdown-width, min(280px, calc(100vw - 28px)));
+        z-index: 10050;
     }
 
     .ptv-shell-context-nav {
+        border-radius: 16px;
         justify-content: flex-start;
+        left: auto;
+        margin: 6px 14px 0;
+        max-height: 48px;
         overflow-x: auto;
-        top: 76px;
+        padding: 0;
+        position: relative;
+        right: auto;
+        top: auto;
+        z-index: 8600;
+    }
+
+    .ptv-shell-context-link {
+        flex: 0 0 auto;
+        font-size: 12px;
+        min-height: 40px;
+        padding: 0 12px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-shell-search,
+    .ptv-shell-search input,
+    .ptv-shell-search-trigger,
+    .ptv-shell-search-clear,
+    .ptv-shell-nav-button,
+    .ptv-shell-icon-button,
+    .ptv-shell-notification-item,
+    .ptv-shell-context-link {
+        transition: none;
     }
 }
 
 html[data-ptv-render-profile='low-power'] .ptv-shell-search,
+html[data-ptv-render-profile='low-power'] .ptv-shell-backdrop-image,
 html[data-ptv-render-profile='low-power'] .ptv-shell-nav-primary,
 html[data-ptv-render-profile='low-power'] .ptv-shell-dropdown-panel,
+html[data-ptv-render-profile='low-power'] .ptv-shell-notification-panel,
 html[data-ptv-render-profile='low-power'] .ptv-shell-user-panel,
 html[data-ptv-render-profile='low-power'] .ptv-shell-context-link,
+html[data-ptv-render-profile='low-power'] .ptv-media-dock,
 html[data-ptv-client-kind='tv'] .ptv-shell-search,
+html[data-ptv-client-kind='tv'] .ptv-shell-backdrop-image,
 html[data-ptv-client-kind='tv'] .ptv-shell-nav-primary,
 html[data-ptv-client-kind='tv'] .ptv-shell-dropdown-panel,
+html[data-ptv-client-kind='tv'] .ptv-shell-notification-panel,
 html[data-ptv-client-kind='tv'] .ptv-shell-user-panel,
-html[data-ptv-client-kind='tv'] .ptv-shell-context-link {
+html[data-ptv-client-kind='tv'] .ptv-shell-context-link,
+html[data-ptv-client-kind='tv'] .ptv-media-dock {
+    filter: none;
     backdrop-filter: none;
 }
 
 html[data-ptv-render-profile='low-power'] .ptv-shell-nav-button,
+html[data-ptv-render-profile='low-power'] .ptv-shell-backdrop-image,
 html[data-ptv-render-profile='low-power'] .ptv-shell-icon-button,
 html[data-ptv-render-profile='low-power'] .ptv-shell-context-link,
+html[data-ptv-render-profile='low-power'] .ptv-media-dock,
+html[data-ptv-render-profile='low-power'] .ptv-media-dock-actions,
 html[data-ptv-client-kind='tv'] .ptv-shell-nav-button,
+html[data-ptv-client-kind='tv'] .ptv-shell-backdrop-image,
 html[data-ptv-client-kind='tv'] .ptv-shell-icon-button,
-html[data-ptv-client-kind='tv'] .ptv-shell-context-link {
+html[data-ptv-client-kind='tv'] .ptv-shell-context-link,
+html[data-ptv-client-kind='tv'] .ptv-media-dock,
+html[data-ptv-client-kind='tv'] .ptv-media-dock-actions {
     transition: none;
 }

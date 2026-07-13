@@ -49,6 +49,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         configuration.PerformanceSettings ??= new PerformanceSettings();
         configuration.TmdbSettings ??= new TmdbSettings();
         configuration.MusicMetadataSettings ??= new MusicMetadataSettings();
+        configuration.GoogleBooksSettings ??= new GoogleBooksSettings();
         configuration.SeerrSettings ??= new SeerrSettings();
         configuration.ArrSettings ??= new ArrSettings();
         configuration.DownloadSettings ??= new DownloadSettings();
@@ -68,6 +69,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         ApplyPerformanceSettingsPatch(configuration.PerformanceSettings, settings.PerformanceSettings);
         ApplyTmdbSettingsPatch(configuration, settings.TmdbSettings);
         ApplyMusicMetadataSettingsPatch(configuration.MusicMetadataSettings, settings.MusicMetadataSettings);
+        ApplyGoogleBooksSettingsPatch(configuration.GoogleBooksSettings, settings.GoogleBooksSettings);
         ApplySeerrSettingsPatch(configuration.SeerrSettings, settings.SeerrSettings);
         ApplyArrSettingsPatch(configuration.ArrSettings, settings.ArrSettings);
         ApplyDownloadSettingsPatch(configuration.DownloadSettings, settings.DownloadSettings);
@@ -255,6 +257,25 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         }
     }
 
+    private static void ApplyGoogleBooksSettingsPatch(GoogleBooksSettings target, PtvGoogleBooksSettingsPatch? patch)
+    {
+        if (patch is null) return;
+
+        target.GoogleBooksEnabled = patch.GoogleBooksEnabled ?? target.GoogleBooksEnabled;
+        target.MaxResults = patch.MaxResults ?? target.MaxResults;
+
+        if (patch.ClearGoogleBooksApiKey == true)
+        {
+            target.GoogleBooksApiKey = null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(patch.GoogleBooksApiKey))
+        {
+            target.GoogleBooksApiKey = patch.GoogleBooksApiKey.Trim();
+            target.GoogleBooksEnabled = true;
+        }
+    }
+
     private static void ApplySeerrSettingsPatch(SeerrSettings target, PtvSeerrSettingsPatch? patch)
     {
         if (patch is null) return;
@@ -370,6 +391,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         if (settings.PerformanceSettings is not null) sections.Add("performanceSettings");
         if (settings.TmdbSettings is not null) sections.Add("tmdbSettings");
         if (settings.MusicMetadataSettings is not null) sections.Add("musicMetadataSettings");
+        if (settings.GoogleBooksSettings is not null) sections.Add("googleBooksSettings");
         if (settings.SeerrSettings is not null) sections.Add("seerrSettings");
         if (settings.ArrSettings is not null) sections.Add("arrSettings");
         if (settings.DownloadSettings is not null) sections.Add("downloadSettings");
@@ -465,6 +487,18 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
             if (musicMetadataSettings.DiscogsToken is not null)
             {
                 keys.Add("musicMetadataSettings.discogsToken:<redacted>");
+            }
+        }
+
+        if (settings.GoogleBooksSettings is { } googleBooksSettings)
+        {
+            AddIfPresent(keys, googleBooksSettings.GoogleBooksEnabled, "googleBooksSettings.googleBooksEnabled");
+            AddIfPresent(keys, googleBooksSettings.ClearGoogleBooksApiKey, "googleBooksSettings.clearGoogleBooksApiKey");
+            AddIfPresent(keys, googleBooksSettings.MaxResults, "googleBooksSettings.maxResults");
+
+            if (googleBooksSettings.GoogleBooksApiKey is not null)
+            {
+                keys.Add("googleBooksSettings.googleBooksApiKey:<redacted>");
             }
         }
 

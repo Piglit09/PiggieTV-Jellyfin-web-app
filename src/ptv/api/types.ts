@@ -40,6 +40,7 @@ export type PtvItemUserData = {
     LastPlayedDate?: string;
     PlaybackPositionTicks?: number;
     Played?: boolean;
+    PlayedPercentage?: number;
     PlayCount?: number;
 };
 
@@ -66,6 +67,7 @@ export type PtvItem = Record<string, unknown> & {
     ProductionYear?: number;
     RunTimeTicks?: number;
     ServerId?: string;
+    SeriesId?: string;
     SeriesName?: string;
     Studios?: string[];
     Tags?: string[];

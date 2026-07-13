@@ -79,6 +79,11 @@
             Versioned music metadata lookup route.
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1GoogleBooksMetadataSearch">
+            <summary>
+            Versioned Google Books metadata lookup route.
+            </summary>
+        </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.LegacyStatus">
             <summary>
             Legacy unversioned status route.
@@ -258,6 +263,14 @@
             <param name="request">Lookup request from query string.</param>
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Music metadata candidates.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SearchGoogleBooksMetadata(Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest,System.Threading.CancellationToken)">
+            <summary>
+            Searches Google Books for administrator reading metadata repair.
+            </summary>
+            <param name="request">Lookup request from query string.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Google Books metadata candidates.</returns>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SaveSettings(System.Nullable{System.Text.Json.JsonElement},System.Threading.CancellationToken)">
             <summary>
@@ -474,6 +487,11 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.MusicMetadataSettings">
             <summary>
             Gets or sets music metadata provider settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.GoogleBooksSettings">
+            <summary>
+            Gets or sets reading metadata provider settings.
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.SeerrSettings">
@@ -1037,6 +1055,20 @@
             <summary>Gets or sets the Discogs personal access token. This is write-only in public DTOs.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.MusicMetadataSettings.MaxResults">
+            <summary>Gets or sets the maximum number of candidates returned per lookup.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.GoogleBooksSettings">
+            <summary>
+            PiggieTV Google Books metadata lookup settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.GoogleBooksSettings.GoogleBooksEnabled">
+            <summary>Gets or sets a value indicating whether native Google Books lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.GoogleBooksSettings.GoogleBooksApiKey">
+            <summary>Gets or sets the Google Books API key. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.GoogleBooksSettings.MaxResults">
             <summary>Gets or sets the maximum number of candidates returned per lookup.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings">
@@ -1759,6 +1791,171 @@
             Gets or sets the currently readable cache document.
             </summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest">
+            <summary>
+            Request for server-side Google Books metadata lookup.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.ItemId">
+            <summary>Gets or sets the Jellyfin item id to hydrate lookup terms from.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Title">
+            <summary>Gets or sets the book/comic title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Author">
+            <summary>Gets or sets the author/creator name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Isbn">
+            <summary>Gets or sets the ISBN search term.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.GoogleBooksId">
+            <summary>Gets or sets an existing Google Books volume id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Year">
+            <summary>Gets or sets the publication year.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Limit">
+            <summary>Gets or sets the maximum candidate count.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse">
+            <summary>
+            Google Books lookup response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.Ok">
+            <summary>Gets or sets a value indicating whether lookup completed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.GeneratedAtUtc">
+            <summary>Gets or sets the generated-at timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.Provider">
+            <summary>Gets or sets provider status.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.Candidates">
+            <summary>Gets or sets metadata candidates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.JellyfinCandidates">
+            <summary>Gets or sets metadata candidates using Jellyfin remote-search casing.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.Diagnostics">
+            <summary>Gets or sets lookup diagnostics for administrators.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus">
+            <summary>
+            Google Books provider status for one lookup.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Provider">
+            <summary>Gets or sets provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Enabled">
+            <summary>Gets or sets a value indicating whether the provider is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Configured">
+            <summary>Gets or sets a value indicating whether an API key is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Cached">
+            <summary>Gets or sets a value indicating whether the response came from cache.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.CandidateCount">
+            <summary>Gets or sets result count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.StatusCode">
+            <summary>Gets or sets provider HTTP status code.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.DurationMs">
+            <summary>Gets or sets provider request duration.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Error">
+            <summary>Gets or sets provider error.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate">
+            <summary>
+            A normalized Google Books metadata candidate that can also be used by Jellyfin remote-search apply UI.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.SearchProviderName">
+            <summary>Gets or sets provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Provider">
+            <summary>Gets or sets provider name using compact PiggieTV casing.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.PtvNativeProvider">
+            <summary>Gets or sets a value indicating this result was produced by PiggieTV's native provider.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Confidence">
+            <summary>Gets or sets provider confidence score.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.MatchReason">
+            <summary>Gets or sets match reason.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Name">
+            <summary>Gets or sets volume title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.OriginalTitle">
+            <summary>Gets or sets original title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Overview">
+            <summary>Gets or sets overview.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.ProductionYear">
+            <summary>Gets or sets publication year.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.PremiereDate">
+            <summary>Gets or sets premiere/published date.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.ImageUrl">
+            <summary>Gets or sets cover image URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Url">
+            <summary>Gets or sets canonical provider URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.ProviderIds">
+            <summary>Gets or sets provider ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Genres">
+            <summary>Gets or sets genres/categories.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Tags">
+            <summary>Gets or sets tags.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.People">
+            <summary>Gets or sets people/creators.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Studios">
+            <summary>Gets or sets publisher as Jellyfin studio-like metadata.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Publisher">
+            <summary>Gets or sets publisher.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Authors">
+            <summary>Gets or sets authors.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.PageCount">
+            <summary>Gets or sets page count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Language">
+            <summary>Gets or sets language.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksPerson">
+            <summary>
+            Jellyfin person metadata for Google Books creators.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksPerson.Name">
+            <summary>Gets or sets person name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksPerson.Type">
+            <summary>Gets or sets person type.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksNamedValue">
+            <summary>
+            Jellyfin name wrapper used by some metadata fields.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksNamedValue.Name">
+            <summary>Gets or sets name.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvItemImageDiagnosticResponse">
             <summary>
             Diagnostic information for a Jellyfin item's stored image metadata and image endpoints.
@@ -2048,6 +2245,9 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.MusicMetadataSettings">
             <summary>Gets or sets music metadata lookup settings.</summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.GoogleBooksSettings">
+            <summary>Gets or sets Google Books reading metadata lookup settings.</summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.SeerrSettings">
             <summary>Gets or sets Jellyseerr settings.</summary>
         </member>
@@ -2104,6 +2304,9 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.MusicMetadataSettings">
             <summary>Gets or sets music metadata lookup setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.GoogleBooksSettings">
+            <summary>Gets or sets Google Books reading metadata lookup setting updates.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.SeerrSettings">
             <summary>Gets or sets Jellyseerr setting updates.</summary>
@@ -2252,6 +2455,23 @@
             <summary>Gets or sets a write-only Discogs token replacement.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataSettingsPatch.MaxResults">
+            <summary>Gets or sets the maximum candidate count per lookup.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch">
+            <summary>
+            Partial Google Books metadata lookup settings patch. API key is write-only.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch.GoogleBooksEnabled">
+            <summary>Gets or sets whether native Google Books lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch.ClearGoogleBooksApiKey">
+            <summary>Gets or sets whether the saved Google Books API key should be cleared.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch.GoogleBooksApiKey">
+            <summary>Gets or sets a write-only Google Books API key replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch.MaxResults">
             <summary>Gets or sets the maximum candidate count per lookup.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch">
@@ -2457,6 +2677,30 @@
             </summary>
             <param name="configuration">Plugin configuration.</param>
             <returns>Public music metadata settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings">
+            <summary>
+            Public Google Books metadata lookup settings DTO that never returns the stored API key.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.GoogleBooksEnabled">
+            <summary>Gets or sets a value indicating whether Google Books lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.GoogleBooksApiKeyConfigured">
+            <summary>Gets or sets a value indicating whether a Google Books API key is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.GoogleBooksApiKey">
+            <summary>Gets or sets a write-only Google Books API key replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.MaxResults">
+            <summary>Gets or sets the maximum candidate count per lookup.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>
+            Creates public Google Books metadata lookup settings.
+            </summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public Google Books metadata settings.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings">
             <summary>
@@ -3607,6 +3851,21 @@
             Gets or sets the number of cached TMDb fact entries in memory.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.NegativeCacheSize">
+            <summary>
+            Gets or sets the number of short-lived negative TMDb cache entries.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.NegativeCacheHits">
+            <summary>
+            Gets or sets the number of short-lived negative TMDb cache hits.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.NegativeCacheWrites">
+            <summary>
+            Gets or sets the number of short-lived negative TMDb cache writes.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.CacheHits">
             <summary>
             Gets or sets the number of TMDb fact cache hits.
@@ -3760,6 +4019,19 @@
             </summary>
             <param name="document">Cache document.</param>
             <returns>Validated cache document.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvGoogleBooksMetadataLookupService">
+            <summary>
+            Looks up reading metadata candidates through server-side Google Books.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvGoogleBooksMetadataLookupService.SearchAsync(Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest,System.Threading.CancellationToken)">
+            <summary>
+            Searches Google Books for reading metadata candidates.
+            </summary>
+            <param name="request">Lookup request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Lookup response.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvMusicMetadataLookupService">
             <summary>
@@ -3999,6 +4271,64 @@
             <returns>Validated and normalized document.</returns>
             <exception cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException">Thrown when the document is invalid.</exception>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService">
+            <summary>
+            Native server-side Google Books metadata lookup for reading items.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService},MediaBrowser.Controller.Library.ILibraryManager)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService"/> class.
+            </summary>
+            <param name="logger">Logger.</param>
+            <param name="libraryManager">Jellyfin library manager.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.SearchAsync(Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.HtmlTagRegex">
+            <remarks>
+            Pattern:<br/>
+            <code>&lt;[^&gt;]+&gt;</code><br/>
+            Options:<br/>
+            <code>RegexOptions.Compiled</code><br/>
+            Explanation:<br/>
+            <code>
+            ○ Match '&lt;'.<br/>
+            ○ Match a character other than '&gt;' atomically at least once.<br/>
+            ○ Match '&gt;'.<br/>
+            </code>
+            </remarks>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.WhitespaceRegex">
+            <remarks>
+            Pattern:<br/>
+            <code>\\s+</code><br/>
+            Options:<br/>
+            <code>RegexOptions.Compiled</code><br/>
+            Explanation:<br/>
+            <code>
+            ○ Match a whitespace character atomically at least once.<br/>
+            </code>
+            </remarks>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.YearRegex">
+            <remarks>
+            Pattern:<br/>
+            <code>\\b(?:19|20)\\d{2}\\b</code><br/>
+            Options:<br/>
+            <code>RegexOptions.Compiled</code><br/>
+            Explanation:<br/>
+            <code>
+            ○ Match if at a word boundary.<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match the string "19".<br/>
+                ○ Match the string "20".<br/>
+            ○ Match a Unicode digit exactly 2 times.<br/>
+            ○ Match if at a word boundary.<br/>
+            </code>
+            </remarks>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvMusicMetadataLookupService">
             <summary>
             Server-side MusicBrainz and Discogs lookup client for administrator metadata repair workflows.
@@ -4072,6 +4402,12 @@
         </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxMusicMetadataResults">
             <summary>Maximum music metadata candidate count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinGoogleBooksMetadataResults">
+            <summary>Minimum Google Books candidate count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxGoogleBooksMetadataResults">
+            <summary>Maximum Google Books candidate count.</summary>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.Normalize(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
             <summary>
@@ -4253,6 +4589,123 @@
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService.ValidateCredentialsAsync(System.Threading.CancellationToken)">
             <inheritdoc />
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.HtmlTagRegex_0">
+            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the HtmlTagRegex method.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.Instance">
+            <summary>Cached, thread-safe singleton instance.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.#ctor">
+            <summary>Initializes the instance.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory">
+            <summary>Provides a factory for creating <see cref="T:System.Text.RegularExpressions.RegexRunner"/> instances to be used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.CreateInstance">
+            <summary>Creates an instance of a <see cref="T:System.Text.RegularExpressions.RegexRunner"/> used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.Runner">
+            <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
+            <summary>Scan the <paramref name="inputSpan"/> starting from base.runtextstart for the next match.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Search <paramref name="inputSpan"/> starting from base.runtextpos for the next location a match could possibly start.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if a possible match was found; false if no more matches are possible.</returns>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Determine whether <paramref name="inputSpan"/> at base.runtextpos is a match for the regular expression.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.WhitespaceRegex_1">
+            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the WhitespaceRegex method.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.Instance">
+            <summary>Cached, thread-safe singleton instance.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.#ctor">
+            <summary>Initializes the instance.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory">
+            <summary>Provides a factory for creating <see cref="T:System.Text.RegularExpressions.RegexRunner"/> instances to be used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.CreateInstance">
+            <summary>Creates an instance of a <see cref="T:System.Text.RegularExpressions.RegexRunner"/> used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.Runner">
+            <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
+            <summary>Scan the <paramref name="inputSpan"/> starting from base.runtextstart for the next match.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Search <paramref name="inputSpan"/> starting from base.runtextpos for the next location a match could possibly start.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if a possible match was found; false if no more matches are possible.</returns>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Determine whether <paramref name="inputSpan"/> at base.runtextpos is a match for the regular expression.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.YearRegex_2">
+            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the YearRegex method.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.YearRegex_2.Instance">
+            <summary>Cached, thread-safe singleton instance.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.#ctor">
+            <summary>Initializes the instance.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory">
+            <summary>Provides a factory for creating <see cref="T:System.Text.RegularExpressions.RegexRunner"/> instances to be used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.CreateInstance">
+            <summary>Creates an instance of a <see cref="T:System.Text.RegularExpressions.RegexRunner"/> used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.Runner">
+            <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
+            <summary>Scan the <paramref name="inputSpan"/> starting from base.runtextstart for the next match.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Search <paramref name="inputSpan"/> starting from base.runtextpos for the next location a match could possibly start.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if a possible match was found; false if no more matches are possible.</returns>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Determine whether <paramref name="inputSpan"/> at base.runtextpos is a match for the regular expression.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.Utilities">
+            <summary>Helper methods used by generated <see cref="T:System.Text.RegularExpressions.Regex"/>-derived implementations.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_defaultTimeout">
+            <summary>Default timeout value set in <see cref="T:System.AppContext"/>, or <see cref="F:System.Text.RegularExpressions.Regex.InfiniteMatchTimeout"/> if none was set.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_hasTimeout">
+            <summary>Whether <see cref="F:System.Text.RegularExpressions.Generated.Utilities.s_defaultTimeout"/> is non-infinite.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.Utilities.IsBoundary(System.ReadOnlySpan{System.Char},System.Int32)">
+            <summary>Determines whether the specified index is a boundary.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.Utilities.IsWordChar(System.Char)">
+            <summary>Determines whether the character is part of the [\w] set.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfAnyStrings_OrdinalIgnoreCase_868B37B1115DDAA6EFFC1D9F6905F7C8D098B5F76516A437A0259697A3AEA147">
+            <summary>Supports searching for the specified strings.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_whitespace">
+            <summary>Supports searching for characters in or not in "\t\n\v\f\r \u0085             \u2028\u2029  　".</summary>
         </member>
     </members>
 </doc>

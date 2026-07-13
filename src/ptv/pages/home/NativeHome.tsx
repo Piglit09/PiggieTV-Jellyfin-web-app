@@ -24,7 +24,7 @@ import {
     resolvePtvItemRoute,
     type PtvItemRouteResult
 } from '../../core/itemRoutes';
-import { getPtvDebugReport, recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
+import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
 import { resolvePtvStaticAssetUrl } from '../../core/urlOrigins';
 import PTVShell from '../../shell/PTVShell';
 import { registerPtvNativeRoute } from '../../shell/routeController';
@@ -50,17 +50,17 @@ import {
 } from './services/homeLayoutService';
 
 const POSTER_IMAGE_OPTIONS = {
-    fillHeight: 446,
-    fillWidth: 297,
+    fillHeight: 480,
+    fillWidth: 320,
     imageType: 'Primary',
-    quality: 92
+    quality: 84
 };
 
 const LIBRARY_IMAGE_OPTIONS = {
     fillHeight: 267,
     fillWidth: 474,
     imageType: 'Thumb',
-    quality: 92
+    quality: 84
 };
 
 const failedNativeHomeImageUrls = new Set<string>();
@@ -104,7 +104,6 @@ type NativeHomeRowViewProps = Readonly<{
     row: NativeHomeRow;
 }>;
 type NativeHomeFallbackProps = Readonly<{ message: string }>;
-type NativeHomeMediaDockProps = Readonly<{ item: PtvItem | null }>;
 type NativeHomeCinematicBackdropProps = Readonly<{
     activeItem: PtvItem | null;
     heroItem: PtvItem | null;
@@ -245,7 +244,7 @@ function getNativeHomeLibraryCardHref(item: NativeHomeMaybeItem) {
     const customHref = getItemString(item, 'PtvHref', 'ptvHref');
 
     if (customHref) return customHref;
-    if (isNativeHomeReadingLibraryItem(item)) return PTV_ROUTES.readingLibrary;
+    if (isNativeHomeReadingLibraryItem(item)) return PTV_ROUTES.reading;
 
     const itemId = getItemId(item);
 
@@ -267,7 +266,7 @@ function getNativeHomeDisplayItems(row: NativeHomeRow): NativeHomeAnyItem[] {
             ...primaryReadingLibrary,
             CollectionType: 'PTV Reading',
             Name: 'PTV Reading',
-            PtvHref: PTV_ROUTES.readingLibrary
+            PtvHref: PTV_ROUTES.reading
         },
         ...otherLibraries
     ];
@@ -683,18 +682,7 @@ function getDetailsHref(item: NativeHomeMaybeItem) {
 }
 
 function getPlaybackHref(item: NativeHomeMaybeItem) {
-    const itemId = getItemId(item);
-
-    if (!itemId) return PTV_ROUTES.home;
-
-    const params = [`itemId=${encodeURIComponent(itemId)}`];
-    const serverId = getItemServerId(item);
-    const startPositionTicks = getItemUserData(item).PlaybackPositionTicks || 0;
-
-    if (serverId) params.push(`serverId=${encodeURIComponent(serverId)}`);
-    if (startPositionTicks) params.push(`startPositionTicks=${encodeURIComponent(String(startPositionTicks))}`);
-
-    return `#/playback?${params.join('&')}`;
+    return getDetailsHref(item);
 }
 
 function getNativeHomeRowAnchor(rowId: string) {
@@ -914,24 +902,6 @@ function getNativeHomeItemRoute(item: NativeHomeMaybeItem, row?: NativeHomeRow):
         mediaType: row?.mediaType,
         source: row ? 'native-home-card' : 'native-home'
     });
-}
-
-function getNativeHomeDockItem(rows: NativeHomeRow[], focusedItem: PtvItem | null, heroItem: PtvItem | null) {
-    const focusedItemId = getItemId(focusedItem);
-
-    if (focusedItemId) return focusedItem;
-
-    for (const row of rows) {
-        const rowText = `${row.id} ${row.title} ${row.subtitle}`.toLowerCase();
-
-        if (!/\bcontinue|resume|listening|reading\b/.test(rowText)) continue;
-
-        const item = getNativeHomeDisplayItems(row).find(candidate => getNativeHomeProgressPercent(candidate) > 0);
-
-        if (item && row.kind !== 'libraries') return item as PtvItem;
-    }
-
-    return getItemId(heroItem) ? heroItem : null;
 }
 
 function getImageAvailability(item: NativeHomeAnyItem) {
@@ -1532,6 +1502,7 @@ function getNativeHomeCardPipeline(row: NativeHomeRow, isMounted: boolean) {
 
 function recordNativeHomeCardPipeline(row: NativeHomeRow, isMounted: boolean) {
     if (!shouldCollectDiagnostics()) return;
+    if (!isMounted) return;
 
     const pipeline = getNativeHomeCardPipeline(row, isMounted);
 
@@ -1556,34 +1527,6 @@ function recordNativeHomeCardPipeline(row: NativeHomeRow, isMounted: boolean) {
             rowSource: row.source,
             rowTitle: row.title
         });
-    });
-}
-
-function recordNativeHomeMountedCardLayout(
-    row: NativeHomeRow,
-    isMounted: boolean,
-    layout: ReturnType<typeof getNativeHomeRowLayout>
-) {
-    if (!shouldCollectDiagnostics()) return;
-
-    const pipeline = getNativeHomeCardPipeline(row, isMounted);
-    const deferredReason = layout.hasPlaceholder ? 'row-placeholder-rendered' : pipeline.deferredReason;
-
-    recordPtvEvent('render', 'native-home-card-mounted-layout', {
-        cardModelsCreated: pipeline.cardModelsCreated,
-        cardsCreated: layout.cardCount,
-        cardsFilteredOut: pipeline.cardsFilteredOut,
-        deferredReason,
-        hasCards: layout.hasCards,
-        hasPlaceholder: layout.hasPlaceholder,
-        isMounted,
-        itemCountFromApi: pipeline.itemCountFromApi,
-        layout,
-        rejectionReasons: pipeline.rejectionReasons,
-        rowId: row.id,
-        rowSource: row.source,
-        rowTitle: row.title,
-        stage: 'mounted-layout'
     });
 }
 
@@ -1742,11 +1685,10 @@ function NativeHomeHero({
             serverId: getItemServerId(heroItem),
             startPositionTicks: getItemUserData(heroItem).PlaybackPositionTicks || 0
         }).catch(error => {
-            recordPtvEvent('render', 'native-home-hero-playback-route-fallback', {
+            recordPtvEvent('render', 'native-home-hero-playback-failed', {
                 error: error instanceof Error ? error.message : String(error),
                 itemId: heroItemId
             });
-            window.location.hash = getPlaybackHref(heroItem).slice(1);
         });
     }, [heroItem, heroRoute]);
 
@@ -1761,7 +1703,7 @@ function NativeHomeHero({
 
     return (
         <section
-            className='ptv-native-home-hero'
+            className='ptv-cinematic-hero ptv-cinematic-hero--home ptv-native-home-hero'
             aria-label='Featured PiggieTV title'
             data-ptv-smart-hero-source={heroSource}
         >
@@ -2005,9 +1947,14 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
             serverId: getItemServerId(item),
             startPositionTicks: getItemUserData(item).PlaybackPositionTicks || 0
         }).catch(() => {
-            window.location.hash = getPlaybackHref(item).slice(1);
+            recordPtvEvent('render', 'native-home-card-playback-failed', {
+                itemId,
+                rowId: row.id,
+                rowTitle: row.title,
+                title
+            });
         });
-    }, [item, itemId, itemRoute, row.id, row.mediaType, row.title]);
+    }, [item, itemId, itemRoute, row.id, row.mediaType, row.title, title]);
 
     const handleQueue = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
         if (!itemId || !isPlayableItem(item) || isQueueing) return;
@@ -2814,96 +2761,6 @@ function NativeHomeRowView({
     );
 }
 
-function getNativeHomeDockImageUrl(item: PtvItem | null) {
-    if (!item || !getItemId(item)) return '';
-
-    return getPtvItemImageUrl(item, getNativeHomeScaledImageOptions({
-        ...POSTER_IMAGE_OPTIONS,
-        quality: 88
-    }));
-}
-
-function getNativeHomeDockKicker(item: PtvItem | null, route: PtvItemRouteResult | null) {
-    if (!item) return '';
-
-    if (route?.routeSource === 'ptv-music') {
-        return getItemString(item, 'AlbumArtist', 'AlbumArtistName', 'Artist') || 'Music';
-    }
-
-    if (route?.routeSource === 'ptv-reading') return 'Reading';
-    if (getNativeHomeProgressPercent(item)) return 'Continue';
-
-    return getItemString(item, 'Type', 'type') || 'Featured';
-}
-
-function NativeHomeMediaDock({ item }: NativeHomeMediaDockProps) {
-    const route = useMemo(
-        () => item ? getNativeHomeItemRoute(item) : null,
-        [item]
-    );
-    const imageUrl = useMemo(() => getNativeHomeDockImageUrl(item), [item]);
-    const progressPercent = getNativeHomeProgressPercent(item);
-    const title = getItemTitle(item);
-    const primaryActionLabel = getNativeHomeHeroPrimaryActionLabel(item, route);
-    const primaryHref = route?.routeSource === 'ptv-music' || route?.routeSource === 'ptv-reading' ?
-        route.href :
-        getPlaybackHref(item);
-    const detailsHref = route?.href || getDetailsHref(item);
-    const kicker = getNativeHomeDockKicker(item, route);
-
-    const handlePrimaryClick = useCallback(() => {
-        if (!item || !route) return;
-
-        recordPtvItemRouteClick(item, route, {
-            action: 'dock-primary',
-            source: 'native-home-media-dock'
-        });
-    }, [item, route]);
-
-    const handleDetailsClick = useCallback(() => {
-        if (!item || !route) return;
-
-        recordPtvItemRouteClick(item, route, {
-            action: 'dock-details',
-            source: 'native-home-media-dock'
-        });
-    }, [item, route]);
-
-    if (!item || !getItemId(item)) return null;
-
-    return (
-        <aside className='ptv-native-home-media-dock' aria-label='Continue media'>
-            <a className='ptv-native-home-media-dock-art' href={detailsHref} onClick={handleDetailsClick}>
-                {imageUrl ? (
-                    <img alt='' decoding='async' loading='lazy' src={imageUrl} />
-                ) : (
-                    <span>{title.slice(0, 1)}</span>
-                )}
-            </a>
-            <div className='ptv-native-home-media-dock-copy'>
-                <span>{kicker}</span>
-                <strong>{title}</strong>
-                {progressPercent ? (
-                    <div
-                        className='ptv-native-home-progress ptv-native-home-media-dock-progress'
-                        aria-label={`${progressPercent}% complete`}
-                    >
-                        <span style={{ width: `${progressPercent}%` }} />
-                    </div>
-                ) : null}
-            </div>
-            <div className='ptv-native-home-media-dock-actions'>
-                <a href={primaryHref} onClick={handlePrimaryClick}>
-                    {primaryActionLabel}
-                </a>
-                <a href={detailsHref} onClick={handleDetailsClick}>
-                    Details
-                </a>
-            </div>
-        </aside>
-    );
-}
-
 function NativeHomeFallback({ message }: NativeHomeFallbackProps) {
     const openJellyfinHome = useCallback(() => {
         // TODO: once the native route controller can host multiple component variants,
@@ -2982,13 +2839,16 @@ function NativeHome() {
         () => getNativeHomePageAccentStyle(focusedHeroItem || heroItem),
         [focusedHeroItem, heroItem]
     );
+    const shellBackdropUrl = useMemo(
+        () => getNativeHomeHeroBackdropUrl(activeBackdropItem, performanceProfile)
+            || getNativeHomeHeroBackdropUrl(heroItem, performanceProfile)
+            || getNativeHomeFallbackBackdropUrls(rows, performanceProfile)[0]
+            || '',
+        [activeBackdropItem, heroItem, performanceProfile, rows]
+    );
     const averageHeroTransitionMs = heroTransitionSampleCount ? heroTransitionTotalMs / heroTransitionSampleCount : 0;
     const averageHoverDelayMs = hoverDelaySampleCount ? hoverDelayTotalMs / hoverDelaySampleCount : 0;
     const ambientColorSource = focusedHeroItem ? getItemTitle(focusedHeroItem) : heroItem ? getItemTitle(heroItem) : 'hero';
-    const dockItem = useMemo(
-        () => getNativeHomeDockItem(rows, focusedHeroItem, heroItem),
-        [focusedHeroItem, heroItem, rows]
-    );
     const canAutoRotateHero = !focusedHeroItem && !isMediaNavOpen;
     const handleRowLayoutAction = useCallback<NativeHomeRowLayoutActionHandler>((rowId, action) => {
         if (action === 'pin' || action === 'unpin') {
@@ -3189,37 +3049,23 @@ function NativeHome() {
         if (isLoading || error) return;
         if (!shouldCollectDiagnostics()) return;
 
-        const renderedRows = rows.map((row, index) => ({
-            ...getNativeHomeRowDiagnostics(row),
-            index,
-            mounted: isRowMounted(row.id),
-            renderedSource: getNativeHomeRowDiagnostics(row).source,
-            source: row.source,
-            sourceCacheSectionId: row.sourceCacheSectionId || null,
-            sourceConfigHash: row.sourceConfigHash || null,
-            sourceType: row.sourceType || null,
-            subtitle: row.subtitle,
-            title: row.title
-        }));
         const mountedRows = rows.filter(row => isRowMounted(row.id));
         const mountedCardsRendered = mountedRows.reduce((total, row) => total + getNativeHomeDisplayItems(row).length, 0);
         const totalCardsPlanned = rows.reduce((total, row) => total + getNativeHomeDisplayItems(row).length, 0);
         const mountedImageCandidateCount = mountedRows.reduce((total, row) => (
             total + getNativeHomeDisplayItems(row).reduce((rowTotal, item) => rowTotal + getNativeHomeImageCandidates(item, row).length, 0)
         ), 0);
-        const debugReport = getPtvDebugReport();
 
         if (canShowDebug) {
-            console.debug('[PTV Row Rules] renderedRows', renderedRows);
+            console.debug('[PTV Row Rules] render summary', {
+                mountedCardsRendered,
+                mountedRowCount,
+                rowCount: rows.length,
+                totalCardsPlanned
+            });
         }
 
-        recordPtvEvent('render', 'row-rules-renderedRows', {
-            mountedRowCount,
-            renderedRows,
-            rowCount: rows.length
-        });
         recordPtvEvent('render', 'native-home-render-complete', {
-            diagnosticsEmitted: debugReport.events.length,
             imageAttemptUrlCount: reportedNativeHomeImageAttemptUrls.size,
             imageCandidateCount: mountedImageCandidateCount,
             mountedCardsRendered,
@@ -3229,65 +3075,6 @@ function NativeHome() {
             rowCount: rows.length
         });
     }, [canShowDebug, error, isLoading, isRowMounted, mountedRowCount, rows]);
-
-    useEffect(() => {
-        if (isLoading || error) return;
-        if (!shouldCollectDiagnostics()) return;
-
-        rows.forEach((row, index) => {
-            const mounted = isRowMounted(row.id);
-            const diagnostics = getNativeHomeRowDiagnostics(row);
-
-            recordPtvEvent('render', 'native-home-row-details', {
-                ...diagnostics,
-                filteredReason: row.filteredReason || null,
-                index,
-                mounted,
-                mountReason: getRowMountReason(row.id),
-                planned: true,
-                renderedSource: diagnostics.source,
-                rowId: row.id,
-                source: row.source,
-                sourceCacheSectionId: row.sourceCacheSectionId || null,
-                sourceConfigHash: row.sourceConfigHash || null,
-                sourceRecommendationId: diagnostics.sourceRecommendationId,
-                sourceRuleId: diagnostics.sourceRuleId,
-                stage: 'render-input',
-                title: row.title
-            });
-        });
-    }, [error, getRowMountReason, isLoading, isRowMounted, rows]);
-
-    useEffect(() => {
-        if (isLoading || error) return undefined;
-        if (!shouldCollectDiagnostics()) return undefined;
-
-        const animationFrame = window.requestAnimationFrame(() => {
-            rows.forEach((row, index) => {
-                const mounted = isRowMounted(row.id);
-                const layout = getNativeHomeRowLayout(row.id);
-                const diagnostics = getNativeHomeRowDiagnostics(row);
-
-                recordPtvEvent('render', 'native-home-row-details', {
-                    ...diagnostics,
-                    filteredReason: row.filteredReason || null,
-                    index,
-                    layout,
-                    mounted,
-                    mountReason: getRowMountReason(row.id),
-                    planned: true,
-                    renderedSource: diagnostics.source,
-                    rowId: row.id,
-                    source: row.source,
-                    stage: 'mounted-layout',
-                    title: row.title
-                });
-                recordNativeHomeMountedCardLayout(row, mounted, layout);
-            });
-        });
-
-        return () => window.cancelAnimationFrame(animationFrame);
-    }, [error, getRowMountReason, isLoading, isRowMounted, mountedRowCount, rows]);
 
     return (
         <Page
@@ -3304,15 +3091,10 @@ function NativeHome() {
                 data-ptv-mounted-rows={mountedRowCount}
                 style={pageAccentStyle}
             >
-                <NativeHomeCinematicBackdrop
-                    activeItem={activeBackdropItem}
-                    heroItem={heroItem}
-                    rows={rows}
-                />
-
                 <PTVShell
+                    backdropSource={activeBackdropItem ? 'home-focused-item' : 'home-hero'}
+                    backdropUrl={shellBackdropUrl}
                     className='ptv-native-home-shell'
-                    mediaDock={error ? null : <NativeHomeMediaDock item={dockItem} />}
                     onNavigationOpenChange={handleMediaNavOpenChange}
                     section='home'
                 >

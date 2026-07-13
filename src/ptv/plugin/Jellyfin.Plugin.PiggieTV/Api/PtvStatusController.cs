@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -49,7 +50,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         _serviceProvider = serviceProvider;
 
         _logger.LogInformation(
-            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
+            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET /Ptv/v1/reading/metadata/googlebooks/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
     }
 
     /// <summary>
@@ -94,6 +95,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         ["featuredContent"] = true,
                         ["featuredContentRefresh"] = true,
                         ["musicMetadata"] = true,
+                        ["readingMetadata"] = true,
                         ["integrations"] = true,
                         ["signup"] = true,
                         ["tags"] = true,
@@ -107,6 +109,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         "featuredContent",
                         "featuredContentRefresh",
                         "musicMetadata",
+                        "readingMetadata",
                         "integrations",
                         "signup",
                         "tags",
@@ -131,11 +134,20 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             var failures = new List<string>();
             var storeStatus = await GetStoreStatusOrFallbackAsync(PtvApiRoutes.V1StatusLower, failures, cancellationToken).ConfigureAwait(false)
                 ?? CreateFallbackStoreStatus("Cache status returned null.");
+            var statusFeatured = PtvFeaturedContentStatus.FromDocument(storeStatus.Document);
 
             _logger.LogInformation(
-                "PiggieTV status full diagnostics: cache loaded. CachePathExists={CachePathExists}. FeaturedCacheExists={FeaturedCacheExists}. CacheWriteError={CacheWriteError}.",
+                "PiggieTV status full diagnostics: cache loaded. CacheFilePath={CacheFilePath}. CachePayloadBytes={CachePayloadBytes}. CachePathExists={CachePathExists}. FeaturedCacheExists={FeaturedCacheExists}. FeaturedCacheFresh={FeaturedCacheFresh}. CacheVersion={CacheVersion}. HasPayload={HasPayload}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}. CacheWriteError={CacheWriteError}.",
+                storeStatus.CacheFilePath,
+                storeStatus.CachePayloadBytes,
                 storeStatus.CachePathExists,
                 storeStatus.FeaturedCacheExists,
+                storeStatus.FeaturedCacheFresh,
+                statusFeatured.CacheVersion,
+                statusFeatured.HasPayload,
+                statusFeatured.HeroCount,
+                statusFeatured.SectionCount,
+                statusFeatured.ItemCount,
                 storeStatus.CacheWriteError);
 
             _logger.LogInformation("PiggieTV status full diagnostics: loading authorization/write capability.");
@@ -162,11 +174,13 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             response.Signup = GetStatusSignup(PtvApiRoutes.V1StatusLower);
             ApplyDegradedStatus(response, failures);
 
+            var serializedStatusBytes = JsonSerializer.SerializeToUtf8Bytes(response).Length;
             _logger.LogInformation(
-                "PiggieTV status full diagnostics: DTO built. Ok={Ok}. Degraded={Degraded}. CacheHealthy={CacheHealthy}. Preparing JSON serialization.",
+                "PiggieTV status full diagnostics: DTO built. Ok={Ok}. Degraded={Degraded}. CacheHealthy={CacheHealthy}. SerializedResponseBytes={SerializedResponseBytes}. Preparing JSON serialization.",
                 response.Ok,
                 response.Degraded,
-                response.CacheHealthy);
+                response.CacheHealthy,
+                serializedStatusBytes);
             _logger.LogInformation("PiggieTV status full diagnostics: response returned.");
             return Ok(response);
         }
@@ -309,7 +323,24 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         try
         {
             var featuredContentStore = GetRequiredService<IPtvFeaturedContentStore>(PtvApiRoutes.V1Featured);
-            var document = await featuredContentStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+            var storeStatus = await featuredContentStore.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            var document = storeStatus.Document;
+            var featuredStatus = PtvFeaturedContentStatus.FromDocument(document);
+            var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(document).Length;
+
+            _logger.LogInformation(
+                "PiggieTV featured endpoint read cache. StoreInstance={StoreInstance}. CacheFilePath={CacheFilePath}. CachePayloadBytes={CachePayloadBytes}. FeaturedCacheExists={FeaturedCacheExists}. FeaturedCacheFresh={FeaturedCacheFresh}. CacheVersion={CacheVersion}. HasPayload={HasPayload}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}. SerializedResponseBytes={SerializedResponseBytes}.",
+                RuntimeHelpers.GetHashCode(featuredContentStore),
+                storeStatus.CacheFilePath,
+                storeStatus.CachePayloadBytes,
+                storeStatus.FeaturedCacheExists,
+                storeStatus.FeaturedCacheFresh,
+                featuredStatus.CacheVersion,
+                featuredStatus.HasPayload,
+                featuredStatus.HeroCount,
+                featuredStatus.SectionCount,
+                featuredStatus.ItemCount,
+                serializedBytes);
 
             return Ok(document);
         }
@@ -533,6 +564,49 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
                 DiagnosticError("PTV_MUSIC_METADATA_LOOKUP_FAILED", PtvApiRoutes.V1MusicMetadataSearch, ex));
+        }
+    }
+
+    /// <summary>
+    /// Searches Google Books for administrator reading metadata repair.
+    /// </summary>
+    /// <param name="request">Lookup request from query string.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Google Books metadata candidates.</returns>
+    [HttpGet("reading/metadata/googlebooks/search")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<PtvGoogleBooksMetadataLookupResponse>> SearchGoogleBooksMetadata(
+        [FromQuery] PtvGoogleBooksMetadataLookupRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!await CanWriteFeaturedContentSafeAsync(PtvApiRoutes.V1GoogleBooksMetadataSearch).ConfigureAwait(false))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                Error("PTV_GOOGLE_BOOKS_METADATA_FORBIDDEN", "Only Jellyfin administrators can search server-side Google Books metadata."));
+        }
+
+        if (request is null)
+        {
+            return BadRequest(Error("PTV_GOOGLE_BOOKS_METADATA_NULL_QUERY", "A Google Books metadata lookup query is required."));
+        }
+
+        try
+        {
+            var metadataLookupService = GetRequiredService<IPtvGoogleBooksMetadataLookupService>(PtvApiRoutes.V1GoogleBooksMetadataSearch);
+
+            return Ok(await metadataLookupService.SearchAsync(request, cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure(PtvApiRoutes.V1GoogleBooksMetadataSearch, ex);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                DiagnosticError("PTV_GOOGLE_BOOKS_METADATA_LOOKUP_FAILED", PtvApiRoutes.V1GoogleBooksMetadataSearch, ex));
         }
     }
 
@@ -2640,7 +2714,28 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 return CreateFallbackStoreStatus("Featured cache store service is not registered.");
             }
 
-            return await featuredContentStore.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "PiggieTV cache store resolved. Route={RouteName}. StoreInstance={StoreInstance}. StoreType={StoreType}.",
+                routeName,
+                RuntimeHelpers.GetHashCode(featuredContentStore),
+                featuredContentStore.GetType().FullName);
+
+            var status = await featuredContentStore.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            var featuredStatus = PtvFeaturedContentStatus.FromDocument(status.Document);
+
+            _logger.LogInformation(
+                "PiggieTV cache store status read. Route={RouteName}. StoreInstance={StoreInstance}. CacheFilePath={CacheFilePath}. FileLength={FileLength}. CacheVersion={CacheVersion}. HasPayload={HasPayload}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}.",
+                routeName,
+                RuntimeHelpers.GetHashCode(featuredContentStore),
+                status.CacheFilePath,
+                status.CachePayloadBytes,
+                featuredStatus.CacheVersion,
+                featuredStatus.HasPayload,
+                featuredStatus.HeroCount,
+                featuredStatus.SectionCount,
+                featuredStatus.ItemCount);
+
+            return status;
         }
         catch (Exception ex)
         {

@@ -33,6 +33,7 @@ import {
     type PtvPlaybackMode
 } from '../../core/featureSettings';
 import { getPtvDebugReport, isPtvDebugEnabled, setPtvDebug } from '../../core/observability';
+import { getPtvPerformanceReport } from '../../services/performanceMonitor';
 import {
     getCurrentPtvPluginApiClient,
     getPtvPluginApiDiagnostics,
@@ -84,6 +85,9 @@ type PtvTmdbMetadataStatus = {
     lastErrorCode?: string | null;
     lastStatusCode?: number | null;
     lastValidatedAt?: string | null;
+    negativeCacheHits?: number;
+    negativeCacheSize?: number;
+    negativeCacheWrites?: number;
 };
 
 type PtvPluginStatus = {
@@ -193,6 +197,14 @@ type PtvMusicMetadataSettingsDto = {
     musicBrainzEnabled: boolean;
 };
 
+type PtvGoogleBooksSettingsDto = {
+    clearGoogleBooksApiKey?: boolean;
+    googleBooksApiKey?: string | null;
+    googleBooksApiKeyConfigured: boolean;
+    googleBooksEnabled: boolean;
+    maxResults: number;
+};
+
 type PtvSeerrSettingsDto = {
     apiKey?: string | null;
     apiKeyConfigured: boolean;
@@ -270,6 +282,7 @@ type PtvPluginSettings = {
     cacheSettings: PtvCacheSettingsDto;
     downloadSettings: PtvDownloadSettingsDto;
     featureSettings: PtvFeatureSettingsDto;
+    googleBooksSettings: PtvGoogleBooksSettingsDto;
     heroSettings: PtvHeroSettingsDto;
     musicMetadataSettings: PtvMusicMetadataSettingsDto;
     performanceSettings: PtvPerformanceSettingsDto;
@@ -286,6 +299,7 @@ type PtvPluginSettingsPatch = {
     cacheSettings?: Partial<PtvCacheSettingsDto>;
     downloadSettings?: Partial<PtvDownloadSettingsDto>;
     featureSettings?: Partial<PtvFeatureSettingsDto>;
+    googleBooksSettings?: Partial<PtvGoogleBooksSettingsDto>;
     heroSettings?: Partial<PtvHeroSettingsDto>;
     musicMetadataSettings?: Partial<PtvMusicMetadataSettingsDto>;
     performanceSettings?: Partial<PtvPerformanceSettingsDto>;
@@ -301,6 +315,7 @@ type PtvSettingsSection =
     | 'cacheSettings'
     | 'downloadSettings'
     | 'featureSettings'
+    | 'googleBooksSettings'
     | 'heroSettings'
     | 'musicMetadataSettings'
     | 'performanceSettings'
@@ -389,6 +404,7 @@ const PTV_PLUGIN_INSTALL_NOTE = [
 ].join('\n');
 const PTV_SETTINGS_LIMITS = {
     cacheRefreshHours: [1, 168],
+    googleBooksMetadataResults: [1, 20],
     heroBackdropMaxWidth: [640, 3840],
     heroLogoMaxWidth: [160, 1600],
     heroMaxItems: [1, 50],
@@ -401,7 +417,7 @@ const PTV_SETTINGS_LIMITS = {
 } as const;
 const ARR_SERVICE_NAMES = ['sonarr', 'radarr', 'lidarr', 'prowlarr'] as const;
 const ARR_CALENDAR_SERVICE_NAMES = ['sonarr', 'radarr', 'lidarr'] as const;
-type PtvIntegrationTestKey = 'discogs' | 'seerr' | 'tmdb' | typeof ARR_SERVICE_NAMES[number];
+type PtvIntegrationTestKey = 'discogs' | 'googleBooks' | 'seerr' | 'tmdb' | typeof ARR_SERVICE_NAMES[number];
 const DEFAULT_PLUGIN_SETTINGS: PtvPluginSettings = {
     arrSettings: {
         lidarr: {
@@ -453,6 +469,12 @@ const DEFAULT_PLUGIN_SETTINGS: PtvPluginSettings = {
         homeRowsEnabled: true,
         playbackMode: 'auto',
         tvLowPowerModeEnabled: true
+    },
+    googleBooksSettings: {
+        googleBooksApiKey: null,
+        googleBooksApiKeyConfigured: false,
+        googleBooksEnabled: true,
+        maxResults: 10
     },
     heroSettings: {
         heroAutoRotateEnabled: true,
@@ -606,6 +628,10 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
             ...DEFAULT_PLUGIN_SETTINGS.featureSettings,
             ...(settings.featureSettings || {})
         },
+        googleBooksSettings: {
+            ...DEFAULT_PLUGIN_SETTINGS.googleBooksSettings,
+            ...(settings.googleBooksSettings || {})
+        },
         heroSettings: {
             ...DEFAULT_PLUGIN_SETTINGS.heroSettings,
             ...(settings.heroSettings || {})
@@ -678,6 +704,11 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
         ...PTV_SETTINGS_LIMITS.musicMetadataResults
     );
     nextSettings.musicMetadataSettings.discogsToken = null;
+    nextSettings.googleBooksSettings.maxResults = clampNumber(
+        nextSettings.googleBooksSettings.maxResults,
+        ...PTV_SETTINGS_LIMITS.googleBooksMetadataResults
+    );
+    nextSettings.googleBooksSettings.googleBooksApiKey = nextSettings.googleBooksSettings.googleBooksApiKey?.trim() || null;
     nextSettings.tmdbSettings.tmdbLanguage = nextSettings.tmdbSettings.tmdbLanguage.trim() || 'en-US';
     nextSettings.tmdbSettings.tmdbRegion = nextSettings.tmdbSettings.tmdbRegion.trim() || 'US';
     nextSettings.tmdbSettings.tmdbApiToken = nextSettings.tmdbSettings.tmdbApiToken?.trim() || null;
@@ -733,6 +764,12 @@ function getDiscogsCredentialLabel(settings: PtvMusicMetadataSettingsDto, discog
     if (discogsTokenInput.trim()) return 'Unsaved Discogs token';
 
     return settings.discogsTokenConfigured ? 'Discogs token configured' : 'Discogs token missing';
+}
+
+function getGoogleBooksCredentialLabel(settings: PtvGoogleBooksSettingsDto, googleBooksApiKeyInput: string) {
+    if (googleBooksApiKeyInput.trim()) return 'Unsaved Google Books key';
+
+    return settings.googleBooksApiKeyConfigured ? 'Google Books key configured' : 'No Google Books key';
 }
 
 function createSeerrSettingsPayload(
@@ -831,6 +868,43 @@ function createMusicMetadataSettingsPayload(
 
     return musicMetadataSettings;
 }
+
+function createGoogleBooksSettingsPayload(
+    settings: PtvGoogleBooksSettingsDto,
+    googleBooksApiKeyInput: string
+): Partial<PtvGoogleBooksSettingsDto> {
+    const nextSettings = normalizePluginSettings({
+        googleBooksSettings: settings
+    });
+    const googleBooksSettings: Partial<PtvGoogleBooksSettingsDto> = {
+        googleBooksEnabled: nextSettings.googleBooksSettings.googleBooksEnabled,
+        maxResults: nextSettings.googleBooksSettings.maxResults
+    };
+    const googleBooksApiKey = googleBooksApiKeyInput.trim();
+
+    if (googleBooksApiKey) {
+        googleBooksSettings.googleBooksApiKey = googleBooksApiKey;
+        googleBooksSettings.googleBooksEnabled = true;
+    }
+
+    return googleBooksSettings;
+}
+
+type PtvGoogleBooksLookupResponse = {
+    Candidates?: unknown[];
+    candidates?: unknown[];
+    diagnostics?: string[];
+    ok?: boolean;
+    provider?: {
+        cached?: boolean;
+        candidateCount?: number;
+        configured?: boolean;
+        durationMs?: number | null;
+        enabled?: boolean;
+        error?: string | null;
+        statusCode?: number | null;
+    };
+};
 
 function redactSettingsForDebug<T>(value: T): T {
     if (Array.isArray(value)) {
@@ -1104,6 +1178,19 @@ function getFreshnessLabel(status: ReturnType<typeof getFeaturedContentCacheStat
     return status.isFresh ? 'fresh' : 'stale';
 }
 
+function hasEmptyFeaturedContentPayload(
+    status: ReturnType<typeof getFeaturedContentCacheStatus>,
+    pluginStatus: PtvPluginStatus | null
+) {
+    const pluginFeaturedStatus = pluginStatus?.featuredContent;
+    const heroCount = status.heroCount || pluginFeaturedStatus?.heroCount || 0;
+    const itemCount = status.itemCount || pluginFeaturedStatus?.itemCount || 0;
+    const sectionCount = status.sectionCount || pluginFeaturedStatus?.sectionCount || 0;
+    const hasPayload = status.storage !== 'none' || pluginStatus?.featuredCacheExists || pluginFeaturedStatus?.hasPayload === true;
+
+    return Boolean(hasPayload && !heroCount && !itemCount && sectionCount);
+}
+
 function getDashboardCacheSource(
     status: ReturnType<typeof getFeaturedContentCacheStatus>,
     pluginStatus: PtvPluginStatus | null
@@ -1118,6 +1205,7 @@ function getDashboardCacheFreshness(
     status: ReturnType<typeof getFeaturedContentCacheStatus>,
     pluginStatus: PtvPluginStatus | null
 ) {
+    if (hasEmptyFeaturedContentPayload(status, pluginStatus)) return 'empty';
     if (status.heroCount || status.itemCount) return getFreshnessLabel(status);
     if (pluginStatus?.featuredCacheExists) {
         return pluginStatus.featuredCacheFresh ? 'fresh' : 'stale';
@@ -1194,14 +1282,6 @@ function getNumberValue(source: unknown, key: string) {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function getArrayValue(source: unknown, key: string) {
-    if (!isRecord(source)) return [];
-
-    const value = source[key];
-
-    return Array.isArray(value) ? value : [];
-}
-
 function getPersistedRecommendationRowCount(settings: unknown) {
     return normalizePtvRecommendationRowSettings(settings)?.rows?.length || 0;
 }
@@ -1236,6 +1316,13 @@ function hasUsableDashboardCacheStatus(status: ReturnType<typeof getFeaturedCont
     );
 }
 
+function hasAuthoritativeLiveDashboardState(
+    pluginState: PluginState,
+    cacheStatus: ReturnType<typeof getFeaturedContentCacheStatus>
+) {
+    return pluginState.connected && hasUsableDashboardCacheStatus(cacheStatus);
+}
+
 function getDashboardDebugState(
     report: unknown,
     pluginState: PluginState,
@@ -1243,17 +1330,23 @@ function getDashboardDebugState(
     debugEnabled: boolean
 ): DashboardDebugState {
     const reportActive = getNestedBoolean(report, 'active');
+    const hasLiveState = hasAuthoritativeLiveDashboardState(pluginState, cacheStatus);
 
     if (pluginState.loading) return 'initializing';
     if (!pluginState.connected) return 'disconnected';
     if (pluginState.connectionState === 'degraded' || pluginState.error || cacheStatus.writeError || cacheStatus.lastRefreshError) return 'degraded';
+    if (hasLiveState) return 'active';
     if (reportActive === false && pluginState.connected) return 'initializing';
-    if (!debugEnabled && reportActive !== true) return hasUsableDashboardCacheStatus(cacheStatus) ? 'initializing' : 'disabled';
+    if (!debugEnabled && reportActive !== true) return 'disabled';
 
     return 'active';
 }
 
 function getDashboardDebugStateMessage(state: DashboardDebugState, report: unknown, pluginState: PluginState) {
+    if (state === 'active' && getNestedBoolean(report, 'active') === false && pluginState.connected) {
+        return 'Plugin and cache diagnostics are live. PTV runtime snapshot is not initialized yet on this route.';
+    }
+
     if (state === 'initializing' && getNestedBoolean(report, 'active') === false && pluginState.connected) {
         return 'PTV runtime not initialized yet.';
     }
@@ -1367,7 +1460,25 @@ function getDebugSectionSourceText(sources: unknown, key: string) {
 }
 
 function getPerformanceSnapshot() {
-    return getPtvGlobal()?.performance?.report?.() || null;
+    const browserReport = getPtvGlobal()?.performance?.report?.();
+    const runtimeReport = getPtvPerformanceReport();
+
+    if (isRecord(browserReport)) {
+        return {
+            ...browserReport,
+            longTaskCount: runtimeReport.longTaskCount,
+            longTaskTotalMs: runtimeReport.longTaskTotalMs,
+            largestLongTaskMs: runtimeReport.largestLongTaskMs,
+            runtimeMonitor: runtimeReport
+        };
+    }
+
+    return {
+        longTaskCount: runtimeReport.longTaskCount,
+        longTaskTotalMs: runtimeReport.longTaskTotalMs,
+        largestLongTaskMs: runtimeReport.largestLongTaskMs,
+        runtimeMonitor: runtimeReport
+    };
 }
 
 function getMemoryLabel(performanceReport: unknown) {
@@ -1643,6 +1754,9 @@ function CacheStateAlerts({
             {cacheFreshness === 'stale' ? (
                 <Alert severity='warning'>Cache is stale; stale content is currently being served.</Alert>
             ) : null}
+            {cacheFreshness === 'empty' ? (
+                <Alert severity='warning'>Featured cache is fresh but empty. Home may need a rebuild or valid row data before content appears.</Alert>
+            ) : null}
             {cacheSource === 'memory' ? (
                 <Alert severity='warning'>Using memory fallback. Cache will reset after reload.</Alert>
             ) : null}
@@ -1689,6 +1803,7 @@ const PiggieTvDashboardPage = () => {
     const [performanceSettingsDraft, setPerformanceSettingsDraft] = useState<PtvPerformanceSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.performanceSettings }));
     const [tmdbSettingsDraft, setTmdbSettingsDraft] = useState<PtvTmdbSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.tmdbSettings }));
     const [musicMetadataSettingsDraft, setMusicMetadataSettingsDraft] = useState<PtvMusicMetadataSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.musicMetadataSettings }));
+    const [googleBooksSettingsDraft, setGoogleBooksSettingsDraft] = useState<PtvGoogleBooksSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.googleBooksSettings }));
     const [cacheSettingsDraft, setCacheSettingsDraft] = useState<PtvCacheSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.cacheSettings }));
     const [seerrSettingsDraft, setSeerrSettingsDraft] = useState<PtvSeerrSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.seerrSettings }));
     const [arrSettingsDraft, setArrSettingsDraft] = useState<PtvArrSettingsDto>(() => clonePluginSettings(DEFAULT_PLUGIN_SETTINGS).arrSettings);
@@ -1700,6 +1815,7 @@ const PiggieTvDashboardPage = () => {
     const [settingsDirty, setSettingsDirtyState] = useState(false);
     const [tmdbTokenInput, setTmdbTokenInput] = useState('');
     const [discogsTokenInput, setDiscogsTokenInput] = useState('');
+    const [googleBooksApiKeyInput, setGoogleBooksApiKeyInput] = useState('');
     const [seerrApiKeyInput, setSeerrApiKeyInput] = useState('');
     const [arrApiKeyInputs, setArrApiKeyInputs] = useState<Record<keyof PtvArrSettingsDto, string>>({
         lidarr: '',
@@ -1812,6 +1928,7 @@ const PiggieTvDashboardPage = () => {
             setPerformanceSettingsDraft({ ...normalizedSettings.performanceSettings });
             setTmdbSettingsDraft({ ...normalizedSettings.tmdbSettings });
             setMusicMetadataSettingsDraft({ ...normalizedSettings.musicMetadataSettings });
+            setGoogleBooksSettingsDraft({ ...normalizedSettings.googleBooksSettings });
             setCacheSettingsDraft({ ...normalizedSettings.cacheSettings });
             setSeerrSettingsDraft({ ...normalizedSettings.seerrSettings });
             setArrSettingsDraft(clonePluginSettings(normalizedSettings).arrSettings);
@@ -1820,6 +1937,7 @@ const PiggieTvDashboardPage = () => {
             settingsDirtyRef.current = false;
             setTmdbTokenInput('');
             setDiscogsTokenInput('');
+            setGoogleBooksApiKeyInput('');
             setSeerrApiKeyInput('');
             setArrApiKeyInputs({
                 lidarr: '',
@@ -2428,6 +2546,129 @@ const PiggieTvDashboardPage = () => {
             });
     }, [discogsTokenInput, musicMetadataSettingsDraft, savePluginSettings]);
 
+    const saveGoogleBooksSettings = useCallback(() => {
+        void savePluginSettings({
+            googleBooksSettings: createGoogleBooksSettingsPayload(googleBooksSettingsDraft, googleBooksApiKeyInput)
+        }, 'googleBooksSettings', 'Google Books settings saved.')
+            .then(savedSettings => {
+                if (!savedSettings) return;
+
+                const googleBooksConfigured = savedSettings.googleBooksSettings.googleBooksApiKeyConfigured;
+
+                setIntegrationTestMessages(previous => ({
+                    ...previous,
+                    googleBooks: googleBooksConfigured ? 'Google Books API key is configured for backend reading metadata lookup.' : 'Google Books can run without a key; add one for higher quota.'
+                }));
+                setGoogleBooksApiKeyInput('');
+            });
+    }, [googleBooksApiKeyInput, googleBooksSettingsDraft, savePluginSettings]);
+
+    const clearGoogleBooksApiKey = useCallback(() => {
+        void savePluginSettings({
+            googleBooksSettings: {
+                clearGoogleBooksApiKey: true
+            }
+        }, 'googleBooksSettings', 'Google Books API key cleared.')
+            .then(savedSettings => {
+                if (!savedSettings) return;
+
+                setGoogleBooksSettingsDraft({ ...savedSettings.googleBooksSettings });
+                setGoogleBooksApiKeyInput('');
+                setIntegrationTestMessages(previous => ({
+                    ...previous,
+                    googleBooks: 'Google Books API key cleared. Lookup can still run without a key at public quota.'
+                }));
+            });
+    }, [savePluginSettings]);
+
+    const testGoogleBooksConnection = useCallback(() => {
+        if (integrationTestRequestRef.current.googleBooks) {
+            debugPluginSettingsSave('integration test deduped', {
+                origin: 'click',
+                service: 'googleBooks'
+            });
+            return;
+        }
+
+        const pluginApi = getCurrentPtvPluginApiClient();
+
+        if (!pluginApi?.searchGoogleBooksMetadata) {
+            setIntegrationTestMessages(previous => ({
+                ...previous,
+                googleBooks: 'Google Books test endpoint is unavailable.'
+            }));
+            return;
+        }
+
+        const abortController = createDashboardAbortController();
+
+        if (abortController) {
+            integrationTestAbortRef.current.googleBooks = abortController;
+        }
+
+        setIntegrationTesting(previous => ({ ...previous, googleBooks: true }));
+        setIntegrationTestMessages(previous => ({ ...previous, googleBooks: 'Testing Google Books lookup...' }));
+        debugPluginSettingsSave('integration test triggered', {
+            origin: 'click',
+            service: 'googleBooks'
+        });
+
+        const testRequest = pluginApi.searchGoogleBooksMetadata<PtvGoogleBooksLookupResponse>({
+            author: 'Marc Bernabe',
+            isbn: '9781462923007',
+            limit: Math.min(5, googleBooksSettingsDraft.maxResults || 5),
+            title: 'Learn Japanese with Manga Volume One',
+            year: 2022
+        }, {
+            signal: abortController?.signal
+        })
+            .then(result => {
+                let candidates: unknown[] = [];
+
+                if (Array.isArray(result.candidates)) {
+                    candidates = result.candidates;
+                } else if (Array.isArray(result.Candidates)) {
+                    candidates = result.Candidates;
+                }
+
+                const provider = result.provider || {};
+                const resultCount = Number(provider.candidateCount ?? candidates.length);
+                const statusCode = provider.statusCode ? ` HTTP ${provider.statusCode}.` : '';
+                const duration = provider.durationMs ? ` Duration ${provider.durationMs}ms.` : '';
+                const cache = provider.cached ? ' Cache hit.' : '';
+                const key = provider.configured || googleBooksSettingsDraft.googleBooksApiKeyConfigured ?
+                    ' API key configured.' :
+                    ' No API key configured.';
+                const error = provider.error ? ` Provider warning: ${provider.error}` : '';
+
+                setIntegrationTestMessages(previous => ({
+                    ...previous,
+                    googleBooks: `Google Books lookup ${result.ok === false ? 'completed with warnings' : 'succeeded'} with ${resultCount} result${resultCount === 1 ? '' : 's'}.${key}${statusCode}${duration}${cache}${error}`
+                }));
+            })
+            .catch((err: unknown) => {
+                if (abortController?.signal.aborted) {
+                    debugPluginSettingsSave('integration test aborted', {
+                        origin: 'abort',
+                        service: 'googleBooks'
+                    });
+                    return;
+                }
+
+                setIntegrationTestMessages(previous => ({
+                    ...previous,
+                    googleBooks: `Google Books test failed: ${getErrorMessage(err)}`
+                }));
+            })
+            .finally(() => {
+                delete integrationTestRequestRef.current.googleBooks;
+                delete integrationTestAbortRef.current.googleBooks;
+                setIntegrationTesting(previous => ({ ...previous, googleBooks: false }));
+            });
+
+        integrationTestRequestRef.current.googleBooks = testRequest;
+    }, [googleBooksSettingsDraft.googleBooksApiKeyConfigured, googleBooksSettingsDraft.maxResults]);
+
     const testTmdbConnection = useCallback(() => {
         if (integrationTestRequestRef.current.tmdb) {
             debugPluginSettingsSave('integration test deduped', {
@@ -2690,6 +2931,21 @@ const PiggieTvDashboardPage = () => {
 
     const handleDiscogsTokenInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setDiscogsTokenInput(event.target.value);
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
+    const handleGoogleBooksEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setGoogleBooksSettingsDraft(previousSettings => ({ ...previousSettings, googleBooksEnabled: event.target.checked }));
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
+    const handleGoogleBooksMaxResultsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setGoogleBooksSettingsDraft(previousSettings => ({ ...previousSettings, maxResults: Number(event.target.value || 0) }));
+        setSettingsDirty(true);
+    }, [setSettingsDirty]);
+
+    const handleGoogleBooksApiKeyInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setGoogleBooksApiKeyInput(event.target.value);
         setSettingsDirty(true);
     }, [setSettingsDirty]);
 
@@ -3075,6 +3331,9 @@ const PiggieTvDashboardPage = () => {
     const currentFps = getNumberValue(performanceReport, 'currentFps');
     const averageFps = getNumberValue(performanceReport, 'averageFps');
     const droppedFrames = getNumberValue(performanceReport, 'droppedFrameCount');
+    const longTaskCount = getNumberValue(performanceReport, 'longTaskCount');
+    const longTaskTotalMs = getNumberValue(performanceReport, 'longTaskTotalMs');
+    const largestLongTaskMs = getNumberValue(performanceReport, 'largestLongTaskMs');
     const activeImageRequests = getNumberValue(imageManagerMetrics, 'activeRequests');
     const queuedImageRequests = getNumberValue(imageManagerMetrics, 'queuedRequests');
     const imageCacheHits = getNumberValue(imageManagerMetrics, 'cacheHits');
@@ -3325,6 +3584,7 @@ const PiggieTvDashboardPage = () => {
                                         </Typography>
                                         <Typography>FPS: {getFpsLabel(currentFps, averageFps)}</Typography>
                                         <Typography>Dropped frames: {droppedFrames ?? 'n/a'}</Typography>
+                                        <Typography>Long tasks: {longTaskCount ?? 0} ({formatDuration(longTaskTotalMs)}, largest {formatDuration(largestLongTaskMs)})</Typography>
                                         <Typography>Memory: {getMemoryLabel(performanceReport)}</Typography>
                                         <Typography>
                                             Image requests: {activeImageRequests ?? 0} active / {queuedImageRequests ?? 0} queued
@@ -3425,6 +3685,93 @@ const PiggieTvDashboardPage = () => {
                                                 disabled={settingsActionDisabled}
                                             >
                                                 {settingsSavingSection === 'musicMetadataSettings' ? 'Saving...' : 'Save Music Metadata Settings'}
+                                            </Button>
+                                        </Stack>
+                                    </Stack>
+                                </CardContent>
+                            </Card>
+                        </Grid>
+
+                        <Grid size={{ xs: 12, lg: 6 }}>
+                            <Card className='ptv-dashboard-card ptv-control-card'>
+                                <CardContent>
+                                    <Stack spacing={2}>
+                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
+                                            <Typography variant='h2'>Google Books Metadata</Typography>
+                                            <Chip
+                                                className='ptv-status-badge ptv-status-badge-info'
+                                                label={getGoogleBooksCredentialLabel(googleBooksSettingsDraft, googleBooksApiKeyInput)}
+                                                size='small'
+                                            />
+                                        </Stack>
+                                        <Divider />
+                                        <WarningAlert message={integrationTestMessages.googleBooks || ''} />
+                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
+                                            <Typography>Google Books enabled: {String(googleBooksSettingsDraft.googleBooksEnabled)}</Typography>
+                                            <Typography>API key configured: {String(googleBooksSettingsDraft.googleBooksApiKeyConfigured)}</Typography>
+                                            <Typography>Lookup candidates per search: {googleBooksSettingsDraft.maxResults}</Typography>
+                                        </Stack>
+                                        <FormControlLabel
+                                            control={<Switch checked={googleBooksSettingsDraft.googleBooksEnabled} disabled={settingsActionDisabled} onChange={handleGoogleBooksEnabledChange} />}
+                                            label='Enable Google Books'
+                                        />
+                                        <TextField
+                                            label='Lookup results per search'
+                                            size='small'
+                                            type='number'
+                                            value={googleBooksSettingsDraft.maxResults}
+                                            disabled={settingsActionDisabled}
+                                            slotProps={{ htmlInput: { min: PTV_SETTINGS_LIMITS.googleBooksMetadataResults[0], max: PTV_SETTINGS_LIMITS.googleBooksMetadataResults[1] } }}
+                                            onChange={handleGoogleBooksMaxResultsChange}
+                                        />
+                                        <TextField
+                                            label='Google Books API key'
+                                            size='small'
+                                            type='password'
+                                            value={googleBooksApiKeyInput}
+                                            disabled={settingsActionDisabled}
+                                            placeholder={googleBooksSettingsDraft.googleBooksApiKeyConfigured ? 'Key configured - enter a new key to replace it' : 'Optional Google Books API key'}
+                                            onChange={handleGoogleBooksApiKeyInputChange}
+                                            autoComplete='off'
+                                        />
+                                        <Typography variant='body2' color='text.secondary'>
+                                            Google Books can run without a key. Add a restricted API key for higher quota; PiggieTV stores it only in the server plugin settings and never returns it to the browser.
+                                        </Typography>
+                                        <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
+                                            <Button
+                                                type='button'
+                                                variant='contained'
+                                                onClick={saveGoogleBooksSettings}
+                                                disabled={settingsActionDisabled}
+                                            >
+                                                {settingsSavingSection === 'googleBooksSettings' ? 'Saving...' : 'Save Google Books Settings'}
+                                            </Button>
+                                            <Button
+                                                type='button'
+                                                variant='outlined'
+                                                color='warning'
+                                                onClick={clearGoogleBooksApiKey}
+                                                disabled={settingsActionDisabled || (!googleBooksSettingsDraft.googleBooksApiKeyConfigured && !googleBooksApiKeyInput)}
+                                            >
+                                                Clear API Key
+                                            </Button>
+                                            <Button
+                                                type='button'
+                                                variant='outlined'
+                                                onClick={testGoogleBooksConnection}
+                                                disabled={settingsActionDisabled || Boolean(integrationTesting.googleBooks)}
+                                            >
+                                                {integrationTesting.googleBooks ? 'Testing...' : 'Test Google Books Connection'}
+                                            </Button>
+                                            <Button
+                                                component='a'
+                                                href='https://developers.google.com/books/docs/v1/getting_started'
+                                                target='_blank'
+                                                rel='noreferrer'
+                                                type='button'
+                                                variant='outlined'
+                                            >
+                                                Google Books API Docs
                                             </Button>
                                         </Stack>
                                     </Stack>
@@ -3677,6 +4024,7 @@ const PiggieTvDashboardPage = () => {
                                             <Typography>Last validated: {formatDateTimeString(tmdbMetadataStatus?.lastValidatedAt)}</Typography>
                                             <Typography>Cache hits: {tmdbMetadataStatus?.cacheHits ?? 0}</Typography>
                                             <Typography>Cache misses: {tmdbMetadataStatus?.cacheMisses ?? 0}</Typography>
+                                            <Typography>Negative cache: {tmdbMetadataStatus?.negativeCacheSize ?? 0} entries / {tmdbMetadataStatus?.negativeCacheHits ?? 0} hits / {tmdbMetadataStatus?.negativeCacheWrites ?? 0} writes</Typography>
                                             <Typography>Last TMDb duration: {formatDuration(tmdbMetadataStatus?.lastDurationMs)}</Typography>
                                             <Typography>Last TMDb error: {tmdbMetadataStatus?.lastError || 'none'}</Typography>
                                             <Typography>Last TMDb error body: {tmdbMetadataStatus?.lastErrorBody || 'none'}</Typography>

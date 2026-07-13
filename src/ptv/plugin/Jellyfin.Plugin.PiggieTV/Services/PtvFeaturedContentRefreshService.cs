@@ -35,7 +35,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     private const int MaxRecommendationArtistRepeats = 1;
     private const int MaxRecommendationSeriesRepeats = 2;
     private const string RowVariantDelimiter = "||";
-    private static readonly TimeSpan TmdbMetadataTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan TmdbMetadataTimeout = TimeSpan.FromSeconds(8);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false

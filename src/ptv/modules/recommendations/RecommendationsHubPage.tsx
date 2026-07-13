@@ -44,8 +44,8 @@ const RECOMMENDATION_HUB_TABS = [
         label: 'Music'
     },
     {
-        href: PTV_ROUTES.readingLibrary,
-        label: 'Reading Library'
+        href: PTV_ROUTES.reading,
+        label: 'Reading'
     },
     {
         href: '#/tv?topParentId=anime',
@@ -129,8 +129,8 @@ function getHubSections(data: PtvRecommendationDashboardData | null): HubSection
             title: 'Anime'
         }],
         ['reading', {
-            ctaHref: PTV_ROUTES.readingLibrary,
-            ctaLabel: 'Open Reading Library',
+            ctaHref: PTV_ROUTES.reading,
+            ctaLabel: 'Open Reading',
             id: 'reading',
             rows: [],
             title: 'Reading'

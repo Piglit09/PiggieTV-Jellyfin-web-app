@@ -16,6 +16,7 @@ type PtvUrlOriginOptions = {
 };
 
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const WEBPACK_DEV_PORTS = new Set(['8080', '8081']);
 
 function getLocationOrigin() {
     return window.location.origin || `${window.location.protocol}//${window.location.host}`;
@@ -23,6 +24,27 @@ function getLocationOrigin() {
 
 export function isPtvLocalDevHost(hostname = window.location.hostname) {
     return LOCAL_DEV_HOSTS.has(hostname.toLowerCase());
+}
+
+function isPrivateLanHost(hostname: string) {
+    const normalizedHostname = hostname.toLowerCase();
+
+    return /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(normalizedHostname)
+        || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(normalizedHostname)
+        || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(normalizedHostname);
+}
+
+export function isPtvWebpackDevServerOrigin(
+    hostname = window.location.hostname,
+    port = window.location.port
+) {
+    const normalizedHostname = hostname.toLowerCase();
+
+    return WEBPACK_DEV_PORTS.has(String(port || ''))
+        && (
+            isPtvLocalDevHost(normalizedHostname)
+            || isPrivateLanHost(normalizedHostname)
+        );
 }
 
 function normalizeAssetPath(assetPath: string) {
@@ -59,7 +81,7 @@ function getCurrentWebBasePath() {
 }
 
 export function getPtvStaticAssetBaseUrl() {
-    if (!isPtvLocalDevHost()) return '';
+    if (!isPtvWebpackDevServerOrigin()) return '';
 
     return `${getLocationOrigin()}${getCurrentWebBasePath()}`;
 }
@@ -156,7 +178,8 @@ export function classifyPtvRequestUrl(url: string, options: PtvUrlOriginOptions 
         isPtvStaticAssetPath(pathname)
         && (
             isPtvLocalDevHost(parsedUrl.hostname)
-            || (haveSameOrigin(parsedUrl, currentUrl) && isPtvLocalDevHost(currentUrl?.hostname || ''))
+            || isPtvWebpackDevServerOrigin(parsedUrl.hostname, parsedUrl.port)
+            || (haveSameOrigin(parsedUrl, currentUrl) && isPtvWebpackDevServerOrigin(currentUrl?.hostname || '', currentUrl?.port || ''))
         )
     ) {
         return {

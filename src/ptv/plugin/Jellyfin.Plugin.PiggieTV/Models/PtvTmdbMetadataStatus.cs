@@ -44,6 +44,24 @@ public sealed class PtvTmdbMetadataStatus
     public int CacheSize { get; set; }
 
     /// <summary>
+    /// Gets or sets the number of short-lived negative TMDb cache entries.
+    /// </summary>
+    [JsonPropertyName("negativeCacheSize")]
+    public int NegativeCacheSize { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of short-lived negative TMDb cache hits.
+    /// </summary>
+    [JsonPropertyName("negativeCacheHits")]
+    public long NegativeCacheHits { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of short-lived negative TMDb cache writes.
+    /// </summary>
+    [JsonPropertyName("negativeCacheWrites")]
+    public long NegativeCacheWrites { get; set; }
+
+    /// <summary>
     /// Gets or sets the number of TMDb fact cache hits.
     /// </summary>
     [JsonPropertyName("cacheHits")]

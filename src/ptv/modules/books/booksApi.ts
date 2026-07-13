@@ -18,6 +18,12 @@ import {
     readPtvLibraryIndexCache,
     writePtvLibraryIndexCache
 } from '../../utils/libraryIndexCache';
+import {
+    clearPtvLocalStorageByPrefix,
+    readPtvLocalStorageJson,
+    removePtvLocalStorageKey,
+    writePtvLocalStorageJson
+} from '../../services/runtimeStability';
 import { runPtvScheduledRequests } from '../../utils/ptvMediaRequestScheduler';
 import { withPtvTimeout } from '../../utils/withPtvTimeout';
 
@@ -142,6 +148,7 @@ const readingHomeCache = new Map<string, ReadingHomeCacheEntry>();
 const readingHomeSummaryCache = new Map<string, ReadingHomeCacheEntry>();
 const readingLibraryCache = new Map<string, PtvReadingLibraryScope[]>();
 const readingRecentlyAddedRequestCache = new Map<string, Promise<PtvReadingItem[]>>();
+const readingImageUrlCache = new Map<string, string>();
 
 function getCacheKey(kind: PtvReadingRouteKind | 'all' = 'all') {
     return [
@@ -167,14 +174,6 @@ function getReadingHomeStorageKey(kind: PtvReadingRouteKind, initialOnly = false
     return `ptv:reading-home:v${READING_HOME_STORAGE_SCHEMA_VERSION}:${getCacheKey(kind)}:${initialOnly ? 'summary' : 'full'}`;
 }
 
-function getStorage(): Storage | null {
-    try {
-        return window.localStorage || null;
-    } catch {
-        return null;
-    }
-}
-
 function getPayloadSize(value: unknown) {
     try {
         return JSON.stringify(value).length;
@@ -197,7 +196,12 @@ function getCacheDiagnostic(
         staleHit?: boolean;
     } = {}
 ): PtvReadingCacheDiagnostic {
+    const generatedAt = typeof data?.generatedAt === 'number' ? data.generatedAt : 0;
+    const cacheAgeMs = generatedAt ? Math.max(0, Date.now() - generatedAt) : null;
+
     return {
+        cacheAgeMs,
+        cacheFresh: status === 'hit' || status === 'refresh',
         cacheKey: options.cacheKey,
         itemCount: data ? getReadingHomeItemCount(data) : 0,
         payloadSize: data ? getPayloadSize(data) : 0,
@@ -237,15 +241,12 @@ function readStoredReadingHome(
     routeKind: PtvReadingRouteKind,
     initialOnly: boolean
 ): PtvReadingHomeData | null {
-    const storage = getStorage();
     const storageKey = getReadingHomeStorageKey(routeKind, initialOnly);
 
-    if (!storage) return null;
-
     try {
-        const rawValue = storage.getItem(storageKey);
+        const entry = readPtvLocalStorageJson<Partial<ReadingHomeStorageEntry> | null>(storageKey, null);
 
-        if (!rawValue) {
+        if (!entry) {
             recordPtvEvent('cache', 'reading-home-storage-cache-miss', {
                 initialOnly,
                 kind: routeKind,
@@ -254,19 +255,19 @@ function readStoredReadingHome(
             return null;
         }
 
-        const entry = JSON.parse(rawValue) as ReadingHomeStorageEntry;
-
         if (entry.schemaVersion !== READING_HOME_STORAGE_SCHEMA_VERSION || entry.key !== storageKey || !entry.data) {
-            storage.removeItem(storageKey);
+            removePtvLocalStorageKey(storageKey);
             return null;
         }
 
         const now = Date.now();
-        const isFresh = entry.expiresAt > now;
-        const isStaleUsable = entry.createdAt + READING_HOME_STALE_TTL_MS > now;
+        const createdAt = typeof entry.createdAt === 'number' ? entry.createdAt : 0;
+        const expiresAt = typeof entry.expiresAt === 'number' ? entry.expiresAt : 0;
+        const isFresh = expiresAt > now;
+        const isStaleUsable = createdAt + READING_HOME_STALE_TTL_MS > now;
 
         if (!isFresh && !isStaleUsable) {
-            storage.removeItem(storageKey);
+            removePtvLocalStorageKey(storageKey);
             recordPtvEvent('cache', 'reading-home-storage-cache-expired', {
                 initialOnly,
                 kind: routeKind,
@@ -281,7 +282,7 @@ function readStoredReadingHome(
         });
 
         recordPtvEvent('cache', isFresh ? 'reading-home-storage-cache-hit' : 'reading-home-storage-cache-stale-hit', {
-            ageMs: now - entry.createdAt,
+            ageMs: now - createdAt,
             initialOnly,
             itemCount: cacheDiagnostics.itemCount,
             kind: routeKind,
@@ -319,10 +320,7 @@ function writeStoredReadingHome(
     initialOnly: boolean,
     data: PtvReadingHomeData
 ) {
-    const storage = getStorage();
     const storageKey = getReadingHomeStorageKey(routeKind, initialOnly);
-
-    if (!storage) return;
 
     try {
         const createdAt = Date.now();
@@ -334,12 +332,17 @@ function writeStoredReadingHome(
             schemaVersion: READING_HOME_STORAGE_SCHEMA_VERSION
         };
 
-        storage.setItem(storageKey, JSON.stringify(entry));
-        recordPtvEvent('cache', 'reading-home-storage-cache-written', {
+        const payloadSize = getPayloadSize(data);
+        const stored = writePtvLocalStorageJson(storageKey, entry, {
+            maxBytes: initialOnly ? 140_000 : 240_000,
+            namespace: 'reading-home'
+        });
+
+        recordPtvEvent('cache', stored ? 'reading-home-storage-cache-written' : 'reading-home-storage-cache-write-skipped', {
             initialOnly,
             itemCount: getReadingHomeItemCount(data),
             kind: routeKind,
-            payloadSize: getPayloadSize(data),
+            payloadSize,
             sectionCount: data.sections.length,
             storageKey
         });
@@ -354,23 +357,11 @@ function writeStoredReadingHome(
 }
 
 function clearStoredReadingHomeCache() {
-    const storage = getStorage();
-
-    if (!storage) return;
-
     try {
-        const prefix = `ptv:reading-home:v${READING_HOME_STORAGE_SCHEMA_VERSION}:`;
-        const keys: string[] = [];
+        const count = clearPtvLocalStorageByPrefix([`ptv:reading-home:v${READING_HOME_STORAGE_SCHEMA_VERSION}:`]);
 
-        for (let index = 0; index < storage.length; index += 1) {
-            const key = storage.key(index);
-
-            if (key?.startsWith(prefix)) keys.push(key);
-        }
-
-        keys.forEach(key => storage.removeItem(key));
         recordPtvEvent('cache', 'reading-home-storage-cache-cleared', {
-            count: keys.length
+            count
         });
     } catch (error) {
         recordPtvEvent('cache', 'reading-home-storage-cache-clear-failed', {
@@ -467,6 +458,7 @@ function isReadingLibrary(library: PtvLibrary) {
 export function getPtvReadingRouteKind(value: string | null | undefined): PtvReadingRouteKind {
     const normalized = lower(value);
 
+    if (normalized === 'reading') return 'reading';
     if (normalized === 'comic' || normalized === 'comics') return 'comics';
     if (normalized === 'manga' || normalized === 'maga') return 'manga';
 
@@ -484,6 +476,13 @@ function sortReadingLibrariesForRoute(
     libraries: PtvReadingLibraryScope[],
     routeKind: PtvReadingRouteKind
 ) {
+    if (routeKind === 'reading') {
+        return [...libraries].sort((left, right) => (
+            left.kind.localeCompare(right.kind)
+            || left.name.localeCompare(right.name)
+        ));
+    }
+
     const preferredKind = getPreferredReadingLibraryKind(routeKind);
 
     return [...libraries].sort((left, right) => (
@@ -496,6 +495,8 @@ function getReadingLibrariesForRoute(
     libraries: PtvReadingLibraryScope[],
     routeKind: PtvReadingRouteKind
 ) {
+    if (routeKind === 'reading') return sortReadingLibrariesForRoute(libraries, routeKind);
+
     const preferredKind = getPreferredReadingLibraryKind(routeKind);
     const matchedLibraries = libraries.filter(library => library.kind === preferredKind);
 
@@ -523,6 +524,7 @@ export function isPtvReadingKindMatch(
     if (!item) return false;
     const itemKind = getPtvReadingItemKind(item, libraryName);
 
+    if (routeKind === 'reading') return true;
     if (routeKind === 'books') return itemKind === 'book';
 
     return itemKind === (routeKind === 'manga' ? 'manga' : 'comic');
@@ -954,13 +956,22 @@ export function invalidatePtvReadingHomeCache() {
 }
 
 export async function getPtvReadingLibraries(): Promise<PtvReadingLibraryScope[]> {
+    const startedAt = performance.now();
     const cacheKey = getCacheKey('all');
 
     if (readingLibraryCache.has(cacheKey)) {
+        recordPtvEvent('api', 'reading-libraries-resolved', {
+            cachedLibraryResolutionMs: Number((performance.now() - startedAt).toFixed(1)),
+            libraryCount: (readingLibraryCache.get(cacheKey) || []).length,
+            source: 'memory-cache'
+        });
+
         return readingLibraryCache.get(cacheKey) || [];
     }
 
+    const requestStartedAt = performance.now();
     const result = await getPtvUserViews();
+    const libraryDiscoveryRequestMs = Number((performance.now() - requestStartedAt).toFixed(1));
     const libraries = (result.Items || [])
         .filter(isReadingLibrary)
         .map((library): PtvReadingLibraryScope => ({
@@ -974,8 +985,12 @@ export async function getPtvReadingLibraries(): Promise<PtvReadingLibraryScope[]
 
     readingLibraryCache.set(cacheKey, libraries);
     recordPtvEvent('api', 'reading-libraries-resolved', {
+        cachedLibraryResolutionMs: null,
         libraryCount: libraries.length,
-        libraryNames: libraries.map(library => library.name)
+        libraryDiscoveryRequestMs,
+        libraryNames: libraries.map(library => library.name),
+        readingLibraryDiscoveryMs: Number((performance.now() - startedAt).toFixed(1)),
+        source: 'user-views'
     });
 
     return libraries;
@@ -1103,6 +1118,7 @@ async function fetchPtvReadingLibraryDiscovery(
     requestDurationMs: number;
 }> {
     const startedAt = performance.now();
+    const libraryResolutionStartedAt = performance.now();
     const libraries = await getPtvReadingLibraries().catch(error => {
         recordPtvEvent('api', 'reading-library-discovery-failed', {
             error: getErrorMessage(error),
@@ -1111,6 +1127,7 @@ async function fetchPtvReadingLibraryDiscovery(
 
         return [];
     });
+    const cachedLibraryResolutionMs = Number((performance.now() - libraryResolutionStartedAt).toFixed(1));
 
     if (!libraries.length) {
         return {
@@ -1137,10 +1154,14 @@ async function fetchPtvReadingLibraryDiscovery(
         }));
 
         recordPtvEvent('api', 'reading-library-discovery-loaded', {
+            cachedLibraryResolutionMs,
             diagnostics,
             libraryCount: diagnostics.length,
+            libraryDiscoveryRequestMs: requestDurationMs,
+            libraryDiscoveryWaitForSharedPromiseMs: 0,
             requestDurationMs,
             routeKind,
+            routeElapsedSinceRuntimeMs: null,
             source: 'user-views'
         });
 
@@ -1159,9 +1180,13 @@ async function fetchPtvReadingLibraryDiscovery(
     const requestDurationMs = Number((performance.now() - startedAt).toFixed(1));
 
     recordPtvEvent('api', 'reading-library-discovery-loaded', {
+        cachedLibraryResolutionMs,
         diagnostics: results.map(result => result.diagnostic),
         libraryCount: results.length,
+        libraryDiscoveryRequestMs: requestDurationMs,
+        libraryDiscoveryWaitForSharedPromiseMs: 0,
         requestDurationMs,
+        routeElapsedSinceRuntimeMs: null,
         routeKind
     });
 
@@ -1182,7 +1207,7 @@ export function getPtvReadingAuthors(item?: PtvReadingItem | null): string {
         .map(person => cleanText(person.Name))
         .filter(Boolean);
 
-    return [...new Set(authors)].join(', ') || 'Unknown Author';
+    return [...new Set(authors)].join(', ');
 }
 
 export function getPtvReadingSeries(item?: PtvReadingItem | null): string {
@@ -1213,6 +1238,32 @@ export function getPtvReadingImageUrl(
 ) {
     if (!item) return READING_PLACEHOLDER_IMAGE;
 
+    const canonicalSize = getReadingCanonicalImageSize(size, preferredImageType);
+    const semanticProfile = getReadingImageSemanticProfile(canonicalSize, preferredImageType);
+    const imageTag = preferredImageType === 'Backdrop'
+        ? item.BackdropImageTags?.[0] || item.ImageTags?.Primary || item.ParentPrimaryImageTag || ''
+        : item.ImageTags?.Primary || item.ParentPrimaryImageTag || '';
+    const cacheKey = [
+        item.Id || item.Name || item.Path || 'unknown',
+        imageTag,
+        preferredImageType,
+        semanticProfile,
+        canonicalSize
+    ].join(':');
+    const cachedUrl = readingImageUrlCache.get(cacheKey);
+
+    if (cachedUrl) {
+        recordPtvEvent('image', 'reading-image-profile-cache-hit', {
+            duplicateImageTransformPrevented: true,
+            imageProfile: semanticProfile,
+            itemId: item.Id || null,
+            largestRequestedDimension: preferredImageType === 'Backdrop' ? canonicalSize : Math.round(canonicalSize * 1.5),
+            preferredImageType
+        });
+
+        return cachedUrl;
+    }
+
     let order: Array<'Primary' | 'Thumb' | 'Backdrop' | 'SeriesPrimary' | 'ParentPrimary'> = ['Primary', 'ParentPrimary', 'Thumb', 'Backdrop'];
 
     if (preferredImageType === 'Backdrop') {
@@ -1223,25 +1274,68 @@ export function getPtvReadingImageUrl(
 
     const candidates = getPtvItemImageCandidates(item, {
         baseOptions: {
-            fillHeight: preferredImageType === 'Backdrop' ? Math.round(size * 0.56) : Math.round(size * 1.5),
-            fillWidth: size,
-            quality: 90
+            fillHeight: preferredImageType === 'Backdrop' ? Math.round(canonicalSize * 0.56) : Math.round(canonicalSize * 1.5),
+            fillWidth: canonicalSize,
+            quality: 84
         },
         order
     });
     const taggedCandidate = candidates.find(candidate => candidate.tag);
 
-    if (taggedCandidate?.url) return taggedCandidate.url;
-    if (item.Id) {
-        return getPtvItemImageUrl(item, {
-            fillHeight: Math.round(size * 1.5),
-            fillWidth: size,
-            imageType: 'Primary',
-            quality: 90
+    if (taggedCandidate?.url) {
+        readingImageUrlCache.set(cacheKey, taggedCandidate.url);
+        recordPtvEvent('image', 'reading-image-profile-requested', {
+            duplicateImageTransformPrevented: false,
+            imageProfile: semanticProfile,
+            itemId: item.Id || null,
+            largestRequestedDimension: preferredImageType === 'Backdrop' ? canonicalSize : Math.round(canonicalSize * 1.5),
+            preferredImageType
         });
+
+        return taggedCandidate.url;
+    }
+
+    if (item.Id) {
+        const imageUrl = getPtvItemImageUrl(item, {
+            fillHeight: Math.round(canonicalSize * 1.5),
+            fillWidth: canonicalSize,
+            imageType: 'Primary',
+            quality: 84
+        });
+
+        readingImageUrlCache.set(cacheKey, imageUrl);
+        recordPtvEvent('image', 'reading-image-profile-requested', {
+            duplicateImageTransformPrevented: false,
+            imageProfile: semanticProfile,
+            itemId: item.Id,
+            largestRequestedDimension: Math.round(canonicalSize * 1.5),
+            preferredImageType
+        });
+
+        return imageUrl;
     }
 
     return READING_PLACEHOLDER_IMAGE;
+}
+
+function getReadingCanonicalImageSize(size: number, preferredImageType: 'Backdrop' | 'Primary' | 'Thumb') {
+    if (preferredImageType === 'Backdrop') {
+        if (size <= 700) return 700;
+        return 900;
+    }
+
+    if (size <= 340) return 320;
+    if (size <= 520) return 480;
+
+    return 800;
+}
+
+function getReadingImageSemanticProfile(size: number, preferredImageType: 'Backdrop' | 'Primary' | 'Thumb') {
+    if (preferredImageType === 'Backdrop') return 'blurred-background-source';
+    if (size <= 320) return 'shelf-cover';
+    if (size <= 480) return 'featured-cover';
+
+    return 'detail-cover';
 }
 
 export function getPtvReadingFormatLabel(item: PtvReadingItem | null | undefined) {
@@ -1393,16 +1487,16 @@ export function mergePtvReadingLibraryIndex(
     ].includes(section.id));
     const sections = [
         ...pinnedSections,
-        routeKind === 'books' ? getSection('manga', 'Manga', manga, {
+        routeKind === 'reading' ? getSection('manga', 'Manga', manga, {
             kind: 'manga',
             subtitle: 'Right-to-left ready'
         }) : null,
-        routeKind === 'books' ? getSection('comics', 'Comics', comics, {
+        routeKind === 'reading' ? getSection('comics', 'Comics', comics, {
             kind: 'comic',
             subtitle: 'Issues and graphic novels'
         }) : null,
         ...getTopGenreSections(allItems),
-        getSection('library', routeKind === 'books' ? 'All Reading' : `All ${routeKind}`, allItems, {
+        getSection('library', getReadingSectionTitle('library', routeKind), allItems, {
             subtitle: 'Library'
         })
     ].filter((section): section is PtvReadingSection => Boolean(section?.items.length));
@@ -1549,7 +1643,13 @@ function getReadingSectionTitle(sectionId: string, routeKind: PtvReadingRouteKin
     if (sectionId === 'continue-reading') return 'Continue Reading';
     if (sectionId === 'favorites') return 'Favorites';
     if (sectionId === 'recently-added') return 'Recently Added';
-    if (sectionId === 'library') return routeKind === 'books' ? 'All Reading' : `All ${routeKind}`;
+    if (sectionId === 'library') {
+        if (routeKind === 'reading') return 'All Reading';
+        if (routeKind === 'comics') return 'All Comics';
+        if (routeKind === 'manga') return 'All Manga';
+
+        return 'All Books';
+    }
     if (sectionId === 'comics') return 'Comics';
     if (sectionId === 'manga') return 'Manga';
 
@@ -1947,7 +2047,8 @@ export function getPtvReadingHome(
                 isPartial: true,
                 kind: routeKind,
                 libraryDiagnostics,
-                metadataProviderCounts: metadataStats.providerCounts,
+                metadataProviderCounts: metadataStats.collectionStatus === 'collected' ? metadataStats.providerCounts : null,
+                metadataProviderCountsStatus: metadataStats.collectionStatus || 'notCollected',
                 metadataProviderItemCount: metadataStats.itemCount,
                 requestDurationMs,
                 sections: sections.map(section => ({
@@ -1989,11 +2090,11 @@ export function getPtvReadingHome(
             continueReadingSection,
             recentlyAddedSection,
             favoritesSection,
-            routeKind === 'books' ? getSection('manga', 'Manga', manga, {
+            routeKind === 'reading' ? getSection('manga', 'Manga', manga, {
                 kind: 'manga',
                 subtitle: 'Right-to-left ready'
             }) : null,
-            routeKind === 'books' ? getSection('comics', 'Comics', comics, {
+            routeKind === 'reading' ? getSection('comics', 'Comics', comics, {
                 kind: 'comic',
                 subtitle: 'Issues and graphic novels'
             }) : null,
@@ -2035,7 +2136,8 @@ export function getPtvReadingHome(
             kind: routeKind,
             libraryDiagnostics,
             libraryPreviewCount: libraryPreviewSection.items.length,
-            metadataProviderCounts: metadataStats.providerCounts,
+            metadataProviderCounts: metadataStats.collectionStatus === 'collected' ? metadataStats.providerCounts : null,
+            metadataProviderCountsStatus: metadataStats.collectionStatus || 'notCollected',
             metadataProviderItemCount: metadataStats.itemCount,
             requestDurationMs,
             sections: sections.map(section => ({

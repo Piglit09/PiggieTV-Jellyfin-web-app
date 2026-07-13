@@ -63,6 +63,12 @@ public static class PtvPluginSettingsNormalizer
     /// <summary>Maximum music metadata candidate count.</summary>
     public const int MaxMusicMetadataResults = 12;
 
+    /// <summary>Minimum Google Books candidate count.</summary>
+    public const int MinGoogleBooksMetadataResults = 1;
+
+    /// <summary>Maximum Google Books candidate count.</summary>
+    public const int MaxGoogleBooksMetadataResults = 20;
+
     private const int MinRecommendationRowItems = 12;
     private const int MaxRecommendationAlbumRepeats = 2;
     private const int MaxRecommendationArtistRepeats = 1;
@@ -85,6 +91,7 @@ public static class PtvPluginSettingsNormalizer
         configuration.PerformanceSettings ??= new PerformanceSettings();
         configuration.TmdbSettings ??= new TmdbSettings();
         configuration.MusicMetadataSettings ??= new MusicMetadataSettings();
+        configuration.GoogleBooksSettings ??= new GoogleBooksSettings();
         configuration.SeerrSettings ??= new SeerrSettings();
         configuration.SignupSettings ??= new SignupSettings();
         configuration.ArrSettings ??= new ArrSettings();
@@ -145,6 +152,12 @@ public static class PtvPluginSettingsNormalizer
             configuration.MusicMetadataSettings.MaxResults,
             MinMusicMetadataResults,
             MaxMusicMetadataResults);
+
+        configuration.GoogleBooksSettings.GoogleBooksApiKey = CleanSecret(configuration.GoogleBooksSettings.GoogleBooksApiKey);
+        configuration.GoogleBooksSettings.MaxResults = Clamp(
+            configuration.GoogleBooksSettings.MaxResults,
+            MinGoogleBooksMetadataResults,
+            MaxGoogleBooksMetadataResults);
 
         configuration.SeerrSettings.DisplayName = CleanText(configuration.SeerrSettings.DisplayName, "Jellyseerr", 48);
         configuration.SeerrSettings.InternalUrl = CleanUrl(configuration.SeerrSettings.InternalUrl, "http://10.16.0.226:5055");

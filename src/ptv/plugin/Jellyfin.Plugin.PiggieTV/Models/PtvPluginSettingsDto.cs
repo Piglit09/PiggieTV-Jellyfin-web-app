@@ -49,6 +49,10 @@ public sealed class PtvPluginSettingsDto
     [JsonPropertyName("musicMetadataSettings")]
     public PtvPublicMusicMetadataSettings MusicMetadataSettings { get; set; } = new();
 
+    /// <summary>Gets or sets Google Books reading metadata lookup settings.</summary>
+    [JsonPropertyName("googleBooksSettings")]
+    public PtvPublicGoogleBooksSettings GoogleBooksSettings { get; set; } = new();
+
     /// <summary>Gets or sets Jellyseerr settings.</summary>
     [JsonPropertyName("seerrSettings")]
     public PtvPublicSeerrSettings SeerrSettings { get; set; } = new();
@@ -90,6 +94,7 @@ public sealed class PtvPluginSettingsDto
             Recommendations = configuration.Recommendations,
             TmdbSettings = PtvPublicTmdbSettings.FromConfiguration(configuration),
             MusicMetadataSettings = PtvPublicMusicMetadataSettings.FromConfiguration(configuration),
+            GoogleBooksSettings = PtvPublicGoogleBooksSettings.FromConfiguration(configuration),
             SeerrSettings = PtvPublicSeerrSettings.FromConfiguration(configuration),
             ArrSettings = PtvPublicArrSettings.FromConfiguration(configuration),
             DownloadSettings = PtvPublicDownloadSettings.FromConfiguration(configuration),
@@ -143,6 +148,10 @@ public sealed class PtvPluginSettingsPatchDto
     /// <summary>Gets or sets music metadata lookup setting updates.</summary>
     [JsonPropertyName("musicMetadataSettings")]
     public PtvMusicMetadataSettingsPatch? MusicMetadataSettings { get; set; }
+
+    /// <summary>Gets or sets Google Books reading metadata lookup setting updates.</summary>
+    [JsonPropertyName("googleBooksSettings")]
+    public PtvGoogleBooksSettingsPatch? GoogleBooksSettings { get; set; }
 
     /// <summary>Gets or sets Jellyseerr setting updates.</summary>
     [JsonPropertyName("seerrSettings")]
@@ -333,6 +342,28 @@ public sealed class PtvMusicMetadataSettingsPatch
     /// <summary>Gets or sets a write-only Discogs token replacement.</summary>
     [JsonPropertyName("discogsToken")]
     public string? DiscogsToken { get; set; }
+
+    /// <summary>Gets or sets the maximum candidate count per lookup.</summary>
+    [JsonPropertyName("maxResults")]
+    public int? MaxResults { get; set; }
+}
+
+/// <summary>
+/// Partial Google Books metadata lookup settings patch. API key is write-only.
+/// </summary>
+public sealed class PtvGoogleBooksSettingsPatch
+{
+    /// <summary>Gets or sets whether native Google Books lookup is enabled.</summary>
+    [JsonPropertyName("googleBooksEnabled")]
+    public bool? GoogleBooksEnabled { get; set; }
+
+    /// <summary>Gets or sets whether the saved Google Books API key should be cleared.</summary>
+    [JsonPropertyName("clearGoogleBooksApiKey")]
+    public bool? ClearGoogleBooksApiKey { get; set; }
+
+    /// <summary>Gets or sets a write-only Google Books API key replacement.</summary>
+    [JsonPropertyName("googleBooksApiKey")]
+    public string? GoogleBooksApiKey { get; set; }
 
     /// <summary>Gets or sets the maximum candidate count per lookup.</summary>
     [JsonPropertyName("maxResults")]
@@ -627,6 +658,47 @@ public sealed class PtvPublicMusicMetadataSettings
             DiscogsTokenConfigured = !string.IsNullOrWhiteSpace(settings.DiscogsToken),
             MaxResults = settings.MaxResults,
             MusicBrainzEnabled = settings.MusicBrainzEnabled
+        };
+    }
+}
+
+/// <summary>
+/// Public Google Books metadata lookup settings DTO that never returns the stored API key.
+/// </summary>
+public sealed class PtvPublicGoogleBooksSettings
+{
+    /// <summary>Gets or sets a value indicating whether Google Books lookup is enabled.</summary>
+    [JsonPropertyName("googleBooksEnabled")]
+    public bool GoogleBooksEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether a Google Books API key is configured.</summary>
+    [JsonPropertyName("googleBooksApiKeyConfigured")]
+    public bool GoogleBooksApiKeyConfigured { get; set; }
+
+    /// <summary>Gets or sets a write-only Google Books API key replacement.</summary>
+    [JsonPropertyName("googleBooksApiKey")]
+    public string? GoogleBooksApiKey { get; set; }
+
+    /// <summary>Gets or sets the maximum candidate count per lookup.</summary>
+    [JsonPropertyName("maxResults")]
+    public int MaxResults { get; set; } = 10;
+
+    /// <summary>
+    /// Creates public Google Books metadata lookup settings.
+    /// </summary>
+    /// <param name="configuration">Plugin configuration.</param>
+    /// <returns>Public Google Books metadata settings.</returns>
+    public static PtvPublicGoogleBooksSettings FromConfiguration(PluginConfiguration configuration)
+    {
+        var settings = configuration.GoogleBooksSettings;
+
+        return new PtvPublicGoogleBooksSettings
+        {
+            GoogleBooksApiKey = null,
+            GoogleBooksApiKeyConfigured = !string.IsNullOrWhiteSpace(settings.GoogleBooksApiKey)
+                || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PTV_GOOGLE_BOOKS_API_KEY")),
+            GoogleBooksEnabled = settings.GoogleBooksEnabled,
+            MaxResults = settings.MaxResults
         };
     }
 }

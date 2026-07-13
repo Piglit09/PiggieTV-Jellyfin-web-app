@@ -18,7 +18,6 @@ import {
     setPtvMusicRepeatMode,
     setPtvMusicVirtualQueue,
     setPtvMusicVolume,
-    stopPtvMusicPlayback,
     subscribeToPtvMusicQueue,
     togglePtvMusicMute,
     togglePtvMusicPlayPause,
@@ -790,6 +789,7 @@ function FullscreenPlayer({
 export function PtvMusicPlayerDock() {
     const snapshot = useMusicQueueSnapshot();
     const [isExpanded, setExpanded] = useState(false);
+    const [isMusicRoute, setMusicRoute] = useState(() => isPtvMusicRouteHash());
     const [isQueueOpen, setQueueOpen] = useState(false);
     const [isPlaylistModalOpen, setPlaylistModalOpen] = useState(false);
     const item = snapshot.currentItem;
@@ -798,24 +798,27 @@ export function PtvMusicPlayerDock() {
     const { isLiked, toggleLiked } = useLikedMusicItem(item, 'mini-favorite');
 
     useEffect(() => {
-        const stopIfMusicRouteLeft = () => {
-            if (!item || isPtvMusicRouteHash()) return;
+        const syncMusicRouteState = () => {
+            const nextIsMusicRoute = isPtvMusicRouteHash();
 
-            setExpanded(false);
-            setQueueOpen(false);
-            setPlaylistModalOpen(false);
-            void stopPtvMusicPlayback('route-left-music');
+            setMusicRoute(nextIsMusicRoute);
+
+            if (!nextIsMusicRoute) {
+                setExpanded(false);
+                setQueueOpen(false);
+                setPlaylistModalOpen(false);
+            }
         };
 
-        stopIfMusicRouteLeft();
-        window.addEventListener('hashchange', stopIfMusicRouteLeft);
-        window.addEventListener('popstate', stopIfMusicRouteLeft);
+        syncMusicRouteState();
+        window.addEventListener('hashchange', syncMusicRouteState);
+        window.addEventListener('popstate', syncMusicRouteState);
 
         return () => {
-            window.removeEventListener('hashchange', stopIfMusicRouteLeft);
-            window.removeEventListener('popstate', stopIfMusicRouteLeft);
+            window.removeEventListener('hashchange', syncMusicRouteState);
+            window.removeEventListener('popstate', syncMusicRouteState);
         };
-    }, [item]);
+    }, []);
 
     useEffect(() => {
         document.documentElement.classList.toggle('ptv-music-active', Boolean(item));
@@ -874,7 +877,7 @@ export function PtvMusicPlayerDock() {
 
     return (
         <>
-            <div className='ptv-music-mini-player' data-ptv-music-player='mini'>
+            {isMusicRoute ? <div className='ptv-music-mini-player' data-ptv-music-player='mini'>
                 <button
                     type='button'
                     className='ptv-music-mini-progress'
@@ -956,7 +959,7 @@ export function PtvMusicPlayerDock() {
                     </div>
                     <PlayerButton icon='fullscreen' label='Full screen player' onClick={() => openPtvMusicPlayer('mini-fullscreen-button')} />
                 </div>
-            </div>
+            </div> : null}
 
             {isExpanded ? (
                 <FullscreenPlayer

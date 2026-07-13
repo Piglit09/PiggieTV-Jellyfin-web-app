@@ -8,6 +8,7 @@ import {
 } from './clientProfile';
 import { dispatchPtvCustomEvent } from './events';
 import { getPtvPluginApiDiagnostics } from './pluginApi';
+import { getPtvRuntimeDiagnostics } from './runtime';
 import { resetRuntimeScope } from './scope';
 import { classifyPtvRequestUrl } from './urlOrigins';
 
@@ -111,8 +112,13 @@ type PtvGlobal = Record<string, unknown> & {
     debug?: PtvDebugApi;
 };
 
-type PtvWindow = Window & Partial<Record<'PTV_DEBUG' | '__PTV_IMAGE_TRACKER__' | '__PTV_OBSERVABILITY_INSTALLED__', boolean>> & {
+type PtvWindow = Window & Partial<Record<'PTV_DEBUG' | '__PTV_IMAGE_TRACKER__' | '__PTV_OBSERVABILITY_INSTALLED__' | '__PTV_STARTUP_EVENT_RECORDED__', boolean>> & {
     PTV?: PtvGlobal;
+    __PTV_INITIALIZATION_ATTEMPT_COUNT__?: number;
+    __PTV_INITIALIZATION_COMPLETED_COUNT__?: number;
+    __PTV_INITIALIZATION_SKIPPED_OWNERS__?: Record<string, boolean>;
+    __PTV_INITIALIZATION_SKIPPED_COUNT__?: number;
+    __PTV_INITIALIZATION_OWNER__?: string;
 };
 
 type NavigatorWithMemory = Navigator & {
@@ -235,7 +241,38 @@ function getActiveProfiles(): {
     };
 }
 
-export function recordPtvStartupEvent() {
+export function recordPtvStartupEvent(owner = 'observability') {
+    const runtimeDiagnostics = getPtvRuntimeDiagnostics();
+
+    if (ptvWindow.__PTV_STARTUP_EVENT_RECORDED__) {
+        const skippedOwners = ptvWindow.__PTV_INITIALIZATION_SKIPPED_OWNERS__ || {};
+
+        if (skippedOwners[owner]) return;
+
+        skippedOwners[owner] = true;
+        ptvWindow.__PTV_INITIALIZATION_SKIPPED_OWNERS__ = skippedOwners;
+        ptvWindow.__PTV_INITIALIZATION_SKIPPED_COUNT__ = (ptvWindow.__PTV_INITIALIZATION_SKIPPED_COUNT__ || 0) + 1;
+
+        if (!shouldCollectDiagnostics()) return;
+
+        recordPtvEvent('profile', 'ptv:init-skipped', {
+            existingRuntimeDetected: true,
+            initializationAttemptCount: ptvWindow.__PTV_INITIALIZATION_ATTEMPT_COUNT__ || runtimeDiagnostics.runtimeCreateCount || 1,
+            initializationCompletedCount: ptvWindow.__PTV_INITIALIZATION_COMPLETED_COUNT__ || (runtimeDiagnostics.ready ? 1 : 0),
+            initializationOwner: ptvWindow.__PTV_INITIALIZATION_OWNER__ || owner,
+            initializationSkippedCount: ptvWindow.__PTV_INITIALIZATION_SKIPPED_COUNT__,
+            runtime: runtimeDiagnostics,
+            skippedOwner: owner
+        });
+
+        return;
+    }
+
+    ptvWindow.__PTV_INITIALIZATION_ATTEMPT_COUNT__ = runtimeDiagnostics.runtimeCreateCount || 1;
+    ptvWindow.__PTV_STARTUP_EVENT_RECORDED__ = true;
+    ptvWindow.__PTV_INITIALIZATION_COMPLETED_COUNT__ = runtimeDiagnostics.ready ? 1 : 0;
+    ptvWindow.__PTV_INITIALIZATION_OWNER__ = owner;
+
     if (!shouldCollectDiagnostics()) return;
 
     const {
@@ -250,9 +287,17 @@ export function recordPtvStartupEvent() {
             isMobile: clientProfile.isMobile,
             isTv: clientProfile.isTv,
             isWebOs: clientProfile.isWebOs,
-            kind: clientProfile.kind
+            kind: clientProfile.kind,
+            layoutMode: clientProfile.layoutMode,
+            responsive: clientProfile.responsive
         },
-        renderProfile: performanceProfile.renderProfile
+        existingRuntimeDetected: false,
+        initializationAttemptCount: ptvWindow.__PTV_INITIALIZATION_ATTEMPT_COUNT__,
+        initializationCompletedCount: ptvWindow.__PTV_INITIALIZATION_COMPLETED_COUNT__,
+        initializationOwner: owner,
+        initializationSkippedCount: ptvWindow.__PTV_INITIALIZATION_SKIPPED_COUNT__ || 0,
+        renderProfile: performanceProfile.renderProfile,
+        runtime: runtimeDiagnostics
     });
 }
 
@@ -1035,7 +1080,6 @@ export function setPtvDebugAdminAccess(isAdmin: boolean) {
 
     if (canCollectDiagnostics) {
         startDebugObservers();
-        recordPtvStartupEvent();
     } else {
         stopDebugObservers();
         clearPtvDebugReport();
@@ -1081,7 +1125,6 @@ export function setPtvDebug(enabled: boolean) {
 
     if (enabled && canCollectDiagnostics) {
         startDebugObservers();
-        recordPtvStartupEvent();
         recordPtvEvent('profile', 'debug-enabled', getPtvClientProfile());
     } else {
         stopDebugObservers();
@@ -1201,6 +1244,19 @@ export function getPtvDebugReport() {
                 isTv: false,
                 isWebOs: false,
                 kind: 'desktop',
+                layoutMode: 'desktop',
+                responsive: {
+                    devicePixelRatio: 1,
+                    hoverCapability: 'unknown',
+                    innerHeight: 0,
+                    innerWidth: 0,
+                    layoutMode: 'desktop',
+                    layoutModeReason: 'diagnostics-disabled',
+                    matchedMediaQuery: 'n/a',
+                    pointerType: 'unknown',
+                    visualViewportHeight: 0,
+                    visualViewportWidth: 0
+                },
                 supportsBackdropFilter: false
             },
             events: [],
@@ -1229,7 +1285,8 @@ export function getPtvDebugReport() {
             shell: null,
             signup: null,
             timings: [],
-            timestamp: now()
+            timestamp: now(),
+            runtime: getPtvRuntimeDiagnostics()
         };
     }
 
@@ -1259,6 +1316,8 @@ export function getPtvDebugReport() {
             isTv: clientProfile.isTv,
             isWebOs: clientProfile.isWebOs,
             kind: clientProfile.kind,
+            layoutMode: clientProfile.layoutMode,
+            responsive: clientProfile.responsive,
             supportsBackdropFilter: clientProfile.supportsBackdropFilter
         },
         events: [...events],
@@ -1284,7 +1343,8 @@ export function getPtvDebugReport() {
         shell: debugShellStatusProvider?.() || null,
         signup: debugSignupStatusProvider?.() || null,
         timings: [...timings],
-        timestamp: now()
+        timestamp: now(),
+        runtime: getPtvRuntimeDiagnostics()
     };
 }
 
@@ -1318,7 +1378,6 @@ export function initPtvObservability() {
 
     if (debugEnabled && shouldCollectDiagnostics()) {
         startDebugObservers();
-        recordPtvStartupEvent();
         recordPtvEvent('profile', 'debug-enabled', getPtvClientProfile());
     }
 }

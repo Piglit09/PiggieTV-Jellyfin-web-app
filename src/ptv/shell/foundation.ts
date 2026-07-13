@@ -3,6 +3,7 @@ import {
     recordPtvEvent,
     registerPtvDebugShellStatusProvider
 } from '../core/observability';
+import { registerPtvRuntimeListener } from '../core/runtime';
 import {
     getPtvRouteControllerState,
     type PtvRouteControllerState
@@ -12,6 +13,7 @@ export type PtvShellFoundationStatus = {
     active: boolean;
     currentRoute: string;
     error: string | null;
+    header: unknown | null;
     isLoading: boolean;
     route: PtvRouteControllerState;
 };
@@ -21,6 +23,7 @@ let status: PtvShellFoundationStatus = {
     active: true,
     currentRoute: getPtvRouteControllerState().routeId,
     error: null,
+    header: null,
     isLoading: false,
     route: getPtvRouteControllerState()
 };
@@ -50,18 +53,39 @@ function publishShellStatus() {
     emit('shellfoundationchange', status);
 }
 
+function getPtvShellHeaderStatus() {
+    try {
+        const shell = window.PTV?.shell;
+
+        if (!shell || typeof shell !== 'object') return null;
+
+        const provider = (shell as Record<string, unknown>).getHeaderStatus;
+
+        return typeof provider === 'function' ? provider() : null;
+    } catch (error) {
+        return {
+            error: error instanceof Error ? error.message : String(error)
+        };
+    }
+}
+
 export function getPtvShellFoundationStatus(): PtvShellFoundationStatus {
     const currentRoute = getPtvRouteControllerState();
+    const header = getPtvShellHeaderStatus();
 
     if (status.route.full !== currentRoute.full || status.currentRoute !== currentRoute.routeId) {
         return {
             ...status,
             currentRoute: currentRoute.routeId,
+            header,
             route: currentRoute
         };
     }
 
-    return status;
+    return {
+        ...status,
+        header
+    };
 }
 
 export function setPtvShellLoading(isLoading: boolean) {
@@ -123,9 +147,9 @@ export function startPtvShellFoundation() {
     shellFoundationStarted = true;
     applyShellState(status);
 
-    on('routecontrollerchange', (event: Event) => {
+    registerPtvRuntimeListener('shell-foundation:routecontrollerchange', () => on('routecontrollerchange', (event: Event) => {
         updateRoute((event as CustomEvent<PtvRouteControllerState>).detail || getPtvRouteControllerState());
-    });
+    }));
 
     const root = window.PTV || (window.PTV = {});
     const existingShell = root.shell && typeof root.shell === 'object' ?
@@ -141,5 +165,3 @@ export function startPtvShellFoundation() {
     };
     registerPtvDebugShellStatusProvider(getPtvShellFoundationStatus);
 }
-
-startPtvShellFoundation();

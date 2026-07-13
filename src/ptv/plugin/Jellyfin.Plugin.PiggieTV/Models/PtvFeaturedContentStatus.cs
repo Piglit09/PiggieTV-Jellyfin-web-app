@@ -82,7 +82,7 @@ public sealed class PtvFeaturedContentStatus
             CacheVersion = GetInt(featuredContent, "version"),
             CreatedAt = GetLong(featuredContent, "createdAt"),
             ExpiresAt = GetLong(featuredContent, "expiresAt"),
-            HasPayload = payload is not null,
+            HasPayload = payload is not null && ((heroItems?.Count ?? 0) > 0 || itemCount > 0),
             HeroCount = heroItems?.Count ?? 0,
             ItemCount = itemCount,
             SectionCount = sectionItems?.Count ?? 0,

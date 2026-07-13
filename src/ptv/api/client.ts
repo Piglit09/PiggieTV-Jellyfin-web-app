@@ -1,6 +1,10 @@
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 
 import { recordPtvEvent } from '../core/observability';
+import {
+    coordinatePtvJsonRequest,
+    getPtvRequestCoordinatorKey
+} from '../services/requestCoordinator';
 import type {
     PtvApiAjaxOptions,
     PtvApiClientLike,
@@ -234,7 +238,16 @@ export function requestPtvJson<T = unknown>(
         return Promise.reject(new PtvApiError('Jellyfin API client cannot make JSON requests.', url, null));
     }
 
-    return apiClient.getJSON<T>(url, options.includeAuthorization !== false)
+    const includeAuthorization = options.includeAuthorization !== false;
+    const requestKey = getPtvRequestCoordinatorKey('GET', url, includeAuthorization);
+    const getJson = apiClient.getJSON.bind(apiClient) as <TResult = unknown>(requestUrl: string, includeAuth?: boolean) => Promise<TResult>;
+
+    return coordinatePtvJsonRequest<T>(requestKey, () => getJson<T>(url, includeAuthorization), {
+        endpoint: pathOrUrl,
+        includeAuthorization,
+        method: 'GET',
+        source: 'requestPtvJson'
+    })
         .catch(async error => {
             throw await normalizePtvApiLayerErrorAsync(error, url);
         });

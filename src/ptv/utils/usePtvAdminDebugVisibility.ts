@@ -8,10 +8,33 @@ type PtvDebugChangeDetail = Readonly<{
     enabled?: boolean;
 }>;
 
+let adminDebugAccess: boolean | null = null;
+let adminDebugAccessPromise: Promise<boolean> | null = null;
+
 function getDebugEnabledFromEvent(event: Event) {
     const detail = (event as CustomEvent<PtvDebugChangeDetail>).detail;
 
     return typeof detail?.enabled === 'boolean' ? detail.enabled : isPtvDebugEnabled();
+}
+
+function getPtvAdminDebugAccess() {
+    if (adminDebugAccess !== null) {
+        return Promise.resolve(adminDebugAccess);
+    }
+
+    if (!adminDebugAccessPromise) {
+        adminDebugAccessPromise = getPtvCurrentUser()
+            .then(user => {
+                adminDebugAccess = isPtvAdminUser(user);
+                return adminDebugAccess;
+            })
+            .catch(error => {
+                adminDebugAccessPromise = null;
+                throw error;
+            });
+    }
+
+    return adminDebugAccessPromise;
 }
 
 export function usePtvAdminDebugVisibility() {
@@ -21,10 +44,8 @@ export function usePtvAdminDebugVisibility() {
     useEffect(() => {
         let isMounted = true;
 
-        void getPtvCurrentUser()
-            .then(user => {
-                const isAdminUser = isPtvAdminUser(user);
-
+        void getPtvAdminDebugAccess()
+            .then(isAdminUser => {
                 setPtvDebugAdminAccess(isAdminUser);
 
                 if (isMounted) {

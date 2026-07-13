@@ -1,6 +1,7 @@
 import { emit, on } from '../core/events';
 import { getRoute, scheduleRouteCheck } from '../core/router';
 import { recordPtvEvent } from '../core/observability';
+import { registerPtvRuntimeListener } from '../core/runtime';
 import { getPtvRouteOwnership } from './routes';
 
 export type PtvRouteTakeoverMode = 'native' | 'enhanced' | 'fallback';
@@ -19,10 +20,13 @@ export type PtvRouteControllerState = {
     hash: string;
     layout: string;
     mode: PtvRouteTakeoverMode;
+    normalizedPath: string;
     owner: string;
     pageType: string;
     path: string;
     routeId: string;
+    routeGeneration: number;
+    routeKey: string;
 };
 
 type PtvRouteLike = {
@@ -31,6 +35,7 @@ type PtvRouteLike = {
     hash?: string;
     id?: string;
     layout?: string;
+    normalizedPath?: string;
     owner?: string;
     pageType?: string;
     path?: string;
@@ -65,12 +70,45 @@ const ENHANCED_ROUTE_FEATURES = new Set([
 
 let routeControllerStarted = false;
 let currentState: PtvRouteControllerState | null = null;
+let routeGeneration = 0;
 const nativeRouteRegistry = new Map<string, PtvNativeRouteRegistration>();
+const routeGenerationCounters = new Map<number, {
+    duplicateRouteEventSuppressed: number;
+    pageMountCountByGeneration: number;
+    pageUnmountCountByGeneration: number;
+    renderCountByGeneration: number;
+    shellMountCountByGeneration: number;
+}>();
 
-nativeRouteRegistry.set('/home', {
-    mode: 'native',
-    path: '/home'
-});
+function seedPtvNativeRoute(path: string, mode: PtvRouteTakeoverMode = 'native') {
+    const normalizedPath = normalizeRegisteredPath(path);
+
+    if (!normalizedPath) return;
+
+    nativeRouteRegistry.set(normalizedPath, {
+        mode,
+        path: normalizedPath
+    });
+}
+
+[
+    '/home',
+    '/movies',
+    '/movies/*',
+    '/shows',
+    '/shows/*',
+    '/tv',
+    '/tv/*',
+    '/collections',
+    '/collections/*',
+    '/reading',
+    '/reading/*',
+    '/search',
+    '/requests',
+    '/request',
+    '/ptv/request',
+    '/calendar'
+].forEach(path => seedPtvNativeRoute(path));
 
 function getCurrentRouteDiagnostics(route?: PtvRouteLike) {
     return {
@@ -80,6 +118,7 @@ function getCurrentRouteDiagnostics(route?: PtvRouteLike) {
         currentPageType: route?.pageType || '',
         full: route?.full || `${window.location.pathname}${window.location.hash}`,
         hash: route?.hash || window.location.hash || '',
+        normalizedPath: route?.normalizedPath || getHashPath(route?.hash || window.location.hash) || route?.path || window.location.pathname || '',
         path: route?.path || window.location.pathname || ''
     };
 }
@@ -87,6 +126,7 @@ function getCurrentRouteDiagnostics(route?: PtvRouteLike) {
 function matchesDashboardPtvRoute(route: PtvRouteLike, segment: string) {
     const routeText = [
         route.hash,
+        route.normalizedPath,
         route.path,
         route.full,
         window.location.hash,
@@ -190,6 +230,20 @@ function getFallbackReason(route: PtvRouteLike, mode: PtvRouteTakeoverMode): str
 function normalizeRoute(route: PtvRouteLike): PtvRouteControllerState {
     const normalizedInput = getForcedRouteDescriptor(route) || route;
     const mode = getControllerMode(normalizedInput);
+    const normalizedPath = normalizedInput.normalizedPath
+        || getHashPath(normalizedInput.hash || window.location.hash)
+        || normalizeRegisteredPath(normalizedInput.path || window.location.pathname || '');
+
+    const routeId = normalizedInput.id || normalizedInput.pageType || 'generic';
+    const pageType = normalizedInput.pageType || 'generic';
+    const owner = normalizedInput.owner || 'shell';
+    const routeKey = [
+        normalizedPath,
+        routeId,
+        pageType,
+        owner,
+        mode
+    ].join('|');
 
     return {
         activeFeatureIds: normalizedInput.features || [],
@@ -199,10 +253,13 @@ function normalizeRoute(route: PtvRouteLike): PtvRouteControllerState {
         hash: normalizedInput.hash || window.location.hash || '',
         layout: normalizedInput.layout || 'standard',
         mode,
-        owner: normalizedInput.owner || 'shell',
-        pageType: normalizedInput.pageType || 'generic',
+        normalizedPath,
+        owner,
+        pageType,
         path: normalizedInput.path || window.location.pathname || '',
-        routeId: normalizedInput.id || normalizedInput.pageType || 'generic'
+        routeGeneration,
+        routeId,
+        routeKey
     };
 }
 
@@ -210,16 +267,79 @@ function stateChanged(nextState: PtvRouteControllerState) {
     if (!currentState) return true;
 
     return [
-        'full',
         'mode',
         'owner',
         'pageType',
+        'routeKey',
         'routeId'
     ].some(key => currentState?.[key as keyof PtvRouteControllerState] !== nextState[key as keyof PtvRouteControllerState]);
 }
 
+function getRouteGenerationCounters(generation: number) {
+    const existing = routeGenerationCounters.get(generation);
+
+    if (existing) return existing;
+
+    const counters = {
+        duplicateRouteEventSuppressed: 0,
+        pageMountCountByGeneration: 0,
+        pageUnmountCountByGeneration: 0,
+        renderCountByGeneration: 0,
+        shellMountCountByGeneration: 0
+    };
+
+    routeGenerationCounters.set(generation, counters);
+
+    if (routeGenerationCounters.size > 20) {
+        const oldestGeneration = routeGenerationCounters.keys().next().value;
+
+        if (oldestGeneration !== undefined) {
+            routeGenerationCounters.delete(oldestGeneration);
+        }
+    }
+
+    return counters;
+}
+
+function incrementRouteGenerationCounter(
+    counter: keyof ReturnType<typeof getRouteGenerationCounters>,
+    detail: Record<string, unknown> = {}
+) {
+    const generation = currentState?.routeGeneration || routeGeneration;
+    const counters = getRouteGenerationCounters(generation);
+
+    counters[counter] += 1;
+
+    recordPtvEvent('route', 'route-generation-counter', {
+        ...detail,
+        ...counters,
+        normalizedPath: currentState?.normalizedPath || '',
+        routeGeneration: generation,
+        routeId: currentState?.routeId || '',
+        routeKey: currentState?.routeKey || ''
+    });
+
+    return counters[counter];
+}
+
+export function recordPtvRouteGenerationLifecycle(
+    lifecycle: 'page-mount' | 'page-render' | 'page-unmount' | 'shell-mount',
+    detail: Record<string, unknown> = {}
+) {
+    const counter = lifecycle === 'shell-mount' ? 'shellMountCountByGeneration' :
+        lifecycle === 'page-render' ? 'renderCountByGeneration' :
+            lifecycle === 'page-unmount' ? 'pageUnmountCountByGeneration' :
+                'pageMountCountByGeneration';
+
+    return incrementRouteGenerationCounter(counter, {
+        lifecycle,
+        ...detail
+    });
+}
+
 function publishRowBuilderRouteMatch(nextState: PtvRouteControllerState) {
     const isRowBuilderPath = /\/dashboard\/piggietv\/rows(?:[/?]|$)/i.test(nextState.hash)
+        || /\/dashboard\/piggietv\/rows(?:[/?]|$)/i.test(nextState.normalizedPath)
         || /\/dashboard\/piggietv\/rows(?:[/?]|$)/i.test(nextState.path)
         || /\/dashboard\/piggietv\/rows(?:[/?]|$)/i.test(nextState.full);
 
@@ -228,6 +348,7 @@ function publishRowBuilderRouteMatch(nextState: PtvRouteControllerState) {
         full: nextState.full,
         hash: nextState.hash,
         mode: nextState.mode,
+        normalizedPath: nextState.normalizedPath,
         owner: nextState.owner,
         pageType: nextState.pageType,
         path: nextState.path,
@@ -262,6 +383,7 @@ function publishRecommendationRouteMatch(nextState: PtvRouteControllerState) {
         full: nextState.full,
         hash: nextState.hash,
         mode: nextState.mode,
+        normalizedPath: nextState.normalizedPath,
         owner: nextState.owner,
         pageType: nextState.pageType,
         path: nextState.path,
@@ -291,37 +413,64 @@ function publishRouteControllerState(route: PtvRouteLike) {
     const nextState = normalizeRoute(route);
 
     if (!stateChanged(nextState)) {
-        currentState = nextState;
-        return nextState;
+        currentState = {
+            ...nextState,
+            routeGeneration
+        };
+        const counters = getRouteGenerationCounters(routeGeneration);
+
+        counters.duplicateRouteEventSuppressed += 1;
+        recordPtvEvent('route', 'duplicate-route-event-suppressed', {
+            ...counters,
+            duplicateRouteEventSuppressed: true,
+            full: nextState.full,
+            normalizedPath: nextState.normalizedPath,
+            routeGeneration,
+            routeId: nextState.routeId,
+            routeKey: nextState.routeKey
+        });
+
+        return currentState;
     }
 
-    currentState = nextState;
-    publishRecommendationRouteMatch(nextState);
-    publishRowBuilderRouteMatch(nextState);
+    routeGeneration += 1;
+    currentState = {
+        ...nextState,
+        routeGeneration
+    };
+    publishRecommendationRouteMatch(currentState);
+    publishRowBuilderRouteMatch(currentState);
     recordPtvEvent('route', 'route-matched', {
-        features: nextState.activeFeatureIds,
-        full: nextState.full,
-        path: nextState.path,
-        routeId: nextState.routeId
+        features: currentState.activeFeatureIds,
+        full: currentState.full,
+        normalizedPath: currentState.normalizedPath,
+        path: currentState.path,
+        routeGeneration,
+        routeId: currentState.routeId,
+        routeKey: currentState.routeKey
     });
     recordPtvEvent('route', 'route-classified', {
-        canRenderNative: nextState.canRenderNative,
-        fallbackReason: nextState.fallbackReason,
-        mode: nextState.mode,
-        owner: nextState.owner,
-        pageType: nextState.pageType,
-        routeId: nextState.routeId
+        canRenderNative: currentState.canRenderNative,
+        fallbackReason: currentState.fallbackReason,
+        mode: currentState.mode,
+        owner: currentState.owner,
+        pageType: currentState.pageType,
+        routeGeneration,
+        routeId: currentState.routeId,
+        routeKey: currentState.routeKey
     });
-    emit('routecontrollerchange', nextState);
+    emit('routecontrollerchange', currentState);
     recordPtvEvent('route', 'route-controller-change', {
-        fallbackReason: nextState.fallbackReason,
-        mode: nextState.mode,
-        owner: nextState.owner,
-        pageType: nextState.pageType,
-        routeId: nextState.routeId
+        fallbackReason: currentState.fallbackReason,
+        mode: currentState.mode,
+        owner: currentState.owner,
+        pageType: currentState.pageType,
+        routeGeneration,
+        routeId: currentState.routeId,
+        routeKey: currentState.routeKey
     });
 
-    return nextState;
+    return currentState;
 }
 
 export function getPtvRouteControllerState(): PtvRouteControllerState {
@@ -329,6 +478,7 @@ export function getPtvRouteControllerState(): PtvRouteControllerState {
     const shouldForceRecommendationRoute = matchesDashboardPtvRoute({
         full,
         hash: window.location.hash,
+        normalizedPath: getHashPath(window.location.hash),
         path: window.location.pathname
     }, 'recommendations') && currentState?.routeId !== 'recommendations';
 
@@ -360,19 +510,28 @@ export function registerPtvNativeRoute(
 
     if (!normalizedPath) return null;
 
+    const existingRegistration = nativeRouteRegistry.get(normalizedPath);
     const registration = {
         component,
         mode,
         path: normalizedPath
     };
+    const changed = !existingRegistration
+        || existingRegistration.mode !== registration.mode
+        || existingRegistration.component !== registration.component;
 
     nativeRouteRegistry.set(normalizedPath, registration);
-    recordPtvEvent('route', 'native-route-registered', {
+    recordPtvEvent('route', changed ? 'native-route-registered' : 'native-route-registration-unchanged', {
         mode,
         path: normalizedPath
     });
 
-    publishRouteControllerState(getRoute());
+    const currentRoute = getRoute();
+    const activeRouteMatchesRegistration = routeMatchesRegisteredNativeRoute(currentRoute)?.path === normalizedPath;
+
+    if (changed && activeRouteMatchesRegistration) {
+        publishRouteControllerState(currentRoute);
+    }
 
     return registration;
 }
@@ -390,9 +549,21 @@ export function startPtvRouteController() {
     routeControllerStarted = true;
     publishRouteControllerState(getRoute());
 
-    on('routechange', (event: Event) => {
-        publishRouteControllerState((event as CustomEvent<PtvRouteLike>).detail || getRoute());
-    });
+    registerPtvRuntimeListener('route-controller:routechange', () => on('routechange', (event: Event) => {
+        const eventRoute = (event as CustomEvent<PtvRouteLike>).detail;
+        const currentRoute = getRoute();
+
+        if (eventRoute?.full && eventRoute.full !== currentRoute.full) {
+            recordPtvEvent('route', 'stale-route-event-discarded', {
+                currentFull: currentRoute.full,
+                eventFull: eventRoute.full,
+                eventNormalizedPath: eventRoute.normalizedPath || '',
+                eventRouteId: eventRoute.id || eventRoute.pageType || ''
+            });
+        }
+
+        publishRouteControllerState(currentRoute);
+    }));
 
     const root = window.PTV || (window.PTV = {});
     root.routeController = {
@@ -403,5 +574,3 @@ export function startPtvRouteController() {
         refresh: () => publishRouteControllerState(getRoute())
     };
 }
-
-startPtvRouteController();

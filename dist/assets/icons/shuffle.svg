@@ -1,0 +1,23 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ptvShuffleGrad" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7DD6FF"></stop>
+      <stop offset="50%" stop-color="#A78BFA"></stop>
+      <stop offset="100%" stop-color="#FF8DC3"></stop>
+    </linearGradient>
+    <filter id="ptvShuffleGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"></feGaussianBlur>
+      <feMerge>
+        <feMergeNode in="blur"></feMergeNode>
+        <feMergeNode in="SourceGraphic"></feMergeNode>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g filter="url(#ptvShuffleGlow)" stroke="url(#ptvShuffleGrad)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 18H20C25 18 28 20 32 25L36 30C40 35 43 37 48 37H54"></path>
+    <path d="M10 46H20C25 46 28 44 32 39L36 34C40 29 43 27 48 27H54"></path>
+    <path d="M46 12L54 18L46 24"></path>
+    <path d="M46 40L54 46L46 52"></path>
+  </g>
+</svg>

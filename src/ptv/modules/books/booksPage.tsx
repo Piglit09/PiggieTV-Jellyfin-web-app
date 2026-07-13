@@ -1,7 +1,6 @@
 /* eslint-disable react/jsx-no-bind, no-void */
 import React, {
     createContext,
-    FormEvent,
     useCallback,
     useContext,
     useEffect,
@@ -21,16 +20,24 @@ import {
     markPtvImageUrlFailed,
     setPtvFavorite
 } from '../../api';
-import { PTV_ASSETS } from '../../core/config';
+import { PTV_ASSETS, PTV_ROUTES } from '../../core/config';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { recordPtvEvent } from '../../core/observability';
 import { scheduleRouteCheck } from '../../core/router';
 import { resolvePtvStaticAssetUrl } from '../../core/urlOrigins';
-import PTVShell from '../../shell/PTVShell';
-import { getPtvRouteControllerState } from '../../shell/routeController';
+import PTVShell, { type PtvShellNavLink } from '../../shell/PTVShell';
+import {
+    getPtvRouteControllerState,
+    recordPtvRouteGenerationLifecycle
+} from '../../shell/routeController';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import { PtvIcon } from '../icons';
 import { loadReaderProgress } from '../reader/readerProgressStore';
+import {
+    buildPtvReadingSeries,
+    findPtvReadingSeriesById,
+    type PtvReadingSeries
+} from './booksSeries';
 
 import {
     getPtvReadingMetadataProviders
@@ -65,7 +72,7 @@ import type {
     PtvReadingSection
 } from './booksTypes';
 
-type ReadingView = 'explore' | 'home' | 'item' | 'library';
+type ReadingView = 'collections' | 'explore' | 'home' | 'item' | 'library' | 'series';
 
 type ReadingRouteState = Readonly<{
     id: string;
@@ -73,6 +80,42 @@ type ReadingRouteState = Readonly<{
     search: string;
     view: ReadingView;
 }>;
+
+type ReadingBrowseFilter = 'all' | 'favorites' | 'in-progress' | 'read' | 'unread';
+
+type ReadingBrowseFormatFilter = 'all' | 'book' | 'comic' | 'epub' | 'pdf';
+
+type ReadingBrowseSort = 'author' | 'format' | 'recent' | 'series' | 'title' | 'year';
+
+type ReadingBrowseViewMode = 'items' | 'series';
+
+const READING_BROWSE_VIEW_MODE_KEY_PREFIX = 'ptv:reading:browse-view:';
+
+function getDefaultReadingBrowseViewMode(routeKind: PtvReadingRouteKind): ReadingBrowseViewMode {
+    return routeKind === 'comics' || routeKind === 'manga' ? 'series' : 'items';
+}
+
+function getStoredReadingBrowseViewMode(routeKind: PtvReadingRouteKind): ReadingBrowseViewMode {
+    if (typeof localStorage === 'undefined') return getDefaultReadingBrowseViewMode(routeKind);
+
+    try {
+        const storedMode = localStorage.getItem(`${READING_BROWSE_VIEW_MODE_KEY_PREFIX}${routeKind}`);
+
+        return storedMode === 'items' || storedMode === 'series' ? storedMode : getDefaultReadingBrowseViewMode(routeKind);
+    } catch {
+        return getDefaultReadingBrowseViewMode(routeKind);
+    }
+}
+
+function storeReadingBrowseViewMode(routeKind: PtvReadingRouteKind, viewMode: ReadingBrowseViewMode) {
+    if (typeof localStorage === 'undefined') return;
+
+    try {
+        localStorage.setItem(`${READING_BROWSE_VIEW_MODE_KEY_PREFIX}${routeKind}`, viewMode);
+    } catch {
+        // Non-critical preference; ignore storage failures on private or restricted browsers.
+    }
+}
 
 type ItemDetailState = Readonly<{
     error: string;
@@ -137,7 +180,6 @@ function getEmptyReadingHomeData(kind: PtvReadingRouteKind): PtvReadingHomeData 
     };
 }
 
-const PTV_READING_LOGO_URL = resolvePtvStaticAssetUrl(PTV_ASSETS.logos.icon);
 const PTV_READING_FALLBACK_BACKGROUND_URL = resolvePtvStaticAssetUrl(PTV_ASSETS.backgrounds.page);
 const PTV_READING_FULL_HOME_LOAD_DELAY_MS = 2500;
 const PTV_READING_LIBRARY_INDEX_LOAD_DELAY_MS = 5000;
@@ -155,14 +197,33 @@ const PTV_READING_SKELETON_KEYS = [
 const failedReadingImageUrls = new Set<string>();
 const failedReadingCoverItemIds = new Set<string>();
 const failedReadingBackdropItemIds = new Set<string>();
+const reportedReadingCachedFailureUrls = new Set<string>();
+let readingAlternateImageUsedCount = 0;
+let readingCachedFailureHitCount = 0;
+let readingFallbackPosterRenderedCount = 0;
+let readingMissingPrimaryImageCount = 0;
 
 function applyReadingImageFallbackToItem(itemId: string | undefined, fallbackUrl: string) {
     if (!itemId || typeof document === 'undefined') return;
 
     document.querySelectorAll<HTMLImageElement>('img[data-ptv-reading-item-id]').forEach(image => {
         if (image.dataset.ptvReadingItemId !== itemId) return;
+        if (image.dataset.ptvFallbackApplied === 'true') return;
 
+        image.dataset.ptvFallbackApplied = 'true';
         image.src = fallbackUrl;
+    });
+}
+
+function recordReadingCachedFailureHit(url: string, itemId?: string) {
+    if (reportedReadingCachedFailureUrls.has(url)) return;
+
+    reportedReadingCachedFailureUrls.add(url);
+    readingCachedFailureHitCount += 1;
+    recordPtvEvent('image', 'reading-image-cached-failure-hit', {
+        cachedFailureHit: true,
+        itemId: itemId || null,
+        url
     });
 }
 
@@ -264,9 +325,97 @@ function getQueryParam(search: string, key: string) {
 
 function getReadingRoute(pathname: string, search: string): ReadingRouteState {
     const parts = pathname.split('/').filter(Boolean);
-    const kind = getPtvReadingRouteKind(parts[0]);
-    const viewSegment = parts[1] || 'home';
     const searchTerm = getQueryParam(search, 'search');
+    const routeRoot = parts[0] || 'reading';
+
+    if (routeRoot === 'reading') {
+        const segment = parts[1] || 'home';
+
+        if (segment === 'books' || segment === 'comics' || segment === 'manga' || segment === 'maga') {
+            const scopedSegment = parts[2] || 'library';
+            const scopedKind = getPtvReadingRouteKind(segment);
+
+            if (scopedSegment === 'item' || scopedSegment === 'book') {
+                return {
+                    id: decodeURIComponent(parts[3] || ''),
+                    kind: scopedKind,
+                    search: searchTerm,
+                    view: 'item'
+                };
+            }
+
+            if (scopedSegment === 'collections') {
+                return {
+                    id: '',
+                    kind: scopedKind,
+                    search: searchTerm,
+                    view: 'collections'
+                };
+            }
+
+            if (scopedSegment === 'series') {
+                return {
+                    id: decodeURIComponent(parts[3] || ''),
+                    kind: scopedKind,
+                    search: searchTerm,
+                    view: 'series'
+                };
+            }
+
+            return {
+                id: '',
+                kind: scopedKind,
+                search: searchTerm,
+                view: 'library'
+            };
+        }
+
+        if (segment === 'explore') {
+            return {
+                id: '',
+                kind: 'reading',
+                search: searchTerm,
+                view: 'explore'
+            };
+        }
+
+        if (segment === 'collections') {
+            return {
+                id: '',
+                kind: 'reading',
+                search: searchTerm,
+                view: 'collections'
+            };
+        }
+
+        if (segment === 'series') {
+            return {
+                id: decodeURIComponent(parts[2] || ''),
+                kind: 'reading',
+                search: searchTerm,
+                view: 'series'
+            };
+        }
+
+        if (segment === 'item' || segment === 'book') {
+            return {
+                id: decodeURIComponent(parts[2] || ''),
+                kind: 'reading',
+                search: searchTerm,
+                view: 'item'
+            };
+        }
+
+        return {
+            id: '',
+            kind: 'reading',
+            search: searchTerm,
+            view: 'home'
+        };
+    }
+
+    const kind = getPtvReadingRouteKind(routeRoot);
+    const viewSegment = parts[1] || 'library';
 
     if (viewSegment === 'explore') {
         return {
@@ -283,6 +432,24 @@ function getReadingRoute(pathname: string, search: string): ReadingRouteState {
             kind,
             search: searchTerm,
             view: 'library'
+        };
+    }
+
+    if (viewSegment === 'collections') {
+        return {
+            id: '',
+            kind,
+            search: searchTerm,
+            view: 'collections'
+        };
+    }
+
+    if (viewSegment === 'series') {
+        return {
+            id: decodeURIComponent(parts[2] || ''),
+            kind,
+            search: searchTerm,
+            view: 'series'
         };
     }
 
@@ -304,42 +471,74 @@ function getReadingRoute(pathname: string, search: string): ReadingRouteState {
 }
 
 function getRouteBase(kind: PtvReadingRouteKind) {
+    if (kind === 'reading') return 'reading';
+
     return kind === 'manga' ? 'manga' : kind;
 }
 
 function getRouteTitle(kind: PtvReadingRouteKind) {
+    if (kind === 'reading') return 'Reading';
     if (kind === 'comics') return 'Comics';
     if (kind === 'manga') return 'Manga';
 
     return 'Books';
 }
 
+function getReadingRoutePageTitle(route: ReadingRouteState) {
+    if (route.view === 'collections') return 'Collections';
+    if (route.view === 'explore') return 'Explore';
+    if (route.view === 'item') return 'Details';
+    if (route.view === 'library') return getRouteTitle(route.kind);
+    if (route.view === 'series') return 'Series';
+
+    return getRouteTitle(route.kind);
+}
+
+function getReadingContextLinks(route: ReadingRouteState): PtvShellNavLink[] {
+    return [
+        { active: route.kind === 'reading' && route.view === 'home', href: PTV_ROUTES.reading, icon: 'home', id: 'reading-home', label: 'Home' },
+        { active: route.kind === 'reading' && route.view === 'explore', href: PTV_ROUTES.readingExplore, icon: 'shuffle', id: 'reading-explore', label: 'Explore' },
+        { active: route.kind === 'books' && (route.view === 'library' || route.view === 'item' || route.view === 'series'), href: PTV_ROUTES.readingBooks, icon: 'books', id: 'reading-books', label: 'Books' },
+        { active: route.kind === 'comics' && (route.view === 'library' || route.view === 'item' || route.view === 'series'), href: PTV_ROUTES.readingComics, icon: 'collections', id: 'reading-comics', label: 'Comics' },
+        { active: route.kind === 'manga' && (route.view === 'library' || route.view === 'item' || route.view === 'series'), href: PTV_ROUTES.readingManga, icon: 'anime', id: 'reading-manga', label: 'Manga' },
+        { active: route.kind === 'reading' && route.view === 'collections', href: PTV_ROUTES.readingCollections, icon: 'collections', id: 'reading-collections', label: 'Collections' }
+    ];
+}
+
+function shouldShowReadingToolbarTitle(view: ReadingView) {
+    return !['collections', 'library'].includes(view);
+}
+
 function getRouteKicker(kind: PtvReadingRouteKind) {
+    if (kind === 'reading') return 'Books - Comics - Manga';
     if (kind === 'comics') return 'Comics library';
     if (kind === 'manga') return 'Manga library';
 
-    return 'Reading library';
-}
-
-function getLibraryRouteKind(kind: string): PtvReadingRouteKind {
-    if (kind === 'comic') return 'comics';
-    if (kind === 'manga') return 'manga';
-
-    return 'books';
-}
-
-function getLibraryKindLabel(kind: string) {
-    if (kind === 'comic') return 'Comics';
-    if (kind === 'manga') return 'Manga';
-
-    return 'Books';
+    return 'Books library';
 }
 
 function getItemHref(item: PtvReadingItem, kind: PtvReadingRouteKind) {
+    if (kind === 'reading') {
+        const itemKind = getPtvReadingItemKind(item);
+        const routeBase = itemKind === 'comic' ? 'comics' : itemKind === 'manga' ? 'manga' : 'books';
+
+        return item.Id ? `#/reading/${routeBase}/item/${encodeURIComponent(item.Id)}` : PTV_ROUTES.reading;
+    }
+
     return item.Id ? `#/${getRouteBase(kind)}/item/${encodeURIComponent(item.Id)}` : `#/${getRouteBase(kind)}`;
 }
 
+function getSeriesHref(series: PtvReadingSeries, kind: PtvReadingRouteKind) {
+    if (kind === 'reading') {
+        return `#/reading/series/${encodeURIComponent(series.id)}`;
+    }
+
+    return `#/${getRouteBase(kind)}/series/${encodeURIComponent(series.id)}`;
+}
+
 function getLibraryHref(kind: PtvReadingRouteKind) {
+    if (kind === 'reading') return PTV_ROUTES.readingBooks;
+
     return `#/${getRouteBase(kind)}/library`;
 }
 
@@ -353,12 +552,83 @@ function getSection(homeData: PtvReadingHomeData, id: string) {
     return homeData.sections.find(section => section.id === id);
 }
 
+function getReadingSeriesRouteKindForItem(item: PtvReadingItem): PtvReadingRouteKind {
+    const itemKind = getPtvReadingItemKind(item);
+
+    if (itemKind === 'comic') return 'comics';
+    if (itemKind === 'manga') return 'manga';
+
+    return 'books';
+}
+
+function buildReadingSeriesForRoute(items: PtvReadingItem[], routeKind: PtvReadingRouteKind) {
+    if (routeKind !== 'reading') return buildPtvReadingSeries(items, routeKind);
+
+    const itemsByKind = new Map<PtvReadingRouteKind, PtvReadingItem[]>();
+
+    items.forEach(item => {
+        const itemRouteKind = getReadingSeriesRouteKindForItem(item);
+        const scopedItems = itemsByKind.get(itemRouteKind) || [];
+
+        scopedItems.push(item);
+        itemsByKind.set(itemRouteKind, scopedItems);
+    });
+
+    return Array.from(itemsByKind.entries())
+        .flatMap(([scopedKind, scopedItems]) => buildPtvReadingSeries(scopedItems, scopedKind))
+        .sort((left, right) => left.title.localeCompare(right.title));
+}
+
 function getSectionItems(homeData: PtvReadingHomeData, id: string) {
     return getSection(homeData, id)?.items || [];
 }
 
 function getAllReadingItems(homeData: PtvReadingHomeData) {
     return uniquePtvReadingItems(homeData.sections.reduce<PtvReadingItem[]>((items, section) => items.concat(section.items), []));
+}
+
+function mergeReadingHomeRefresh(previous: PtvReadingHomeData, nextHomeData: PtvReadingHomeData, stage: string) {
+    if (previous.kind !== nextHomeData.kind) return nextHomeData;
+
+    const previousItemCount = getAllReadingItems(previous).length;
+    const nextItemCount = getAllReadingItems(nextHomeData).length;
+
+    if (previousItemCount > 0 && nextItemCount === 0) {
+        recordPtvEvent('cache', 'reading-background-refresh-preserved-visible-cache', {
+            kind: nextHomeData.kind,
+            nextCacheStatus: nextHomeData.cacheDiagnostics?.status || 'none',
+            nextIsPartial: Boolean(nextHomeData.isPartial),
+            previousItemCount,
+            reason: 'background-refresh-empty',
+            stage
+        });
+
+        return {
+            ...previous,
+            cacheDiagnostics: nextHomeData.cacheDiagnostics || previous.cacheDiagnostics,
+            libraryDebug: nextHomeData.libraryDebug || previous.libraryDebug,
+            sectionDiagnostics: nextHomeData.sectionDiagnostics?.length ? nextHomeData.sectionDiagnostics : previous.sectionDiagnostics
+        };
+    }
+
+    if (!previous.isPartial && nextHomeData.isPartial) {
+        recordPtvEvent('cache', 'reading-background-refresh-preserved-full-cache', {
+            kind: nextHomeData.kind,
+            nextItemCount,
+            previousItemCount,
+            reason: 'background-refresh-partial',
+            stage
+        });
+
+        return {
+            ...previous,
+            cacheDiagnostics: nextHomeData.cacheDiagnostics || previous.cacheDiagnostics,
+            libraryDebug: nextHomeData.libraryDebug || previous.libraryDebug,
+            sectionDiagnostics: nextHomeData.sectionDiagnostics?.length ? nextHomeData.sectionDiagnostics : previous.sectionDiagnostics
+        };
+    }
+
+    return nextHomeData;
 }
 
 function replaceReadingSection(sections: PtvReadingSection[], nextSection: PtvReadingSection) {
@@ -369,6 +639,39 @@ function replaceReadingSection(sections: PtvReadingSection[], nextSection: PtvRe
     }
 
     return nextSections;
+}
+
+function replaceReadingItemInHomeData(homeData: PtvReadingHomeData, updatedItem: PtvReadingItem) {
+    if (!updatedItem.Id) return homeData;
+
+    let replaced = false;
+    const sections = homeData.sections.map(section => {
+        let sectionChanged = false;
+        const items = section.items.map(item => {
+            if (item.Id !== updatedItem.Id) return item;
+
+            replaced = true;
+            sectionChanged = true;
+            return {
+                ...item,
+                ...updatedItem,
+                PtvReadingLibraryKindHint: updatedItem.PtvReadingLibraryKindHint || item.PtvReadingLibraryKindHint,
+                PtvReadingLibraryName: updatedItem.PtvReadingLibraryName || item.PtvReadingLibraryName
+            };
+        });
+
+        return sectionChanged ? {
+            ...section,
+            items
+        } : section;
+    });
+
+    if (!replaced) return homeData;
+
+    return {
+        ...homeData,
+        sections
+    };
 }
 
 function getReadingSectionDiagnostics(sections: PtvReadingSection[]) {
@@ -384,7 +687,7 @@ function getHeroItems(homeData: PtvReadingHomeData, routeKind: PtvReadingRouteKi
         'recently-added',
         'library',
         'favorites',
-        ...(routeKind === 'books' ? ['comics', 'manga'] : [])
+        ...(routeKind === 'reading' ? ['comics', 'manga'] : [])
     ];
     const preferredItems = preferredSectionIds.reduce<PtvReadingItem[]>((items, sectionId) => (
         items.concat(getSectionItems(homeData, sectionId))
@@ -414,6 +717,12 @@ function getItemMeta(item: PtvReadingItem) {
     ].filter(Boolean).join(' - ');
 }
 
+function getReadingProgressPercent(item: PtvReadingItem) {
+    const progress = loadReaderProgress(getPtvReadingStableId(item));
+
+    return typeof progress?.percent === 'number' ? progress.percent : 0;
+}
+
 function getKindLabel(item: PtvReadingItem) {
     const kind = getPtvReadingItemKind(item);
 
@@ -424,11 +733,83 @@ function getKindLabel(item: PtvReadingItem) {
 }
 
 function getProgressLabel(item: PtvReadingItem) {
-    const progress = loadReaderProgress(getPtvReadingStableId(item));
+    const percent = getReadingProgressPercent(item);
 
-    if (!progress?.percent || progress.percent < 1) return '';
+    if (percent < 1) return '';
 
-    return `${Math.round(progress.percent)}% read`;
+    return `${Math.round(percent)}% read`;
+}
+
+function isReadingItemRead(item: PtvReadingItem) {
+    return Boolean(item.UserData?.Played) || getReadingProgressPercent(item) >= 99;
+}
+
+function getReadingBrowseSearchText(item: PtvReadingItem) {
+    return [
+        getPtvReadingTitle(item),
+        getPtvReadingAuthors(item),
+        getPtvReadingSeries(item),
+        getReadableFormatLabel(item),
+        getKindLabel(item),
+        item.CollectionName,
+        item.Album,
+        item.ProductionYear ? String(item.ProductionYear) : '',
+        item.IndexNumber ? String(item.IndexNumber) : '',
+        getPtvReadingGenres(item).join(' ')
+    ].filter(Boolean).join(' ').toLocaleLowerCase();
+}
+
+function getReadingSortValue(item: PtvReadingItem, sort: ReadingBrowseSort) {
+    if (sort === 'author') return getPtvReadingAuthors(item) || getPtvReadingTitle(item);
+    if (sort === 'format') return getReadableFormatLabel(item);
+    if (sort === 'series') return getPtvReadingSeries(item) || getPtvReadingTitle(item);
+    if (sort === 'year') return String(item.ProductionYear || 0).padStart(4, '0');
+
+    return getPtvReadingTitle(item);
+}
+
+function sortReadingBrowseItems(items: PtvReadingItem[], sort: ReadingBrowseSort) {
+    return [...items].sort((left, right) => {
+        if (sort === 'recent') {
+            const leftTime = left.DateCreated ? Date.parse(left.DateCreated) : 0;
+            const rightTime = right.DateCreated ? Date.parse(right.DateCreated) : 0;
+
+            return rightTime - leftTime || getPtvReadingTitle(left).localeCompare(getPtvReadingTitle(right));
+        }
+
+        if (sort === 'year') {
+            return getReadingSortValue(right, sort).localeCompare(getReadingSortValue(left, sort))
+                || getPtvReadingTitle(left).localeCompare(getPtvReadingTitle(right));
+        }
+
+        return getReadingSortValue(left, sort).localeCompare(getReadingSortValue(right, sort))
+            || getPtvReadingTitle(left).localeCompare(getPtvReadingTitle(right));
+    });
+}
+
+function getReadingBrowseItems(
+    items: PtvReadingItem[],
+    query: string,
+    filter: ReadingBrowseFilter,
+    formatFilter: ReadingBrowseFormatFilter,
+    sort: ReadingBrowseSort
+) {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+
+    return sortReadingBrowseItems(items.filter(item => {
+        if (formatFilter !== 'all' && getPtvReadingFormat(item) !== formatFilter) return false;
+
+        if (filter === 'favorites' && !item.UserData?.IsFavorite) return false;
+        if (filter === 'in-progress') {
+            const percent = getReadingProgressPercent(item);
+
+            if (percent < 1 || percent >= 99) return false;
+        }
+        if (filter === 'read' && !isReadingItemRead(item)) return false;
+        if (filter === 'unread' && isReadingItemRead(item)) return false;
+
+        return !normalizedQuery || getReadingBrowseSearchText(item).includes(normalizedQuery);
+    }), sort);
 }
 
 function getMetadataProviderLabels(item: PtvReadingItem) {
@@ -449,15 +830,34 @@ function getReadingImageErrorHandler() {
     return (event: React.SyntheticEvent<HTMLImageElement>) => {
         const failedUrl = event.currentTarget.currentSrc || event.currentTarget.src;
         const failedItemId = event.currentTarget.dataset.ptvReadingItemId;
+        const alternateUrl = event.currentTarget.dataset.ptvReadingAlternateUrl || '';
 
         if (failedUrl && failedUrl !== getPtvReadingImagePlaceholder()) {
             failedReadingImageUrls.add(failedUrl);
             markPtvImageUrlFailed(failedUrl);
         }
 
-        if (failedItemId) failedReadingCoverItemIds.add(failedItemId);
+        if (
+            alternateUrl
+            && alternateUrl !== failedUrl
+            && alternateUrl !== getPtvReadingImagePlaceholder()
+            && event.currentTarget.dataset.ptvAlternateApplied !== 'true'
+            && !failedReadingImageUrls.has(alternateUrl)
+            && !hasPtvImageUrlFailed(alternateUrl)
+        ) {
+            event.currentTarget.dataset.ptvAlternateApplied = 'true';
+            readingAlternateImageUsedCount += 1;
+            recordPtvEvent('image', 'reading-alternate-image-used', {
+                alternateImageUsed: true,
+                failedUrl,
+                itemId: failedItemId || null,
+                nextUrl: alternateUrl
+            });
+            event.currentTarget.src = alternateUrl;
+            return;
+        }
 
-        applyReadingImageFallbackToItem(failedItemId, getPtvReadingImagePlaceholder());
+        if (failedItemId) failedReadingCoverItemIds.add(failedItemId);
 
         if (event.currentTarget.dataset.ptvFallbackApplied === 'true') {
             event.currentTarget.hidden = true;
@@ -465,6 +865,15 @@ function getReadingImageErrorHandler() {
         }
 
         event.currentTarget.dataset.ptvFallbackApplied = 'true';
+        readingFallbackPosterRenderedCount += 1;
+        readingMissingPrimaryImageCount += 1;
+        recordPtvEvent('image', 'reading-fallback-poster-rendered', {
+            fallbackPosterRendered: true,
+            failedUrl,
+            itemId: failedItemId || null,
+            missingPrimaryImage: true
+        });
+        applyReadingImageFallbackToItem(failedItemId, getPtvReadingImagePlaceholder());
         event.currentTarget.src = getPtvReadingImagePlaceholder();
     };
 }
@@ -512,7 +921,27 @@ function getCachedReadingImageUrl(
 
     const imageUrl = getPtvReadingImageUrl(item, getReadingProfileImageSize(size), preferredImageType);
 
-    if (!imageUrl || failedReadingImageUrls.has(imageUrl) || hasPtvImageUrlFailed(imageUrl)) return getPtvReadingImagePlaceholder();
+    if (!imageUrl) {
+        readingMissingPrimaryImageCount += 1;
+        return getPtvReadingImagePlaceholder();
+    }
+
+    if (failedReadingImageUrls.has(imageUrl) || hasPtvImageUrlFailed(imageUrl)) {
+        recordReadingCachedFailureHit(imageUrl, item?.Id);
+        return getPtvReadingImagePlaceholder();
+    }
+
+    return imageUrl;
+}
+
+function getReadingAlternateImageUrl(
+    item: PtvReadingItem | null | undefined,
+    size = 360,
+    preferredImageType: 'Primary' | 'Thumb' = 'Thumb'
+) {
+    const imageUrl = getPtvReadingImageUrl(item, getReadingProfileImageSize(size), preferredImageType);
+
+    if (!imageUrl || failedReadingImageUrls.has(imageUrl) || hasPtvImageUrlFailed(imageUrl)) return '';
 
     return imageUrl;
 }
@@ -567,167 +996,6 @@ function ReadingPageBackdrop({ item, route }: Readonly<{
                 onError={getReadingBackdropErrorHandler()}
             />
         </div>
-    );
-}
-
-function ReadingTopBar({ route }: Readonly<{
-    route: ReadingRouteState;
-}>) {
-    const [searchTerm, setSearchTerm] = useState(route.search);
-    const routeBase = getRouteBase(route.kind);
-    const tabs = [
-        {
-            href: `#/${routeBase}`,
-            id: 'home',
-            label: getRouteTitle(route.kind)
-        },
-        {
-            href: `#/${routeBase}/explore`,
-            id: 'explore',
-            label: 'Explore'
-        },
-        {
-            href: `#/${routeBase}/library`,
-            id: 'library',
-            label: 'Library'
-        }
-    ];
-
-    useEffect(() => {
-        setSearchTerm(route.search);
-    }, [route.search]);
-
-    const onSubmit = (event: FormEvent) => {
-        event.preventDefault();
-        const normalizedSearchTerm = searchTerm.trim();
-
-        window.location.hash = normalizedSearchTerm ?
-            `#/${routeBase}/explore?search=${encodeURIComponent(normalizedSearchTerm)}` :
-            `#/${routeBase}/explore`;
-    };
-
-    return (
-        <header className='ptv-books-top'>
-            <a className='ptv-books-brand' href={`#/${routeBase}`} aria-label={`${getRouteTitle(route.kind)} home`}>
-                <span className='ptv-books-brand-mark'>
-                    <img
-                        alt=''
-                        decoding='async'
-                        loading='eager'
-                        src={PTV_READING_LOGO_URL}
-                    />
-                </span>
-                <strong>PiggieTV Reading</strong>
-            </a>
-            <form className='ptv-books-search' onSubmit={onSubmit}>
-                <PtvIcon name='search' />
-                <input
-                    value={searchTerm}
-                    onChange={event => setSearchTerm(event.target.value)}
-                    placeholder='Search books, comics, manga'
-                    aria-label='Search reading library'
-                />
-            </form>
-            <nav className='ptv-books-top-tabs' aria-label='Reading tabs'>
-                {tabs.map(tab => (
-                    <a
-                        key={tab.id}
-                        className={route.view === tab.id ? 'ptv-books-top-tab-active' : ''}
-                        href={tab.href}
-                    >
-                        {tab.label}
-                    </a>
-                ))}
-            </nav>
-            <div className='ptv-books-top-actions'>
-                <a href='#/home' aria-label='Go to PiggieTV home' onClick={navigateToPtvHome}>
-                    <PtvIcon name='home' />
-                </a>
-                <a href={`#/${routeBase}/library`} aria-label='Open reading library'>
-                    <PtvIcon name='library' />
-                </a>
-                <a href='#/music' aria-label='Open music'>
-                    <PtvIcon name='music' />
-                </a>
-            </div>
-        </header>
-    );
-}
-
-function ReadingSidebar({ homeData, route }: Readonly<{
-    homeData: PtvReadingHomeData;
-    route: ReadingRouteState;
-}>) {
-    const routeBase = getRouteBase(route.kind);
-    const navItems = [
-        {
-            href: '#/home',
-            icon: 'home',
-            id: 'ptv-home',
-            label: 'PTV Home'
-        },
-        {
-            href: '#/books',
-            icon: 'books',
-            id: 'books',
-            label: 'Books'
-        },
-        {
-            href: '#/comics',
-            icon: 'collections',
-            id: 'comics',
-            label: 'Comics'
-        },
-        {
-            href: '#/manga',
-            icon: 'anime',
-            id: 'manga',
-            label: 'Manga'
-        },
-        {
-            href: `#/${routeBase}/explore`,
-            icon: 'shuffle',
-            id: 'explore',
-            label: 'Explore'
-        },
-        {
-            href: `#/${routeBase}/library`,
-            icon: 'library',
-            id: 'library',
-            label: 'Library'
-        }
-    ];
-
-    const activeId = route.view === 'home' ? route.kind : route.view;
-
-    return (
-        <aside className='ptv-books-sidebar' aria-label='Reading navigation'>
-            <nav className='ptv-books-sidebar-nav'>
-                {navItems.map(item => (
-                    <a
-                        key={item.id}
-                        className={activeId === item.id ? 'ptv-books-nav-active' : ''}
-                        href={item.href}
-                        onClick={item.id === 'ptv-home' ? navigateToPtvHome : undefined}
-                    >
-                        <PtvIcon name={item.icon} />
-                        <span>{item.label}</span>
-                    </a>
-                ))}
-            </nav>
-            <div className='ptv-books-sidebar-libraries'>
-                <p className='ptv-books-sidebar-heading'>Libraries</p>
-                {homeData.libraries.slice(0, 18).map(library => (
-                    <a key={library.id} href={`#/${getRouteBase(getLibraryRouteKind(library.kind))}/library`}>
-                        <strong>{library.name}</strong>
-                        <span>{getLibraryKindLabel(library.kind)}</span>
-                    </a>
-                ))}
-                {!homeData.libraries.length ? (
-                    <p className='ptv-books-sidebar-empty'>No Jellyfin book libraries found</p>
-                ) : null}
-            </div>
-        </aside>
     );
 }
 
@@ -862,10 +1130,13 @@ function ReadingCard({ item, routeKind }: Readonly<{
     item: PtvReadingItem;
     routeKind: PtvReadingRouteKind;
 }>) {
+    const { isAdmin, onAction } = useReadingAdminControls();
     const [isFavorite, setFavorite] = useState(Boolean(item.UserData?.IsFavorite));
     const title = getPtvReadingTitle(item);
     const href = getItemHref(item, routeKind);
     const meta = getItemMeta(item);
+    const detailsHref = getDetailsHref(item);
+    const libraryHref = getLibraryHref(routeKind);
 
     useEffect(() => {
         setFavorite(Boolean(item.UserData?.IsFavorite));
@@ -889,6 +1160,7 @@ function ReadingCard({ item, routeKind }: Readonly<{
             <button type='button' className='ptv-books-card-cover' onClick={() => void readPtvItem(item)} aria-label={`Read ${title}`}>
                 <img
                     alt=''
+                    data-ptv-reading-alternate-url={getReadingAlternateImageUrl(item, 320, 'Thumb') || undefined}
                     data-ptv-reading-item-id={item.Id || undefined}
                     decoding='async'
                     loading='lazy'
@@ -907,9 +1179,6 @@ function ReadingCard({ item, routeKind }: Readonly<{
                 <button type='button' onClick={() => void readPtvItem(item)} aria-label={`Read ${title}`}>
                     <PtvIcon name='play' />
                 </button>
-                <a href={href} aria-label={`Open ${title}`}>
-                    <PtvIcon name='books' />
-                </a>
                 <button
                     type='button'
                     className={isFavorite ? 'ptv-books-favorited' : ''}
@@ -918,8 +1187,42 @@ function ReadingCard({ item, routeKind }: Readonly<{
                 >
                     <PtvIcon name='favorite' />
                 </button>
+                <details className='ptv-books-card-overflow'>
+                    <summary aria-label={`More actions for ${title}`} title={`More actions for ${title}`}>
+                        <PtvIcon name='more' />
+                    </summary>
+                    <div className='ptv-books-card-overflow-menu'>
+                        <a href={href}>
+                            <PtvIcon name='books' />
+                            <span>Open</span>
+                        </a>
+                        <a href={detailsHref}>
+                            <PtvIcon name='metadata' />
+                            <span>Details</span>
+                        </a>
+                        <a href={libraryHref}>
+                            <PtvIcon name='library' />
+                            <span>Open library</span>
+                        </a>
+                        {isAdmin && item.Id ? (
+                            <>
+                                <button type='button' onClick={() => onAction(item, 'identify')}>
+                                    <PtvIcon name='search' />
+                                    <span>Identify</span>
+                                </button>
+                                <button type='button' onClick={() => onAction(item, 'metadata')}>
+                                    <PtvIcon name='metadata' />
+                                    <span>Edit metadata</span>
+                                </button>
+                                <button type='button' onClick={() => onAction(item, 'images')}>
+                                    <PtvIcon name='image' />
+                                    <span>Images</span>
+                                </button>
+                            </>
+                        ) : null}
+                    </div>
+                </details>
             </div>
-            <ReadingAdminActions item={item} compact />
         </article>
     );
 }
@@ -1106,6 +1409,99 @@ function ReadingGrid({ items, routeKind }: Readonly<{
     );
 }
 
+function ReadingSeriesCard({ routeKind, series }: Readonly<{
+    routeKind: PtvReadingRouteKind;
+    series: PtvReadingSeries;
+}>) {
+    const href = getSeriesHref(series, routeKind);
+    const progress = Math.round(series.progressPercent);
+
+    return (
+        <article className='ptv-books-card ptv-books-series-card'>
+            <a className='ptv-books-card-cover' href={href} aria-label={`Open ${series.title}`}>
+                <img
+                    alt=''
+                    data-ptv-reading-alternate-url={getReadingAlternateImageUrl(series.coverItem, 320, 'Thumb') || undefined}
+                    data-ptv-reading-item-id={series.coverItem.Id || undefined}
+                    decoding='async'
+                    loading='lazy'
+                    src={getCachedReadingImageUrl(series.coverItem, 320)}
+                    onError={getReadingImageErrorHandler()}
+                />
+                <div className='ptv-books-badges' aria-label='Series metadata'>
+                    <span>{series.itemCount} items</span>
+                    {series.inProgressCount ? <span>{series.inProgressCount} in progress</span> : null}
+                </div>
+                <span><PtvIcon name='library' /></span>
+            </a>
+            <div className='ptv-books-card-text'>
+                <a href={href}>{series.title}</a>
+                <p>{[
+                    series.year ? String(series.year) : '',
+                    `${series.readCount} read`,
+                    progress ? `${progress}% complete` : ''
+                ].filter(Boolean).join(' - ')}</p>
+            </div>
+            <div className='ptv-books-card-actions'>
+                <a href={href} aria-label={`Open ${series.title}`}>
+                    <PtvIcon name='library' />
+                </a>
+                <button type='button' onClick={() => void readPtvItem(series.nextItem)} aria-label={`Read next ${series.title}`}>
+                    <PtvIcon name='play' />
+                </button>
+            </div>
+        </article>
+    );
+}
+
+function ReadingSeriesGrid({ routeKind, series }: Readonly<{
+    routeKind: PtvReadingRouteKind;
+    series: PtvReadingSeries[];
+}>) {
+    const [visibleLimit, setVisibleLimit] = useState(PTV_READING_GRID_RENDER_LIMIT);
+    const visibleSeries = series.slice(0, visibleLimit);
+
+    useEffect(() => {
+        setVisibleLimit(PTV_READING_GRID_RENDER_LIMIT);
+    }, [routeKind, series]);
+
+    if (!visibleSeries.length) {
+        return (
+            <section className='ptv-books-empty'>
+                <PtvIcon name='collections' />
+                <h2>No series found</h2>
+                <p>Jellyfin did not return grouped reading items for this view.</p>
+            </section>
+        );
+    }
+
+    return (
+        <>
+            <div className='ptv-books-grid ptv-books-series-grid'>
+                {visibleSeries.map(entry => (
+                    <ReadingSeriesCard
+                        key={entry.id}
+                        routeKind={routeKind}
+                        series={entry}
+                    />
+                ))}
+            </div>
+            {visibleSeries.length < series.length ? (
+                <div className='ptv-books-load-more'>
+                    <button
+                        type='button'
+                        onClick={() => setVisibleLimit(limit => limit + PTV_READING_GRID_RENDER_LIMIT)}
+                    >
+                        <PtvIcon name='more' />
+                        <span>Load More</span>
+                    </button>
+                    <span>{visibleSeries.length} of {series.length}</span>
+                </div>
+            ) : null}
+        </>
+    );
+}
+
 function ReadingHero({ homeData, routeKind }: Readonly<{
     homeData: PtvReadingHomeData;
     routeKind: PtvReadingRouteKind;
@@ -1136,6 +1532,7 @@ function ReadingHero({ homeData, routeKind }: Readonly<{
             <div className='ptv-books-home-hero-backdrop' aria-hidden='true'>
                 <img
                     alt=''
+                    data-ptv-reading-alternate-url={getReadingAlternateImageUrl(heroItem, 480, 'Thumb') || undefined}
                     data-ptv-reading-item-id={heroItem.Id || undefined}
                     decoding='async'
                     loading='eager'
@@ -1164,7 +1561,6 @@ function ReadingHero({ homeData, routeKind }: Readonly<{
                     {getMetadataProviderLabels(heroItem).map(label => (
                         <span key={label}>{label}</span>
                     ))}
-                    <span>{homeData.stats.itemCount} items</span>
                 </div>
                 <ReadingMetadataProviderLinks item={heroItem} />
                 <div className='ptv-books-hero-actions'>
@@ -1294,12 +1690,24 @@ function ReadingLibraryDebugPanel({ cacheDiagnostics, debug }: Readonly<{
         ['cacheStatus', cacheDiagnostics?.status || 'none'],
         ['cacheSource', cacheDiagnostics?.source || 'none'],
         ['cacheStaleHit', cacheDiagnostics ? String(cacheDiagnostics.staleHit) : 'none'],
+        ['readingCacheAgeMs', cacheDiagnostics?.cacheAgeMs ?? 'n/a'],
+        ['readingCacheFresh', cacheDiagnostics?.cacheFresh === undefined ? 'n/a' : String(cacheDiagnostics.cacheFresh)],
+        ['readingBackgroundRefreshStarted', cacheDiagnostics?.backgroundRefreshStarted === undefined ? 'n/a' : String(cacheDiagnostics.backgroundRefreshStarted)],
+        ['readingBackgroundRefreshCompleted', cacheDiagnostics?.backgroundRefreshCompleted === undefined ? 'n/a' : String(cacheDiagnostics.backgroundRefreshCompleted)],
+        ['readingBackgroundRefreshDurationMs', cacheDiagnostics?.backgroundRefreshDurationMs ?? 'n/a'],
+        ['readingFreshCacheWritten', cacheDiagnostics?.freshCacheWritten === undefined ? 'n/a' : String(cacheDiagnostics.freshCacheWritten)],
+        ['readingFreshRenderApplied', cacheDiagnostics?.freshRenderApplied === undefined ? 'n/a' : String(cacheDiagnostics.freshRenderApplied)],
+        ['readingRefreshError', cacheDiagnostics?.refreshError || 'none'],
         ['cacheRefreshDurationMs', cacheDiagnostics?.refreshDurationMs ?? 'n/a'],
         ['cachePayloadSize', cacheDiagnostics?.payloadSize ?? 0],
         ['cacheItemCount', cacheDiagnostics?.itemCount ?? 0],
         ['lastReadingQueryUrl', debug.lastReadingQueryUrl || 'none'],
         ['failedCoverUrlCount', failedReadingImageUrls.size],
         ['failedCoverUrls', Array.from(failedReadingImageUrls).slice(-5).join(' | ') || 'none'],
+        ['alternateImageUsed', readingAlternateImageUsedCount],
+        ['fallbackPosterRendered', readingFallbackPosterRenderedCount],
+        ['missingPrimaryImage', readingMissingPrimaryImageCount],
+        ['cachedFailureHit', readingCachedFailureHitCount],
         ['droppedItemCount', debug.droppedItemCount],
         ['kindCounts', JSON.stringify(debug.kindCounts)],
         ['libraryDiagnostics', debug.libraryDiagnostics.map(entry => `${entry.name} (${entry.id}) type=${entry.collectionType || 'unknown'} count=${entry.itemCount} status=${entry.statusCode ?? 'n/a'} duration=${entry.requestDurationMs ?? 'n/a'}ms url=${entry.lastQueriedUrl || 'none'} timeout=${entry.timeoutReason || 'none'}`).join(' | ') || 'none'],
@@ -1322,13 +1730,146 @@ function ReadingLibraryDebugPanel({ cacheDiagnostics, debug }: Readonly<{
     );
 }
 
+function ReadingBrowseTools({ filter, formatFilter, itemCount, query, routeKind, seriesCount = 0, setFilter, setFormatFilter, setQuery, setSort, setViewMode, showSeriesToggle = false, sort, totalCount, viewMode = 'items' }: Readonly<{
+    filter: ReadingBrowseFilter;
+    formatFilter: ReadingBrowseFormatFilter;
+    itemCount: number;
+    query: string;
+    routeKind: PtvReadingRouteKind;
+    seriesCount?: number;
+    setFilter: (value: ReadingBrowseFilter) => void;
+    setFormatFilter: (value: ReadingBrowseFormatFilter) => void;
+    setQuery: (value: string) => void;
+    setSort: (value: ReadingBrowseSort) => void;
+    setViewMode?: (value: ReadingBrowseViewMode) => void;
+    showSeriesToggle?: boolean;
+    sort: ReadingBrowseSort;
+    totalCount: number;
+    viewMode?: ReadingBrowseViewMode;
+}>) {
+    const routeTitle = getRouteTitle(routeKind).toLocaleLowerCase();
+
+    return (
+        <section className='ptv-books-browse-tools' aria-label={`${getRouteTitle(routeKind)} browse tools`}>
+            <label className='ptv-books-browse-search'>
+                <PtvIcon name='search' />
+                <input
+                    aria-label={`Search ${routeTitle}`}
+                    placeholder={`Search ${routeTitle}`}
+                    type='search'
+                    value={query}
+                    onChange={event => setQuery(event.currentTarget.value)}
+                />
+            </label>
+            <label>
+                <span>Status</span>
+                <select
+                    aria-label='Filter reading status'
+                    value={filter}
+                    onChange={event => setFilter(event.currentTarget.value as ReadingBrowseFilter)}
+                >
+                    <option value='all'>All</option>
+                    <option value='favorites'>Favorites</option>
+                    <option value='in-progress'>In progress</option>
+                    <option value='unread'>Unread</option>
+                    <option value='read'>Read</option>
+                </select>
+            </label>
+            <label>
+                <span>Format</span>
+                <select
+                    aria-label='Filter reading format'
+                    value={formatFilter}
+                    onChange={event => setFormatFilter(event.currentTarget.value as ReadingBrowseFormatFilter)}
+                >
+                    <option value='all'>All formats</option>
+                    <option value='book'>Books</option>
+                    <option value='comic'>Comics</option>
+                    <option value='epub'>EPUB</option>
+                    <option value='pdf'>PDF</option>
+                </select>
+            </label>
+            <label>
+                <span>Sort</span>
+                <select
+                    aria-label='Sort reading library'
+                    value={sort}
+                    onChange={event => setSort(event.currentTarget.value as ReadingBrowseSort)}
+                >
+                    <option value='recent'>Recently added</option>
+                    <option value='title'>Title</option>
+                    <option value='author'>Author</option>
+                    <option value='series'>Series</option>
+                    <option value='year'>Year</option>
+                    <option value='format'>Format</option>
+                </select>
+            </label>
+            {showSeriesToggle && setViewMode ? (
+                <div className='ptv-books-view-mode-toggle' role='group' aria-label='Reading browse view'>
+                    <button
+                        type='button'
+                        className={viewMode === 'series' ? 'is-active' : ''}
+                        onClick={() => setViewMode('series')}
+                    >
+                        Series
+                    </button>
+                    <button
+                        type='button'
+                        className={viewMode === 'items' ? 'is-active' : ''}
+                        onClick={() => setViewMode('items')}
+                    >
+                        Individual Items
+                    </button>
+                </div>
+            ) : null}
+            <p>{viewMode === 'series' ? `${seriesCount} series` : `${itemCount} of ${totalCount} shown`}</p>
+        </section>
+    );
+}
+
 function ReadingLibraryView({ homeData, routeKind }: Readonly<{
     homeData: PtvReadingHomeData;
     routeKind: PtvReadingRouteKind;
 }>) {
+    const [browseFilter, setBrowseFilter] = useState<ReadingBrowseFilter>('all');
+    const [browseFormatFilter, setBrowseFormatFilter] = useState<ReadingBrowseFormatFilter>('all');
+    const [browseQuery, setBrowseQuery] = useState('');
+    const [browseSort, setBrowseSort] = useState<ReadingBrowseSort>('recent');
+    const showSeriesToggle = routeKind === 'comics' || routeKind === 'manga';
+    const [browseViewMode, setBrowseViewMode] = useState<ReadingBrowseViewMode>(() => getStoredReadingBrowseViewMode(routeKind));
     const libraryItems = getSectionItems(homeData, 'library');
     const librarySection = getSection(homeData, 'library');
     const metadataProviderSummaryLabels = getMetadataProviderSummaryLabels(homeData);
+    const updateBrowseViewMode = useCallback((nextMode: ReadingBrowseViewMode) => {
+        setBrowseViewMode(nextMode);
+        storeReadingBrowseViewMode(routeKind, nextMode);
+    }, [routeKind]);
+    const sourceItems = useMemo(() => (
+        libraryItems.length ? libraryItems : getAllReadingItems(homeData)
+    ), [homeData, libraryItems]);
+    const browseItems = useMemo(() => getReadingBrowseItems(
+        sourceItems,
+        browseQuery,
+        browseFilter,
+        browseFormatFilter,
+        browseSort
+    ), [browseFilter, browseFormatFilter, browseQuery, browseSort, sourceItems]);
+    const groupedSeries = useMemo(() => buildReadingSeriesForRoute(browseItems, routeKind), [browseItems, routeKind]);
+
+    useEffect(() => {
+        setBrowseViewMode(getStoredReadingBrowseViewMode(routeKind));
+    }, [routeKind]);
+
+    useEffect(() => {
+        if (!showSeriesToggle) return;
+
+        recordPtvEvent('render', 'reading-series-grouping-ready', {
+            itemCount: browseItems.length,
+            routeKind,
+            seriesCount: groupedSeries.length,
+            viewMode: browseViewMode
+        });
+    }, [browseItems.length, browseViewMode, groupedSeries.length, routeKind, showSeriesToggle]);
 
     return (
         <div className='ptv-books-view'>
@@ -1353,9 +1894,139 @@ function ReadingLibraryView({ homeData, routeKind }: Readonly<{
             {librarySection?.error ? (
                 <ReadingError message={librarySection.error} />
             ) : null}
+            {sourceItems.length ? (
+                <ReadingBrowseTools
+                    filter={browseFilter}
+                    formatFilter={browseFormatFilter}
+                    itemCount={browseItems.length}
+                    query={browseQuery}
+                    routeKind={routeKind}
+                    seriesCount={groupedSeries.length}
+                    setFilter={setBrowseFilter}
+                    setFormatFilter={setBrowseFormatFilter}
+                    setQuery={setBrowseQuery}
+                    setSort={setBrowseSort}
+                    setViewMode={updateBrowseViewMode}
+                    showSeriesToggle={showSeriesToggle}
+                    sort={browseSort}
+                    totalCount={sourceItems.length}
+                    viewMode={browseViewMode}
+                />
+            ) : null}
             {homeData.isPartial && !libraryItems.length ? null : (
-                <ReadingGrid items={libraryItems.length ? libraryItems : getAllReadingItems(homeData)} routeKind={routeKind} />
+                showSeriesToggle && browseViewMode === 'series' ? (
+                    <ReadingSeriesGrid routeKind={routeKind} series={groupedSeries} />
+                ) : (
+                    <ReadingGrid items={browseItems} routeKind={routeKind} />
+                )
             )}
+        </div>
+    );
+}
+
+function ReadingSeriesDetailView({ homeData, routeKind, seriesId }: Readonly<{
+    homeData: PtvReadingHomeData;
+    routeKind: PtvReadingRouteKind;
+    seriesId: string;
+}>) {
+    const allItems = useMemo(() => getAllReadingItems(homeData), [homeData]);
+    const groupedSeries = useMemo(() => buildReadingSeriesForRoute(allItems, routeKind), [allItems, routeKind]);
+    const series = findPtvReadingSeriesById(groupedSeries, seriesId);
+    const progress = Math.round(series?.progressPercent || 0);
+
+    if (!series) {
+        if (homeData.isPartial) {
+            return <ReadingLoading label='Loading series' />;
+        }
+
+        return (
+            <div className='ptv-books-view'>
+                <section className='ptv-books-empty'>
+                    <PtvIcon name='collections' />
+                    <h2>Series not found</h2>
+                    <p>This virtual reading series is no longer available in the current library snapshot.</p>
+                    <a href={getLibraryHref(routeKind)}>Back to {getRouteTitle(routeKind)}</a>
+                </section>
+            </div>
+        );
+    }
+
+    return (
+        <div className='ptv-books-view'>
+            <section className='ptv-books-library-hero ptv-books-series-hero'>
+                <div className='ptv-books-series-hero-cover'>
+                    <img
+                        alt=''
+                        data-ptv-reading-alternate-url={getReadingAlternateImageUrl(series.coverItem, 320, 'Thumb') || undefined}
+                        data-ptv-reading-item-id={series.coverItem.Id || undefined}
+                        decoding='async'
+                        loading='eager'
+                        src={getCachedReadingImageUrl(series.coverItem, 380)}
+                        onError={getReadingImageErrorHandler()}
+                    />
+                </div>
+                <div>
+                    <p className='ptv-books-kicker'>Series</p>
+                    <h1>{series.title}</h1>
+                    <div>
+                        <span>{series.itemCount} items</span>
+                        <span>{series.readCount} read</span>
+                        {series.inProgressCount ? <span>{series.inProgressCount} in progress</span> : null}
+                        {progress ? <span>{progress}% complete</span> : null}
+                        {series.year ? <span>{series.year}</span> : null}
+                    </div>
+                    <div className='ptv-books-hero-actions'>
+                        <button type='button' onClick={() => void readPtvItem(series.nextItem)}>
+                            <PtvIcon name='play' />
+                            <span>{series.inProgressCount ? 'Resume' : 'Read Next'}</span>
+                        </button>
+                        <a href={getLibraryHref(routeKind)}>
+                            <PtvIcon name='library' />
+                            <span>Back to Library</span>
+                        </a>
+                    </div>
+                </div>
+            </section>
+            <ReadingGrid items={series.items} routeKind={routeKind} />
+        </div>
+    );
+}
+
+function getReadingCollectionItems(homeData: PtvReadingHomeData) {
+    return uniquePtvReadingItems(getAllReadingItems(homeData).filter(item => (
+        item.Type === 'BoxSet'
+    )));
+}
+
+function ReadingCollectionsView({ homeData, routeKind }: Readonly<{
+    homeData: PtvReadingHomeData;
+    routeKind: PtvReadingRouteKind;
+}>) {
+    const collectionItems = getReadingCollectionItems(homeData);
+
+    return (
+        <div className='ptv-books-view'>
+            <section className='ptv-books-library-hero'>
+                <p className='ptv-books-kicker'>Browse</p>
+                <h1>Collections</h1>
+                <div>
+                    <span>{collectionItems.length} collections</span>
+                    <span>{getRouteTitle(routeKind)}</span>
+                </div>
+            </section>
+            {homeData.isPartial && !collectionItems.length ? (
+                <ReadingLoading label='Loading collections' />
+            ) : null}
+            {!homeData.isPartial && !collectionItems.length ? (
+                <section className='ptv-books-empty'>
+                    <PtvIcon name='collections' />
+                    <h2>No collections found</h2>
+                    <p>Jellyfin did not return collection or series items for this reading library.</p>
+                </section>
+            ) : null}
+            {collectionItems.length ? (
+                <ReadingGrid items={collectionItems} routeKind={routeKind} />
+            ) : null}
         </div>
     );
 }
@@ -1379,6 +2050,7 @@ function ItemDetailView({ detail, routeKind }: Readonly<{
             <section className='ptv-books-detail-hero'>
                 <img
                     alt=''
+                    data-ptv-reading-alternate-url={getReadingAlternateImageUrl(item, 480, 'Thumb') || undefined}
                     data-ptv-reading-item-id={item.Id || undefined}
                     decoding='async'
                     loading='eager'
@@ -1612,18 +2284,73 @@ export default function PiggieTvBooksPage() {
                 }
             }, route.view === 'library' ? 0 : PTV_READING_LIBRARY_INDEX_LOAD_DELAY_MS);
         };
-        const loadFullReadingData = () => {
-            void getPtvReadingHome(route.kind, { forceRefresh })
+        const loadFullReadingData = (bypassCacheForRefresh = false) => {
+            const refreshStartedAt = performance.now();
+
+            setHomeData(previous => previous.kind === route.kind ? {
+                ...previous,
+                cacheDiagnostics: previous.cacheDiagnostics ? {
+                    ...previous.cacheDiagnostics,
+                    backgroundRefreshCompleted: false,
+                    backgroundRefreshDurationMs: null,
+                    backgroundRefreshStarted: true,
+                    freshCacheWritten: false,
+                    freshRenderApplied: false,
+                    refreshError: ''
+                } : previous.cacheDiagnostics
+            } : previous);
+
+            void getPtvReadingHome(route.kind, { forceRefresh: forceRefresh || bypassCacheForRefresh })
                 .then(nextHomeData => {
                     if (!isCurrentRequest()) return;
 
-                    recordReadingLoadMetrics(nextHomeData, 'background-home-refresh');
-                    setHomeData(nextHomeData);
+                    const durationMs = Number((performance.now() - refreshStartedAt).toFixed(1));
+                    const refreshedHomeData = {
+                        ...nextHomeData,
+                        cacheDiagnostics: nextHomeData.cacheDiagnostics ? {
+                            ...nextHomeData.cacheDiagnostics,
+                            backgroundRefreshCompleted: true,
+                            backgroundRefreshDurationMs: durationMs,
+                            backgroundRefreshStarted: true,
+                            cacheAgeMs: 0,
+                            cacheFresh: true,
+                            freshCacheWritten: true,
+                            freshRenderApplied: true,
+                            refreshError: ''
+                        } : nextHomeData.cacheDiagnostics
+                    };
+
+                    recordReadingLoadMetrics(refreshedHomeData, 'background-home-refresh');
+                    setHomeData(previous => mergeReadingHomeRefresh(previous, refreshedHomeData, 'background-home-refresh'));
+                    recordPtvEvent('cache', 'reading-background-refresh-completed', {
+                        bypassCacheForRefresh,
+                        durationMs,
+                        itemCount: getAllReadingItems(refreshedHomeData).length,
+                        kind: route.kind,
+                        readingBackgroundRefreshCompleted: true,
+                        readingFreshCacheWritten: true,
+                        readingFreshRenderApplied: true,
+                        staleCacheRevalidated: bypassCacheForRefresh
+                    });
                 })
                 .catch(error => {
+                    const errorMessage = getReadingErrorMessage(error);
+
+                    setHomeData(previous => previous.kind === route.kind ? {
+                        ...previous,
+                        cacheDiagnostics: previous.cacheDiagnostics ? {
+                            ...previous.cacheDiagnostics,
+                            backgroundRefreshCompleted: false,
+                            backgroundRefreshDurationMs: Number((performance.now() - refreshStartedAt).toFixed(1)),
+                            backgroundRefreshStarted: true,
+                            refreshError: errorMessage
+                        } : previous.cacheDiagnostics
+                    } : previous);
                     recordPtvEvent('render', 'reading-page-error', {
-                        error: getReadingErrorMessage(error),
+                        error: errorMessage,
                         kind: route.kind,
+                        readingBackgroundRefreshCompleted: false,
+                        readingRefreshError: errorMessage,
                         stage: 'reading-shell-background-data'
                     });
                 });
@@ -1664,8 +2391,20 @@ export default function PiggieTvBooksPage() {
                 }
 
                 if (nextHomeData.isPartial || nextHomeData.cacheDiagnostics?.staleHit) {
+                    const bypassCacheForRefresh = Boolean(nextHomeData.cacheDiagnostics?.staleHit);
+
+                    if (bypassCacheForRefresh) {
+                        recordPtvEvent('cache', 'reading-stale-cache-refresh-scheduled', {
+                            cacheAgeMs: Math.max(0, Date.now() - nextHomeData.generatedAt),
+                            kind: route.kind,
+                            readingBackgroundRefreshStarted: true,
+                            readingCacheFresh: false,
+                            staleCacheRevalidationScheduled: true
+                        });
+                    }
+
                     window.setTimeout(() => {
-                        if (isCurrentRequest()) loadFullReadingData();
+                        if (isCurrentRequest()) loadFullReadingData(bypassCacheForRefresh);
                     }, PTV_READING_FULL_HOME_LOAD_DELAY_MS);
                 }
             })
@@ -1768,12 +2507,38 @@ export default function PiggieTvBooksPage() {
         });
 
         void openReadingAdminDialog(item, action)
-            .then(() => {
+            .then(updatedItem => {
+                const refreshedItem = updatedItem as PtvReadingItem | undefined;
+
                 invalidatePtvReadingHomeCache();
+
+                if (refreshedItem?.Id) {
+                    setHomeData(previous => replaceReadingItemInHomeData(previous, refreshedItem));
+
+                    if (route.view === 'item' && route.id === itemId) {
+                        setItemDetail({
+                            error: '',
+                            isLoading: false,
+                            item: refreshedItem
+                        });
+                    }
+                }
+
                 void loadReadingData(true);
 
-                if (route.view === 'item' && route.id === itemId) {
+                if ((action !== 'identify' || !refreshedItem?.Id) && route.view === 'item' && route.id === itemId) {
                     void refreshReadingItemDetail(itemId);
+                }
+
+                if (action === 'identify') {
+                    window.setTimeout(() => {
+                        invalidatePtvReadingHomeCache();
+                        void loadReadingData(true);
+
+                        if (route.view === 'item' && route.id === itemId) {
+                            void refreshReadingItemDetail(itemId);
+                        }
+                    }, 3500);
                 }
             })
             .catch(() => {
@@ -1797,6 +2562,11 @@ export default function PiggieTvBooksPage() {
         document.body.classList.add('ptv-route-reading-mounted');
         document.documentElement.dataset.ptvReadingRouteMounted = 'true';
         document.body.dataset.ptvReadingRouteMounted = 'true';
+        recordPtvRouteGenerationLifecycle('page-mount', {
+            hash: window.location.hash,
+            kind: route.kind,
+            page: 'reading'
+        });
         recordPtvEvent('render', 'reading-page-mounted', {
             hash: window.location.hash,
             kind: route.kind
@@ -1810,6 +2580,10 @@ export default function PiggieTvBooksPage() {
             readingMountedRef.current = false;
             readingRequestIdRef.current += 1;
             cleanupReadingRouteState();
+            recordPtvRouteGenerationLifecycle('page-unmount', {
+                hash: window.location.hash,
+                page: 'reading'
+            });
             recordPtvEvent('render', 'reading-page-unmounted', {
                 hash: window.location.hash
             });
@@ -1825,6 +2599,13 @@ export default function PiggieTvBooksPage() {
         recordPtvEvent('render', 'reading-page-rendered', {
             itemCount: homeData.stats.itemCount,
             kind: route.kind,
+            route: route.view,
+            sectionCount: homeData.sections.length
+        });
+        recordPtvRouteGenerationLifecycle('page-render', {
+            itemCount: homeData.stats.itemCount,
+            kind: route.kind,
+            page: 'reading',
             route: route.view,
             sectionCount: homeData.sections.length
         });
@@ -1920,13 +2701,18 @@ export default function PiggieTvBooksPage() {
                 );
             case 'library':
                 return <ReadingLibraryView homeData={homeData} routeKind={route.kind} />;
+            case 'collections':
+                return <ReadingCollectionsView homeData={homeData} routeKind={route.kind} />;
             case 'item':
                 return <ItemDetailView detail={itemDetail} routeKind={route.kind} />;
+            case 'series':
+                return <ReadingSeriesDetailView homeData={homeData} routeKind={route.kind} seriesId={route.id} />;
             case 'home':
             default:
                 return <ReadingHomeView homeData={homeData} onRetrySection={retryReadingSection} routeKind={route.kind} />;
         }
     };
+    const showToolbarTitle = shouldShowReadingToolbarTitle(route.view);
 
     return (
         <Page
@@ -1935,7 +2721,14 @@ export default function PiggieTvBooksPage() {
             className='mainAnimatedPage type-interior ptv-books-page'
             isMenuButtonEnabled
         >
-            <PTVShell className='ptv-books-shell' section='reading' title='Reading'>
+            <PTVShell
+                backdropSource={`reading-${route.kind}`}
+                backdropUrl={heroItem ? getCachedReadingBackdropUrl(heroItem, 1400) : ''}
+                className='ptv-books-shell'
+                contextualLinks={getReadingContextLinks(route)}
+                section='reading'
+                title='Reading'
+            >
                 <main
                     className={`ptv-books-app ptv-books-app-shell ptv-books-route-${route.view} ptv-books-kind-${route.kind}${performanceProfile.isLowPower ? ' ptv-books-low-power' : ''}`}
                     data-ptv-client-profile={performanceProfile.clientKind}
@@ -1943,26 +2736,29 @@ export default function PiggieTvBooksPage() {
                 >
                     <ReadingPageBackdrop item={heroItem} route={route.kind} />
                     <div className='ptv-books-body'>
-                        <ReadingSidebar homeData={homeData} route={route} />
                         <section className='ptv-books-main' aria-label='PiggieTV Reading'>
                             <div className='ptv-books-main-scroll'>
-                                <div className='ptv-books-main-toolbar'>
-                                    <div>
-                                        <p className='ptv-books-kicker'>PiggieTV</p>
-                                        <h1>{route.view === 'home' ? getRouteTitle(route.kind) : route.view}</h1>
-                                        {homeData.libraries.length ? (
-                                            <span className='ptv-books-toolbar-sync'>
-                                                {homeData.libraries.map(library => library.name).slice(0, 3).join(' - ')}
-                                            </span>
+                                {showToolbarTitle || isAdmin ? (
+                                    <div className={`ptv-books-main-toolbar${showToolbarTitle ? '' : ' ptv-books-main-toolbar-compact'}`}>
+                                        {showToolbarTitle ? (
+                                            <div>
+                                                <p className='ptv-books-kicker'>PiggieTV</p>
+                                                <h1>{getReadingRoutePageTitle(route)}</h1>
+                                                {homeData.libraries.length ? (
+                                                    <span className='ptv-books-toolbar-sync'>
+                                                        {homeData.libraries.map(library => library.name).slice(0, 3).join(' - ')}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        ) : <span aria-hidden='true' />}
+                                        {isAdmin ? (
+                                            <button type='button' onClick={refresh}>
+                                                <PtvIcon name='refresh' />
+                                                <span>Refresh</span>
+                                            </button>
                                         ) : null}
                                     </div>
-                                    {isAdmin ? (
-                                        <button type='button' onClick={refresh}>
-                                            <PtvIcon name='refresh' />
-                                            <span>Refresh</span>
-                                        </button>
-                                    ) : null}
-                                </div>
+                                ) : null}
                                 <READING_ADMIN_CONTEXT.Provider value={adminControls}>
                                     {renderView()}
                                 </READING_ADMIN_CONTEXT.Provider>

@@ -79,21 +79,14 @@ build: ${__JF_BUILD_VERSION__}`);
 
     // ===== PTV SERVER BOOTSTRAP =====
 
-    const isDev = window.location.hostname === 'localhost';
+    const serverUrl = await serverAddress();
 
-    // eslint-disable-next-line sonarjs/no-clear-text-protocols
-    const DEV_SERVER = 'http://10.16.0.50:8096';
-
-    if (isDev) {
-        console.info('[PTV] Using development Jellyfin server:', DEV_SERVER);
-
-        ServerConnections.initApiClient(DEV_SERVER);
-    } else {
-        const serverUrl = await serverAddress();
-
-        if (serverUrl) {
-            ServerConnections.initApiClient(serverUrl);
+    if (serverUrl) {
+        if (__WEBPACK_SERVE__) {
+            console.info('[PTV] Using development Jellyfin server:', serverUrl);
         }
+
+        ServerConnections.initApiClient(serverUrl);
     }
 
     // Initialize automatic (default) cast target

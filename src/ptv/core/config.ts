@@ -1,14 +1,73 @@
-import { getPtvStaticAssetBaseUrl, isPtvLocalDevHost } from './urlOrigins';
+import { getPtvStaticAssetBaseUrl, isPtvWebpackDevServerOrigin } from './urlOrigins';
 
-const isDev = isPtvLocalDevHost();
-const devJellyfinServerUrl =
+const isDev = __WEBPACK_SERVE__ || isPtvWebpackDevServerOrigin();
+const fallbackDevJellyfinServerUrl =
     // eslint-disable-next-line sonarjs/no-clear-text-protocols
     'http://10.16.0.50:8096';
+
+function trimTrailingSlash(value: string) {
+    let nextValue = value;
+
+    while (nextValue.endsWith('/')) {
+        nextValue = nextValue.slice(0, -1);
+    }
+
+    return nextValue;
+}
+
+function addRuntimeCandidate(candidates: string[], url: string) {
+    const normalizedUrl = trimTrailingSlash(String(url || '').trim());
+
+    if (!normalizedUrl || candidates.includes(normalizedUrl)) return;
+
+    candidates.push(normalizedUrl);
+}
+
+function getStoredDevJellyfinServerUrl() {
+    try {
+        return window.localStorage.getItem('ptv:dev:jellyfinServerUrl')
+            || window.localStorage.getItem('ptv:jellyfinServerUrl')
+            || '';
+    } catch {
+        return '';
+    }
+}
+
+function getSameHostJellyfinUrl(port: string) {
+    const protocol = window.location.protocol || 'http:';
+    const hostname = window.location.hostname;
+
+    if (!hostname) return '';
+
+    return `${protocol}//${hostname}:${port}`;
+}
+
+function getJellyfinServerUrlCandidates() {
+    const candidates: string[] = [];
+
+    if (isDev) {
+        addRuntimeCandidate(candidates, getStoredDevJellyfinServerUrl());
+
+        if (isPtvWebpackDevServerOrigin()) {
+            addRuntimeCandidate(candidates, getSameHostJellyfinUrl('8096'));
+            addRuntimeCandidate(candidates, getSameHostJellyfinUrl('8920'));
+        }
+
+        addRuntimeCandidate(candidates, fallbackDevJellyfinServerUrl);
+    }
+
+    addRuntimeCandidate(candidates, window.location.origin);
+
+    return candidates;
+}
+
+const jellyfinServerUrlCandidates = getJellyfinServerUrlCandidates();
 
 export const PTV_RUNTIME = {
     devStaticAssetBaseUrl: isDev ? getPtvStaticAssetBaseUrl() : '',
     devStaticAssetOrigin: isDev ? window.location.origin : '',
-    jellyfinServerUrl: isDev ? devJellyfinServerUrl : window.location.origin,
+    jellyfinServerUrl: jellyfinServerUrlCandidates[0] || window.location.origin,
+    jellyfinServerUrlCandidates,
     mode: isDev ? 'development' : 'production'
 } as const;
 
@@ -116,7 +175,13 @@ export const PTV_ROUTES = {
     profilePreferences: '#/mypreferencesmenu',
     calendar: '#/calendar',
     randomItem: '#/list?sortBy=Random',
-    readingLibrary: '#/books/library',
+    reading: '#/reading',
+    readingBooks: '#/reading/books',
+    readingCollections: '#/reading/collections',
+    readingComics: '#/reading/comics',
+    readingExplore: '#/reading/explore',
+    readingLibrary: '#/reading/books',
+    readingManga: '#/reading/manga',
     recommendationsTypo: '#/recomendations',
     recommendations: '#/recommendations',
     request: '#/requests',
@@ -150,10 +215,10 @@ export const PTV_DEBUG = {
 } as const;
 
 export const PTV_CACHE = {
-    featuredContentKey: 'ptv:featured-content:v8',
+    featuredContentKey: 'ptv:featured-content:v7',
     featuredContentSettingsKey: 'ptv:featured-content:settings:v1',
     featuredContentTtlMs: 12 * 60 * 60 * 1000,
-    featuredContentVersion: 8,
+    featuredContentVersion: 7,
     maxFeaturedContentTtlMs: 7 * 24 * 60 * 60 * 1000,
     minFeaturedContentTtlMs: 60 * 60 * 1000
 } as const;
@@ -168,6 +233,7 @@ export const PTV_PLUGIN_API = {
         imageProxy: 'Ptv/v1/ImageProxy',
         integrationsStatus: 'Ptv/v1/integrations/status',
         integrationTestBase: 'Ptv/v1/integrations',
+        googleBooksMetadataSearch: 'Ptv/v1/reading/metadata/googlebooks/search',
         musicMetadataSearch: 'Ptv/v1/music/metadata/search',
         seerrRequest: 'Ptv/v1/integrations/seerr/request',
         seerrRequests: 'Ptv/v1/integrations/seerr/requests',

@@ -14,7 +14,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
-        var startMessage = $"Registering PiggieTV API controllers and services. BuildTimestampUtc={Plugin.BuildTimestampUtc}. ExpectedRoutes=GET /Ptv/v1/status; GET /Ptv/v1/settings; GET /Ptv/v1/featured; POST /Ptv/v1/featured/refresh; GET /Ptv/v1/music/metadata/search; GET /Ptv/v1/integrations/status; GET /Ptv/v1/calendar; GET /Ptv/v1/integrations/arr/calendar; GET /Ptv/v1/tags; GET /Ptv/v1/random/movie.";
+        var startMessage = $"Registering PiggieTV API controllers and services. BuildTimestampUtc={Plugin.BuildTimestampUtc}. ExpectedRoutes=GET /Ptv/v1/status; GET /Ptv/v1/settings; GET /Ptv/v1/featured; POST /Ptv/v1/featured/refresh; GET /Ptv/v1/music/metadata/search; GET /Ptv/v1/reading/metadata/googlebooks/search; GET /Ptv/v1/integrations/status; GET /Ptv/v1/calendar; GET /Ptv/v1/integrations/arr/calendar; GET /Ptv/v1/tags; GET /Ptv/v1/random/movie.";
 
         Console.WriteLine(startMessage);
         Trace.TraceInformation(startMessage);
@@ -24,6 +24,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService<PtvSignupCleanupService>();
         serviceCollection.AddSingleton<IPtvTmdbMetadataService, PtvTmdbMetadataService>();
         serviceCollection.AddSingleton<IPtvMusicMetadataLookupService, PtvMusicMetadataLookupService>();
+        serviceCollection.AddSingleton<IPtvGoogleBooksMetadataLookupService, PtvGoogleBooksMetadataLookupService>();
         serviceCollection.AddSingleton<PtvFeaturedContentRefreshService>();
         serviceCollection.AddSingleton<IPtvFeaturedContentRefreshService>(
             serviceProvider => serviceProvider.GetRequiredService<PtvFeaturedContentRefreshService>());

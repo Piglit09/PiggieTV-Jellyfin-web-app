@@ -1,6 +1,6 @@
 import type { PtvItem, PtvItemUserData } from '../../api';
 
-export type PtvReadingRouteKind = 'books' | 'comics' | 'manga';
+export type PtvReadingRouteKind = 'books' | 'comics' | 'manga' | 'reading';
 
 export type PtvReadingItemKind = 'book' | 'comic' | 'manga';
 
@@ -17,6 +17,7 @@ export type PtvReadingMetadataProvider = {
 };
 
 export type PtvReadingMetadataStats = {
+    collectionStatus?: 'collected' | 'notCollected';
     itemCount: number;
     providerCounts: Record<PtvReadingMetadataProviderId, number>;
 };
@@ -68,9 +69,17 @@ export type PtvReadingLibraryScope = {
 export type PtvReadingCacheStatus = 'hit' | 'miss' | 'refresh' | 'stale-hit' | 'write-error';
 
 export type PtvReadingCacheDiagnostic = {
+    backgroundRefreshCompleted?: boolean;
+    backgroundRefreshDurationMs?: number | null;
+    backgroundRefreshStarted?: boolean;
+    cacheAgeMs?: number | null;
+    cacheFresh?: boolean;
     cacheKey?: string;
+    freshCacheWritten?: boolean;
+    freshRenderApplied?: boolean;
     itemCount: number;
     payloadSize: number;
+    refreshError?: string;
     refreshDurationMs: number | null;
     sectionCount: number;
     source: string;

@@ -107,6 +107,7 @@ const METADATA_PROVIDER_CONFIGS: MetadataProviderConfig[] = [
 ];
 
 export const EMPTY_PTV_READING_METADATA_STATS: PtvReadingMetadataStats = {
+    collectionStatus: 'notCollected',
     itemCount: 0,
     providerCounts: {
         comicvine: 0,
@@ -134,6 +135,15 @@ export function getPtvReadingMetadataProviders(
 }
 
 export function getPtvReadingMetadataStats(items: PtvReadingItem[]): PtvReadingMetadataStats {
+    const providerIdSampleCount = items.filter(item => item.ProviderIds && Object.keys(item.ProviderIds).length).length;
+
+    if (!providerIdSampleCount) {
+        return {
+            ...EMPTY_PTV_READING_METADATA_STATS,
+            collectionStatus: 'notCollected'
+        };
+    }
+
     return items.reduce<PtvReadingMetadataStats>((stats, item) => {
         const providers = getPtvReadingMetadataProviders(item);
 
@@ -147,6 +157,7 @@ export function getPtvReadingMetadataStats(items: PtvReadingItem[]): PtvReadingM
             }), stats.providerCounts)
         };
     }, {
+        collectionStatus: 'collected',
         itemCount: 0,
         providerCounts: {
             ...EMPTY_PTV_READING_METADATA_STATS.providerCounts

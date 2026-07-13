@@ -54,6 +54,11 @@ public class PiggieTVPluginConfiguration : BasePluginConfiguration
     public MusicMetadataSettings MusicMetadataSettings { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets reading metadata provider settings.
+    /// </summary>
+    public GoogleBooksSettings GoogleBooksSettings { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets Jellyseerr request integration settings.
     /// </summary>
     public SeerrSettings SeerrSettings { get; set; } = new();
@@ -835,6 +840,21 @@ public sealed class MusicMetadataSettings
 
     /// <summary>Gets or sets the maximum number of candidates returned per lookup.</summary>
     public int MaxResults { get; set; } = 6;
+}
+
+/// <summary>
+/// PiggieTV Google Books metadata lookup settings.
+/// </summary>
+public sealed class GoogleBooksSettings
+{
+    /// <summary>Gets or sets a value indicating whether native Google Books lookup is enabled.</summary>
+    public bool GoogleBooksEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets the Google Books API key. This is write-only in public DTOs.</summary>
+    public string? GoogleBooksApiKey { get; set; }
+
+    /// <summary>Gets or sets the maximum number of candidates returned per lookup.</summary>
+    public int MaxResults { get; set; } = 10;
 }
 
 /// <summary>

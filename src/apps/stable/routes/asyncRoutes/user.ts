@@ -17,6 +17,8 @@ export const ASYNC_USER_ROUTES: AsyncRoute[] = [
     { path: 'movies/*', page: 'movies' },
     { path: 'music', page: 'music' },
     { path: 'music/*', page: 'music' },
+    { path: 'reading', page: 'reading' },
+    { path: 'reading/*', page: 'reading' },
     { path: 'recomendations', page: 'recommendations' },
     { path: 'recomendations/*', page: 'recommendations' },
     { path: 'recommendations', page: 'recommendations' },

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <linearGradient id="ptvGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6FE7FF"/>
+      <stop offset="45%" stop-color="#B16CFF"/>
+      <stop offset="100%" stop-color="#FF4FD8"/>
+    </linearGradient>
+    <filter id="ptvGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="1.2" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 0.45 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <path d="M12 8.3A3.7 3.7 0 1 0 12 15.7A3.7 3.7 0 1 0 12 8.3Z" stroke="url(#ptvGrad)" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" filter="url(#ptvGlow)"/>
+  <path d="M12 2.8l1 .2.7 2a7.7 7.7 0 0 1 1.4.6l1.9-.9.7.7-.9 1.9c.22.44.42.9.57 1.38l2 .72.2 1-.2 1-2 .72a7.8 7.8 0 0 1-.57 1.38l.9 1.9-.7.7-1.9-.9c-.45.25-.92.45-1.4.6l-.7 2-1 .2-1-.2-.72-2a7.7 7.7 0 0 1-1.38-.6l-1.9.9-.7-.7.9-1.9a7.8 7.8 0 0 1-.6-1.38l-2-.72-.2-1 .2-1 2-.72c.16-.48.36-.94.6-1.38l-.9-1.9.7-.7 1.9.9c.44-.24.9-.44 1.38-.6l.72-2 1-.2z" stroke="url(#ptvGrad)" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" filter="url(#ptvGlow)"/>
+</svg>

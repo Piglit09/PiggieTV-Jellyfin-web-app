@@ -2,6 +2,17 @@
     --ptv-icon-url: url('assets/icons/settings.svg');
     --ptv-icon-size: 20px;
     --ptv-icon-opacity: 0.84;
+    --ptv-icon-start: #a855f7;
+    --ptv-icon-mid: #ec5cff;
+    --ptv-icon-end: #7dd6ff;
+    --ptv-icon-muted: rgb(207 193 255 / 78%);
+    --ptv-icon-muted-end: rgb(147 218 255 / 70%);
+    --ptv-icon-disabled: rgb(168 157 190 / 42%);
+    --ptv-icon-danger: #ff7da4;
+    --ptv-icon-warning-color: #ffd76b;
+    --ptv-icon-success-color: #83f7b2;
+    --ptv-icon-fill: linear-gradient(135deg, var(--ptv-icon-muted), var(--ptv-icon-muted-end));
+    --ptv-icon-active-fill: linear-gradient(135deg, var(--ptv-icon-start), var(--ptv-icon-mid) 48%, var(--ptv-icon-end));
     --ptv-icon-filter:
         brightness(0)
         invert(1)
@@ -682,7 +693,14 @@ span.material-icons.ptv-icon-legacy.ptv-icon-users::after {
 }
 
 .ptv-icon-active,
+.is-active > .ptv-icon,
+.is-active .ptv-icon,
+.ptv-shell-nav-button.is-active .ptv-icon,
+.ptv-shell-context-link.is-active .ptv-icon,
+.ptv-shell-nav-dropdown.is-active > .ptv-shell-nav-button .ptv-icon,
 .ptv-icon-hover:hover {
+    --ptv-icon-fill: var(--ptv-icon-active-fill);
+
     opacity: 1;
     filter: var(--ptv-icon-active-filter);
 }
@@ -1010,7 +1028,7 @@ span.material-icons.ptv-icon-legacy.ptv-icon-users::after {
     max-height: 22px !important;
     margin: 0 14px 0 0 !important;
 
-    background: linear-gradient(135deg, #7dd6ff, #a78bfa 52%, #ff8dc3) !important;
+    background: var(--ptv-icon-fill, linear-gradient(135deg, var(--ptv-icon-muted), var(--ptv-icon-muted-end))) !important;
     opacity: 1 !important;
     visibility: visible !important;
 
@@ -1026,11 +1044,6 @@ span.material-icons.ptv-icon-legacy.ptv-icon-users::after {
 
 .ptv-header-icon-btn .ptv-icon {
     margin: 0 !important;
-}
-
-.ptv-icon:not([style]),
-.ptv-icon:not([data-ptv-icon]) {
-    background: #9fe7ff !important;
 }
 
 .userPreferencesPage .listItem {
@@ -1087,6 +1100,31 @@ span.material-icons.ptv-icon-legacy.ptv-icon-users::after {
 .ptv-skinHeader,
 .skinHeader {
     z-index: 1200 !important;
+}
+
+@supports not ((mask-image: url('assets/icons/settings.svg')) or (-webkit-mask-image: url('assets/icons/settings.svg'))) {
+    .ptv-icon,
+    .listItem > .ptv-icon,
+    .paper-icon-button-light .ptv-icon,
+    .ptv-header-icon-btn .ptv-icon,
+    .ptv-sidebar-item .ptv-icon {
+        background-color: transparent !important;
+        background-image: var(--ptv-icon-url) !important;
+        background-position: center !important;
+        background-repeat: no-repeat !important;
+        background-size: contain !important;
+        filter: var(--ptv-icon-filter) !important;
+    }
+
+    .ptv-icon-active,
+    .is-active > .ptv-icon,
+    .is-active .ptv-icon,
+    .ptv-shell-nav-button.is-active .ptv-icon,
+    .ptv-shell-nav-dropdown.is-active > .ptv-shell-nav-button .ptv-icon,
+    .ptv-shell-context-link.is-active .ptv-icon,
+    .ptv-icon-hover:hover {
+        filter: var(--ptv-icon-active-filter) !important;
+    }
 }
 
 .ptv-card-play-pill {

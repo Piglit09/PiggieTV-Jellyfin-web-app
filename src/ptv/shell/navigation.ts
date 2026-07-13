@@ -37,7 +37,7 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
             { id: 'movies', label: 'Movies', href: '#/movies', icon: 'movies' },
             { id: 'shows', label: 'Shows', href: '#/tv', icon: 'shows' },
             { id: 'music', label: 'Music', href: '#/music', icon: 'music' },
-            { id: 'reading-library', label: 'PTV Reading', href: PTV_ROUTES.readingLibrary, icon: 'books' },
+            { id: 'reading-library', label: 'PTV Reading', href: PTV_ROUTES.reading, icon: 'books' },
             { id: 'collections', label: 'Collections', href: '#/collections', icon: 'collections' },
             { id: 'livetv', label: 'Live TV', href: '#/livetv', icon: 'liveTv' },
             { id: 'guide', label: 'Guide', href: '#/livetv.html?tab=guide', icon: 'guide' },
