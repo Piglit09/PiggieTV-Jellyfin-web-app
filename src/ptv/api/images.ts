@@ -139,6 +139,24 @@ export function hasPtvImageUrlFailed(url: string) {
     return Boolean(normalizedUrl && failedPtvImageUrls.has(normalizedUrl));
 }
 
+export function clearPtvImageFailuresForItem(itemId: string | null | undefined) {
+    const normalizedItemId = String(itemId || '').trim().toLowerCase();
+
+    if (!normalizedItemId) return;
+
+    for (const url of Array.from(failedPtvImageUrls)) {
+        if (url.toLowerCase().includes(`/items/${normalizedItemId}/images/`)) {
+            failedPtvImageUrls.delete(url);
+        }
+    }
+
+    for (const key of Array.from(failedPtvImageCandidateKeys)) {
+        if (key.toLowerCase().startsWith(`${normalizedItemId}:`)) {
+            failedPtvImageCandidateKeys.delete(key);
+        }
+    }
+}
+
 export function hasPtvImageCandidateFailed(candidate: PtvItemImageCandidate | null | undefined) {
     if (!candidate) return false;
 

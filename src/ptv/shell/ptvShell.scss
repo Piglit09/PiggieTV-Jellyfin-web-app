@@ -1,10 +1,37 @@
 /* stylelint-disable no-descending-specificity -- Shared shell active states and profile overrides intentionally layer late. */
 html[data-ptv-route-native='true'] .ptv-app-header-root,
+html[data-ptv-route-native='true'] .ptv-skinHeader,
+html[data-ptv-route-native='true'] .ptv-legacy-skinHeader,
 html[data-ptv-route-native='true'] .skinHeader,
 html[data-ptv-route-native='true'] .mainDrawer,
+html[data-ptv-route-native='true'] .ptv-mainDrawer,
+html[data-ptv-route-native='true'] .mainDrawerHandle,
+html[data-ptv-route-native='true'] .ptv-mainDrawerHandle,
 html[data-ptv-route-native='true'] .appfooter,
-html[data-ptv-route-native='true'] .appFooter {
+html[data-ptv-route-native='true'] .appFooter,
+html.ptv-native-shell-mounted .ptv-app-header-root,
+html.ptv-native-shell-mounted .ptv-skinHeader,
+html.ptv-native-shell-mounted .ptv-legacy-skinHeader,
+html.ptv-native-shell-mounted .skinHeader,
+html.ptv-native-shell-mounted .mainDrawer,
+html.ptv-native-shell-mounted .ptv-mainDrawer,
+html.ptv-native-shell-mounted .mainDrawerHandle,
+html.ptv-native-shell-mounted .ptv-mainDrawerHandle,
+html.ptv-native-shell-mounted .appfooter,
+html.ptv-native-shell-mounted .appFooter,
+body.ptv-native-shell-mounted .ptv-app-header-root,
+body.ptv-native-shell-mounted .ptv-skinHeader,
+body.ptv-native-shell-mounted .ptv-legacy-skinHeader,
+body.ptv-native-shell-mounted .skinHeader,
+body.ptv-native-shell-mounted .mainDrawer,
+body.ptv-native-shell-mounted .ptv-mainDrawer,
+body.ptv-native-shell-mounted .mainDrawerHandle,
+body.ptv-native-shell-mounted .ptv-mainDrawerHandle,
+body.ptv-native-shell-mounted .appfooter,
+body.ptv-native-shell-mounted .appFooter {
     display: none !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
 }
 
 :root {

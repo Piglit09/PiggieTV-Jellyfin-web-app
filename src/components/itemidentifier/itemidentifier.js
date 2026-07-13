@@ -162,6 +162,44 @@ function cleanOverviewText(value) {
     return decodeHtmlEntities(stripHtmlTags(value)).replace(/\s+/g, ' ').trim();
 }
 
+function hasHtmlMarkup(value) {
+    const text = String(value || '');
+    let searchStartIndex = 0;
+
+    while (searchStartIndex < text.length) {
+        const startIndex = text.indexOf('<', searchStartIndex);
+
+        if (startIndex === -1) {
+            return false;
+        }
+
+        const endIndex = text.indexOf('>', startIndex + 1);
+
+        if (endIndex === -1) {
+            return false;
+        }
+
+        const tagBody = text.slice(startIndex + 1, endIndex).trim();
+
+        if (!tagBody) {
+            searchStartIndex = endIndex + 1;
+            continue;
+        }
+
+        const normalizedTagBody = tagBody.startsWith('/') ? tagBody.slice(1) : tagBody;
+        const firstChar = normalizedTagBody[0];
+        const firstCharCode = String(firstChar || '').charCodeAt(0);
+
+        if (firstChar === '!' || (firstCharCode >= 65 && firstCharCode <= 90) || (firstCharCode >= 97 && firstCharCode <= 122)) {
+            return true;
+        }
+
+        searchStartIndex = endIndex + 1;
+    }
+
+    return false;
+}
+
 function getProviderIdsForDiagnostic(item) {
     return normalizeRemoteProviderIds(item?.ProviderIds);
 }
@@ -220,6 +258,8 @@ function mergeAppliedResultFallback(item, applyResult) {
     if (!item) return item;
 
     const providerIds = mergeProviderIds(item.ProviderIds, applyResult.ProviderIds);
+    const itemOverview = cleanOverviewText(item.Overview);
+    const resultOverview = cleanOverviewText(applyResult.Overview);
     const genres = getUniqueTextList([
         ...(Array.isArray(item.Genres) ? item.Genres : []),
         ...(Array.isArray(applyResult.Genres) ? applyResult.Genres : [])
@@ -228,7 +268,7 @@ function mergeAppliedResultFallback(item, applyResult) {
     return {
         ...item,
         Genres: genres.length ? genres : item.Genres,
-        Overview: item.Overview || applyResult.Overview || '',
+        Overview: itemOverview || resultOverview || '',
         ProductionYear: item.ProductionYear || applyResult.ProductionYear,
         ProviderIds: providerIds
     };
@@ -358,6 +398,8 @@ function mergeRemoteSearchApplyResults(applyResult, detailedResult) {
     [
         'Name',
         'OriginalTitle',
+        'ImageUrl',
+        'imageUrl',
         'Overview',
         'PremiereDate',
         'SearchProviderName',
@@ -771,7 +813,7 @@ function getApplyPersistenceReport(item, applyResult) {
     }
 
     check('title', String(item?.Name || '').trim() === String(applyResult?.Name || '').trim());
-    check('overview', Boolean(cleanOverviewText(item?.Overview)) || !resultOverview);
+    check('overview', !resultOverview || (cleanOverviewText(item?.Overview) === resultOverview && !hasHtmlMarkup(item?.Overview)));
     check('genres', resultGenres.some(genre => (item?.Genres || []).some(itemGenre => normalizeProviderKey(itemGenre) === normalizeProviderKey(genre))));
     check('people', resultPeople.some(person => (item?.People || []).some(itemPerson => normalizeProviderKey(itemPerson?.Name) === normalizeProviderKey(person.Name))));
     check('studios', resultStudios.some(studio => (item?.Studios || []).some(itemStudio => normalizeProviderKey(itemStudio?.Name) === normalizeProviderKey(studio.Name))));
@@ -850,7 +892,7 @@ function shouldPersistAppliedResultFields(item, applyResult) {
 
     if (report.missing.length) return true;
     if (String(applyResult?.Name || '').trim() && !isMetadataFieldLocked(item, 'Name') && String(item?.Name || '').trim() !== String(applyResult.Name || '').trim()) return true;
-    if (resultOverview && cleanOverviewText(item?.Overview) !== resultOverview) return true;
+    if (resultOverview && (cleanOverviewText(item?.Overview) !== resultOverview || hasHtmlMarkup(item?.Overview))) return true;
     if (resultYear && Number(item?.ProductionYear || 0) !== resultYear) return true;
 
     return !getAppliedProviderIdMatches(item, applyResult);

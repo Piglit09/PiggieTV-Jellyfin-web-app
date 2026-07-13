@@ -16,6 +16,7 @@ import { playbackManager } from 'components/playback/playbackmanager';
 import './books.scss';
 
 import {
+    clearPtvImageFailuresForItem,
     hasPtvImageUrlFailed,
     markPtvImageUrlFailed,
     setPtvFavorite
@@ -334,6 +335,24 @@ let readingAlternateImageUsedCount = 0;
 let readingCachedFailureHitCount = 0;
 let readingFallbackPosterRenderedCount = 0;
 let readingMissingPrimaryImageCount = 0;
+
+function clearReadingImageFailuresForItem(itemId: string | null | undefined) {
+    const normalizedItemId = String(itemId || '').trim().toLowerCase();
+
+    if (!normalizedItemId) return;
+
+    failedReadingCoverItemIds.delete(itemId || '');
+    failedReadingBackdropItemIds.delete(itemId || '');
+
+    for (const url of Array.from(failedReadingImageUrls)) {
+        if (url.toLowerCase().includes(`/items/${normalizedItemId}/images/`)) {
+            failedReadingImageUrls.delete(url);
+            reportedReadingCachedFailureUrls.delete(url);
+        }
+    }
+
+    clearPtvImageFailuresForItem(itemId);
+}
 
 function applyReadingImageFallbackToItem(itemId: string | undefined, fallbackUrl: string) {
     if (!itemId || typeof document === 'undefined') return;
@@ -882,6 +901,74 @@ function getReadingBrowseItems(
 
 function getMetadataProviderLabels(item: PtvReadingItem) {
     return getPtvReadingMetadataProviders(item).map(provider => provider.label);
+}
+
+const READING_HTML_ENTITIES: Record<string, string> = {
+    amp: '&',
+    apos: "'",
+    gt: '>',
+    lt: '<',
+    nbsp: ' ',
+    quot: '"'
+};
+
+function stripReadingHtmlTags(value: string) {
+    let output = '';
+    let insideTag = false;
+
+    for (const char of value) {
+        if (char === '<') {
+            insideTag = true;
+            output += ' ';
+            continue;
+        }
+
+        if (char === '>') {
+            insideTag = false;
+            output += ' ';
+            continue;
+        }
+
+        if (!insideTag) {
+            output += char;
+        }
+    }
+
+    return output;
+}
+
+function decodeReadingHtmlEntities(value: string) {
+    if (!value) return '';
+
+    if (typeof document !== 'undefined') {
+        const textarea = document.createElement('textarea');
+
+        textarea.innerHTML = value;
+
+        return textarea.value;
+    }
+
+    return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
+        const normalizedEntity = String(entity || '').toLowerCase();
+
+        if (normalizedEntity.startsWith('#x')) {
+            const parsed = Number.parseInt(normalizedEntity.slice(2), 16);
+
+            return Number.isFinite(parsed) ? String.fromCharCode(parsed) : match;
+        }
+
+        if (normalizedEntity.startsWith('#')) {
+            const parsed = Number.parseInt(normalizedEntity.slice(1), 10);
+
+            return Number.isFinite(parsed) ? String.fromCharCode(parsed) : match;
+        }
+
+        return READING_HTML_ENTITIES[normalizedEntity] || match;
+    });
+}
+
+function getReadingOverviewText(value: string | null | undefined) {
+    return decodeReadingHtmlEntities(stripReadingHtmlTags(String(value || ''))).replace(/\s+/g, ' ').trim();
 }
 
 function getMetadataProviderSummaryLabels(homeData: PtvReadingHomeData) {
@@ -2260,6 +2347,7 @@ function ItemDetailView({ detail, routeKind }: Readonly<{
     const title = getPtvReadingTitle(item);
     const genres = getPtvReadingGenres(item).slice(0, 5);
     const extension = getPtvReadingExtension(item);
+    const overview = getReadingOverviewText(item.Overview);
 
     return (
         <div className='ptv-books-view ptv-books-detail-view'>
@@ -2299,9 +2387,9 @@ function ItemDetailView({ detail, routeKind }: Readonly<{
                     <ReadingAdminActions item={item} />
                 </div>
             </section>
-            {item.Overview ? (
+            {overview ? (
                 <section className='ptv-books-overview'>
-                    <p>{item.Overview}</p>
+                    <p>{overview}</p>
                 </section>
             ) : null}
             {genres.length ? (
@@ -2808,9 +2896,11 @@ export default function PiggieTvBooksPage() {
             .then(updatedItem => {
                 const refreshedItem = updatedItem as PtvReadingItem | undefined;
 
+                clearReadingImageFailuresForItem(itemId);
                 invalidatePtvReadingHomeCache();
 
                 if (refreshedItem?.Id) {
+                    clearReadingImageFailuresForItem(refreshedItem.Id);
                     setHomeData(previous => replaceReadingItemInHomeData(previous, refreshedItem));
 
                     if (route.view === 'item' && route.id === itemId) {
@@ -2830,6 +2920,7 @@ export default function PiggieTvBooksPage() {
 
                 if (action === 'identify') {
                     window.setTimeout(() => {
+                        clearReadingImageFailuresForItem(itemId);
                         invalidatePtvReadingHomeCache();
                         void loadReadingData(true);
 

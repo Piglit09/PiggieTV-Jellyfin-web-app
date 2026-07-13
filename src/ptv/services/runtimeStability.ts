@@ -43,6 +43,20 @@ let runtimeInstanceSequence = 0;
 let shellInstanceSequence = 0;
 let migrationRan = false;
 
+function syncNativeShellDocumentState() {
+    const isMounted = activeNativeShellInstances.size > 0;
+    const root = document.documentElement;
+    const body = document.body;
+
+    root.classList.toggle('ptv-native-shell-mounted', isMounted);
+    root.dataset.ptvNativeShellMounted = String(isMounted);
+
+    if (body) {
+        body.classList.toggle('ptv-native-shell-mounted', isMounted);
+        body.dataset.ptvNativeShellMounted = String(isMounted);
+    }
+}
+
 function getStorage(): Storage | null {
     try {
         return window.localStorage || null;
@@ -75,6 +89,7 @@ export function normalizePtvRouteLocation(locationLike: Pick<Location, 'hash' | 
     const hashPath = normalizeRouteSegment(hashValue);
     const canonicalPath = hashPath && hashPath !== '/' ? hashPath : pathname || '/';
     const full = `${pathname || ''}${hash}`;
+    const hashQuery = hash.includes('?') ? `?${hash.split('?').slice(1).join('?')}` : '';
 
     return {
         canonicalPath,
@@ -82,7 +97,7 @@ export function normalizePtvRouteLocation(locationLike: Pick<Location, 'hash' | 
         hash,
         hashPath,
         path: pathname || '/',
-        routeKey: `${canonicalPath}${hash.includes('?') ? `?${hash.split('?').slice(1).join('?')}` : ''}`
+        routeKey: `${canonicalPath}${hashQuery}`
     };
 }
 
@@ -288,7 +303,9 @@ export function runPtvClientCacheMigration() {
             if (shouldRemoveLegacyKey(key, rawValue)) removedKeys.push(key);
         }
 
-        removedKeys.forEach(key => storage.removeItem(key));
+        for (const key of removedKeys) {
+            storage.removeItem(key);
+        }
         storage.setItem(PTV_RUNTIME_MIGRATION_KEY, '1');
 
         if (removedKeys.length) {
@@ -314,7 +331,8 @@ export function runPtvClientCacheMigration() {
 export function registerPtvPersistentRuntimeRoot(source = 'ptv-runtime-root') {
     runPtvClientCacheMigration();
 
-    const id = `runtime-${Date.now()}-${runtimeInstanceSequence += 1}`;
+    runtimeInstanceSequence += 1;
+    const id = `runtime-${Date.now()}-${runtimeInstanceSequence}`;
     const route = normalizePtvRouteLocation();
 
     activeRuntimeInstances.set(id, {
@@ -358,7 +376,8 @@ export function registerPtvPersistentRuntimeRoot(source = 'ptv-runtime-root') {
 export function registerPtvNativeShellInstance(section: string) {
     runPtvClientCacheMigration();
 
-    const id = `native-shell-${Date.now()}-${shellInstanceSequence += 1}`;
+    shellInstanceSequence += 1;
+    const id = `native-shell-${Date.now()}-${shellInstanceSequence}`;
     const route = normalizePtvRouteLocation();
 
     activeNativeShellInstances.set(id, {
@@ -366,6 +385,7 @@ export function registerPtvNativeShellInstance(section: string) {
         route: route.routeKey,
         section
     });
+    syncNativeShellDocumentState();
 
     incrementPtvPerformanceCounter('nativeShellMountCount', {
         activeNativeShellCount: activeNativeShellInstances.size,
@@ -388,6 +408,7 @@ export function registerPtvNativeShellInstance(section: string) {
 
     return () => {
         activeNativeShellInstances.delete(id);
+        syncNativeShellDocumentState();
     };
 }
 
