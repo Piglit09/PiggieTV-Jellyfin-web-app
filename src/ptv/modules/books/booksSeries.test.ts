@@ -139,4 +139,66 @@ describe('PTV reading series grouping', () => {
         expect(series[0].unreadCount).toBe(2);
         expect(series[0].nextItem.Id).toBe('2');
     });
+
+    it('uses manual overrides ahead of inferred filename grouping', () => {
+        const series = buildPtvReadingSeries([
+            book('Batman and Harley Quinn 001 (2017)', '1'),
+            book('Absolute Carnage vs. Deadpool 003', '2')
+        ], 'comics', {
+            overrides: {
+                2: {
+                    itemId: '2',
+                    issueNumber: 2,
+                    seriesTitle: 'Batman and Harley Quinn',
+                    seriesYear: 2017
+                }
+            }
+        });
+
+        expect(series).toHaveLength(1);
+        expect(series[0].confidence).toBe('manual');
+        expect(series[0].title).toBe('Batman and Harley Quinn');
+        expect(series[0].items.map(item => item.Id)).toEqual(['1', '2']);
+    });
+
+    it('keeps manually removed items out of their inferred series', () => {
+        const series = buildPtvReadingSeries([
+            book('Batman 001', '1'),
+            book('Batman 002', '2')
+        ], 'comics', {
+            overrides: {
+                2: {
+                    excluded: true,
+                    itemId: '2'
+                }
+            }
+        });
+
+        expect(series).toHaveLength(2);
+        expect(series.find(entry => entry.title === 'Batman')?.itemCount).toBe(1);
+        expect(series.find(entry => entry.confidence === 'manual')?.items.map(item => item.Id)).toEqual(['2']);
+    });
+
+    it('uses manual issue numbers when sorting a corrected series', () => {
+        const series = buildPtvReadingSeries([
+            book('Corrected Series final', 'last'),
+            book('Corrected Series opener', 'first')
+        ], 'manga', {
+            overrides: {
+                first: {
+                    issueNumber: 1,
+                    itemId: 'first',
+                    seriesTitle: 'Corrected Series'
+                },
+                last: {
+                    issueNumber: 2,
+                    itemId: 'last',
+                    seriesTitle: 'Corrected Series'
+                }
+            }
+        });
+
+        expect(series).toHaveLength(1);
+        expect(series[0].items.map(item => item.Id)).toEqual(['first', 'last']);
+    });
 });

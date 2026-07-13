@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Jellyfin.Plugin.PiggieTV.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a99e6db6874215aa6a322d22f712cabc25dd0b88")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+774153231b6c63fbac4f3c4da2636fc9c619c595")]
 [assembly: System.Reflection.AssemblyProductAttribute("Jellyfin.Plugin.PiggieTV.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Jellyfin.Plugin.PiggieTV.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

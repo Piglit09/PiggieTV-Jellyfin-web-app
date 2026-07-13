@@ -3,8 +3,10 @@ import type {
     PtvReadingRouteKind
 } from './booksTypes';
 
+export type PtvReadingSeriesConfidence = 'explicit' | 'filename-high' | 'filename-low' | 'manual' | 'metadata' | 'provider';
+
 export type PtvReadingSeriesItemInfo = Readonly<{
-    confidence: 'explicit' | 'provider' | 'metadata' | 'filename-high' | 'filename-low';
+    confidence: PtvReadingSeriesConfidence;
     groupKey: string;
     issueNumber: number | null;
     issueText: string;
@@ -31,6 +33,21 @@ export type PtvReadingSeries = Readonly<{
     title: string;
     unreadCount: number;
     year: number | null;
+}>;
+
+export type PtvReadingSeriesOverride = Readonly<{
+    coverItemId?: string;
+    excluded?: boolean;
+    issueNumber?: number | null;
+    itemId: string;
+    seriesKey?: string;
+    seriesTitle?: string;
+    seriesYear?: number | null;
+    volumeNumber?: number | null;
+}>;
+
+export type PtvReadingSeriesBuildOptions = Readonly<{
+    overrides?: Record<string, PtvReadingSeriesOverride>;
 }>;
 
 function getBaseReadingTitle(item: PtvReadingItem) {
@@ -110,6 +127,14 @@ function getGroupingKey(source: string, title: string, year: number | null, expl
 
     const key = normalizeSeriesKey(title) || 'series';
     return `${source}:${key}:${year || 'unknown'}`;
+}
+
+function getManualGroupKey(title: string, year: number | null, seriesKey = '') {
+    if (!seriesKey) return getGroupingKey('filename', title, year);
+
+    const key = normalizeSeriesKey(seriesKey) || 'series';
+
+    return `manual:${key}`;
 }
 
 function getItemVolumeNumber(item: PtvReadingItem) {
@@ -263,6 +288,10 @@ function normalizeSeriesKey(value: string) {
         .replace(/(?:^-+)|(?:-+$)/g, '');
 }
 
+export function normalizePtvReadingSeriesKey(value: string) {
+    return normalizeSeriesKey(value);
+}
+
 function hashString(value: string) {
     let hash = 2166136261;
 
@@ -286,6 +315,14 @@ function getSeriesId(groupKey: string, routeKind: PtvReadingRouteKind) {
     const hashInput = `${routeKind}:${key}`;
 
     return `${key.slice(0, 64)}-${hashString(hashInput)}`;
+}
+
+export function getPtvReadingSeriesIdFromKey(groupKey: string, routeKind: PtvReadingRouteKind) {
+    return getSeriesId(groupKey, routeKind);
+}
+
+export function getPtvReadingSeriesItemOverrideKey(item: PtvReadingItem) {
+    return String(item.Id || item.Path || item.Name || '').trim();
 }
 
 function getItemProgressPercent(item: PtvReadingItem) {
@@ -334,13 +371,52 @@ function uniqueItems(items: PtvReadingItem[]) {
     });
 }
 
+function getOverrideNumber(value: number | null | undefined, fallback: number | null) {
+    if (value === null) return null;
+    if (typeof value !== 'number') return fallback;
+
+    return Number.isFinite(value) ? value : fallback;
+}
+
+function applySeriesOverride(
+    item: PtvReadingItem,
+    info: PtvReadingSeriesItemInfo,
+    override?: PtvReadingSeriesOverride
+): PtvReadingSeriesItemInfo {
+    if (!override) return info;
+
+    const itemKey = getPtvReadingSeriesItemOverrideKey(item);
+    const fallbackTitle = cleanSeriesCandidate(getBaseReadingTitle(item)) || info.seriesTitle;
+    const seriesTitle = cleanSeriesCandidate(override.seriesTitle || '') || (override.excluded ? fallbackTitle : info.seriesTitle);
+    const year = override.seriesYear === undefined ? info.year : override.seriesYear;
+    const issueNumber = getOverrideNumber(override.issueNumber, info.issueNumber);
+    const volumeNumber = getOverrideNumber(override.volumeNumber, info.volumeNumber);
+
+    return {
+        ...info,
+        confidence: 'manual',
+        groupKey: override.excluded ? `manual-excluded:${normalizeSeriesKey(itemKey || fallbackTitle) || 'item'}` : getManualGroupKey(seriesTitle, year, override.seriesKey),
+        issueNumber,
+        issueText: issueNumber == null ? info.issueText : String(issueNumber),
+        seriesTitle,
+        sortName: info.sortName || fallbackTitle,
+        volumeNumber,
+        year
+    };
+}
+
 export function getPtvReadingSeriesInfo(item: PtvReadingItem) {
     return parseSeriesFromTitle(item);
 }
 
-export function buildPtvReadingSeries(items: PtvReadingItem[], routeKind: PtvReadingRouteKind): PtvReadingSeries[] {
+export function buildPtvReadingSeries(
+    items: PtvReadingItem[],
+    routeKind: PtvReadingRouteKind,
+    options: PtvReadingSeriesBuildOptions = {}
+): PtvReadingSeries[] {
     const grouped = new Map<string, {
         confidence: PtvReadingSeriesItemInfo['confidence'];
+        coverItemId: string;
         groupKey: string;
         infos: Map<string, PtvReadingSeriesItemInfo>;
         items: PtvReadingItem[];
@@ -349,10 +425,12 @@ export function buildPtvReadingSeries(items: PtvReadingItem[], routeKind: PtvRea
     }>();
 
     uniqueItems(items).forEach(item => {
-        const info = parseSeriesFromTitle(item);
+        const itemKey = getPtvReadingSeriesItemOverrideKey(item);
+        const info = applySeriesOverride(item, parseSeriesFromTitle(item), options.overrides?.[itemKey]);
         const id = getSeriesId(info.groupKey, routeKind);
         const existing = grouped.get(id) || {
             confidence: info.confidence,
+            coverItemId: '',
             groupKey: info.groupKey,
             infos: new Map<string, PtvReadingSeriesItemInfo>(),
             items: [],
@@ -361,7 +439,9 @@ export function buildPtvReadingSeries(items: PtvReadingItem[], routeKind: PtvRea
         };
 
         existing.items.push(item);
-        existing.infos.set(String(item.Id || item.Path || item.Name || existing.items.length), info);
+        existing.infos.set(itemKey || String(existing.items.length), info);
+        existing.confidence = existing.confidence === 'manual' || info.confidence === 'manual' ? 'manual' : existing.confidence;
+        existing.coverItemId = existing.coverItemId || options.overrides?.[itemKey]?.coverItemId || '';
         existing.year = existing.year || info.year;
         grouped.set(id, existing);
     });
@@ -384,11 +464,12 @@ export function buildPtvReadingSeries(items: PtvReadingItem[], routeKind: PtvRea
         const unreadCount = sortedItems.length - readCount;
         const progressPercent = sortedItems.length ? (sortedItems.reduce((total, item) => total + getItemProgressPercent(item), 0) / sortedItems.length) : 0;
         const nextItem = pickSeriesNextItem(sortedItems);
+        const coverItem = sortedItems.find(item => getPtvReadingSeriesItemOverrideKey(item) === group.coverItemId) || nextItem || sortedItems[0];
 
         return {
             completedCount: readCount,
             confidence: group.confidence,
-            coverItem: nextItem || sortedItems[0],
+            coverItem,
             id,
             inProgressCount,
             itemCount: sortedItems.length,

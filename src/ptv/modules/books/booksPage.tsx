@@ -36,8 +36,15 @@ import { loadReaderProgress } from '../reader/readerProgressStore';
 import {
     buildPtvReadingSeries,
     findPtvReadingSeriesById,
-    type PtvReadingSeries
+    getPtvReadingSeriesInfo,
+    getPtvReadingSeriesItemOverrideKey,
+    type PtvReadingSeries,
+    type PtvReadingSeriesOverride
 } from './booksSeries';
+import {
+    loadPtvReadingSeriesOverrides,
+    savePtvReadingSeriesOverrides
+} from './booksSeriesOverrides';
 
 import {
     getPtvReadingMetadataProviders
@@ -91,6 +98,20 @@ type ReadingBrowseViewMode = 'items' | 'series';
 
 const READING_BROWSE_VIEW_MODE_KEY_PREFIX = 'ptv:reading:browse-view:';
 
+type ReadingSeriesOverridesByKind = Partial<Record<PtvReadingRouteKind, Record<string, PtvReadingSeriesOverride>>>;
+
+type ReadingSeriesOverrideUpdate = Readonly<{
+    item: PtvReadingItem;
+    override: Omit<PtvReadingSeriesOverride, 'itemId'>;
+}>;
+
+type ReadingSeriesOverrideDiagnostics = Readonly<{
+    groupedSeriesCount: number;
+    manualSeriesCount: number;
+    overrideCount: number;
+    overrideItemIds: string[];
+}>;
+
 function getDefaultReadingBrowseViewMode(routeKind: PtvReadingRouteKind): ReadingBrowseViewMode {
     return routeKind === 'comics' || routeKind === 'manga' ? 'series' : 'items';
 }
@@ -115,6 +136,117 @@ function storeReadingBrowseViewMode(routeKind: PtvReadingRouteKind, viewMode: Re
     } catch {
         // Non-critical preference; ignore storage failures on private or restricted browsers.
     }
+}
+
+function getReadingSeriesOverrideKinds(routeKind: PtvReadingRouteKind): PtvReadingRouteKind[] {
+    return routeKind === 'reading' ? ['books', 'comics', 'manga', 'reading'] : [routeKind];
+}
+
+function loadReadingSeriesOverridesForRoute(routeKind: PtvReadingRouteKind): ReadingSeriesOverridesByKind {
+    return getReadingSeriesOverrideKinds(routeKind).reduce<ReadingSeriesOverridesByKind>((overrides, kind) => {
+        overrides[kind] = loadPtvReadingSeriesOverrides(kind);
+
+        return overrides;
+    }, {});
+}
+
+function getReadingSeriesOverridesForRoute(
+    routeKind: PtvReadingRouteKind,
+    overridesByKind: ReadingSeriesOverridesByKind
+) {
+    return getReadingSeriesOverrideKinds(routeKind).reduce<Record<string, PtvReadingSeriesOverride>>((overrides, kind) => ({
+        ...overrides,
+        ...(overridesByKind[kind] || {})
+    }), {});
+}
+
+function getReadingSeriesOverrideKind(routeKind: PtvReadingRouteKind, item: PtvReadingItem) {
+    return routeKind === 'reading' ? getReadingSeriesRouteKindForItem(item) : routeKind;
+}
+
+function parsePromptYear(value: string | null) {
+    if (value === null) return undefined;
+
+    const trimmedValue = value.trim();
+
+    if (!trimmedValue) return null;
+
+    const parsedValue = Number(trimmedValue);
+
+    return Number.isFinite(parsedValue) ? parsedValue : null;
+}
+
+function parsePromptOptionalNumber(value: string | null) {
+    if (value === null) return undefined;
+
+    const trimmedValue = value.trim();
+
+    if (!trimmedValue) return undefined;
+
+    const parsedValue = Number(trimmedValue);
+
+    return Number.isFinite(parsedValue) ? parsedValue : undefined;
+}
+
+function getReadingSeriesPromptOverride(
+    item: PtvReadingItem,
+    series: PtvReadingSeries,
+    existingOverride?: PtvReadingSeriesOverride
+) {
+    if (typeof window === 'undefined') return null;
+
+    const inferredInfo = getPtvReadingSeriesInfo(item);
+    const title = window.prompt('Series name', existingOverride?.seriesTitle || series.title || inferredInfo.seriesTitle);
+
+    if (title === null) return null;
+
+    const nextTitle = title.trim();
+
+    if (!nextTitle) return null;
+
+    const year = parsePromptYear(window.prompt('Series year', String(existingOverride?.seriesYear ?? series.year ?? inferredInfo.year ?? '')));
+    const volumeNumber = parsePromptOptionalNumber(window.prompt('Volume number', String(existingOverride?.volumeNumber ?? inferredInfo.volumeNumber ?? '')));
+    const issueNumber = parsePromptOptionalNumber(window.prompt('Issue number', String(existingOverride?.issueNumber ?? inferredInfo.issueNumber ?? '')));
+
+    return {
+        excluded: false,
+        issueNumber,
+        seriesTitle: nextTitle,
+        seriesYear: year ?? null,
+        volumeNumber
+    } satisfies Omit<PtvReadingSeriesOverride, 'itemId'>;
+}
+
+function getReadingSeriesGroupPromptOverride(series: PtvReadingSeries) {
+    if (typeof window === 'undefined') return null;
+
+    const title = window.prompt('Series name', series.title);
+
+    if (title === null) return null;
+
+    const nextTitle = title.trim();
+
+    if (!nextTitle) return null;
+
+    const year = parsePromptYear(window.prompt('Series year', String(series.year ?? '')));
+
+    return {
+        excluded: false,
+        seriesTitle: nextTitle,
+        seriesYear: year ?? null
+    } satisfies Omit<PtvReadingSeriesOverride, 'itemId'>;
+}
+
+function getReadingSeriesDiagnostics(
+    groupedSeries: PtvReadingSeries[],
+    seriesOverrides: Record<string, PtvReadingSeriesOverride>
+): ReadingSeriesOverrideDiagnostics {
+    return {
+        groupedSeriesCount: groupedSeries.length,
+        manualSeriesCount: groupedSeries.filter(series => series.confidence === 'manual').length,
+        overrideCount: Object.keys(seriesOverrides).length,
+        overrideItemIds: Object.keys(seriesOverrides).slice(0, 12)
+    };
 }
 
 type ItemDetailState = Readonly<{
@@ -323,151 +455,80 @@ function getQueryParam(search: string, key: string) {
     return '';
 }
 
+function getReadingRouteState(
+    kind: PtvReadingRouteKind,
+    view: ReadingView,
+    search: string,
+    id = ''
+): ReadingRouteState {
+    return {
+        id,
+        kind,
+        search,
+        view
+    };
+}
+
+function isScopedReadingKind(segment: string) {
+    return segment === 'books' || segment === 'comics' || segment === 'manga' || segment === 'maga';
+}
+
+function getReadingRouteForKind(
+    kind: PtvReadingRouteKind,
+    viewSegment: string,
+    idSegment: string,
+    search: string,
+    fallbackView: ReadingView
+) {
+    switch (viewSegment) {
+        case 'explore':
+            return getReadingRouteState(kind, 'explore', search);
+        case 'library':
+            return getReadingRouteState(kind, 'library', search);
+        case 'collections':
+            return getReadingRouteState(kind, 'collections', search);
+        case 'series':
+            return getReadingRouteState(kind, 'series', search, decodeURIComponent(idSegment || ''));
+        case 'book':
+        case 'item':
+            return getReadingRouteState(kind, 'item', search, decodeURIComponent(idSegment || ''));
+        default:
+            return getReadingRouteState(kind, fallbackView, search);
+    }
+}
+
+function getRootReadingRoute(parts: string[], search: string) {
+    const segment = parts[1] || 'home';
+
+    if (isScopedReadingKind(segment)) {
+        return getReadingRouteForKind(
+            getPtvReadingRouteKind(segment),
+            parts[2] || 'library',
+            parts[3] || '',
+            search,
+            'library'
+        );
+    }
+
+    return getReadingRouteForKind('reading', segment, parts[2] || '', search, 'home');
+}
+
 function getReadingRoute(pathname: string, search: string): ReadingRouteState {
     const parts = pathname.split('/').filter(Boolean);
     const searchTerm = getQueryParam(search, 'search');
     const routeRoot = parts[0] || 'reading';
 
     if (routeRoot === 'reading') {
-        const segment = parts[1] || 'home';
-
-        if (segment === 'books' || segment === 'comics' || segment === 'manga' || segment === 'maga') {
-            const scopedSegment = parts[2] || 'library';
-            const scopedKind = getPtvReadingRouteKind(segment);
-
-            if (scopedSegment === 'item' || scopedSegment === 'book') {
-                return {
-                    id: decodeURIComponent(parts[3] || ''),
-                    kind: scopedKind,
-                    search: searchTerm,
-                    view: 'item'
-                };
-            }
-
-            if (scopedSegment === 'collections') {
-                return {
-                    id: '',
-                    kind: scopedKind,
-                    search: searchTerm,
-                    view: 'collections'
-                };
-            }
-
-            if (scopedSegment === 'series') {
-                return {
-                    id: decodeURIComponent(parts[3] || ''),
-                    kind: scopedKind,
-                    search: searchTerm,
-                    view: 'series'
-                };
-            }
-
-            return {
-                id: '',
-                kind: scopedKind,
-                search: searchTerm,
-                view: 'library'
-            };
-        }
-
-        if (segment === 'explore') {
-            return {
-                id: '',
-                kind: 'reading',
-                search: searchTerm,
-                view: 'explore'
-            };
-        }
-
-        if (segment === 'collections') {
-            return {
-                id: '',
-                kind: 'reading',
-                search: searchTerm,
-                view: 'collections'
-            };
-        }
-
-        if (segment === 'series') {
-            return {
-                id: decodeURIComponent(parts[2] || ''),
-                kind: 'reading',
-                search: searchTerm,
-                view: 'series'
-            };
-        }
-
-        if (segment === 'item' || segment === 'book') {
-            return {
-                id: decodeURIComponent(parts[2] || ''),
-                kind: 'reading',
-                search: searchTerm,
-                view: 'item'
-            };
-        }
-
-        return {
-            id: '',
-            kind: 'reading',
-            search: searchTerm,
-            view: 'home'
-        };
+        return getRootReadingRoute(parts, searchTerm);
     }
 
-    const kind = getPtvReadingRouteKind(routeRoot);
-    const viewSegment = parts[1] || 'library';
-
-    if (viewSegment === 'explore') {
-        return {
-            id: '',
-            kind,
-            search: searchTerm,
-            view: 'explore'
-        };
-    }
-
-    if (viewSegment === 'library') {
-        return {
-            id: '',
-            kind,
-            search: searchTerm,
-            view: 'library'
-        };
-    }
-
-    if (viewSegment === 'collections') {
-        return {
-            id: '',
-            kind,
-            search: searchTerm,
-            view: 'collections'
-        };
-    }
-
-    if (viewSegment === 'series') {
-        return {
-            id: decodeURIComponent(parts[2] || ''),
-            kind,
-            search: searchTerm,
-            view: 'series'
-        };
-    }
-
-    if (viewSegment === 'item' || viewSegment === 'book') {
-        return {
-            id: decodeURIComponent(parts[2] || ''),
-            kind,
-            search: searchTerm,
-            view: 'item'
-        };
-    }
-
-    return {
-        id: '',
-        kind,
-        search: searchTerm,
-        view: 'home'
-    };
+    return getReadingRouteForKind(
+        getPtvReadingRouteKind(routeRoot),
+        parts[1] || 'library',
+        parts[2] || '',
+        searchTerm,
+        'home'
+    );
 }
 
 function getRouteBase(kind: PtvReadingRouteKind) {
@@ -520,7 +581,10 @@ function getRouteKicker(kind: PtvReadingRouteKind) {
 function getItemHref(item: PtvReadingItem, kind: PtvReadingRouteKind) {
     if (kind === 'reading') {
         const itemKind = getPtvReadingItemKind(item);
-        const routeBase = itemKind === 'comic' ? 'comics' : itemKind === 'manga' ? 'manga' : 'books';
+        let routeBase = 'books';
+
+        if (itemKind === 'comic') routeBase = 'comics';
+        if (itemKind === 'manga') routeBase = 'manga';
 
         return item.Id ? `#/reading/${routeBase}/item/${encodeURIComponent(item.Id)}` : PTV_ROUTES.reading;
     }
@@ -561,8 +625,12 @@ function getReadingSeriesRouteKindForItem(item: PtvReadingItem): PtvReadingRoute
     return 'books';
 }
 
-function buildReadingSeriesForRoute(items: PtvReadingItem[], routeKind: PtvReadingRouteKind) {
-    if (routeKind !== 'reading') return buildPtvReadingSeries(items, routeKind);
+function buildReadingSeriesForRoute(
+    items: PtvReadingItem[],
+    routeKind: PtvReadingRouteKind,
+    seriesOverrides: Record<string, PtvReadingSeriesOverride> = {}
+) {
+    if (routeKind !== 'reading') return buildPtvReadingSeries(items, routeKind, { overrides: seriesOverrides });
 
     const itemsByKind = new Map<PtvReadingRouteKind, PtvReadingItem[]>();
 
@@ -575,7 +643,7 @@ function buildReadingSeriesForRoute(items: PtvReadingItem[], routeKind: PtvReadi
     });
 
     return Array.from(itemsByKind.entries())
-        .flatMap(([scopedKind, scopedItems]) => buildPtvReadingSeries(scopedItems, scopedKind))
+        .flatMap(([scopedKind, scopedItems]) => buildPtvReadingSeries(scopedItems, scopedKind, { overrides: seriesOverrides }))
         .sort((left, right) => left.title.localeCompare(right.title));
 }
 
@@ -1005,7 +1073,11 @@ function ReadingChips({ homeData, routeKind }: Readonly<{
 }>) {
     const routeBase = getRouteBase(routeKind);
     const genres = Array.from(new Set(getAllReadingItems(homeData).reduce<string[]>((items, item) => items.concat(getPtvReadingGenres(item)), [])));
-    const routeChip = routeKind === 'comics' ? 'Comics' : routeKind === 'manga' ? 'Manga' : 'Books';
+    let routeChip = 'Books';
+
+    if (routeKind === 'comics') routeChip = 'Comics';
+    if (routeKind === 'manga') routeChip = 'Manga';
+
     const chips = [
         'Favorites',
         'Continue Reading',
@@ -1409,12 +1481,24 @@ function ReadingGrid({ items, routeKind }: Readonly<{
     );
 }
 
-function ReadingSeriesCard({ routeKind, series }: Readonly<{
+function ReadingSeriesCard({ onSeriesOverrideChange, routeKind, series }: Readonly<{
+    onSeriesOverrideChange?: (updates: ReadingSeriesOverrideUpdate[]) => void;
     routeKind: PtvReadingRouteKind;
     series: PtvReadingSeries;
 }>) {
+    const { isAdmin } = useReadingAdminControls();
     const href = getSeriesHref(series, routeKind);
     const progress = Math.round(series.progressPercent);
+    const manageSeries = () => {
+        const override = getReadingSeriesGroupPromptOverride(series);
+
+        if (!override) return;
+
+        onSeriesOverrideChange?.(series.items.map(item => ({
+            item,
+            override
+        })));
+    };
 
     return (
         <article className='ptv-books-card ptv-books-series-card'>
@@ -1449,12 +1533,18 @@ function ReadingSeriesCard({ routeKind, series }: Readonly<{
                 <button type='button' onClick={() => void readPtvItem(series.nextItem)} aria-label={`Read next ${series.title}`}>
                     <PtvIcon name='play' />
                 </button>
+                {isAdmin && onSeriesOverrideChange ? (
+                    <button type='button' onClick={manageSeries} aria-label={`Manage series ${series.title}`}>
+                        <PtvIcon name='metadata' />
+                    </button>
+                ) : null}
             </div>
         </article>
     );
 }
 
-function ReadingSeriesGrid({ routeKind, series }: Readonly<{
+function ReadingSeriesGrid({ onSeriesOverrideChange, routeKind, series }: Readonly<{
+    onSeriesOverrideChange?: (updates: ReadingSeriesOverrideUpdate[]) => void;
     routeKind: PtvReadingRouteKind;
     series: PtvReadingSeries[];
 }>) {
@@ -1481,6 +1571,7 @@ function ReadingSeriesGrid({ routeKind, series }: Readonly<{
                 {visibleSeries.map(entry => (
                     <ReadingSeriesCard
                         key={entry.id}
+                        onSeriesOverrideChange={onSeriesOverrideChange}
                         routeKind={routeKind}
                         series={entry}
                     />
@@ -1665,9 +1756,10 @@ function ReadingExploreView({ homeData, routeKind, search, searchResults }: Read
     );
 }
 
-function ReadingLibraryDebugPanel({ cacheDiagnostics, debug }: Readonly<{
+function ReadingLibraryDebugPanel({ cacheDiagnostics, debug, seriesDiagnostics }: Readonly<{
     cacheDiagnostics?: PtvReadingHomeData['cacheDiagnostics'];
     debug?: PtvReadingLibraryDebug;
+    seriesDiagnostics?: ReadingSeriesOverrideDiagnostics;
 }>) {
     const { canShowDebug } = useReadingAdminControls();
 
@@ -1710,6 +1802,10 @@ function ReadingLibraryDebugPanel({ cacheDiagnostics, debug }: Readonly<{
         ['cachedFailureHit', readingCachedFailureHitCount],
         ['droppedItemCount', debug.droppedItemCount],
         ['kindCounts', JSON.stringify(debug.kindCounts)],
+        ['readingSeriesGroupedCount', seriesDiagnostics?.groupedSeriesCount ?? 'n/a'],
+        ['readingSeriesManualCount', seriesDiagnostics?.manualSeriesCount ?? 'n/a'],
+        ['readingSeriesOverrideCount', seriesDiagnostics?.overrideCount ?? 'n/a'],
+        ['readingSeriesOverrideItemIds', seriesDiagnostics?.overrideItemIds.join(', ') || 'none'],
         ['libraryDiagnostics', debug.libraryDiagnostics.map(entry => `${entry.name} (${entry.id}) type=${entry.collectionType || 'unknown'} count=${entry.itemCount} status=${entry.statusCode ?? 'n/a'} duration=${entry.requestDurationMs ?? 'n/a'}ms url=${entry.lastQueriedUrl || 'none'} timeout=${entry.timeoutReason || 'none'}`).join(' | ') || 'none'],
         ['sectionDiagnostics', debug.sectionDiagnostics.map(entry => `${entry.title} status=${entry.status} count=${entry.itemCount} duration=${entry.requestDurationMs ?? 'n/a'}ms url=${entry.lastQueriedUrl || 'none'} timeout=${entry.timeoutReason || 'none'}`).join(' | ') || 'none'],
         ['dropReasons', debug.dropReasons.length ? debug.dropReasons.join(' | ') : 'none']
@@ -1827,9 +1923,11 @@ function ReadingBrowseTools({ filter, formatFilter, itemCount, query, routeKind,
     );
 }
 
-function ReadingLibraryView({ homeData, routeKind }: Readonly<{
+function ReadingLibraryView({ homeData, onSeriesOverrideChange, routeKind, seriesOverrides }: Readonly<{
     homeData: PtvReadingHomeData;
+    onSeriesOverrideChange: (updates: ReadingSeriesOverrideUpdate[]) => void;
     routeKind: PtvReadingRouteKind;
+    seriesOverrides: Record<string, PtvReadingSeriesOverride>;
 }>) {
     const [browseFilter, setBrowseFilter] = useState<ReadingBrowseFilter>('all');
     const [browseFormatFilter, setBrowseFormatFilter] = useState<ReadingBrowseFormatFilter>('all');
@@ -1854,7 +1952,8 @@ function ReadingLibraryView({ homeData, routeKind }: Readonly<{
         browseFormatFilter,
         browseSort
     ), [browseFilter, browseFormatFilter, browseQuery, browseSort, sourceItems]);
-    const groupedSeries = useMemo(() => buildReadingSeriesForRoute(browseItems, routeKind), [browseItems, routeKind]);
+    const groupedSeries = useMemo(() => buildReadingSeriesForRoute(browseItems, routeKind, seriesOverrides), [browseItems, routeKind, seriesOverrides]);
+    const seriesDiagnostics = useMemo(() => getReadingSeriesDiagnostics(groupedSeries, seriesOverrides), [groupedSeries, seriesOverrides]);
 
     useEffect(() => {
         setBrowseViewMode(getStoredReadingBrowseViewMode(routeKind));
@@ -1870,6 +1969,20 @@ function ReadingLibraryView({ homeData, routeKind }: Readonly<{
             viewMode: browseViewMode
         });
     }, [browseItems.length, browseViewMode, groupedSeries.length, routeKind, showSeriesToggle]);
+
+    let libraryContent: React.ReactNode = null;
+
+    if (!homeData.isPartial || libraryItems.length) {
+        libraryContent = showSeriesToggle && browseViewMode === 'series' ? (
+            <ReadingSeriesGrid
+                onSeriesOverrideChange={onSeriesOverrideChange}
+                routeKind={routeKind}
+                series={groupedSeries}
+            />
+        ) : (
+            <ReadingGrid items={browseItems} routeKind={routeKind} />
+        );
+    }
 
     return (
         <div className='ptv-books-view'>
@@ -1887,7 +2000,11 @@ function ReadingLibraryView({ homeData, routeKind }: Readonly<{
                     ))}
                 </div>
             </section>
-            <ReadingLibraryDebugPanel cacheDiagnostics={homeData.cacheDiagnostics} debug={homeData.libraryDebug} />
+            <ReadingLibraryDebugPanel
+                cacheDiagnostics={homeData.cacheDiagnostics}
+                debug={homeData.libraryDebug}
+                seriesDiagnostics={seriesDiagnostics}
+            />
             {homeData.isPartial && !libraryItems.length && !librarySection?.error ? (
                 <ReadingLoading label='Loading library shelf' />
             ) : null}
@@ -1913,24 +2030,117 @@ function ReadingLibraryView({ homeData, routeKind }: Readonly<{
                     viewMode={browseViewMode}
                 />
             ) : null}
-            {homeData.isPartial && !libraryItems.length ? null : (
-                showSeriesToggle && browseViewMode === 'series' ? (
-                    <ReadingSeriesGrid routeKind={routeKind} series={groupedSeries} />
-                ) : (
-                    <ReadingGrid items={browseItems} routeKind={routeKind} />
-                )
-            )}
+            {libraryContent}
         </div>
     );
 }
 
-function ReadingSeriesDetailView({ homeData, routeKind, seriesId }: Readonly<{
+function ReadingSeriesManagementPanel({ onSeriesOverrideChange, onSeriesOverrideRemove, series, seriesOverrides }: Readonly<{
+    onSeriesOverrideChange: (updates: ReadingSeriesOverrideUpdate[]) => void;
+    onSeriesOverrideRemove: (items: PtvReadingItem[]) => void;
+    series: PtvReadingSeries;
+    seriesOverrides: Record<string, PtvReadingSeriesOverride>;
+}>) {
+    const { isAdmin } = useReadingAdminControls();
+
+    if (!isAdmin) return null;
+
+    const editItem = (item: PtvReadingItem) => {
+        const itemKey = getPtvReadingSeriesItemOverrideKey(item);
+        const override = getReadingSeriesPromptOverride(item, series, seriesOverrides[itemKey]);
+
+        if (!override) return;
+
+        onSeriesOverrideChange([{
+            item,
+            override
+        }]);
+    };
+    const removeFromSeries = (item: PtvReadingItem) => {
+        onSeriesOverrideChange([{
+            item,
+            override: {
+                excluded: true,
+                seriesTitle: getPtvReadingTitle(item)
+            }
+        }]);
+    };
+    const setSeriesCover = (item: PtvReadingItem) => {
+        const itemKey = getPtvReadingSeriesItemOverrideKey(item);
+
+        if (!itemKey) return;
+
+        onSeriesOverrideChange(series.items.map(seriesItem => ({
+            item: seriesItem,
+            override: {
+                ...(seriesOverrides[getPtvReadingSeriesItemOverrideKey(seriesItem)] || {}),
+                coverItemId: itemKey,
+                excluded: false,
+                seriesTitle: series.title,
+                seriesYear: series.year
+            }
+        })));
+    };
+
+    return (
+        <section className='ptv-books-series-management' aria-label={`${series.title} series management`}>
+            <div>
+                <p className='ptv-books-kicker'>Series tools</p>
+                <h2>Correct grouping</h2>
+                <p>Manual corrections override provider and filename grouping for this browser.</p>
+            </div>
+            <div className='ptv-books-series-management-list'>
+                {series.items.map(item => {
+                    const itemKey = getPtvReadingSeriesItemOverrideKey(item);
+                    const override = seriesOverrides[itemKey];
+                    const info = getPtvReadingSeriesInfo(item);
+
+                    return (
+                        <article key={itemKey || getPtvReadingTitle(item)} className='ptv-books-series-management-item'>
+                            <div>
+                                <strong>{getPtvReadingTitle(item)}</strong>
+                                <span>
+                                    {override ? 'Manual override' : info.confidence}
+                                    {info.issueNumber == null ? '' : ` - issue ${info.issueNumber}`}
+                                    {override?.excluded ? ' - removed from series' : ''}
+                                </span>
+                            </div>
+                            <div>
+                                <button type='button' onClick={() => editItem(item)}>
+                                    <PtvIcon name='metadata' />
+                                    <span>Move</span>
+                                </button>
+                                <button type='button' onClick={() => removeFromSeries(item)}>
+                                    <PtvIcon name='delete' />
+                                    <span>Remove</span>
+                                </button>
+                                <button type='button' onClick={() => setSeriesCover(item)}>
+                                    <PtvIcon name='image' />
+                                    <span>Cover</span>
+                                </button>
+                                <button type='button' disabled={!override} onClick={() => onSeriesOverrideRemove([item])}>
+                                    <PtvIcon name='refresh' />
+                                    <span>Reset</span>
+                                </button>
+                            </div>
+                        </article>
+                    );
+                })}
+            </div>
+        </section>
+    );
+}
+
+function ReadingSeriesDetailView({ homeData, onSeriesOverrideChange, onSeriesOverrideRemove, routeKind, seriesId, seriesOverrides }: Readonly<{
     homeData: PtvReadingHomeData;
+    onSeriesOverrideChange: (updates: ReadingSeriesOverrideUpdate[]) => void;
+    onSeriesOverrideRemove: (items: PtvReadingItem[]) => void;
     routeKind: PtvReadingRouteKind;
     seriesId: string;
+    seriesOverrides: Record<string, PtvReadingSeriesOverride>;
 }>) {
     const allItems = useMemo(() => getAllReadingItems(homeData), [homeData]);
-    const groupedSeries = useMemo(() => buildReadingSeriesForRoute(allItems, routeKind), [allItems, routeKind]);
+    const groupedSeries = useMemo(() => buildReadingSeriesForRoute(allItems, routeKind, seriesOverrides), [allItems, routeKind, seriesOverrides]);
     const series = findPtvReadingSeriesById(groupedSeries, seriesId);
     const progress = Math.round(series?.progressPercent || 0);
 
@@ -1987,6 +2197,12 @@ function ReadingSeriesDetailView({ homeData, routeKind, seriesId }: Readonly<{
                     </div>
                 </div>
             </section>
+            <ReadingSeriesManagementPanel
+                onSeriesOverrideChange={onSeriesOverrideChange}
+                onSeriesOverrideRemove={onSeriesOverrideRemove}
+                series={series}
+                seriesOverrides={seriesOverrides}
+            />
             <ReadingGrid items={series.items} routeKind={routeKind} />
         </div>
     );
@@ -2150,9 +2366,11 @@ export default function PiggieTvBooksPage() {
     const [homeData, setHomeData] = useState<PtvReadingHomeData>(EMPTY_HOME_DATA);
     const [searchResults, setSearchResults] = useState<PtvReadingItem[]>([]);
     const [itemDetail, setItemDetail] = useState<ItemDetailState>(getInitialItemDetail);
+    const [seriesOverridesByKind, setSeriesOverridesByKind] = useState<ReadingSeriesOverridesByKind>(() => loadReadingSeriesOverridesForRoute(route.kind));
     const { canShowDebug, debugEnabled, isAdmin } = usePtvAdminDebugVisibility();
     const [isLoading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState('');
+    const seriesOverrides = useMemo(() => getReadingSeriesOverridesForRoute(route.kind, seriesOverridesByKind), [route.kind, seriesOverridesByKind]);
     const heroItem = useMemo(() => (
         itemDetail.item || (homeData.kind === route.kind ? getHeroItems(homeData, route.kind)[0] : null) || null
     ), [homeData, itemDetail.item, route.kind]);
@@ -2259,6 +2477,86 @@ export default function PiggieTvBooksPage() {
             });
     }, []);
 
+    const saveReadingSeriesOverrideUpdates = useCallback((updates: ReadingSeriesOverrideUpdate[]) => {
+        if (!updates.length) return;
+
+        const nextOverridesByKind: ReadingSeriesOverridesByKind = {
+            ...seriesOverridesByKind
+        };
+        const touchedKinds = new Set<PtvReadingRouteKind>();
+        const itemIds: string[] = [];
+
+        updates.forEach(({ item, override }) => {
+            const itemId = getPtvReadingSeriesItemOverrideKey(item);
+
+            if (!itemId) return;
+
+            const overrideKind = getReadingSeriesOverrideKind(route.kind, item);
+            const existingOverrides = nextOverridesByKind[overrideKind] || loadPtvReadingSeriesOverrides(overrideKind);
+            const nextOverrides = {
+                ...existingOverrides,
+                [itemId]: {
+                    ...existingOverrides[itemId],
+                    ...override,
+                    itemId
+                }
+            };
+
+            nextOverridesByKind[overrideKind] = nextOverrides;
+            touchedKinds.add(overrideKind);
+            itemIds.push(itemId);
+        });
+
+        touchedKinds.forEach(kind => {
+            savePtvReadingSeriesOverrides(kind, nextOverridesByKind[kind] || {});
+        });
+        setSeriesOverridesByKind(nextOverridesByKind);
+        recordPtvEvent('render', 'reading-series-overrides-saved', {
+            itemCount: itemIds.length,
+            itemIds: itemIds.slice(0, 12),
+            routeKind: route.kind,
+            touchedKinds: Array.from(touchedKinds)
+        });
+    }, [route.kind, seriesOverridesByKind]);
+
+    const resetReadingSeriesOverrides = useCallback((items: PtvReadingItem[]) => {
+        if (!items.length) return;
+
+        const nextOverridesByKind: ReadingSeriesOverridesByKind = {
+            ...seriesOverridesByKind
+        };
+        const touchedKinds = new Set<PtvReadingRouteKind>();
+        const itemIds: string[] = [];
+
+        items.forEach(item => {
+            const itemId = getPtvReadingSeriesItemOverrideKey(item);
+
+            if (!itemId) return;
+
+            const overrideKind = getReadingSeriesOverrideKind(route.kind, item);
+            const existingOverrides = nextOverridesByKind[overrideKind] || loadPtvReadingSeriesOverrides(overrideKind);
+            const nextOverrides = {
+                ...existingOverrides
+            };
+
+            delete nextOverrides[itemId];
+            nextOverridesByKind[overrideKind] = nextOverrides;
+            touchedKinds.add(overrideKind);
+            itemIds.push(itemId);
+        });
+
+        touchedKinds.forEach(kind => {
+            savePtvReadingSeriesOverrides(kind, nextOverridesByKind[kind] || {});
+        });
+        setSeriesOverridesByKind(nextOverridesByKind);
+        recordPtvEvent('render', 'reading-series-overrides-reset', {
+            itemCount: itemIds.length,
+            itemIds: itemIds.slice(0, 12),
+            routeKind: route.kind,
+            touchedKinds: Array.from(touchedKinds)
+        });
+    }, [route.kind, seriesOverridesByKind]);
+
     const loadReadingData = useCallback((forceRefresh = false) => {
         const requestId = ++readingRequestIdRef.current;
         const isCurrentRequest = () => readingMountedRef.current && requestId === readingRequestIdRef.current;
@@ -2334,7 +2632,7 @@ export default function PiggieTvBooksPage() {
                     });
                 })
                 .catch(error => {
-                    const errorMessage = getReadingErrorMessage(error);
+                    const refreshErrorMessage = getReadingErrorMessage(error);
 
                     setHomeData(previous => previous.kind === route.kind ? {
                         ...previous,
@@ -2343,14 +2641,14 @@ export default function PiggieTvBooksPage() {
                             backgroundRefreshCompleted: false,
                             backgroundRefreshDurationMs: Number((performance.now() - refreshStartedAt).toFixed(1)),
                             backgroundRefreshStarted: true,
-                            refreshError: errorMessage
+                            refreshError: refreshErrorMessage
                         } : previous.cacheDiagnostics
                     } : previous);
                     recordPtvEvent('render', 'reading-page-error', {
-                        error: errorMessage,
+                        error: refreshErrorMessage,
                         kind: route.kind,
                         readingBackgroundRefreshCompleted: false,
-                        readingRefreshError: errorMessage,
+                        readingRefreshError: refreshErrorMessage,
                         stage: 'reading-shell-background-data'
                     });
                 });
@@ -2418,7 +2716,7 @@ export default function PiggieTvBooksPage() {
                     stage: 'reading-shell-data'
                 });
                 setLoading(false);
-        });
+            });
     }, [loadReadingLibraryIndex, recordReadingLoadMetrics, route.kind, route.view]);
 
     const retryReadingSection = useCallback((sectionId: string) => {
@@ -2555,6 +2853,10 @@ export default function PiggieTvBooksPage() {
         isAdmin,
         onAction: openAdminAction
     }), [canShowDebug, debugEnabled, isAdmin, openAdminAction]);
+
+    useEffect(() => {
+        setSeriesOverridesByKind(loadReadingSeriesOverridesForRoute(route.kind));
+    }, [route.kind]);
 
     useEffect(() => {
         readingMountedRef.current = true;
@@ -2700,13 +3002,29 @@ export default function PiggieTvBooksPage() {
                     />
                 );
             case 'library':
-                return <ReadingLibraryView homeData={homeData} routeKind={route.kind} />;
+                return (
+                    <ReadingLibraryView
+                        homeData={homeData}
+                        onSeriesOverrideChange={saveReadingSeriesOverrideUpdates}
+                        routeKind={route.kind}
+                        seriesOverrides={seriesOverrides}
+                    />
+                );
             case 'collections':
                 return <ReadingCollectionsView homeData={homeData} routeKind={route.kind} />;
             case 'item':
                 return <ItemDetailView detail={itemDetail} routeKind={route.kind} />;
             case 'series':
-                return <ReadingSeriesDetailView homeData={homeData} routeKind={route.kind} seriesId={route.id} />;
+                return (
+                    <ReadingSeriesDetailView
+                        homeData={homeData}
+                        onSeriesOverrideChange={saveReadingSeriesOverrideUpdates}
+                        onSeriesOverrideRemove={resetReadingSeriesOverrides}
+                        routeKind={route.kind}
+                        seriesId={route.id}
+                        seriesOverrides={seriesOverrides}
+                    />
+                );
             case 'home':
             default:
                 return <ReadingHomeView homeData={homeData} onRetrySection={retryReadingSection} routeKind={route.kind} />;
