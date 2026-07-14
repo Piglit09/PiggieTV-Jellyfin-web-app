@@ -59,6 +59,11 @@ public class PiggieTVPluginConfiguration : BasePluginConfiguration
     public GoogleBooksSettings GoogleBooksSettings { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets administrator Reading series corrections shared by every client.
+    /// </summary>
+    public ReadingSeriesOverrideSettings ReadingSeriesOverrides { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets Jellyseerr request integration settings.
     /// </summary>
     public SeerrSettings SeerrSettings { get; set; } = new();
@@ -114,6 +119,48 @@ public class PiggieTVPluginConfiguration : BasePluginConfiguration
 /// </summary>
 public sealed class PluginConfiguration : PiggieTVPluginConfiguration
 {
+}
+
+/// <summary>
+/// Server-persisted Reading series corrections grouped by Reading route kind.
+/// </summary>
+public sealed class ReadingSeriesOverrideSettings
+{
+    /// <summary>Gets or sets the persistence schema version.</summary>
+    public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>Gets or sets overrides indexed by route kind and Jellyfin item id.</summary>
+    public Dictionary<string, Dictionary<string, ReadingSeriesOverrideDefinition>> Routes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// One administrator-defined Reading series correction.
+/// </summary>
+public sealed class ReadingSeriesOverrideDefinition
+{
+    /// <summary>Gets or sets the preferred cover item id.</summary>
+    public string? CoverItemId { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the item is excluded from inferred grouping.</summary>
+    public bool? Excluded { get; set; }
+
+    /// <summary>Gets or sets the corrected issue number.</summary>
+    public double? IssueNumber { get; set; }
+
+    /// <summary>Gets or sets an explicit media classification.</summary>
+    public string? MediaKind { get; set; }
+
+    /// <summary>Gets or sets a stable administrator series key.</summary>
+    public string? SeriesKey { get; set; }
+
+    /// <summary>Gets or sets the corrected series title.</summary>
+    public string? SeriesTitle { get; set; }
+
+    /// <summary>Gets or sets the display year; it is not part of series identity.</summary>
+    public int? SeriesYear { get; set; }
+
+    /// <summary>Gets or sets the corrected volume number.</summary>
+    public double? VolumeNumber { get; set; }
 }
 
 /// <summary>

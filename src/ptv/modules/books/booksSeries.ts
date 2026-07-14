@@ -2,6 +2,11 @@ import type {
     PtvReadingItem,
     PtvReadingRouteKind
 } from './booksTypes';
+import {
+    normalizePtvReadingComparisonKey,
+    parsePtvReadingFilename,
+    type PtvReadingFilenameInfo
+} from './readingFilename';
 
 export type PtvReadingSeriesConfidence = 'explicit' | 'filename-high' | 'filename-low' | 'manual' | 'metadata' | 'provider';
 
@@ -40,6 +45,7 @@ export type PtvReadingSeriesOverride = Readonly<{
     excluded?: boolean;
     issueNumber?: number | null;
     itemId: string;
+    mediaKind?: 'book' | 'comic' | 'manga';
     seriesKey?: string;
     seriesTitle?: string;
     seriesYear?: number | null;
@@ -52,28 +58,18 @@ export type PtvReadingSeriesBuildOptions = Readonly<{
 
 function getBaseReadingTitle(item: PtvReadingItem) {
     const pathName = String(item.Path || '').split(/[\\/]/).pop() || '';
-    const withoutExtension = pathName.replace(/\.[a-z0-9]{2,5}$/i, '');
 
-    return String(item.Name || item.SortName || withoutExtension || '').trim();
+    return String(pathName || item.Name || item.SortName || '').trim();
 }
 
 function cleanSeriesCandidate(value: string) {
-    return String(value || '')
-        .replace(/\.[a-z0-9]{2,5}$/i, '')
-        .replace(/\[(?:[^[\]]*)\]/g, ' ')
-        .replace(/\((?:digital|empire|nahga|lucaz|getcomics|webrip|retail|scan|c2c|minutemen|dcp|hybrid)[^)]*\)/gi, ' ')
-        .replace(/\b(?:getcomics|getcomics\.info|readcomiconline|comicextra)\b.*$/i, ' ')
-        .replace(/_+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+    return parsePtvReadingFilename(value).seriesTitle;
 }
 
-function parseYear(value: string, item: PtvReadingItem) {
+function parseYear(parsedFilename: PtvReadingFilenameInfo, item: PtvReadingItem) {
     if (item.ProductionYear) return Number(item.ProductionYear);
 
-    const match = /\b((?:19|20)\d{2})\b/.exec(value);
-
-    return match ? Number(match[1]) : null;
+    return parsedFilename.year;
 }
 
 function parseNumber(value: string) {
@@ -82,27 +78,9 @@ function parseNumber(value: string) {
     return Number.isFinite(number) ? number : null;
 }
 
-function stripTrailingIssueDecorations(value: string) {
-    let nextValue = value;
-    // eslint-disable-next-line sonarjs/slow-regex -- Bounded title fragment, not untrusted bulk text.
-    const yearMatch = /\s+\((?:19|20)\d{2}\)/i.exec(nextValue);
-    const dashIndex = nextValue.indexOf(' - ');
-
-    if (yearMatch?.index !== undefined) {
-        nextValue = nextValue.slice(0, yearMatch.index);
-    }
-
-    if (dashIndex >= 0) {
-        nextValue = nextValue.slice(0, dashIndex);
-    }
-
-    return nextValue.replace(/\s+/g, ' ')
-        .trim();
-}
-
 function getExplicitSeriesTitle(item: PtvReadingItem) {
     const explicitValue = String(
-        (item as PtvReadingItem & { SeriesName?: string }).SeriesName
+        item.SeriesName
         || item.Album
         || item.CollectionName
         || ''
@@ -113,7 +91,7 @@ function getExplicitSeriesTitle(item: PtvReadingItem) {
 
 function getExplicitSeriesId(item: PtvReadingItem) {
     return String(
-        (item as PtvReadingItem & { SeriesId?: string }).SeriesId
+        item.SeriesId
         || item.ProviderIds?.ComicVineSeries
         || item.ProviderIds?.ComicVineVolume
         || item.ProviderIds?.GoogleBooksSeries
@@ -122,11 +100,11 @@ function getExplicitSeriesId(item: PtvReadingItem) {
     ).trim();
 }
 
-function getGroupingKey(source: string, title: string, year: number | null, explicitId = '') {
+function getGroupingKey(source: string, title: string, _year: number | null, explicitId = '') {
     if (explicitId) return `${source}:${normalizeSeriesKey(explicitId)}`;
 
     const key = normalizeSeriesKey(title) || 'series';
-    return `${source}:${key}:${year || 'unknown'}`;
+    return `${source}:${key}`;
 }
 
 function getManualGroupKey(title: string, year: number | null, seriesKey = '') {
@@ -143,9 +121,8 @@ function getItemVolumeNumber(item: PtvReadingItem) {
 
 function buildExplicitSeriesInfo(
     item: PtvReadingItem,
-    cleanedTitle: string,
+    parsedFilename: PtvReadingFilenameInfo,
     explicitSeriesTitle: string,
-    explicitSeriesId: string,
     year: number | null
 ) {
     const itemIndexNumber = parseNumber(String(item.IndexNumber || ''));
@@ -153,114 +130,100 @@ function buildExplicitSeriesInfo(
     if (!explicitSeriesTitle) return null;
 
     return {
-        confidence: explicitSeriesId ? 'provider' : 'explicit',
-        groupKey: getGroupingKey('explicit', explicitSeriesTitle, year, explicitSeriesId),
-        issueNumber: itemIndexNumber,
-        issueText: itemIndexNumber == null ? '' : String(item.IndexNumber),
+        confidence: 'explicit',
+        groupKey: getGroupingKey('explicit', explicitSeriesTitle, year),
+        issueNumber: itemIndexNumber ?? parsedFilename.issueNumber,
+        issueText: String(itemIndexNumber ?? parsedFilename.issueNumber ?? ''),
         seriesTitle: explicitSeriesTitle,
-        sortName: cleanedTitle,
-        volumeNumber: getItemVolumeNumber(item),
+        sortName: parsedFilename.cleanTitle,
+        volumeNumber: getItemVolumeNumber(item) ?? parsedFilename.volumeNumber,
         year
     } satisfies PtvReadingSeriesItemInfo;
 }
 
-function findNumberedSeriesTitle(value: string) {
-    const patterns = [
-        // eslint-disable-next-line sonarjs/slow-regex -- Bounded title fragment, not untrusted bulk text.
-        /\s+#\s*(\d+(?:\.\d+)?)(?:\b|$)/i,
-        // eslint-disable-next-line sonarjs/slow-regex -- Bounded title fragment, not untrusted bulk text.
-        /\s+(?:issue|chapter|ch)\s*(\d+(?:\.\d+)?)(?:\b|$)/i,
-        // eslint-disable-next-line sonarjs/slow-regex -- Bounded title fragment, not untrusted bulk text.
-        /\s+v(?:ol(?:ume)?)?\.?\s*(\d+(?:\.\d+)?)(?:\b|$)/i,
-        // eslint-disable-next-line sonarjs/slow-regex -- Bounded title fragment, not untrusted bulk text.
-        /\s+(\d{1,4}(?:\.\d+)?)(?:\s*\((?:19|20)\d{2}\))?$/i
-    ];
-
-    for (const pattern of patterns) {
-        const match = pattern.exec(value);
-        const matchIndex = match?.index ?? -1;
-        const issueText = match?.[1] || '';
-
-        if (matchIndex >= 0 && issueText) {
-            return {
-                issueText,
-                seriesTitle: stripTrailingIssueDecorations(value.slice(0, matchIndex))
-            };
-        }
-    }
-
-    return null;
-}
-
-function buildPatternSeriesInfo(
+function buildProviderSeriesInfo(
     item: PtvReadingItem,
-    cleanedTitle: string,
+    parsedFilename: PtvReadingFilenameInfo,
+    explicitSeriesTitle: string,
     explicitSeriesId: string,
     year: number | null
 ) {
-    const numberedSeries = findNumberedSeriesTitle(cleanedTitle);
-    const issueNumber = parseNumber(numberedSeries?.issueText || '');
+    if (!explicitSeriesId) return null;
 
-    if (!numberedSeries?.seriesTitle || issueNumber == null) return null;
-
-    const source = explicitSeriesId ? 'provider' : 'filename';
+    const itemIndexNumber = parseNumber(String(item.IndexNumber || ''));
+    const seriesTitle = explicitSeriesTitle || parsedFilename.seriesTitle || parsedFilename.cleanTitle;
 
     return {
-        confidence: explicitSeriesId ? 'provider' : 'filename-high',
-        groupKey: getGroupingKey(source, numberedSeries.seriesTitle, year, explicitSeriesId),
+        confidence: 'provider',
+        groupKey: getGroupingKey('provider', seriesTitle, year, explicitSeriesId),
+        issueNumber: itemIndexNumber ?? parsedFilename.issueNumber,
+        issueText: String(itemIndexNumber ?? parsedFilename.issueNumber ?? ''),
+        seriesTitle,
+        sortName: parsedFilename.cleanTitle,
+        volumeNumber: getItemVolumeNumber(item) ?? parsedFilename.volumeNumber,
+        year
+    } satisfies PtvReadingSeriesItemInfo;
+}
+
+function buildFilenameSeriesInfo(parsedFilename: PtvReadingFilenameInfo, year: number | null) {
+    if (parsedFilename.confidence === 'low') return null;
+    if (parsedFilename.issueNumber == null && parsedFilename.volumeNumber == null) return null;
+
+    const issueNumber = parsedFilename.issueNumber ?? parsedFilename.volumeNumber;
+
+    return {
+        confidence: 'filename-high',
+        groupKey: getGroupingKey('filename', parsedFilename.seriesTitle, year),
         issueNumber,
-        issueText: numberedSeries.issueText,
-        seriesTitle: numberedSeries.seriesTitle,
-        sortName: cleanedTitle,
-        volumeNumber: getItemVolumeNumber(item),
+        issueText: String(issueNumber ?? ''),
+        seriesTitle: parsedFilename.seriesTitle,
+        sortName: parsedFilename.cleanTitle,
+        volumeNumber: parsedFilename.volumeNumber,
         year
     } satisfies PtvReadingSeriesItemInfo;
 }
 
 function buildFallbackSeriesInfo(
     item: PtvReadingItem,
-    cleanedTitle: string,
-    rawTitle: string,
-    explicitSeriesId: string,
+    parsedFilename: PtvReadingFilenameInfo,
     year: number | null
 ) {
     const itemIndexNumber = parseNumber(String(item.IndexNumber || ''));
-    let confidence: PtvReadingSeriesItemInfo['confidence'] = 'metadata';
-    let source = 'metadata';
-
-    if (explicitSeriesId) {
-        confidence = 'provider';
-        source = 'provider';
-    } else if (itemIndexNumber == null) {
-        confidence = 'filename-low';
-        source = 'single';
-    }
-
-    const title = cleanedTitle || rawTitle;
+    const title = parsedFilename.cleanTitle || parsedFilename.rawName;
+    const itemIdentity = getPtvReadingSeriesItemOverrideKey(item) || title;
 
     return {
-        confidence,
-        groupKey: getGroupingKey(source, title, year, explicitSeriesId),
+        confidence: itemIndexNumber == null ? 'filename-low' : 'metadata',
+        groupKey: `single:${normalizeSeriesKey(itemIdentity) || 'item'}`,
         issueNumber: itemIndexNumber,
         issueText: itemIndexNumber == null ? '' : String(item.IndexNumber),
         seriesTitle: title,
         sortName: title,
-        volumeNumber: getItemVolumeNumber(item),
+        volumeNumber: getItemVolumeNumber(item) ?? parsedFilename.volumeNumber,
         year
-    };
+    } satisfies PtvReadingSeriesItemInfo;
 }
 
 function parseSeriesFromTitle(item: PtvReadingItem): PtvReadingSeriesItemInfo {
     const rawTitle = getBaseReadingTitle(item);
-    const cleanedTitle = cleanSeriesCandidate(rawTitle);
+    const parsedFilename = parsePtvReadingFilename(rawTitle);
     const explicitSeriesTitle = getExplicitSeriesTitle(item);
     const explicitSeriesId = getExplicitSeriesId(item);
-    const year = parseYear(cleanedTitle, item);
-    const explicitInfo = buildExplicitSeriesInfo(
+    const year = parseYear(parsedFilename, item);
+    const providerInfo = buildProviderSeriesInfo(
         item,
-        cleanedTitle,
+        parsedFilename,
         explicitSeriesTitle,
         explicitSeriesId,
+        year
+    );
+
+    if (providerInfo) return providerInfo;
+
+    const explicitInfo = buildExplicitSeriesInfo(
+        item,
+        parsedFilename,
+        explicitSeriesTitle,
         year
     );
 
@@ -268,24 +231,17 @@ function parseSeriesFromTitle(item: PtvReadingItem): PtvReadingSeriesItemInfo {
         return explicitInfo;
     }
 
-    const patternInfo = buildPatternSeriesInfo(item, cleanedTitle, explicitSeriesId, year);
+    const patternInfo = buildFilenameSeriesInfo(parsedFilename, year);
 
     if (patternInfo) {
         return patternInfo;
     }
 
-    return buildFallbackSeriesInfo(item, cleanedTitle, rawTitle, explicitSeriesId, year);
+    return buildFallbackSeriesInfo(item, parsedFilename, year);
 }
 
 function normalizeSeriesKey(value: string) {
-    return String(value || '')
-        .toLowerCase()
-        .normalize('NFKD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/&/g, ' and ')
-        .replace(/[^a-z0-9]+/g, '-')
-        // eslint-disable-next-line sonarjs/slow-regex -- Bounded normalized key fragment.
-        .replace(/(?:^-+)|(?:-+$)/g, '');
+    return normalizePtvReadingComparisonKey(value).replace(/\s+/g, '-');
 }
 
 export function normalizePtvReadingSeriesKey(value: string) {

@@ -9,6 +9,7 @@ namespace Jellyfin.Plugin.PiggieTV.Services;
 /// </summary>
 public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
 {
+    private const int MaxReadingSeriesOverridesPerRoute = 5000;
     private readonly ILogger<PtvPluginSettingsService> _logger;
 
     /// <summary>
@@ -105,6 +106,134 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         SaveConfiguration(configuration);
 
         return PtvPluginSettingsDto.FromConfiguration(configuration);
+    }
+
+    /// <inheritdoc />
+    public PtvReadingSeriesOverridesResponse GetReadingSeriesOverrides(string routeKind)
+    {
+        var normalizedRouteKind = NormalizeReadingRouteKind(routeKind);
+        var configuration = GetConfiguration();
+
+        configuration.ReadingSeriesOverrides ??= new ReadingSeriesOverrideSettings();
+        configuration.ReadingSeriesOverrides.Routes ??= new(StringComparer.OrdinalIgnoreCase);
+        configuration.ReadingSeriesOverrides.Routes.TryGetValue(normalizedRouteKind, out var storedOverrides);
+
+        return CreateReadingSeriesOverridesResponse(normalizedRouteKind, storedOverrides);
+    }
+
+    /// <inheritdoc />
+    public PtvReadingSeriesOverridesResponse SaveReadingSeriesOverrides(string routeKind, PtvReadingSeriesOverridesUpdate update)
+    {
+        var normalizedRouteKind = NormalizeReadingRouteKind(routeKind);
+        var configuration = GetConfiguration();
+        var sanitizedOverrides = SanitizeReadingSeriesOverrides(update.Overrides);
+
+        configuration.ReadingSeriesOverrides ??= new ReadingSeriesOverrideSettings();
+        configuration.ReadingSeriesOverrides.SchemaVersion = 1;
+        configuration.ReadingSeriesOverrides.Routes ??= new(StringComparer.OrdinalIgnoreCase);
+        configuration.ReadingSeriesOverrides.Routes[normalizedRouteKind] = sanitizedOverrides;
+        SaveConfiguration(configuration);
+
+        _logger.LogInformation(
+            "Saved PiggieTV Reading series overrides. RouteKind={RouteKind}; OverrideCount={OverrideCount}.",
+            normalizedRouteKind,
+            sanitizedOverrides.Count);
+
+        return CreateReadingSeriesOverridesResponse(normalizedRouteKind, sanitizedOverrides);
+    }
+
+    private static string NormalizeReadingRouteKind(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "books" => "books",
+            "comics" => "comics",
+            "manga" => "manga",
+            "reading" => "reading",
+            _ => throw new ArgumentException("Reading route kind must be books, comics, manga, or reading.", nameof(value))
+        };
+    }
+
+    private static Dictionary<string, ReadingSeriesOverrideDefinition> SanitizeReadingSeriesOverrides(
+        IReadOnlyDictionary<string, PtvReadingSeriesOverrideDto>? overrides)
+    {
+        var output = new Dictionary<string, ReadingSeriesOverrideDefinition>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in overrides ?? new Dictionary<string, PtvReadingSeriesOverrideDto>())
+        {
+            var itemId = CleanReadingOverrideText(entry.Key, 256);
+
+            if (string.IsNullOrWhiteSpace(itemId) || entry.Value is null || output.Count >= MaxReadingSeriesOverridesPerRoute)
+            {
+                continue;
+            }
+
+            output[itemId] = new ReadingSeriesOverrideDefinition
+            {
+                CoverItemId = CleanReadingOverrideText(entry.Value.CoverItemId, 256),
+                Excluded = entry.Value.Excluded,
+                IssueNumber = CleanReadingOverrideNumber(entry.Value.IssueNumber),
+                MediaKind = NormalizeReadingMediaKind(entry.Value.MediaKind),
+                SeriesKey = CleanReadingOverrideText(entry.Value.SeriesKey, 256),
+                SeriesTitle = CleanReadingOverrideText(entry.Value.SeriesTitle, 300),
+                SeriesYear = entry.Value.SeriesYear is >= 1000 and <= 3000 ? entry.Value.SeriesYear : null,
+                VolumeNumber = CleanReadingOverrideNumber(entry.Value.VolumeNumber)
+            };
+        }
+
+        return output;
+    }
+
+    private static PtvReadingSeriesOverridesResponse CreateReadingSeriesOverridesResponse(
+        string routeKind,
+        IReadOnlyDictionary<string, ReadingSeriesOverrideDefinition>? overrides)
+    {
+        return new PtvReadingSeriesOverridesResponse
+        {
+            RouteKind = routeKind,
+            SchemaVersion = 1,
+            Overrides = (overrides ?? new Dictionary<string, ReadingSeriesOverrideDefinition>())
+                .Take(MaxReadingSeriesOverridesPerRoute)
+                .ToDictionary(
+                    entry => entry.Key,
+                    entry => new PtvReadingSeriesOverrideDto
+                    {
+                        CoverItemId = entry.Value.CoverItemId,
+                        Excluded = entry.Value.Excluded,
+                        IssueNumber = entry.Value.IssueNumber,
+                        MediaKind = entry.Value.MediaKind,
+                        SeriesKey = entry.Value.SeriesKey,
+                        SeriesTitle = entry.Value.SeriesTitle,
+                        SeriesYear = entry.Value.SeriesYear,
+                        VolumeNumber = entry.Value.VolumeNumber
+                    },
+                    StringComparer.OrdinalIgnoreCase)
+        };
+    }
+
+    private static string? CleanReadingOverrideText(string? value, int maxLength)
+    {
+        var cleaned = value?.Trim();
+
+        if (string.IsNullOrWhiteSpace(cleaned)) return null;
+
+        return cleaned.Length <= maxLength ? cleaned : cleaned[..maxLength];
+    }
+
+    private static double? CleanReadingOverrideNumber(double? value)
+    {
+        return value is >= 0 and <= 100000 && double.IsFinite(value.Value) ? value : null;
+    }
+
+    private static string? NormalizeReadingMediaKind(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "book" => "book",
+            "comic" => "comic",
+            "manga" => "manga",
+            _ => null
+        };
     }
 
     private static PluginConfiguration GetConfiguration()

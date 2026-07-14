@@ -1,0 +1,333 @@
+.identifyDialog {
+    width: min(94vw, 1500px) !important;
+    max-width: min(94vw, 1500px) !important;
+    height: auto;
+    max-height: 92vh;
+    border: 1px solid rgb(151 115 255 / 35%);
+    border-radius: 18px;
+    overflow: hidden;
+
+    .formDialogHeader {
+        position: sticky;
+        z-index: 4;
+        top: 0;
+        min-height: 58px;
+        background: rgb(24 13 46 / 94%);
+        backdrop-filter: blur(18px);
+    }
+
+    .formDialogContent {
+        max-height: calc(92vh - 58px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    .dialogContentInner {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: none;
+        min-height: 0;
+        padding: clamp(18px, 2.4vw, 36px);
+    }
+
+    .identifySearchForm,
+    .identifyOptionsForm,
+    .identificationSearchResults {
+        box-sizing: border-box;
+        width: min(100%, 1320px);
+        margin: 0 auto;
+    }
+
+    .identifySearchForm {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 24px;
+        align-content: start;
+
+        > p,
+        > .fldPath,
+        > .identifyAdvancedFields,
+        > .formDialogFooter {
+            grid-column: 1 / -1;
+        }
+
+        .identifyReadingFields {
+            display: contents;
+        }
+    }
+
+    .identificationSearchResultList {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 20px;
+        max-height: calc(92vh - 190px);
+        padding: 4px 8px 28px 4px;
+        overflow: auto;
+        overscroll-behavior: contain;
+
+        .card {
+            width: 100% !important;
+            margin: 0;
+        }
+    }
+
+    .identifyOptionsForm {
+        padding-bottom: 76px;
+    }
+
+    .identifySelectedSummary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        align-items: center;
+        font-size: 1.08rem;
+    }
+
+    .identifyProviderDeck {
+        max-width: 78ch;
+        margin: 10px 0 0;
+        color: rgb(233 226 255 / 78%);
+    }
+
+    .identifyProviderBadge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 2px 9px;
+        border: 1px solid rgb(150 121 255 / 42%);
+        border-radius: 999px;
+        background: rgb(112 70 190 / 20%);
+        color: #f4efff;
+        font-size: 0.82rem;
+        font-weight: 700;
+    }
+
+    .identifyApplyStatus {
+        min-height: 24px;
+        margin: 14px 0;
+    }
+
+    .readingMetadataPreviewActions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 0 0 14px;
+    }
+
+    .identifyMetadataTable {
+        max-height: min(48vh, 620px);
+        overflow: hidden;
+        border: 1px solid rgb(255 255 255 / 13%);
+        border-radius: 12px;
+        background: rgb(9 5 18 / 34%);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    .identifyMetadataTableHeader,
+    .identifyMetadataRow {
+        display: grid;
+        grid-template-columns: 64px minmax(120px, 0.65fr) minmax(190px, 1.4fr) minmax(190px, 1.4fr);
+        gap: 12px;
+        align-items: start;
+        padding: 12px 14px;
+    }
+
+    .identifyMetadataTableHeader {
+        position: sticky;
+        z-index: 2;
+        top: 0;
+        background: rgb(43 25 77 / 96%);
+        color: rgb(233 226 255 / 72%);
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .identifyMetadataRow {
+        border-top: 1px solid rgb(255 255 255 / 8%);
+
+        &.is-changed {
+            background: rgb(133 83 224 / 6%);
+        }
+    }
+
+    .identifyMetadataToggle {
+        display: flex;
+        justify-content: center;
+        min-height: 34px;
+    }
+
+    .identifyMetadataLabel {
+        padding-top: 7px;
+    }
+
+    .identifyMetadataValue {
+        min-width: 0;
+        padding-top: 7px;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+    }
+
+    .identifyMetadataEmpty {
+        color: rgb(233 226 255 / 45%);
+        font-style: italic;
+    }
+
+    .identifyMetadataWarning {
+        display: block;
+        margin-top: 6px;
+        color: #ffd58c;
+        line-height: 1.35;
+    }
+
+    .identifyArtworkComparison {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(180px, 280px)) minmax(240px, 1fr);
+        gap: 20px;
+        align-items: end;
+        margin-top: 18px;
+        padding: 16px;
+        border: 1px solid rgb(255 255 255 / 13%);
+        border-radius: 12px;
+        background: rgb(9 5 18 / 34%);
+
+        > div > span {
+            display: block;
+            margin-bottom: 8px;
+            color: rgb(233 226 255 / 70%);
+            font-weight: 700;
+        }
+
+        img,
+        .identifyCoverPlaceholder {
+            width: 100%;
+            max-width: 210px;
+            aspect-ratio: 2 / 3;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+
+        .identifyCoverPlaceholder {
+            display: grid;
+            place-items: center;
+            box-sizing: border-box;
+            padding: 16px;
+            border: 1px dashed rgb(255 255 255 / 20%);
+            color: rgb(233 226 255 / 50%);
+            text-align: center;
+        }
+    }
+
+    .identifyArtworkToggle {
+        align-self: center;
+
+        small {
+            display: block;
+            margin-top: 6px;
+            color: #ffd58c;
+        }
+    }
+
+    .identifyProviderDetails {
+        margin: 18px 0;
+        padding: 12px 14px;
+        border: 1px solid rgb(255 255 255 / 11%);
+        border-radius: 10px;
+        overflow-wrap: anywhere;
+    }
+
+    .identifyProviderDetail {
+        display: grid;
+        grid-template-columns: minmax(110px, 0.35fr) minmax(180px, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        margin-top: 10px;
+
+        code {
+            overflow-wrap: anywhere;
+            color: rgb(233 226 255 / 74%);
+        }
+    }
+
+    .identifyOptionsForm > .formDialogFooter,
+    .identifySearchForm > .formDialogFooter {
+        position: sticky;
+        z-index: 3;
+        bottom: 0;
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+        margin-top: 18px;
+        padding: 12px 0;
+        background: linear-gradient(180deg, transparent, rgb(24 13 46 / 98%) 32%);
+    }
+}
+
+@media (max-width: 700px) {
+    .identifyDialog {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+
+        .dialogContentInner {
+            padding: 14px;
+        }
+
+        .identifySearchForm {
+            display: block;
+        }
+
+        .identificationSearchResultList {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            max-height: calc(100dvh - 180px);
+        }
+
+        .identifyMetadataTableHeader {
+            display: none;
+        }
+
+        .identifyMetadataRow {
+            grid-template-columns: 44px minmax(0, 1fr);
+            gap: 8px 10px;
+
+            .identifyMetadataValue {
+                grid-column: 2;
+            }
+
+            .identifyMetadataValue::before {
+                display: block;
+                margin-bottom: 3px;
+                color: rgb(233 226 255 / 50%);
+                font-size: 0.72rem;
+                text-transform: uppercase;
+            }
+
+            .identifyMetadataValue:nth-of-type(1)::before {
+                content: 'Current';
+            }
+
+            .identifyMetadataValue:nth-of-type(2)::before {
+                content: 'Proposed';
+            }
+        }
+
+        .identifyArtworkComparison {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+
+            .identifyArtworkToggle {
+                grid-column: 1 / -1;
+            }
+        }
+
+        .identifyProviderDetail {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    }
+}

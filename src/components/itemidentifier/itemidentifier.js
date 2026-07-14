@@ -24,18 +24,24 @@ import template from './itemidentifier.template.html';
 import datetime from '../../scripts/datetime';
 import { recordPtvEvent } from '../../ptv/core/observability';
 import {
+    buildReadingMetadataPreview,
     buildRemoteSearchPayload,
     createMetadataSearchResultViewModel,
     dedupeExternalIdInfos,
+    getReadingIdentifyInfo,
     getReadingIdentifyName,
+    getSafeReadingProviderLink,
     getRemoteSearchApplyPayload,
     getRemoteSearchResponseShape,
     hasRemoteSearchProviderIds,
     normalizeProviderKey,
+    normalizeReadingMetadataCandidate,
     normalizeRemoteProviderIds,
     normalizeRemoteSearchResultForApply,
-    normalizeRemoteSearchResults
+    normalizeRemoteSearchResults,
+    rankMetadataSearchResults
 } from './itemidentifierUtils';
+import './itemidentifier.scss';
 
 const enableFocusTransform = !browser.slow && !browser.edge;
 const IDENTIFY_SEARCH_SOFT_TIMEOUT_MS = 5000;
@@ -50,6 +56,7 @@ let currentReject;
 let hasChanges = false;
 let currentSearchResult;
 let currentSearchRequestId = 0;
+let currentReadingMetadataPreview = [];
 
 function getApiClient() {
     return ServerConnections.getApiClient(currentServerId);
@@ -88,13 +95,11 @@ function getReadingPersonName(item, types) {
 function getReadingLookupIssue(item) {
     if (item?.IndexNumber) return item.IndexNumber;
 
-    const match = /(?:#|issue|vol(?:ume)?\.?)\s*(\d+)/i.exec(String(item?.Name || ''));
-
-    return match ? match[1] : '';
+    return getReadingIdentifyInfo(item).IndexNumber ?? '';
 }
 
 function getReadingLookupSeries(item) {
-    return item?.SeriesName || item?.Album || item?.CollectionName || '';
+    return getReadingIdentifyInfo(item).SeriesName;
 }
 
 function getReadingLookupIsbn(item) {
@@ -106,17 +111,14 @@ function getReadingLookupIsbn(item) {
 function getReadingLookupInfo(item) {
     if (!['Book', 'BoxSet', 'Photo'].includes(item?.Type)) return {};
 
-    const issueNumber = getReadingLookupIssue(item);
+    const readingInfo = getReadingIdentifyInfo(item);
 
     return {
+        ...readingInfo,
         Author: getReadingPersonName(item, ['Author', 'Writer', 'Creator']),
         ISBN: getReadingLookupIsbn(item),
-        IndexNumber: issueNumber ? Number(issueNumber) || issueNumber : null,
-        Name: getReadingIdentifyName(item) || item?.Name || '',
-        Path: item?.Path || '',
         ProviderIds: normalizeRemoteProviderIds(item?.ProviderIds),
-        SeriesName: getReadingLookupSeries(item),
-        Year: item?.ProductionYear || null
+        Year: item?.ProductionYear || readingInfo.Year || null
     };
 }
 
@@ -503,7 +505,7 @@ function searchNativeGoogleBooks(apiClient, lookupInfo, providerIdEntries) {
 
     return withIdentificationHardTimeout(apiClient.getJSON(requestUrl), IDENTIFY_SEARCH_HARD_TIMEOUT_MS)
         .then(response => {
-            const results = normalizeRemoteSearchResults(response).map(result => normalizeRemoteSearchResultForApply(result));
+            const results = normalizeRemoteSearchResults(response).map(result => normalizeReadingMetadataCandidate(result, lookupInfo));
 
             recordIdentificationDiagnostic('ptv-reading-identify-native-googlebooks-search-completed', {
                 durationMs: Number((performance.now() - startedAt).toFixed(1)),
@@ -595,20 +597,28 @@ function resolveDetailedRemoteSearchResult(apiClient, itemId, applyResult) {
         dataType: 'json'
 
     }), IDENTIFY_SEARCH_HARD_TIMEOUT_MS).then(response => {
-        const detailedResults = normalizeRemoteSearchResults(response).map(result => normalizeRemoteSearchResultForApply(result));
+        const searchInfo = getReadingLookupInfo(currentItem);
+        const detailedResults = normalizeRemoteSearchResults(response).map(result => (
+            isBookIdentifyLookup() ?
+                normalizeReadingMetadataCandidate(result, searchInfo) :
+                normalizeRemoteSearchResultForApply(result)
+        ));
         const detailedResult = detailedResults.find(result => getDetailedResultProviderMatch(result, applyResult)) || detailedResults[0];
         const mergedResult = detailedResult ? mergeRemoteSearchApplyResults(applyResult, detailedResult) : applyResult;
+        const normalizedMergedResult = isBookIdentifyLookup() ?
+            normalizeReadingMetadataCandidate(mergedResult, searchInfo) :
+            mergedResult;
 
         recordIdentificationDiagnostic('ptv-reading-identify-detail-lookup-completed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
             endpoint: redactDiagnosticUrl(requestUrl),
-            hasDetailedOverview: Boolean(mergedResult.Overview),
-            providerIds: mergedResult.ProviderIds || {},
+            hasDetailedOverview: Boolean(normalizedMergedResult.Overview),
+            providerIds: normalizedMergedResult.ProviderIds || {},
             resultCount: detailedResults.length,
-            searchProviderName: mergedResult.SearchProviderName || ''
+            searchProviderName: normalizedMergedResult.SearchProviderName || ''
         });
 
-        return mergedResult;
+        return normalizedMergedResult;
     }, error => {
         recordIdentificationDiagnostic('ptv-reading-identify-detail-lookup-failed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
@@ -752,7 +762,11 @@ function getResultStudios(applyResult) {
     ]);
 }
 
-function getExpectedApplyFields(item, applyResult) {
+function shouldApplyMetadataField(selectedFields, field) {
+    return !Array.isArray(selectedFields) || selectedFields.includes(field);
+}
+
+function getExpectedApplyFields(item, applyResult, selectedFields = null) {
     const resultOverview = cleanOverviewText(applyResult?.Overview);
     const resultGenres = getResultTextList(applyResult, 'Genres', 'GenreItems');
     const resultPeople = getResultPeople(applyResult);
@@ -760,44 +774,60 @@ function getExpectedApplyFields(item, applyResult) {
     const resultTags = getResultTextList(applyResult, 'Tags');
     const expected = [];
 
-    if (!isMetadataFieldLocked(item, 'Name') && String(applyResult?.Name || '').trim()) {
+    if (shouldApplyMetadataField(selectedFields, 'Name') && !isMetadataFieldLocked(item, 'Name') && String(applyResult?.Name || '').trim()) {
         expected.push('title');
     }
 
-    if (!isMetadataFieldLocked(item, 'Overview') && resultOverview) {
+    if (shouldApplyMetadataField(selectedFields, 'OriginalTitle') && !isMetadataFieldLocked(item, 'OriginalTitle') && String(applyResult?.OriginalTitle || '').trim()) {
+        expected.push('originalTitle');
+    }
+
+    if (shouldApplyMetadataField(selectedFields, 'SeriesName') && !isMetadataFieldLocked(item, 'SeriesName') && String(applyResult?.SeriesName || '').trim()) {
+        expected.push('series');
+    }
+
+    if (shouldApplyMetadataField(selectedFields, 'IndexNumber') && !isMetadataFieldLocked(item, 'IndexNumber') && applyResult?.IndexNumber != null) {
+        expected.push('volumeIssue');
+    }
+
+    if (shouldApplyMetadataField(selectedFields, 'Overview') && !isMetadataFieldLocked(item, 'Overview') && resultOverview) {
         expected.push('overview');
     }
 
-    if (!isMetadataFieldLocked(item, 'Genres') && resultGenres.length) {
+    if (shouldApplyMetadataField(selectedFields, 'Genres') && !isMetadataFieldLocked(item, 'Genres') && resultGenres.length) {
         expected.push('genres');
     }
 
-    if (!isMetadataFieldLocked(item, 'People') && resultPeople.length) {
+    if (shouldApplyMetadataField(selectedFields, 'People') && !isMetadataFieldLocked(item, 'People') && resultPeople.length) {
         expected.push('people');
     }
 
-    if (!isMetadataFieldLocked(item, 'Studios') && resultStudios.length) {
+    if (shouldApplyMetadataField(selectedFields, 'Studios') && !isMetadataFieldLocked(item, 'Studios') && resultStudios.length) {
         expected.push('studios');
     }
 
-    if (!isMetadataFieldLocked(item, 'Tags') && resultTags.length) {
+    if (shouldApplyMetadataField(selectedFields, 'Tags') && !isMetadataFieldLocked(item, 'Tags') && resultTags.length) {
         expected.push('tags');
     }
 
-    if (Number(applyResult?.ProductionYear || 0) && !isMetadataFieldLocked(item, 'ProductionYear')) {
+    if (shouldApplyMetadataField(selectedFields, 'ProductionYear') && Number(applyResult?.ProductionYear || 0) && !isMetadataFieldLocked(item, 'ProductionYear')) {
         expected.push('year');
     }
 
-    if (String(applyResult?.PremiereDate || '').trim() && !isMetadataFieldLocked(item, 'PremiereDate')) {
+    if (shouldApplyMetadataField(selectedFields, 'PremiereDate') && String(applyResult?.PremiereDate || '').trim() && !isMetadataFieldLocked(item, 'PremiereDate')) {
         expected.push('premiereDate');
+    }
+
+    if (shouldApplyMetadataField(selectedFields, 'ProviderIds') && hasRemoteSearchProviderIds(applyResult)) {
+        expected.push('providerIds');
     }
 
     return expected;
 }
 
-function getApplyPersistenceReport(item, applyResult) {
+function getApplyPersistenceReport(item, applyResult, selectedFields = null) {
     const providerLinked = getAppliedProviderIdMatches(item, applyResult);
-    const expected = getExpectedApplyFields(item, applyResult);
+    const expected = getExpectedApplyFields(item, applyResult, selectedFields);
     const applied = [];
     const missing = [];
     const resultOverview = cleanOverviewText(applyResult?.Overview);
@@ -813,6 +843,9 @@ function getApplyPersistenceReport(item, applyResult) {
     }
 
     check('title', String(item?.Name || '').trim() === String(applyResult?.Name || '').trim());
+    check('originalTitle', String(item?.OriginalTitle || '').trim() === String(applyResult?.OriginalTitle || '').trim());
+    check('series', String(item?.SeriesName || '').trim() === String(applyResult?.SeriesName || '').trim());
+    check('volumeIssue', Number(item?.IndexNumber) === Number(applyResult?.IndexNumber));
     check('overview', !resultOverview || (cleanOverviewText(item?.Overview) === resultOverview && !hasHtmlMarkup(item?.Overview)));
     check('genres', resultGenres.some(genre => (item?.Genres || []).some(itemGenre => normalizeProviderKey(itemGenre) === normalizeProviderKey(genre))));
     check('people', resultPeople.some(person => (item?.People || []).some(itemPerson => normalizeProviderKey(itemPerson?.Name) === normalizeProviderKey(person.Name))));
@@ -820,6 +853,7 @@ function getApplyPersistenceReport(item, applyResult) {
     check('tags', resultTags.some(tag => (item?.Tags || []).some(itemTag => normalizeProviderKey(itemTag) === normalizeProviderKey(tag))));
     check('year', Number(item?.ProductionYear || 0) === Number(applyResult?.ProductionYear || 0));
     check('premiereDate', Boolean(item?.PremiereDate));
+    check('providerIds', providerLinked);
 
     return {
         applied,
@@ -829,7 +863,7 @@ function getApplyPersistenceReport(item, applyResult) {
     };
 }
 
-function getMetadataUpdateItem(item, applyResult) {
+function getMetadataUpdateItem(item, applyResult, selectedFields = null) {
     const resultOverview = cleanOverviewText(applyResult.Overview);
     const resultYear = Number(applyResult.ProductionYear || 0);
     const lockedFields = Array.isArray(item.LockedFields) ? item.LockedFields : [];
@@ -840,9 +874,9 @@ function getMetadataUpdateItem(item, applyResult) {
     const itemPeople = Array.isArray(item.People) ? item.People : [];
     const itemStudios = normalizeUpdateStudios(item.Studios);
     const itemTags = Array.isArray(item.Tags) ? item.Tags : [];
-    const people = isMetadataFieldLocked(item, 'People') || !resultPeople.length ? itemPeople : resultPeople;
-    const studios = isMetadataFieldLocked(item, 'Studios') || !resultStudios.length ? itemStudios : resultStudios;
-    const tags = isMetadataFieldLocked(item, 'Tags') ? itemTags : getUniqueTextList([
+    const people = !shouldApplyMetadataField(selectedFields, 'People') || isMetadataFieldLocked(item, 'People') || !resultPeople.length ? itemPeople : resultPeople;
+    const studios = !shouldApplyMetadataField(selectedFields, 'Studios') || isMetadataFieldLocked(item, 'Studios') || !resultStudios.length ? itemStudios : resultStudios;
+    const tags = !shouldApplyMetadataField(selectedFields, 'Tags') || isMetadataFieldLocked(item, 'Tags') ? itemTags : getUniqueTextList([
         ...resultTags,
         ...itemTags
     ]);
@@ -859,26 +893,27 @@ function getMetadataUpdateItem(item, applyResult) {
         DateCreated: item.DateCreated || null,
         EndDate: item.EndDate || null,
         ForcedSortName: item.ForcedSortName || '',
-        Genres: isMetadataFieldLocked(item, 'Genres') ? item.Genres || [] : getUniqueTextList([
+        Genres: !shouldApplyMetadataField(selectedFields, 'Genres') || isMetadataFieldLocked(item, 'Genres') ? item.Genres || [] : getUniqueTextList([
             ...(resultGenres.length ? resultGenres : []),
             ...(Array.isArray(item.Genres) ? item.Genres : [])
         ]),
         Id: item.Id,
-        IndexNumber: isMetadataFieldLocked(item, 'IndexNumber') ? item.IndexNumber ?? null : applyResult.IndexNumber ?? item.IndexNumber ?? null,
+        IndexNumber: !shouldApplyMetadataField(selectedFields, 'IndexNumber') || isMetadataFieldLocked(item, 'IndexNumber') ? item.IndexNumber ?? null : applyResult.IndexNumber ?? item.IndexNumber ?? null,
         LockData: Boolean(item.LockData),
         LockedFields: lockedFields,
-        Name: isMetadataFieldLocked(item, 'Name') ? item.Name || '' : applyResult.Name || item.Name || currentItem?.Name || '',
+        Name: !shouldApplyMetadataField(selectedFields, 'Name') || isMetadataFieldLocked(item, 'Name') ? item.Name || '' : applyResult.Name || item.Name || currentItem?.Name || '',
         OfficialRating: item.OfficialRating || '',
-        OriginalTitle: isMetadataFieldLocked(item, 'OriginalTitle') ? item.OriginalTitle || '' : applyResult.OriginalTitle || item.OriginalTitle || '',
-        Overview: isMetadataFieldLocked(item, 'Overview') ? item.Overview || '' : resultOverview || item.Overview || '',
-        ParentIndexNumber: isMetadataFieldLocked(item, 'ParentIndexNumber') ? item.ParentIndexNumber ?? null : applyResult.ParentIndexNumber ?? item.ParentIndexNumber ?? null,
+        OriginalTitle: !shouldApplyMetadataField(selectedFields, 'OriginalTitle') || isMetadataFieldLocked(item, 'OriginalTitle') ? item.OriginalTitle || '' : applyResult.OriginalTitle || item.OriginalTitle || '',
+        Overview: !shouldApplyMetadataField(selectedFields, 'Overview') || isMetadataFieldLocked(item, 'Overview') ? item.Overview || '' : resultOverview || item.Overview || '',
+        ParentIndexNumber: !shouldApplyMetadataField(selectedFields, 'IndexNumber') || isMetadataFieldLocked(item, 'ParentIndexNumber') ? item.ParentIndexNumber ?? null : applyResult.ParentIndexNumber ?? item.ParentIndexNumber ?? null,
         People: people,
         PreferredMetadataCountryCode: item.PreferredMetadataCountryCode || '',
         PreferredMetadataLanguage: item.PreferredMetadataLanguage || '',
-        PremiereDate: isMetadataFieldLocked(item, 'PremiereDate') ? item.PremiereDate || null : applyResult.PremiereDate || item.PremiereDate || null,
-        ProductionYear: isMetadataFieldLocked(item, 'ProductionYear') ? item.ProductionYear || null : resultYear || item.ProductionYear || null,
-        ProviderIds: mergeProviderIds(item.ProviderIds, applyResult.ProviderIds),
+        PremiereDate: !shouldApplyMetadataField(selectedFields, 'PremiereDate') || isMetadataFieldLocked(item, 'PremiereDate') ? item.PremiereDate || null : applyResult.PremiereDate || item.PremiereDate || null,
+        ProductionYear: !shouldApplyMetadataField(selectedFields, 'ProductionYear') || isMetadataFieldLocked(item, 'ProductionYear') ? item.ProductionYear || null : resultYear || item.ProductionYear || null,
+        ProviderIds: shouldApplyMetadataField(selectedFields, 'ProviderIds') ? mergeProviderIds(item.ProviderIds, applyResult.ProviderIds) : item.ProviderIds || {},
         RunTimeTicks: item.RunTimeTicks || null,
+        SeriesName: !shouldApplyMetadataField(selectedFields, 'SeriesName') || isMetadataFieldLocked(item, 'SeriesName') ? item.SeriesName || '' : applyResult.SeriesName || item.SeriesName || '',
         Status: item.Status || '',
         Studios: studios,
         Tags: tags
@@ -898,13 +933,13 @@ function shouldPersistAppliedResultFields(item, applyResult) {
     return !getAppliedProviderIdMatches(item, applyResult);
 }
 
-function persistAppliedResultFields(apiClient, item, applyResult) {
-    if (!apiClient?.updateItem || !item?.Id || !shouldPersistAppliedResultFields(item, applyResult)) {
+function persistAppliedResultFields(apiClient, item, applyResult, selectedFields = null, force = false) {
+    if (!apiClient?.updateItem || !item?.Id || (!force && !shouldPersistAppliedResultFields(item, applyResult))) {
         return Promise.resolve(item);
     }
 
     const userId = apiClient.getCurrentUserId?.();
-    const updateItem = getMetadataUpdateItem(item, applyResult);
+    const updateItem = getMetadataUpdateItem(item, applyResult, selectedFields);
     const startedAt = performance.now();
 
     recordIdentificationDiagnostic('ptv-reading-identify-applied-fields-save-started', {
@@ -924,12 +959,12 @@ function persistAppliedResultFields(apiClient, item, applyResult) {
         });
 
         if (!userId || !apiClient.getItem) {
-            return mergeAppliedResultFallback(updateItem, applyResult);
+            return Array.isArray(selectedFields) ? updateItem : mergeAppliedResultFallback(updateItem, applyResult);
         }
 
         return apiClient.getItem(userId, updateItem.Id)
-            .then(refreshedItem => mergeAppliedResultFallback(refreshedItem, applyResult))
-            .catch(() => mergeAppliedResultFallback(updateItem, applyResult));
+            .then(refreshedItem => Array.isArray(selectedFields) ? refreshedItem : mergeAppliedResultFallback(refreshedItem, applyResult))
+            .catch(() => Array.isArray(selectedFields) ? updateItem : mergeAppliedResultFallback(updateItem, applyResult));
     }, error => {
         recordIdentificationDiagnostic('ptv-reading-identify-applied-fields-save-failed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
@@ -937,6 +972,8 @@ function persistAppliedResultFields(apiClient, item, applyResult) {
             itemId: updateItem.Id,
             providerIds: updateItem.ProviderIds || {}
         });
+
+        if (force) throw error;
 
         return item;
     });
@@ -1234,7 +1271,8 @@ function searchForIdentificationResults(page) {
             status: results.length || (!jellyfinSearch.error && !googleBooksSearch.error) ? 'success' : 'error'
         });
         showIdentificationSearchResults(page, results, {
-            responseShape: `${jellyfinSearch.responseShape};googlebooks:${googleBooksSearch.responseShape}`
+            responseShape: `${jellyfinSearch.responseShape};googlebooks:${googleBooksSearch.responseShape}`,
+            searchInfo: lookupRequest.SearchInfo
         });
     }, error => {
         if (currentSearchRequestId !== requestId) return;
@@ -1258,7 +1296,9 @@ function searchForIdentificationResults(page) {
 
 function showIdentificationSearchResults(page, results, options = {}) {
     const identificationSearchResults = page.querySelector('.identificationSearchResults');
-    const resultViewModels = results.map((result, index) => createMetadataSearchResultViewModel(result, index));
+    const resultViewModels = isBookIdentifyLookup() ?
+        rankMetadataSearchResults(results, options.searchInfo || getReadingLookupInfo(currentItem)) :
+        results.map((result, index) => createMetadataSearchResultViewModel(result, index));
 
     identificationSearchResults.classList.remove('hide');
     page.querySelector('.identifyOptionsForm').classList.add('hide');
@@ -1321,52 +1361,178 @@ function finishFindNewDialog(dlg, identifyResult) {
     dialogHelper.close(dlg);
 }
 
+function getCurrentPrimaryImageUrl(apiClient) {
+    const tag = currentItem?.ImageTags?.Primary || currentItem?.PrimaryImageTag;
+
+    if (!tag || !currentItem?.Id || !apiClient?.getImageUrl) return '';
+
+    return apiClient.getImageUrl(currentItem.Id, {
+        maxHeight: 420,
+        maxWidth: 280,
+        tag,
+        type: 'Primary'
+    });
+}
+
+function getMetadataPreviewValueHtml(value, fieldKey) {
+    if (!value) return '<span class="identifyMetadataEmpty">Not set</span>';
+
+    if (fieldKey === 'ProviderIds') {
+        const labels = String(value).split('\n').map(line => line.split(':')[0]).filter(Boolean);
+
+        return labels.map(label => `<span class="identifyProviderBadge">${escapeHtml(label)}</span>`).join(' ') || '<span class="identifyMetadataEmpty">Not set</span>';
+    }
+
+    const maxLength = fieldKey === 'Overview' ? 600 : 240;
+    const text = String(value).slice(0, maxLength);
+
+    return `<span>${escapeHtml(text)}${String(value).length > maxLength ? '…' : ''}</span>`;
+}
+
+function getReadingMetadataPreviewHtml(preview, applyResult, apiClient) {
+    const metadataRows = preview.filter(field => field.key !== 'PrimaryImage');
+    const imageField = preview.find(field => field.key === 'PrimaryImage');
+    const currentImageUrl = getCurrentPrimaryImageUrl(apiClient);
+    const proposedImageUrl = String(applyResult.ImageUrl || applyResult.imageUrl || '').trim();
+    const providerDetails = Object.entries(applyResult.ProviderIds || {}).map(([key, value]) => {
+        const providerUrl = getSafeReadingProviderLink(key, value);
+        const label = escapeHtml(key);
+        const valueHtml = escapeHtml(String(value).slice(0, 300));
+        const linkHtml = providerUrl ? `<a href="${escapeHtml(providerUrl)}" target="_blank" rel="noopener noreferrer">Open provider</a>` : '';
+
+        return `<div class="identifyProviderDetail"><strong>${label}</strong><code>${valueHtml}</code>${linkHtml}</div>`;
+    }).join('');
+    let html = '<div class="identifyMetadataTable" role="table" aria-label="Current and proposed metadata">';
+    html += '<div class="identifyMetadataTableHeader" role="row"><span>Apply</span><span>Field</span><span>Current Jellyfin value</span><span>Proposed provider value</span></div>';
+
+    metadataRows.forEach(field => {
+        const disabled = !field.changed || !field.proposedValue;
+        const warningHtml = field.warning ? `<small class="identifyMetadataWarning">${escapeHtml(field.warning)}</small>` : '';
+        html += `<div class="identifyMetadataRow${field.changed ? ' is-changed' : ''}" role="row">`;
+        html += `<label class="identifyMetadataToggle" title="Apply ${escapeHtml(field.label)}"><input type="checkbox" is="emby-checkbox" class="readingMetadataField" data-metadata-field="${escapeHtml(field.key)}"${field.selected ? ' checked' : ''}${disabled ? ' disabled' : ''} /><span class="visually-hidden">Apply ${escapeHtml(field.label)}</span></label>`;
+        html += `<strong class="identifyMetadataLabel">${escapeHtml(field.label)}</strong>`;
+        html += `<div class="identifyMetadataValue">${getMetadataPreviewValueHtml(field.currentValue, field.key)}</div>`;
+        html += `<div class="identifyMetadataValue">${getMetadataPreviewValueHtml(field.proposedValue, field.key)}${warningHtml}</div>`;
+        html += '</div>';
+    });
+
+    html += '</div>';
+    html += '<section class="identifyArtworkComparison" aria-label="Primary image comparison">';
+    html += '<div><span>Current cover</span>';
+    html += currentImageUrl ? `<img src="${escapeHtml(currentImageUrl)}" alt="Current cover" />` : '<div class="identifyCoverPlaceholder">No current cover</div>';
+    html += '</div><div><span>Proposed cover</span>';
+    html += proposedImageUrl ? `<img src="${escapeHtml(proposedImageUrl)}" alt="Proposed cover" />` : '<div class="identifyCoverPlaceholder">No proposed cover</div>';
+    html += '</div>';
+    const imageChecked = imageField?.selected ? ' checked' : '';
+    const imageDisabled = proposedImageUrl ? '' : ' disabled';
+    const imageWarning = imageField?.warning ? `<small>${escapeHtml(imageField.warning)}</small>` : '';
+    html += `<label class="checkboxContainer identifyArtworkToggle"><input type="checkbox" is="emby-checkbox" id="chkIdentifyReplaceImages" class="readingMetadataField" data-metadata-field="PrimaryImage"${imageChecked}${imageDisabled} /><span>Replace existing primary image</span>${imageWarning}</label>`;
+    html += '</section>';
+
+    if (providerDetails) {
+        html += `<details class="identifyProviderDetails"><summary>Provider details</summary>${providerDetails}</details>`;
+    }
+
+    return html;
+}
+
+function updateReadingApplyButton(page) {
+    const hasSelection = Array.from(page.querySelectorAll('.readingMetadataField')).some(input => input.checked && !input.disabled);
+
+    setApplySubmitDisabled(page, !hasSelection || !hasRemoteSearchProviderIds(currentSearchResult));
+}
+
+function bindReadingMetadataPreviewActions(page) {
+    page.querySelectorAll('.readingMetadataField').forEach(input => {
+        input.addEventListener('change', () => updateReadingApplyButton(page));
+    });
+
+    page.querySelector('.btnSelectSafeChanges')?.addEventListener('click', () => {
+        page.querySelectorAll('.readingMetadataField').forEach(input => {
+            const field = currentReadingMetadataPreview.find(candidate => candidate.key === input.dataset.metadataField);
+
+            input.checked = Boolean(field?.safe) && !input.disabled;
+        });
+        updateReadingApplyButton(page);
+    });
+
+    page.querySelector('.btnClearMetadataSelections')?.addEventListener('click', () => {
+        page.querySelectorAll('.readingMetadataField').forEach(input => {
+            input.checked = false;
+        });
+        updateReadingApplyButton(page);
+    });
+}
+
+function renderIdentifyOptions(page, normalizedResult) {
+    const apiClient = getApiClient();
+    const lines = [];
+    const providerName = normalizedResult.SearchProviderName || 'Metadata provider';
+
+    currentSearchResult = normalizedResult;
+    lines.push(`<strong>${escapeHtml(normalizedResult.Name || 'Selected metadata')}</strong>`);
+
+    if (normalizedResult.ProductionYear) {
+        lines.push(escapeHtml(datetime.toLocaleString(normalizedResult.ProductionYear, { useGrouping: false })));
+    }
+
+    lines.push(`<span class="identifyProviderBadge">${escapeHtml(providerName)}</span>`);
+
+    let resultHtml = `<div class="identifySelectedSummary">${lines.join('')}</div>`;
+
+    if (normalizedResult.PtvProviderDisplayTitle && normalizedResult.PtvProviderDisplayTitle !== normalizedResult.Name) {
+        resultHtml += `<p class="identifyProviderDeck">Provider display text: ${escapeHtml(normalizedResult.PtvProviderDisplayTitle)}</p>`;
+    }
+
+    page.querySelector('.selectedSearchResult').innerHTML = resultHtml;
+
+    if (isBookIdentifyLookup()) {
+        currentReadingMetadataPreview = buildReadingMetadataPreview(currentItem, normalizedResult);
+        page.querySelector('.readingMetadataPreviewActions').classList.remove('hide');
+        page.querySelector('.readingMetadataComparison').innerHTML = getReadingMetadataPreviewHtml(currentReadingMetadataPreview, normalizedResult, apiClient);
+        bindReadingMetadataPreviewActions(page);
+        showApplyStatus(page, 'Review each changed field, then apply the selected metadata and artwork independently.', 'info');
+        updateReadingApplyButton(page);
+    } else {
+        currentReadingMetadataPreview = [];
+        page.querySelector('.readingMetadataPreviewActions').classList.add('hide');
+        page.querySelector('.readingMetadataComparison').innerHTML = '';
+        showApplyStatus(page, hasRemoteSearchProviderIds(normalizedResult) ? 'Ready to apply the selected metadata.' : 'Selected result is missing provider IDs and cannot be applied safely.', hasRemoteSearchProviderIds(normalizedResult) ? 'info' : 'error');
+        setApplySubmitDisabled(page, !hasRemoteSearchProviderIds(normalizedResult));
+    }
+
+    focusManager.focus(page.querySelector('.identifyOptionsForm .btnSubmit'));
+}
+
 function showIdentifyOptions(page, identifyResult) {
     const identifyOptionsForm = page.querySelector('.identifyOptionsForm');
-    const normalizedResult = getRemoteSearchApplyPayload(identifyResult);
+    const selectedResult = getRemoteSearchApplyPayload(identifyResult);
+    const normalizedResult = isBookIdentifyLookup() ?
+        normalizeReadingMetadataCandidate(selectedResult, getReadingLookupInfo(currentItem)) :
+        selectedResult;
 
     page.querySelector('.popupIdentifyForm').classList.add('hide');
     page.querySelector('.identificationSearchResults').classList.add('hide');
     identifyOptionsForm.classList.remove('hide');
-    page.querySelector('#chkIdentifyReplaceImages').checked = true;
-    page.querySelector('.dialogContentInner').classList.add('dialog-content-centered');
+    page.querySelector('.dialogContentInner').classList.remove('dialog-content-centered');
 
     currentSearchResult = normalizedResult;
-    showApplyStatus(page, hasRemoteSearchProviderIds(normalizedResult) ? 'Ready to apply the selected metadata.' : 'Selected result is missing provider IDs and cannot be applied safely.', hasRemoteSearchProviderIds(normalizedResult) ? 'info' : 'error');
+    showApplyStatus(page, 'Loading complete provider details for comparison...', 'loading');
+    setApplySubmitDisabled(page, true);
 
-    const lines = [];
-    lines.push(escapeHtml(normalizedResult.Name || 'Selected metadata'));
+    resolveDetailedRemoteSearchResult(getApiClient(), currentItem?.Id, normalizedResult).then(detailedResult => {
+        const result = isBookIdentifyLookup() ?
+            normalizeReadingMetadataCandidate(detailedResult, getReadingLookupInfo(currentItem)) :
+            detailedResult;
 
-    if (normalizedResult.ProductionYear) {
-        lines.push(datetime.toLocaleString(normalizedResult.ProductionYear, { useGrouping: false }));
-    }
-
-    if (normalizedResult.SearchProviderName) {
-        lines.push(escapeHtml(normalizedResult.SearchProviderName));
-    }
-
-    const providerIdLines = Object.entries(normalizedResult.ProviderIds || {})
-        .map(([key, value]) => `${escapeHtml(key)}: ${escapeHtml(String(value))}`);
-
-    if (providerIdLines.length) {
-        lines.push(...providerIdLines);
-    }
-
-    let resultHtml = lines.join('<br/>');
-    const overview = String(normalizedResult.Overview || '').trim();
-
-    if (overview) {
-        resultHtml += `<p style="max-width:34em;margin-top:1em;">${escapeHtml(stripHtmlTags(overview)).slice(0, 360)}</p>`;
-    }
-
-    if (normalizedResult.ImageUrl) {
-        resultHtml = `<div style="display:flex;align-items:center;"><img src="${escapeHtml(normalizedResult.ImageUrl)}" style="max-height:240px;" /><div style="margin-left:1em;">${resultHtml}</div></div>`;
-    }
-
-    page.querySelector('.selectedSearchResult').innerHTML = resultHtml;
-    setApplySubmitDisabled(page, !hasRemoteSearchProviderIds(normalizedResult));
-
-    focusManager.focus(identifyOptionsForm.querySelector('.btnSubmit'));
+        renderIdentifyOptions(page, result);
+    }, error => {
+        recordIdentificationDiagnostic('ptv-reading-identify-preview-detail-failed', {
+            error: getDiagnosticError(error),
+            providerIds: normalizedResult.ProviderIds || {}
+        });
+        renderIdentifyOptions(page, normalizedResult);
+    });
 }
 
 function getSearchResultHtml(result, index) {
@@ -1422,10 +1588,14 @@ function getSearchResultHtml(result, index) {
 
     lines.push(result.providerName);
 
+    if (result.confidence) {
+        lines.push(result.rankReason ? `${result.confidence}: ${result.rankReason}` : result.confidence);
+    }
+
     if (result.rawResult?.AlbumArtist) {
         lines.push(result.rawResult.AlbumArtist.Name);
     }
-    if (result.displayYear) {
+    if (result.displayYear && lines.length < numLines) {
         lines.push(result.displayYear);
     }
 
@@ -1444,6 +1614,133 @@ function getSearchResultHtml(result, index) {
     return html;
 }
 
+function getSelectedReadingMetadataFields(page) {
+    return Array.from(page.querySelectorAll('.readingMetadataField'))
+        .filter(input => input.checked && !input.disabled)
+        .map(input => input.dataset.metadataField)
+        .filter(Boolean);
+}
+
+function submitReadingIdentificationResult(page, applyResult) {
+    const selectedFields = getSelectedReadingMetadataFields(page);
+    const selectedMetadataFields = selectedFields.filter(field => field !== 'PrimaryImage');
+    const replaceImages = selectedFields.includes('PrimaryImage');
+
+    if (!selectedFields.length) {
+        showApplyStatus(page, 'Select at least one metadata or artwork change.', 'error');
+        return;
+    }
+
+    const apiClient = getApiClient();
+    const startedAt = performance.now();
+    let metadataStatus = selectedMetadataFields.length ? 'saving' : 'skipped';
+    let artworkStatus = replaceImages ? 'saving' : 'skipped';
+    let savedItem = currentItem;
+
+    loading.show();
+    page.dataset.identifyApplyLoading = 'true';
+    setApplySubmitDisabled(page, true);
+    showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, 'loading');
+
+    recordIdentificationDiagnostic('ptv-reading-identify-selective-apply-started', {
+        artworkSelected: replaceImages,
+        provider: applyResult.SearchProviderName || '',
+        selectedMetadataFields
+    });
+
+    const metadataPromise = selectedMetadataFields.length ?
+        persistAppliedResultFields(apiClient, currentItem, applyResult, selectedMetadataFields, true)
+            .then(item => {
+                metadataStatus = 'saved';
+                savedItem = item || savedItem;
+                showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, artworkStatus === 'saving' ? 'loading' : 'info');
+
+                return item;
+            }, error => {
+                metadataStatus = 'failed';
+                recordIdentificationDiagnostic('ptv-reading-identify-selective-metadata-failed', {
+                    error: getDiagnosticError(error),
+                    selectedMetadataFields
+                });
+
+                return null;
+            }) :
+        Promise.resolve(currentItem);
+    const artworkPromise = replaceImages ?
+        persistAppliedResultImage(apiClient, currentItem.Id, applyResult, true).then(saved => {
+            artworkStatus = saved ? 'saved' : 'failed';
+            showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, metadataStatus === 'saving' ? 'loading' : 'info');
+
+            return saved;
+        }) :
+        Promise.resolve(false);
+
+    Promise.all([metadataPromise, artworkPromise]).then(() => {
+        const userId = apiClient.getCurrentUserId?.();
+        const refreshPromise = userId && apiClient.getItem ?
+            apiClient.getItem(userId, currentItem.Id).catch(() => savedItem) :
+            Promise.resolve(savedItem);
+
+        return refreshPromise.then(refreshedItem => {
+            if (refreshedItem) currentItem = refreshedItem;
+
+            const metadataSucceeded = metadataStatus === 'saved' || metadataStatus === 'skipped';
+            const artworkSucceeded = artworkStatus === 'saved' || artworkStatus === 'skipped';
+            const verificationReport = getApplyPersistenceReport(currentItem, applyResult, selectedMetadataFields);
+            const fullySuccessful = metadataSucceeded && artworkSucceeded && !verificationReport.missing.length;
+
+            hasChanges = metadataStatus === 'saved' || artworkStatus === 'saved';
+            currentSearchResult = applyResult;
+            loading.hide();
+            page.dataset.identifyApplyLoading = 'false';
+
+            window.dispatchEvent(new CustomEvent('ptv-reading-item-metadata-updated', {
+                detail: {
+                    artworkStatus,
+                    item: currentItem || null,
+                    itemId: currentItem?.Id,
+                    metadataStatus,
+                    provider: applyResult.SearchProviderName || '',
+                    selectedMetadataFields
+                }
+            }));
+
+            recordIdentificationDiagnostic('ptv-reading-identify-selective-apply-completed', {
+                artworkStatus,
+                durationMs: Number((performance.now() - startedAt).toFixed(1)),
+                metadataStatus,
+                missingFields: verificationReport.missing,
+                selectedMetadataFields,
+                status: fullySuccessful ? 'success' : 'partial'
+            });
+
+            if (fullySuccessful) {
+                showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, 'success');
+                toast('Metadata updated.');
+                dialogHelper.close(page);
+                return;
+            }
+
+            const missingText = verificationReport.missing.length ?
+                ` Missing metadata fields: ${verificationReport.missing.join(', ')}.` :
+                '';
+
+            showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.${missingText}`, 'error');
+            setApplySubmitDisabled(page, false);
+            toast('Metadata update completed with warnings.');
+        });
+    }).catch(error => {
+        loading.hide();
+        page.dataset.identifyApplyLoading = 'false';
+        setApplySubmitDisabled(page, false);
+        showApplyStatus(page, getIdentificationApplyErrorMessage(error), 'error');
+        recordIdentificationDiagnostic('ptv-reading-identify-selective-apply-failed', {
+            error: getDiagnosticError(error),
+            selectedMetadataFields
+        });
+    });
+}
+
 function submitIdentficationResult(page) {
     if (!currentSearchResult || !currentItem?.Id) {
         showSearchStatus(page, 'Choose a metadata match before applying.', 'error');
@@ -1454,6 +1751,10 @@ function submitIdentficationResult(page) {
 
     let applyResult = getRemoteSearchApplyPayload(currentSearchResult);
 
+    if (isBookIdentifyLookup()) {
+        applyResult = normalizeReadingMetadataCandidate(applyResult, getReadingLookupInfo(currentItem));
+    }
+
     if (!hasRemoteSearchProviderIds(applyResult)) {
         showApplyStatus(page, 'This metadata result did not include a provider ID, so it cannot be applied safely.', 'error');
         recordIdentificationDiagnostic('ptv-reading-identify-apply-blocked', {
@@ -1461,6 +1762,11 @@ function submitIdentficationResult(page) {
             resultName: applyResult.Name || '',
             searchProviderName: applyResult.SearchProviderName || ''
         });
+        return;
+    }
+
+    if (isBookIdentifyLookup()) {
+        submitReadingIdentificationResult(page, applyResult);
         return;
     }
 
@@ -1688,6 +1994,7 @@ function showEditor(itemId) {
 
         dlg.classList.add('formDialog');
         dlg.classList.add('recordingDialog');
+        dlg.classList.add('identifyDialog');
 
         let html = '';
         html += globalize.translateHtml(template, 'core');
@@ -1723,11 +2030,11 @@ function showEditor(itemId) {
             return false;
         });
 
-        dlg.querySelector('.btnCancel').addEventListener('click', () => {
-            dialogHelper.close(dlg);
+        dlg.querySelectorAll('.btnCancel').forEach(button => {
+            button.addEventListener('click', () => {
+                dialogHelper.close(dlg);
+            });
         });
-
-        dlg.classList.add('identifyDialog');
 
         showIdentificationForm(dlg, item);
         loading.hide();
@@ -1736,6 +2043,8 @@ function showEditor(itemId) {
 
 function onDialogClosed() {
     loading.hide();
+    currentReadingMetadataPreview = [];
+    currentSearchResult = null;
     if (hasChanges) {
         currentResolve(currentItem);
     } else {

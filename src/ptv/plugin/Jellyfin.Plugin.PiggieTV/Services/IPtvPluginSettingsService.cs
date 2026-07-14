@@ -25,4 +25,19 @@ public interface IPtvPluginSettingsService
     /// </summary>
     /// <returns>Default public plugin settings.</returns>
     PtvPluginSettingsDto ResetSettings();
+
+    /// <summary>
+    /// Gets server-persisted Reading series overrides for one route kind.
+    /// </summary>
+    /// <param name="routeKind">Reading route kind.</param>
+    /// <returns>Sanitized Reading series overrides.</returns>
+    PtvReadingSeriesOverridesResponse GetReadingSeriesOverrides(string routeKind);
+
+    /// <summary>
+    /// Replaces server-persisted Reading series overrides for one route kind.
+    /// </summary>
+    /// <param name="routeKind">Reading route kind.</param>
+    /// <param name="update">Incoming override document.</param>
+    /// <returns>Saved, sanitized Reading series overrides.</returns>
+    PtvReadingSeriesOverridesResponse SaveReadingSeriesOverrides(string routeKind, PtvReadingSeriesOverridesUpdate update);
 }

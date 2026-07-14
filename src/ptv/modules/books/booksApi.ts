@@ -28,9 +28,16 @@ import { runPtvScheduledRequests } from '../../utils/ptvMediaRequestScheduler';
 import { withPtvTimeout } from '../../utils/withPtvTimeout';
 
 import { getPtvReadingMetadataStats } from './booksMetadataProviders';
+import {
+    getPtvReadingExtension,
+    getPtvReadingFormat,
+    getPtvReadingItemKind,
+    hasPtvReadingComicKeyword,
+    hasPtvReadingMangaKeyword,
+    isPtvReadingKindMatch
+} from './booksClassification';
 import type {
     PtvReadingCacheDiagnostic,
-    PtvReadingFileFormat,
     PtvReadingHomeData,
     PtvReadingItem,
     PtvReadingItemKind,
@@ -42,6 +49,8 @@ import type {
     PtvReadingSection,
     PtvReadingSectionDiagnostic
 } from './booksTypes';
+
+type PtvReadingImageType = 'Backdrop' | 'Primary' | 'Thumb';
 
 const READING_SHELF_FIELDS = [
     'CanDownload',
@@ -95,12 +104,6 @@ const READING_OPTIONAL_SHELF_TIMEOUT_MS = 2500;
 const READING_CONTINUE_LIMIT = 12;
 const READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 3;
 const READING_HOME_STORAGE_SCHEMA_VERSION = 4;
-const COMIC_EXTENSIONS = new Set(['cb7', 'cbr', 'cbt', 'cbz']);
-const EPUB_EXTENSIONS = new Set(['epub']);
-const PDF_EXTENSIONS = new Set(['pdf']);
-const UNSUPPORTED_BOOK_EXTENSIONS = new Set(['azw', 'azw3', 'djvu', 'mobi']);
-const MANGA_KEYWORDS = /(?:manga|manhwa|manhua)/i;
-const COMIC_KEYWORDS = /(?:comic|comics|graphic novel|graphic novels|issue|issues)/i;
 const BOOKS_KEYWORDS = /\b(?:book|books|ebook|ebooks|novel|novels|light novel|reader)\b/i;
 const READING_PLACEHOLDER_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent([
     '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="640" viewBox="0 0 420 640">',
@@ -394,53 +397,11 @@ function getItemText(item: PtvReadingItem | PtvLibrary | null | undefined, libra
     ].join(' ');
 }
 
-function getExtensionFromText(value: unknown): string {
-    const text = lower(value);
-    const extensionMatch = /\.([a-z0-9]+)(?:$|\?)/.exec(text);
-
-    if (extensionMatch?.[1]) return extensionMatch[1];
-    if (text && !text.includes('/') && !text.includes('\\') && text.length <= 8) return text.replace(/^\./, '');
-
-    return '';
-}
-
-export function getPtvReadingExtension(item: PtvReadingItem | null | undefined): string {
-    if (!item) return '';
-
-    const values = [
-        item.Path,
-        item.Container,
-        item.MediaSources?.[0]?.Path,
-        item.MediaSources?.[0]?.Container,
-        item.Name
-    ];
-
-    for (const value of values) {
-        const extension = getExtensionFromText(value);
-
-        if (extension) return extension;
-    }
-
-    return '';
-}
-
-export function getPtvReadingFormat(item: PtvReadingItem | null | undefined): PtvReadingFileFormat {
-    const extension = getPtvReadingExtension(item);
-    const mime = lower(item?.MediaSources?.[0]?.MimeType || item?.MediaSources?.[0]?.MediaStreams?.[0]?.MimeType);
-
-    if (EPUB_EXTENSIONS.has(extension) || mime.includes('epub')) return 'epub';
-    if (PDF_EXTENSIONS.has(extension) || mime.includes('pdf')) return 'pdf';
-    if (COMIC_EXTENSIONS.has(extension) || mime.includes('comicbook') || mime.includes('x-cb')) return 'comic';
-    if (UNSUPPORTED_BOOK_EXTENSIONS.has(extension)) return 'unsupported';
-
-    return 'book';
-}
-
 function getLibraryKind(library: PtvLibrary): PtvReadingItemKind {
     const text = getItemText(library);
 
-    if (MANGA_KEYWORDS.test(text)) return 'manga';
-    if (COMIC_KEYWORDS.test(text)) return 'comic';
+    if (hasPtvReadingMangaKeyword(text)) return 'manga';
+    if (hasPtvReadingComicKeyword(text)) return 'comic';
 
     return 'book';
 }
@@ -451,8 +412,8 @@ function isReadingLibrary(library: PtvLibrary) {
 
     return collectionType === 'books'
         || BOOKS_KEYWORDS.test(text)
-        || COMIC_KEYWORDS.test(text)
-        || MANGA_KEYWORDS.test(text);
+        || hasPtvReadingComicKeyword(text)
+        || hasPtvReadingMangaKeyword(text);
 }
 
 export function getPtvReadingRouteKind(value: string | null | undefined): PtvReadingRouteKind {
@@ -503,32 +464,12 @@ function getReadingLibrariesForRoute(
     return sortReadingLibrariesForRoute(matchedLibraries.length ? matchedLibraries : libraries, routeKind);
 }
 
-export function getPtvReadingItemKind(item: PtvReadingItem | null | undefined, libraryName = ''): PtvReadingItemKind {
-    const hintedKind = item?.PtvReadingLibraryKindHint;
-    const text = getItemText(item, libraryName || item?.PtvReadingLibraryName || '');
-    const format = getPtvReadingFormat(item);
-
-    if (MANGA_KEYWORDS.test(text)) return 'manga';
-    if (COMIC_KEYWORDS.test(text)) return 'comic';
-    if (hintedKind === 'manga' || hintedKind === 'comic') return hintedKind;
-    if (format === 'comic') return 'comic';
-
-    return 'book';
-}
-
-export function isPtvReadingKindMatch(
-    item: PtvReadingItem | null | undefined,
-    routeKind: PtvReadingRouteKind,
-    libraryName = ''
-) {
-    if (!item) return false;
-    const itemKind = getPtvReadingItemKind(item, libraryName);
-
-    if (routeKind === 'reading') return true;
-    if (routeKind === 'books') return itemKind === 'book';
-
-    return itemKind === (routeKind === 'manga' ? 'manga' : 'comic');
-}
+export {
+    getPtvReadingExtension,
+    getPtvReadingFormat,
+    getPtvReadingItemKind,
+    isPtvReadingKindMatch
+} from './booksClassification';
 
 function hasItemId(item: PtvReadingItem | null | undefined): item is PtvReadingItem & { Id: string } {
     return Boolean(item?.Id);
@@ -1025,9 +966,9 @@ async function fetchPtvReadingLibraryDiagnostic(
     library: PtvReadingLibraryScope,
     routeKind: PtvReadingRouteKind
 ): Promise<{
-    diagnostic: PtvReadingLibraryDiagnostic;
-    library: PtvReadingLibraryScope;
-}> {
+        diagnostic: PtvReadingLibraryDiagnostic;
+        library: PtvReadingLibraryScope;
+    }> {
     const query: PtvItemQuery = {
         Limit: 1,
         ParentId: library.id,
@@ -1113,10 +1054,10 @@ async function fetchPtvReadingLibraryDiscovery(
         probeLibraries?: boolean;
     } = {}
 ): Promise<{
-    diagnostics: PtvReadingLibraryDiagnostic[];
-    libraries: PtvReadingLibraryScope[];
-    requestDurationMs: number;
-}> {
+        diagnostics: PtvReadingLibraryDiagnostic[];
+        libraries: PtvReadingLibraryScope[];
+        requestDurationMs: number;
+    }> {
     const startedAt = performance.now();
     const libraryResolutionStartedAt = performance.now();
     const libraries = await getPtvReadingLibraries().catch(error => {
@@ -1234,15 +1175,15 @@ export function getPtvReadingImagePlaceholder() {
 export function getPtvReadingImageUrl(
     item: PtvReadingItem | null | undefined,
     size = 420,
-    preferredImageType: 'Backdrop' | 'Primary' | 'Thumb' = 'Primary'
+    preferredImageType: PtvReadingImageType = 'Primary'
 ) {
     if (!item) return READING_PLACEHOLDER_IMAGE;
 
     const canonicalSize = getReadingCanonicalImageSize(size, preferredImageType);
     const semanticProfile = getReadingImageSemanticProfile(canonicalSize, preferredImageType);
-    const imageTag = preferredImageType === 'Backdrop'
-        ? item.BackdropImageTags?.[0] || item.ImageTags?.Primary || item.ParentPrimaryImageTag || ''
-        : item.ImageTags?.Primary || item.ParentPrimaryImageTag || '';
+    const imageTag = preferredImageType === 'Backdrop' ?
+        item.BackdropImageTags?.[0] || item.ImageTags?.Primary || item.ParentPrimaryImageTag || '' :
+        item.ImageTags?.Primary || item.ParentPrimaryImageTag || '';
     const cacheKey = [
         item.Id || item.Name || item.Path || 'unknown',
         imageTag,

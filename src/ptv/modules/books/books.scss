@@ -61,7 +61,7 @@ body.ptv-route-reading-mounted .skinHeader {
 
 .ptv-books-page button {
     appearance: none;
-    min-height: 42px;
+    min-height: 44px;
     border: 1px solid var(--ptv-books-line);
     border-radius: var(--ptv-books-radius);
     background: var(--ptv-books-control);
@@ -614,9 +614,9 @@ body.ptv-route-reading-mounted .skinHeader {
 }
 
 .ptv-books-main-scroll {
-    width: min(100%, 1760px);
+    width: min(100%, 1800px);
     margin: 0 auto;
-    padding: 28px clamp(18px, 4vw, 46px) 46px;
+    padding: 28px clamp(18px, 3vw, 46px) 46px;
 }
 
 .ptv-books-main-toolbar {
@@ -850,20 +850,31 @@ body.ptv-route-reading-mounted .skinHeader {
 .ptv-books-row {
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: 190px;
+    grid-auto-columns: clamp(184px, 12vw, 214px);
     gap: 18px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
     padding: 2px 2px 20px;
     scroll-padding-inline: 16px;
     scroll-snap-type: x proximity;
-    scrollbar-width: none;
+    scrollbar-color: rgba(103, 232, 249, 0.46) rgba(255, 255, 255, 0.06);
+    scrollbar-width: thin;
     touch-action: pan-x pan-y;
     -webkit-overflow-scrolling: touch;
 }
 
 .ptv-books-row::-webkit-scrollbar {
-    display: none;
+    height: 8px;
+}
+
+.ptv-books-row::-webkit-scrollbar-track {
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.ptv-books-row::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(103, 232, 249, 0.46);
 }
 
 .ptv-books-row-skeleton {
@@ -879,12 +890,12 @@ body.ptv-route-reading-mounted .skinHeader {
 
 .ptv-books-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
     gap: 24px 18px;
 }
 
 .ptv-books-series-grid {
-    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(204px, 1fr));
 }
 
 .ptv-books-load-more {
@@ -1112,6 +1123,7 @@ body.ptv-route-reading-mounted .skinHeader {
 }
 
 .ptv-books-library-debug {
+    max-width: 100%;
     border: 1px solid var(--ptv-books-line);
     border-radius: var(--ptv-books-radius);
     background: rgba(255, 255, 255, 0.055);
@@ -1129,6 +1141,35 @@ body.ptv-route-reading-mounted .skinHeader {
     grid-template-columns: minmax(170px, 250px) minmax(0, 1fr);
     gap: 8px 14px;
     margin: 14px 0 0;
+}
+
+.ptv-books-library-debug-sections {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+    gap: 14px;
+    max-height: min(62vh, 760px);
+    margin-top: 14px;
+    padding-right: 6px;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.ptv-books-library-debug-sections > section {
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--ptv-books-radius);
+    background: rgba(0, 0, 0, 0.2);
+    padding: 14px;
+}
+
+.ptv-books-library-debug-sections h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.ptv-books-library-debug-sections dl {
+    grid-template-columns: minmax(130px, 0.38fr) minmax(0, 1fr);
+    margin-top: 12px;
 }
 
 .ptv-books-library-debug dt,
@@ -1227,7 +1268,7 @@ body.ptv-route-reading-mounted .skinHeader {
 
 .ptv-books-detail-hero {
     display: grid;
-    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
     gap: 28px;
     align-items: end;
     padding: 28px;
@@ -1277,6 +1318,11 @@ body.ptv-route-reading-mounted .skinHeader {
     display: grid;
     gap: 14px;
     min-width: 0;
+}
+
+.ptv-books-detail-hero > div > p,
+.ptv-books-overview p {
+    max-width: 88ch;
 }
 
 .ptv-books-detail-badges,
@@ -1355,6 +1401,10 @@ body.ptv-route-reading-mounted .skinHeader {
     .ptv-books-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     }
+
+    .ptv-books-series-grid {
+        grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    }
 }
 
 @media (max-width: 920px) {
@@ -1414,6 +1464,10 @@ body.ptv-route-reading-mounted .skinHeader {
     }
 
     .ptv-books-library-debug dl {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-books-library-debug-sections {
         grid-template-columns: 1fr;
     }
 

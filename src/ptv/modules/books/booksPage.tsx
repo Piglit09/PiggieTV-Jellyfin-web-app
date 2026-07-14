@@ -44,6 +44,7 @@ import {
 } from './booksSeries';
 import {
     loadPtvReadingSeriesOverrides,
+    loadPtvReadingSeriesOverridesFromServer,
     savePtvReadingSeriesOverrides
 } from './booksSeriesOverrides';
 
@@ -72,6 +73,10 @@ import {
     searchPtvReading,
     uniquePtvReadingItems
 } from './booksApi';
+import {
+    buildReadingDiagnosticSections,
+    canShowReadingDiagnostics
+} from './readingDiagnostics';
 import type {
     PtvReadingHomeData,
     PtvReadingItem,
@@ -148,6 +153,20 @@ function loadReadingSeriesOverridesForRoute(routeKind: PtvReadingRouteKind): Rea
         overrides[kind] = loadPtvReadingSeriesOverrides(kind);
 
         return overrides;
+    }, {});
+}
+
+async function loadReadingSeriesOverridesForRouteFromServer(routeKind: PtvReadingRouteKind) {
+    const kinds = getReadingSeriesOverrideKinds(routeKind);
+    const loadedOverrides = await Promise.all(kinds.map(async kind => ({
+        kind,
+        overrides: await loadPtvReadingSeriesOverridesFromServer(kind)
+    })));
+
+    return loadedOverrides.reduce<ReadingSeriesOverridesByKind>((overridesByKind, entry) => {
+        overridesByKind[entry.kind] = entry.overrides;
+
+        return overridesByKind;
     }, {});
 }
 
@@ -1848,67 +1867,42 @@ function ReadingLibraryDebugPanel({ cacheDiagnostics, debug, seriesDiagnostics }
     debug?: PtvReadingLibraryDebug;
     seriesDiagnostics?: ReadingSeriesOverrideDiagnostics;
 }>) {
-    const { canShowDebug } = useReadingAdminControls();
+    const { debugEnabled, isAdmin } = useReadingAdminControls();
 
-    if (!canShowDebug) return null;
+    if (!canShowReadingDiagnostics(isAdmin, debugEnabled)) return null;
     if (!debug) return null;
 
-    const debugRows = [
-        ['selectedReadingLibraryIds', debug.selectedReadingLibraryIds.join(', ') || 'none'],
-        ['readingLibraryNames', debug.readingLibraryNames.join(', ') || 'none'],
-        ['routeKind', debug.routeKind],
-        ['jellyfinItemTotal', debug.jellyfinItemTotal],
-        ['jellyfinRouteItemTotal', debug.jellyfinRouteItemTotal],
-        ['fetchedItemCount', debug.fetchedItemCount],
-        ['totalRecordCountFromApi', debug.totalRecordCountFromApi],
-        ['pageSize', debug.pageSize],
-        ['pageCount', debug.pageCount],
-        ['requestDurationMs', debug.requestDurationMs ?? 'n/a'],
-        ['statusCode', debug.statusCode ?? 'n/a'],
-        ['timeoutReason', debug.timeoutReason || 'none'],
-        ['cacheStatus', cacheDiagnostics?.status || 'none'],
-        ['cacheSource', cacheDiagnostics?.source || 'none'],
-        ['cacheStaleHit', cacheDiagnostics ? String(cacheDiagnostics.staleHit) : 'none'],
-        ['readingCacheAgeMs', cacheDiagnostics?.cacheAgeMs ?? 'n/a'],
-        ['readingCacheFresh', cacheDiagnostics?.cacheFresh === undefined ? 'n/a' : String(cacheDiagnostics.cacheFresh)],
-        ['readingBackgroundRefreshStarted', cacheDiagnostics?.backgroundRefreshStarted === undefined ? 'n/a' : String(cacheDiagnostics.backgroundRefreshStarted)],
-        ['readingBackgroundRefreshCompleted', cacheDiagnostics?.backgroundRefreshCompleted === undefined ? 'n/a' : String(cacheDiagnostics.backgroundRefreshCompleted)],
-        ['readingBackgroundRefreshDurationMs', cacheDiagnostics?.backgroundRefreshDurationMs ?? 'n/a'],
-        ['readingFreshCacheWritten', cacheDiagnostics?.freshCacheWritten === undefined ? 'n/a' : String(cacheDiagnostics.freshCacheWritten)],
-        ['readingFreshRenderApplied', cacheDiagnostics?.freshRenderApplied === undefined ? 'n/a' : String(cacheDiagnostics.freshRenderApplied)],
-        ['readingRefreshError', cacheDiagnostics?.refreshError || 'none'],
-        ['cacheRefreshDurationMs', cacheDiagnostics?.refreshDurationMs ?? 'n/a'],
-        ['cachePayloadSize', cacheDiagnostics?.payloadSize ?? 0],
-        ['cacheItemCount', cacheDiagnostics?.itemCount ?? 0],
-        ['lastReadingQueryUrl', debug.lastReadingQueryUrl || 'none'],
-        ['failedCoverUrlCount', failedReadingImageUrls.size],
-        ['failedCoverUrls', Array.from(failedReadingImageUrls).slice(-5).join(' | ') || 'none'],
-        ['alternateImageUsed', readingAlternateImageUsedCount],
-        ['fallbackPosterRendered', readingFallbackPosterRenderedCount],
-        ['missingPrimaryImage', readingMissingPrimaryImageCount],
-        ['cachedFailureHit', readingCachedFailureHitCount],
-        ['droppedItemCount', debug.droppedItemCount],
-        ['kindCounts', JSON.stringify(debug.kindCounts)],
-        ['readingSeriesGroupedCount', seriesDiagnostics?.groupedSeriesCount ?? 'n/a'],
-        ['readingSeriesManualCount', seriesDiagnostics?.manualSeriesCount ?? 'n/a'],
-        ['readingSeriesOverrideCount', seriesDiagnostics?.overrideCount ?? 'n/a'],
-        ['readingSeriesOverrideItemIds', seriesDiagnostics?.overrideItemIds.join(', ') || 'none'],
-        ['libraryDiagnostics', debug.libraryDiagnostics.map(entry => `${entry.name} (${entry.id}) type=${entry.collectionType || 'unknown'} count=${entry.itemCount} status=${entry.statusCode ?? 'n/a'} duration=${entry.requestDurationMs ?? 'n/a'}ms url=${entry.lastQueriedUrl || 'none'} timeout=${entry.timeoutReason || 'none'}`).join(' | ') || 'none'],
-        ['sectionDiagnostics', debug.sectionDiagnostics.map(entry => `${entry.title} status=${entry.status} count=${entry.itemCount} duration=${entry.requestDurationMs ?? 'n/a'}ms url=${entry.lastQueriedUrl || 'none'} timeout=${entry.timeoutReason || 'none'}`).join(' | ') || 'none'],
-        ['dropReasons', debug.dropReasons.length ? debug.dropReasons.join(' | ') : 'none']
-    ];
+    const diagnosticSections = buildReadingDiagnosticSections({
+        cacheDiagnostics,
+        debug,
+        runtime: {
+            alternateImageUsed: readingAlternateImageUsedCount,
+            cachedFailureHit: readingCachedFailureHitCount,
+            failedCoverUrls: Array.from(failedReadingImageUrls).slice(-8),
+            fallbackPosterRendered: readingFallbackPosterRenderedCount,
+            missingPrimaryImage: readingMissingPrimaryImageCount
+        },
+        seriesDiagnostics
+    });
 
     return (
         <details className='ptv-books-library-debug'>
-            <summary>Reading library debug</summary>
-            <dl>
-                {debugRows.map(([label, value]) => (
-                    <React.Fragment key={String(label)}>
-                        <dt>{label}</dt>
-                        <dd>{String(value)}</dd>
-                    </React.Fragment>
+            <summary>Reading diagnostics</summary>
+            <div className='ptv-books-library-debug-sections'>
+                {diagnosticSections.map(section => (
+                    <section key={section.id}>
+                        <h3>{section.title}</h3>
+                        <dl>
+                            {section.rows.map(diagnosticRow => (
+                                <React.Fragment key={`${section.id}-${diagnosticRow.label}`}>
+                                    <dt>{diagnosticRow.label}</dt>
+                                    <dd>{diagnosticRow.value}</dd>
+                                </React.Fragment>
+                            ))}
+                        </dl>
+                    </section>
                 ))}
-            </dl>
+            </div>
         </details>
     );
 }
@@ -2595,10 +2589,22 @@ export default function PiggieTvBooksPage() {
             itemIds.push(itemId);
         });
 
-        touchedKinds.forEach(kind => {
-            savePtvReadingSeriesOverrides(kind, nextOverridesByKind[kind] || {});
-        });
         setSeriesOverridesByKind(nextOverridesByKind);
+        void Promise.all(Array.from(touchedKinds).map(kind => (
+            savePtvReadingSeriesOverrides(kind, nextOverridesByKind[kind] || {})
+        ))).then(results => {
+            recordPtvEvent('render', 'reading-series-overrides-persisted', {
+                persistedCount: results.filter(Boolean).length,
+                routeKind: route.kind,
+                touchedKinds: Array.from(touchedKinds)
+            });
+        }).catch(error => {
+            recordPtvEvent('render', 'reading-series-overrides-persist-failed', {
+                message: getReadingErrorMessage(error),
+                routeKind: route.kind,
+                touchedKinds: Array.from(touchedKinds)
+            });
+        });
         recordPtvEvent('render', 'reading-series-overrides-saved', {
             itemCount: itemIds.length,
             itemIds: itemIds.slice(0, 12),
@@ -2633,10 +2639,16 @@ export default function PiggieTvBooksPage() {
             itemIds.push(itemId);
         });
 
-        touchedKinds.forEach(kind => {
-            savePtvReadingSeriesOverrides(kind, nextOverridesByKind[kind] || {});
-        });
         setSeriesOverridesByKind(nextOverridesByKind);
+        void Promise.all(Array.from(touchedKinds).map(kind => (
+            savePtvReadingSeriesOverrides(kind, nextOverridesByKind[kind] || {})
+        ))).catch(error => {
+            recordPtvEvent('render', 'reading-series-overrides-reset-persist-failed', {
+                message: getReadingErrorMessage(error),
+                routeKind: route.kind,
+                touchedKinds: Array.from(touchedKinds)
+            });
+        });
         recordPtvEvent('render', 'reading-series-overrides-reset', {
             itemCount: itemIds.length,
             itemIds: itemIds.slice(0, 12),
@@ -2947,6 +2959,15 @@ export default function PiggieTvBooksPage() {
 
     useEffect(() => {
         setSeriesOverridesByKind(loadReadingSeriesOverridesForRoute(route.kind));
+        let active = true;
+
+        void loadReadingSeriesOverridesForRouteFromServer(route.kind).then(overrides => {
+            if (active) setSeriesOverridesByKind(overrides);
+        });
+
+        return () => {
+            active = false;
+        };
     }, [route.kind]);
 
     useEffect(() => {

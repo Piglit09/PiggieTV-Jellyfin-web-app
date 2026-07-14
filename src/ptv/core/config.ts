@@ -1,6 +1,7 @@
 import { getPtvStaticAssetBaseUrl, isPtvWebpackDevServerOrigin } from './urlOrigins';
 
-const isDev = __WEBPACK_SERVE__ || isPtvWebpackDevServerOrigin();
+const isWebpackDevServer = typeof __WEBPACK_SERVE__ !== 'undefined' && __WEBPACK_SERVE__;
+const isDev = isWebpackDevServer || isPtvWebpackDevServerOrigin();
 const fallbackDevJellyfinServerUrl =
     // eslint-disable-next-line sonarjs/no-clear-text-protocols
     'http://10.16.0.50:8096';
@@ -234,6 +235,7 @@ export const PTV_PLUGIN_API = {
         integrationsStatus: 'Ptv/v1/integrations/status',
         integrationTestBase: 'Ptv/v1/integrations',
         googleBooksMetadataSearch: 'Ptv/v1/reading/metadata/googlebooks/search',
+        readingSeriesOverrides: 'Ptv/v1/reading/series-overrides',
         musicMetadataSearch: 'Ptv/v1/music/metadata/search',
         seerrRequest: 'Ptv/v1/integrations/seerr/request',
         seerrRequests: 'Ptv/v1/integrations/seerr/requests',

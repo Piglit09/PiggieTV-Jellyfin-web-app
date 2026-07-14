@@ -52,8 +52,11 @@ export type PtvReadingItem = PtvItem & {
     Path?: string;
     People?: PtvReadingPerson[];
     ProviderIds?: Record<string, string>;
+    PtvReadingKindOverride?: PtvReadingItemKind;
     PtvReadingLibraryKindHint?: PtvReadingItemKind;
     PtvReadingLibraryName?: string;
+    SeriesId?: string;
+    SeriesName?: string;
     SortName?: string;
     UserData?: PtvItemUserData;
 };

@@ -64,7 +64,7 @@ describe('PTV reading series grouping', () => {
     it('groups manga volume naming without stripping meaningful apostrophes', () => {
         const series = buildPtvReadingSeries([
             book("The Ancient Magus' Bride v08", '8'),
-            book("The Ancient Magus' Bride v07", '7')
+            book('The Ancient Magus\u2019 Bride v07 (Digital) (Oak)', '7')
         ], 'manga');
 
         expect(series).toHaveLength(1);
@@ -72,14 +72,14 @@ describe('PTV reading series grouping', () => {
         expect(series[0].items.map(item => item.Id)).toEqual(['7', '8']);
     });
 
-    it('keeps publication-year reboots separate', () => {
+    it('does not use publication year as series identity', () => {
         const series = buildPtvReadingSeries([
             book('Deadpool (2013) 001', '2013'),
-            book('Deadpool (2015) 001', '2015')
+            book('Deadpool (2015) 002', '2015')
         ], 'comics');
 
-        expect(series).toHaveLength(2);
-        expect(series.map(entry => entry.year).sort((left, right) => Number(left) - Number(right))).toEqual([2013, 2015]);
+        expect(series).toHaveLength(1);
+        expect(series[0].items.map(item => item.Id)).toEqual(['2013', '2015']);
     });
 
     it('preserves numeric title series names', () => {

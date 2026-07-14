@@ -1326,6 +1326,24 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 }
             );
         },
+        getReadingSeriesOverrides<T = unknown>(routeKind: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.readingSeriesOverrides}/${encodeURIComponent(routeKind)}`,
+                options
+            );
+        },
+        saveReadingSeriesOverrides<TResponse = unknown, TBody = unknown>(routeKind: string, body: TBody, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.readingSeriesOverrides}/${encodeURIComponent(routeKind)}`,
+                {
+                    ...options,
+                    body,
+                    method: 'PUT'
+                }
+            );
+        },
         getStatus<T = unknown>(options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.status, options);
         },

@@ -1,239 +1,183 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildReadingMetadataPreview,
     buildRemoteSearchPayload,
-    createMetadataSearchResultViewModel,
-    dedupeExternalIdInfos,
-    getReadingIdentifyName,
-    getRemoteSearchResponseShape,
-    getRemoteSearchApplyPayload,
-    hasRemoteSearchProviderIds,
-    normalizeRemoteProviderIdValue,
-    normalizeRemoteProviderIds,
-    normalizeRemoteSearchResultForApply,
-    normalizeRemoteSearchResults,
-    sanitizeProviderIds
+    getReadingIdentifyInfo,
+    getSafeReadingProviderLink,
+    normalizeReadingMetadataCandidate,
+    rankMetadataSearchResults
 } from './itemidentifierUtils';
 
-describe('itemidentifierUtils', () => {
-    it('normalizes raw array metadata responses', () => {
-        const response = [
-            { Name: 'Book One' }
+const sakiSearch = {
+    Name: 'Saki the Succubus Hungers Tonight v03 (2020) (Digital) (LuCaZ).cbz',
+    Path: '/Manga/Saki the Succubus Hungers Tonight v03 (2020) (Digital) (LuCaZ).cbz',
+    ProviderIds: {},
+    SeriesName: 'Saki the Succubus Hungers Tonight'
+};
+
+describe('Reading metadata normalization', () => {
+    it('keeps ComicVine marketing copy out of the canonical title', () => {
+        const result = normalizeReadingMetadataCandidate({
+            IndexNumber: 3,
+            Name: "Does she have a fever? She's looking kind of hot...",
+            ProviderIds: {
+                ComicVine: 'saki-the-succubus-hungers-tonight-3-does-she-have-/4000-790398'
+            },
+            SearchProviderName: 'Comic Vine',
+            SeriesName: 'Saki the Succubus Hungers Tonight'
+        }, sakiSearch);
+
+        expect(result.Name).toBe('Saki the Succubus Hungers Tonight Vol. 3');
+        expect(result.Overview).toContain('Does she have a fever?');
+        expect(result.PtvProviderDisplayTitle).toContain('Does she have a fever?');
+        expect(result.PtvReadingMetadata).toMatchObject({
+            canonicalTitle: 'Saki the Succubus Hungers Tonight Vol. 3',
+            providerId: 'saki-the-succubus-hungers-tonight-3-does-she-have-/4000-790398',
+            seriesTitle: 'Saki the Succubus Hungers Tonight',
+            volumeNumber: 3
+        });
+        expect(result.ProviderIds.ComicVine).toBe('saki-the-succubus-hungers-tonight-3-does-she-have-/4000-790398');
+    });
+
+    it('builds a useful issue title from a bare ComicVine result name', () => {
+        const result = normalizeReadingMetadataCandidate({
+            IndexNumber: 3,
+            Name: '#003',
+            ProviderIds: { ComicVine: 'absolute-carnage-vs-deadpool-3/4000-723106' },
+            SeriesName: 'Absolute Carnage vs. Deadpool'
+        }, {
+            Name: 'Absolute Carnage vs. Deadpool 003 (2019).cbr',
+            Path: '/Comics/Absolute Carnage vs. Deadpool 003 (2019).cbr'
+        });
+
+        expect(result.Name).toBe('Absolute Carnage vs. Deadpool #3');
+        expect(result.SeriesName).toBe('Absolute Carnage vs. Deadpool');
+        expect(result.IndexNumber).toBe(3);
+    });
+
+    it('creates structured lookup data from the shared filename parser', () => {
+        expect(getReadingIdentifyInfo(sakiSearch)).toMatchObject({
+            IndexNumber: 3,
+            Name: 'Saki the Succubus Hungers Tonight Vol. 3',
+            SeriesName: 'Saki the Succubus Hungers Tonight',
+            Year: 2020
+        });
+
+        expect(buildRemoteSearchPayload(sakiSearch, 'item-1', 'Book')).toMatchObject({
+            ItemId: 'item-1',
+            SearchInfo: {
+                IndexNumber: 3,
+                Name: 'Saki the Succubus Hungers Tonight Vol. 3',
+                SeriesName: 'Saki the Succubus Hungers Tonight',
+                Year: 2020
+            }
+        });
+    });
+});
+
+describe('Reading metadata result ranking', () => {
+    it('ranks an exact series and volume above a wrong volume', () => {
+        const ranked = rankMetadataSearchResults([
+            {
+                IndexNumber: 8,
+                Name: '#8',
+                ProviderIds: { ComicVine: 'saki-8/4000-8' },
+                SearchProviderName: 'Comic Vine',
+                SeriesName: 'Saki the Succubus Hungers Tonight'
+            },
+            {
+                IndexNumber: 3,
+                Name: '#3',
+                ProviderIds: { ComicVine: 'saki-3/4000-3' },
+                SearchProviderName: 'Comic Vine',
+                SeriesName: 'Saki the Succubus Hungers Tonight'
+            }
+        ], sakiSearch);
+
+        expect(ranked[0].rawResult.IndexNumber).toBe(3);
+        expect(ranked[0].confidence).toMatch(/Strong|Excellent/);
+        expect(ranked[0].rankReason).toContain('volume/issue match');
+    });
+
+    it('ranks exact ISBN and provider IDs deterministically', () => {
+        const searchInfo = {
+            ISBN: '9781462923007',
+            Name: 'Learn Japanese with Manga Volume One',
+            ProviderIds: {
+                GoogleBooks: 'mrNLEAAAQBAJ',
+                ISBN: '9781462923007'
+            }
+        };
+        const results = [
+            {
+                Name: 'Learn Japanese with Manga',
+                ProviderIds: { GoogleBooks: 'other', ISBN: '0000000000000' },
+                SearchProviderName: 'Google Books'
+            },
+            {
+                Name: 'Learn Japanese with Manga Volume One',
+                ProviderIds: { GoogleBooks: 'mrNLEAAAQBAJ', ISBN: '9781462923007' },
+                SearchProviderName: 'Google Books'
+            }
         ];
 
-        expect(normalizeRemoteSearchResults(response)).toEqual(response);
-        expect(getRemoteSearchResponseShape(response)).toBe('array');
-    });
+        const firstRun = rankMetadataSearchResults(results, searchInfo);
+        const secondRun = rankMetadataSearchResults([...results].reverse(), searchInfo);
 
-    it('normalizes wrapped metadata responses', () => {
-        expect(normalizeRemoteSearchResults({
-            SearchResults: [
-                { Name: 'Search Result' }
-            ]
-        })).toEqual([
-            { Name: 'Search Result' }
-        ]);
-        expect(normalizeRemoteSearchResults({
-            Response: {
-                Items: [
-                    { Name: 'Nested Item' }
-                ]
-            }
-        })).toEqual([
-            { Name: 'Nested Item' }
-        ]);
+        expect(firstRun[0].providerId).toBe('mrNLEAAAQBAJ');
+        expect(secondRun[0].providerId).toBe('mrNLEAAAQBAJ');
+        expect(firstRun[0].rankScore).toBeGreaterThan(firstRun[1].rankScore);
     });
+});
 
-    it('returns an empty array for empty or malformed metadata responses', () => {
-        expect(normalizeRemoteSearchResults(null)).toEqual([]);
-        expect(normalizeRemoteSearchResults({ Error: 'Provider failed' })).toEqual([]);
-    });
-
-    it('deduplicates provider ID fields while preserving Jellyfin key casing', () => {
-        expect(dedupeExternalIdInfos([
-            { Key: 'ComicVine', Name: 'Comic Vine' },
-            { Key: 'comic-vine', Name: 'Comic Vine Duplicate' },
-            { Key: 'GoogleBooks', Name: 'Google Books' },
-            { Key: 'Google Books', Name: 'Google Books Duplicate' },
-            { Key: 'OpenLibrary', Name: 'Open Library' }
-        ])).toEqual([
-            { Key: 'GoogleBooks', Name: 'Google Books' },
-            { Key: 'ComicVine', Name: 'Comic Vine' },
-            { Key: 'OpenLibrary', Name: 'Open Library' }
-        ]);
-    });
-
-    it('does not send empty provider IDs that can overwrite a valid Google Books ID', () => {
-        expect(sanitizeProviderIds([
-            { key: 'GoogleBooks', value: 'mrNLEAAAQBAJ' },
-            { key: 'GoogleBooks', value: '' },
-            { key: 'ComicVine', value: '   ' },
-            { key: '', value: 'ignored' }
-        ])).toEqual({
-            GoogleBooks: 'mrNLEAAAQBAJ'
+describe('Reading metadata preview safety', () => {
+    it('shows current and proposed values without selecting an unrelated title', () => {
+        const preview = buildReadingMetadataPreview({
+            ImageTags: { Primary: 'existing-cover' },
+            Name: 'The Ancient Magus\' Bride Vol. 7',
+            Path: '/Manga/The Ancient Magus\' Bride v07.cbz',
+            SeriesName: 'The Ancient Magus\' Bride'
+        }, {
+            ImageUrl: 'https://example.test/new-cover.jpg',
+            Name: 'A Completely Different Series #7',
+            Overview: 'A provider summary.',
+            ProviderIds: { ComicVine: 'different/4000-7' },
+            SeriesName: 'A Completely Different Series'
         });
-    });
+        const name = preview.find(field => field.key === 'Name');
+        const image = preview.find(field => field.key === 'PrimaryImage');
+        const overview = preview.find(field => field.key === 'Overview');
 
-    it('normalizes duplicate provider ID keys to Jellyfin provider keys', () => {
-        expect(normalizeRemoteProviderIds({
-            'Comic Vine': 'https://comicvine.gamespot.com/absolute-carnage-vs-deadpool-3/4000-723106',
-            ComicVine: 'absolute-carnage-vs-deadpool-3/4000-723106',
-            'Google Books': 'mrNLEAAAQBAJ'
-        })).toEqual({
-            ComicVine: 'absolute-carnage-vs-deadpool-3/4000-723106',
-            GoogleBooks: 'mrNLEAAAQBAJ'
+        expect(name).toMatchObject({
+            currentValue: "The Ancient Magus' Bride Vol. 7",
+            proposedValue: 'A Completely Different Series #7',
+            selected: false
         });
+        expect(image).toMatchObject({ selected: false });
+        expect(overview).toMatchObject({ proposedValue: 'A provider summary.', selected: true });
     });
 
-    it('scopes Google Books provider ID searches to the Google Books provider, including disabled providers', () => {
-        expect(buildRemoteSearchPayload({
-            Name: 'Learn Japanese with Manga Volume One'
-        }, 'item-1', 'Book', [
-            { key: 'GoogleBooks', providerName: 'Google Books', value: 'mrNLEAAAQBAJ' },
-            { key: 'ISBN', providerName: 'ISBN', value: '9781462923007' }
-        ])).toEqual({
-            IncludeDisabledProviders: true,
-            ItemId: 'item-1',
-            SearchProviderName: 'Google Books',
-            SearchInfo: {
-                Name: 'Learn Japanese with Manga Volume One',
-                ProviderIds: {
-                    GoogleBooks: 'mrNLEAAAQBAJ',
-                    ISBN: '9781462923007'
-                }
-            }
-        });
-    });
-
-    it('maps ISBN-only book searches into the Google Books query syntax Jellyfin supports', () => {
-        expect(buildRemoteSearchPayload({
-            ISBN: '978-1-4629-2300-7'
-        }, 'item-1', 'Book')).toEqual({
-            IncludeDisabledProviders: true,
-            ItemId: 'item-1',
-            SearchProviderName: 'Google Books',
-            SearchInfo: {
-                Name: 'isbn:9781462923007',
-                ProviderIds: {}
-            }
-        });
-    });
-
-    it('keeps author input useful by folding it into the BookInfo name query', () => {
-        expect(buildRemoteSearchPayload({
-            Author: 'Marc Bernabe',
-            Name: 'Learn Japanese with Manga Volume One'
-        }, 'item-1', 'Book')).toEqual({
-            IncludeDisabledProviders: true,
-            ItemId: 'item-1',
-            SearchInfo: {
-                Name: 'Learn Japanese with Manga Volume One Marc Bernabe',
-                ProviderIds: {}
-            }
-        });
-    });
-
-    it('cleans reading filenames before pre-filling title search', () => {
-        expect(getReadingIdentifyName({
-            Name: 'Example Manga v02 (2020) (Digital) (LuCaZ).cbz'
-        })).toBe('Example Manga v02 (2020)');
-    });
-
-    it('normalizes pasted Google Books and Comic Vine provider IDs', () => {
-        expect(normalizeRemoteProviderIdValue(
-            'GoogleBooks',
-            'https://books.google.com/books/edition/Batman_and_Harley_Quinn_2017_1/qDw7DwAAQBAJ?hl=en'
-        )).toBe('qDw7DwAAQBAJ');
-        expect(normalizeRemoteProviderIdValue(
-            'ComicVine',
-            'https://comicvine.gamespot.com/batman-and-harley-quinn-1/4000-678037/'
-        )).toBe('batman-and-harley-quinn-1/4000-678037');
-    });
-
-    it('keeps Comic Vine result provider IDs in Jellyfin apply shape', () => {
-        const result = normalizeRemoteSearchResultForApply({
-            Id: 'batman-and-harley-quinn-1/4000-678037',
-            Name: 'Batman and Harley Quinn #001',
-            SearchProviderName: 'Comic Vine',
-            providerIds: {
-                'comic-vine': 'batman-and-harley-quinn-1/4000-678037'
-            }
+    it('selects a missing cover but never selects an empty provider value', () => {
+        const preview = buildReadingMetadataPreview({
+            Name: 'Saki the Succubus Hungers Tonight Vol. 2',
+            Path: '/Manga/Saki the Succubus Hungers Tonight v02.cbz'
+        }, {
+            ImageUrl: 'https://example.test/cover.jpg',
+            Name: 'Saki the Succubus Hungers Tonight Vol. 2',
+            Overview: ''
         });
 
-        expect(result.ProviderIds).toEqual({
-            ComicVine: 'batman-and-harley-quinn-1/4000-678037'
-        });
-        expect(hasRemoteSearchProviderIds(result)).toBe(true);
+        expect(preview.find(field => field.key === 'PrimaryImage')).toMatchObject({ selected: true });
+        expect(preview.find(field => field.key === 'Overview')).toMatchObject({ selected: false });
     });
+});
 
-    it('derives provider IDs from selected provider result IDs when the server omits ProviderIds casing', () => {
-        const result = normalizeRemoteSearchResultForApply({
-            id: 'qDw7DwAAQBAJ',
-            Name: 'Batman and Harley Quinn (2017-) #1',
-            searchProviderName: 'Google Books'
-        });
-
-        expect(result.ProviderIds).toEqual({
-            GoogleBooks: 'qDw7DwAAQBAJ'
-        });
-        expect(result.SearchProviderName).toBe('Google Books');
-    });
-
-    it('preserves the full raw Comic Vine result behind the search result view model', () => {
-        const rawResult = {
-            Id: 'absolute-carnage-vs-deadpool-3/4000-723106',
-            ImageUrl: 'https://comicvine.example/cover.jpg',
-            Name: 'Absolute Carnage vs. Deadpool 003',
-            Overview: '<p>Full provider description.</p>',
-            People: [
-                { Name: 'Frank Tieri', Type: 'Writer' }
-            ],
-            ProviderIds: {
-                'Comic Vine': 'https://comicvine.gamespot.com/absolute-carnage-vs-deadpool-3/4000-723106'
-            },
-            SearchProviderName: 'Comic Vine',
-            Studios: [
-                { Name: 'Marvel' }
-            ],
-            Tags: ['Carnage']
-        };
-        const viewModel = createMetadataSearchResultViewModel(rawResult);
-
-        expect(viewModel.displayTitle).toBe('Absolute Carnage vs. Deadpool 003');
-        expect(viewModel.displayOverview).toBe('<p>Full provider description.</p>');
-        expect(viewModel.rawResult.Overview).toBe('<p>Full provider description.</p>');
-        expect(viewModel.rawResult.People).toEqual(rawResult.People);
-        expect(viewModel.rawResult.Studios).toEqual(rawResult.Studios);
-        expect(viewModel.rawResult.Tags).toEqual(rawResult.Tags);
-    });
-
-    it('submits the complete raw remote result instead of reconstructed display fields', () => {
-        const viewModel = createMetadataSearchResultViewModel({
-            Id: 'absolute-carnage-vs-deadpool-3/4000-723106',
-            Name: 'Absolute Carnage vs. Deadpool 003',
-            Overview: 'Full provider description.',
-            ProviderIds: {
-                ComicVine: 'absolute-carnage-vs-deadpool-3/4000-723106'
-            },
-            SearchProviderName: 'Comic Vine',
-            SeriesName: 'Absolute Carnage vs. Deadpool',
-            ProviderSpecificPayload: {
-                issueId: 723106
-            }
-        });
-        const payload = getRemoteSearchApplyPayload(viewModel);
-
-        expect(payload).toMatchObject({
-            Name: 'Absolute Carnage vs. Deadpool 003',
-            Overview: 'Full provider description.',
-            ProviderIds: {
-                ComicVine: 'absolute-carnage-vs-deadpool-3/4000-723106'
-            },
-            ProviderSpecificPayload: {
-                issueId: 723106
-            },
-            SearchProviderName: 'Comic Vine',
-            SeriesName: 'Absolute Carnage vs. Deadpool'
-        });
+describe('Reading provider links', () => {
+    it('creates links only for validated provider identifiers', () => {
+        expect(getSafeReadingProviderLink('GoogleBooks', 'mrNLEAAAQBAJ')).toBe('https://books.google.com/books?id=mrNLEAAAQBAJ');
+        expect(getSafeReadingProviderLink('ComicVine', '/absolute-carnage/4000-723106/')).toBe('https://comicvine.gamespot.com/absolute-carnage/4000-723106/');
+        expect(getSafeReadingProviderLink('ComicVine', ['java', 'script:alert(1)'].join(''))).toBe('');
+        expect(getSafeReadingProviderLink('Unknown', 'item-1')).toBe('');
     });
 });

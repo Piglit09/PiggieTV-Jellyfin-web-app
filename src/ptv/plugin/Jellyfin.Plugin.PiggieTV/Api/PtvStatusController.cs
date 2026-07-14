@@ -611,6 +611,72 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     }
 
     /// <summary>
+    /// Gets administrator Reading series overrides persisted in the plugin configuration.
+    /// </summary>
+    /// <param name="routeKind">Reading route kind.</param>
+    /// <returns>Persisted override document.</returns>
+    [HttpGet("reading/series-overrides/{routeKind}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<PtvReadingSeriesOverridesResponse>> GetReadingSeriesOverrides([FromRoute] string routeKind)
+    {
+        if (!await CanWriteFeaturedContentSafeAsync("reading/series-overrides").ConfigureAwait(false))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                Error("PTV_READING_SERIES_OVERRIDES_FORBIDDEN", "Only Jellyfin administrators can read Reading series overrides."));
+        }
+
+        try
+        {
+            return Ok(GetRequiredService<IPtvPluginSettingsService>("reading/series-overrides").GetReadingSeriesOverrides(routeKind));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(Error("PTV_READING_SERIES_OVERRIDES_INVALID_ROUTE", ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// Replaces administrator Reading series overrides for one route kind.
+    /// </summary>
+    /// <param name="routeKind">Reading route kind.</param>
+    /// <param name="update">Incoming override document.</param>
+    /// <returns>Saved override document.</returns>
+    [HttpPut("reading/series-overrides/{routeKind}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<PtvReadingSeriesOverridesResponse>> SaveReadingSeriesOverrides(
+        [FromRoute] string routeKind,
+        [FromBody] PtvReadingSeriesOverridesUpdate? update)
+    {
+        if (!await CanWriteFeaturedContentSafeAsync("reading/series-overrides").ConfigureAwait(false))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                Error("PTV_READING_SERIES_OVERRIDES_FORBIDDEN", "Only Jellyfin administrators can save Reading series overrides."));
+        }
+
+        if (update is null)
+        {
+            return BadRequest(Error("PTV_READING_SERIES_OVERRIDES_NULL_PAYLOAD", "A Reading series override document is required."));
+        }
+
+        try
+        {
+            return Ok(GetRequiredService<IPtvPluginSettingsService>("reading/series-overrides").SaveReadingSeriesOverrides(routeKind, update));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(Error("PTV_READING_SERIES_OVERRIDES_INVALID_ROUTE", ex.Message));
+        }
+    }
+
+    /// <summary>
     /// Saves PiggieTV plugin settings from the dashboard.
     /// </summary>
     /// <param name="settingsPayload">Incoming plugin settings patch JSON.</param>
