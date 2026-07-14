@@ -100,6 +100,33 @@ describe('Reading metadata result ranking', () => {
         expect(ranked[0].rankReason).toContain('volume/issue match');
     });
 
+    it('ranks the matching Saki volume 2 result above other volumes', () => {
+        const ranked = rankMetadataSearchResults([
+            {
+                IndexNumber: 3,
+                Name: '#3',
+                ProviderIds: { ComicVine: 'saki-3/4000-3' },
+                SearchProviderName: 'Comic Vine',
+                SeriesName: 'Saki the Succubus Hungers Tonight'
+            },
+            {
+                IndexNumber: 2,
+                Name: '#2',
+                ProviderIds: { ComicVine: 'saki-2/4000-2' },
+                SearchProviderName: 'Comic Vine',
+                SeriesName: 'Saki the Succubus Hungers Tonight'
+            }
+        ], {
+            Name: 'Saki the Succubus Hungers Tonight v02 (2020) (Digital) (LuCaZ).cbz',
+            Path: '/Manga/Saki the Succubus Hungers Tonight v02 (2020) (Digital) (LuCaZ).cbz',
+            ProviderIds: {},
+            SeriesName: 'Saki the Succubus Hungers Tonight'
+        });
+
+        expect(ranked[0].rawResult.IndexNumber).toBe(2);
+        expect(ranked[0].rankReason).toContain('volume/issue match');
+    });
+
     it('ranks exact ISBN and provider IDs deterministically', () => {
         const searchInfo = {
             ISBN: '9781462923007',

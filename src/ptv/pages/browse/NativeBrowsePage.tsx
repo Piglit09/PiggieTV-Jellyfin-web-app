@@ -6,10 +6,13 @@ import Page from 'components/Page';
 import {
     getPtvApiUrl,
     getPtvCurrentUserId,
+    getPtvItemImageCandidates,
     getPtvItemImageUrl,
     getPtvItems,
     getPtvResumeItems,
     getPtvItemFieldProfileDiagnostics,
+    markPtvImageCandidateFailed,
+    recordPtvImageFallback,
     serializePtvItemFieldProfile,
     type PtvItem,
     type PtvItemFieldProfileId,
@@ -29,6 +32,10 @@ import {
     getPtvQualityTags
 } from '../../modules/cards/qualityTags';
 import { PtvIcon } from '../../modules/icons';
+import {
+    getPtvBrowseFeaturedQueryOverrides,
+    prioritizePtvBrowseTasks
+} from './browseLoadingPolicy';
 
 import './nativeBrowse.scss';
 
@@ -439,15 +446,6 @@ function getBrowseMetadata(item: PtvItem) {
         getBrowseItemTypeLabel(item),
         getText(item.OfficialRating)
     ].filter(Boolean).join(' | ');
-}
-
-function getBrowsePrimaryImage(item: PtvItem) {
-    return getPtvItemImageUrl(item, {
-        fillHeight: 558,
-        fillWidth: 372,
-        imageType: 'Primary',
-        quality: 92
-    });
 }
 
 function getBrowseBackdropImage(item: PtvItem | null) {
@@ -897,9 +895,30 @@ function PtvBrowseCard({
     sectionId: string;
 }>) {
     const route = useMemo(() => getBrowseRoute(item), [item]);
-    const imageUrl = getBrowsePrimaryImage(item);
+    const imageCandidates = useMemo(() => getPtvItemImageCandidates(item, {
+        baseOptions: {
+            fillHeight: 558,
+            fillWidth: 372,
+            quality: 92
+        },
+        order: ['Primary', 'SeriesPrimary', 'ParentPrimary', 'Thumb']
+    }).slice(0, 4), [item]);
+    const [imageAttemptIndex, setImageAttemptIndex] = useState(0);
+    const imageCandidate = imageCandidates[imageAttemptIndex];
     const tags = useMemo(() => getPtvQualityTags(item, { maxTags: 3 }), [item]);
     const title = getText(item.Name) || 'Untitled';
+
+    useEffect(() => {
+        setImageAttemptIndex(0);
+    }, [item.Id]);
+
+    const handleImageError = useCallback(() => {
+        if (!imageCandidate) return;
+
+        markPtvImageCandidateFailed(imageCandidate);
+        recordPtvImageFallback();
+        setImageAttemptIndex(index => index + 1);
+    }, [imageCandidate]);
 
     return (
         <a
@@ -914,7 +933,15 @@ function PtvBrowseCard({
             onFocus={() => onFocusItem(sectionId, item)}
         >
             <span className='ptv-browse-card-art'>
-                {imageUrl ? <img src={imageUrl} alt='' decoding='async' loading='lazy' /> : <span className='ptv-browse-card-fallback'>{title.slice(0, 1)}</span>}
+                {imageCandidate ? (
+                    <img
+                        src={imageCandidate.url}
+                        alt=''
+                        decoding='async'
+                        loading='lazy'
+                        onError={handleImageError}
+                    />
+                ) : <span className='ptv-browse-card-fallback'>{title.slice(0, 1)}</span>}
                 {tags.length ? (
                     <span className='ptv-browse-quality-stack'>
                         {tags.map(tag => (
@@ -1515,19 +1542,13 @@ function NativeBrowsePage() {
                 });
             };
 
-            const sectionTasks: Array<{
-                id: string;
-                run: () => Promise<{
-                    diagnostic: PtvBrowseDiagnostic;
-                    items: PtvItem[];
-                }>;
-            }> = [
+            const sectionTasks = prioritizePtvBrowseTasks([
                 {
                     id: 'featured',
-                    run: () => fetchBrowseItems('featured', getBaseQuery(config, {
-                        Limit: 20,
-                        SortBy: 'Random'
-                    }, 'featured'))
+                    run: () => fetchBrowseItems(
+                        'featured',
+                        getBaseQuery(config, getPtvBrowseFeaturedQueryOverrides(), 'featured')
+                    )
                 },
                 {
                     id: 'continue',
@@ -1573,7 +1594,7 @@ function NativeBrowsePage() {
                         SortOrder: 'Ascending'
                     }, 'collections'))
                 }
-            ];
+            ]);
             let nextSectionIndex = 0;
 
             const runSectionWorker = async () => {

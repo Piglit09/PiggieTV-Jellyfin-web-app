@@ -108,4 +108,52 @@ public sealed class PtvTmdbMetadataStatus
     /// </summary>
     [JsonPropertyName("lastValidatedAt")]
     public DateTimeOffset? LastValidatedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of unique TMDb requests considered in the last enrichment pass.
+    /// </summary>
+    [JsonPropertyName("lastRequestedCount")]
+    public int LastRequestedCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of requests served from positive or negative cache in the last pass.
+    /// </summary>
+    [JsonPropertyName("lastCachedCount")]
+    public int LastCachedCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of remote requests started in the last pass.
+    /// </summary>
+    [JsonPropertyName("lastAttemptedCount")]
+    public int LastAttemptedCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of successful remote requests completed in the last pass.
+    /// </summary>
+    [JsonPropertyName("lastCompletedCount")]
+    public int LastCompletedCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of requests deferred by the per-pass remote budget.
+    /// </summary>
+    [JsonPropertyName("lastSkippedCount")]
+    public int LastSkippedCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of failed remote requests in the last pass.
+    /// </summary>
+    [JsonPropertyName("lastFailedCount")]
+    public int LastFailedCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of cancelled remote requests in the last pass.
+    /// </summary>
+    [JsonPropertyName("lastCancelledCount")]
+    public int LastCancelledCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the last pass returned a useful partial result.
+    /// </summary>
+    [JsonPropertyName("lastPartial")]
+    public bool LastPartial { get; set; }
 }

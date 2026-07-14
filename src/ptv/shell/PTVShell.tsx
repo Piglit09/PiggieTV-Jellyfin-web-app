@@ -1000,6 +1000,11 @@ function PtvShellBackdrop({
     const [previousUrl, setPreviousUrl] = useState('');
     const [isCurrentVisible, setCurrentVisible] = useState(Boolean(resolvedUrl));
     const [isPreviousVisible, setPreviousVisible] = useState(false);
+    const mountEventRecordedRef = useRef(false);
+    const initialMountEventRef = useRef({
+        activeBackdropSource: source || 'fallback',
+        backdropActive: Boolean(resolvedUrl)
+    });
 
     useEffect(() => {
         if (!resolvedUrl || resolvedUrl === currentUrl) return undefined;
@@ -1053,11 +1058,11 @@ function PtvShellBackdrop({
     }, [currentUrl, resolvedUrl, source]);
 
     useEffect(() => {
-        recordPtvEvent('route', 'ptv-shell-mounted', {
-            activeBackdropSource: source || 'fallback',
-            backdropActive: Boolean(currentUrl)
-        });
-    }, [currentUrl, source]);
+        if (mountEventRecordedRef.current) return;
+
+        mountEventRecordedRef.current = true;
+        recordPtvEvent('route', 'ptv-shell-mounted', initialMountEventRef.current);
+    }, []);
 
     return (
         <div className='ptv-shell-backdrop' aria-hidden='true' data-ptv-shell-backdrop-source={source || 'fallback'}>

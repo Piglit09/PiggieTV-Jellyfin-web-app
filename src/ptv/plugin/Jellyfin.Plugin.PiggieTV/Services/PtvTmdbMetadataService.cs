@@ -20,6 +20,7 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     private const int MaxAllowedEnrichmentItems = 600;
     private const int MaxFactCacheEntries = 1600;
     private const int MaxParallelRequests = 4;
+    private const int MaxRemoteRequestsPerPass = 48;
     private const string UnauthorizedErrorCode = "unauthorized";
     private const string ReadAccessTokenEnvironmentVariable = "PTV_TMDB_READ_ACCESS_TOKEN";
     private const string ApiKeyEnvironmentVariable = "PTV_TMDB_API_KEY";
@@ -33,9 +34,12 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         Timeout = TimeSpan.FromSeconds(4)
     };
     private static readonly TimeSpan NegativeFactCacheTtl = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan CredentialValidationTtl = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan PerRequestDeadline = TimeSpan.FromMilliseconds(3500);
 
     private readonly ConcurrentDictionary<string, PtvTmdbItemFacts> _factCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _negativeFactCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _credentialValidationGate = new(1, 1);
     private readonly ILogger<PtvTmdbMetadataService> _logger;
     private long _cacheHits;
     private long _cacheMisses;
@@ -48,13 +52,23 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
     private string? _lastErrorBody;
     private int? _lastValidationStatusCode;
     private DateTimeOffset? _lastValidatedAt;
+    private int? _lastValidatedCredentialFingerprint;
+    private bool _lastValidationSucceeded;
+    private int _lastRequestedCount;
+    private int _lastCachedCount;
+    private int _lastAttemptedCount;
+    private int _lastCompletedCount;
+    private int _lastSkippedCount;
+    private int _lastFailedCount;
+    private int _lastCancelledCount;
+    private bool _lastPartial;
 
     private sealed record TmdbRequest(BaseItem Item, string Endpoint, string TmdbId)
     {
         public string CacheKey => $"{Endpoint}:{TmdbId}";
     }
 
-    private sealed record TmdbFetchResult(PtvTmdbItemFacts Facts, bool CacheNegative);
+    private sealed record TmdbFetchResult(PtvTmdbItemFacts Facts, bool CacheNegative, bool RequestFailed);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PtvTmdbMetadataService"/> class.
@@ -96,57 +110,94 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             .Take(GetMaxEnrichmentItems())
             .ToArray();
 
-        if (requests.Length == 0)
-        {
-            return new Dictionary<Guid, PtvTmdbItemFacts>();
-        }
+        _lastRequestedCount = requests.Length;
+        _lastCachedCount = 0;
+        _lastAttemptedCount = 0;
+        _lastCompletedCount = 0;
+        _lastSkippedCount = 0;
+        _lastFailedCount = 0;
+        _lastCancelledCount = 0;
+        _lastPartial = false;
+        ClearTransientError();
 
-        if (!await ValidateCredentialsCoreAsync(credentials, cancellationToken).ConfigureAwait(false))
-        {
-            return new Dictionary<Guid, PtvTmdbItemFacts>();
-        }
-
-        var result = new ConcurrentDictionary<Guid, PtvTmdbItemFacts>();
-        using var gate = new SemaphoreSlim(MaxParallelRequests, MaxParallelRequests);
-        var tasks = requests.Select(async request =>
-        {
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-            try
-            {
-                var facts = await GetOrFetchFactsAsync(request, credentials, cancellationToken).ConfigureAwait(false);
-
-                if (facts.HasFacts)
-                {
-                    result[request.Item.Id] = facts;
-                }
-            }
-            finally
-            {
-                gate.Release();
-            }
-        });
+        var result = new Dictionary<Guid, PtvTmdbItemFacts>();
+        var pendingRequests = new List<TmdbRequest>();
 
         try
         {
-            await Task.WhenAll(tasks).ConfigureAwait(false);
-
-            if (!string.Equals(_lastErrorCode, UnauthorizedErrorCode, StringComparison.OrdinalIgnoreCase))
+            foreach (var request in requests)
             {
-                _lastError = null;
-                _lastErrorCode = null;
+                if (_factCache.TryGetValue(request.CacheKey, out var cachedFacts))
+                {
+                    Interlocked.Increment(ref _cacheHits);
+                    _lastCachedCount += 1;
+                    if (cachedFacts.HasFacts) result[request.Item.Id] = cachedFacts;
+                    continue;
+                }
+
+                if (TryGetNegativeCachedFacts(request.CacheKey))
+                {
+                    Interlocked.Increment(ref _cacheHits);
+                    Interlocked.Increment(ref _negativeCacheHits);
+                    _lastCachedCount += 1;
+                    continue;
+                }
+
+                Interlocked.Increment(ref _cacheMisses);
+                pendingRequests.Add(request);
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            _lastError = "TMDb metadata enrichment timed out or was canceled.";
-            _lastErrorCode = "canceled";
-        }
-        catch (Exception ex)
-        {
-            _lastError = ex.Message;
-            _lastErrorCode = "error";
-            _logger.LogDebug(ex, "PiggieTV TMDb metadata enrichment failed.");
+
+            if (pendingRequests.Count == 0)
+            {
+                ClearTransientError();
+                return result;
+            }
+
+            if (!await ValidateCredentialsCoreAsync(credentials, cancellationToken).ConfigureAwait(false))
+            {
+                _lastSkippedCount = pendingRequests.Count;
+                _lastPartial = result.Count > 0 || _lastSkippedCount > 0;
+                return result;
+            }
+
+            var workItems = pendingRequests
+                .Select(request => (Func<CancellationToken, Task<TmdbFetchResult>>)(async workToken =>
+                {
+                    using var deadlineSource = CancellationTokenSource.CreateLinkedTokenSource(workToken);
+                    deadlineSource.CancelAfter(PerRequestDeadline);
+                    return await FetchAndCacheFactsAsync(request, credentials, deadlineSource.Token).ConfigureAwait(false);
+                }))
+                .ToArray();
+            var workResult = await PtvBoundedWorkQueue.RunAsync(
+                workItems,
+                MaxParallelRequests,
+                MaxRemoteRequestsPerPass,
+                cancellationToken).ConfigureAwait(false);
+            var responseFailureCount = 0;
+
+            foreach (var entry in workResult.Results)
+            {
+                var request = pendingRequests[entry.Key];
+                var fetchResult = entry.Value;
+                if (fetchResult.RequestFailed)
+                {
+                    responseFailureCount += 1;
+                    continue;
+                }
+
+                if (fetchResult.Facts.HasFacts) result[request.Item.Id] = fetchResult.Facts;
+            }
+
+            _lastAttemptedCount = workResult.AttemptedCount;
+            _lastCompletedCount = Math.Max(0, workResult.Results.Count - responseFailureCount);
+            _lastSkippedCount = workResult.SkippedCount;
+            _lastFailedCount = workResult.FailedCount + responseFailureCount;
+            _lastCancelledCount = workResult.CancelledCount;
+            _lastPartial = _lastSkippedCount > 0 || _lastFailedCount > 0 || _lastCancelledCount > 0;
+
+            if (!_lastPartial) ClearTransientError();
+
+            return result;
         }
         finally
         {
@@ -154,8 +205,6 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             _lastDurationMs = stopwatch.ElapsedMilliseconds;
             TrimFactCache();
         }
-
-        return result;
     }
 
     /// <inheritdoc />
@@ -182,7 +231,15 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             LastError = _lastError,
             LastErrorBody = _lastErrorBody,
             LastStatusCode = _lastValidationStatusCode,
-            LastValidatedAt = _lastValidatedAt
+            LastValidatedAt = _lastValidatedAt,
+            LastRequestedCount = _lastRequestedCount,
+            LastCachedCount = _lastCachedCount,
+            LastAttemptedCount = _lastAttemptedCount,
+            LastCompletedCount = _lastCompletedCount,
+            LastSkippedCount = _lastSkippedCount,
+            LastFailedCount = _lastFailedCount,
+            LastCancelledCount = _lastCancelledCount,
+            LastPartial = _lastPartial
         };
     }
 
@@ -211,12 +268,56 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
             return GetStatus();
         }
 
-        await ValidateCredentialsCoreAsync(credentials, cancellationToken).ConfigureAwait(false);
+        await ValidateCredentialsCoreAsync(credentials, cancellationToken, true).ConfigureAwait(false);
 
         return GetStatus();
     }
 
     private async Task<bool> ValidateCredentialsCoreAsync(
+        TmdbCredentials credentials,
+        CancellationToken cancellationToken,
+        bool force = false)
+    {
+        var fingerprint = HashCode.Combine(credentials.CredentialType, credentials.ReadAccessToken, credentials.ApiKey);
+        if (!force && CanReuseCredentialValidation(fingerprint)) return true;
+
+        try
+        {
+            await _credentialValidationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            _lastError = "TMDb credential validation timed out or was canceled. Metadata enrichment skipped for this refresh.";
+            _lastErrorCode = "canceled";
+            _credentialStatus = "timeout";
+            _lastValidatedAt = DateTimeOffset.UtcNow;
+            return false;
+        }
+
+        try
+        {
+            if (!force && CanReuseCredentialValidation(fingerprint)) return true;
+
+            var valid = await ValidateCredentialsRequestAsync(credentials, cancellationToken).ConfigureAwait(false);
+            _lastValidatedCredentialFingerprint = fingerprint;
+            _lastValidationSucceeded = valid;
+            return valid;
+        }
+        finally
+        {
+            _credentialValidationGate.Release();
+        }
+    }
+
+    private bool CanReuseCredentialValidation(int fingerprint)
+    {
+        return _lastValidationSucceeded
+            && _lastValidatedCredentialFingerprint == fingerprint
+            && _lastValidatedAt is not null
+            && DateTimeOffset.UtcNow - _lastValidatedAt.Value < CredentialValidationTtl;
+    }
+
+    private async Task<bool> ValidateCredentialsRequestAsync(
         TmdbCredentials credentials,
         CancellationToken cancellationToken)
     {
@@ -287,25 +388,11 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         }
     }
 
-    private async Task<PtvTmdbItemFacts> GetOrFetchFactsAsync(
+    private async Task<TmdbFetchResult> FetchAndCacheFactsAsync(
         TmdbRequest request,
         TmdbCredentials credentials,
         CancellationToken cancellationToken)
     {
-        if (_factCache.TryGetValue(request.CacheKey, out var cachedFacts))
-        {
-            Interlocked.Increment(ref _cacheHits);
-            return cachedFacts;
-        }
-
-        if (TryGetNegativeCachedFacts(request.CacheKey))
-        {
-            Interlocked.Increment(ref _cacheHits);
-            Interlocked.Increment(ref _negativeCacheHits);
-            return PtvTmdbItemFacts.Empty;
-        }
-
-        Interlocked.Increment(ref _cacheMisses);
         var result = await FetchFactsAsync(request, credentials, cancellationToken).ConfigureAwait(false);
         var facts = result.Facts;
 
@@ -326,7 +413,7 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
                 NegativeFactCacheTtl.TotalMinutes);
         }
 
-        return facts;
+        return result;
     }
 
     private async Task<TmdbFetchResult> FetchFactsAsync(
@@ -366,13 +453,14 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
 
             return new TmdbFetchResult(
                 PtvTmdbItemFacts.Empty,
-                response.StatusCode == HttpStatusCode.NotFound);
+                response.StatusCode == HttpStatusCode.NotFound,
+                response.StatusCode != HttpStatusCode.NotFound);
         }
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var json = JsonNode.Parse(body);
 
-        return new TmdbFetchResult(ParseFacts(json), false);
+        return new TmdbFetchResult(ParseFacts(json), false, false);
     }
 
     private bool TryGetNegativeCachedFacts(string cacheKey)
@@ -398,6 +486,19 @@ public sealed class PtvTmdbMetadataService : IPtvTmdbMetadataService
         _lastErrorCode = UnauthorizedErrorCode;
         _lastErrorBody = errorBody;
         _credentialStatus = "unauthorized";
+    }
+
+    private void ClearTransientError()
+    {
+        if (string.Equals(_lastErrorCode, UnauthorizedErrorCode, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(_lastErrorCode, "missing-credential", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _lastError = null;
+        _lastErrorCode = null;
+        _lastErrorBody = null;
     }
 
     private static string GetCredentialStatus(bool enabled, bool configured)

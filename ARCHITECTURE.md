@@ -153,6 +153,8 @@ Reading apply is field-selective. It can update Name, OriginalTitle, SeriesName,
 
 `readingDiagnostics.ts` gates Reading diagnostics on both administrator access and explicit PTV debug mode. Output is collapsed, size-bounded, grouped by concern, and redacts credentials, authorization values, user/item identifiers, hosts, URLs, and local paths.
 
+Dashboard copy/export has a separate final boundary in `debugExportSanitizer.ts`. Live administrator-only debug panels may keep their operational detail, but any serialized or copied global export is recursively bounded and removes credentials, authorization/query secrets, private origins, user/item identifiers, local paths, and sensitive signup/SMTP values. Export sanitization is the last step before serialization so newly added dashboard sections cannot bypass it accidentally.
+
 ## Plugin API
 
 The plugin controller is rooted at `/Ptv/v1`. Important endpoint groups are:
@@ -178,6 +180,12 @@ Client behavior is selected through the client/render profile. Desktop can use f
 
 Horizontal shelves use bounded overflow, pointer/touch scrolling, visible controls where applicable, keyboard/remote focus, and small overscan. Fixed-format cards use stable dimensions to avoid layout shifts. Long diagnostics and Identify comparisons scroll within their own bounded regions.
 
+Browse work is scheduled by `browseLoadingPolicy.ts`: Recently Added and Featured work starts before Continue, recommendations, broad browse, and collections. Sections settle independently and publish partial UI rather than making the route wait for every shelf. Card rows retain the existing lightweight item field profile; richer hero metadata is requested separately.
+
+Image failures use a bounded, expiring negative cache. A failed candidate advances through the shared Primary, series/parent Primary, and Thumb sequence before a letter placeholder is shown. Failure suppression expires and is capped so one transient image failure cannot poison the session or grow without bound.
+
+TMDb featured enrichment is cache-first and runs through `PtvBoundedWorkQueue`: at most 48 remote candidates per pass, four concurrent requests, and a 3.5-second per-request budget inside the existing outer refresh budget. Completed enrichment is retained when the caller cancels or the outer budget expires. Status exposes attempted, completed, skipped, failed, cancelled, and partial counts; partial timeout is diagnostic rather than a featured-cache health failure.
+
 ## Validation Boundaries
 
 The current repository uses:
@@ -187,6 +195,10 @@ The current repository uses:
 - ESLint and Stylelint
 - Webpack production builds
 - `dotnet build` for the companion plugin
+
+`src/ptv/core/config.ts` must remain importable outside Webpack. Its development-server check uses `typeof __WEBPACK_SERVE__ !== 'undefined'` before reading the compile-time constant; direct access breaks Vitest and other Node-based consumers.
+
+The final 2026-07-13 audit verified 30 Vitest files/243 tests, 6 focused Reading files/43 tests, TypeScript, scoped ESLint and Stylelint, four companion-plugin tests, the plugin Release build, and the production Webpack build. Repository-wide ESLint still reports the demonstrated baseline of 172 errors/126 warnings, and repository-wide Stylelint reports the demonstrated baseline of 140 errors. New standalone files lint clean; findings in touched legacy browse/shell files are on unchanged pre-existing lines.
 
 Local automated validation cannot prove authenticated Jellyfin behavior, live Google Books/ComicVine application, restart persistence, Fire TV input, or real-device responsive behavior. Those remain deployment checks.
 
@@ -210,3 +222,5 @@ Local automated validation cannot prove authenticated Jellyfin behavior, live Go
 | 2026-06-16 | Initial repository architecture snapshot. |
 | 2026-06-17 | Added recommendation persistence, source fallback, and diagnostics architecture. |
 | 2026-07-13 | Consolidated the singleton runtime, shared shell, cache v7, current routes, plugin API, and Reading metadata/grouping architecture into one current document. |
+| 2026-07-13 | Recorded the final Reading production-hardening verification boundary, guarded Webpack runtime constant, and scoped-versus-repository lint baseline. |
+| 2026-07-13 | Added the final debug-export sanitizer boundary, bounded/cache-first TMDb enrichment, progressive browse scheduling, expiring image-failure isolation, and corrected shell mount telemetry. |

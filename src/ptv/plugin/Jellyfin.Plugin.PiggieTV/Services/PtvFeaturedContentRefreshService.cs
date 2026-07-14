@@ -3047,22 +3047,32 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             var facts = await _tmdbMetadataService.GetFactsAsync(candidates, tmdbTimeoutSource.Token).ConfigureAwait(false);
             var status = _tmdbMetadataService.GetStatus();
 
-            if (!string.IsNullOrWhiteSpace(status.LastError))
+            if (IsFatalTmdbStatus(status))
             {
                 _lastRefreshWarning = $"TMDb metadata failed: {NormalizeTmdbStatusMessage(status)}";
                 _logger.LogWarning("PiggieTV featured-content refresh continued without TMDb metadata. Reason={Reason}", status.LastError);
+            }
+            else if (status.LastPartial)
+            {
+                _logger.LogInformation(
+                    "PiggieTV TMDb enrichment completed partially without failing featured refresh. Requested={Requested}; Cached={Cached}; Attempted={Attempted}; Completed={Completed}; Skipped={Skipped}; Failed={Failed}; Cancelled={Cancelled}.",
+                    status.LastRequestedCount,
+                    status.LastCachedCount,
+                    status.LastAttemptedCount,
+                    status.LastCompletedCount,
+                    status.LastSkippedCount,
+                    status.LastFailedCount,
+                    status.LastCancelledCount);
             }
 
             return facts;
         }
         catch (OperationCanceledException)
         {
-            _lastRefreshWarning = "TMDb metadata failed: timed out.";
-            _logger.LogWarning("PiggieTV TMDb metadata enrichment timed out. Featured-content refresh will continue with Jellyfin metadata only.");
+            _logger.LogInformation("PiggieTV TMDb metadata enrichment reached its time budget. Featured-content refresh will continue with Jellyfin metadata only.");
         }
         catch (Exception ex)
         {
-            _lastRefreshWarning = $"TMDb metadata failed: {ex.Message}";
             _logger.LogWarning(ex, "PiggieTV TMDb metadata enrichment failed. Featured-content refresh will continue with Jellyfin metadata only.");
         }
 
@@ -3084,6 +3094,13 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         }
 
         return status.LastError ?? "unknown error.";
+    }
+
+    private static bool IsFatalTmdbStatus(PtvTmdbMetadataStatus status)
+    {
+        return string.Equals(status.LastErrorCode, "unauthorized", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status.LastErrorCode, "missing-credential", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status.LastErrorCode, "validation-failed", StringComparison.OrdinalIgnoreCase);
     }
 
     private IReadOnlyList<BaseItem> GetCandidateItems()

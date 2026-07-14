@@ -7,7 +7,7 @@ Current as of 2026-07-13. This is the current-state ledger, not a historical cha
 | Field | Current value |
 | --- | --- |
 | Product | PiggieTV native experience embedded in Jellyfin Web |
-| Current HEAD | `9851acd987` (`series fix`) |
+| Current HEAD | `476f994f01` (`idea`); Reading hardening source is in `71666e7d02` (`bookshelf`) |
 | Jellyfin Web package | `10.11.11` |
 | Node requirement | `>=20.0.0` |
 | Frontend stack | React 18.3, TypeScript 5.8, Webpack 5, MUI 6, TanStack Query 5 |
@@ -17,7 +17,7 @@ Current as of 2026-07-13. This is the current-state ledger, not a historical cha
 | Featured cache | Schema/version 7, plugin and browser stale-while-revalidate path |
 | Reading home cache | Schema 4, 5-minute fresh TTL, 24-hour stale window |
 
-The worktree is intentionally dirty. The current Reading stabilization changes, companion plugin contract changes, new regression tests, and these four project documents have not been committed. Existing development log files are unrelated artifacts and remain untouched.
+The Reading implementation and its focused tests are present in HEAD history. The current worktree adds a focused global debug/performance hardening pass, project-memory updates, a narrow root-log ignore rule, and removal of generated development logs from Git tracking. It also contains an unrelated pre-existing user change to `src/components/itemidentifier/itemidentifierUtils.test.js`; do not discard it. Generated build/test output was restored or removed after verification.
 
 ## Current Product State
 
@@ -60,9 +60,17 @@ The worktree is intentionally dirty. The current Reading stabilization changes, 
 - Featured cache version 7 is the accepted schema.
 - Frontend-only operation remains possible for Jellyfin-backed routes, but plugin-dependent features require the matching DLL and a Jellyfin restart.
 
-## Reading Stabilization Scope In The Worktree
+### Debug Export And Performance Hardening
 
-Current modified/new implementation areas:
+- Final copied/serialized dashboard exports pass through one shared recursive sanitizer. It bounds output and removes secrets, private origins, IDs, local paths, and sensitive SMTP/signup detail without changing the administrator-only live panels.
+- TMDb enrichment is cache-first, validates credentials once per bounded reuse window, limits each pass to 48 remote candidates and four concurrent requests, and retains completed partial results when cancellation arrives.
+- Browse section work uses an explicit priority policy and publishes each shelf independently; card-list payloads continue to use the existing lean field profile.
+- Failed images advance through shared candidates and enter capped five-minute negative caches instead of retrying forever or remaining suppressed for the whole session.
+- Shell mount telemetry now records an actual component mount once, rather than recording every backdrop-source change as a duplicate mount.
+
+## Reading Production-Hardening Scope
+
+Verified implementation areas from the Reading hardening commit:
 
 - `src/components/itemidentifier/*`
 - `src/ptv/modules/books/booksApi.ts`
@@ -75,23 +83,28 @@ Current modified/new implementation areas:
 - plugin configuration, controller, service interface/service, and Reading override models
 - focused tests for classification, filename parsing, series grouping/overrides, diagnostics, and Identify normalization/ranking
 
-## Validation Status
+## Final Validation Status
 
-The current source state passed these local gates after the final classification extraction:
+The current source state was reverified after completing the guarded `__WEBPACK_SERVE__` access in `src/ptv/core/config.ts`:
 
 | Check | Result |
 | --- | --- |
-| Focused Reading/Identify tests | 6 files, 42 tests passed |
-| Full Vitest suite | 27 files, 237 tests passed |
+| Focused Reading/Identify tests | 6 files, 43 tests passed |
+| Debug/performance focused tests | 3 files, 5 tests passed |
+| Full Vitest suite | 30 files, 243 tests passed |
 | TypeScript | Passed with `--noEmit --incremental false` |
-| Scoped ESLint | Zero errors; eight existing nested-render warnings in `booksPage.tsx` |
+| Repository ESLint | Fails existing baseline: 298 findings (172 errors, 126 warnings) across broad legacy PTV/Jellyfin files |
+| Scoped ESLint | New standalone files have zero findings; Reading scope has zero errors and eight pre-existing nested-render warnings |
+| Repository Stylelint | Fails existing baseline: 140 errors in `card.scss`, `homesections.scss`, `themes/dark/theme.scss`, and `nativeBrowse.scss`; none are in the Reading hardening diff |
 | Scoped Stylelint | Passed |
-| Plugin debug build | Passed with zero warnings/errors |
-| Production Webpack build | Passed in 79.3 seconds |
+| Companion plugin tests | 4 tests passed |
+| Plugin Release build | Passed with zero warnings/errors |
+| Production Webpack build | Passed in 110.7 seconds; Webpack compilation 97.673 seconds |
 | Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
 | `git diff --check` | Passed |
+| Secret/local-data scan | No real credentials or supplied sensitive export values in added source/tests/docs; fake fixtures only. One private Seerr default URL remains on a pre-existing unchanged dashboard line and is sanitized from exports. |
 
-Generated build/test artifacts were cleaned or restored after validation.
+The global lint/style failures are demonstrated pre-existing and non-blocking for this delivery: counts exactly match the prior baseline, new standalone files lint clean, touched legacy-file findings are on unchanged lines, the Reading scope has zero errors, and the failing Stylelint files were not changed by this pass. Generated `dist`, Babel cache, Vitest result, and plugin `bin/obj` changes were cleaned or restored. Four generated root development logs are removed from tracking and ignored because they contain machine-local runtime output.
 
 ## Deployment Verification Still Required
 
@@ -113,4 +126,4 @@ Generated build/test artifacts were cleaned or restored after validation.
 
 ## Next Delivery Step
 
-Package and deploy the current frontend and plugin together, run the live Reading verification matrix in `HANDOFF.md`, then commit only the intended source/tests/docs after reviewing the dirty worktree.
+Review the final audit diff. The intended scope includes the focused debug/performance source and tests, four project-memory files, the narrow `.gitignore`, and generated-log removals; keep the unrelated Identify test edit intact and decide its commit separately. Then package and deploy the matching plugin before the frontend, restart Jellyfin, clear stale frontend/service-worker assets, and run the live matrices in `HANDOFF.md`.

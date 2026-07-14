@@ -1,12 +1,12 @@
 # PiggieTV Handoff
 
-Updated 2026-07-13 for HEAD `9851acd987` plus the current uncommitted Reading stabilization work.
+Updated 2026-07-13 for HEAD `476f994f01`; Reading production-hardening source is present in `71666e7d02`.
 
 ## Where The Project Is
 
 PiggieTV is a Jellyfin Web customization with a guarded singleton runtime, shared PTV shell, native Home/media/Music/Reading/Requests routes, persistent playback UI, featured cache v7, recommendation and Row Builder tooling, and a companion .NET 9 Jellyfin plugin.
 
-The latest local task is complete in code: stabilize Reading classification, filename parsing, series grouping, Google Books/ComicVine Identify behavior, selective metadata application, diagnostics authorization/redaction, and responsive Reading/Identify layouts. Automated validation is green. The next work is deployment and live verification, not another local rewrite.
+The Reading hardening task remains complete and unchanged. A separate focused dashboard/performance pass is now complete locally: copied debug exports are sanitized, TMDb enrichment is bounded and cancellation-aware, browse shelves settle progressively, isolated image failures expire, and shell mount telemetry no longer duplicates on backdrop changes. The next work is review/commit followed by deployment and live verification, not another broad rewrite.
 
 ## Important Current Decisions
 
@@ -48,20 +48,40 @@ The latest local task is complete in code: stabilize Reading classification, fil
 - `readingDiagnostics.ts` gates, groups, bounds, and redacts Reading diagnostics.
 - `books.scss` and `itemidentifier.scss` provide fluid widths, touch controls, horizontal shelf overflow, and bounded internal scrolling.
 
+### Dashboard And Performance Follow-up
+
+- `debugExportSanitizer.ts` is the final boundary for copied/serialized dashboard reports; the live admin panel remains operationally detailed.
+- `PtvTmdbMetadataService` now uses cache-first lookup, bounded parallelism, per-request cancellation, limited remote work, reusable credential validation, and partial-result counters.
+- `browseLoadingPolicy.ts` prioritizes first-visible shelves and avoids the former random Featured query; sections still publish independently.
+- `images.ts` uses capped expiring failure caches, while browse cards advance through shared fallback candidates.
+- `PTVShell` emits its mount diagnostic once per actual shell backdrop component mount.
+
 ## Validation Already Completed
 
 ```text
-Focused Reading/Identify: 6 files, 42 tests passed
-Full Vitest suite:         27 files, 237 tests passed
+Focused Reading/Identify: 6 files, 43 tests passed
+Debug/performance tests:   3 files, 5 tests passed
+Full Vitest suite:         30 files, 243 tests passed
 TypeScript:                passed
 Scoped ESLint:             zero errors; 8 existing nested-render warnings
 Scoped Stylelint:          passed
-Plugin debug build:        passed, 0 warnings / 0 errors
-Production Webpack:        passed in 79.3s
+Plugin Release build:      passed, 0 warnings / 0 errors
+Plugin tests:              4 tests passed
+Production Webpack:        passed in 110.7s (97.673s compilation)
 git diff --check:          passed
 ```
 
-Production Webpack emitted only the repository's existing aggregate asset-size and entrypoint-size warnings. Generated build/test artifacts were cleaned or restored.
+Production Webpack emitted only the repository's existing aggregate asset-size and entrypoint-size warnings. Repository-wide ESLint still reports the exact 172-error/126-warning baseline and repository-wide Stylelint the exact 140-error baseline. New standalone files lint clean; touched legacy browse/shell findings are on unchanged lines. Generated build/test artifacts were cleaned or restored.
+
+## Debug/Performance Live Verification
+
+1. Copy the global dashboard report and confirm it contains useful health/timing/count fields but no private host, user/item ID, token, authorization header, local path, SMTP credential, or raw sensitive URL.
+2. Trigger a featured refresh with a warm TMDb cache and confirm cache hits do not consume the remote-work budget.
+3. Trigger a cold/slow refresh and confirm attempted/completed/skipped/failed/cancelled/partial counters are coherent and completed enrichment survives timeout/cancellation.
+4. Open Movies and Shows with network timing visible. Confirm the hero and first shelf become interactive before slower shelves finish, and confirm no duplicate exact shelf request is issued.
+5. Confirm standard poster rows use lean list payloads and richer hero data is fetched separately.
+6. Break one poster URL temporarily. Confirm the card advances to another candidate/placeholder, other images continue, and the failed candidate is retried after expiry or reload.
+7. Change focused backdrops repeatedly and confirm `ptv-shell-mounted` does not increment for those changes.
 
 ## Live Verification Matrix
 
@@ -91,18 +111,20 @@ npm test
 npx tsc --noEmit --pretty false --incremental false
 npx eslint src/components/itemidentifier/itemidentifier.js src/components/itemidentifier/itemidentifierUtils.js src/ptv/modules/books src/ptv/core/config.ts src/ptv/core/pluginApi.ts
 npx stylelint "src/ptv/modules/books/books.scss" "src/components/itemidentifier/itemidentifier.scss"
-dotnet build src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj --no-restore
+dotnet build src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj -c Release --no-restore
 npm run build:production
 git diff --check
 ```
 
 The broad ESLint command may report the eight known nested-render warnings in `booksPage.tsx`; treat new errors separately.
 
-## Dirty Worktree Guidance
+## Final Audit Worktree Guidance
 
-- Do not discard unrelated user changes or development logs.
-- The four root project documents are currently untracked and intentionally updated by this task.
-- Review frontend and plugin changes as one feature set before committing.
+- Do not discard unrelated user changes.
+- The four root project-memory documents are tracked, current, and belong in the intended commit scope.
+- Root `ptv-dev-server*.log` files are generated machine-local output. They are removed from tracking and narrowly ignored; the active server may keep local copies open.
+- Review the focused debug/performance files, project-memory updates, `.gitignore`, and generated-log removals before committing. The Reading frontend/plugin implementation is already present in HEAD history.
+- `src/components/itemidentifier/itemidentifierUtils.test.js` was already modified outside this follow-up; preserve it and decide its commit scope separately.
 - Do not commit generated `dist`, plugin `bin/obj`, Vitest result, or Babel cache output.
 - Confirm the plugin DLL and frontend bundle were produced from the same worktree before live testing.
 

@@ -18,9 +18,9 @@ This log tracks known bugs, reproduction steps, expected behavior, actual behavi
 | TS-HOME-001 | Medium | Resolved / monitor | Music home | `PtvMusicHomeData` objects were missing required `library`. Later logs show no TypeScript errors. | 2026-06-16 |
 | ROUTE-MUSIC-001 | Medium | Resolved / monitor | Music route | `musicPage` module was temporarily unresolved. Later logs show the module built successfully. | 2026-06-16 |
 | TS-MUSIC-003 | Low | Resolved / monitor | Music playback | `playPtvMusicTracks` was called with three arguments where one or two were expected. Later logs show no TypeScript errors. | 2026-06-16 |
-| READ-STAB-001 | High | Fixed in code / pending deployment verification | Reading | Shared filename parsing, classification, grouping, selective Identify apply, protected diagnostics, and responsive layout pass automated validation. | 2026-07-13 |
-| READ-OVERRIDE-001 | High | Fixed in code / pending plugin deployment | Reading series | Durable admin series overrides now use the plugin endpoint; cross-device and restart persistence require live verification. | 2026-07-13 |
-| READ-PROVIDER-001 | High | Fixed in code / pending live provider verification | Reading metadata | Google Books/ComicVine normalization, ranking, canonical title handling, and field-selective apply are covered locally but require authenticated provider checks. | 2026-07-13 |
+| READ-STAB-001 | High | Verified locally / pending deployment verification | Reading | Shared filename parsing, classification, grouping, selective Identify apply, protected diagnostics, and responsive layout pass the final automated gate. | 2026-07-13 |
+| READ-OVERRIDE-001 | High | Verified locally / pending plugin deployment | Reading series | Durable admin series overrides use the plugin endpoint; cross-device and restart persistence require live verification. | 2026-07-13 |
+| READ-PROVIDER-001 | High | Verified locally / pending live provider verification | Reading metadata | Google Books/ComicVine normalization, ranking, canonical title handling, and field-selective apply pass local coverage but require authenticated provider checks. | 2026-07-13 |
 | SHELL-LEGACY-001 | Medium | Intermittent / monitor | Shared shell | The legacy Jellyfin header appeared once during a soft runtime state and cleared after hard refresh; no automated reproduction is available. | 2026-07-13 |
 
 ## REC-PERSIST-001: Recommendation Save Rejected
@@ -118,7 +118,7 @@ This log tracks known bugs, reproduction steps, expected behavior, actual behavi
 | Expected behavior | Books, Comics, and Manga classify and group consistently; metadata selection is safe; debug output is protected; shelves remain usable across supported inputs and widths. |
 | Actual behavior | Before this pass, parsing/grouping rules were duplicated, provider wording could influence classification/title, diagnostics were overly broad, and shelf/Identify layouts could overflow. |
 | Fix | Added shared parser/classification/diagnostics boundaries, deterministic grouping and ranking, selective metadata application, and bounded responsive layouts. |
-| Evidence | 42 focused tests and the 237-test full suite pass; TypeScript, scoped styles/lint, plugin build, and production Webpack pass. |
+| Evidence | 43 focused tests and the 238-test full suite pass; TypeScript, scoped styles/lint, plugin build, and production Webpack pass. |
 | Next action | Run the authenticated provider, device, and viewport matrix after deploying the matching frontend and plugin. |
 
 ## READ-OVERRIDE-001: Reading Series Override Persistence
@@ -237,5 +237,25 @@ This log tracks known bugs, reproduction steps, expected behavior, actual behavi
 
 - Reconciled `ARCHITECTURE.md`, `PROJECT_STATE.md`, and `HANDOFF.md` against HEAD `9851acd987`, package version `10.11.11`, the current runtime/shell route registry, featured cache version 7, Reading cache schema 4, plugin `/Ptv/v1` routes, and the uncommitted Reading stabilization work.
 - Removed stale June current-state claims from the operational documents while preserving this file's historical issue details.
-- The current local validation baseline is 42 focused Reading/Identify tests, 237 full-suite tests, passing TypeScript/style/plugin builds, and a passing production Webpack build with only existing bundle-size warnings.
+- The final local validation baseline is 43 focused Reading/Identify tests, 238 full-suite tests, passing TypeScript/scoped-style/plugin builds, and a passing production Webpack build with only existing bundle-size warnings.
 - Deployment remains the next gate. Live provider application, server-restart persistence, real-device input, representative authenticated viewports, and the intermittent legacy-header report are not marked verified by local automation.
+
+## 2026-07-13 - Reading production-hardening final audit
+
+- Confirmed every intended Reading hardening source/test/plugin change remains present in HEAD history, with the implementation in `71666e7d02` and the final audit based on HEAD `476f994f01`.
+- Confirmed `config.ts` protects the Webpack compile constant with `typeof __WEBPACK_SERVE__ !== 'undefined'` before reading it. The full Vitest suite passes after this guard: 27 files and 238 tests. The focused Reading/Identify suite passes 6 files and 43 tests, including an explicit Saki v02 ranking regression.
+- TypeScript passes. The plugin Release build passes with zero warnings/errors. Production Webpack passes in 135 seconds with only its two existing asset/entrypoint size warnings.
+- Repository ESLint reports 298 baseline findings (172 errors, 126 warnings), while the changed Reading/Identify scope has zero errors and eight warnings traced to pre-hardening commits. Repository Stylelint reports 140 baseline errors only in files outside the hardening diff; both changed SCSS files pass.
+- Manually audited all requested invariants: year-free grouping; apostrophe normalization; plugin-authoritative overrides; Manga classification precedence; canonical-title protection; exact volume ranking; non-destructive empty-field/artwork defaults; independent metadata/artwork status; protected, bounded, redacted diagnostics; provider URL allowlisting; bounded Identify/apply scrolling; and fluid Reading layouts without page-level scaling.
+- A redacted scan of 30 source/test/project-memory files found no real API keys, Jellyfin tokens, authorization credentials, or local-only secrets in added production code. Two matches are deliberate fake values in diagnostics redaction tests. Generated dev logs contained machine-local URLs and were removed from Git tracking; a narrow root-log ignore rule prevents recommit.
+- Generated production `dist`, Babel cache, Vitest result, and plugin `bin/obj` changes were removed or restored after verification. Live provider application, restart persistence, device input, and authenticated responsive checks remain deployment verification.
+
+## 2026-07-13 - Global debug export and performance follow-up
+
+- Debug-export root cause: the dashboard assembled multiple authoritative live sections but copied the merged object without a final shared redaction/bounding boundary. Added recursive final sanitization for copy/serialization while preserving the admin-only live view.
+- TMDb root cause: enrichment scheduled too much remote work under one outer timeout, repeated credential validation, and treated caller cancellation as an all-or-nothing refresh failure. It is now cache-first with a 48-item remote cap, four workers, 3.5-second request budgets, reusable credential validation, partial-result retention, and explicit attempted/completed/skipped/failed/cancelled/partial counters.
+- Browse root cause: independent shelves already rendered progressively, but task ordering allowed slower broad work to compete with first-visible content and Featured used an expensive random query. Added explicit priority scheduling and a bounded recent Featured query while retaining the existing lean card field profile and request coordinator.
+- Image root cause: failed-image sets never expired and browse cards did not consistently advance through shared candidates. Added capped five-minute negative caches and candidate fallback before the placeholder.
+- Shell diagnostics root cause: `ptv-shell-mounted` was tied to backdrop source changes rather than an actual mount. It now emits once per component mount.
+- Validation: 3 focused files/5 tests, 6 Reading files/43 tests, and the full 30-file/243-test Vitest suite pass. TypeScript, scoped lint/style, four plugin tests, plugin Release build, `git diff --check`, and production Webpack pass. Webpack completed in 110.7 seconds with only the two known bundle-size warnings.
+- Repository lint baselines are unchanged: ESLint 172 errors/126 warnings and Stylelint 140 errors. New standalone files lint clean; touched legacy-file findings are on unchanged lines. No real credential or supplied sensitive export value appears in added source/tests/docs; fixtures are synthetic. One private Seerr default URL remains on an unchanged pre-existing dashboard line and is removed by export sanitization.

@@ -58,6 +58,7 @@ import {
 } from '../../pages/home/ptvRows';
 import { clearPtvIntegrationSettingsCache } from '../integrations/integrationsConfig';
 import { normalizePtvRecommendationRowSettings } from '../recommendations/recommendationSettings';
+import { serializeSanitizedPtvDebugExport } from './debugExportSanitizer';
 
 type PtvPluginFeaturedStatus = {
     cacheVersion?: number;
@@ -83,7 +84,15 @@ type PtvTmdbMetadataStatus = {
     lastError?: string | null;
     lastErrorBody?: string | null;
     lastErrorCode?: string | null;
+    lastAttemptedCount?: number;
+    lastCachedCount?: number;
+    lastCancelledCount?: number;
+    lastCompletedCount?: number;
     lastStatusCode?: number | null;
+    lastFailedCount?: number;
+    lastPartial?: boolean;
+    lastRequestedCount?: number;
+    lastSkippedCount?: number;
     lastValidatedAt?: string | null;
     negativeCacheHits?: number;
     negativeCacheSize?: number;
@@ -3165,7 +3174,7 @@ const PiggieTvDashboardPage = () => {
             pluginApi: livePluginApi
         });
 
-        return JSON.stringify({
+        return serializeSanitizedPtvDebugExport({
             cacheStatus: liveCacheStatus,
             clientProfile,
             debugReport: liveDebugReport,
@@ -3179,7 +3188,7 @@ const PiggieTvDashboardPage = () => {
             source: 'dashboard-live-merged',
             signup: pluginState.status?.signup || null,
             timestamp: new Date().toISOString()
-        }, null, 2);
+        });
     }, [clientProfile, debugEnabled, debugReport, featureSettings, getMergedDebugReport, persistedRecommendationRows, pluginState]);
 
     const copyDebugSnapshot = useCallback(() => {
@@ -3195,7 +3204,7 @@ const PiggieTvDashboardPage = () => {
     const copyDebugReport = useCallback(() => {
         const report = getMergedDebugReport(debugReport);
 
-        copyTextToClipboard(JSON.stringify(report, null, 2))
+        copyTextToClipboard(serializeSanitizedPtvDebugExport(report))
             .then(() => {
                 setStatusMessage('Debug report copied.');
             })

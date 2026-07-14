@@ -1,0 +1,5 @@
+# Local webpack development server output
+/ptv-dev-server.codex.err.log
+/ptv-dev-server.codex.out.log
+/ptv-dev-server.err.log
+/ptv-dev-server.log

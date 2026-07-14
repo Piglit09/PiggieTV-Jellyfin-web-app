@@ -29,10 +29,11 @@ export type PtvItemImageCandidateOptions = {
 
 type PtvImageItemInput = PtvItem | string | null | undefined;
 
-const failedPtvImageUrls = new Set<string>();
-const failedPtvImageCandidateKeys = new Set<string>();
+const failedPtvImageUrls = new Map<string, number>();
+const failedPtvImageCandidateKeys = new Map<string, number>();
 const MAX_FAILED_IMAGE_URLS = 800;
 const MAX_FAILED_IMAGE_CANDIDATE_KEYS = 1200;
+const PTV_IMAGE_FAILURE_TTL_MS = 5 * 60 * 1000;
 const ptvImageFailureDiagnostics = {
     fallbackCount: 0,
     retrySuppressionCount: 0,
@@ -53,12 +54,13 @@ function normalizePtvImageFailureUrl(url: string) {
 }
 
 function trimFailedImageUrls() {
+    pruneExpiredFailures(failedPtvImageUrls);
     if (failedPtvImageUrls.size <= MAX_FAILED_IMAGE_URLS) return;
 
     const urlsToDelete = failedPtvImageUrls.size - MAX_FAILED_IMAGE_URLS;
     let deleted = 0;
 
-    for (const url of failedPtvImageUrls) {
+    for (const url of failedPtvImageUrls.keys()) {
         failedPtvImageUrls.delete(url);
         deleted += 1;
 
@@ -67,17 +69,36 @@ function trimFailedImageUrls() {
 }
 
 function trimFailedImageCandidateKeys() {
+    pruneExpiredFailures(failedPtvImageCandidateKeys);
     if (failedPtvImageCandidateKeys.size <= MAX_FAILED_IMAGE_CANDIDATE_KEYS) return;
 
     const keysToDelete = failedPtvImageCandidateKeys.size - MAX_FAILED_IMAGE_CANDIDATE_KEYS;
     let deleted = 0;
 
-    for (const key of failedPtvImageCandidateKeys) {
+    for (const key of failedPtvImageCandidateKeys.keys()) {
         failedPtvImageCandidateKeys.delete(key);
         deleted += 1;
 
         if (deleted >= keysToDelete) return;
     }
+}
+
+function pruneExpiredFailures(failures: Map<string, number>) {
+    const now = Date.now();
+
+    for (const [key, expiresAt] of failures) {
+        if (expiresAt <= now) failures.delete(key);
+    }
+}
+
+function hasActiveFailure(failures: Map<string, number>, key: string) {
+    const expiresAt = failures.get(key);
+
+    if (!expiresAt) return false;
+    if (expiresAt > Date.now()) return true;
+
+    failures.delete(key);
+    return false;
 }
 
 function getPtvImageCandidateFailureKey(candidate: PtvItemImageCandidate | null | undefined) {
@@ -99,7 +120,7 @@ export function markPtvImageUrlFailed(url: string) {
 
     ptvImageFailureDiagnostics.totalFailureCount += 1;
 
-    if (failedPtvImageUrls.has(normalizedUrl)) {
+    if (hasActiveFailure(failedPtvImageUrls, normalizedUrl)) {
         ptvImageFailureDiagnostics.retrySuppressionCount += 1;
         if (shouldCollectDiagnostics()) {
             recordPtvEvent('image', 'image-retry-suppressed', {
@@ -110,7 +131,7 @@ export function markPtvImageUrlFailed(url: string) {
         return;
     }
 
-    failedPtvImageUrls.add(normalizedUrl);
+    failedPtvImageUrls.set(normalizedUrl, Date.now() + PTV_IMAGE_FAILURE_TTL_MS);
     trimFailedImageUrls();
     if (shouldCollectDiagnostics()) {
         recordPtvEvent('image', 'image-url-failure-cached', {
@@ -126,7 +147,7 @@ export function markPtvImageCandidateFailed(candidate: PtvItemImageCandidate | n
     const key = getPtvImageCandidateFailureKey(candidate);
 
     if (key) {
-        failedPtvImageCandidateKeys.add(key);
+        failedPtvImageCandidateKeys.set(key, Date.now() + PTV_IMAGE_FAILURE_TTL_MS);
         trimFailedImageCandidateKeys();
     }
 
@@ -136,7 +157,7 @@ export function markPtvImageCandidateFailed(candidate: PtvItemImageCandidate | n
 export function hasPtvImageUrlFailed(url: string) {
     const normalizedUrl = normalizePtvImageFailureUrl(url);
 
-    return Boolean(normalizedUrl && failedPtvImageUrls.has(normalizedUrl));
+    return Boolean(normalizedUrl && hasActiveFailure(failedPtvImageUrls, normalizedUrl));
 }
 
 export function clearPtvImageFailuresForItem(itemId: string | null | undefined) {
@@ -144,13 +165,13 @@ export function clearPtvImageFailuresForItem(itemId: string | null | undefined) 
 
     if (!normalizedItemId) return;
 
-    for (const url of Array.from(failedPtvImageUrls)) {
+    for (const url of Array.from(failedPtvImageUrls.keys())) {
         if (url.toLowerCase().includes(`/items/${normalizedItemId}/images/`)) {
             failedPtvImageUrls.delete(url);
         }
     }
 
-    for (const key of Array.from(failedPtvImageCandidateKeys)) {
+    for (const key of Array.from(failedPtvImageCandidateKeys.keys())) {
         if (key.toLowerCase().startsWith(`${normalizedItemId}:`)) {
             failedPtvImageCandidateKeys.delete(key);
         }
@@ -162,7 +183,7 @@ export function hasPtvImageCandidateFailed(candidate: PtvItemImageCandidate | nu
 
     const key = getPtvImageCandidateFailureKey(candidate);
 
-    return hasPtvImageUrlFailed(candidate.url) || Boolean(key && failedPtvImageCandidateKeys.has(key));
+    return hasPtvImageUrlFailed(candidate.url) || Boolean(key && hasActiveFailure(failedPtvImageCandidateKeys, key));
 }
 
 export function recordPtvImageFallback() {
@@ -172,6 +193,9 @@ export function recordPtvImageFallback() {
 }
 
 export function getPtvImageFailureDiagnostics() {
+    pruneExpiredFailures(failedPtvImageUrls);
+    pruneExpiredFailures(failedPtvImageCandidateKeys);
+
     return {
         cachedFailures: failedPtvImageUrls.size,
         cachedImageFailures: failedPtvImageCandidateKeys.size,
