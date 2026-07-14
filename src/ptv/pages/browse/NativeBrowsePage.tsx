@@ -4,7 +4,6 @@ import { useLocation } from 'react-router-dom';
 import Page from 'components/Page';
 
 import {
-    getPtvApiUrl,
     getPtvCurrentUserId,
     getPtvItemImageCandidates,
     getPtvItemImageUrl,
@@ -25,7 +24,11 @@ import {
 } from '../../core/itemRoutes';
 import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
 import PTVShell, { type PtvShellSection } from '../../shell/PTVShell';
-import { getPtvRouteControllerState, registerPtvNativeRoute } from '../../shell/routeController';
+import {
+    getPtvRouteControllerState,
+    navigatePtvRoute,
+    registerPtvNativeRoute
+} from '../../shell/routeController';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import {
     getPtvQualityPillClass,
@@ -36,6 +39,20 @@ import {
     getPtvBrowseFeaturedQueryOverrides,
     prioritizePtvBrowseTasks
 } from './browseLoadingPolicy';
+import {
+    applyPtvBrowseScope,
+    findExactPtvBrowseDirectoryEntry,
+    loadPtvBrowseDirectory,
+    loadPtvFocusedBrowsePage,
+    resolvePtvBrowseScope,
+    type PtvBrowseDirectoryEntry,
+    type PtvBrowseResolvedScope
+} from './browseData';
+import {
+    buildPtvBrowseHref,
+    parsePtvBrowseRoute,
+    type PtvBrowseRoute
+} from './browseRoute';
 
 import './nativeBrowse.scss';
 
@@ -274,9 +291,8 @@ function getArrayText(value: unknown): string[] {
         .filter(Boolean);
 }
 
-function getPtvBrowseConfig(pathname: string, search: string): PtvBrowseConfig {
-    const params = new URLSearchParams(search);
-    const parentHint = (params.get('topParentId') || params.get('kind') || '').toLowerCase();
+function getPtvBrowseConfig(pathname: string, parentHintValue: string): PtvBrowseConfig {
+    const parentHint = parentHintValue.toLowerCase();
 
     if (pathname.includes('collections')) {
         return {
@@ -303,7 +319,7 @@ function getPtvBrowseConfig(pathname: string, search: string): PtvBrowseConfig {
                 continueIncludeItemTypes: 'Episode,Series',
                 description: 'Series, seasons, and episodes from your anime library.',
                 featuredTitle: 'Featured Anime',
-                genreFilter: 'Anime',
+                genreFilter: '',
                 icon: 'anime',
                 includeItemTypes: 'Series',
                 kind: 'shows',
@@ -320,7 +336,7 @@ function getPtvBrowseConfig(pathname: string, search: string): PtvBrowseConfig {
                 continueIncludeItemTypes: 'Episode,Series',
                 description: 'Animated series, comfort shows, and weekend cartoons.',
                 featuredTitle: 'Featured Cartoons',
-                genreFilter: 'Animation',
+                genreFilter: '',
                 icon: 'cartoons',
                 includeItemTypes: 'Series',
                 kind: 'shows',
@@ -353,7 +369,7 @@ function getPtvBrowseConfig(pathname: string, search: string): PtvBrowseConfig {
             continueIncludeItemTypes: 'Movie',
             description: 'Anime films, specials, and cinematic picks.',
             featuredTitle: 'Featured AniMovies',
-            genreFilter: 'Anime',
+            genreFilter: '',
             icon: 'animeMovies',
             includeItemTypes: 'Movie',
             kind: 'movies',
@@ -387,7 +403,12 @@ function getPtvBrowseShellSection(config: PtvBrowseConfig): PtvShellSection {
     return config.kind;
 }
 
-function getBaseQuery(config: PtvBrowseConfig, overrides: PtvItemQuery = {}, section = 'default'): PtvItemQuery {
+function getBaseQuery(
+    config: PtvBrowseConfig,
+    overrides: PtvItemQuery = {},
+    section = 'default',
+    scope?: PtvBrowseResolvedScope
+): PtvItemQuery {
     const query: PtvItemQuery = {
         EnableImages: true,
         EnableImageTypes: getBrowseImageTypesForSection(section),
@@ -403,7 +424,7 @@ function getBaseQuery(config: PtvBrowseConfig, overrides: PtvItemQuery = {}, sec
         query.Genres = config.genreFilter;
     }
 
-    return query;
+    return scope ? applyPtvBrowseScope(query, scope) : query;
 }
 
 function dedupeBrowseItems(items: PtvItem[]) {
@@ -490,22 +511,12 @@ function getDistinctTags(items: PtvItem[], key: 'Genres' | 'Studios') {
         .slice(0, 18);
 }
 
-function redactBrowseDiagnosticUrl(url: string) {
-    return url
-        .replace(/([?&](?:api_key|apikey|access_token|token)=)[^&]+/gi, '$1[redacted]')
-        .replace(/(Authorization=)[^&]+/gi, '$1[redacted]');
-}
-
 function getBrowseRequestUrl(query: PtvItemQuery) {
     const userId = getPtvCurrentUserId();
 
     if (!userId) return '';
 
-    try {
-        return redactBrowseDiagnosticUrl(getPtvApiUrl(`Users/${userId}/Items`, query));
-    } catch {
-        return '';
-    }
+    return `GET /Users/{user}/Items (${String(query.IncludeItemTypes || 'items')}, limit=${Number(query.Limit || 0)})`;
 }
 
 function getBrowseFieldDiagnostics(section: string, query: PtvItemQuery, itemCount: number, payloadSize: number) {
@@ -1261,12 +1272,35 @@ function PtvBrowseSectionView({
     );
 }
 
-function PtvBrowseTagSection({ tags, title, type }: Readonly<{ tags: string[]; title: string; type: 'genre' | 'studio' }>) {
+type PtvBrowseTagType = 'genre' | 'network' | 'studio';
+
+function getPtvBrowseTagHeading(type: PtvBrowseTagType) {
+    if (type === 'genre') return 'Genres';
+    if (type === 'network') return 'Networks';
+
+    return 'Studios';
+}
+
+function getPtvBrowseTagHref(route: PtvBrowseRoute, type: PtvBrowseTagType, tag: string) {
+    if (type === 'genre') return buildPtvBrowseHref(route, { genre: tag, view: 'genre' });
+    if (type === 'network') return buildPtvBrowseHref(route, { network: tag, view: 'network' });
+
+    return buildPtvBrowseHref(route, { studio: tag, view: 'studio' });
+}
+
+function PtvBrowseTagSection({ route, tags, title, type }: Readonly<{
+    route: PtvBrowseRoute;
+    tags: string[];
+    title: string;
+    type: PtvBrowseTagType;
+}>) {
     return (
         <section className='ptv-browse-tag-section'>
             <header className='ptv-browse-row-header'>
                 <div>
-                    <span className='ptv-browse-section-kicker'>{type === 'genre' ? 'Genres' : 'Studios'}</span>
+                    <span className='ptv-browse-section-kicker'>
+                        {getPtvBrowseTagHeading(type)}
+                    </span>
                     <h2>{title}</h2>
                 </div>
             </header>
@@ -1276,7 +1310,7 @@ function PtvBrowseTagSection({ tags, title, type }: Readonly<{ tags: string[]; t
                         <a
                             key={tag}
                             className='ptv-browse-chip'
-                            href={`#/search?query=${encodeURIComponent(tag)}`}
+                            href={getPtvBrowseTagHref(route, type, tag)}
                         >
                             {tag}
                         </a>
@@ -1308,7 +1342,7 @@ function PtvBrowseDebugPanel({ diagnostics, state }: Readonly<{ diagnostics: Ptv
                 <dd>{state.tags.studios.join(', ') || 'none'}</dd>
             </dl>
             <div className='ptv-browse-debug-list'>
-                {diagnostics.map(entry => (
+                {diagnostics.slice(0, 8).map(entry => (
                     <span key={entry.section}>
                         {entry.section}: {entry.status}, {entry.count} items, {entry.durationMs}ms
                         {entry.timeoutReason ? `, ${entry.timeoutReason}` : ''}
@@ -1317,13 +1351,12 @@ function PtvBrowseDebugPanel({ diagnostics, state }: Readonly<{ diagnostics: Ptv
                         {entry.limit ? `, limit=${entry.limit}` : ''}
                         {entry.requestedFieldProfile ? `, profile=${entry.requestedFieldProfile}` : ''}
                         {entry.requestedFieldCount ? `, fieldCount=${entry.requestedFieldCount}` : ''}
-                        {entry.fields ? `, fields=${entry.fields}` : ''}
                         {entry.payloadSize ? `, payload=${entry.payloadSize}` : ''}
                         {entry.bytesPerItem ? `, bytes/item=${entry.bytesPerItem}` : ''}
                         {entry.normalizationDurationMs ? `, normalize=${entry.normalizationDurationMs}ms` : ''}
                         {entry.fieldProfileMismatchWarning ? `, warning=${entry.fieldProfileMismatchWarning}` : ''}
                         {entry.timeoutSource !== 'none' ? `, timeoutSource=${entry.timeoutSource}` : ''}
-                        {entry.requestUrl ? `, ${entry.requestUrl}` : ''}
+                        {entry.requestUrl ? `, endpoint=${entry.requestUrl}` : ''}
                     </span>
                 ))}
             </div>
@@ -1331,10 +1364,13 @@ function PtvBrowseDebugPanel({ diagnostics, state }: Readonly<{ diagnostics: Ptv
     );
 }
 
-function NativeBrowsePage() {
-    const location = useLocation();
+function PtvBrowseLandingPage({ config, location, route, scope }: Readonly<{
+    config: PtvBrowseConfig;
+    location: { pathname: string; search: string };
+    route: PtvBrowseRoute;
+    scope: PtvBrowseResolvedScope;
+}>) {
     const { canShowDebug } = usePtvAdminDebugVisibility();
-    const config = useMemo(() => getPtvBrowseConfig(location.pathname, location.search), [location.pathname, location.search]);
     const memoryKey = useMemo(() => getPtvBrowseMemoryKey(location.pathname, location.search), [location.pathname, location.search]);
     const memoryRef = useRef<PtvBrowseMemory>(loadPtvBrowseMemory(memoryKey));
     const memoryRestoredRef = useRef(false);
@@ -1547,7 +1583,7 @@ function NativeBrowsePage() {
                     id: 'featured',
                     run: () => fetchBrowseItems(
                         'featured',
-                        getBaseQuery(config, getPtvBrowseFeaturedQueryOverrides(), 'featured')
+                        getBaseQuery(config, getPtvBrowseFeaturedQueryOverrides(), 'featured', scope)
                     )
                 },
                 {
@@ -1557,14 +1593,14 @@ function NativeBrowsePage() {
                         Limit: 20,
                         SortBy: 'DatePlayed',
                         SortOrder: 'Descending'
-                    }, 'continue'))
+                    }, 'continue', scope))
                 },
                 {
                     id: 'recommendations',
                     run: () => fetchBrowseItems('recommendations', getBaseQuery(config, {
                         Limit: 20,
                         SortBy: 'Random'
-                    }, 'recommendations'))
+                    }, 'recommendations', scope))
                 },
                 {
                     id: 'recently-added',
@@ -1572,7 +1608,7 @@ function NativeBrowsePage() {
                         Limit: 20,
                         SortBy: 'DateCreated',
                         SortOrder: 'Descending'
-                    }, 'recently-added'))
+                    }, 'recently-added', scope))
                 },
                 {
                     id: 'browse',
@@ -1580,7 +1616,7 @@ function NativeBrowsePage() {
                         Limit: 50,
                         SortBy: 'SortName',
                         SortOrder: 'Ascending'
-                    }, 'browse'))
+                    }, 'browse', scope))
                 },
                 {
                     id: 'collections',
@@ -1592,7 +1628,7 @@ function NativeBrowsePage() {
                         Limit: 24,
                         SortBy: 'SortName',
                         SortOrder: 'Ascending'
-                    }, 'collections'))
+                    }, 'collections', scope))
                 }
             ]);
             let nextSectionIndex = 0;
@@ -1644,7 +1680,7 @@ function NativeBrowsePage() {
             slowTimers.forEach(timer => window.clearTimeout(timer));
             slowTimers.clear();
         };
-    }, [config, handleBrowseRetry, retryNonce]);
+    }, [config, handleBrowseRetry, retryNonce, scope]);
 
     useEffect(() => {
         if (memoryRestoredRef.current || !state.sections.length) return undefined;
@@ -1712,13 +1748,553 @@ function NativeBrowsePage() {
                             section={section}
                         />
                     ))}
-                    <PtvBrowseTagSection title={`${config.title} Genres`} tags={state.tags.genres} type='genre' />
-                    <PtvBrowseTagSection title={`${config.title} Studios`} tags={state.tags.studios} type='studio' />
+                    <PtvBrowseTagSection route={route} title={`${config.title} Genres`} tags={state.tags.genres} type='genre' />
+                    <PtvBrowseTagSection
+                        route={route}
+                        title={`${config.title} ${config.kind === 'shows' ? 'Networks' : 'Studios'}`}
+                        tags={state.tags.studios}
+                        type={config.kind === 'shows' ? 'network' : 'studio'}
+                    />
                     <PtvBrowseDebugPanel diagnostics={state.diagnostics} state={state} />
                 </main>
             </PTVShell>
         </Page>
     );
+}
+
+type PtvFocusedBrowseState = Readonly<{
+    directory: PtvBrowseDirectoryEntry[];
+    durationMs: number;
+    error: string;
+    exactFilterResolved: boolean;
+    items: PtvItem[];
+    status: 'error' | 'loading' | 'ready';
+    totalRecordCount: number;
+}>;
+
+const EMPTY_FOCUSED_BROWSE_STATE: PtvFocusedBrowseState = {
+    directory: [],
+    durationMs: 0,
+    error: '',
+    exactFilterResolved: false,
+    items: [],
+    status: 'loading',
+    totalRecordCount: 0
+};
+
+function getFocusedBrowseTitle(route: PtvBrowseRoute, config: PtvBrowseConfig) {
+    if (route.view === 'genre') return route.genre;
+    if (route.view === 'studio') return route.studio;
+    if (route.view === 'network') return route.network;
+    if (route.view === 'genres') return `${config.title} Genres`;
+    if (route.view === 'studios') return `${config.title} Studios`;
+    if (route.view === 'networks') return `${config.title} Networks`;
+    if (route.view === 'continue') return `Continue ${config.kind === 'shows' ? 'Watching' : config.title}`;
+    if (route.view === 'latest') return `Latest ${config.title}`;
+    if (route.view === 'trending') return `Trending ${config.title}`;
+    if (route.view === 'season') return 'Seasons';
+    if (route.view === 'featured') return `Featured ${config.title}`;
+
+    return config.title;
+}
+
+function getFocusedBrowseKicker(route: PtvBrowseRoute) {
+    if (route.view === 'genre') return 'Genre';
+    if (route.view === 'studio') return 'Studio';
+    if (route.view === 'network') return 'Network';
+    if (route.view === 'genres' || route.view === 'studios' || route.view === 'networks') return 'Browse directory';
+    if (route.view === 'continue') return 'Pick up where you left off';
+    if (route.view === 'latest') return 'Recently added';
+    if (route.view === 'trending') return 'Trending in your library';
+
+    return 'Browse';
+}
+
+function isPtvBrowseDirectoryView(route: PtvBrowseRoute) {
+    return route.view === 'genres' || route.view === 'studios' || route.view === 'networks';
+}
+
+function getPtvBrowseDirectoryType(route: PtvBrowseRoute): 'genre' | 'studio' {
+    return route.view === 'genres' ? 'genre' : 'studio';
+}
+
+function PtvFocusedBrowseToolbar({ route }: Readonly<{ route: PtvBrowseRoute }>) {
+    const [query, setQuery] = useState(route.query);
+    const [sortBy, setSortBy] = useState(route.sortBy);
+    const [sortOrder, setSortOrder] = useState(route.sortOrder);
+
+    useEffect(() => {
+        setQuery(route.query);
+        setSortBy(route.sortBy);
+        setSortOrder(route.sortOrder);
+    }, [route.canonicalRouteKey, route.query, route.sortBy, route.sortOrder]);
+
+    const handleSubmit = useCallback((event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        navigatePtvRoute(buildPtvBrowseHref(route, {
+            page: 0,
+            query,
+            sortBy,
+            sortOrder
+        }));
+    }, [query, route, sortBy, sortOrder]);
+    const handleQueryChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        setQuery(event.target.value);
+    }, []);
+    const handleSortByChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+        setSortBy(event.target.value);
+    }, []);
+    const handleSortOrderChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+        setSortOrder(event.target.value as 'Ascending' | 'Descending');
+    }, []);
+
+    return (
+        <form className='ptv-browse-focused-toolbar' onSubmit={handleSubmit}>
+            <label>
+                <span>Search this view</span>
+                <input
+                    onChange={handleQueryChange}
+                    placeholder={`Search ${route.kind}`}
+                    type='search'
+                    value={query}
+                />
+            </label>
+            <label>
+                <span>Sort by</span>
+                <select onChange={handleSortByChange} value={sortBy}>
+                    <option value='SortName'>Name</option>
+                    <option value='DateCreated'>Date added</option>
+                    <option value='PremiereDate'>Release date</option>
+                    <option value='CommunityRating'>Rating</option>
+                </select>
+            </label>
+            <label>
+                <span>Order</span>
+                <select
+                    onChange={handleSortOrderChange}
+                    value={sortOrder}
+                >
+                    <option value='Ascending'>Ascending</option>
+                    <option value='Descending'>Descending</option>
+                </select>
+            </label>
+            <button className='ptv-browse-toolbar-action' type='submit'>Apply</button>
+            {route.query ? (
+                <a className='ptv-browse-toolbar-action' href={buildPtvBrowseHref(route, { page: 0, query: '' })}>
+                    Clear search
+                </a>
+            ) : null}
+        </form>
+    );
+}
+
+function getBoundedBrowseDiagnosticText(value: unknown, maxLength = 120) {
+    const normalized = String(value || '').replace(/[\r\n\t]+/g, ' ').trim();
+
+    return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function PtvFocusedBrowseDebug({ route, scope, state, title }: Readonly<{
+    route: PtvBrowseRoute;
+    scope: PtvBrowseResolvedScope;
+    state: PtvFocusedBrowseState;
+    title: string;
+}>) {
+    const { canShowDebug } = usePtvAdminDebugVisibility();
+
+    if (!canShowDebug) return null;
+
+    return (
+        <details className='ptv-browse-debug'>
+            <summary>Focused browse diagnostics</summary>
+            <dl>
+                <dt>rawView</dt>
+                <dd>{getBoundedBrowseDiagnosticText(route.rawView) || 'landing'}</dd>
+                <dt>normalizedView</dt>
+                <dd>{route.view}</dd>
+                <dt>mediaKind</dt>
+                <dd>{route.kind}</dd>
+                <dt>scopeAlias</dt>
+                <dd>{getBoundedBrowseDiagnosticText(scope.alias) || 'none'}</dd>
+                <dt>scopeResolved</dt>
+                <dd>{String(scope.status === 'resolved')}</dd>
+                <dt>routeKey</dt>
+                <dd>{getBoundedBrowseDiagnosticText(route.canonicalRouteKey)}</dd>
+                <dt>cacheCategory</dt>
+                <dd>focused-browse/{route.kind}/{route.view}</dd>
+                <dt>filterType</dt>
+                <dd>{route.filterType}</dd>
+                <dt>filterValue</dt>
+                <dd>{getBoundedBrowseDiagnosticText(route.filterValue) || 'none'}</dd>
+                <dt>exactFilterResolved</dt>
+                <dd>{String(state.exactFilterResolved)}</dd>
+                <dt>sort</dt>
+                <dd>{route.sortBy} {route.sortOrder}</dd>
+                <dt>page</dt>
+                <dd>{route.page}</dd>
+                <dt>startIndex</dt>
+                <dd>{route.page * route.pageSize}</dd>
+                <dt>returnedItems</dt>
+                <dd>{state.items.length}</dd>
+                <dt>totalRecordCount</dt>
+                <dd>{state.totalRecordCount}</dd>
+                <dt>durationMs</dt>
+                <dd>{state.durationMs}</dd>
+                <dt>staleResponseSuppressed</dt>
+                <dd>false (suppressed responses are recorded before render)</dd>
+                <dt>activeTitle</dt>
+                <dd>{getBoundedBrowseDiagnosticText(title)}</dd>
+            </dl>
+        </details>
+    );
+}
+
+type PtvBrowseDirectoryTarget = 'genre' | 'network' | 'studio';
+
+function getPtvBrowseDirectoryTarget(route: PtvBrowseRoute): PtvBrowseDirectoryTarget {
+    if (route.view === 'genres') return 'genre';
+    if (route.view === 'networks') return 'network';
+
+    return 'studio';
+}
+
+function getPtvBrowseDirectoryHref(
+    route: PtvBrowseRoute,
+    target: PtvBrowseDirectoryTarget,
+    name: string
+) {
+    if (target === 'genre') return buildPtvBrowseHref(route, { genre: name, view: 'genre' });
+    if (target === 'network') return buildPtvBrowseHref(route, { network: name, view: 'network' });
+
+    return buildPtvBrowseHref(route, { studio: name, view: 'studio' });
+}
+
+function getPtvFocusedBrowseStatusText(state: PtvFocusedBrowseState) {
+    if (state.status === 'ready') {
+        const noun = state.totalRecordCount === 1 ? 'item' : 'items';
+
+        return `${state.totalRecordCount} ${noun}`;
+    }
+
+    if (state.status === 'loading') return 'Loading this view...';
+
+    return 'This view needs attention.';
+}
+
+function getPtvFocusedBrowseBackHref(route: PtvBrowseRoute) {
+    return buildPtvBrowseHref(route, {
+        collectionId: '',
+        genre: '',
+        network: '',
+        page: 0,
+        query: '',
+        seasonParentId: '',
+        studio: '',
+        view: 'landing'
+    });
+}
+
+async function loadPtvFocusedBrowseState(
+    route: PtvBrowseRoute,
+    scope: PtvBrowseResolvedScope
+): Promise<PtvFocusedBrowseState> {
+    if (route.error) throw new Error(route.error);
+    if (scope.status === 'error') throw new Error(scope.error);
+
+    if (isPtvBrowseDirectoryView(route)) {
+        const directory = await loadPtvBrowseDirectory(route, scope, getPtvBrowseDirectoryType(route));
+
+        return {
+            directory,
+            durationMs: 0,
+            error: '',
+            exactFilterResolved: true,
+            items: [],
+            status: 'ready',
+            totalRecordCount: directory.length
+        };
+    }
+
+    let metadataId = '';
+    let exactFilterResolved = route.view !== 'studio' && route.view !== 'network';
+
+    if (route.view === 'studio' || route.view === 'network') {
+        const directory = await loadPtvBrowseDirectory(route, scope, 'studio');
+        const filterName = route.view === 'studio' ? route.studio : route.network;
+        const selected = findExactPtvBrowseDirectoryEntry(directory, filterName);
+
+        if (!selected) throw new Error(`No exact ${route.view} match exists in this library.`);
+
+        metadataId = selected.id;
+        exactFilterResolved = true;
+    }
+
+    const pages = await Promise.all(Array.from({ length: route.page + 1 }, (_, page) => (
+        loadPtvFocusedBrowsePage({ ...route, page }, scope, metadataId)
+    )));
+    const items = dedupeBrowseItems(pages.flatMap(page => page.items));
+    const totalRecordCount = Math.max(items.length, ...pages.map(page => page.totalRecordCount));
+
+    return {
+        directory: [],
+        durationMs: 0,
+        error: '',
+        exactFilterResolved,
+        items,
+        status: 'ready',
+        totalRecordCount
+    };
+}
+
+function PtvFocusedBrowseDirectory({ route, state }: Readonly<{
+    route: PtvBrowseRoute;
+    state: PtvFocusedBrowseState;
+}>) {
+    const target = getPtvBrowseDirectoryTarget(route);
+
+    if (!state.directory.length) {
+        return <div className='ptv-browse-focused-status'>No categories were found.</div>;
+    }
+
+    return (
+        <div className='ptv-browse-directory-grid'>
+            {state.directory.map(entry => (
+                <a
+                    className='ptv-browse-directory-link'
+                    key={`${target}-${entry.id}`}
+                    href={getPtvBrowseDirectoryHref(route, target, entry.name)}
+                >
+                    <strong>{entry.name}</strong>
+                    {entry.count ? <span>{entry.count} items</span> : null}
+                </a>
+            ))}
+        </div>
+    );
+}
+
+function ignoreFocusedBrowseCardFocus() {
+    // Focus state is local to focused grids; the landing hero is not mounted here.
+}
+
+function PtvFocusedBrowseItems({ route, state }: Readonly<{
+    route: PtvBrowseRoute;
+    state: PtvFocusedBrowseState;
+}>) {
+    const hasMore = state.items.length < state.totalRecordCount;
+
+    if (!state.items.length) {
+        return <div className='ptv-browse-focused-status'>No matching items were found.</div>;
+    }
+
+    return (
+        <>
+            <div className='ptv-browse-focused-grid'>
+                {state.items.map(item => (
+                    <PtvBrowseCard
+                        key={getText(item.Id)}
+                        item={item}
+                        onFocusItem={ignoreFocusedBrowseCardFocus}
+                        sectionId={`${route.kind}-${route.view}`}
+                    />
+                ))}
+            </div>
+            {hasMore ? (
+                <a className='ptv-browse-load-more' href={buildPtvBrowseHref(route, { page: route.page + 1 })}>
+                    Load more
+                </a>
+            ) : null}
+        </>
+    );
+}
+
+function PtvFocusedBrowseBody({ onRetry, route, state, title }: Readonly<{
+    onRetry: () => void;
+    route: PtvBrowseRoute;
+    state: PtvFocusedBrowseState;
+    title: string;
+}>) {
+    if (state.status === 'loading') {
+        return <div className='ptv-browse-focused-status'>Loading {title}...</div>;
+    }
+
+    if (state.status === 'error') {
+        return (
+            <div className='ptv-browse-focused-status ptv-browse-row-failure'>
+                <strong>{state.error}</strong>
+                <button type='button' onClick={onRetry}>
+                    <PtvIcon name='refresh' />
+                    <span>Retry</span>
+                </button>
+            </div>
+        );
+    }
+
+    if (isPtvBrowseDirectoryView(route)) {
+        return <PtvFocusedBrowseDirectory route={route} state={state} />;
+    }
+
+    return <PtvFocusedBrowseItems route={route} state={state} />;
+}
+
+function PtvFocusedBrowsePage({ config, route, scope }: Readonly<{
+    config: PtvBrowseConfig;
+    route: PtvBrowseRoute;
+    scope: PtvBrowseResolvedScope;
+}>) {
+    const [retryNonce, setRetryNonce] = useState(0);
+    const [state, setState] = useState<PtvFocusedBrowseState>(EMPTY_FOCUSED_BROWSE_STATE);
+    const title = getFocusedBrowseTitle(route, config);
+
+    useEffect(() => {
+        let cancelled = false;
+        const startedAt = performance.now();
+        const routeGeneration = getPtvRouteControllerState().routeGeneration;
+
+        setState(EMPTY_FOCUSED_BROWSE_STATE);
+        void loadPtvFocusedBrowseState(route, scope).then(nextState => {
+            if (cancelled || getPtvRouteControllerState().routeGeneration !== routeGeneration) {
+                recordPtvEvent('route', 'focused-browse-stale-response-suppressed', {
+                    kind: route.kind,
+                    view: route.view
+                });
+                return;
+            }
+
+            const durationMs = Number((performance.now() - startedAt).toFixed(1));
+            const readyState = { ...nextState, durationMs };
+
+            setState(readyState);
+            recordPtvEvent('route', 'focused-browse-loaded', {
+                durationMs,
+                itemCount: readyState.items.length,
+                kind: route.kind,
+                page: route.page,
+                scopeStatus: scope.status,
+                totalRecordCount: readyState.totalRecordCount,
+                view: route.view
+            });
+        }).catch(error => {
+            if (cancelled || getPtvRouteControllerState().routeGeneration !== routeGeneration) return;
+
+            const message = error instanceof Error ? error.message : 'This browse view could not be loaded.';
+
+            setState({
+                ...EMPTY_FOCUSED_BROWSE_STATE,
+                durationMs: Number((performance.now() - startedAt).toFixed(1)),
+                error: message,
+                status: 'error'
+            });
+            recordPtvEvent('route', 'focused-browse-failed', {
+                error: message,
+                kind: route.kind,
+                scopeStatus: scope.status,
+                view: route.view
+            });
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [retryNonce, route, scope]);
+    const handleRetry = useCallback(() => {
+        setRetryNonce(value => value + 1);
+    }, []);
+    const showToolbar = !isPtvBrowseDirectoryView(route) && route.view !== 'season';
+
+    return (
+        <Page
+            id='ptv-native-browse-page'
+            title={`${PTV_BRANDING.appName} ${title}`}
+            className='ptv-native-browse-page'
+            isBackButtonEnabled={false}
+            isMenuButtonEnabled={false}
+            isNowPlayingBarEnabled={false}
+            isThemeMediaSupported={false}
+        >
+            <PTVShell
+                backdropSource={`${route.kind}-${route.view}`}
+                backdropUrl={getBrowseBackdropImage(state.items[0] || null)}
+                className='ptv-browse-shell'
+                section={getPtvBrowseShellSection(config)}
+                title={title}
+            >
+                <main className='ptv-browse-focused-content' aria-busy={state.status === 'loading'}>
+                    <header className='ptv-browse-focused-header'>
+                        <div>
+                            <span className='ptv-browse-section-kicker'>{getFocusedBrowseKicker(route)}</span>
+                            <h1>{title}</h1>
+                            <p>{getPtvFocusedBrowseStatusText(state)}</p>
+                        </div>
+                        <a className='ptv-browse-focused-back' href={getPtvFocusedBrowseBackHref(route)}>
+                            Back to {config.title}
+                        </a>
+                    </header>
+
+                    {showToolbar ? <PtvFocusedBrowseToolbar route={route} /> : null}
+                    <PtvFocusedBrowseBody onRetry={handleRetry} route={route} state={state} title={title} />
+
+                    <PtvFocusedBrowseDebug route={route} scope={scope} state={state} title={title} />
+                </main>
+            </PTVShell>
+        </Page>
+    );
+}
+
+function NativeBrowsePage() {
+    const location = useLocation();
+    const route = useMemo(
+        () => parsePtvBrowseRoute(location.pathname, location.search),
+        [location.pathname, location.search]
+    );
+    const config = useMemo(
+        () => getPtvBrowseConfig(location.pathname, route.scopeAlias),
+        [location.pathname, route.scopeAlias]
+    );
+    const [resolvedScope, setResolvedScope] = useState<Readonly<{
+        key: string;
+        scope: PtvBrowseResolvedScope | null;
+    }>>({ key: '', scope: null });
+
+    useEffect(() => {
+        let cancelled = false;
+
+        setResolvedScope({ key: route.canonicalRouteKey, scope: null });
+        void resolvePtvBrowseScope(route).then(scope => {
+            if (!cancelled) setResolvedScope({ key: route.canonicalRouteKey, scope });
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [route]);
+
+    const scope = resolvedScope.key === route.canonicalRouteKey ? resolvedScope.scope : null;
+
+    if (!scope) {
+        return (
+            <Page
+                id='ptv-native-browse-page'
+                title={`${PTV_BRANDING.appName} ${config.title}`}
+                className='ptv-native-browse-page'
+                isBackButtonEnabled={false}
+                isMenuButtonEnabled={false}
+                isNowPlayingBarEnabled={false}
+                isThemeMediaSupported={false}
+            >
+                <PTVShell className='ptv-browse-shell' section={getPtvBrowseShellSection(config)} title={config.title}>
+                    <main className='ptv-browse-focused-content' aria-busy='true'>
+                        <div className='ptv-browse-focused-status'>Resolving your {config.title} library...</div>
+                    </main>
+                </PTVShell>
+            </Page>
+        );
+    }
+
+    if (route.view === 'landing') {
+        return <PtvBrowseLandingPage config={config} location={location} route={route} scope={scope} />;
+    }
+
+    return <PtvFocusedBrowsePage config={config} route={route} scope={scope} />;
 }
 
 registerPtvNativeRoute('/movies', NativeBrowsePage, 'native');

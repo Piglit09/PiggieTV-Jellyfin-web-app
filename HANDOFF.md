@@ -73,6 +73,49 @@ git diff --check:          passed
 
 Production Webpack emitted only the repository's existing aggregate asset-size and entrypoint-size warnings. Repository-wide ESLint still reports the exact 172-error/126-warning baseline and repository-wide Stylelint the exact 140-error baseline. New standalone files lint clean; touched legacy browse/shell findings are on unchanged lines. Generated build/test artifacts were cleaned or restored.
 
+## Movies/Shows Focused Browse Delivery (2026-07-14)
+
+- `browseRoute.ts` owns canonical parsing/building for view, scope, genre/studio/network, collection/series context, query, sort, order, and page.
+- `routeIdentity.ts` and the shell controller now treat query-only changes as distinct route state.
+- Base Movies/Shows pages retain the approved progressive shelf loader. Focused views render only their directory or paged grid.
+- Movies views: Latest, Trending, Genres, exact Genre, Studios, exact Studio.
+- Shows views: Continue, Latest, Trending, Genres, exact Genre, Networks, exact Network, and series-scoped Seasons.
+- `anime`, `animemovies`, and `cartoons` resolve through Jellyfin user views to real IDs; unresolved aliases show an error rather than broad media.
+- Genre uses Jellyfin `Genres`; studio/network names resolve exactly to metadata IDs and use `StudioIds`; filters are applied before 50-item paging.
+- Trending uses the deterministic local-library formula recorded in `ARCHITECTURE.md`; it does not alias Recently Added or make live per-card provider requests.
+- Footer metadata chips now build typed browse URLs rather than ordinary Search URLs.
+- Browse diagnostics are admin-plus-debug only, collapsed, bounded, and redacted.
+
+Final local validation:
+
+```text
+Focused browse:       4 files, 17 tests passed
+Full Vitest suite:    33 files, 258 tests passed
+TypeScript:           passed
+New-file ESLint:      passed, zero findings
+Legacy touched lint:  no new findings versus HEAD baselines
+Scoped Stylelint:     one unchanged nativeBrowse.scss:492 baseline error
+Production Webpack:   passed in 76.7s (74.173s compilation)
+Plugin build:         not required; no plugin code changed
+```
+
+### Focused Browse Live Matrix
+
+1. Direct-load, refresh, back, and forward on base `#/movies` and `#/shows`.
+2. Verify `view=latest` differs materially and is DateCreated descending.
+3. Verify Shows `view=continue` contains resumable items only.
+4. Verify Trending order is stable across refresh while inputs are unchanged.
+5. Open Genres, select a value containing punctuation/Unicode, load a second page, and return from item details.
+6. Open Movies Studios, select Universal Pictures, and confirm exact Jellyfin metadata matches and total count.
+7. Open Shows Networks, select a network, and confirm no title-search leakage.
+8. Verify `topParentId=anime`, `animemovies`, and `cartoons` never leak broad libraries; verify an unknown alias fails closed.
+9. Verify `view=season` without `seriesId` shows the recovery state and a complete series-scoped URL lists seasons.
+10. Change filters quickly and confirm an older response never replaces the active route.
+11. At desktop/mobile widths, verify grid, Load More, touch/keyboard/remote activation, visible focus, and return scroll position.
+12. As non-admin and admin-with-debug-off, confirm no browse diagnostics. As admin with debug on, confirm the panel is collapsed and redacted.
+
+Deployment is frontend-only. No Jellyfin/plugin restart is required. A hard refresh or service-worker update is recommended once after installing the new web bundle; application data caches do not need clearing.
+
 ## Debug/Performance Live Verification
 
 1. Copy the global dashboard report and confirm it contains useful health/timing/count fields but no private host, user/item ID, token, authorization header, local path, SMTP credential, or raw sensitive URL.

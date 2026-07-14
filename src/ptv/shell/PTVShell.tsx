@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES } from '../core/config';
 import { recordPtvEvent } from '../core/observability';
+import { getPtvQueryStringValue, parsePtvQueryString } from '../core/queryString';
 import { resolvePtvStaticAssetUrl } from '../core/urlOrigins';
 import { PtvIcon, type PtvIconName } from '../modules/icons';
 import { incrementPtvPerformanceCounter } from '../services/performanceMonitor';
@@ -139,7 +140,7 @@ const PTV_SHELL_PRIMARY_LINKS: readonly PtvShellNavLink[] = [
 
 const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[]> = {
     anime: [
-        { id: 'anime-season', label: 'Season', href: `${PTV_ROUTES.animeShows}&view=season`, icon: 'activity' },
+        { id: 'anime-latest', label: 'Latest', href: `${PTV_ROUTES.animeShows}&view=latest`, icon: 'activity' },
         { id: 'anime-movies', label: 'Movies', href: PTV_ROUTES.animeMovies, icon: 'animeMovies' },
         { id: 'anime-genres', label: 'Genres', href: `${PTV_ROUTES.animeShows}&view=genres`, icon: 'filter' },
         { id: 'anime-trending', label: 'Trending', href: `${PTV_ROUTES.animeShows}&view=trending`, icon: 'activity' }
@@ -201,10 +202,17 @@ const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[
 };
 
 function isPtvShellHrefActive(href: string, hash = window.location.hash || PTV_ROUTES.home) {
-    const [targetHash] = href.split('?');
-    const [currentHash] = hash.split('?');
+    const [targetHash, targetSearch = ''] = href.split('?');
+    const [currentHash, currentSearch = ''] = hash.split('?');
 
-    return currentHash === targetHash;
+    if (currentHash !== targetHash) return false;
+    const currentParams = parsePtvQueryString(currentSearch);
+
+    if (!targetSearch) return !getPtvQueryStringValue(currentParams, 'view');
+
+    const targetParams = parsePtvQueryString(targetSearch);
+
+    return targetParams.every(([key, value]) => getPtvQueryStringValue(currentParams, key) === value);
 }
 
 function getPtvShellHashPath(hash = window.location.hash || PTV_ROUTES.home) {

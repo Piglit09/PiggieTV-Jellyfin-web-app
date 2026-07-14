@@ -186,6 +186,26 @@ Image failures use a bounded, expiring negative cache. A failed candidate advanc
 
 TMDb featured enrichment is cache-first and runs through `PtvBoundedWorkQueue`: at most 48 remote candidates per pass, four concurrent requests, and a 3.5-second per-request budget inside the existing outer refresh budget. Completed enrichment is retained when the caller cancels or the outer budget expires. Status exposes attempted, completed, skipped, failed, cancelled, and partial counts; partial timeout is diagnostic rather than a featured-cache health failure.
 
+### Movies And Shows Focused Browse Routes
+
+`browseRoute.ts` is the canonical parser and URL builder for native Movies, Shows, and Collections browsing. It parses the hash query exactly once and includes every data-affecting value in `canonicalRouteKey`: media kind, view, scope alias, structured filter, collection/series context, search, sort, order, and page. `routeIdentity.ts` gives the shell/controller the same query-aware identity, so query-only navigation, refresh, and browser history no longer reuse the landing route generation.
+
+The supported focused registry is:
+
+- Movies: `latest`, `trending`, `genres`, `genre`, `studios`, `studio`
+- Shows: `continue`, `latest`, `trending`, `genres`, `genre`, `networks`, `network`, `season`
+- Collections: `featured`, `genres`
+
+Base `#/movies`, `#/shows`, and `#/collections` remain the existing progressive multi-shelf landing pages. Focused routes render one directory or paged result grid and never append the landing shelf stack. Incomplete season routes require `seriesId`; unsupported routes render a recovery state instead of silently falling back.
+
+`browseData.ts` resolves `anime`, `animemovies`, and `cartoons` through authenticated Jellyfin user-view discovery. Alias matching uses explicit collection type plus exact normalized configured names only; once resolved, all queries use stable user-view IDs through `ParentId` or `AncestorIds`. Unknown aliases fail closed. Scope discovery is cached per server/user. Focused page cache keys include resolved library IDs, filters, search, sorting, and pagination and are capped at 80 two-minute entries.
+
+Exact genre queries use `Genres` before `StartIndex`/`Limit`. Studio and network directories use Jellyfin metadata endpoints, resolve an exact normalized entry to its ID, then query with `StudioIds` before paging. Focused pages request 50 items at a time, honor `TotalRecordCount`, deduplicate accumulated pages by item ID, and suppress stale route responses. Footer metadata links use `buildPtvBrowseHref`; they do not route names through global text search.
+
+Trending is deterministic and local-library-only. The score is `PlayCount * 20 + favorite 14 + played 8 + CommunityRating * 2 + CriticRating / 10 + recency`, where recency contributes 0-10 points over an approximately 180-day decay. Stable title/ID ties and a five-minute bounded ranked-pool cache keep unchanged inputs ordered consistently without per-card external requests.
+
+Browse diagnostics require administrator access plus explicit debug mode, remain collapsed and bounded, and expose only safe route/scope/filter/count/timing state. Raw origins, user/item IDs, tokens, and request URLs are not rendered.
+
 ## Validation Boundaries
 
 The current repository uses:
@@ -224,3 +244,4 @@ Local automated validation cannot prove authenticated Jellyfin behavior, live Go
 | 2026-07-13 | Consolidated the singleton runtime, shared shell, cache v7, current routes, plugin API, and Reading metadata/grouping architecture into one current document. |
 | 2026-07-13 | Recorded the final Reading production-hardening verification boundary, guarded Webpack runtime constant, and scoped-versus-repository lint baseline. |
 | 2026-07-13 | Added the final debug-export sanitizer boundary, bounded/cache-first TMDb enrichment, progressive browse scheduling, expiring image-failure isolation, and corrected shell mount telemetry. |
+| 2026-07-14 | Added canonical query-aware Movies/Shows focused routes, exact scoped metadata browsing, deterministic local trending, bounded server paging/cache identity, and protected browse diagnostics. |

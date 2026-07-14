@@ -34,6 +34,9 @@ The Reading implementation and its focused tests are present in HEAD history. Th
 - Native Home, media browse pages, hero/card surfaces, configured rows, recommendation rows, quality tags, route diagnostics, and featured cache v7 are present.
 - Recommendation Settings and configured Row Builder rows are separate row sources. Persisted accepted/enabled recommendation rows are the authoritative generated recommendation source.
 - Movies, Shows, Anime, Cartoons, and Collections have native browse route ownership and contextual navigation.
+- Movies and Shows now distinguish base landing routes from focused URL-addressable views. Movies support Latest, Trending, Genres/exact Genre, and Studios/exact Studio. Shows support Continue, Latest, Trending, Genres/exact Genre, Networks/exact Network, and series-scoped Seasons.
+- Hash query state participates in route identity. Focused pages use structured server-side filters, 50-item paging, exact metadata-ID resolution, bounded page caching, item-ID deduplication, and stale-response suppression.
+- Anime, Anime Movies, and Cartoons aliases resolve to real authenticated Jellyfin user-view IDs and fail closed when unavailable; scoped queries no longer broaden silently.
 
 ### Music And Playback
 
@@ -104,6 +107,22 @@ The current source state was reverified after completing the guarded `__WEBPACK_
 | `git diff --check` | Passed |
 | Secret/local-data scan | No real credentials or supplied sensitive export values in added source/tests/docs; fake fixtures only. One private Seerr default URL remains on a pre-existing unchanged dashboard line and is sanitized from exports. |
 
+### 2026-07-14 Movies/Shows Browse Validation
+
+| Check | Result |
+| --- | --- |
+| Focused browse tests | 4 files, 17 tests passed |
+| Full Vitest suite | 33 files, 258 tests passed |
+| TypeScript | Passed with `--noEmit` |
+| New standalone-file ESLint | Passed with zero findings |
+| Touched legacy ESLint | No new findings; `NativeBrowsePage.tsx` improves from the 20-finding HEAD baseline to 19, and shell/controller retain the same 32-finding HEAD baseline |
+| Scoped Stylelint | One unchanged `nativeBrowse.scss:492` selector-order baseline error; all added style rules pass |
+| Production Webpack | Passed; final compile 74.173 seconds |
+| Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
+| Companion plugin | Not rebuilt because no plugin source or API contract changed |
+
+Live authenticated desktop/mobile/TV verification remains required for real library counts, exact Universal Pictures/network metadata, multi-page scrolling, and history/return scroll behavior. No Reading implementation or plugin contract was changed by this browse pass.
+
 The global lint/style failures are demonstrated pre-existing and non-blocking for this delivery: counts exactly match the prior baseline, new standalone files lint clean, touched legacy-file findings are on unchanged lines, the Reading scope has zero errors, and the failing Stylelint files were not changed by this pass. Generated `dist`, Babel cache, Vitest result, and plugin `bin/obj` changes were cleaned or restored. Four generated root development logs are removed from tracking and ignored because they contain machine-local runtime output.
 
 ## Deployment Verification Still Required
@@ -126,4 +145,4 @@ The global lint/style failures are demonstrated pre-existing and non-blocking fo
 
 ## Next Delivery Step
 
-Review the final audit diff. The intended scope includes the focused debug/performance source and tests, four project-memory files, the narrow `.gitignore`, and generated-log removals; keep the unrelated Identify test edit intact and decide its commit separately. Then package and deploy the matching plugin before the frontend, restart Jellyfin, clear stale frontend/service-worker assets, and run the live matrices in `HANDOFF.md`.
+Review the focused browse diff and project-memory updates, then deploy the rebuilt frontend. This pass is web-only and does not require a plugin DLL update or Jellyfin restart. Allow the service worker to update or perform one hard refresh before running the live Movies/Shows matrix in `HANDOFF.md`.

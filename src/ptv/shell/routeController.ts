@@ -2,6 +2,7 @@ import { emit, on } from '../core/events';
 import { getRoute, scheduleRouteCheck } from '../core/router';
 import { recordPtvEvent } from '../core/observability';
 import { registerPtvRuntimeListener } from '../core/runtime';
+import { getPtvCanonicalRouteIdentity } from './routeIdentity';
 import { getPtvRouteOwnership } from './routes';
 
 export type PtvRouteTakeoverMode = 'native' | 'enhanced' | 'fallback';
@@ -237,8 +238,12 @@ function normalizeRoute(route: PtvRouteLike): PtvRouteControllerState {
     const routeId = normalizedInput.id || normalizedInput.pageType || 'generic';
     const pageType = normalizedInput.pageType || 'generic';
     const owner = normalizedInput.owner || 'shell';
+    const routeLocation = getPtvCanonicalRouteIdentity(
+        normalizedInput.hash || window.location.hash,
+        normalizedPath
+    );
     const routeKey = [
-        normalizedPath,
+        routeLocation || normalizedPath,
         routeId,
         pageType,
         owner,

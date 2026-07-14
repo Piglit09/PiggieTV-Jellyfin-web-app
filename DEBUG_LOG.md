@@ -259,3 +259,23 @@ This log tracks known bugs, reproduction steps, expected behavior, actual behavi
 - Shell diagnostics root cause: `ptv-shell-mounted` was tied to backdrop source changes rather than an actual mount. It now emits once per component mount.
 - Validation: 3 focused files/5 tests, 6 Reading files/43 tests, and the full 30-file/243-test Vitest suite pass. TypeScript, scoped lint/style, four plugin tests, plugin Release build, `git diff --check`, and production Webpack pass. Webpack completed in 110.7 seconds with only the two known bundle-size warnings.
 - Repository lint baselines are unchanged: ESLint 172 errors/126 warnings and Stylelint 140 errors. New standalone files lint clean; touched legacy-file findings are on unchanged lines. No real credential or supplied sensitive export value appears in added source/tests/docs; fixtures are synthetic. One private Seerr default URL remains on an unchanged pre-existing dashboard line and is removed by export sanitization.
+
+## 2026-07-14 - Movies/Shows focused browse root-cause checkpoint
+
+- Confirmed the shared route controller removed hash query parameters from `routeKey`, so query-only navigation did not advance route generation even though the browser URL changed.
+- Confirmed `NativeBrowsePage` parsed only `topParentId`/`kind`; it never parsed or applied `view`, selected genre, studio, network, sort, or page state.
+- Confirmed Anime, AniMovies, and Cartoons aliases were converted into broad genre guesses instead of resolved Jellyfin user-view IDs, allowing scoped pages to leak unrelated media.
+- Confirmed every focused URL ran the same six landing queries and reused landing presentation. Genre/studio footer chips routed metadata names into ordinary text search, and their values came only from already limited shelf payloads.
+- Confirmed the existing Anime `view=season` navigation omitted a series/parent ID, so the advertised URL could not represent a meaningful season page.
+- Planned correction preserves the existing landing shelves and recent progressive-loading work while adding one canonical route model, server-side exact metadata filters, resolved parent scope, bounded paging, and admin-plus-debug-only route diagnostics.
+
+## 2026-07-14 - Movies/Shows focused browse completion checkpoint
+
+- Added one canonical typed browse-route model and query-aware shell route identity. Query-only navigation, equivalent query ordering, unsupported values, structured filters, sort, and paging now have deterministic state.
+- Preserved the existing landing loader while adding focused Latest, Continue, Trending, genre, studio, network, and series-season pages with truthful loading/error/empty states.
+- Replaced alias-as-label behavior with cached Jellyfin user-view discovery. Anime, Anime Movies, and Cartoons use resolved library IDs; unknown aliases fail closed.
+- Exact genre/studio/network filters are applied server-side before 50-item paging. Studio/network names resolve to exact metadata IDs. Accumulated pages dedupe item IDs, use `TotalRecordCount`, share a bounded page cache keyed by resolved scope/filter/sort/page, and suppress stale route responses.
+- Replaced footer plain-search links with canonical typed browse URLs and removed the incomplete Anime Season navigation link. Raw browse diagnostics are now admin-plus-debug only, collapsed, bounded, and redacted.
+- Trending is a stable local-library ranking: play count, favorite/played engagement, community/critic rating, and recency; no per-card external requests are introduced.
+- Final validation: focused 4 files/17 tests; full 33 files/258 tests; TypeScript passed; new standalone files ESLint-clean. Touched legacy lint findings are unchanged or reduced versus HEAD; Stylelint retains only the unchanged `nativeBrowse.scss:492` baseline selector-order error. Production Webpack passed in 76.7 seconds with only the two established size warnings. No plugin code changed, so no plugin build was required.
+- Generated `dist`, Babel-loader cache, and Vitest result artifacts were removed/restored. Authenticated desktop/mobile/TV behavior and real-library metadata/counts remain deployment checks.

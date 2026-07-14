@@ -643,6 +643,181 @@
     color: rgb(255 255 255 / 72%);
 }
 
+.ptv-browse-focused-content {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    gap: 1.5rem;
+    min-height: 70vh;
+    padding: clamp(7.5rem, 11vw, 10rem) clamp(1rem, 3vw, 3rem) 4rem;
+}
+
+.ptv-browse-focused-header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 1.5rem;
+}
+
+.ptv-browse-focused-header h1 {
+    margin: 0;
+    color: #fff;
+    text-shadow: 0 0.8rem 2rem rgb(0 0 0 / 54%);
+    font-size: clamp(2.6rem, 5vw, 5.2rem);
+    line-height: 0.96;
+    letter-spacing: 0;
+}
+
+.ptv-browse-focused-header p {
+    margin: 0.75rem 0 0;
+    color: rgb(255 255 255 / 68%);
+    font-weight: 700;
+}
+
+.ptv-browse-focused-back,
+.ptv-browse-load-more,
+.ptv-browse-toolbar-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.8rem;
+    padding: 0 1.1rem;
+    border: 1px solid rgb(255 255 255 / 16%);
+    border-radius: 999px;
+    background: rgb(47 32 70 / 58%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%), 0 0.8rem 2rem rgb(0 0 0 / 24%);
+    color: #fff;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 800;
+    backdrop-filter: blur(12px);
+}
+
+.ptv-browse-load-more {
+    justify-self: center;
+    min-width: 10rem;
+}
+
+.ptv-browse-focused-back:hover,
+.ptv-browse-focused-back:focus-visible,
+.ptv-browse-load-more:hover,
+.ptv-browse-load-more:focus-visible,
+.ptv-browse-toolbar-action:hover,
+.ptv-browse-toolbar-action:focus-visible {
+    border-color: rgb(208 158 255 / 54%);
+    background: rgb(145 70 224 / 34%);
+    outline: 0;
+}
+
+.ptv-browse-focused-toolbar {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 1.25rem;
+    background: rgb(45 29 67 / 24%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%);
+    backdrop-filter: blur(16px);
+}
+
+.ptv-browse-focused-toolbar label {
+    display: grid;
+    gap: 0.38rem;
+    color: rgb(255 255 255 / 66%);
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+
+.ptv-browse-focused-toolbar label:first-child {
+    flex: 1 1 18rem;
+}
+
+.ptv-browse-focused-toolbar input,
+.ptv-browse-focused-toolbar select {
+    min-height: 2.8rem;
+    padding: 0 0.85rem;
+    border: 1px solid rgb(255 255 255 / 14%);
+    border-radius: 0.8rem;
+    background: rgb(8 8 18 / 76%);
+    color: #fff;
+    font: inherit;
+    font-size: 0.92rem;
+}
+
+.ptv-browse-focused-toolbar input:focus,
+.ptv-browse-focused-toolbar select:focus {
+    border-color: rgb(193 130 255 / 64%);
+    outline: 2px solid rgb(160 82 255 / 22%);
+}
+
+.ptv-browse-focused-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 1fr));
+    gap: 1rem;
+    align-items: start;
+    padding-block: 0.65rem;
+}
+
+.ptv-browse-focused-grid .ptv-browse-card {
+    width: 100%;
+}
+
+.ptv-browse-directory-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+    gap: 0.85rem;
+}
+
+.ptv-browse-directory-link {
+    display: grid;
+    gap: 0.3rem;
+    min-height: 6rem;
+    align-content: center;
+    padding: 1.2rem;
+    border: 1px solid rgb(255 255 255 / 13%);
+    border-radius: 1.15rem;
+    background:
+        linear-gradient(145deg, rgb(255 255 255 / 9%), transparent 58%),
+        rgb(72 40 106 / 22%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%), 0 1rem 2.4rem rgb(0 0 0 / 24%);
+    color: #fff;
+    text-decoration: none;
+    backdrop-filter: blur(14px);
+}
+
+.ptv-browse-directory-link:hover,
+.ptv-browse-directory-link:focus-visible {
+    border-color: rgb(205 156 255 / 52%);
+    background-color: rgb(126 68 182 / 28%);
+    outline: 0;
+}
+
+.ptv-browse-directory-grid strong {
+    font-size: 1.15rem;
+}
+
+.ptv-browse-directory-grid span {
+    color: rgb(255 255 255 / 58%);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.ptv-browse-focused-status {
+    display: grid;
+    min-height: 12rem;
+    place-items: center;
+    padding: 1.25rem;
+    border: 1px solid rgb(255 255 255 / 11%);
+    border-radius: 1.25rem;
+    background: rgb(34 24 52 / 22%);
+    color: rgb(255 255 255 / 68%);
+    text-align: center;
+    font-weight: 800;
+    backdrop-filter: blur(12px);
+}
+
 @media (max-width: 900px) {
     .ptv-browse-hero-copy {
         width: min(100%, 34rem);
@@ -680,6 +855,24 @@
     .ptv-browse-row-controls button {
         width: 2.75rem;
         height: 2.75rem;
+    }
+
+    .ptv-browse-focused-content {
+        padding-top: 10rem;
+    }
+
+    .ptv-browse-focused-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .ptv-browse-focused-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ptv-browse-focused-grid {
+        grid-template-columns: repeat(auto-fill, minmax(min(42vw, 9.5rem), 1fr));
     }
 }
 
