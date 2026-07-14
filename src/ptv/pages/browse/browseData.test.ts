@@ -100,6 +100,23 @@ describe('browseData', () => {
         });
     });
 
+    it('uses the resolved Universal Pictures studio ID before paging without text search', () => {
+        const route = parsePtvBrowseRoute(
+            '/movies',
+            '?view=studio&studio=Universal%20Pictures&page=1'
+        );
+        const query = buildPtvFocusedBrowseQuery(route, {
+            alias: '', error: '', libraryIds: [], libraryNames: [], status: 'unscoped'
+        }, 'universal-pictures-id');
+
+        expect(query).toMatchObject({
+            Limit: 50,
+            StartIndex: 50,
+            StudioIds: 'universal-pictures-id'
+        });
+        expect(query).not.toHaveProperty('SearchTerm');
+    });
+
     it('matches metadata directory entries exactly', () => {
         const entries = [{ count: 10, id: 'studio-id', name: 'Warner Bros.' }];
 

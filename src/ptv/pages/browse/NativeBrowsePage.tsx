@@ -2165,11 +2165,27 @@ function PtvFocusedBrowsePage({ config, route, scope }: Readonly<{
 
             setState(readyState);
             recordPtvEvent('route', 'focused-browse-loaded', {
+                cacheKeyCategory: `${route.kind}:${route.view}`,
                 durationMs,
+                filterLabel: ['genre', 'network', 'studio'].includes(route.filterType) ? route.filterValue : '',
+                filterType: route.filterType,
+                filterValuePresent: Boolean(route.filterValue),
                 itemCount: readyState.items.length,
                 kind: route.kind,
+                limit: route.pageSize,
+                loaderKey: [
+                    route.kind,
+                    route.view,
+                    route.filterType,
+                    scope.alias || scope.status,
+                    route.page
+                ].join(':'),
                 page: route.page,
+                routeKeyCategory: `${route.kind}:${route.view}`,
+                sortBy: route.sortBy,
+                sortOrder: route.sortOrder,
                 scopeStatus: scope.status,
+                startIndex: route.page * route.pageSize,
                 totalRecordCount: readyState.totalRecordCount,
                 view: route.view
             });

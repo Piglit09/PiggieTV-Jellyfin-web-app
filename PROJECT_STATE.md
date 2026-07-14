@@ -1,13 +1,13 @@
 # PiggieTV Project State
 
-Current as of 2026-07-13. This is the current-state ledger, not a historical changelog.
+Current as of 2026-07-14. This is the current-state ledger, not a historical changelog.
 
 ## Repository Snapshot
 
 | Field | Current value |
 | --- | --- |
 | Product | PiggieTV native experience embedded in Jellyfin Web |
-| Current HEAD | `476f994f01` (`idea`); Reading hardening source is in `71666e7d02` (`bookshelf`) |
+| Current HEAD | `603c13d56a` (`pages`); Reading hardening source is in `71666e7d02` (`bookshelf`) |
 | Jellyfin Web package | `10.11.11` |
 | Node requirement | `>=20.0.0` |
 | Frontend stack | React 18.3, TypeScript 5.8, Webpack 5, MUI 6, TanStack Query 5 |
@@ -17,7 +17,7 @@ Current as of 2026-07-13. This is the current-state ledger, not a historical cha
 | Featured cache | Schema/version 7, plugin and browser stale-while-revalidate path |
 | Reading home cache | Schema 4, 5-minute fresh TTL, 24-hour stale window |
 
-The Reading implementation and its focused tests are present in HEAD history. The current worktree adds a focused global debug/performance hardening pass, project-memory updates, a narrow root-log ignore rule, and removal of generated development logs from Git tracking. It also contains an unrelated pre-existing user change to `src/components/itemidentifier/itemidentifierUtils.test.js`; do not discard it. Generated build/test output was restored or removed after verification.
+The Reading implementation and its focused tests are present in HEAD history. The current worktree contains a frontend-only corrective hardening pass for shareable debug exports, query-transition lifecycle telemetry, focused-browse runtime evidence, and exact Universal Pictures server paging coverage. Generated build/test output is removed or restored after verification.
 
 ## Current Product State
 
@@ -65,7 +65,7 @@ The Reading implementation and its focused tests are present in HEAD history. Th
 
 ### Debug Export And Performance Hardening
 
-- Final copied/serialized dashboard exports pass through one shared recursive sanitizer. It bounds output and removes secrets, private origins, IDs, local paths, and sensitive SMTP/signup detail without changing the administrator-only live panels.
+- Final copied/serialized dashboard exports pass through one shared recursive sanitizer. It bounds output, removes secrets/private origins/IDs/local paths/sensitive SMTP detail, replaces complete data-image/blob values, preserves safe version/build identifiers, and omits credential-shape fields without changing administrator-only live panels.
 - TMDb enrichment is cache-first, validates credentials once per bounded reuse window, limits each pass to 48 remote candidates and four concurrent requests, and retains completed partial results when cancellation arrives.
 - Browse section work uses an explicit priority policy and publishes each shelf independently; card-list payloads continue to use the existing lean field profile.
 - Failed images advance through shared candidates and enter capped five-minute negative caches instead of retrying forever or remaining suppressed for the whole session.
@@ -121,6 +121,27 @@ The current source state was reverified after completing the guarded `__WEBPACK_
 | Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
 | Companion plugin | Not rebuilt because no plugin source or API contract changed |
 
+### 2026-07-14 Authenticated Runtime Corrective Hardening
+
+| Check | Result |
+| --- | --- |
+| Authenticated export | Parsed successfully: 120 events from `dashboard-live-merged` |
+| Proven focused Movies behavior | Genre directory reported 59 entries; exact genre loads reported 2/2 and 50/395 items, with the 50-item first page completing in 634.6 ms |
+| Proven cache/plugin health | Featured cache v7 adopted from plugin storage, fresh/stored, 356 items, 25 sections, 6 persisted recommendation rows |
+| Export defects found | Semantic versions misclassified as private hosts; credential length/SMTP password-state fields retained |
+| Export defects fixed | Safe versions/build IDs retained; credential-shape fields omitted; complete data-image/blob payloads replaced |
+| Route telemetry defect fixed | Lifecycle counters now synchronize current browser location before selecting route generation |
+| Focused regression suite | 5 files, 22 tests passed |
+| Full Vitest suite | 34 files, 263 tests passed |
+| TypeScript | Passed with `--noEmit` |
+| Scoped ESLint | New standalone files passed; touched legacy-file findings reproduce against HEAD |
+| Scoped Stylelint | No style changed; unchanged `nativeBrowse.scss:492` baseline remains |
+| Production Webpack | Passed in 106.7 seconds; compilation 92.588 seconds |
+| Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
+| Companion plugin | Not rebuilt because no plugin source or API contract changed |
+
+This export does not prove Universal Pictures or network selection, Shows focused routes, scoped alias isolation, Trending stability, season routes, second-page UI accumulation, back/forward restoration, or the three diagnostics authorization combinations. Automated contracts cover these paths, but authenticated deployment verification remains required before blanket production sign-off.
+
 Live authenticated desktop/mobile/TV verification remains required for real library counts, exact Universal Pictures/network metadata, multi-page scrolling, and history/return scroll behavior. No Reading implementation or plugin contract was changed by this browse pass.
 
 The global lint/style failures are demonstrated pre-existing and non-blocking for this delivery: counts exactly match the prior baseline, new standalone files lint clean, touched legacy-file findings are on unchanged lines, the Reading scope has zero errors, and the failing Stylelint files were not changed by this pass. Generated `dist`, Babel cache, Vitest result, and plugin `bin/obj` changes were cleaned or restored. Four generated root development logs are removed from tracking and ignored because they contain machine-local runtime output.
@@ -145,4 +166,4 @@ The global lint/style failures are demonstrated pre-existing and non-blocking fo
 
 ## Next Delivery Step
 
-Review the focused browse diff and project-memory updates, then deploy the rebuilt frontend. This pass is web-only and does not require a plugin DLL update or Jellyfin restart. Allow the service worker to update or perform one hard refresh before running the live Movies/Shows matrix in `HANDOFF.md`.
+Review the corrective hardening diff and project-memory updates, then deploy the rebuilt frontend. This pass is web-only and does not require a plugin DLL update or plugin restart. Allow the service worker to update or perform one hard refresh before running the remaining authenticated Movies/Shows matrix in `HANDOFF.md`.

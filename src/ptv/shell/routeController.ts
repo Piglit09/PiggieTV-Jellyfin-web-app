@@ -310,6 +310,10 @@ function incrementRouteGenerationCounter(
     counter: keyof ReturnType<typeof getRouteGenerationCounters>,
     detail: Record<string, unknown> = {}
 ) {
+    if (routeControllerStarted) {
+        getPtvRouteControllerState();
+    }
+
     const generation = currentState?.routeGeneration || routeGeneration;
     const counters = getRouteGenerationCounters(generation);
 

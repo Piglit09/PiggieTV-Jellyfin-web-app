@@ -1,6 +1,6 @@
 # PiggieTV Architecture
 
-Current as of 2026-07-13.
+Current as of 2026-07-14.
 
 This document describes the architecture present in the current worktree. It records stable boundaries and ownership. Use `PROJECT_STATE.md` for delivery state, `HANDOFF.md` for continuation instructions, and `DEBUG_LOG.md` for issue history.
 
@@ -153,7 +153,7 @@ Reading apply is field-selective. It can update Name, OriginalTitle, SeriesName,
 
 `readingDiagnostics.ts` gates Reading diagnostics on both administrator access and explicit PTV debug mode. Output is collapsed, size-bounded, grouped by concern, and redacts credentials, authorization values, user/item identifiers, hosts, URLs, and local paths.
 
-Dashboard copy/export has a separate final boundary in `debugExportSanitizer.ts`. Live administrator-only debug panels may keep their operational detail, but any serialized or copied global export is recursively bounded and removes credentials, authorization/query secrets, private origins, user/item identifiers, local paths, and sensitive signup/SMTP values. Export sanitization is the last step before serialization so newly added dashboard sections cannot bypass it accidentally.
+Dashboard copy/export has a separate final boundary in `debugExportSanitizer.ts`. Live administrator-only debug panels may keep their operational detail, but any serialized or copied global export is recursively bounded and removes credentials, authorization/query secrets, private origins, user/item identifiers, local paths, and sensitive signup/SMTP values. Data-image payloads and blob URLs are replaced as complete values, semantic versions/build identifiers remain useful, and credential-shape fields such as lengths or SMTP password state are omitted. Export sanitization is the last step before serialization so newly added dashboard sections cannot bypass it accidentally.
 
 ## Plugin API
 
@@ -188,7 +188,7 @@ TMDb featured enrichment is cache-first and runs through `PtvBoundedWorkQueue`: 
 
 ### Movies And Shows Focused Browse Routes
 
-`browseRoute.ts` is the canonical parser and URL builder for native Movies, Shows, and Collections browsing. It parses the hash query exactly once and includes every data-affecting value in `canonicalRouteKey`: media kind, view, scope alias, structured filter, collection/series context, search, sort, order, and page. `routeIdentity.ts` gives the shell/controller the same query-aware identity, so query-only navigation, refresh, and browser history no longer reuse the landing route generation.
+`browseRoute.ts` is the canonical parser and URL builder for native Movies, Shows, and Collections browsing. It parses the hash query exactly once and includes every data-affecting value in `canonicalRouteKey`: media kind, view, scope alias, structured filter, collection/series context, search, sort, order, and page. `routeIdentity.ts` gives the shell/controller the same query-aware identity, so query-only navigation, refresh, and browser history no longer reuse the landing route generation. Route lifecycle counters synchronize the controller from the current browser location before recording their generation, preventing a shell mount during a query-only transition from being attributed to the previous query.
 
 The supported focused registry is:
 
@@ -204,7 +204,7 @@ Exact genre queries use `Genres` before `StartIndex`/`Limit`. Studio and network
 
 Trending is deterministic and local-library-only. The score is `PlayCount * 20 + favorite 14 + played 8 + CommunityRating * 2 + CriticRating / 10 + recency`, where recency contributes 0-10 points over an approximately 180-day decay. Stable title/ID ties and a five-minute bounded ranked-pool cache keep unchanged inputs ordered consistently without per-card external requests.
 
-Browse diagnostics require administrator access plus explicit debug mode, remain collapsed and bounded, and expose only safe route/scope/filter/count/timing state. Raw origins, user/item IDs, tokens, and request URLs are not rendered.
+Browse diagnostics require administrator access plus explicit debug mode, remain collapsed and bounded, and expose only safe route/scope/filter/count/timing state. Focused-load telemetry records category, bounded filter label, page/offset/limit, count, total, duration, scope status, and sort state without request URLs, origins, user/item IDs, tokens, or resolved library IDs.
 
 ## Validation Boundaries
 
@@ -218,7 +218,7 @@ The current repository uses:
 
 `src/ptv/core/config.ts` must remain importable outside Webpack. Its development-server check uses `typeof __WEBPACK_SERVE__ !== 'undefined'` before reading the compile-time constant; direct access breaks Vitest and other Node-based consumers.
 
-The final 2026-07-13 audit verified 30 Vitest files/243 tests, 6 focused Reading files/43 tests, TypeScript, scoped ESLint and Stylelint, four companion-plugin tests, the plugin Release build, and the production Webpack build. Repository-wide ESLint still reports the demonstrated baseline of 172 errors/126 warnings, and repository-wide Stylelint reports the demonstrated baseline of 140 errors. New standalone files lint clean; findings in touched legacy browse/shell files are on unchanged pre-existing lines.
+The final 2026-07-14 browse/runtime hardening audit verified 34 Vitest files/263 tests, including 5 focused files/22 sanitizer, route-lifecycle, route-identity, and browse tests. TypeScript and the production Webpack build pass. New standalone files lint clean; findings in touched legacy browse/shell files reproduce against their HEAD versions, and the unchanged `nativeBrowse.scss:492` selector-order finding remains the scoped Stylelint baseline. No plugin source or API contract changed, so the companion plugin was not rebuilt for this frontend-only correction.
 
 Local automated validation cannot prove authenticated Jellyfin behavior, live Google Books/ComicVine application, restart persistence, Fire TV input, or real-device responsive behavior. Those remain deployment checks.
 
@@ -245,3 +245,4 @@ Local automated validation cannot prove authenticated Jellyfin behavior, live Go
 | 2026-07-13 | Recorded the final Reading production-hardening verification boundary, guarded Webpack runtime constant, and scoped-versus-repository lint baseline. |
 | 2026-07-13 | Added the final debug-export sanitizer boundary, bounded/cache-first TMDb enrichment, progressive browse scheduling, expiring image-failure isolation, and corrected shell mount telemetry. |
 | 2026-07-14 | Added canonical query-aware Movies/Shows focused routes, exact scoped metadata browsing, deterministic local trending, bounded server paging/cache identity, and protected browse diagnostics. |
+| 2026-07-14 | Corrected query-transition lifecycle telemetry, hardened shareable debug exports against data/blob payloads and misleading version/credential fields, and added safe focused-browse runtime evidence. |

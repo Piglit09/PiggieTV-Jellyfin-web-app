@@ -1,12 +1,12 @@
 # PiggieTV Handoff
 
-Updated 2026-07-13 for HEAD `476f994f01`; Reading production-hardening source is present in `71666e7d02`.
+Updated 2026-07-14 for HEAD `603c13d56a`; Reading production-hardening source is present in `71666e7d02`.
 
 ## Where The Project Is
 
 PiggieTV is a Jellyfin Web customization with a guarded singleton runtime, shared PTV shell, native Home/media/Music/Reading/Requests routes, persistent playback UI, featured cache v7, recommendation and Row Builder tooling, and a companion .NET 9 Jellyfin plugin.
 
-The Reading hardening task remains complete and unchanged. A separate focused dashboard/performance pass is now complete locally: copied debug exports are sanitized, TMDb enrichment is bounded and cancellation-aware, browse shelves settle progressively, isolated image failures expire, and shell mount telemetry no longer duplicates on backdrop changes. The next work is review/commit followed by deployment and live verification, not another broad rewrite.
+The Reading hardening task remains complete and unchanged. Movies/Shows focused browse is implemented, and the latest authenticated export drove a narrow corrective pass: shareable exports no longer leak data/blob payloads or credential-shape state, semantic versions remain readable, query-only lifecycle telemetry uses the current route generation, and focused-load telemetry is safe and actionable. The next work is review/commit followed by frontend deployment and the remaining authenticated route matrix, not another broad rewrite.
 
 ## Important Current Decisions
 
@@ -56,6 +56,13 @@ The Reading hardening task remains complete and unchanged. A separate focused da
 - `images.ts` uses capped expiring failure caches, while browse cards advance through shared fallback candidates.
 - `PTVShell` emits its mount diagnostic once per actual shell backdrop component mount.
 
+### Authenticated Runtime Corrective Hardening
+
+- `debugExportSanitizer.ts` replaces complete `data:image` and `blob:` values, preserves semantic versions/build IDs, and omits credential lengths and SMTP password-state fields.
+- `routeController.ts` synchronizes the current browser location before recording shell lifecycle counters, removing stale query attribution during soft navigation.
+- `NativeBrowsePage.tsx` emits bounded focused-load category/filter/page/count/timing/scope/sort evidence without private IDs or request URLs.
+- Regression coverage includes query-only lifecycle transitions and an exact Universal Pictures second-page query using `StudioIds`, `Limit=50`, `StartIndex=50`, and no `SearchTerm`.
+
 ## Validation Already Completed
 
 ```text
@@ -89,15 +96,21 @@ Production Webpack emitted only the repository's existing aggregate asset-size a
 Final local validation:
 
 ```text
-Focused browse:       4 files, 17 tests passed
-Full Vitest suite:    33 files, 258 tests passed
+Focused hardening:    5 files, 22 tests passed
+Full Vitest suite:    34 files, 263 tests passed
 TypeScript:           passed
 New-file ESLint:      passed, zero findings
 Legacy touched lint:  no new findings versus HEAD baselines
 Scoped Stylelint:     one unchanged nativeBrowse.scss:492 baseline error
-Production Webpack:   passed in 76.7s (74.173s compilation)
+Production Webpack:   passed in 106.7s (92.588s compilation)
 Plugin build:         not required; no plugin code changed
 ```
+
+### Authenticated Evidence And Limits
+
+The supplied authenticated dashboard export parsed successfully with 120 events. It proves Movies genre-directory loads (59 entries), exact genre loads (2/2 and 50/395 items), a 50-item first-page request completing in 634.6 ms, and a healthy fresh/stored featured cache v7 with 356 items, 25 sections, and 6 persisted recommendation rows. It also captured the stale lifecycle-route attribution that is now regression-tested.
+
+It does **not** prove Universal Pictures/network selection, Shows focused views, Anime/AniMovies/Cartoons scope isolation, Trending stability, season routes, second-page UI accumulation, browser history/scroll restoration, or non-admin/admin-debug authorization combinations. Keep the delivery status at pending authenticated sign-off until those checks pass against the deployed bundle.
 
 ### Focused Browse Live Matrix
 
@@ -114,7 +127,7 @@ Plugin build:         not required; no plugin code changed
 11. At desktop/mobile widths, verify grid, Load More, touch/keyboard/remote activation, visible focus, and return scroll position.
 12. As non-admin and admin-with-debug-off, confirm no browse diagnostics. As admin with debug on, confirm the panel is collapsed and redacted.
 
-Deployment is frontend-only. No Jellyfin/plugin restart is required. A hard refresh or service-worker update is recommended once after installing the new web bundle; application data caches do not need clearing.
+Deployment is frontend-only. No plugin DLL or plugin restart is required. Install the new web bundle, allow the service worker to update or perform one hard refresh, then run the remaining matrix. Application data caches do not need clearing.
 
 ## Debug/Performance Live Verification
 

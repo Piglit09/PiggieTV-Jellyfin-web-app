@@ -1,4 +1,7 @@
 type PtvDebugSanitizationReport = {
+    omittedFields: number;
+    redactedBlobUrls: number;
+    redactedDataImages: number;
     redactedFields: number;
     redactedIdentifiers: number;
     redactedPaths: number;
@@ -28,6 +31,13 @@ const IDENTIFIER_FIELD_PATTERN = /^(?:deviceId|itemId|parentId|serverId|userId)$
 const LOCAL_PATH_FIELD_PATTERN = /^(?:cacheFilePath|cachePath|filePath|localPath|path)$/i;
 const URL_FIELD_PATTERN = /(?:imageUrl|requestUrl|resolvedUrl|url)$/i;
 const PRIVATE_HOST_FIELD_PATTERN = /^(?:host|hostname|origin|serverAddress|serverHost)$/i;
+const OMITTED_SHAREABLE_FIELD_PATTERN = /^(?:credentialLength|smtpPasswordConfigured)$/i;
+const VERSION_FIELD_PATTERN = /(?:^|(?:build|client|plugin|server|web))version$/i;
+const BUILD_IDENTIFIER_FIELD_PATTERN = /(?:build|commit|revision)(?:hash|id|version)?$/i;
+const SEMANTIC_VERSION_PATTERN = /^v?\d+(?:\.\d+){1,4}(?:[-+][0-9A-Za-z.-]+)?$/;
+const SAFE_BUILD_IDENTIFIER_PATTERN = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,79}$/;
+const DATA_IMAGE_PATTERN = /^data:image/i;
+const BLOB_URL_PATTERN = /^blob:/i;
 const PRIVATE_IPV4_PATTERNS = [
     /\b10(?:\.\d{1,3}){3}\b/gi,
     /\b127(?:\.\d{1,3}){3}\b/gi,
@@ -47,6 +57,9 @@ const API_PATH_PREFIX_PATTERN = /^\/?(?:Items|Plugins|Ptv|Sessions|System|Users)
 
 function createReport(): PtvDebugSanitizationReport {
     return {
+        omittedFields: 0,
+        redactedBlobUrls: 0,
+        redactedDataImages: 0,
         redactedFields: 0,
         redactedIdentifiers: 0,
         redactedPaths: 0,
@@ -61,6 +74,18 @@ function createReport(): PtvDebugSanitizationReport {
 function sanitizeUrl(rawUrl: string, report: PtvDebugSanitizationReport) {
     const normalizedUrl = rawUrl.trim();
     if (!normalizedUrl || /^(?:n\/a|none|null|undefined)$/i.test(normalizedUrl)) return normalizedUrl;
+
+    if (DATA_IMAGE_PATTERN.test(normalizedUrl)) {
+        report.redactedDataImages += 1;
+        report.redactedUrls += 1;
+        return '[data-image-redacted]';
+    }
+
+    if (BLOB_URL_PATTERN.test(normalizedUrl)) {
+        report.redactedBlobUrls += 1;
+        report.redactedUrls += 1;
+        return '[blob-url-redacted]';
+    }
 
     try {
         const anchor = document.createElement('a');
@@ -95,6 +120,12 @@ function sanitizeString(
     report: PtvDebugSanitizationReport,
     limits: PtvDebugSanitizationLimits
 ) {
+    const normalizedValue = value.trim();
+
+    if (DATA_IMAGE_PATTERN.test(normalizedValue) || BLOB_URL_PATTERN.test(normalizedValue)) {
+        return sanitizeUrl(normalizedValue, report);
+    }
+
     let sanitized = value.replace(ABSOLUTE_URL_PATTERN, match => sanitizeUrl(match, report));
     sanitized = sanitized.replace(/(\/?Users\/)[^/?#\s]+/gi, (_match, prefix: string) => {
         report.redactedIdentifiers += 1;
@@ -143,18 +174,22 @@ function sanitizeString(
     return sanitized;
 }
 
-function sanitizeSignup(value: unknown) {
+function sanitizeSignup(value: unknown, report: PtvDebugSanitizationReport) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
 
     const signup = value as Record<string, unknown>;
+
+    if (Object.prototype.hasOwnProperty.call(signup, 'smtpPasswordConfigured')) {
+        report.omittedFields += 1;
+    }
+
     return {
         emailConfigured: Boolean(signup.emailConfigured),
         emailEnabled: Boolean(signup.emailEnabled),
         enabled: Boolean(signup.enabled),
         nativeUserCount: Number(signup.nativeUserCount) || 0,
         pendingResetCount: Number(signup.pendingResetCount) || 0,
-        pendingVerificationCount: Number(signup.pendingVerificationCount) || 0,
-        smtpPasswordConfigured: Boolean(signup.smtpPasswordConfigured)
+        pendingVerificationCount: Number(signup.pendingVerificationCount) || 0
     };
 }
 
@@ -164,6 +199,19 @@ function sanitizeStringField(
     report: PtvDebugSanitizationReport,
     limits: PtvDebugSanitizationLimits
 ) {
+    const normalizedValue = value.trim();
+
+    if (DATA_IMAGE_PATTERN.test(normalizedValue) || BLOB_URL_PATTERN.test(normalizedValue)) {
+        return sanitizeUrl(normalizedValue, report);
+    }
+
+    if (
+        (VERSION_FIELD_PATTERN.test(fieldName) && SEMANTIC_VERSION_PATTERN.test(normalizedValue))
+        || (BUILD_IDENTIFIER_FIELD_PATTERN.test(fieldName) && SAFE_BUILD_IDENTIFIER_PATTERN.test(normalizedValue))
+    ) {
+        return normalizedValue;
+    }
+
     const isLocalPath = value.includes('\\')
         || /^[A-Z]:/i.test(value)
         || (value.startsWith('/') && !API_PATH_PREFIX_PATTERN.test(value));
@@ -213,7 +261,12 @@ function sanitizeRecord(
     const keys = Object.keys(input);
 
     for (const key of keys.slice(0, limits.maxObjectKeys)) {
-        const normalizedValue = key.toLowerCase() === 'signup' ? sanitizeSignup(input[key]) : input[key];
+        if (OMITTED_SHAREABLE_FIELD_PATTERN.test(key)) {
+            report.omittedFields += 1;
+            continue;
+        }
+
+        const normalizedValue = key.toLowerCase() === 'signup' ? sanitizeSignup(input[key], report) : input[key];
         output[key] = sanitizeValue(normalizedValue, report, limits, seen, depth + 1, key);
     }
 

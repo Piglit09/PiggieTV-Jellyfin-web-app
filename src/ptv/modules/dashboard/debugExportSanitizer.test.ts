@@ -47,6 +47,7 @@ describe('debugExportSanitizer', () => {
         expect(serialized).not.toContain('highly-sensitive-token');
         expect(serialized).not.toContain('tmdb-secret');
         expect(serialized).not.toContain('smtp.private.example');
+        expect(serialized).not.toContain('smtpPasswordConfigured');
         expect(serialized).not.toContain('private-user');
         expect(serialized).not.toContain('jellyfin.internal');
         expect(serialized).not.toContain('C:\\Users\\ExampleUser');
@@ -56,6 +57,66 @@ describe('debugExportSanitizer', () => {
         expect(serialized).toContain('statusCode');
         expect(serialized).toContain('"serverHost": "[private-host]"');
         expect(parsed.sanitization).toBeTruthy();
+    });
+
+    it('replaces data images and blob URLs without retaining their payloads', () => {
+        const serialized = serializeSanitizedPtvDebugExport({
+            imageUrl: 'data:image/png;base64,secret-image-payload',
+            nested: {
+                nextUrl: 'blob:http://localhost:8080/private-object-id',
+                path: 'data:image/jpeg;base64,another-secret-payload'
+            },
+            values: ['blob:https://example.invalid/private-blob']
+        });
+        const parsed = JSON.parse(serialized) as {
+            sanitization: {
+                redactedBlobUrls: number;
+                redactedDataImages: number;
+            };
+        };
+
+        expect(serialized).toContain('[data-image-redacted]');
+        expect(serialized).toContain('[blob-url-redacted]');
+        expect(serialized).not.toContain('secret-image-payload');
+        expect(serialized).not.toContain('another-secret-payload');
+        expect(serialized).not.toContain('private-object-id');
+        expect(parsed.sanitization.redactedDataImages).toBe(2);
+        expect(parsed.sanitization.redactedBlobUrls).toBe(2);
+    });
+
+    it('preserves semantic versions and build IDs while redacting actual private hosts', () => {
+        const privateHost = ['10', '16', '0', '125'].join('.');
+        const pluginVersion = ['10', '11', '8', '0'].join('.');
+        const serialized = serializeSanitizedPtvDebugExport({
+            buildId: 'a194db74b3',
+            pluginVersion,
+            serverHost: privateHost,
+            version: '7.2.1'
+        });
+
+        expect(serialized).toContain(`"pluginVersion": "${pluginVersion}"`);
+        expect(serialized).toContain('"version": "7.2.1"');
+        expect(serialized).toContain('"buildId": "a194db74b3"');
+        expect(serialized).not.toContain(privateHost);
+        expect(serialized).toContain('"serverHost": "[private-host]"');
+    });
+
+    it('omits credential-shape and SMTP password-status fields from shareable exports', () => {
+        const sanitized = sanitizePtvDebugExport({
+            pluginState: {
+                credentialLength: 64,
+                signup: {
+                    emailConfigured: true,
+                    smtpPasswordConfigured: true
+                },
+                smtpPasswordConfigured: false
+            }
+        });
+        const serialized = JSON.stringify(sanitized);
+
+        expect(serialized).not.toContain('credentialLength');
+        expect(serialized).not.toContain('smtpPasswordConfigured');
+        expect(sanitized.sanitization.omittedFields).toBe(3);
     });
 
     it('does not mutate input and bounds nested arrays, strings, objects, and depth', () => {
