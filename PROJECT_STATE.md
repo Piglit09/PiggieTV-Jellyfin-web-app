@@ -7,7 +7,7 @@ Current as of 2026-07-14. This is the current-state ledger, not a historical cha
 | Field | Current value |
 | --- | --- |
 | Product | PiggieTV native experience embedded in Jellyfin Web |
-| Current HEAD | `603c13d56a` (`pages`); Reading hardening source is in `71666e7d02` (`bookshelf`) |
+| Current HEAD | `568e7eac3b` (`route fix`); Reading hardening source is in `71666e7d02` (`bookshelf`) |
 | Jellyfin Web package | `10.11.11` |
 | Node requirement | `>=20.0.0` |
 | Frontend stack | React 18.3, TypeScript 5.8, Webpack 5, MUI 6, TanStack Query 5 |
@@ -17,7 +17,7 @@ Current as of 2026-07-14. This is the current-state ledger, not a historical cha
 | Featured cache | Schema/version 7, plugin and browser stale-while-revalidate path |
 | Reading home cache | Schema 4, 5-minute fresh TTL, 24-hour stale window |
 
-The Reading implementation and its focused tests are present in HEAD history. The current worktree contains a frontend-only corrective hardening pass for shareable debug exports, query-transition lifecycle telemetry, focused-browse runtime evidence, and exact Universal Pictures server paging coverage. Generated build/test output is removed or restored after verification.
+The Reading implementation and its focused tests are present in HEAD history. The current worktree contains the frontend-only Movies/Shows focused-loader identity correction, exact-value genre directory presentation, truthful Studios & Networks labeling, shell mount attribution, regression tests, and these project-memory updates. Generated build/test output is removed or restored after verification.
 
 ## Current Product State
 
@@ -34,9 +34,11 @@ The Reading implementation and its focused tests are present in HEAD history. Th
 - Native Home, media browse pages, hero/card surfaces, configured rows, recommendation rows, quality tags, route diagnostics, and featured cache v7 are present.
 - Recommendation Settings and configured Row Builder rows are separate row sources. Persisted accepted/enabled recommendation rows are the authoritative generated recommendation source.
 - Movies, Shows, Anime, Cartoons, and Collections have native browse route ownership and contextual navigation.
-- Movies and Shows now distinguish base landing routes from focused URL-addressable views. Movies support Latest, Trending, Genres/exact Genre, and Studios/exact Studio. Shows support Continue, Latest, Trending, Genres/exact Genre, Networks/exact Network, and series-scoped Seasons.
+- Movies and Shows now distinguish base landing routes from focused URL-addressable views. Movies support Latest, Trending, Genres/exact Genre, and Studios/exact Studio. Shows support Continue, Latest, Trending, Genres/exact Genre, Studios & Networks/exact Studio or Network, and series-scoped Seasons. Existing `view=networks`/`view=network` URLs remain compatible.
 - Hash query state participates in route identity. Focused pages use structured server-side filters, 50-item paging, exact metadata-ID resolution, bounded page caching, item-ID deduplication, and stale-response suppression.
+- One canonical internal focused-loader key now owns effect reloads, request-generation ownership, page accumulation, and cache isolation. It includes scope/parent/filter/search/sort/page/size state; shareable diagnostics emit a separate sanitized identity that keeps exact public filter names without raw Jellyfin IDs.
 - Anime, Anime Movies, and Cartoons aliases resolve to real authenticated Jellyfin user-view IDs and fail closed when unavailable; scoped queries no longer broaden silently.
+- Genre directories preserve each exact Jellyfin query value while normalizing presentation casing, deduplicating case-insensitive exact matches, and offering only explicit non-fuzzy alias groups. Curated mode hides a bounded sensitive-genre set per user; All metadata mode exposes the unmodified directory. Counts reuse Jellyfin metadata-directory totals.
 
 ### Music And Playback
 
@@ -142,14 +144,51 @@ The current source state was reverified after completing the guarded `__WEBPACK_
 
 This export does not prove Universal Pictures or network selection, Shows focused routes, scoped alias isolation, Trending stability, season routes, second-page UI accumulation, back/forward restoration, or the three diagnostics authorization combinations. Automated contracts cover these paths, but authenticated deployment verification remains required before blanket production sign-off.
 
+### 2026-07-14 Focused Loader Identity Correction
+
+The previously reported loader key (`movies:genre:genre:unscoped:0`) was generated only for diagnostics. Behavioral reloads already depended on the parsed route object, and late responses were guarded by cancellation state plus route generation, so the omission was diagnostic-only. The correction nevertheless promotes one complete identity into effect ownership and the focused cache, making the invariant explicit and independently testable.
+
+| Check | Result |
+| --- | --- |
+| Focused browse/route tests | 5 files, 31 tests passed |
+| Full Vitest suite | 35 files, 277 tests passed |
+| TypeScript | Passed with `--noEmit` |
+| New/data-file ESLint | Passed with zero findings |
+| Legacy touched ESLint | `NativeBrowsePage.tsx` reports 17 errors and 2 warnings both before and after this change; no new findings |
+| Production Webpack | Passed in 80.9 seconds; compilation 78.352 seconds |
+| Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
+| `git diff --check` | Passed; line-ending notices only |
+| Companion plugin | Not rebuilt because no plugin source or API contract changed |
+
+Regression coverage proves distinct keys for sequential genre, studio, network, scope, search, sort, and page transitions; keyed state reset; same-filter page accumulation; cached prior-filter restoration; and suppression of a late Crime response after Horror becomes active. The shared Jellyfin API path does not accept an `AbortSignal`, so old requests are retired and their results suppressed rather than transport-cancelled.
+
 Live authenticated desktop/mobile/TV verification remains required for real library counts, exact Universal Pictures/network metadata, multi-page scrolling, and history/return scroll behavior. No Reading implementation or plugin contract was changed by this browse pass.
+
+### 2026-07-14 Genre Directory And Deployment Verification
+
+| Check | Result |
+| --- | --- |
+| Focused browse/route/directory tests | 6 files, 37 tests passed |
+| Full Vitest suite | 36 files, 283 tests passed |
+| TypeScript | Passed with `--noEmit` |
+| New standalone/data ESLint | Passed with zero findings |
+| Legacy touched ESLint | `NativeBrowsePage.tsx` remains 17 errors/2 warnings and `PTVShell.tsx` remains 26 errors/1 warning, exactly matching HEAD baselines |
+| Scoped Stylelint | One unchanged `nativeBrowse.scss:492` selector-order error, identical at HEAD and in the worktree |
+| Production Webpack | Passed in 211 seconds; compilation 184.232 seconds |
+| Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
+| `git diff --check` | Passed |
+| Changed-file secret/private-data scan | Passed; no credentials, tokens, authorization values, raw private URLs, or raw stable Jellyfin IDs |
+| Current local bundle | `http://localhost:8080/` returned HTTP 200 and contains current shell/network-label markers |
+| Companion plugin | Not rebuilt; no plugin source or API contract changed |
+
+The Shows directory is intentionally labeled **Studios & Networks** because it is backed by Jellyfin `getStudios` and `StudioIds`. Genre aliases affect presentation only; focused requests retain the exact original server value. The newest local bundle is confirmed served, but authenticated route interactions and device input remain manual deployment checks.
 
 The global lint/style failures are demonstrated pre-existing and non-blocking for this delivery: counts exactly match the prior baseline, new standalone files lint clean, touched legacy-file findings are on unchanged lines, the Reading scope has zero errors, and the failing Stylelint files were not changed by this pass. Generated `dist`, Babel cache, Vitest result, and plugin `bin/obj` changes were cleaned or restored. Four generated root development logs are removed from tracking and ignored because they contain machine-local runtime output.
 
 ## Deployment Verification Still Required
 
-- Deploy the rebuilt frontend and matching PiggieTV plugin together.
-- Restart Jellyfin after installing the plugin DLL.
+- Deploy the rebuilt frontend. The existing matching PiggieTV plugin remains required for its previously delivered Reading/plugin features, but this browse pass changes no plugin source or contract.
+- A plugin DLL update and Jellyfin plugin restart are not required for this pass.
 - Verify Google Books and ComicVine result selection and field application against a live authenticated server.
 - Verify durable Reading series overrides across browser/device changes and Jellyfin restart.
 - Verify representative 390, 768, 1440, and 2560 pixel viewports with real data.
@@ -166,4 +205,27 @@ The global lint/style failures are demonstrated pre-existing and non-blocking fo
 
 ## Next Delivery Step
 
-Review the corrective hardening diff and project-memory updates, then deploy the rebuilt frontend. This pass is web-only and does not require a plugin DLL update or plugin restart. Allow the service worker to update or perform one hard refresh before running the remaining authenticated Movies/Shows matrix in `HANDOFF.md`.
+Review the focused-loader diff and project-memory updates, then deploy the rebuilt frontend. This pass is web-only and does not require a plugin DLL update or plugin restart. Allow the service worker to update or perform one hard refresh before running the remaining authenticated Movies/Shows matrix in `HANDOFF.md`.
+
+### 2026-07-14 Authentication Header Visibility Correction
+
+The header visible over the custom login page was the globally mounted stable `AppHeader` from `RootAppRouter`, not a page-local `PTVShell`. The experimental layout had the same missing authentication exclusion for its Jellyfin-style app bar and drawer. Both header owners now use the shared exact route classifier in `authenticationRoutes.ts`. Visible authenticated controls remain unmounted on authentication routes, while the stable header owner retains a hidden compatibility host containing only Jellyfin's required drawer and skin-header anchors. The existing PTV login enhancer and shell route registry use the same classifier, eliminating divergent login parsing.
+
+Authentication classification ignores query parameters and covers plain/query login, server selection, manual login, password recovery/reset, quick connect, and signup. React Router location ownership restores authenticated headers immediately after leaving authentication and handles query-only and browser history changes without a timing delay or broad CSS selector.
+
+| Check | Result |
+| --- | --- |
+| Focused authentication/header/shell tests | 3 files, 35 tests passed |
+| Full Vitest suite | 38 files, 315 tests passed |
+| TypeScript | Passed with `--noEmit` |
+| Scoped ESLint | Passed with zero findings |
+| Stylelint | Not run; no style source changed |
+| Production Webpack | Passed in 78.6 seconds; compilation 76.139 seconds |
+| Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
+| `git diff --check` | Passed; line-ending notices only |
+| Corrective local runtime probes | Plain/query login at desktop, tablet, mobile, and TV sizes rendered without the runtime-error overlay or visible PiggieTV header; the hidden compatibility host, drawer anchor, and skin-header anchor were present in every case |
+| Companion plugin | Not rebuilt; no plugin source or API contract changed |
+
+Manual deployment verification remains required for a real expired-session redirect, logout/login, successful authenticated navigation, and back/forward transitions against the configured Jellyfin server. Native Jellyfin fallback pages and normal authenticated headers were not changed.
+
+The first visibility implementation fully unmounted `AppHeader`. That exposed an existing Jellyfin lifecycle contract: `scripts/libraryMenu` queries `.mainDrawer .scrollContainer` and `.skinHeader` during module evaluation, including from the login controller. Missing anchors caused the reported `querySelector`, `setTabs`, `classList`, and circular `__WEBPACK_DEFAULT_EXPORT__` initialization cascade. `AppHeader.test.tsx` now protects the corrected boundary: hidden anchors remain available, but the visible header, sidebar, and drawer handle do not mount.

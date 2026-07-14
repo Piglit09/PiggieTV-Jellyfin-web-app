@@ -110,7 +110,7 @@ const AppHeader: FC<AppHeaderParams> = ({
     }, []);
 
     useEffect(() => {
-        void import('scripts/libraryMenu');
+        void import('../../../scripts/libraryMenu');
     }, []);
 
     useEffect(() => {
@@ -131,7 +131,9 @@ const AppHeader: FC<AppHeaderParams> = ({
 
     return (
         <div
-            className='ptv-app-header-root'
+            className={isHidden ? 'ptv-auth-header-compatibility' : 'ptv-app-header-root'}
+            data-ptv-auth-compatibility={isHidden ? 'true' : undefined}
+            aria-hidden={isHidden ? 'true' : undefined}
             style={isHidden ? { display: 'none' } : undefined}
         >
             <div className='mainDrawer hide ptv-mainDrawer'>
@@ -140,157 +142,159 @@ const AppHeader: FC<AppHeaderParams> = ({
 
             <div className='skinHeader focuscontainer-x ptv-legacy-skinHeader' />
 
-            <header className='ptv-skinHeader'>
-                <div className='ptv-header-left'>
-                    <button
-                        type='button'
-                        className='ptv-header-icon-btn ptv-back-btn'
-                        aria-label='Go back'
-                        onClick={navigateBack}
-                    >
-                        <PtvIcon name='back' />
-                    </button>
+            {!isHidden && (<>
+                <header className='ptv-skinHeader'>
+                    <div className='ptv-header-left'>
+                        <button
+                            type='button'
+                            className='ptv-header-icon-btn ptv-back-btn'
+                            aria-label='Go back'
+                            onClick={navigateBack}
+                        >
+                            <PtvIcon name='back' />
+                        </button>
 
-                    <a
-                        href={PTV_ROUTES.home}
-                        className='ptv-header-icon-btn ptv-home-btn itemAction'
-                        data-action='link'
-                        aria-label='Home'
-                    >
-                        <PtvIcon name='home' />
-                    </a>
+                        <a
+                            href={PTV_ROUTES.home}
+                            className='ptv-header-icon-btn ptv-home-btn itemAction'
+                            data-action='link'
+                            aria-label='Home'
+                        >
+                            <PtvIcon name='home' />
+                        </a>
 
-                    <button
-                        type='button'
-                        className='ptv-header-icon-btn ptv-main-menu-btn'
-                        aria-label='Open navigation menu'
-                        onClick={openSidebar}
-                    >
-                        <PtvIcon name='menu' />
-                    </button>
+                        <button
+                            type='button'
+                            className='ptv-header-icon-btn ptv-main-menu-btn'
+                            aria-label='Open navigation menu'
+                            onClick={openSidebar}
+                        >
+                            <PtvIcon name='menu' />
+                        </button>
 
-                    <a
-                        href={PTV_ROUTES.home}
-                        className='ptv-brand itemAction'
-                        data-action='link'
-                        aria-label='Go to home'
-                    >
-                        <img
-                            ref={mountHeaderLogo}
-                            alt={PTV_BRANDING.appName}
-                            className='ptv-brand-logo'
-                            data-ptv-logo='header'
-                            data-ptv-image-component='header-logo'
-                            loading='eager'
-                            decoding='async'
-                        />
-                    </a>
-                </div>
+                        <a
+                            href={PTV_ROUTES.home}
+                            className='ptv-brand itemAction'
+                            data-action='link'
+                            aria-label='Go to home'
+                        >
+                            <img
+                                ref={mountHeaderLogo}
+                                alt={PTV_BRANDING.appName}
+                                className='ptv-brand-logo'
+                                data-ptv-logo='header'
+                                data-ptv-image-component='header-logo'
+                                loading='eager'
+                                decoding='async'
+                            />
+                        </a>
+                    </div>
 
-                <nav className='ptv-header-nav' aria-label='Primary navigation'>
-                    <a
-                        href={PTV_ROUTES.home}
-                        className={`ptv-nav-link ${
-                            !isRequestActive && isActiveRoute(PTV_ROUTES.home) ? 'ptv-nav-link-active' : ''
-                        }`}
-                    >
-                        Home
-                    </a>
+                    <nav className='ptv-header-nav' aria-label='Primary navigation'>
+                        <a
+                            href={PTV_ROUTES.home}
+                            className={`ptv-nav-link ${
+                                !isRequestActive && isActiveRoute(PTV_ROUTES.home) ? 'ptv-nav-link-active' : ''
+                            }`}
+                        >
+                            Home
+                        </a>
 
-                    <a
-                        href={PTV_ROUTES.music}
-                        className={`ptv-nav-link ${
-                            !isRequestActive && isActiveRoute(PTV_ROUTES.music) ? 'ptv-nav-link-active' : ''
-                        }`}
-                    >
-                        Music
-                    </a>
+                        <a
+                            href={PTV_ROUTES.music}
+                            className={`ptv-nav-link ${
+                                !isRequestActive && isActiveRoute(PTV_ROUTES.music) ? 'ptv-nav-link-active' : ''
+                            }`}
+                        >
+                            Music
+                        </a>
 
-                    <a
-                        href={PTV_ROUTES.reading}
-                        className={`ptv-nav-link ${
-                            !isRequestActive && isReadingRoute() ? 'ptv-nav-link-active' : ''
-                        }`}
-                    >
-                        PTV Reading
-                    </a>
+                        <a
+                            href={PTV_ROUTES.reading}
+                            className={`ptv-nav-link ${
+                                !isRequestActive && isReadingRoute() ? 'ptv-nav-link-active' : ''
+                            }`}
+                        >
+                            PTV Reading
+                        </a>
 
-                    <a
-                        href={PTV_ROUTES.favorites}
-                        className={`ptv-nav-link ${
-                            !isRequestActive && isFavoritesRoute() ? 'ptv-nav-link-active' : ''
-                        }`}
-                    >
-                        Favorites
-                    </a>
+                        <a
+                            href={PTV_ROUTES.favorites}
+                            className={`ptv-nav-link ${
+                                !isRequestActive && isFavoritesRoute() ? 'ptv-nav-link-active' : ''
+                            }`}
+                        >
+                            Favorites
+                        </a>
 
-                    <a
-                        href={PTV_ROUTES.requestSafe}
-                        className={`ptv-nav-link ptv-top-tab ptv-top-tab-request ${
-                            isRequestActive ? 'ptv-nav-link-active' : ''
-                        }`}
-                        data-ptv-request-trigger='true'
-                        onClick={navigateToRequest}
-                    >
-                        Request
-                    </a>
-                </nav>
+                        <a
+                            href={PTV_ROUTES.requestSafe}
+                            className={`ptv-nav-link ptv-top-tab ptv-top-tab-request ${
+                                isRequestActive ? 'ptv-nav-link-active' : ''
+                            }`}
+                            data-ptv-request-trigger='true'
+                            onClick={navigateToRequest}
+                        >
+                            Request
+                        </a>
+                    </nav>
 
-                <div className='ptv-header-actions'>
-                    <a
-                        href={PTV_ROUTES.randomItem}
-                        className='ptv-header-icon-btn ptv-random-btn itemAction'
-                        data-action='link'
-                        aria-label='Random'
-                        onClick={navigateToRandom}
-                    >
-                        <PtvIcon name='shuffle' />
-                    </a>
+                    <div className='ptv-header-actions'>
+                        <a
+                            href={PTV_ROUTES.randomItem}
+                            className='ptv-header-icon-btn ptv-random-btn itemAction'
+                            data-action='link'
+                            aria-label='Random'
+                            onClick={navigateToRandom}
+                        >
+                            <PtvIcon name='shuffle' />
+                        </a>
 
-                    <button
-                        type='button'
-                        className='ptv-header-icon-btn ptv-refresh-btn'
-                        aria-label='Refresh'
-                        onClick={refreshPage}
-                    >
-                        <PtvIcon name='refresh' />
-                    </button>
+                        <button
+                            type='button'
+                            className='ptv-header-icon-btn ptv-refresh-btn'
+                            aria-label='Refresh'
+                            onClick={refreshPage}
+                        >
+                            <PtvIcon name='refresh' />
+                        </button>
 
-                    <a
-                        href={PTV_ROUTES.displayPreferences}
-                        className='ptv-header-icon-btn ptv-display-btn itemAction'
-                        data-action='link'
-                        aria-label='Display settings'
-                    >
-                        <PtvIcon name='display' />
-                    </a>
+                        <a
+                            href={PTV_ROUTES.displayPreferences}
+                            className='ptv-header-icon-btn ptv-display-btn itemAction'
+                            data-action='link'
+                            aria-label='Display settings'
+                        >
+                            <PtvIcon name='display' />
+                        </a>
 
-                    <button
-                        type='button'
-                        className='ptv-header-icon-btn ptv-search-btn'
-                        aria-label='Search'
-                        onClick={navigateToSearch}
-                    >
-                        <PtvIcon name='search' />
-                    </button>
+                        <button
+                            type='button'
+                            className='ptv-header-icon-btn ptv-search-btn'
+                            aria-label='Search'
+                            onClick={navigateToSearch}
+                        >
+                            <PtvIcon name='search' />
+                        </button>
 
-                    <a
-                        href={PTV_ROUTES.profilePreferences}
-                        className='ptv-header-icon-btn ptv-profile-btn itemAction'
-                        data-action='link'
-                        aria-label='Profile'
-                    >
-                        <PtvIcon name='profile' />
-                    </a>
-                </div>
-            </header>
+                        <a
+                            href={PTV_ROUTES.profilePreferences}
+                            className='ptv-header-icon-btn ptv-profile-btn itemAction'
+                            data-action='link'
+                            aria-label='Profile'
+                        >
+                            <PtvIcon name='profile' />
+                        </a>
+                    </div>
+                </header>
 
-            <Sidebar
-                isOpen={isSidebarOpen}
-                onClose={closeSidebar}
-            />
+                <Sidebar
+                    isOpen={isSidebarOpen}
+                    onClose={closeSidebar}
+                />
 
-            <div className='mainDrawerHandle ptv-mainDrawerHandle' />
+                <div className='mainDrawerHandle ptv-mainDrawerHandle' />
+            </>)}
         </div>
     );
 };

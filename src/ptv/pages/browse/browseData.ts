@@ -12,6 +12,7 @@ import {
     type PtvLibrary
 } from '../../api';
 import type { PtvBrowseMediaKind, PtvBrowseRoute } from './browseRoute';
+import { getPtvFocusedBrowseLoaderKey } from './focusedBrowseLoader';
 
 export type PtvBrowseScopeStatus = 'error' | 'resolved' | 'unscoped';
 
@@ -110,23 +111,7 @@ export function getPtvFocusedBrowseCacheKey(
     scope: PtvBrowseResolvedScope,
     metadataId = ''
 ) {
-    return [
-        route.kind,
-        route.view,
-        route.scopeAlias || 'all',
-        [...scope.libraryIds].sort((left, right) => left.localeCompare(right)).join(','),
-        route.genre,
-        route.studio,
-        route.network,
-        route.collectionId,
-        route.seasonParentId,
-        metadataId,
-        route.query,
-        route.sortBy,
-        route.sortOrder,
-        route.page,
-        route.pageSize
-    ].join('|');
+    return getPtvFocusedBrowseLoaderKey(route, scope, metadataId);
 }
 
 function trimFocusedPageCache() {
@@ -445,6 +430,32 @@ export async function loadPtvFocusedBrowsePage(
     trimFocusedPageCache();
 
     return result;
+}
+
+export async function loadPtvFocusedBrowsePages(
+    route: PtvBrowseRoute,
+    scope: PtvBrowseResolvedScope,
+    metadataId = ''
+): Promise<PtvFocusedBrowseResult> {
+    const pages = await Promise.all(Array.from({ length: route.page + 1 }, (_, page) => (
+        loadPtvFocusedBrowsePage({ ...route, page }, scope, metadataId)
+    )));
+    const itemsById = new Map<string, PtvItem>();
+
+    pages.forEach(page => {
+        page.items.forEach(item => {
+            const itemId = getBrowseText(item.Id);
+
+            if (itemId && !itemsById.has(itemId)) itemsById.set(itemId, item);
+        });
+    });
+
+    const items = [...itemsById.values()];
+
+    return {
+        items,
+        totalRecordCount: Math.max(items.length, ...pages.map(page => page.totalRecordCount))
+    };
 }
 
 export function resetPtvBrowseDataCachesForTests() {

@@ -1,6 +1,10 @@
 import { getRegisteredRouteEntries } from '../core/lifecycle';
 import { PTV_ROUTES } from '../core/config';
 import { getPtvNavigationSections } from './navigation';
+import {
+    getPtvAuthenticationRouteKind,
+    isPtvLoginRoute
+} from './authenticationRoutes';
 
 const ROUTE_MATCHERS = [
     {
@@ -12,7 +16,7 @@ const ROUTE_MATCHERS = [
         layout: 'auth',
         owner: 'login',
         pageType: 'login',
-        pattern: ({ hash, path }) => hash.includes('/login') || path.includes('/login')
+        pattern: context => isPtvLoginRoute(context)
     },
     {
         className: 'ptv-route-signup',
@@ -23,10 +27,7 @@ const ROUTE_MATCHERS = [
         layout: 'auth',
         owner: 'signup',
         pageType: 'signup',
-        pattern: ({ hash }) => hash === PTV_ROUTES.signup
-            || hash.startsWith(`${PTV_ROUTES.signup}?`)
-            || hash === '#/ptv/signup'
-            || hash.startsWith('#/ptv/signup?')
+        pattern: context => getPtvAuthenticationRouteKind(context) === 'signup'
             || document.documentElement.classList.contains('ptv-signup-active')
     },
     {

@@ -1,12 +1,12 @@
 # PiggieTV Handoff
 
-Updated 2026-07-14 for HEAD `603c13d56a`; Reading production-hardening source is present in `71666e7d02`.
+Updated 2026-07-14 for HEAD `568e7eac3b`; Reading production-hardening source is present in `71666e7d02`.
 
 ## Where The Project Is
 
 PiggieTV is a Jellyfin Web customization with a guarded singleton runtime, shared PTV shell, native Home/media/Music/Reading/Requests routes, persistent playback UI, featured cache v7, recommendation and Row Builder tooling, and a companion .NET 9 Jellyfin plugin.
 
-The Reading hardening task remains complete and unchanged. Movies/Shows focused browse is implemented, and the latest authenticated export drove a narrow corrective pass: shareable exports no longer leak data/blob payloads or credential-shape state, semantic versions remain readable, query-only lifecycle telemetry uses the current route generation, and focused-load telemetry is safe and actionable. The next work is review/commit followed by frontend deployment and the remaining authenticated route matrix, not another broad rewrite.
+The Reading hardening task remains complete and unchanged. Movies/Shows focused browse is implemented, and the current worktree finishes focused-loader identity, exact-value genre directory presentation, truthful Studios & Networks terminology, and shell mount attribution before deployment. One complete normalized key controls focused effect ownership and cache isolation; exported diagnostics retain exact public filters while excluding raw Jellyfin IDs. The next work is review/commit followed by frontend deployment and the remaining authenticated route matrix, not another broad rewrite.
 
 ## Important Current Decisions
 
@@ -22,6 +22,8 @@ The Reading hardening task remains complete and unchanged. Movies/Shows focused 
 - Provider deck/description copy must not become the item title.
 - Reading metadata application is field-selective. Empty provider values do not clear existing metadata, existing artwork defaults to preservation, and Reading does not use broad `ReplaceAllMetadata`.
 - Reading diagnostics require both admin authorization and explicit debug mode.
+- Genre display normalization never rewrites the query value. Exact case-insensitive deduplication and explicit alias groups are allowed; fuzzy genre merging is not.
+- Shows `view=networks` remains URL-compatible, while its visible directory label is **Studios & Networks** because the data path is `getStudios` plus `StudioIds`.
 
 ## What Changed In The Current Worktree
 
@@ -63,6 +65,39 @@ The Reading hardening task remains complete and unchanged. Movies/Shows focused 
 - `NativeBrowsePage.tsx` emits bounded focused-load category/filter/page/count/timing/scope/sort evidence without private IDs or request URLs.
 - Regression coverage includes query-only lifecycle transitions and an exact Universal Pictures second-page query using `StudioIds`, `Limit=50`, `StartIndex=50`, and no `SearchTerm`.
 
+### Focused Loader Identity Correction
+
+- The old coarse loader key was diagnostic-only; route-object dependencies and route-generation checks already drove behavioral reload/suppression.
+- `focusedBrowseLoader.ts` now provides the authoritative internal key for effect ownership and focused cache identity. It contains kind, view, resolved scope, parent context, exact genre/studio/network, resolved metadata IDs, search, sort, page, offset, and page size.
+- The Jellyfin API adapter has no `AbortSignal` contract. Keyed owner tokens retire old work and suppress late completion; diagnostics do not claim network cancellation.
+- New-key loads clear prior focused results. Matching pages accumulate with item-ID deduplication, while prior filters restore only their own bounded cache entries.
+- Safe diagnostic keys keep exact public labels, for example `movies:genre:genre:unscoped:Crime:SortName:Ascending:0:50`, but omit/fingerprint private IDs and arbitrary search text.
+
+### Genre Directory, Network Label, And Shell Attribution
+
+- `genreDirectory.ts` presents compact searchable alphabetical genre cards while preserving every exact original Jellyfin value for requests.
+- Case-only duplicates collapse deterministically. Explicit alias groups remain transparent and expose their exact member values; unrelated near-matches never merge.
+- Curated mode hides only a bounded exact sensitive set. All metadata mode restores the complete server directory and is stored as a per-user browser preference.
+- Metadata `ChildCount` values drive directory counts; no per-genre item-query fan-out was added.
+- Shows displays **Studios & Networks**, retains `view=networks`/`view=network`, and continues exact `StudioIds` queries.
+- Browse diagnostics remain admin-plus-debug only, collapsed, bounded, and privacy-safe.
+- `ptv-shell-mounted` now carries a stable shell-instance identifier and `actualComponentMount: true`, so route/backdrop events are distinguishable from actual component mounts.
+
+```text
+Focused browse/route: 6 files, 37 tests passed
+Full Vitest suite:     36 files, 283 tests passed
+TypeScript:            passed
+New/data-file ESLint:  passed, zero findings
+NativeBrowse ESLint:   17 errors / 2 warnings both at HEAD and in the worktree
+PTVShell ESLint:       26 errors / 1 warning both at HEAD and in the worktree
+Scoped Stylelint:      1 unchanged nativeBrowse.scss:492 baseline error
+Production Webpack:    passed in 211s (184.232s compilation)
+git diff --check:      passed
+Secret/private scan:   passed for changed source/tests/docs
+Current dev bundle:    HTTP 200 at http://localhost:8080/ with current markers
+Plugin build:          not required; no plugin source or contract changed
+```
+
 ## Validation Already Completed
 
 ```text
@@ -86,7 +121,7 @@ Production Webpack emitted only the repository's existing aggregate asset-size a
 - `routeIdentity.ts` and the shell controller now treat query-only changes as distinct route state.
 - Base Movies/Shows pages retain the approved progressive shelf loader. Focused views render only their directory or paged grid.
 - Movies views: Latest, Trending, Genres, exact Genre, Studios, exact Studio.
-- Shows views: Continue, Latest, Trending, Genres, exact Genre, Networks, exact Network, and series-scoped Seasons.
+- Shows views: Continue, Latest, Trending, Genres, exact Genre, Studios & Networks, exact Studio/Network, and series-scoped Seasons. Existing network route values remain unchanged.
 - `anime`, `animemovies`, and `cartoons` resolve through Jellyfin user views to real IDs; unresolved aliases show an error rather than broad media.
 - Genre uses Jellyfin `Genres`; studio/network names resolve exactly to metadata IDs and use `StudioIds`; filters are applied before 50-item paging.
 - Trending uses the deterministic local-library formula recorded in `ARCHITECTURE.md`; it does not alias Recently Added or make live per-card provider requests.
@@ -120,14 +155,14 @@ It does **not** prove Universal Pictures/network selection, Shows focused views,
 4. Verify Trending order is stable across refresh while inputs are unchanged.
 5. Open Genres, select a value containing punctuation/Unicode, load a second page, and return from item details.
 6. Open Movies Studios, select Universal Pictures, and confirm exact Jellyfin metadata matches and total count.
-7. Open Shows Networks, select a network, and confirm no title-search leakage.
+7. Open Shows Studios & Networks, select a known network/studio such as 4Kids, and confirm exact `StudioIds` filtering with no title-search leakage.
 8. Verify `topParentId=anime`, `animemovies`, and `cartoons` never leak broad libraries; verify an unknown alias fails closed.
 9. Verify `view=season` without `seriesId` shows the recovery state and a complete series-scoped URL lists seasons.
 10. Change filters quickly and confirm an older response never replaces the active route.
 11. At desktop/mobile widths, verify grid, Load More, touch/keyboard/remote activation, visible focus, and return scroll position.
 12. As non-admin and admin-with-debug-off, confirm no browse diagnostics. As admin with debug on, confirm the panel is collapsed and redacted.
 
-Deployment is frontend-only. No plugin DLL or plugin restart is required. Install the new web bundle, allow the service worker to update or perform one hard refresh, then run the remaining matrix. Application data caches do not need clearing.
+Deployment is frontend-only. No plugin DLL or plugin restart is required. Install the new web bundle, allow the service worker to update or perform one hard refresh, then run the remaining matrix. Application data caches do not need clearing. The current development bundle is available at `http://localhost:8080/`; its HTTP and marker checks do not replace authenticated route testing.
 
 ## Debug/Performance Live Verification
 
@@ -187,3 +222,15 @@ The broad ESLint command may report the eight known nested-render warnings in `b
 ## Stop Conditions
 
 Do not claim the Reading work fully deployed until the authenticated provider/apply, restart persistence, and device checks above pass. If a live check fails, record the request/response shape and current item payload in `DEBUG_LOG.md` without credentials, tokens, item IDs, server addresses, or local paths.
+
+## 2026-07-14 - Authentication header visibility checkpoint
+
+- Root cause: `RootAppRouter` mounted the global stable `AppHeader` for every non-dashboard stable route, including login. The experimental `AppLayout` independently had the same missing authentication boundary for its Jellyfin-style app bar/drawer. The supplied header was the stable `AppHeader`, not a stale page-local `PTVShell` instance.
+- Added `authenticationRoutes.ts` as the only authentication-route classifier. It accepts hash, hashbang, pathname, and full Jellyfin-web locations, ignores query parameters, and exact-matches login, server-selection, password, manual-login, quick-connect, and signup routes.
+- Stable and experimental authenticated controls are absent on authentication routes and return through normal React Router lifecycle when navigation leaves authentication. The stable `AppHeader` retains only a `display:none` compatibility host with Jellyfin's `.mainDrawer .scrollContainer` and `.skinHeader` anchors; `libraryMenu` requires them during login-time module initialization. The route registry and login enhancer reuse the same classifier.
+- No login card markup/style, native fallback route, authenticated page header, plugin source, playback behavior, or cache schema changed.
+- The initial full unmount caused a configured-login runtime cascade because `libraryMenu` received no compatibility DOM. The follow-up preserves only the hidden anchors and keeps every visible authenticated control unmounted.
+- Final verification passed: focused 3 files/35 tests; full Vitest 38 files/315 tests; TypeScript; scoped ESLint with zero findings; production Webpack in 78.6 seconds with a 76.139-second compilation and only the two established size warnings; `git diff --check` apart from line-ending notices.
+- Fresh headless Chrome against plain/query login at desktop, tablet, mobile, and TV sizes found no runtime overlay, `.ptv-app-header-root`, or visible `.ptv-skinHeader`; every case found the hidden compatibility host and both required legacy anchors.
+- Stylelint was not run because no style source changed. The companion plugin was not rebuilt because this is a frontend-only lifecycle correction.
+- Before deployment sign-off, manually verify a real expired-session redirect, logout/login, successful login restoration, and back/forward navigation with the configured server. Confirm normal authenticated pages and native fallback pages retain their headers.

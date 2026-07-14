@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
+    getPtvItems: vi.fn(),
     getPtvUserViews: vi.fn()
 }));
 
 vi.mock('../../api', () => ({
     getCurrentPtvApiClient: vi.fn(() => null),
     getPtvCurrentUserId: vi.fn(() => 'user'),
-    getPtvItems: vi.fn(),
+    getPtvItems: apiMocks.getPtvItems,
     getPtvResumeItems: vi.fn(),
     getPtvServerId: vi.fn(() => 'server'),
     getPtvUserViews: apiMocks.getPtvUserViews,
@@ -20,6 +21,8 @@ import {
     findExactPtvBrowseDirectoryEntry,
     getPtvBrowseTrendingScore,
     getPtvFocusedBrowseCacheKey,
+    loadPtvFocusedBrowsePage,
+    loadPtvFocusedBrowsePages,
     rankPtvBrowseTrendingItems,
     resetPtvBrowseDataCachesForTests,
     resolvePtvBrowseScope,
@@ -38,6 +41,7 @@ const scopedAnime: PtvBrowseResolvedScope = {
 describe('browseData', () => {
     beforeEach(() => {
         resetPtvBrowseDataCachesForTests();
+        apiMocks.getPtvItems.mockReset();
         apiMocks.getPtvUserViews.mockReset();
     });
 
@@ -87,8 +91,8 @@ describe('browseData', () => {
         });
         expect(buildPtvFocusedBrowseQuery(networkRoute, {
             alias: '', error: '', libraryIds: [], libraryNames: [], status: 'unscoped'
-        }, 'network-id')).toMatchObject({
-            StudioIds: 'network-id',
+        }, '4kids-studio-id')).toMatchObject({
+            StudioIds: '4kids-studio-id',
             StartIndex: 0
         });
         expect(buildPtvFocusedBrowseQuery(
@@ -98,6 +102,15 @@ describe('browseData', () => {
             SortBy: 'DateCreated',
             SortOrder: 'Descending'
         });
+    });
+
+    it('sends the exact original genre value without presentation normalization', () => {
+        const route = parsePtvBrowseRoute('/movies', '?view=genre&genre=sCi-Fi');
+        const query = buildPtvFocusedBrowseQuery(route, {
+            alias: '', error: '', libraryIds: [], libraryNames: [], status: 'unscoped'
+        });
+
+        expect(query.Genres).toBe('sCi-Fi');
     });
 
     it('uses the resolved Universal Pictures studio ID before paging without text search', () => {
@@ -135,6 +148,45 @@ describe('browseData', () => {
             .not.toBe(getPtvFocusedBrowseCacheKey(firstPage, otherScope));
         expect(getPtvFocusedBrowseCacheKey(firstPage, scopedAnime))
             .not.toBe(getPtvFocusedBrowseCacheKey({ ...firstPage, sortOrder: 'Descending' }, scopedAnime));
+    });
+
+    it('accumulates page two only from the matching filter identity', async () => {
+        apiMocks.getPtvItems.mockImplementation(async query => ({
+            Items: [{ Id: `${query.Genres}-${query.StartIndex}` }],
+            TotalRecordCount: 100
+        }));
+        const horrorPageTwo = parsePtvBrowseRoute('/movies', '?view=genre&genre=Horror&page=1');
+        const result = await loadPtvFocusedBrowsePages(horrorPageTwo, {
+            alias: '', error: '', libraryIds: [], libraryNames: [], status: 'unscoped'
+        });
+
+        expect(result.items.map(item => item.Id)).toEqual(['Horror-0', 'Horror-50']);
+        expect(apiMocks.getPtvItems).toHaveBeenCalledTimes(2);
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.Genres)).toEqual(['Horror', 'Horror']);
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.StartIndex)).toEqual([0, 50]);
+    });
+
+    it('restores a cached prior filter without mixing the intervening filter', async () => {
+        apiMocks.getPtvItems.mockImplementation(async query => ({
+            Items: [{ Id: `${query.Genres}-item` }],
+            TotalRecordCount: 1
+        }));
+        const scope: PtvBrowseResolvedScope = {
+            alias: '', error: '', libraryIds: [], libraryNames: [], status: 'unscoped'
+        };
+        const crime = parsePtvBrowseRoute('/movies', '?view=genre&genre=Crime');
+        const horror = parsePtvBrowseRoute('/movies', '?view=genre&genre=Horror');
+
+        await expect(loadPtvFocusedBrowsePage(crime, scope)).resolves.toMatchObject({
+            items: [{ Id: 'Crime-item' }]
+        });
+        await expect(loadPtvFocusedBrowsePage(horror, scope)).resolves.toMatchObject({
+            items: [{ Id: 'Horror-item' }]
+        });
+        await expect(loadPtvFocusedBrowsePage(crime, scope)).resolves.toMatchObject({
+            items: [{ Id: 'Crime-item' }]
+        });
+        expect(apiMocks.getPtvItems).toHaveBeenCalledTimes(2);
     });
 
     it('uses a deterministic library-data trending score', () => {

@@ -100,6 +100,7 @@ type PtvShellDebugStatus = {
 
 let shellHeaderStatusBridgeInstalled = false;
 let shellHeaderRenderCount = 0;
+let shellInstanceSequence = 0;
 let shellMountedAt = 0;
 let shellStatus: Omit<PtvShellDebugStatus, 'currentRoute' | 'domNodeCount' | 'mountedForMs'> = {
     activeSecondaryNav: '',
@@ -197,7 +198,7 @@ const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[
         { id: 'shows-continue', label: 'Continue', href: `${PTV_ROUTES.shows}?view=continue`, icon: 'resume' },
         { id: 'shows-latest', label: 'Latest', href: `${PTV_ROUTES.shows}?view=latest`, icon: 'activity' },
         { id: 'shows-genres', label: 'Genres', href: `${PTV_ROUTES.shows}?view=genres`, icon: 'filter' },
-        { id: 'shows-networks', label: 'Networks', href: `${PTV_ROUTES.shows}?view=networks`, icon: 'libraries' }
+        { id: 'shows-networks', label: 'Studios & Networks', href: `${PTV_ROUTES.shows}?view=networks`, icon: 'libraries' }
     ]
 };
 
@@ -1009,9 +1010,18 @@ function PtvShellBackdrop({
     const [isCurrentVisible, setCurrentVisible] = useState(Boolean(resolvedUrl));
     const [isPreviousVisible, setPreviousVisible] = useState(false);
     const mountEventRecordedRef = useRef(false);
+    const shellInstanceIdRef = useRef('');
+
+    if (!shellInstanceIdRef.current) {
+        shellInstanceSequence += 1;
+        shellInstanceIdRef.current = `shell-${shellInstanceSequence}`;
+    }
+
     const initialMountEventRef = useRef({
+        actualComponentMount: true,
         activeBackdropSource: source || 'fallback',
-        backdropActive: Boolean(resolvedUrl)
+        backdropActive: Boolean(resolvedUrl),
+        shellInstanceId: shellInstanceIdRef.current
     });
 
     useEffect(() => {

@@ -12,6 +12,7 @@ import { EXPERIMENTAL_APP_ROUTES } from 'apps/experimental/routes/routes';
 import { STABLE_APP_ROUTES } from 'apps/stable/routes/routes';
 import { WIZARD_APP_ROUTES } from 'apps/wizard/routes/routes';
 import AppHeader from 'ptv/modules/header/AppHeader';
+import { shouldMountPtvAuthenticatedHeader } from 'ptv/shell/authenticationRoutes';
 import Backdrop from 'components/Backdrop';
 import BangRedirect from 'components/router/BangRedirect';
 import { createRouterHistory } from 'components/router/routerHistory';
@@ -50,6 +51,7 @@ function RootAppLayout() {
     const location = useLocation();
     const isNewLayoutPath = Object.values(DASHBOARD_APP_PATHS)
         .some(path => location.pathname.startsWith(`/${path}`));
+    const shouldMountAuthenticatedHeader = shouldMountPtvAuthenticatedHeader(location);
 
     return (
         <ThemeProvider
@@ -58,7 +60,13 @@ function RootAppLayout() {
             storageManager={ThemeStorageManager}
         >
             <Backdrop />
-            <AppHeader isHidden={isExperimentalLayout || isNewLayoutPath} />
+            <AppHeader
+                isHidden={
+                    !shouldMountAuthenticatedHeader
+                    || isExperimentalLayout
+                    || isNewLayoutPath
+                }
+            />
 
             <Outlet />
         </ThemeProvider>

@@ -10,6 +10,7 @@ import CustomCss from 'components/CustomCss';
 import ElevationScroll from 'components/ElevationScroll';
 import ThemeCss from 'components/ThemeCss';
 import { useApi } from 'hooks/useApi';
+import { shouldMountPtvAuthenticatedHeader } from 'ptv/shell/authenticationRoutes';
 
 import AppToolbar from './components/AppToolbar';
 import AppDrawer, { isDrawerPath } from './components/drawers/AppDrawer';
@@ -20,9 +21,13 @@ export const Component = () => {
     const [ isDrawerActive, setIsDrawerActive ] = useState(false);
     const { user } = useApi();
     const location = useLocation();
+    const shouldMountAuthenticatedHeader = shouldMountPtvAuthenticatedHeader(location);
 
     const isMediumScreen = useMediaQuery((t: Theme) => t.breakpoints.up('md'));
-    const isDrawerAvailable = isDrawerPath(location.pathname) && Boolean(user) && !isMediumScreen;
+    const isDrawerAvailable = shouldMountAuthenticatedHeader
+        && isDrawerPath(location.pathname)
+        && Boolean(user)
+        && !isMediumScreen;
     const isDrawerOpen = isDrawerActive && isDrawerAvailable;
 
     const onToggleDrawer = useCallback(() => {
@@ -32,33 +37,35 @@ export const Component = () => {
     return (
         <>
             <Box sx={{ position: 'relative', display: 'flex', height: '100%' }}>
-                <StrictMode>
-                    <ElevationScroll elevate={false}>
-                        <AppBar
-                            position='fixed'
-                            sx={{
-                                width: '100%',
-                                ml: 0
-                            }}
-                        >
-                            <AppToolbar
-                                isDrawerAvailable={!isMediumScreen && isDrawerAvailable}
-                                isDrawerOpen={isDrawerOpen}
-                                onDrawerButtonClick={onToggleDrawer}
-                            />
-                        </AppBar>
-                    </ElevationScroll>
+                {shouldMountAuthenticatedHeader && (
+                    <StrictMode>
+                        <ElevationScroll elevate={false}>
+                            <AppBar
+                                position='fixed'
+                                sx={{
+                                    width: '100%',
+                                    ml: 0
+                                }}
+                            >
+                                <AppToolbar
+                                    isDrawerAvailable={!isMediumScreen && isDrawerAvailable}
+                                    isDrawerOpen={isDrawerOpen}
+                                    onDrawerButtonClick={onToggleDrawer}
+                                />
+                            </AppBar>
+                        </ElevationScroll>
 
-                    {
-                        isDrawerAvailable && (
-                            <AppDrawer
-                                open={isDrawerOpen}
-                                onClose={onToggleDrawer}
-                                onOpen={onToggleDrawer}
-                            />
-                        )
-                    }
-                </StrictMode>
+                        {
+                            isDrawerAvailable && (
+                                <AppDrawer
+                                    open={isDrawerOpen}
+                                    onClose={onToggleDrawer}
+                                    onOpen={onToggleDrawer}
+                                />
+                            )
+                        }
+                    </StrictMode>
+                )}
 
                 <Box
                     component='main'

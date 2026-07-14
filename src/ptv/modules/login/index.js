@@ -3,6 +3,7 @@ import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES, PTV_SERVICES } from '../../core/c
 import { applyPtvResponsiveImage, getPtvStaticAssetUrl } from '../../core/images';
 import { watchDom } from '../../core/observer';
 import { resetRuntimeScope } from '../../core/scope';
+import { isPtvLoginRoute } from '../../shell/authenticationRoutes';
 import { wasApplied, markApplied } from '../../utils/dom';
 
 const SIGN_UP_URL = PTV_SERVICES.signUpUrl;
@@ -151,7 +152,7 @@ registerModule({
         id: 'login',
         layout: 'auth',
         pageType: 'login',
-        pattern: ({ full }) => /(?:login|manual|selectserver|quickconnect)/i.test(full),
+        pattern: context => isPtvLoginRoute(context),
         surface: 1
     },
     surface: 1,

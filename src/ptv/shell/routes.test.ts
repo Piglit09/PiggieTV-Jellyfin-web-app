@@ -37,3 +37,26 @@ describe('PTV shell reading routes', () => {
         expect(route.normalizedPath).toBe('/books');
     });
 });
+
+describe('PTV shell authentication routes', () => {
+    it.each([
+        '#/login',
+        '#/login?serverid=server&url=%2Fhome',
+        '#/selectserver',
+        '#/forgotpassword'
+    ])('keeps %s under login ownership', hash => {
+        const route = getRoute(hash);
+
+        expect(route.id).toBe('login');
+        expect(route.owner).toBe('login');
+        expect(route.layout).toBe('auth');
+    });
+
+    it('preserves signup ownership for the custom authentication route', () => {
+        const route = getRoute('#/ptv/signup?mode=reset');
+
+        expect(route.id).toBe('signup');
+        expect(route.owner).toBe('signup');
+        expect(route.layout).toBe('auth');
+    });
+});

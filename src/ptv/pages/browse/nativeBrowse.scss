@@ -613,12 +613,19 @@
 }
 
 .ptv-browse-debug {
-    padding: 1rem;
+    max-height: min(42rem, 70vh);
+    padding: 0.8rem 1rem;
+    overflow: auto;
 }
 
 .ptv-browse-debug summary {
     cursor: pointer;
     font-weight: 900;
+}
+
+.ptv-browse-debug:not([open]) {
+    max-height: none;
+    overflow: hidden;
 }
 
 .ptv-browse-debug dl {
@@ -766,16 +773,16 @@
 
 .ptv-browse-directory-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
     gap: 0.85rem;
 }
 
 .ptv-browse-directory-link {
     display: grid;
     gap: 0.3rem;
-    min-height: 6rem;
+    min-height: 5rem;
     align-content: center;
-    padding: 1.2rem;
+    padding: 1rem;
     border: 1px solid rgb(255 255 255 / 13%);
     border-radius: 1.15rem;
     background:
@@ -802,6 +809,131 @@
     color: rgb(255 255 255 / 58%);
     font-size: 0.82rem;
     font-weight: 700;
+}
+
+.ptv-browse-genre-directory,
+.ptv-browse-directory-sections {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.ptv-browse-directory-tools {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.9rem;
+    border: 1px solid rgb(255 255 255 / 11%);
+    border-radius: 1rem;
+    background: rgb(39 25 58 / 24%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%);
+    backdrop-filter: blur(14px);
+}
+
+.ptv-browse-directory-search {
+    display: grid;
+    flex: 1 1 18rem;
+    gap: 0.35rem;
+    color: rgb(255 255 255 / 68%);
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+
+.ptv-browse-directory-search-input {
+    min-height: 2.75rem;
+    padding: 0 0.85rem;
+    border: 1px solid rgb(255 255 255 / 14%);
+    border-radius: 0.8rem;
+    background: rgb(8 8 18 / 76%);
+    color: #fff;
+    font: inherit;
+    font-size: 0.92rem;
+}
+
+.ptv-browse-directory-search-input:focus-visible {
+    border-color: rgb(193 130 255 / 64%);
+    outline: 2px solid rgb(160 82 255 / 22%);
+}
+
+.ptv-browse-directory-mode {
+    display: inline-flex;
+    gap: 0.3rem;
+    padding: 0.25rem;
+    border: 1px solid rgb(255 255 255 / 11%);
+    border-radius: 999px;
+    background: rgb(8 8 18 / 54%);
+}
+
+.ptv-browse-directory-mode-button {
+    min-height: 2.25rem;
+    padding: 0 0.85rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: rgb(255 255 255 / 68%);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 850;
+}
+
+.ptv-browse-directory-mode-button:hover,
+.ptv-browse-directory-mode-button:focus-visible,
+.ptv-browse-directory-mode-button.is-active {
+    background: rgb(153 78 239 / 32%);
+    color: #fff;
+    outline: none;
+}
+
+.ptv-browse-directory-tools p {
+    flex: 1 0 100%;
+    margin: 0;
+    color: rgb(255 255 255 / 54%);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.ptv-browse-directory-section {
+    display: grid;
+    gap: 0.65rem;
+}
+
+.ptv-browse-directory-section h2 {
+    margin: 0;
+    color: #7fe7ff;
+    font-size: 0.78rem;
+    letter-spacing: 0;
+}
+
+.ptv-browse-directory-link--grouped:hover {
+    border-color: rgb(255 255 255 / 13%);
+    background-color: rgb(72 40 106 / 22%);
+}
+
+.ptv-browse-directory-aliases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+}
+
+.ptv-browse-directory-aliases a {
+    padding: 0.32rem 0.55rem;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 999px;
+    background: rgb(14 11 25 / 52%);
+    color: rgb(255 255 255 / 78%);
+    text-decoration: none;
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+.ptv-browse-directory-aliases a:hover,
+.ptv-browse-directory-aliases a:focus-visible {
+    border-color: rgb(205 156 255 / 52%);
+    background: rgb(126 68 182 / 34%);
+    color: #fff;
+    outline: none;
 }
 
 .ptv-browse-focused-status {
@@ -873,6 +1005,23 @@
 
     .ptv-browse-focused-grid {
         grid-template-columns: repeat(auto-fill, minmax(min(42vw, 9.5rem), 1fr));
+    }
+
+    .ptv-browse-directory-tools {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ptv-browse-directory-search {
+        flex-basis: auto;
+    }
+
+    .ptv-browse-directory-mode {
+        overflow-x: auto;
+    }
+
+    .ptv-browse-directory-mode-button {
+        flex: 0 0 auto;
     }
 }
 
