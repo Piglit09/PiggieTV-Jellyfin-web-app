@@ -23,6 +23,7 @@ import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 
 import { getPtvClientProfile, getPtvPerformanceProfile } from '../../core/clientProfile';
+import { formatPtvBuildInfoCompact, getPtvBuildInfo, type PtvBuildInfo } from '../../core/buildInfo';
 import { PTV_CACHE, PTV_PLUGIN_API } from '../../core/config';
 import {
     getPtvFeatureSettings,
@@ -1394,6 +1395,7 @@ function getDashboardDebugSectionSources(
 
     return {
         cache: getDebugSourceDetail('live cacheStatus', cacheStatus.readInProgress ? 'read in progress' : cacheStatus.storage),
+        buildInfo: getDebugSourceDetail('compile-time frontend and live plugin status'),
         clientProfile: getDebugSourceDetail('live clientProfile'),
         debugReport: getDebugSourceDetail(
             report ? 'debug report snapshot' : 'not captured',
@@ -1408,6 +1410,7 @@ function getDashboardDebugSectionSources(
 }
 
 function mergeDashboardDebugReport(options: {
+    buildInfo: PtvBuildInfo;
     cacheStatus: ReturnType<typeof getFeaturedContentCacheStatus>;
     clientProfile: ReturnType<typeof getPtvClientProfile>;
     debugEnabled: boolean;
@@ -1418,6 +1421,7 @@ function mergeDashboardDebugReport(options: {
     report: unknown;
 }) {
     const {
+        buildInfo,
         cacheStatus,
         clientProfile,
         debugEnabled,
@@ -1442,6 +1446,7 @@ function mergeDashboardDebugReport(options: {
 
     return {
         ...baseReport,
+        buildInfo,
         cache,
         clientProfile,
         debugState,
@@ -1899,6 +1904,11 @@ const PiggieTvDashboardPage = () => {
 
     useEffect(() => {
         settingsDirtyRef.current = settingsDirty;
+        document.documentElement.dataset.ptvDashboardUnsaved = String(settingsDirty);
+
+        return () => {
+            delete document.documentElement.dataset.ptvDashboardUnsaved;
+        };
     }, [settingsDirty]);
 
     const clientProfile = useMemo(() => getPtvClientProfile(), []);
@@ -3138,6 +3148,7 @@ const PiggieTvDashboardPage = () => {
         cacheStatus?: ReturnType<typeof getFeaturedContentCacheStatus>;
         pluginApi?: ReturnType<typeof getPtvPluginApiDiagnostics>;
     } = {}) => mergeDashboardDebugReport({
+        buildInfo: getPtvBuildInfo(pluginState.status, { pluginConnected: pluginState.connected }),
         cacheStatus: overrides.cacheStatus || cacheStatus,
         clientProfile,
         debugEnabled,
@@ -3175,6 +3186,7 @@ const PiggieTvDashboardPage = () => {
         });
 
         return serializeSanitizedPtvDebugExport({
+            buildInfo: getPtvBuildInfo(pluginState.status, { pluginConnected: pluginState.connected }),
             cacheStatus: liveCacheStatus,
             clientProfile,
             debugReport: liveDebugReport,
@@ -3222,6 +3234,20 @@ const PiggieTvDashboardPage = () => {
                 setStatusMessage(`Plugin install note copy failed: ${getErrorMessage(err)}`);
             });
     }, []);
+
+    const copyBuildInformation = useCallback(() => {
+        const compactBuildInfo = formatPtvBuildInfoCompact(getPtvBuildInfo(pluginState.status, {
+            pluginConnected: pluginState.connected
+        }));
+
+        copyTextToClipboard(compactBuildInfo)
+            .then(() => {
+                setStatusMessage('Build information copied.');
+            })
+            .catch((err: unknown) => {
+                setStatusMessage(`Build information copy failed: ${getErrorMessage(err)}`);
+            });
+    }, [pluginState]);
 
     useEffect(() => {
         if (!initialHydrationStartedRef.current) {
@@ -3321,6 +3347,7 @@ const PiggieTvDashboardPage = () => {
     const attemptedPluginApiUrl = pluginApiDiagnostics.resolvedUrl || pluginApiDiagnostics.attemptedUrl;
     const statusPluginApiUrl = getPtvPluginApiResolvedUrl() || attemptedPluginApiUrl;
     const pluginVersion = pluginStatus?.pluginVersion || pluginStatus?.version || 'n/a';
+    const buildInfo = getPtvBuildInfo(pluginStatus, { pluginConnected: pluginState.connected });
     const pluginName = pluginStatus?.pluginName || pluginStatus?.name || 'PiggieTV';
     const createdAt = cacheStatus.createdAt || pluginFeaturedStatus?.createdAt || pluginStatus?.featuredCacheCreatedAt;
     const expiresAt = cacheStatus.expiresAt || pluginFeaturedStatus?.expiresAt || pluginStatus?.featuredCacheExpiresAt;
@@ -3412,6 +3439,13 @@ const PiggieTvDashboardPage = () => {
                                         <Stack className='ptv-dashboard-status-list' spacing={0.5}>
                                             <Typography>Plugin: {pluginName}</Typography>
                                             <Typography>Plugin version: {pluginVersion}</Typography>
+                                            <Typography>Frontend build: {buildInfo.frontendBuildId}</Typography>
+                                            <Typography>Frontend commit: {buildInfo.frontendCommitSha}</Typography>
+                                            <Typography>Built: {buildInfo.frontendBuildDate}</Typography>
+                                            <Typography>Jellyfin Web: {buildInfo.jellyfinWebVersion}</Typography>
+                                            <Typography>Build mode: {buildInfo.environment}</Typography>
+                                            <Typography>Compatibility: {buildInfo.compatibility}</Typography>
+                                            <Typography>{buildInfo.compatibilityMessage}</Typography>
                                             <Typography>API endpoint: {statusPluginApiUrl || 'n/a'}</Typography>
                                             <Typography>Connection state: {pluginState.connectionState}</Typography>
                                             <Typography>Server UTC: {pluginStatus?.serverTimeUtc || 'n/a'}</Typography>
@@ -3437,6 +3471,9 @@ const PiggieTvDashboardPage = () => {
                                             disabled={pluginState.loading}
                                         >
                                             {pluginState.connected ? getRefreshStatusButtonLabel(pluginState.loading) : 'Retry Connection'}
+                                        </Button>
+                                        <Button type='button' variant='outlined' onClick={copyBuildInformation}>
+                                            Copy Build Information
                                         </Button>
                                     </Stack>
                                 </CardContent>

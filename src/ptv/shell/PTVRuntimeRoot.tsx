@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { startPtvPlaybackStateService } from '../services/playbackStateService';
 import { registerPtvPersistentRuntimeRoot } from '../services/runtimeStability';
 import PTVMediaDock from './PTVMediaDock';
+import PTVUpdateNotice from './PTVUpdateNotice';
 
 import './ptvShell.scss';
 
@@ -27,6 +28,7 @@ function PTVRuntimeRoot() {
             <div className='ptv-runtime-media-dock-slot'>
                 <PTVMediaDock />
             </div>
+            <PTVUpdateNotice />
         </div>
     );
 }

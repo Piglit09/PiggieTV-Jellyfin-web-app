@@ -24,6 +24,7 @@ import {
 } from '../services/notificationService';
 import { recordPtvRouteGenerationLifecycle } from './routeController';
 import { usePtvAdminDebugVisibility } from '../utils/usePtvAdminDebugVisibility';
+import PTVShellBackdrop from './PTVShellBackdrop';
 
 import './ptvShell.scss';
 
@@ -73,7 +74,6 @@ export type PTVShellProps = Readonly<{
 const PTV_SHELL_DASHBOARD_HREF = '#/dashboard/piggietv';
 const PTV_SHELL_SERVER_HREF = '#/selectserver';
 const PTV_SHELL_SIGNOUT_HREF = '#/logout';
-const PTV_SHELL_FALLBACK_BACKDROP_URL = resolvePtvStaticAssetUrl(PTV_ASSETS.backgrounds.page);
 const PTV_SHELL_SEARCH_DRAFT_KEY = 'ptv:shell:search-draft';
 
 type PtvShellDebugStatus = {
@@ -100,7 +100,6 @@ type PtvShellDebugStatus = {
 
 let shellHeaderStatusBridgeInstalled = false;
 let shellHeaderRenderCount = 0;
-let shellInstanceSequence = 0;
 let shellMountedAt = 0;
 let shellStatus: Omit<PtvShellDebugStatus, 'currentRoute' | 'domNodeCount' | 'mountedForMs'> = {
     activeSecondaryNav: '',
@@ -997,115 +996,6 @@ function PtvShellContextNav({
     );
 }
 
-function PtvShellBackdrop({
-    source,
-    url
-}: Readonly<{
-    source?: string;
-    url?: string;
-}>) {
-    const resolvedUrl = url || PTV_SHELL_FALLBACK_BACKDROP_URL;
-    const [currentUrl, setCurrentUrl] = useState(resolvedUrl);
-    const [previousUrl, setPreviousUrl] = useState('');
-    const [isCurrentVisible, setCurrentVisible] = useState(Boolean(resolvedUrl));
-    const [isPreviousVisible, setPreviousVisible] = useState(false);
-    const mountEventRecordedRef = useRef(false);
-    const shellInstanceIdRef = useRef('');
-
-    if (!shellInstanceIdRef.current) {
-        shellInstanceSequence += 1;
-        shellInstanceIdRef.current = `shell-${shellInstanceSequence}`;
-    }
-
-    const initialMountEventRef = useRef({
-        actualComponentMount: true,
-        activeBackdropSource: source || 'fallback',
-        backdropActive: Boolean(resolvedUrl),
-        shellInstanceId: shellInstanceIdRef.current
-    });
-
-    useEffect(() => {
-        if (!resolvedUrl || resolvedUrl === currentUrl) return undefined;
-
-        const startedAt = performance.now();
-        let cancelled = false;
-        const image = new Image();
-
-        image.decoding = 'async';
-        image.onload = () => {
-            if (cancelled) return;
-
-            setPreviousUrl(currentUrl);
-            setPreviousVisible(Boolean(currentUrl));
-            setCurrentUrl(resolvedUrl);
-            setCurrentVisible(false);
-
-            const frame = window.requestAnimationFrame(() => {
-                setPreviousVisible(false);
-                setCurrentVisible(true);
-            });
-            const timeout = window.setTimeout(() => {
-                setPreviousUrl('');
-            }, 900);
-
-            recordPtvEvent('render', 'ptv-shell-backdrop-loaded', {
-                activeBackdropSource: source || 'unknown',
-                backdropCacheHit: performance.now() - startedAt < 10,
-                backdropLoadMs: Number((performance.now() - startedAt).toFixed(1))
-            });
-
-            window.setTimeout(() => {
-                window.cancelAnimationFrame(frame);
-                window.clearTimeout(timeout);
-            }, 950);
-        };
-        image.onerror = () => {
-            if (cancelled) return;
-
-            recordPtvEvent('render', 'ptv-shell-backdrop-failed', {
-                activeBackdropSource: source || 'unknown',
-                fallbackUrl: PTV_SHELL_FALLBACK_BACKDROP_URL,
-                requestedUrl: resolvedUrl
-            });
-        };
-        image.src = resolvedUrl;
-
-        return () => {
-            cancelled = true;
-        };
-    }, [currentUrl, resolvedUrl, source]);
-
-    useEffect(() => {
-        if (mountEventRecordedRef.current) return;
-
-        mountEventRecordedRef.current = true;
-        recordPtvEvent('route', 'ptv-shell-mounted', initialMountEventRef.current);
-    }, []);
-
-    return (
-        <div className='ptv-shell-backdrop' aria-hidden='true' data-ptv-shell-backdrop-source={source || 'fallback'}>
-            {previousUrl ? (
-                <img
-                    alt=''
-                    className={`ptv-shell-backdrop-image ptv-shell-backdrop-image-previous${isPreviousVisible ? ' is-visible' : ''}`}
-                    decoding='async'
-                    src={previousUrl}
-                />
-            ) : null}
-            {currentUrl ? (
-                <img
-                    alt=''
-                    className={`ptv-shell-backdrop-image ptv-shell-backdrop-image-current${isCurrentVisible ? ' is-visible' : ''}`}
-                    decoding='async'
-                    src={currentUrl}
-                />
-            ) : null}
-            <div className='ptv-shell-backdrop-overlay' />
-            <div className='ptv-shell-noise' />
-        </div>
-    );
-}
-
 export default function PTVShell({
     backdropSource,
     backdropUrl,
@@ -1252,7 +1142,7 @@ export default function PTVShell({
             data-ptv-route-mode='native'
             data-ptv-shell-section={section}
         >
-            <PtvShellBackdrop source={backdropSource || section} url={backdropUrl} />
+            <PTVShellBackdrop source={backdropSource || section} url={backdropUrl} />
 
             <header ref={headerRef} className='ptv-shell-header' aria-label='PiggieTV application shell'>
                 <div className='ptv-shell-header-left'>

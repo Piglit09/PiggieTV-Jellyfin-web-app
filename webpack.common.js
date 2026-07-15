@@ -21,6 +21,8 @@ const Assets = [
 ];
 
 const DEV_MODE = process.env.NODE_ENV !== 'production';
+const PTV_BUILD_DATE = process.env.PTV_BUILD_DATE || new Date().toISOString();
+const PTV_BUILD_ID = process.env.PTV_BUILD_ID || packageJson.version;
 let COMMIT_SHA = '';
 try {
     COMMIT_SHA = require('child_process')
@@ -63,6 +65,9 @@ const config = {
                     process.env.JELLYFIN_VERSION || 'Release'),
             __PACKAGE_JSON_NAME__: JSON.stringify(packageJson.name),
             __PACKAGE_JSON_VERSION__: JSON.stringify(packageJson.version),
+            __PTV_BUILD_DATE__: JSON.stringify(PTV_BUILD_DATE),
+            __PTV_BUILD_ID__: JSON.stringify(PTV_BUILD_ID),
+            __PTV_BUILD_MODE__: JSON.stringify(DEV_MODE ? 'development' : 'production'),
             __USE_SYSTEM_FONTS__: !!JSON.parse(process.env.USE_SYSTEM_FONTS || '0'),
             __WEBPACK_SERVE__: !!JSON.parse(process.env.WEBPACK_SERVE || '0')
         }),

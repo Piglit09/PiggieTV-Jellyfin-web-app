@@ -253,6 +253,18 @@ The first 2026-07-14 authentication correction correctly removed visible authent
 
 ## Change Record
 
+### 2026-07-14 Production Hardening Program
+
+- CI is split into frontend quality/build/browser jobs and a path-scoped companion-plugin contract job under `.github/workflows`. Checks use locked npm installs, Node 20, Chromium, net9.0, the recorded per-file PTV lint baseline, a zero-debt gate for new hardening files, privacy scanning, and range-aware whitespace validation.
+- `webpack.common.js` injects sanitized build date, build identifier, and mode values. `core/buildInfo.ts` combines those values with frontend/plugin API, cache, and version compatibility without exposing server identity or credentials; the dashboard presents the same bounded provenance.
+- `services/updateService.ts` owns service-worker update lifecycle. It offers an update, defers activation while playback is active, sends `SKIP_WAITING` only after explicit user action, and reloads only after controller replacement. `PTVUpdateNotice` is rendered by the persistent runtime root, so route changes do not lose update state.
+- `BrowseDirectory.tsx` and `browseDirectoryModel.ts` own directory presentation, filtering, curated/all preference, bounded recent choices, and incremental rendering. `NativeBrowsePage.tsx` retains request ownership, focused-loader identity, cache, pagination, and stale-response suppression.
+- `PTVShellBackdrop.tsx` owns shell backdrop transitions and telemetry. PTV dashboard enhancements are imported only on dashboard routes; reader engines and other established route-specific modules remain lazy.
+- The Playwright harness under `e2e` imports real route, focused-loader, authentication, and update-service logic into a deterministic local browser surface. It is intentionally excluded from Vitest discovery and runs as a separate Chromium suite.
+- `scripts/ptv-repository-size-report.mjs` separates project-owned files from historically tracked dependency/build trees and reports potential LFS/duplicate assets without deleting or rewriting history.
+
+The hardening pass does not change plugin routes, cache schema v7, recommendation persistence, playback ownership, Reading metadata application, or native Jellyfin fallback contracts.
+
 | Date | Change |
 | --- | --- |
 | 2026-06-16 | Initial repository architecture snapshot. |

@@ -3,3 +3,22 @@
 /ptv-dev-server.codex.out.log
 /ptv-dev-server.err.log
 /ptv-dev-server.log
+/.ptv-*.log
+
+# Local dependency, compiler, and test output. Some of these paths are already
+# present in repository history; these rules prevent new generated files from
+# being added without rewriting that history.
+/node_modules/
+/.dotnet-home/
+/dist/
+/coverage/
+/playwright-report/
+/test-results/
+/e2e/.harness/
+/blob-report/
+/.eslintcache
+/.stylelintcache
+/webpack-stats*.json
+/bundle-report*.json
+/src/ptv/plugin/**/bin/
+/src/ptv/plugin/**/obj/

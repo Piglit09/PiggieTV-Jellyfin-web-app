@@ -818,6 +818,9 @@
 }
 
 .ptv-browse-directory-tools {
+    position: sticky;
+    top: var(--ptv-shell-header-height, 5rem);
+    z-index: 4;
     display: flex;
     align-items: end;
     flex-wrap: wrap;
@@ -893,9 +896,124 @@
     font-weight: 700;
 }
 
+.ptv-browse-directory-empty-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 2.75rem;
+    padding: 0 0.75rem;
+    color: rgb(255 255 255 / 72%);
+    font-size: 0.78rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.ptv-browse-directory-empty-checkbox {
+    width: 1rem;
+    height: 1rem;
+    accent-color: #a852ff;
+}
+
+.ptv-browse-directory-note {
+    margin: -0.8rem 0 0;
+    color: rgb(255 255 255 / 56%);
+    font-size: 0.76rem;
+    font-weight: 700;
+}
+
+.ptv-browse-directory-alphabet {
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+    padding-block: 0.15rem;
+    scrollbar-width: thin;
+}
+
+.ptv-browse-directory-alphabet-button {
+    min-width: 2.35rem;
+    min-height: 2.35rem;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 0.7rem;
+    background: rgb(18 13 31 / 62%);
+    color: rgb(255 255 255 / 72%);
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.ptv-browse-directory-alphabet-button:hover,
+.ptv-browse-directory-alphabet-button:focus-visible {
+    border-color: rgb(205 156 255 / 52%);
+    background: rgb(126 68 182 / 34%);
+    color: #fff;
+    outline: none;
+}
+
+.ptv-browse-directory-recents {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.ptv-browse-directory-recents h2 {
+    margin: 0;
+    color: #7fe7ff;
+    font-size: 0.78rem;
+    letter-spacing: 0;
+}
+
+.ptv-browse-directory-recents div {
+    display: flex;
+    gap: 0.45rem;
+    overflow-x: auto;
+    padding-block: 0.15rem;
+}
+
+.ptv-browse-directory-recent-link {
+    flex: 0 0 auto;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: 999px;
+    background: rgb(91 46 132 / 22%);
+    color: rgb(255 255 255 / 78%);
+    text-decoration: none;
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+
+.ptv-browse-directory-recent-link:hover,
+.ptv-browse-directory-recent-link:focus-visible {
+    border-color: rgb(205 156 255 / 52%);
+    background: rgb(126 68 182 / 34%);
+    color: #fff;
+    outline: none;
+}
+
+.ptv-browse-directory-more {
+    justify-self: center;
+    min-height: 2.75rem;
+    padding: 0 1rem;
+    border: 1px solid rgb(205 156 255 / 32%);
+    border-radius: 999px;
+    background: rgb(126 68 182 / 24%);
+    color: #fff;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 850;
+    cursor: pointer;
+}
+
+.ptv-browse-directory-more:hover,
+.ptv-browse-directory-more:focus-visible {
+    border-color: rgb(205 156 255 / 62%);
+    background: rgb(126 68 182 / 42%);
+    outline: none;
+}
+
 .ptv-browse-directory-section {
     display: grid;
     gap: 0.65rem;
+    scroll-margin-top: calc(var(--ptv-shell-header-height, 5rem) + 6rem);
 }
 
 .ptv-browse-directory-section h2 {

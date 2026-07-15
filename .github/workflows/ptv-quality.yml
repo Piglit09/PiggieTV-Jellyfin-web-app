@@ -1,0 +1,113 @@
+name: PiggieTV quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ptv-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fast-checks:
+    name: Tests, types, lint, and privacy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit
+
+      - name: Focused PiggieTV tests
+        run: npm run test:ptv -- --run
+
+      - name: Full Vitest suite
+        run: npm test -- --run
+
+      - name: TypeScript
+        run: npm run build:check
+
+      - name: PiggieTV ESLint baseline
+        run: npm run lint:ptv
+
+      - name: New hardening files have no ESLint debt
+        run: npm run lint:ptv:clean
+
+      - name: PiggieTV stylelint baseline
+        run: npm run stylelint:ptv
+
+      - name: Secret scan
+        run: npm run secret:scan
+
+      - name: Whitespace check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git diff --check "$BASE_SHA...HEAD"
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            git diff --check HEAD^
+          else
+            git diff --check
+          fi
+
+  production-build:
+    name: Production Webpack
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit
+
+      - name: Build production frontend
+        run: npm run build:production
+
+      - name: Summarize bundle
+        run: npm run build:report
+
+  browser-tests:
+    name: Browser integration
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run deterministic browser tests
+        run: npm run test:e2e

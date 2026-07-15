@@ -227,8 +227,8 @@ Upstream Jellyfin Web code remains the base application. PTV changes should stay
 
 Frontend:
 
-- [Node.js](https://nodejs.org/en/download)
-- npm
+- [Node.js](https://nodejs.org/en/download) 20.x
+- npm 9.6.4 through 10.x
 
 Plugin:
 
@@ -236,10 +236,10 @@ Plugin:
 
 ## Frontend Development
 
-Install dependencies:
+Install the exact locked dependencies:
 
 ```sh
-npm install
+npm ci
 ```
 
 Run the local development server:
@@ -266,12 +266,27 @@ Production build:
 npm run build:production
 ```
 
-Lint PTV code:
+Run tests and the scoped quality gates:
 
 ```sh
-npx eslint src/ptv
-npx stylelint "src/ptv/**/*.{css,scss}"
+npm run test:ptv
+npm test
+npm run lint:ptv
+npm run stylelint:ptv
+npm run secret:scan
 ```
+
+Run deterministic Chromium integration tests and summarize a production build:
+
+```sh
+npm run test:e2e
+npm run build:production
+npm run build:report
+```
+
+The browser suite uses a controlled local harness and does not require Jellyfin credentials. Production builds inject a sanitized frontend commit, build date, build ID, build mode, and Jellyfin Web version. The PiggieTV dashboard combines these values with connected plugin/API/cache versions.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for required CI checks, commit guidance, privacy rules, and device validation. See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) before packaging or deployment.
 
 ## Plugin Build
 
@@ -308,6 +323,7 @@ PiggieTV architecture docs live in `src/ptv/docs`:
 Plugin-specific notes:
 
 - [PiggieTV plugin README](src/ptv/plugin/README.md)
+- [Frontend/plugin compatibility](src/ptv/docs/compatibility.md)
 
 ## Upstream Jellyfin
 

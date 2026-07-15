@@ -1,0 +1,51 @@
+name: PiggieTV plugin contract
+
+on:
+  pull_request:
+    paths:
+      - 'src/ptv/plugin/**'
+      - 'src/ptv/core/pluginApi.ts'
+      - 'src/ptv/core/config.ts'
+      - 'src/ptv/core/buildInfo.ts'
+      - '.github/workflows/ptv-plugin.yml'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'src/ptv/plugin/**'
+      - 'src/ptv/core/pluginApi.ts'
+      - 'src/ptv/core/config.ts'
+      - 'src/ptv/core/buildInfo.ts'
+      - '.github/workflows/ptv-plugin.yml'
+
+concurrency:
+  group: ptv-plugin-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    name: Plugin build and contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Validate frontend/plugin contract
+        run: node scripts/ptv-plugin-contract-check.mjs
+
+      - name: Build and test plugin
+        run: dotnet test src/ptv/plugin/Jellyfin.Plugin.PiggieTV.Tests/Jellyfin.Plugin.PiggieTV.Tests.csproj --configuration Release

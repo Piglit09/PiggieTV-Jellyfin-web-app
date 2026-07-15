@@ -58,13 +58,7 @@ import {
     getPtvFocusedBrowseLoaderKey,
     PtvFocusedBrowseLoadOwner
 } from './focusedBrowseLoader';
-import {
-    buildPtvGenreDirectoryGroups,
-    getPtvGenreDisplayName,
-    groupPtvGenreDirectoryAlphabetically,
-    type PtvGenreDirectoryGroup,
-    type PtvGenreDirectoryMode
-} from './genreDirectory';
+import BrowseDirectory from './BrowseDirectory';
 
 import './nativeBrowse.scss';
 
@@ -1963,26 +1957,6 @@ function PtvFocusedBrowseDebug({ route, scope, state, title }: Readonly<{
     );
 }
 
-type PtvBrowseDirectoryTarget = 'genre' | 'network' | 'studio';
-
-function getPtvBrowseDirectoryTarget(route: PtvBrowseRoute): PtvBrowseDirectoryTarget {
-    if (route.view === 'genres') return 'genre';
-    if (route.view === 'networks') return 'network';
-
-    return 'studio';
-}
-
-function getPtvBrowseDirectoryHref(
-    route: PtvBrowseRoute,
-    target: PtvBrowseDirectoryTarget,
-    name: string
-) {
-    if (target === 'genre') return buildPtvBrowseHref(route, { genre: name, view: 'genre' });
-    if (target === 'network') return buildPtvBrowseHref(route, { network: name, view: 'network' });
-
-    return buildPtvBrowseHref(route, { studio: name, view: 'studio' });
-}
-
 function getPtvFocusedBrowseStatusText(state: PtvFocusedBrowseState) {
     if (state.status === 'ready') {
         const noun = state.totalRecordCount === 1 ? 'item' : 'items';
@@ -2060,206 +2034,6 @@ async function loadPtvFocusedBrowseState(
     };
 }
 
-const PTV_GENRE_DIRECTORY_MODE_STORAGE_KEY = 'ptv:browse:genre-directory:mode:v1';
-
-function getPtvGenreDirectoryModeStorageKey() {
-    const userId = getPtvCurrentUserId();
-
-    if (!userId) return `${PTV_GENRE_DIRECTORY_MODE_STORAGE_KEY}:anonymous`;
-
-    let hash = 0x811c9dc5;
-
-    for (let index = 0; index < userId.length; index += 1) {
-        hash ^= userId.charCodeAt(index);
-        hash = Math.imul(hash, 0x01000193);
-    }
-
-    return `${PTV_GENRE_DIRECTORY_MODE_STORAGE_KEY}:${(hash >>> 0).toString(36)}`;
-}
-
-function readPtvGenreDirectoryMode(): PtvGenreDirectoryMode {
-    try {
-        return window.localStorage.getItem(getPtvGenreDirectoryModeStorageKey()) === 'all' ? 'all' : 'curated';
-    } catch {
-        return 'curated';
-    }
-}
-
-function writePtvGenreDirectoryMode(mode: PtvGenreDirectoryMode) {
-    try {
-        window.localStorage.setItem(getPtvGenreDirectoryModeStorageKey(), mode);
-    } catch {
-        // Storage may be unavailable in private browsing or constrained webviews.
-    }
-}
-
-function getPtvDirectoryCountLabel(count: number) {
-    if (!count) return '';
-
-    return `${count} ${count === 1 ? 'item' : 'items'}`;
-}
-
-function PtvGenreDirectoryCard({ group, route }: Readonly<{
-    group: PtvGenreDirectoryGroup;
-    route: PtvBrowseRoute;
-}>) {
-    if (group.entries.length === 1) {
-        const entry = group.entries[0];
-
-        return (
-            <a
-                className='ptv-browse-directory-link'
-                href={getPtvBrowseDirectoryHref(route, 'genre', entry.name)}
-            >
-                <strong>{group.displayName}</strong>
-                {group.count ? <span>{getPtvDirectoryCountLabel(group.count)}</span> : null}
-            </a>
-        );
-    }
-
-    return (
-        <div className='ptv-browse-directory-link ptv-browse-directory-link--grouped'>
-            <strong>{group.displayName}</strong>
-            {group.count ? <span>{getPtvDirectoryCountLabel(group.count)}</span> : null}
-            <div className='ptv-browse-directory-aliases'>
-                {group.entries.map(entry => (
-                    <a
-                        href={getPtvBrowseDirectoryHref(route, 'genre', entry.name)}
-                        key={entry.id}
-                    >
-                        {getPtvGenreDisplayName(entry.name)}
-                    </a>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function PtvGenreDirectoryModeButton({ active, label, mode, onSelect }: Readonly<{
-    active: boolean;
-    label: string;
-    mode: PtvGenreDirectoryMode;
-    onSelect: (mode: PtvGenreDirectoryMode) => void;
-}>) {
-    const handleClick = useCallback(() => {
-        onSelect(mode);
-    }, [mode, onSelect]);
-
-    return (
-        <button
-            aria-pressed={active}
-            className={`ptv-browse-directory-mode-button${active ? ' is-active' : ''}`}
-            onClick={handleClick}
-            type='button'
-        >
-            {label}
-        </button>
-    );
-}
-
-function PtvFocusedGenreDirectory({ route, state }: Readonly<{
-    route: PtvBrowseRoute;
-    state: PtvFocusedBrowseState;
-}>) {
-    const [mode, setMode] = useState<PtvGenreDirectoryMode>(readPtvGenreDirectoryMode);
-    const [query, setQuery] = useState('');
-    const allGroups = useMemo(() => buildPtvGenreDirectoryGroups(state.directory, {
-        includeSensitive: true
-    }), [state.directory]);
-    const curatedGroups = useMemo(() => buildPtvGenreDirectoryGroups(state.directory, {
-        includeSensitive: false
-    }), [state.directory]);
-    const groups = useMemo(() => buildPtvGenreDirectoryGroups(state.directory, {
-        includeSensitive: mode === 'all',
-        query
-    }), [mode, query, state.directory]);
-    const sections = useMemo(() => groupPtvGenreDirectoryAlphabetically(groups), [groups]);
-    const hiddenGroupCount = Math.max(0, allGroups.length - curatedGroups.length);
-    const handleQueryChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-        setQuery(event.target.value);
-    }, []);
-    const setDirectoryMode = useCallback((nextMode: PtvGenreDirectoryMode) => {
-        setMode(nextMode);
-        writePtvGenreDirectoryMode(nextMode);
-    }, []);
-
-    return (
-        <div className='ptv-browse-genre-directory'>
-            <div className='ptv-browse-directory-tools'>
-                <label className='ptv-browse-directory-search'>
-                    <span>Search genres</span>
-                    <input
-                        aria-label='Search genres'
-                        className='ptv-browse-directory-search-input'
-                        onChange={handleQueryChange}
-                        placeholder='Search genres'
-                        type='search'
-                        value={query}
-                    />
-                </label>
-                <div className='ptv-browse-directory-mode' role='group' aria-label='Genre visibility'>
-                    <PtvGenreDirectoryModeButton
-                        active={mode === 'curated'}
-                        label='Curated'
-                        mode='curated'
-                        onSelect={setDirectoryMode}
-                    />
-                    <PtvGenreDirectoryModeButton
-                        active={mode === 'all'}
-                        label='All metadata genres'
-                        mode='all'
-                        onSelect={setDirectoryMode}
-                    />
-                </div>
-                <p aria-live='polite'>
-                    {groups.length} genres
-                    {mode === 'curated' && hiddenGroupCount ? `, ${hiddenGroupCount} sensitive hidden` : ''}
-                </p>
-            </div>
-            {sections.length ? sections.map(section => (
-                <section className='ptv-browse-directory-section' key={section.letter}>
-                    <h2>{section.letter}</h2>
-                    <div className='ptv-browse-directory-grid'>
-                        {section.groups.map(group => (
-                            <PtvGenreDirectoryCard group={group} key={group.key} route={route} />
-                        ))}
-                    </div>
-                </section>
-            )) : (
-                <div className='ptv-browse-focused-status'>No genres match this search.</div>
-            )}
-        </div>
-    );
-}
-
-function PtvFocusedBrowseDirectory({ route, state }: Readonly<{
-    route: PtvBrowseRoute;
-    state: PtvFocusedBrowseState;
-}>) {
-    const target = getPtvBrowseDirectoryTarget(route);
-
-    if (!state.directory.length) {
-        return <div className='ptv-browse-focused-status'>No categories were found.</div>;
-    }
-
-    if (target === 'genre') return <PtvFocusedGenreDirectory route={route} state={state} />;
-
-    return (
-        <div className='ptv-browse-directory-grid'>
-            {state.directory.map(entry => (
-                <a
-                    className='ptv-browse-directory-link'
-                    key={`${target}-${entry.id}`}
-                    href={getPtvBrowseDirectoryHref(route, target, entry.name)}
-                >
-                    <strong>{entry.name}</strong>
-                    {entry.count ? <span>{getPtvDirectoryCountLabel(entry.count)}</span> : null}
-                </a>
-            ))}
-        </div>
-    );
-}
-
 function ignoreFocusedBrowseCardFocus() {
     // Focus state is local to focused grids; the landing hero is not mounted here.
 }
@@ -2318,7 +2092,7 @@ function PtvFocusedBrowseBody({ onRetry, route, state, title }: Readonly<{
     }
 
     if (isPtvBrowseDirectoryView(route)) {
-        return <PtvFocusedBrowseDirectory route={route} state={state} />;
+        return <BrowseDirectory directory={state.directory} route={route} />;
     }
 
     return <PtvFocusedBrowseItems route={route} state={state} />;

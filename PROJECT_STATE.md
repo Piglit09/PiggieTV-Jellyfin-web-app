@@ -207,6 +207,43 @@ The global lint/style failures are demonstrated pre-existing and non-blocking fo
 
 Review the focused-loader diff and project-memory updates, then deploy the rebuilt frontend. This pass is web-only and does not require a plugin DLL update or plugin restart. Allow the service worker to update or perform one hard refresh before running the remaining authenticated Movies/Shows matrix in `HANDOFF.md`.
 
+### 2026-07-14 Production Hardening Program
+
+Status: locally verified and ready for deployment-stage manual checks.
+
+Delivered boundaries:
+
+- GitHub Actions for frontend tests/types/lint/privacy/build/browser checks and path-scoped plugin contract/tests.
+- Build provenance and frontend/plugin compatibility reporting in the PTV dashboard.
+- User-mediated service-worker updates that defer while playback is active.
+- Extracted browse-directory and shell-backdrop ownership without changing focused loader, cache, route, playback, or plugin contracts.
+- Searchable/alphabetical directory UX with Curated/All preference, bounded per-user recents, 120-entry incremental rendering, responsive focus, and no request fan-out.
+- Route-aware dashboard enhancement loading plus existing lazy reader boundaries.
+- Deterministic Chromium coverage for authentication ownership, focused browse lifecycle, service-worker updates, keyboard focus, and exact desktop/tablet/mobile/TV viewports.
+- Repository size, bundle size, secret, and frontend/plugin contract reports; contributor, PR, issue, and release-checklist guidance.
+
+Final local results:
+
+| Check | Result |
+| --- | --- |
+| Focused PTV Vitest | 28 files, 165 tests passed |
+| Full Vitest | 41 files, 334 tests passed |
+| Playwright Chromium | 26 tests passed |
+| TypeScript | Passed with `--noEmit` |
+| PTV inherited ESLint gate | Passed at recorded baseline: 170 errors, 23 warnings |
+| New hardening-file ESLint | Passed with zero findings |
+| PTV Stylelint | Passed with zero findings |
+| Plugin contract | Frontend/plugin API v1 and cache v7 compatible |
+| Plugin tests | 4 passed on net9.0 |
+| Production Webpack | Passed in 199.6 seconds; two established size warnings |
+| Main production output | 857.5 KiB main script; 4.1 MiB combined main entrypoint; 246 KiB service worker |
+| Secret scan | Passed for tracked and untracked, non-ignored repository paths |
+| Repository report | 119,114 tracked files, 1333.48 MiB; 1303.83 MiB is generated/dependency material |
+
+One new integration defect was found and fixed during final verification: Vitest initially collected the new Playwright specs, causing three framework-mismatch suite failures while 334 unit tests passed. `vite.config.ts` now limits Vitest discovery to `src/**/*.{test,spec}.{js,jsx,ts,tsx}`; the corrected full suite passes.
+
+Known non-blocking debt remains explicit: the inherited PTV ESLint baseline, Webpack size warnings, historically tracked dependency/build trees, two project assets over 1 MiB that are future Git LFS candidates, and six duplicate project-owned binary groups. No history rewrite, LFS migration, tracked dependency removal, or asset deletion was performed.
+
 ### 2026-07-14 Authentication Header Visibility Correction
 
 The header visible over the custom login page was the globally mounted stable `AppHeader` from `RootAppRouter`, not a page-local `PTVShell`. The experimental layout had the same missing authentication exclusion for its Jellyfin-style app bar and drawer. Both header owners now use the shared exact route classifier in `authenticationRoutes.ts`. Visible authenticated controls remain unmounted on authentication routes, while the stable header owner retains a hidden compatibility host containing only Jellyfin's required drawer and skin-header anchors. The existing PTV login enhancer and shell route registry use the same classifier, eliminating divergent login parsing.

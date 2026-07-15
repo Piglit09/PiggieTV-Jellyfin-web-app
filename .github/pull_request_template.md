@@ -1,11 +1,47 @@
-<!--
-Ensure your title is short, descriptive, and in the imperative mood (Fix X, Change Y, instead of Fixed X, Changed Y).
-For a good inspiration of what to write in commit messages and PRs please review https://chris.beams.io/posts/git-commit/ and our https://jellyfin.org/docs/general/contributing/issues page.
--->
+## Scope
 
-**Changes**
-<!-- Describe your changes here in 1-5 sentences. -->
+<!-- Describe the problem, root cause, and intentionally unchanged behavior. -->
 
-**Issues**
-<!-- Tag any issues that this PR solves here.
-ex. Fixes # -->
+## Screenshots
+
+<!-- Add sanitized before/after images for visible changes, or write "Not applicable". -->
+
+## Test Results
+
+- [ ] Focused PiggieTV tests
+- [ ] Full Vitest suite
+- [ ] TypeScript
+- [ ] Scoped ESLint and stylelint gates
+- [ ] Production Webpack
+- [ ] Playwright browser suite when routes, shell, or updates change
+- [ ] Plugin tests/contracts when plugin files or contracts change
+
+Commands and results:
+
+```text
+
+```
+
+## Compatibility Impact
+
+- Frontend behavior:
+- Plugin/API impact: none / compatible / breaking
+- Cache/schema impact: none / compatible / migration required
+- Service-worker impact: none / update notice / cache invalidation
+
+## Manual Device Checks
+
+- [ ] Desktop
+- [ ] Mobile or tablet
+- [ ] TV/remote or low-power profile
+- [ ] Active playback preserved where applicable
+
+## Security And Privacy
+
+- [ ] No credentials, tokens, authorization headers, private server addresses, user IDs, filesystem paths, or raw private diagnostics are included.
+- [ ] Diagnostic examples are synthetic or sanitized.
+- [ ] Provider URLs and external input are validated where applicable.
+
+## Issues
+
+<!-- Example: Fixes #123 -->

@@ -1238,3 +1238,71 @@ html[data-ptv-client-kind='tv'] .ptv-media-dock,
 html[data-ptv-client-kind='tv'] .ptv-media-dock-actions {
     transition: none;
 }
+
+.ptv-update-notice {
+    position: fixed;
+    z-index: 12000;
+    right: 1rem;
+    bottom: 1rem;
+    display: flex;
+    max-width: min(34rem, calc(100vw - 2rem));
+    padding: 0.85rem 1rem;
+    border: 1px solid rgb(184 138 255 / 42%);
+    border-radius: 0.75rem;
+    background: rgb(20 14 33 / 92%);
+    box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 45%);
+    color: #fff;
+    gap: 1rem;
+    align-items: center;
+    backdrop-filter: blur(16px);
+}
+
+.ptv-update-notice-copy {
+    display: grid;
+    min-width: 0;
+    gap: 0.2rem;
+}
+
+.ptv-update-notice-copy span {
+    color: rgb(255 255 255 / 76%);
+    font-size: 0.88rem;
+}
+
+.ptv-update-notice-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0.5rem;
+}
+
+.ptv-update-notice-actions button {
+    min-height: 2.45rem;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid rgb(255 255 255 / 18%);
+    border-radius: 999px;
+    background: rgb(133 62 255 / 68%);
+    color: inherit;
+    cursor: pointer;
+}
+
+.ptv-update-notice-actions button:last-child {
+    background: rgb(255 255 255 / 8%);
+}
+
+.ptv-update-notice-actions button:focus-visible {
+    outline: 3px solid #74d9ff;
+    outline-offset: 2px;
+}
+
+@media (max-width: 40rem) {
+    .ptv-update-notice {
+        left: 0.75rem;
+        right: 0.75rem;
+        bottom: 0.75rem;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .ptv-update-notice-actions button {
+        flex: 1;
+    }
+}

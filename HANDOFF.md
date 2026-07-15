@@ -223,6 +223,35 @@ The broad ESLint command may report the eight known nested-render warnings in `b
 
 Do not claim the Reading work fully deployed until the authenticated provider/apply, restart persistence, and device checks above pass. If a live check fails, record the request/response shape and current item payload in `DEBUG_LOG.md` without credentials, tokens, item IDs, server addresses, or local paths.
 
+## 2026-07-14 - Production Hardening Handoff
+
+The current worktree adds CI, provenance, safe service-worker updates, deterministic browser integration tests, directory/shell decomposition, repository and bundle audits, compatibility checks, and contributor/release guidance. It deliberately preserves plugin API v1, cache v7, recommendation persistence, Reading metadata behavior, playback ownership, focused-loader identity, and Jellyfin fallback routes.
+
+Use these commands for the release gate:
+
+```powershell
+npm run test:ptv
+npm test
+npm run build:check
+npm run lint:ptv
+npm run lint:ptv:clean
+npm run stylelint:ptv
+npm run test:e2e
+npm run test:plugin-contract
+npm run test:plugin
+npm run build:production
+npm run build:report
+npm run repository:report
+npm run secret:scan
+git diff --check
+```
+
+The final local results are 165 focused PTV tests, 334 full-suite tests, 26 Chromium tests, and four plugin tests passing. TypeScript, both ESLint gates, Stylelint, plugin contract, privacy scan, and production Webpack pass. The Webpack output retains only the established asset/entrypoint warnings.
+
+Before commit, restore tracked generated changes under `node_modules/.vite`, `node_modules/.package-lock.json`, and plugin `bin/obj`; remove ignored `dist`, `e2e/.harness`, and `test-results`. Keep root project-memory files, CI/workflow files, `.quality`, hardening scripts, e2e sources, contributor docs, and package/root lock changes in scope. Do not remove or untrack the historical dependency trees without a separate approved migration.
+
+Deployment order: build/test the plugin and frontend from the same revision, deploy the existing compatible plugin only if the installed version is not 10.11.8.1, restart Jellyfin only when replacing that DLL, then deploy the frontend and accept the offered service-worker update. A plugin restart is not required for the frontend-only hardening changes. Application caches do not need clearing; a hard refresh/service-worker clear is recovery-only if the old bundle remains controlled.
+
 ## 2026-07-14 - Authentication header visibility checkpoint
 
 - Root cause: `RootAppRouter` mounted the global stable `AppHeader` for every non-dashboard stable route, including login. The experimental `AppLayout` independently had the same missing authentication boundary for its Jellyfin-style app bar/drawer. The supplied header was the stable `AppHeader`, not a stale page-local `PTVShell` instance.

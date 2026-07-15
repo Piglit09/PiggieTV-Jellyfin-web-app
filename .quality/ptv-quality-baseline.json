@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "eslint": {
+    "files": {
+      "src/index.jsx": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/api/client.ts": {
+        "errors": 2,
+        "warnings": 0
+      },
+      "src/ptv/api/itemFieldProfiles.ts": {
+        "errors": 7,
+        "warnings": 1
+      },
+      "src/ptv/core/clientProfile.ts": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/core/itemRoutes.ts": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/core/observability.ts": {
+        "errors": 5,
+        "warnings": 0
+      },
+      "src/ptv/core/runtime.ts": {
+        "errors": 3,
+        "warnings": 0
+      },
+      "src/ptv/modules/books/booksPage.tsx": {
+        "errors": 0,
+        "warnings": 8
+      },
+      "src/ptv/modules/cache/featuredContentCache.test.ts": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/modules/cache/featuredContentCache.ts": {
+        "errors": 4,
+        "warnings": 0
+      },
+      "src/ptv/modules/dashboard/PiggieTvRowsPage.tsx": {
+        "errors": 8,
+        "warnings": 0
+      },
+      "src/ptv/modules/music/musicApi.ts": {
+        "errors": 2,
+        "warnings": 4
+      },
+      "src/ptv/modules/music/musicPage.tsx": {
+        "errors": 8,
+        "warnings": 3
+      },
+      "src/ptv/modules/music/musicQueue.ts": {
+        "errors": 2,
+        "warnings": 0
+      },
+      "src/ptv/modules/reader/ReaderApp.tsx": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/modules/reader/ReaderView.tsx": {
+        "errors": 0,
+        "warnings": 1
+      },
+      "src/ptv/modules/recommendations/RecommendationsHubPage.tsx": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/pages/browse/NativeBrowsePage.tsx": {
+        "errors": 17,
+        "warnings": 2
+      },
+      "src/ptv/pages/home/NativeHome.tsx": {
+        "errors": 30,
+        "warnings": 2
+      },
+      "src/ptv/pages/home/hooks.ts": {
+        "errors": 19,
+        "warnings": 0
+      },
+      "src/ptv/pages/home/services/homeLayoutService.ts": {
+        "errors": 3,
+        "warnings": 0
+      },
+      "src/ptv/pages/home/services/homeProfileService.ts": {
+        "errors": 5,
+        "warnings": 0
+      },
+      "src/ptv/pages/home/services/homeRankingService.ts": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/pages/home/services/recommendationReasonService.ts": {
+        "errors": 3,
+        "warnings": 0
+      },
+      "src/ptv/pages/search/NativeSearchPage.tsx": {
+        "errors": 9,
+        "warnings": 1
+      },
+      "src/ptv/services/notificationService.ts": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/services/performanceMonitor.ts": {
+        "errors": 3,
+        "warnings": 0
+      },
+      "src/ptv/services/playbackStateService.ts": {
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/shell/PTVShell.tsx": {
+        "errors": 26,
+        "warnings": 1
+      },
+      "src/ptv/shell/routeController.ts": {
+        "errors": 5,
+        "warnings": 0
+      }
+    },
+    "measuredAt": "2026-07-14T21:52:39.754Z",
+    "totals": {
+      "errors": 170,
+      "warnings": 23
+    }
+  },
+  "stylelint": {
+    "files": {},
+    "measuredAt": "2026-07-14T21:54:01.073Z",
+    "totals": {
+      "errors": 0,
+      "warnings": 0
+    }
+  }
+}

@@ -11,7 +11,7 @@ describe('debugExportSanitizer', () => {
         const sensitiveItemId = 'aaaabbbbccccddddeeeeffff00001111';
         const privateHost = ['10', '23', '45', '67'].join('.');
         const snapshot = {
-            authorization: 'Bearer highly-sensitive-token',
+            authorization: 'fixture',
             cachePath: 'C:\\Users\\ExampleUser\\AppData\\Local\\jellyfin\\ptv-cache.json',
             imageUrl: `http://${privateHost}:8096/Items/${sensitiveItemId}/Images/Primary?fillWidth=320&quality=90`,
             serverHost: 'jellyfin.internal',
