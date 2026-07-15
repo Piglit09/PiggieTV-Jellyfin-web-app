@@ -13,7 +13,7 @@ Current as of 2026-07-14. This is the current-state ledger, not a historical cha
 | Frontend stack | React 18.3, TypeScript 5.8, Webpack 5, MUI 6, TanStack Query 5 |
 | PTV frontend root | `src/ptv` |
 | Plugin root | `src/ptv/plugin/Jellyfin.Plugin.PiggieTV` |
-| Plugin target/version | .NET 9, `10.11.8.1` against Jellyfin packages `10.11.8` |
+| Plugin target/version | .NET 9, `10.11.8.2` against Jellyfin packages `10.11.8` |
 | Featured cache | Schema/version 7, plugin and browser stale-while-revalidate path |
 | Reading home cache | Schema 4, 5-minute fresh TTL, 24-hour stale window |
 
@@ -278,3 +278,14 @@ The first visibility implementation fully unmounted `AppHeader`. That exposed an
 - Final local verification: focused 10 files/38 tests; full Vitest 45 files/348 tests; TypeScript passed; PTV Stylelint has zero findings; scoped ESLint remains at its recorded 170-error/23-warning inherited baseline with no increase; plugin contract passed; plugin tests 7/7 and Release build passed; Playwright 27/27 passed; production Webpack passed with only the established asset/entrypoint size warnings.
 
 Deployment requires the frontend and companion plugin from the same revision. Replace the installed plugin DLL and restart Jellyfin before expecting Reading override server authority or the new advertised feature. A routine browser cache clear is not required; accept/reload the new frontend bundle normally.
+
+### 2026-07-15 Plugin/Frontend Release Pair
+
+Status: locally release-verified; deployment has not been performed.
+
+- The companion plugin patch is `10.11.8.2`, replacing installed/source release `10.11.8.1`. API major `1`, featured cache schema `7`, Jellyfin package target `10.11.8`, and manifest target ABI `10.11.8.0` are unchanged.
+- Plugin version authority is the `PtvPluginVersion` project property. Assembly/file versions, status responses, the provider user agent, source/published manifests, contract checks, and release documentation now resolve from or verify that value.
+- Frontend compatibility keeps `10.11.8.1` connected for the supported API/cache contract but reports `readingSeriesOverrides` as upgrade-required. `10.11.8.2` advertising the feature is compatible. Browser storage remains explicitly labeled a local cache fallback, never server authority.
+- Published payload: `Jellyfin.Plugin.PiggieTV.dll`, `.deps.json`, `.pdb`, `.xml`, and `meta.json` in `src/ptv/plugin/bin`. The DLL and manifest both report `10.11.8.2`.
+- Final verification: focused compatibility 12/12, full Vitest 351/351, plugin 9/9, plugin contract passed, TypeScript passed, scoped ESLint passed, Release build/publish passed with zero .NET warnings/errors, production Webpack passed with the established asset/entrypoint size warnings, and the 119,152-path secret scan passed.
+- Deployment order is plugin payload -> Jellyfin restart -> capability/status verification -> matching frontend. A routine browser/service-worker purge is not required; use the normal update/reload path first.

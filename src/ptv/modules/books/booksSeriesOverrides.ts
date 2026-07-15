@@ -5,6 +5,7 @@ import type {
     PtvReadingRouteKind
 } from './booksTypes';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
+import { classifyPtvPluginCapability, type PtvPluginBuildStatus } from '../../core/buildInfo';
 import { recordPtvEvent } from '../../core/observability';
 
 const PTV_READING_SERIES_OVERRIDE_VERSION = 1;
@@ -19,10 +20,14 @@ type ReadingSeriesOverridesResponse = {
 export type PtvReadingOverridePersistenceState = Readonly<{
     authority: 'browser-cache' | 'server';
     endpointAvailable: boolean;
-    lastCategory: 'endpoint-missing' | 'plugin-unavailable' | 'request-failed' | 'server-confirmed';
+    lastCategory: 'endpoint-missing' | 'plugin-unavailable' | 'request-failed' | 'server-confirmed' | 'upgrade-required';
+    message: string;
     routeKind: PtvReadingRouteKind;
     serverPersistenceConfirmed: boolean;
+    upgradeRequired: boolean;
 }>;
+
+const READING_OVERRIDE_UPGRADE_MESSAGE = 'Upgrade the PiggieTV plugin to 10.11.8.2 or newer to persist Reading corrections on the server. Browser storage is being used only as a local cache fallback.';
 
 const overridePersistenceState = new Map<PtvReadingRouteKind, PtvReadingOverridePersistenceState>();
 
@@ -46,7 +51,30 @@ function getOverrideFailureCategory(error: unknown): PtvReadingOverridePersisten
     if ('status' in error) status = Number(error.status);
     else if ('statusCode' in error) status = Number(error.statusCode);
 
-    return status === 404 ? 'endpoint-missing' : 'request-failed';
+    return status === 404 ? 'upgrade-required' : 'request-failed';
+}
+
+async function getReadingOverrideCapability(
+    pluginApi: NonNullable<ReturnType<typeof getCurrentPtvPluginApiClient>>
+) {
+    try {
+        const status = await pluginApi.getStatus<PtvPluginBuildStatus>();
+
+        return classifyPtvPluginCapability(status, 'readingSeriesOverrides');
+    } catch {
+        return 'unknown';
+    }
+}
+
+function setUpgradeRequiredState(routeKind: PtvReadingRouteKind) {
+    return setOverridePersistenceState(routeKind, {
+        authority: 'browser-cache',
+        endpointAvailable: false,
+        lastCategory: 'upgrade-required',
+        message: READING_OVERRIDE_UPGRADE_MESSAGE,
+        serverPersistenceConfirmed: false,
+        upgradeRequired: true
+    });
 }
 
 export function getPtvReadingOverridePersistenceState(routeKind: PtvReadingRouteKind) {
@@ -171,8 +199,15 @@ export async function loadPtvReadingSeriesOverridesFromServer(
             authority: 'browser-cache',
             endpointAvailable: false,
             lastCategory: 'plugin-unavailable',
-            serverPersistenceConfirmed: false
+            message: 'PiggieTV plugin is unavailable. Browser storage is being used only as a local cache fallback.',
+            serverPersistenceConfirmed: false,
+            upgradeRequired: false
         });
+        return cachedOverrides;
+    }
+
+    if (await getReadingOverrideCapability(pluginApi) === 'upgrade-required') {
+        setUpgradeRequiredState(routeKind);
         return cachedOverrides;
     }
 
@@ -194,7 +229,9 @@ export async function loadPtvReadingSeriesOverridesFromServer(
                 authority: 'server',
                 endpointAvailable: true,
                 lastCategory: 'server-confirmed',
-                serverPersistenceConfirmed: true
+                message: 'Reading corrections are persisted by the PiggieTV plugin.',
+                serverPersistenceConfirmed: true,
+                upgradeRequired: false
             });
 
             return authoritativeOverrides;
@@ -206,7 +243,9 @@ export async function loadPtvReadingSeriesOverridesFromServer(
             authority: 'server',
             endpointAvailable: true,
             lastCategory: 'server-confirmed',
-            serverPersistenceConfirmed: true
+            message: 'Reading corrections are persisted by the PiggieTV plugin.',
+            serverPersistenceConfirmed: true,
+            upgradeRequired: false
         });
 
         return serverOverrides;
@@ -215,9 +254,11 @@ export async function loadPtvReadingSeriesOverridesFromServer(
 
         setOverridePersistenceState(routeKind, {
             authority: 'browser-cache',
-            endpointAvailable: category !== 'endpoint-missing',
+            endpointAvailable: category !== 'endpoint-missing' && category !== 'upgrade-required',
             lastCategory: category,
-            serverPersistenceConfirmed: false
+            message: category === 'upgrade-required' ? READING_OVERRIDE_UPGRADE_MESSAGE : 'Server persistence could not be confirmed. Browser storage is being used only as a local cache fallback.',
+            serverPersistenceConfirmed: false,
+            upgradeRequired: category === 'upgrade-required'
         });
         return cachedOverrides;
     }
@@ -238,9 +279,18 @@ export async function savePtvReadingSeriesOverrides(
             authority: 'browser-cache',
             endpointAvailable: false,
             lastCategory: 'plugin-unavailable',
-            serverPersistenceConfirmed: false
+            message: 'PiggieTV plugin is unavailable. Browser storage is being used only as a local cache fallback.',
+            serverPersistenceConfirmed: false,
+            upgradeRequired: false
         });
         return false;
+    }
+
+    if (await getReadingOverrideCapability(pluginApi) === 'upgrade-required') {
+        setUpgradeRequiredState(routeKind);
+        throw Object.assign(new Error(READING_OVERRIDE_UPGRADE_MESSAGE), {
+            code: 'PTV_READING_OVERRIDE_PLUGIN_UPGRADE_REQUIRED'
+        });
     }
 
     try {
@@ -250,16 +300,20 @@ export async function savePtvReadingSeriesOverrides(
             authority: 'server',
             endpointAvailable: true,
             lastCategory: 'server-confirmed',
-            serverPersistenceConfirmed: true
+            message: 'Reading corrections are persisted by the PiggieTV plugin.',
+            serverPersistenceConfirmed: true,
+            upgradeRequired: false
         });
     } catch (error) {
         const category = getOverrideFailureCategory(error);
 
         setOverridePersistenceState(routeKind, {
             authority: 'browser-cache',
-            endpointAvailable: category !== 'endpoint-missing',
+            endpointAvailable: category !== 'endpoint-missing' && category !== 'upgrade-required',
             lastCategory: category,
-            serverPersistenceConfirmed: false
+            message: category === 'upgrade-required' ? READING_OVERRIDE_UPGRADE_MESSAGE : 'Server persistence could not be confirmed. Browser storage is being used only as a local cache fallback.',
+            serverPersistenceConfirmed: false,
+            upgradeRequired: category === 'upgrade-required'
         });
         throw error;
     }

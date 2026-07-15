@@ -3452,6 +3452,7 @@ const PiggieTvDashboardPage = () => {
                                             <Typography>Build mode: {buildInfo.environment}</Typography>
                                             <Typography>Compatibility: {buildInfo.compatibility}</Typography>
                                             <Typography>{buildInfo.compatibilityMessage}</Typography>
+                                            <Typography>Reading series overrides: {buildInfo.readingSeriesOverrides}</Typography>
                                             <Typography>API endpoint: {statusPluginApiUrl || 'n/a'}</Typography>
                                             <Typography>Connection state: {pluginState.connectionState}</Typography>
                                             <Typography>Server UTC: {pluginStatus?.serverTimeUtc || 'n/a'}</Typography>

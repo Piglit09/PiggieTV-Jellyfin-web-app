@@ -6,7 +6,13 @@ import {
     getPtvBuildInfo
 } from './buildInfo';
 
-const TEST_PLUGIN_VERSION = ['10', '11', '8', '1'].join('.');
+const OLD_PLUGIN_VERSION = ['10', '11', '8', '1'].join('.');
+const CURRENT_PLUGIN_VERSION = ['10', '11', '8', '2'].join('.');
+
+const READING_OVERRIDES_FEATURE = {
+    featureFlags: { readingSeriesOverrides: true },
+    features: ['status', 'readingSeriesOverrides']
+};
 
 describe('PiggieTV build information', () => {
     it('uses explicit provenance fallbacks for direct module imports', () => {
@@ -47,24 +53,42 @@ describe('PiggieTV build information', () => {
         expect(classifyPtvBuildCompatibility({ apiVersion: 1, cacheVersion: 8 }).compatibility).toBe('version-mismatch');
     });
 
-    it('warns for compatible Jellyfin patch-level differences', () => {
+    it('keeps the old plugin connected but requires an upgrade for Reading persistence', () => {
         const result = classifyPtvBuildCompatibility({
             apiVersion: 1,
             cacheVersion: 7,
-            pluginVersion: TEST_PLUGIN_VERSION
+            pluginVersion: OLD_PLUGIN_VERSION,
+            features: ['status', 'featuredContent']
         }, {
             jellyfinWebVersion: '10.11.11',
             pluginConnected: true
         });
 
-        expect(result.compatibility).toBe('patch-warning');
+        expect(result.compatibility).toBe('capability-upgrade-required');
+        expect(result.compatibilityMessage).toContain(CURRENT_PLUGIN_VERSION);
+        expect(result.compatibilityMessage).toContain('server-persisted Reading corrections');
+    });
+
+    it('accepts plugin 10.11.8.2 when Reading persistence is advertised', () => {
+        const result = classifyPtvBuildCompatibility({
+            apiVersion: 1,
+            cacheVersion: 7,
+            pluginVersion: CURRENT_PLUGIN_VERSION,
+            ...READING_OVERRIDES_FEATURE
+        }, {
+            jellyfinWebVersion: '10.11.11',
+            pluginConnected: true
+        });
+
+        expect(result.compatibility).toBe('compatible');
     });
 
     it('formats a compact diagnostics representation without runtime locations', () => {
         const info = getPtvBuildInfo({
             apiVersion: 1,
             cacheVersion: 7,
-            pluginVersion: TEST_PLUGIN_VERSION
+            pluginVersion: CURRENT_PLUGIN_VERSION,
+            ...READING_OVERRIDES_FEATURE
         }, {
             environment: 'production',
             frontendBuildId: '10.11.11',
@@ -75,7 +99,8 @@ describe('PiggieTV build information', () => {
         const compact = formatPtvBuildInfoCompact(info);
 
         expect(compact).toContain('commit=abc123');
-        expect(compact).toContain('compatibility=patch-warning');
+        expect(compact).toContain('readingOverrides=available');
+        expect(compact).toContain('compatibility=compatible');
         expect(compact).not.toContain('http');
         expect(compact).not.toContain('\\');
     });

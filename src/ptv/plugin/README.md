@@ -2,7 +2,7 @@
 
 Minimal server-side companion for the PiggieTV web client.
 
-Initial endpoints only:
+Primary endpoints include:
 
 - `GET /Ptv/v1/status`
 - `GET /Ptv/v1/featured`
@@ -12,6 +12,8 @@ Initial endpoints only:
 - `GET /Ptv/v1/settings`
 - `POST /Ptv/v1/settings`
 - `POST /Ptv/v1/settings/reset`
+- `GET /Ptv/v1/reading/series-overrides/{routeKind}`
+- `PUT /Ptv/v1/reading/series-overrides/{routeKind}`
 
 Temporary compatibility aliases are also available:
 
@@ -26,7 +28,9 @@ Temporary compatibility aliases are also available:
 - `DELETE /Ptv/FeaturedContent`
 - `POST /Ptv/FeaturedContent/Refresh`
 
-All endpoints require an authenticated Jellyfin user. Featured-content reads are available to any authenticated user, while `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, and all settings endpoints require Jellyfin admin/elevated permissions.
+All endpoints require an authenticated Jellyfin user. Featured-content reads are available to any authenticated user, while `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, Reading override writes, and all settings endpoints require Jellyfin admin/elevated permissions.
+
+Release `10.11.8.2` is the minimum plugin that advertises the `readingSeriesOverrides` capability. Older API-v1/cache-v7 plugins remain connected, but the frontend marks server-persisted Reading corrections as upgrade-required and truthfully identifies browser storage as a local cache fallback.
 
 The cache write endpoint validates payload version, required fields, timestamps, unsafe client fields, and serialized size before saving. The plugin writes only to its fixed PiggieTV cache file and never accepts client-provided storage paths or file names. Validation errors use structured JSON:
 
@@ -81,6 +85,18 @@ Install manually by replacing the production plugin folder with the published fi
 ```
 
 Then restart Jellyfin. Replacing `meta.json` matters because Jellyfin persists plugin support status there; a stale `NotSupported` manifest can keep the plugin disabled even after the DLL is fixed.
+
+Copy the complete publish payload from `src/ptv/plugin/bin`:
+
+```text
+Jellyfin.Plugin.PiggieTV.dll
+Jellyfin.Plugin.PiggieTV.deps.json
+Jellyfin.Plugin.PiggieTV.pdb
+Jellyfin.Plugin.PiggieTV.xml
+meta.json
+```
+
+The DLL and `meta.json` are the required runtime/manifest pair. Keep the generated dependency manifest with the release; the PDB and XML documentation are safe operational diagnostics and should come from the same build rather than an older release.
 
 Architecture docs:
 

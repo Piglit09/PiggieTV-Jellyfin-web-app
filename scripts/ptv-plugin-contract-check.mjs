@@ -9,7 +9,9 @@ const cacheValidator = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/Pt
 const statusController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs');
 const statusResponse = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvStatusResponse.cs');
 const project = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
+const pluginManifest = JSON.parse(read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/meta.json'));
 const packageJson = JSON.parse(read('package.json'));
+const expectedPluginVersion = ['10', '11', '8', '2'].join('.');
 
 function requiredMatch(source, pattern, label) {
     const match = source.match(pattern);
@@ -24,6 +26,7 @@ const contract = {
     pluginCacheVersion: Number(requiredMatch(cacheValidator, /FeaturedCacheVersion\s*=\s*(\d+)/, 'plugin cache version')),
     pluginTarget: requiredMatch(project, /<PtvJellyfinPackageVersion>([^<]+)</, 'plugin Jellyfin target'),
     pluginVersion: requiredMatch(project, /<PtvPluginVersion>([^<]+)</, 'plugin version'),
+    pluginManifestVersion: pluginManifest.version,
     webVersion: packageJson.version
 };
 
@@ -41,6 +44,15 @@ if (contract.frontendApiVersion !== contract.pluginApiVersion) {
 }
 if (contract.frontendCacheVersion !== contract.pluginCacheVersion) {
     failures.push(`Cache mismatch: frontend v${contract.frontendCacheVersion}, plugin v${contract.pluginCacheVersion}`);
+}
+if (contract.pluginVersion !== expectedPluginVersion) {
+    failures.push(`Plugin release mismatch: expected ${expectedPluginVersion}, project reports ${contract.pluginVersion}`);
+}
+if (contract.pluginManifestVersion !== contract.pluginVersion) {
+    failures.push(`Plugin manifest mismatch: project ${contract.pluginVersion}, manifest ${contract.pluginManifestVersion}`);
+}
+if (contract.pluginTarget !== '10.11.8') {
+    failures.push(`Unexpected Jellyfin package target: expected 10.11.8, received ${contract.pluginTarget}`);
 }
 
 for (const [label, sourceText] of requiredRoutes) {

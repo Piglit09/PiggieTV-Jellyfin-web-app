@@ -250,7 +250,7 @@ The final local results are 165 focused PTV tests, 334 full-suite tests, 26 Chro
 
 Before commit, restore tracked generated changes under `node_modules/.vite`, `node_modules/.package-lock.json`, and plugin `bin/obj`; remove ignored `dist`, `e2e/.harness`, and `test-results`. Keep root project-memory files, CI/workflow files, `.quality`, hardening scripts, e2e sources, contributor docs, and package/root lock changes in scope. Do not remove or untrack the historical dependency trees without a separate approved migration.
 
-Deployment order: build/test the plugin and frontend from the same revision, deploy the existing compatible plugin only if the installed version is not 10.11.8.1, restart Jellyfin only when replacing that DLL, then deploy the frontend and accept the offered service-worker update. A plugin restart is not required for the frontend-only hardening changes. Application caches do not need clearing; a hard refresh/service-worker clear is recovery-only if the old bundle remains controlled.
+Deployment order for the corrected pair: build/test the plugin and frontend from the same revision, deploy plugin `10.11.8.2` and its matching `meta.json`, restart Jellyfin, verify `/Ptv/v1/status` advertises `readingSeriesOverrides`, then deploy the frontend and accept the offered service-worker update. Application caches do not need clearing; a hard refresh/service-worker clear is recovery-only if the old bundle remains controlled.
 
 ## 2026-07-14 - Authentication header visibility checkpoint
 
@@ -273,3 +273,12 @@ Deployment order: build/test the plugin and frontend from the same revision, dep
 - Telemetry aggregates 101 identical Reading image-profile hits into seven representative events while retaining a total of 101. Route/API failures have priority over image cache/load noise. Static-logo timings use resource duration when available and label observer age as discarded.
 - Verified commands/results: focused Vitest 38/38; full Vitest 348/348; TypeScript clean; PTV Stylelint clean; ESLint baseline unchanged at 170 errors/23 warnings; plugin contract clean; plugin tests 7/7; plugin Release build clean; Playwright 27/27; production Webpack clean apart from the two known size warnings.
 - Generated Vitest and plugin `bin/obj` changes were restored. Intended untracked files are the new progressive-index tests/module, auth-startup test, observability buffer/tests, dashboard runtime diagnostic/tests, and plugin override contract test.
+
+## 2026-07-15 Release Candidate Handoff
+
+- Old installed/source plugin: `10.11.8.1`; corrected release plugin: `10.11.8.2`.
+- Copy all files from `src/ptv/plugin/bin` into the Jellyfin PiggieTV plugin directory: `Jellyfin.Plugin.PiggieTV.dll`, `Jellyfin.Plugin.PiggieTV.deps.json`, `Jellyfin.Plugin.PiggieTV.pdb`, `Jellyfin.Plugin.PiggieTV.xml`, and `meta.json`.
+- Restart Jellyfin, then confirm `/Ptv/v1/status` reports plugin/version `10.11.8.2`, API `1`, cache `7`, and `readingSeriesOverrides=true`. Only then deploy the matching frontend bundle.
+- Expected old-plugin behavior: connected, API/cache usable, Reading server persistence marked upgrade-required, browser fallback labeled local cache. Expected new-plugin behavior: compatible and server persistence available.
+- Automated release result: focused compatibility 12/12, full Vitest 351/351, plugin 9/9, TypeScript/scoped ESLint/contract/secret scan clean, Release build/publish clean, and production Webpack successful with only established size warnings.
+- After deployment, manually test an override save/reload, the old-plugin upgrade warning if rollback is exercised, dashboard version/capability labels, login/auth transitions, active playback, and normal service-worker update adoption. No routine cache purge is required.

@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PtvPluginVersion>10.11.8.1</PtvPluginVersion>
+    <PtvPluginVersion>10.11.8.2</PtvPluginVersion>
     <PtvJellyfinPackageVersion>10.11.8</PtvJellyfinPackageVersion>
     <Version>$(PtvPluginVersion)</Version>
     <AssemblyVersion>$(PtvPluginVersion)</AssemblyVersion>

@@ -123,9 +123,9 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                     signup = PtvStatusSignup.Create(),
                     name = "PiggieTV",
                     pluginName = "PiggieTV",
-                    pluginVersion = Plugin.Instance?.Version?.ToString() ?? "1.0.0.0",
+                    pluginVersion = PtvStatusResponse.CurrentPluginVersion,
                     settingsAvailable = true,
-                    version = Plugin.Instance?.Version?.ToString() ?? "1.0.0.0"
+                    version = PtvStatusResponse.CurrentPluginVersion
                 };
 
                 _logger.LogInformation("PiggieTV status safe-mode response built. Returning minimal JSON.");

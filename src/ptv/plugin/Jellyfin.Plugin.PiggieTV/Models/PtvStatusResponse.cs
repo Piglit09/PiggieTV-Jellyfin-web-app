@@ -8,6 +8,13 @@ namespace Jellyfin.Plugin.PiggieTV.Models;
 public sealed class PtvStatusResponse
 {
     /// <summary>
+    /// Gets the plugin release version from the loaded plugin or assembly metadata.
+    /// </summary>
+    public static string CurrentPluginVersion => Plugin.Instance?.Version?.ToString()
+        ?? typeof(Plugin).Assembly.GetName().Version?.ToString()
+        ?? "0.0.0.0";
+
+    /// <summary>
     /// Gets or sets a value indicating whether the plugin API is available.
     /// </summary>
     [JsonPropertyName("ok")]
@@ -41,13 +48,13 @@ public sealed class PtvStatusResponse
     /// Gets or sets the plugin version.
     /// </summary>
     [JsonPropertyName("version")]
-    public string Version { get; set; } = Plugin.Instance?.Version?.ToString() ?? "0.0.0.0";
+    public string Version { get; set; } = CurrentPluginVersion;
 
     /// <summary>
     /// Gets or sets the plugin version.
     /// </summary>
     [JsonPropertyName("pluginVersion")]
-    public string PluginVersion { get; set; } = Plugin.Instance?.Version?.ToString() ?? "0.0.0.0";
+    public string PluginVersion { get; set; } = CurrentPluginVersion;
 
     /// <summary>
     /// Gets or sets the public PiggieTV plugin API version.
@@ -297,7 +304,7 @@ public sealed class PtvStatusResponse
         PtvTmdbMetadataStatus? tmdbMetadata = null)
     {
         var now = DateTimeOffset.UtcNow;
-        var pluginVersion = Plugin.Instance?.Version?.ToString() ?? "0.0.0.0";
+        var pluginVersion = CurrentPluginVersion;
         refreshStatus ??= new PtvFeaturedContentRefreshStatus();
 
         return new PtvStatusResponse

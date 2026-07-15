@@ -23,7 +23,7 @@ public sealed class PtvMusicMetadataLookupService : IPtvMusicMetadataLookupServi
     private const int MaxCacheEntries = 240;
     private const string MusicBrainzProvider = "musicbrainz";
     private const string DiscogsProvider = "discogs";
-    private const string UserAgent = "PiggieTV/10.11.8.1 (Jellyfin.Plugin.PiggieTV)";
+    private static readonly string UserAgent = $"PiggieTV/{typeof(PtvMusicMetadataLookupService).Assembly.GetName().Version} (Jellyfin.Plugin.PiggieTV)";
     private static readonly HttpClient Client = new()
     {
         Timeout = TimeSpan.FromSeconds(8)

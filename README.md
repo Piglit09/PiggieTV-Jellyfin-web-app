@@ -310,6 +310,8 @@ Install manually by copying the published plugin output into a Jellyfin plugin f
 
 Then restart Jellyfin.
 
+The current companion release is `10.11.8.2`. Deploy the complete matching output from `src/ptv/plugin/bin`: `Jellyfin.Plugin.PiggieTV.dll`, `Jellyfin.Plugin.PiggieTV.deps.json`, `Jellyfin.Plugin.PiggieTV.pdb`, `Jellyfin.Plugin.PiggieTV.xml`, and `meta.json`. The DLL and manifest are required; never mix files from different plugin builds. Plugin API v1, featured cache v7, and the Jellyfin package target `10.11.8` remain unchanged.
+
 ## Documentation
 
 PiggieTV architecture docs live in `src/ptv/docs`:

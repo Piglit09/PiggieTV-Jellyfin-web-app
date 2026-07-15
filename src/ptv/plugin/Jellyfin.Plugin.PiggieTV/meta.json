@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "Restores Jellyfin 10.11.8 production compatibility and resets the local plugin manifest to an active supported state.",
+  "changelog": "Advertises and verifies durable Reading series overrides while preserving PiggieTV API v1 and featured cache v7 compatibility.",
   "description": "Server-side cache and integration endpoints for the PiggieTV web client.",
   "guid": "27c90ee7-7d56-4591-98f8-b0ebcda8c5fd",
   "name": "PiggieTV",
   "overview": "PiggieTV server companion plugin",
   "owner": "PiggieTV",
   "targetAbi": "10.11.8.0",
-  "timestamp": "2026-06-05T00:00:00Z",
-  "version": "10.11.8.1",
+  "timestamp": "2026-07-15T00:00:00Z",
+  "version": "10.11.8.2",
   "status": 0,
   "autoUpdate": false,
   "assemblies": [

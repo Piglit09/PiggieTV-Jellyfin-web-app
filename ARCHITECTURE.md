@@ -18,7 +18,7 @@ Browser / TV client
 
 Jellyfin server
   -> Jellyfin libraries, users, playback, and metadata providers
-  -> Jellyfin.Plugin.PiggieTV (net9.0, plugin version 10.11.8.1)
+  -> Jellyfin.Plugin.PiggieTV (net9.0, plugin version 10.11.8.2)
        -> featured cache v7
        -> settings and Row Builder persistence
        -> integrations and signup services
@@ -279,3 +279,12 @@ The hardening pass does not change plugin routes, cache schema v7, recommendatio
 | 2026-07-14 | Restored Jellyfin's hidden login-time header/drawer compatibility anchors without remounting visible authenticated controls, eliminating the `libraryMenu` null and circular-initialization runtime cascade. |
 | 2026-07-14 | Replaced Reading's 200-item terminal cap with a cancellable 50-item progressive index: the first 200 items render promptly, later pages accumulate monotonically to the server total, only complete schema-v4 library indexes persist, and card grids remain incrementally mounted. Route lifecycle events now synchronize exact Movies, Shows, Reading, Dashboard, and authentication ownership before render/unmount telemetry. |
 | 2026-07-14 | Added authentication-gated/deduplicated plugin startup reads, canonical singleton runtime diagnostics, advertised and contract-tested Reading series-override routes, explicit development provenance fallbacks, and priority-aware image telemetry aggregation. |
+| 2026-07-15 | Established plugin `10.11.8.2` as the first release advertising durable Reading series overrides, with assembly-derived runtime identity, manifest/contract verification, and capability-aware frontend compatibility. |
+
+### Plugin Release Compatibility Boundary
+
+Plugin `10.11.8.2` is the first release in this line that advertises durable `readingSeriesOverrides`. `PtvPluginVersion` in the plugin project is authoritative; assembly/file metadata and runtime status derive from the built assembly, while source and published `meta.json` files are contract-checked against it. Plugin API v1, featured cache schema v7, Jellyfin package target `10.11.8`, and manifest target ABI `10.11.8.0` are independent compatibility axes and must not be patch-bumped with the plugin.
+
+The frontend evaluates transport compatibility and feature capability separately. Plugin `10.11.8.1` without `readingSeriesOverrides` remains connected but cannot claim server-persisted Reading corrections; reads may use browser cache and writes request a plugin upgrade. Plugin `10.11.8.2` with the advertised feature is compatible. The dashboard shows this distinction without creating a second runtime or treating cache fallback as server persistence.
+
+The release payload is the five-file `src/ptv/plugin/bin` publish output. Replacing the DLL/manifest requires a Jellyfin restart before deploying the matching frontend behavior.

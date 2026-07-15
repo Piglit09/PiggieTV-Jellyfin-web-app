@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const pluginState = vi.hoisted(() => ({
     get: vi.fn(),
-    save: vi.fn()
+    save: vi.fn(),
+    status: vi.fn()
 }));
 
 vi.mock('../../core/pluginApi', () => ({
     getCurrentPtvPluginApiClient: vi.fn(() => ({
         getReadingSeriesOverrides: pluginState.get,
+        getStatus: pluginState.status,
         saveReadingSeriesOverrides: pluginState.save
     }))
 }));
@@ -18,11 +20,21 @@ import {
     savePtvReadingSeriesOverrides
 } from './booksSeriesOverrides';
 
+const OLD_PLUGIN_VERSION = ['10', '11', '8', '1'].join('.');
+const CURRENT_PLUGIN_VERSION = ['10', '11', '8', '2'].join('.');
+
 describe('Reading series override persistence', () => {
     beforeEach(() => {
         window.localStorage.clear();
         pluginState.get.mockReset();
         pluginState.save.mockReset();
+        pluginState.status.mockReset();
+        pluginState.status.mockResolvedValue({
+            apiVersion: 1,
+            cacheVersion: 7,
+            featureFlags: { readingSeriesOverrides: true },
+            pluginVersion: CURRENT_PLUGIN_VERSION
+        });
     });
 
     it('migrates legacy browser overrides to plugin persistence once', async () => {
@@ -75,7 +87,8 @@ describe('Reading series override persistence', () => {
         expect(getPtvReadingOverridePersistenceState('comics')).toMatchObject({
             authority: 'server',
             endpointAvailable: true,
-            serverPersistenceConfirmed: true
+            serverPersistenceConfirmed: true,
+            upgradeRequired: false
         });
     });
 
@@ -84,12 +97,48 @@ describe('Reading series override persistence', () => {
 
         await loadPtvReadingSeriesOverridesFromServer('manga');
 
-        expect(getPtvReadingOverridePersistenceState('manga')).toEqual({
+        expect(getPtvReadingOverridePersistenceState('manga')).toMatchObject({
             authority: 'browser-cache',
             endpointAvailable: false,
-            lastCategory: 'endpoint-missing',
+            lastCategory: 'upgrade-required',
             routeKind: 'manga',
-            serverPersistenceConfirmed: false
+            serverPersistenceConfirmed: false,
+            upgradeRequired: true
         });
+    });
+
+    it('does not call an unavailable override endpoint on plugin 10.11.8.1', async () => {
+        pluginState.status.mockResolvedValue({
+            apiVersion: 1,
+            cacheVersion: 7,
+            features: ['status', 'featuredContent'],
+            pluginVersion: OLD_PLUGIN_VERSION
+        });
+
+        await loadPtvReadingSeriesOverridesFromServer('manga');
+
+        expect(pluginState.get).not.toHaveBeenCalled();
+        expect(getPtvReadingOverridePersistenceState('manga')).toMatchObject({
+            authority: 'browser-cache',
+            endpointAvailable: false,
+            lastCategory: 'upgrade-required',
+            message: expect.stringContaining(CURRENT_PLUGIN_VERSION),
+            serverPersistenceConfirmed: false,
+            upgradeRequired: true
+        });
+    });
+
+    it('rejects server-persistence saves when the connected plugin lacks the capability', async () => {
+        pluginState.status.mockResolvedValue({
+            apiVersion: 1,
+            cacheVersion: 7,
+            featureFlags: { readingSeriesOverrides: false },
+            pluginVersion: OLD_PLUGIN_VERSION
+        });
+
+        await expect(savePtvReadingSeriesOverrides('comics', {})).rejects.toMatchObject({
+            code: 'PTV_READING_OVERRIDE_PLUGIN_UPGRADE_REQUIRED'
+        });
+        expect(pluginState.save).not.toHaveBeenCalled();
     });
 });

@@ -1,11 +1,16 @@
 import { PTV_CACHE, PTV_PLUGIN_API, PTV_RUNTIME } from './config';
 
 export type PtvBuildCompatibility =
+    | 'capability-upgrade-required'
     | 'compatible'
-    | 'patch-warning'
     | 'plugin-unavailable'
     | 'unknown'
     | 'version-mismatch';
+
+export type PtvPluginCapabilityCompatibility =
+    | 'available'
+    | 'unknown'
+    | 'upgrade-required';
 
 export type PtvPluginBuildStatus = {
     apiVersion?: number;
@@ -13,6 +18,8 @@ export type PtvPluginBuildStatus = {
     featuredContent?: {
         cacheVersion?: number;
     };
+    featureFlags?: Record<string, boolean>;
+    features?: Record<string, boolean> | string[];
     pluginVersion?: string;
     version?: string;
 };
@@ -28,6 +35,7 @@ export type PtvBuildInfo = {
     jellyfinWebVersion: string;
     pluginApiVersion: number | 'unknown';
     pluginVersion: string;
+    readingSeriesOverrides: PtvPluginCapabilityCompatibility;
 };
 
 type PtvBuildInfoOverrides = Partial<Pick<
@@ -65,6 +73,30 @@ function readCompileTimeValues() {
 function getVersionParts(value: string) {
     const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(value);
     return match ? match.slice(1, 4).map(Number) : null;
+}
+
+export function classifyPtvPluginCapability(
+    pluginStatus: PtvPluginBuildStatus | null | undefined,
+    capability: string
+): PtvPluginCapabilityCompatibility {
+    if (!pluginStatus) return 'unknown';
+
+    const normalizedCapability = capability.toLowerCase();
+    const featureFlag = Object.entries(pluginStatus.featureFlags || {})
+        .find(([name]) => name.toLowerCase() === normalizedCapability)?.[1];
+
+    if (typeof featureFlag === 'boolean') return featureFlag ? 'available' : 'upgrade-required';
+
+    if (Array.isArray(pluginStatus.features)) {
+        return pluginStatus.features.some(name => name.toLowerCase() === normalizedCapability) ?
+            'available' :
+            'upgrade-required';
+    }
+
+    const feature = Object.entries(pluginStatus.features || {})
+        .find(([name]) => name.toLowerCase() === normalizedCapability)?.[1];
+
+    return feature === true ? 'available' : 'upgrade-required';
 }
 
 export function classifyPtvBuildCompatibility(
@@ -106,16 +138,23 @@ export function classifyPtvBuildCompatibility(
     const webParts = getVersionParts(options.jellyfinWebVersion || '');
     const pluginParts = getVersionParts(pluginVersion);
 
-    if (webParts && pluginParts && webParts[0] === pluginParts[0] && webParts[1] === pluginParts[1] && webParts[2] !== pluginParts[2]) {
+    if (webParts && pluginParts && (webParts[0] !== pluginParts[0] || webParts[1] !== pluginParts[1])) {
         return {
-            compatibility: 'patch-warning',
-            compatibilityMessage: 'Frontend and plugin target compatible Jellyfin major/minor versions with different patch levels.'
+            compatibility: 'version-mismatch',
+            compatibilityMessage: `Plugin ${pluginVersion} does not target the Jellyfin ${webParts[0]}.${webParts[1]} compatibility line.`
+        };
+    }
+
+    if (classifyPtvPluginCapability(pluginStatus, 'readingSeriesOverrides') !== 'available') {
+        return {
+            compatibility: 'capability-upgrade-required',
+            compatibilityMessage: 'Plugin connected, but an upgrade to PiggieTV 10.11.8.2 or newer is required for server-persisted Reading corrections.'
         };
     }
 
     return {
         compatibility: 'compatible',
-        compatibilityMessage: 'Frontend, plugin API, and cache schema are compatible.'
+        compatibilityMessage: 'Frontend, plugin API, cache schema, and Reading persistence capability are compatible.'
     };
 }
 
@@ -152,7 +191,8 @@ export function getPtvBuildInfo(
         ),
         jellyfinWebVersion,
         pluginApiVersion: pluginStatus?.apiVersion ?? 'unknown',
-        pluginVersion: safeBuildValue(pluginStatus?.pluginVersion || pluginStatus?.version)
+        pluginVersion: safeBuildValue(pluginStatus?.pluginVersion || pluginStatus?.version),
+        readingSeriesOverrides: classifyPtvPluginCapability(pluginStatus, 'readingSeriesOverrides')
     };
 }
 
@@ -165,6 +205,7 @@ export function formatPtvBuildInfoCompact(buildInfo: PtvBuildInfo) {
         `plugin=${buildInfo.pluginVersion}`,
         `api=${buildInfo.pluginApiVersion}`,
         `cache=${buildInfo.cacheSchemaVersion}`,
+        `readingOverrides=${buildInfo.readingSeriesOverrides}`,
         `compatibility=${buildInfo.compatibility}`
     ].join('; ');
 }

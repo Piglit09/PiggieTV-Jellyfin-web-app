@@ -74,6 +74,16 @@
             Versioned item image diagnostics route.
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1MusicMetadataSearch">
+            <summary>
+            Versioned music metadata lookup route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1GoogleBooksMetadataSearch">
+            <summary>
+            Versioned Google Books metadata lookup route.
+            </summary>
+        </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.LegacyStatus">
             <summary>
             Legacy unversioned status route.
@@ -246,11 +256,42 @@
             </summary>
             <returns>Public plugin settings.</returns>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SaveSettings(Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto,System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SearchMusicMetadata(Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest,System.Threading.CancellationToken)">
+            <summary>
+            Searches MusicBrainz and Discogs for administrator song metadata repair.
+            </summary>
+            <param name="request">Lookup request from query string.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Music metadata candidates.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SearchGoogleBooksMetadata(Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest,System.Threading.CancellationToken)">
+            <summary>
+            Searches Google Books for administrator reading metadata repair.
+            </summary>
+            <param name="request">Lookup request from query string.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Google Books metadata candidates.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.GetReadingSeriesOverrides(System.String)">
+            <summary>
+            Gets administrator Reading series overrides persisted in the plugin configuration.
+            </summary>
+            <param name="routeKind">Reading route kind.</param>
+            <returns>Persisted override document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SaveReadingSeriesOverrides(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesUpdate)">
+            <summary>
+            Replaces administrator Reading series overrides for one route kind.
+            </summary>
+            <param name="routeKind">Reading route kind.</param>
+            <param name="update">Incoming override document.</param>
+            <returns>Saved override document.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvStatusController.SaveSettings(System.Nullable{System.Text.Json.JsonElement},System.Threading.CancellationToken)">
             <summary>
             Saves PiggieTV plugin settings from the dashboard.
             </summary>
-            <param name="settings">Incoming plugin settings patch.</param>
+            <param name="settingsPayload">Incoming plugin settings patch JSON.</param>
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Saved public plugin settings.</returns>
         </member>
@@ -438,6 +479,11 @@
             Gets or sets versioned row-builder settings.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.Recommendations">
+            <summary>
+            Gets or sets persisted generated recommendation rows.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.CacheSettings">
             <summary>
             Gets or sets featured cache settings.
@@ -451,6 +497,21 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.TmdbSettings">
             <summary>
             Gets or sets metadata provider settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.MusicMetadataSettings">
+            <summary>
+            Gets or sets music metadata provider settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.GoogleBooksSettings">
+            <summary>
+            Gets or sets reading metadata provider settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.ReadingSeriesOverrides">
+            <summary>
+            Gets or sets administrator Reading series corrections shared by every client.
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.SeerrSettings">
@@ -508,6 +569,46 @@
             Jellyfin plugin configuration type.
             </summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings">
+            <summary>
+            Server-persisted Reading series corrections grouped by Reading route kind.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.SchemaVersion">
+            <summary>Gets or sets the persistence schema version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.Routes">
+            <summary>Gets or sets overrides indexed by route kind and Jellyfin item id.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition">
+            <summary>
+            One administrator-defined Reading series correction.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition.CoverItemId">
+            <summary>Gets or sets the preferred cover item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition.Excluded">
+            <summary>Gets or sets a value indicating whether the item is excluded from inferred grouping.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition.IssueNumber">
+            <summary>Gets or sets the corrected issue number.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition.MediaKind">
+            <summary>Gets or sets an explicit media classification.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition.SeriesKey">
+            <summary>Gets or sets a stable administrator series key.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition.SeriesTitle">
+            <summary>Gets or sets the corrected series title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition.SeriesYear">
+            <summary>Gets or sets the display year; it is not part of series identity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition.VolumeNumber">
+            <summary>Gets or sets the corrected volume number.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings">
             <summary>
             PiggieTV feature toggles.
@@ -524,6 +625,9 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings.TvLowPowerModeEnabled">
             <summary>Gets or sets a value indicating whether TV low-power mode is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings.PlaybackMode">
+            <summary>Gets or sets the PiggieTV playback profile mode.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.FeatureSettings.DebugModeEnabled">
             <summary>Gets or sets a value indicating whether backend debug mode is enabled.</summary>
@@ -571,6 +675,246 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowSettings.EnableRecommendedRows">
             <summary>Gets or sets a value indicating whether recommended rows are enabled.</summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings">
+            <summary>
+            Persisted generated recommendation row settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.SchemaVersion">
+            <summary>Gets or sets the recommendation settings schema version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.Enabled">
+            <summary>Gets or sets a value indicating whether persisted recommendation rows are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.GeneratedAt">
+            <summary>Gets or sets the last generation timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.RowConfigHash">
+            <summary>Gets or sets the row-builder hash used when rows were generated.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.RecommendationConfigHash">
+            <summary>Gets or sets the persisted recommendation config hash.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.SourceCounts">
+            <summary>Gets or sets source item counts from the last generation.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.RowDiagnostics">
+            <summary>Gets or sets row diagnostics indexed by recommendation row id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.SourceTimingsJson">
+            <summary>Gets or sets legacy source timing diagnostics. Normalization clears this before storage.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.Rows">
+            <summary>Gets or sets persisted generated rows.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings.CreateDefault">
+            <summary>
+            Creates default recommendation row settings.
+            </summary>
+            <returns>Default recommendation settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition">
+            <summary>
+            Persisted generated recommendation row.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.Id">
+            <summary>Gets or sets the stable recommendation row id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.Enabled">
+            <summary>Gets or sets a value indicating whether this recommendation row is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.Accepted">
+            <summary>Gets or sets a value indicating whether this generated row has been explicitly accepted for Home.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.Draft">
+            <summary>Gets or sets a value indicating whether this generated row is still a draft.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.Title">
+            <summary>Gets or sets the row title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.Explanation">
+            <summary>Gets or sets a short explanation for the generated row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.MediaType">
+            <summary>Gets or sets the recommendation row media type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.GeneratedAt">
+            <summary>Gets or sets the row generation timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.RowConfigHash">
+            <summary>Gets or sets the row-builder hash used when this row was generated.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.RecommendationConfigHash">
+            <summary>Gets or sets the persisted recommendation config hash.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.SourceCounts">
+            <summary>Gets or sets source item counts from generation.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.Diagnostics">
+            <summary>Gets or sets row generation and hydration diagnostics.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.SourceTimingsJson">
+            <summary>Gets or sets legacy source timing diagnostics. Normalization clears this before storage.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDefinition.Items">
+            <summary>Gets or sets Jellyfin items backing this row.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics">
+            <summary>
+            Persisted recommendation row diagnostics.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.RowId">
+            <summary>Gets or sets the recommendation row id this diagnostic describes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.Title">
+            <summary>Gets or sets the recommendation row title this diagnostic describes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.CandidateCount">
+            <summary>Gets or sets candidate count before row selection.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.DedupeRemovals">
+            <summary>Gets or sets item removals caused by row-level dedupe/diversity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.HydrationRemovals">
+            <summary>Gets or sets item removals caused by hydration/persistence.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.FinalRenderedCount">
+            <summary>Gets or sets final rendered item count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.ItemCount">
+            <summary>Gets or sets current persisted item count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.PrimaryCandidateCount">
+            <summary>Gets or sets primary candidate count before fallback fill.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.SecondaryFallbackCount">
+            <summary>Gets or sets secondary fallback item count used during fill.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowDiagnostics.DiscoveryFallbackCount">
+            <summary>Gets or sets discovery fallback item count used during fill.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationSourceCount">
+            <summary>
+            Persisted recommendation source count.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationSourceCount.Source">
+            <summary>Gets or sets the source name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationSourceCount.Count">
+            <summary>Gets or sets the source item count.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemImageTags">
+            <summary>
+            Persisted item image tags for generated recommendation rows.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemImageTags.Primary">
+            <summary>Gets or sets the primary image tag.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemImageTags.Thumb">
+            <summary>Gets or sets the thumb image tag.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemImageTags.Logo">
+            <summary>Gets or sets the logo image tag.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot">
+            <summary>
+            Persisted Jellyfin item snapshot for generated recommendation rows.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.Id">
+            <summary>Gets or sets the Jellyfin item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.Name">
+            <summary>Gets or sets the item name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.Type">
+            <summary>Gets or sets the Jellyfin item type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.MediaType">
+            <summary>Gets or sets the media type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.Overview">
+            <summary>Gets or sets the overview.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.ImageTags">
+            <summary>Gets or sets image tags.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.BackdropImageTags">
+            <summary>Gets or sets backdrop image tags.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.ParentBackdropImageTags">
+            <summary>Gets or sets parent backdrop image tags.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.Genres">
+            <summary>Gets or sets genres.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.Studios">
+            <summary>Gets or sets studios.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.Artists">
+            <summary>Gets or sets artists.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.AlbumArtist">
+            <summary>Gets or sets album artist.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.Album">
+            <summary>Gets or sets album name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.AlbumId">
+            <summary>Gets or sets album id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.AlbumPrimaryImageItemId">
+            <summary>Gets or sets album primary image item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.AlbumPrimaryImageTag">
+            <summary>Gets or sets album primary image tag.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.ParentPrimaryImageItemId">
+            <summary>Gets or sets parent primary image item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.ParentPrimaryImageTag">
+            <summary>Gets or sets parent primary image tag.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.ParentThumbItemId">
+            <summary>Gets or sets parent thumb item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.ParentThumbImageTag">
+            <summary>Gets or sets parent thumb image tag.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.ParentId">
+            <summary>Gets or sets parent id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.SeriesId">
+            <summary>Gets or sets series id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.SeriesName">
+            <summary>Gets or sets series name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.SeriesPrimaryImageTag">
+            <summary>Gets or sets series primary image tag.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.ProductionYear">
+            <summary>Gets or sets production year.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.CommunityRating">
+            <summary>Gets or sets community rating.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.PrimaryImageAspectRatio">
+            <summary>Gets or sets primary image aspect ratio.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.RunTimeTicks">
+            <summary>Gets or sets runtime ticks.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.DateCreated">
+            <summary>Gets or sets date created.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RecommendationItemSnapshot.PremiereDate">
+            <summary>Gets or sets premiere date.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings">
             <summary>
             PiggieTV versioned row-builder settings.
@@ -584,6 +928,9 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.DefaultsInitialized">
             <summary>Gets or sets a value indicating whether default rule initialization has run.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.ShowConfiguredRowsOnHome">
+            <summary>Gets or sets a value indicating whether configured Row Builder rows should render on Home.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings.Rules">
             <summary>Gets or sets configured row rules.</summary>
@@ -752,6 +1099,37 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.TmdbSettings.UseTmdbForRowAccuracy">
             <summary>Gets or sets a value indicating whether TMDb should influence row matching.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.MusicMetadataSettings">
+            <summary>
+            PiggieTV music metadata lookup settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.MusicMetadataSettings.MusicBrainzEnabled">
+            <summary>Gets or sets a value indicating whether MusicBrainz lookups are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.MusicMetadataSettings.DiscogsEnabled">
+            <summary>Gets or sets a value indicating whether Discogs lookups are enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.MusicMetadataSettings.DiscogsToken">
+            <summary>Gets or sets the Discogs personal access token. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.MusicMetadataSettings.MaxResults">
+            <summary>Gets or sets the maximum number of candidates returned per lookup.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.GoogleBooksSettings">
+            <summary>
+            PiggieTV Google Books metadata lookup settings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.GoogleBooksSettings.GoogleBooksEnabled">
+            <summary>Gets or sets a value indicating whether native Google Books lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.GoogleBooksSettings.GoogleBooksApiKey">
+            <summary>Gets or sets the Google Books API key. This is write-only in public DTOs.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.GoogleBooksSettings.MaxResults">
+            <summary>Gets or sets the maximum number of candidates returned per lookup.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SeerrSettings">
             <summary>
@@ -1473,6 +1851,171 @@
             Gets or sets the currently readable cache document.
             </summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest">
+            <summary>
+            Request for server-side Google Books metadata lookup.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.ItemId">
+            <summary>Gets or sets the Jellyfin item id to hydrate lookup terms from.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Title">
+            <summary>Gets or sets the book/comic title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Author">
+            <summary>Gets or sets the author/creator name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Isbn">
+            <summary>Gets or sets the ISBN search term.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.GoogleBooksId">
+            <summary>Gets or sets an existing Google Books volume id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Year">
+            <summary>Gets or sets the publication year.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest.Limit">
+            <summary>Gets or sets the maximum candidate count.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse">
+            <summary>
+            Google Books lookup response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.Ok">
+            <summary>Gets or sets a value indicating whether lookup completed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.GeneratedAtUtc">
+            <summary>Gets or sets the generated-at timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.Provider">
+            <summary>Gets or sets provider status.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.Candidates">
+            <summary>Gets or sets metadata candidates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.JellyfinCandidates">
+            <summary>Gets or sets metadata candidates using Jellyfin remote-search casing.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupResponse.Diagnostics">
+            <summary>Gets or sets lookup diagnostics for administrators.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus">
+            <summary>
+            Google Books provider status for one lookup.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Provider">
+            <summary>Gets or sets provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Enabled">
+            <summary>Gets or sets a value indicating whether the provider is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Configured">
+            <summary>Gets or sets a value indicating whether an API key is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Cached">
+            <summary>Gets or sets a value indicating whether the response came from cache.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.CandidateCount">
+            <summary>Gets or sets result count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.StatusCode">
+            <summary>Gets or sets provider HTTP status code.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.DurationMs">
+            <summary>Gets or sets provider request duration.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataProviderStatus.Error">
+            <summary>Gets or sets provider error.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate">
+            <summary>
+            A normalized Google Books metadata candidate that can also be used by Jellyfin remote-search apply UI.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.SearchProviderName">
+            <summary>Gets or sets provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Provider">
+            <summary>Gets or sets provider name using compact PiggieTV casing.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.PtvNativeProvider">
+            <summary>Gets or sets a value indicating this result was produced by PiggieTV's native provider.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Confidence">
+            <summary>Gets or sets provider confidence score.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.MatchReason">
+            <summary>Gets or sets match reason.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Name">
+            <summary>Gets or sets volume title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.OriginalTitle">
+            <summary>Gets or sets original title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Overview">
+            <summary>Gets or sets overview.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.ProductionYear">
+            <summary>Gets or sets publication year.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.PremiereDate">
+            <summary>Gets or sets premiere/published date.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.ImageUrl">
+            <summary>Gets or sets cover image URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Url">
+            <summary>Gets or sets canonical provider URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.ProviderIds">
+            <summary>Gets or sets provider ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Genres">
+            <summary>Gets or sets genres/categories.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Tags">
+            <summary>Gets or sets tags.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.People">
+            <summary>Gets or sets people/creators.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Studios">
+            <summary>Gets or sets publisher as Jellyfin studio-like metadata.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Publisher">
+            <summary>Gets or sets publisher.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Authors">
+            <summary>Gets or sets authors.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.PageCount">
+            <summary>Gets or sets page count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataCandidate.Language">
+            <summary>Gets or sets language.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksPerson">
+            <summary>
+            Jellyfin person metadata for Google Books creators.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksPerson.Name">
+            <summary>Gets or sets person name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksPerson.Type">
+            <summary>Gets or sets person type.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksNamedValue">
+            <summary>
+            Jellyfin name wrapper used by some metadata fields.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksNamedValue.Name">
+            <summary>Gets or sets name.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvItemImageDiagnosticResponse">
             <summary>
             Diagnostic information for a Jellyfin item's stored image metadata and image endpoints.
@@ -1593,6 +2136,140 @@
             Gets a value indicating whether a tagged endpoint failed but the untagged endpoint worked.
             </summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest">
+            <summary>
+            Request for server-side music metadata lookup.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest.ItemId">
+            <summary>Gets or sets the Jellyfin item id to hydrate lookup terms from.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest.Title">
+            <summary>Gets or sets the track title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest.Artist">
+            <summary>Gets or sets the artist name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest.Album">
+            <summary>Gets or sets the album or release title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest.Year">
+            <summary>Gets or sets the release year.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest.Limit">
+            <summary>Gets or sets the maximum candidate count per provider.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse">
+            <summary>
+            Server-side music metadata lookup response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.Ok">
+            <summary>Gets or sets a value indicating whether the lookup completed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.ItemId">
+            <summary>Gets or sets the Jellyfin item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.ItemName">
+            <summary>Gets or sets the Jellyfin item name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.Title">
+            <summary>Gets or sets the track title used for lookup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.Artist">
+            <summary>Gets or sets the artist used for lookup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.Album">
+            <summary>Gets or sets the album used for lookup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.Year">
+            <summary>Gets or sets the release year used for lookup.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.GeneratedAtUtc">
+            <summary>Gets or sets the generated-at timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.Providers">
+            <summary>Gets or sets provider statuses.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.Candidates">
+            <summary>Gets or sets metadata candidates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupResponse.Diagnostics">
+            <summary>Gets or sets lookup diagnostics for administrators.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus">
+            <summary>
+            Music metadata provider status for one lookup.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus.Provider">
+            <summary>Gets or sets provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus.Enabled">
+            <summary>Gets or sets a value indicating whether the provider is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus.Configured">
+            <summary>Gets or sets a value indicating whether the provider has required credentials.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus.Cached">
+            <summary>Gets or sets a value indicating whether the response came from the plugin cache.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus.CandidateCount">
+            <summary>Gets or sets result count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus.StatusCode">
+            <summary>Gets or sets provider HTTP status code.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus.DurationMs">
+            <summary>Gets or sets provider request duration.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataProviderStatus.Error">
+            <summary>Gets or sets provider error.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate">
+            <summary>
+            Candidate metadata from an external music provider.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Provider">
+            <summary>Gets or sets provider name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Confidence">
+            <summary>Gets or sets provider confidence or score.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Title">
+            <summary>Gets or sets track title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Artist">
+            <summary>Gets or sets artist name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Album">
+            <summary>Gets or sets album or release title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Year">
+            <summary>Gets or sets release year.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.ProviderIds">
+            <summary>Gets or sets provider ids that can be copied into Jellyfin metadata.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Genres">
+            <summary>Gets or sets genres.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Styles">
+            <summary>Gets or sets Discogs styles.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Tags">
+            <summary>Gets or sets tags.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Labels">
+            <summary>Gets or sets labels.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Url">
+            <summary>Gets or sets provider URL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataCandidate.Summary">
+            <summary>Gets or sets compact candidate summary.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto">
             <summary>
             Public PiggieTV plugin settings DTO. Secrets are write-only.
@@ -1610,6 +2287,9 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.Rows">
             <summary>Gets or sets versioned row-builder settings.</summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.Recommendations">
+            <summary>Gets or sets persisted generated recommendation rows.</summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.CacheSettings">
             <summary>Gets or sets featured cache settings.</summary>
         </member>
@@ -1621,6 +2301,12 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.TmdbSettings">
             <summary>Gets or sets TMDb settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.MusicMetadataSettings">
+            <summary>Gets or sets music metadata lookup settings.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.GoogleBooksSettings">
+            <summary>Gets or sets Google Books reading metadata lookup settings.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.SeerrSettings">
             <summary>Gets or sets Jellyseerr settings.</summary>
@@ -1661,6 +2347,9 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.Rows">
             <summary>Gets or sets row-builder setting updates.</summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.Recommendations">
+            <summary>Gets or sets persisted recommendation row updates.</summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.CacheSettings">
             <summary>Gets or sets featured cache setting updates.</summary>
         </member>
@@ -1672,6 +2361,12 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.TmdbSettings">
             <summary>Gets or sets TMDb setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.MusicMetadataSettings">
+            <summary>Gets or sets music metadata lookup setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.GoogleBooksSettings">
+            <summary>Gets or sets Google Books reading metadata lookup setting updates.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.SeerrSettings">
             <summary>Gets or sets Jellyseerr setting updates.</summary>
@@ -1704,6 +2399,9 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch.TvLowPowerModeEnabled">
             <summary>Gets or sets whether TV low-power mode is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch.PlaybackMode">
+            <summary>Gets or sets the PiggieTV playback profile mode.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvFeatureSettingsPatch.DebugModeEnabled">
             <summary>Gets or sets whether debug mode is enabled.</summary>
@@ -1801,6 +2499,40 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbSettingsPatch.UseTmdbForRowAccuracy">
             <summary>Gets or sets whether TMDb influences row accuracy.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataSettingsPatch">
+            <summary>
+            Partial music metadata lookup settings patch. Discogs token is write-only.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataSettingsPatch.MusicBrainzEnabled">
+            <summary>Gets or sets whether MusicBrainz lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataSettingsPatch.DiscogsEnabled">
+            <summary>Gets or sets whether Discogs lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataSettingsPatch.DiscogsToken">
+            <summary>Gets or sets a write-only Discogs token replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataSettingsPatch.MaxResults">
+            <summary>Gets or sets the maximum candidate count per lookup.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch">
+            <summary>
+            Partial Google Books metadata lookup settings patch. API key is write-only.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch.GoogleBooksEnabled">
+            <summary>Gets or sets whether native Google Books lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch.ClearGoogleBooksApiKey">
+            <summary>Gets or sets whether the saved Google Books API key should be cleared.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch.GoogleBooksApiKey">
+            <summary>Gets or sets a write-only Google Books API key replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksSettingsPatch.MaxResults">
+            <summary>Gets or sets the maximum candidate count per lookup.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvSeerrSettingsPatch">
             <summary>
@@ -1979,6 +2711,57 @@
             <param name="configuration">Plugin configuration.</param>
             <returns>Public TMDb settings DTO.</returns>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicMusicMetadataSettings">
+            <summary>
+            Public music metadata lookup settings DTO that never returns the stored Discogs token.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicMusicMetadataSettings.MusicBrainzEnabled">
+            <summary>Gets or sets a value indicating whether MusicBrainz lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicMusicMetadataSettings.DiscogsEnabled">
+            <summary>Gets or sets a value indicating whether Discogs lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicMusicMetadataSettings.DiscogsTokenConfigured">
+            <summary>Gets or sets a value indicating whether a Discogs token is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicMusicMetadataSettings.DiscogsToken">
+            <summary>Gets or sets a write-only Discogs token replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicMusicMetadataSettings.MaxResults">
+            <summary>Gets or sets the maximum candidate count per lookup.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicMusicMetadataSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>
+            Creates public music metadata lookup settings.
+            </summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public music metadata settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings">
+            <summary>
+            Public Google Books metadata lookup settings DTO that never returns the stored API key.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.GoogleBooksEnabled">
+            <summary>Gets or sets a value indicating whether Google Books lookup is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.GoogleBooksApiKeyConfigured">
+            <summary>Gets or sets a value indicating whether a Google Books API key is configured.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.GoogleBooksApiKey">
+            <summary>Gets or sets a write-only Google Books API key replacement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.MaxResults">
+            <summary>Gets or sets the maximum candidate count per lookup.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Models.PtvPublicGoogleBooksSettings.FromConfiguration(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
+            <summary>
+            Creates public Google Books metadata lookup settings.
+            </summary>
+            <param name="configuration">Plugin configuration.</param>
+            <returns>Public Google Books metadata settings.</returns>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvPublicSeerrSettings">
             <summary>
             Public Jellyseerr settings DTO that never returns the stored API key.
@@ -2102,6 +2885,57 @@
             <summary>Creates public download settings.</summary>
             <param name="configuration">Plugin configuration.</param>
             <returns>Public download settings.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesResponse">
+            <summary>
+            Administrator Reading series overrides returned to the web client.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesResponse.SchemaVersion">
+            <summary>Gets or sets the persistence schema version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesResponse.RouteKind">
+            <summary>Gets or sets the normalized Reading route kind.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesResponse.Overrides">
+            <summary>Gets or sets overrides indexed by Jellyfin item id.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesUpdate">
+            <summary>
+            Request body used to replace overrides for one Reading route kind.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesUpdate.Overrides">
+            <summary>Gets or sets overrides indexed by Jellyfin item id.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto">
+            <summary>
+            One Reading series correction transferred between the plugin and web client.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.CoverItemId">
+            <summary>Gets or sets the preferred cover item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.Excluded">
+            <summary>Gets or sets a value indicating whether the item is excluded from inferred grouping.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.IssueNumber">
+            <summary>Gets or sets the corrected issue number.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.MediaKind">
+            <summary>Gets or sets an explicit media classification.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.SeriesKey">
+            <summary>Gets or sets a stable administrator series key.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.SeriesTitle">
+            <summary>Gets or sets the corrected series title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.SeriesYear">
+            <summary>Gets or sets the display year.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.VolumeNumber">
+            <summary>Gets or sets the corrected volume number.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRowValidationResult">
             <summary>
@@ -2227,6 +3061,24 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.ProviderError">
             <summary>Gets or sets provider error, if any.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.RowId">
+            <summary>Gets or sets the generated row id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.RowTitle">
+            <summary>Gets or sets the generated row title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.PlannedRowCount">
+            <summary>Gets or sets the planned row count for the rule.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.GeneratedSourceCount">
+            <summary>Gets or sets how many sources the rule generated before rendering.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.DroppedSourceCount">
+            <summary>Gets or sets how many planned sources did not produce a rendered row.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.DropReason">
+            <summary>Gets or sets the reason a planned source was dropped, when known.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRowGenerationDiagnostic.ItemCount">
             <summary>Gets or sets item count.</summary>
@@ -2657,6 +3509,11 @@
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse">
             <summary>
             PiggieTV plugin health response.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CurrentPluginVersion">
+            <summary>
+            Gets the plugin release version from the loaded plugin or assembly metadata.
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.Ok">
@@ -3110,6 +3967,21 @@
             Gets or sets the number of cached TMDb fact entries in memory.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.NegativeCacheSize">
+            <summary>
+            Gets or sets the number of short-lived negative TMDb cache entries.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.NegativeCacheHits">
+            <summary>
+            Gets or sets the number of short-lived negative TMDb cache hits.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.NegativeCacheWrites">
+            <summary>
+            Gets or sets the number of short-lived negative TMDb cache writes.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.CacheHits">
             <summary>
             Gets or sets the number of TMDb fact cache hits.
@@ -3148,6 +4020,46 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastValidatedAt">
             <summary>
             Gets or sets when credentials were last validated.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastRequestedCount">
+            <summary>
+            Gets or sets the number of unique TMDb requests considered in the last enrichment pass.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastCachedCount">
+            <summary>
+            Gets or sets the number of requests served from positive or negative cache in the last pass.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastAttemptedCount">
+            <summary>
+            Gets or sets the number of remote requests started in the last pass.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastCompletedCount">
+            <summary>
+            Gets or sets the number of successful remote requests completed in the last pass.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastSkippedCount">
+            <summary>
+            Gets or sets the number of requests deferred by the per-pass remote budget.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastFailedCount">
+            <summary>
+            Gets or sets the number of failed remote requests in the last pass.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastCancelledCount">
+            <summary>
+            Gets or sets the number of cancelled remote requests in the last pass.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbMetadataStatus.LastPartial">
+            <summary>
+            Gets or sets a value indicating whether the last pass returned a useful partial result.
             </summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Plugin">
@@ -3264,6 +4176,32 @@
             <param name="document">Cache document.</param>
             <returns>Validated cache document.</returns>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvGoogleBooksMetadataLookupService">
+            <summary>
+            Looks up reading metadata candidates through server-side Google Books.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvGoogleBooksMetadataLookupService.SearchAsync(Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest,System.Threading.CancellationToken)">
+            <summary>
+            Searches Google Books for reading metadata candidates.
+            </summary>
+            <param name="request">Lookup request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Lookup response.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvMusicMetadataLookupService">
+            <summary>
+            Looks up music metadata candidates through server-side providers.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvMusicMetadataLookupService.SearchAsync(Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest,System.Threading.CancellationToken)">
+            <summary>
+            Searches configured music metadata providers.
+            </summary>
+            <param name="request">Lookup request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Lookup response.</returns>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvPluginSettingsService">
             <summary>
             Manages PiggieTV plugin settings.
@@ -3288,6 +4226,21 @@
             </summary>
             <returns>Default public plugin settings.</returns>
         </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvPluginSettingsService.GetReadingSeriesOverrides(System.String)">
+            <summary>
+            Gets server-persisted Reading series overrides for one route kind.
+            </summary>
+            <param name="routeKind">Reading route kind.</param>
+            <returns>Sanitized Reading series overrides.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvPluginSettingsService.SaveReadingSeriesOverrides(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesUpdate)">
+            <summary>
+            Replaces server-persisted Reading series overrides for one route kind.
+            </summary>
+            <param name="routeKind">Reading route kind.</param>
+            <param name="update">Incoming override document.</param>
+            <returns>Saved, sanitized Reading series overrides.</returns>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService">
             <summary>
             Native PiggieTV signup service.
@@ -3302,7 +4255,7 @@
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.VerifyEmailAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailVerificationRequest,System.String,System.Threading.CancellationToken)">
             <summary>Verifies a pending signup email and finalizes Jellyfin user creation.</summary>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.RequestPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest,System.String,System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.RequestPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest,System.String,System.String,System.Threading.CancellationToken)">
             <summary>Requests a password reset email.</summary>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService.ConfirmPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest,System.String,System.Threading.CancellationToken)">
@@ -3362,6 +4315,59 @@
             Gets the current TMDb enrichment status.
             </summary>
             <returns>TMDb enrichment status.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkQueue">
+            <summary>
+            Executes a bounded slice of asynchronous work without discarding completed results when cancellation occurs.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkQueue.RunAsync``1(System.Collections.Generic.IReadOnlyList{System.Func{System.Threading.CancellationToken,System.Threading.Tasks.Task{``0}}},System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Runs a bounded set of work items with fixed concurrency.
+            </summary>
+            <typeparam name="T">Result type.</typeparam>
+            <param name="workItems">Work item factories.</param>
+            <param name="maxConcurrency">Maximum concurrent workers.</param>
+            <param name="maxItems">Maximum work items attempted in this pass.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Completed results and outcome counts.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkResult`1">
+            <summary>
+            Result of a bounded asynchronous work pass.
+            </summary>
+            <typeparam name="T">Work result type.</typeparam>
+            <param name="Results">Completed results keyed by original work index.</param>
+            <param name="AttemptedCount">Number of work items started.</param>
+            <param name="FailedCount">Number of work items that failed with an exception.</param>
+            <param name="CancelledCount">Number of selected work items cancelled or not started after cancellation.</param>
+            <param name="SkippedCount">Number of work items deferred by the per-pass limit.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkResult`1.#ctor(System.Collections.Generic.IReadOnlyDictionary{System.Int32,`0},System.Int32,System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Result of a bounded asynchronous work pass.
+            </summary>
+            <typeparam name="T">Work result type.</typeparam>
+            <param name="Results">Completed results keyed by original work index.</param>
+            <param name="AttemptedCount">Number of work items started.</param>
+            <param name="FailedCount">Number of work items that failed with an exception.</param>
+            <param name="CancelledCount">Number of selected work items cancelled or not started after cancellation.</param>
+            <param name="SkippedCount">Number of work items deferred by the per-pass limit.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkResult`1.Results">
+            <summary>Completed results keyed by original work index.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkResult`1.AttemptedCount">
+            <summary>Number of work items started.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkResult`1.FailedCount">
+            <summary>Number of work items that failed with an exception.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkResult`1.CancelledCount">
+            <summary>Number of selected work items cancelled or not started after cancellation.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkResult`1.SkippedCount">
+            <summary>Number of work items deferred by the per-pass limit.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService">
             <summary>
@@ -3489,6 +4495,79 @@
             <returns>Validated and normalized document.</returns>
             <exception cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException">Thrown when the document is invalid.</exception>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService">
+            <summary>
+            Native server-side Google Books metadata lookup for reading items.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService},MediaBrowser.Controller.Library.ILibraryManager)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService"/> class.
+            </summary>
+            <param name="logger">Logger.</param>
+            <param name="libraryManager">Jellyfin library manager.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.SearchAsync(Jellyfin.Plugin.PiggieTV.Models.PtvGoogleBooksMetadataLookupRequest,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.HtmlTagRegex">
+            <remarks>
+            Pattern:<br/>
+            <code>&lt;[^&gt;]+&gt;</code><br/>
+            Options:<br/>
+            <code>RegexOptions.Compiled</code><br/>
+            Explanation:<br/>
+            <code>
+            ○ Match '&lt;'.<br/>
+            ○ Match a character other than '&gt;' atomically at least once.<br/>
+            ○ Match '&gt;'.<br/>
+            </code>
+            </remarks>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.WhitespaceRegex">
+            <remarks>
+            Pattern:<br/>
+            <code>\\s+</code><br/>
+            Options:<br/>
+            <code>RegexOptions.Compiled</code><br/>
+            Explanation:<br/>
+            <code>
+            ○ Match a whitespace character atomically at least once.<br/>
+            </code>
+            </remarks>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService.YearRegex">
+            <remarks>
+            Pattern:<br/>
+            <code>\\b(?:19|20)\\d{2}\\b</code><br/>
+            Options:<br/>
+            <code>RegexOptions.Compiled</code><br/>
+            Explanation:<br/>
+            <code>
+            ○ Match if at a word boundary.<br/>
+            ○ Match with 2 alternative expressions.<br/>
+                ○ Match the string "19".<br/>
+                ○ Match the string "20".<br/>
+            ○ Match a Unicode digit exactly 2 times.<br/>
+            ○ Match if at a word boundary.<br/>
+            </code>
+            </remarks>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvMusicMetadataLookupService">
+            <summary>
+            Server-side MusicBrainz and Discogs lookup client for administrator metadata repair workflows.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvMusicMetadataLookupService.#ctor(MediaBrowser.Controller.Library.ILibraryManager,Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvMusicMetadataLookupService})">
+            <summary>
+            Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvMusicMetadataLookupService"/> class.
+            </summary>
+            <param name="libraryManager">Jellyfin library manager.</param>
+            <param name="logger">Logger.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvMusicMetadataLookupService.SearchAsync(Jellyfin.Plugin.PiggieTV.Models.PtvMusicMetadataLookupRequest,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer">
             <summary>
             Normalizes PiggieTV plugin settings and preserves safe defaults for older installs.
@@ -3542,6 +4621,18 @@
         <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxMaxCachePayloadBytes">
             <summary>Maximum cache payload size in bytes.</summary>
         </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinMusicMetadataResults">
+            <summary>Minimum music metadata candidate count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxMusicMetadataResults">
+            <summary>Maximum music metadata candidate count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MinGoogleBooksMetadataResults">
+            <summary>Minimum Google Books candidate count.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.MaxGoogleBooksMetadataResults">
+            <summary>Maximum Google Books candidate count.</summary>
+        </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.Normalize(Jellyfin.Plugin.PiggieTV.Configuration.PluginConfiguration)">
             <summary>
             Normalizes a plugin configuration in place.
@@ -3555,6 +4646,13 @@
             </summary>
             <param name="settings">Row-builder settings.</param>
             <returns>Normalized row-builder settings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.NormalizeRecommendationSettings(Jellyfin.Plugin.PiggieTV.Configuration.RecommendationRowSettings)">
+            <summary>
+            Normalizes persisted recommendation row settings in place.
+            </summary>
+            <param name="settings">Recommendation settings.</param>
+            <returns>Normalized recommendation settings.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService">
             <summary>
@@ -3574,6 +4672,12 @@
             <inheritdoc />
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.ResetSettings">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.GetReadingSeriesOverrides(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.SaveReadingSeriesOverrides(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesUpdate)">
             <inheritdoc />
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvSignupCleanupService">
@@ -3613,7 +4717,7 @@
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.VerifyEmailAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupEmailVerificationRequest,System.String,System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.RequestPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest,System.String,System.Threading.CancellationToken)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.RequestPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetRequest,System.String,System.String,System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvSignupService.ConfirmPasswordResetAsync(Jellyfin.Plugin.PiggieTV.Models.PtvSignupPasswordResetConfirmRequest,System.String,System.Threading.CancellationToken)">
@@ -3715,6 +4819,123 @@
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvTmdbMetadataService.ValidateCredentialsAsync(System.Threading.CancellationToken)">
             <inheritdoc />
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.HtmlTagRegex_0">
+            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the HtmlTagRegex method.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.Instance">
+            <summary>Cached, thread-safe singleton instance.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.#ctor">
+            <summary>Initializes the instance.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory">
+            <summary>Provides a factory for creating <see cref="T:System.Text.RegularExpressions.RegexRunner"/> instances to be used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.CreateInstance">
+            <summary>Creates an instance of a <see cref="T:System.Text.RegularExpressions.RegexRunner"/> used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.Runner">
+            <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
+            <summary>Scan the <paramref name="inputSpan"/> starting from base.runtextstart for the next match.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Search <paramref name="inputSpan"/> starting from base.runtextpos for the next location a match could possibly start.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if a possible match was found; false if no more matches are possible.</returns>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.HtmlTagRegex_0.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Determine whether <paramref name="inputSpan"/> at base.runtextpos is a match for the regular expression.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.WhitespaceRegex_1">
+            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the WhitespaceRegex method.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.Instance">
+            <summary>Cached, thread-safe singleton instance.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.#ctor">
+            <summary>Initializes the instance.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory">
+            <summary>Provides a factory for creating <see cref="T:System.Text.RegularExpressions.RegexRunner"/> instances to be used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.CreateInstance">
+            <summary>Creates an instance of a <see cref="T:System.Text.RegularExpressions.RegexRunner"/> used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.Runner">
+            <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
+            <summary>Scan the <paramref name="inputSpan"/> starting from base.runtextstart for the next match.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Search <paramref name="inputSpan"/> starting from base.runtextpos for the next location a match could possibly start.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if a possible match was found; false if no more matches are possible.</returns>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.WhitespaceRegex_1.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Determine whether <paramref name="inputSpan"/> at base.runtextpos is a match for the regular expression.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.YearRegex_2">
+            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the YearRegex method.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.YearRegex_2.Instance">
+            <summary>Cached, thread-safe singleton instance.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.#ctor">
+            <summary>Initializes the instance.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory">
+            <summary>Provides a factory for creating <see cref="T:System.Text.RegularExpressions.RegexRunner"/> instances to be used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.CreateInstance">
+            <summary>Creates an instance of a <see cref="T:System.Text.RegularExpressions.RegexRunner"/> used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.Runner">
+            <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
+            <summary>Scan the <paramref name="inputSpan"/> starting from base.runtextstart for the next match.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Search <paramref name="inputSpan"/> starting from base.runtextpos for the next location a match could possibly start.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if a possible match was found; false if no more matches are possible.</returns>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.YearRegex_2.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Determine whether <paramref name="inputSpan"/> at base.runtextpos is a match for the regular expression.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.Utilities">
+            <summary>Helper methods used by generated <see cref="T:System.Text.RegularExpressions.Regex"/>-derived implementations.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_defaultTimeout">
+            <summary>Default timeout value set in <see cref="T:System.AppContext"/>, or <see cref="F:System.Text.RegularExpressions.Regex.InfiniteMatchTimeout"/> if none was set.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_hasTimeout">
+            <summary>Whether <see cref="F:System.Text.RegularExpressions.Generated.Utilities.s_defaultTimeout"/> is non-infinite.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.Utilities.IsBoundary(System.ReadOnlySpan{System.Char},System.Int32)">
+            <summary>Determines whether the specified index is a boundary.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.Utilities.IsWordChar(System.Char)">
+            <summary>Determines whether the character is part of the [\w] set.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_indexOfAnyStrings_OrdinalIgnoreCase_868B37B1115DDAA6EFFC1D9F6905F7C8D098B5F76516A437A0259697A3AEA147">
+            <summary>Supports searching for the specified strings.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_whitespace">
+            <summary>Supports searching for characters in or not in "\t\n\v\f\r \u0085             \u2028\u2029  　".</summary>
         </member>
     </members>
 </doc>
