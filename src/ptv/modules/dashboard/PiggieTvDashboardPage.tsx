@@ -60,6 +60,8 @@ import {
 import { clearPtvIntegrationSettingsCache } from '../integrations/integrationsConfig';
 import { normalizePtvRecommendationRowSettings } from '../recommendations/recommendationSettings';
 import { serializeSanitizedPtvDebugExport } from './debugExportSanitizer';
+import { getPtvDashboardRuntimeDiagnostics } from './dashboardRuntimeDiagnostics';
+import { getPtvShellFoundationStatus } from '../../shell/foundation';
 
 type PtvPluginFeaturedStatus = {
     cacheVersion?: number;
@@ -1443,6 +1445,8 @@ function mergeDashboardDebugReport(options: {
     };
     const debugState = getDashboardDebugState(baseReport, pluginState, cacheStatus, debugEnabled);
     const sectionSources = getDashboardDebugSectionSources(baseReport, pluginState, cacheStatus);
+    const runtime = getPtvDashboardRuntimeDiagnostics();
+    const shell = getPtvShellFoundationStatus();
 
     return {
         ...baseReport,
@@ -1455,7 +1459,9 @@ function mergeDashboardDebugReport(options: {
         pluginState,
         recommendations,
         renderProfile: performanceProfile.renderProfile,
+        runtime,
         sectionSources,
+        shell,
         source: 'dashboard-live-merged',
         sourceTimestamp: new Date().toISOString()
     };

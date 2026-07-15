@@ -25,6 +25,36 @@ test.describe('general runtime integration', () => {
         await expect(page.getByRole('link', { name: 'Movies' })).toBeFocused();
     });
 
+    test('updates route ownership across Shows, Reading, Dashboard, history, and authentication', async ({ page }) => {
+        const expectOwner = async (routeId: string, routeOwner: string) => {
+            await expect(page.locator('#app')).toHaveAttribute('data-route-id', routeId);
+            await expect(page.locator('#app')).toHaveAttribute('data-route-owner', routeOwner);
+        };
+
+        await page.goto('/#/shows?view=network&network=AMC');
+        await expectOwner('shows', 'shows');
+
+        await page.evaluate(() => {
+            window.location.hash = '#/reading/manga';
+        });
+        await expectOwner('reading', 'reading');
+
+        await page.evaluate(() => {
+            window.location.hash = '#/dashboard/piggietv';
+        });
+        await expectOwner('dashboard', 'dashboard');
+
+        await page.goBack();
+        await expectOwner('reading', 'reading');
+        await page.goBack();
+        await expectOwner('shows', 'shows');
+
+        await page.evaluate(() => {
+            window.location.hash = '#/login?serverid=fixture';
+        });
+        await expectOwner('login', 'login');
+    });
+
     for (const viewport of [
         { height: 1271, name: 'desktop', width: 2560 },
         { height: 844, name: 'mobile', width: 390 },

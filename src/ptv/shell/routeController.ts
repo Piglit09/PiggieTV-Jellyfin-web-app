@@ -311,7 +311,7 @@ function incrementRouteGenerationCounter(
     detail: Record<string, unknown> = {}
 ) {
     if (routeControllerStarted) {
-        getPtvRouteControllerState();
+        synchronizePtvRouteOwnership();
     }
 
     const generation = currentState?.routeGeneration || routeGeneration;
@@ -323,6 +323,7 @@ function incrementRouteGenerationCounter(
         ...detail,
         ...counters,
         normalizedPath: currentState?.normalizedPath || '',
+        routeOwner: currentState?.owner || '',
         routeGeneration: generation,
         routeId: currentState?.routeId || '',
         routeKey: currentState?.routeKey || ''
@@ -482,6 +483,21 @@ function publishRouteControllerState(route: PtvRouteLike) {
     return currentState;
 }
 
+function synchronizePtvRouteOwnership() {
+    const route = getPtvRouteOwnership(window.location);
+    const nextState = normalizeRoute(route);
+
+    if (
+        currentState
+        && currentState.full === nextState.full
+        && currentState.routeKey === nextState.routeKey
+    ) {
+        return currentState;
+    }
+
+    return publishRouteControllerState(route);
+}
+
 export function getPtvRouteControllerState(): PtvRouteControllerState {
     const full = `${window.location.pathname}${window.location.hash}`;
     const shouldForceRecommendationRoute = matchesDashboardPtvRoute({
@@ -493,7 +509,7 @@ export function getPtvRouteControllerState(): PtvRouteControllerState {
 
     if (currentState?.full === full && !shouldForceRecommendationRoute) return currentState;
 
-    return publishRouteControllerState(getPtvRouteOwnership(window.location));
+    return synchronizePtvRouteOwnership();
 }
 
 export function navigatePtvRoute(href: string, options: {

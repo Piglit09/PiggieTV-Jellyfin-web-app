@@ -1,4 +1,5 @@
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import Events from '../../utils/events';
 
 import { PTV_PLUGIN_API, PTV_RUNTIME } from './config';
 import { classifyPtvRequestUrl, isPtvLocalDevHost, isPtvWebpackDevServerOrigin, type PtvRequestOriginKind } from './urlOrigins';
@@ -14,8 +15,10 @@ type PtvApiRequest = {
 };
 
 type PtvJellyfinApiClient = {
+    accessToken?: () => string | null | undefined;
     ajax?: (request: PtvApiRequest) => Promise<unknown>;
     fetch?: (request: PtvApiRequest, includeAuthorization?: boolean) => Promise<unknown>;
+    getCurrentUserId?: () => string | null | undefined;
     getJSON?: (url: string, includeAuthorization?: boolean) => Promise<unknown>;
     getUrl?: (name: string, params?: Record<string, unknown>) => string;
     serverAddress?: () => string;
@@ -77,6 +80,8 @@ export type PtvPluginPayloadRequestOptions = PtvPluginRequestOptions & {
 };
 
 export type PtvPluginApiDiagnostics = {
+    authenticationReadyRetryCount: number;
+    authenticationWaitCount: number;
     attemptedOrigins: Array<{
         origin: string;
         originKind: PtvRequestOriginKind;
@@ -91,6 +96,7 @@ export type PtvPluginApiDiagnostics = {
     attemptedUrls: string[];
     authoritativePluginApiRoot: string | null;
     candidates: string[];
+    deduplicatedRequestCount: number;
     lastError: PtvNormalizedApiError | null;
     lastFailedEndpoint: string | null;
     lastFailedStatusCode: number | null;
@@ -102,6 +108,7 @@ export type PtvPluginApiDiagnostics = {
     retryBackoffMs: number;
     retryCount: number;
     startupAttemptCount: number;
+    startupReasonCounts: Record<string, number>;
     statusAttemptCount: number;
     settingsAttemptCount: number;
     featuredAttemptCount: number;
@@ -116,13 +123,17 @@ const pluginReadResponseCache = new Map<string, {
     value: unknown;
 }>();
 let pluginReadResponseCacheRevision = 0;
+let pluginAuthenticationWait: Promise<PtvJellyfinApiClient> | null = null;
 let pluginApiDiagnostics: PtvPluginApiDiagnostics = {
+    authenticationReadyRetryCount: 0,
+    authenticationWaitCount: 0,
     attemptedOrigins: [],
     attemptedResponses: [],
     attemptedUrl: null,
     attemptedUrls: [],
     authoritativePluginApiRoot: null,
     candidates: [],
+    deduplicatedRequestCount: 0,
     lastError: null,
     lastFailedEndpoint: null,
     lastFailedStatusCode: null,
@@ -134,10 +145,124 @@ let pluginApiDiagnostics: PtvPluginApiDiagnostics = {
     retryBackoffMs: 0,
     retryCount: 0,
     startupAttemptCount: 0,
+    startupReasonCounts: {},
     statusAttemptCount: 0,
     settingsAttemptCount: 0,
     featuredAttemptCount: 0
 };
+
+const PLUGIN_AUTHENTICATION_WAIT_TIMEOUT_MS = 15_000;
+
+function incrementPluginDiagnosticCategory(category: string) {
+    const normalizedCategory = category.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'unknown';
+    const nextEntries = Object.entries(pluginApiDiagnostics.startupReasonCounts)
+        .filter(([key]) => key !== normalizedCategory)
+        .slice(-7);
+
+    updatePluginApiDiagnostics({
+        startupReasonCounts: {
+            ...Object.fromEntries(nextEntries),
+            [normalizedCategory]: (pluginApiDiagnostics.startupReasonCounts[normalizedCategory] || 0) + 1
+        }
+    });
+}
+
+function hasPluginAuthenticationIntrospection(apiClient: PtvJellyfinApiClient) {
+    return typeof apiClient.getCurrentUserId === 'function' || typeof apiClient.accessToken === 'function';
+}
+
+function isPluginAuthenticationReady(apiClient: PtvJellyfinApiClient) {
+    if (!hasPluginAuthenticationIntrospection(apiClient)) {
+        // Direct-import and focused unit-test clients do not expose Jellyfin auth state.
+        return true;
+    }
+
+    const hasUser = typeof apiClient.getCurrentUserId !== 'function' || Boolean(apiClient.getCurrentUserId());
+    const hasToken = typeof apiClient.accessToken !== 'function' || Boolean(apiClient.accessToken());
+
+    return hasUser && hasToken;
+}
+
+function createPluginAuthenticationError() {
+    return Object.assign(new Error('PTV plugin request deferred until Jellyfin authentication is ready.'), {
+        code: 'PTV_PLUGIN_AUTHENTICATION_NOT_READY',
+        kind: 'unauthorized' as const,
+        status: 401
+    });
+}
+
+function withPluginRequestAbort<T>(promise: Promise<T>, signal?: AbortSignal) {
+    if (!signal) return promise;
+    if (signal.aborted) {
+        return Promise.reject(Object.assign(new Error('Plugin request aborted.'), {
+            code: 'PTV_PLUGIN_REQUEST_ABORTED'
+        }));
+    }
+
+    return new Promise<T>((resolve, reject) => {
+        const handleAbort = () => reject(Object.assign(new Error('Plugin request aborted.'), {
+            code: 'PTV_PLUGIN_REQUEST_ABORTED'
+        }));
+
+        signal.addEventListener('abort', handleAbort, { once: true });
+        promise.then(resolve, reject).finally(() => {
+            signal.removeEventListener('abort', handleAbort);
+        });
+    });
+}
+
+function waitForPluginAuthentication(
+    apiClient: PtvJellyfinApiClient,
+    signal?: AbortSignal
+): Promise<PtvJellyfinApiClient> {
+    const currentClient = getCurrentApiClient() || apiClient;
+
+    if (isPluginAuthenticationReady(currentClient)) {
+        return Promise.resolve(currentClient);
+    }
+
+    updatePluginApiDiagnostics({
+        authenticationWaitCount: pluginApiDiagnostics.authenticationWaitCount + 1
+    });
+    incrementPluginDiagnosticCategory('pre-authentication-wait');
+    if (!pluginAuthenticationWait) {
+        pluginAuthenticationWait = new Promise<PtvJellyfinApiClient>((resolve, reject) => {
+            let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+            const cleanup = () => {
+                if (timeoutId !== null) clearTimeout(timeoutId);
+                Events.off(ServerConnections, 'localusersignedin', handleAuthenticationChange);
+                Events.off(ServerConnections, 'localusersignedout', handleAuthenticationChange);
+            };
+            const handleAuthenticationChange = () => {
+                const authenticatedClient = getCurrentApiClient() || apiClient;
+
+                if (!isPluginAuthenticationReady(authenticatedClient)) return;
+
+                cleanup();
+                clearPluginReadResponseCache();
+                updatePluginApiDiagnostics({
+                    authenticationReadyRetryCount: pluginApiDiagnostics.authenticationReadyRetryCount + 1
+                });
+                incrementPluginDiagnosticCategory('authenticated-retry');
+                resolve(authenticatedClient);
+            };
+
+            Events.on(ServerConnections, 'localusersignedin', handleAuthenticationChange);
+            Events.on(ServerConnections, 'localusersignedout', handleAuthenticationChange);
+            timeoutId = setTimeout(() => {
+                cleanup();
+                incrementPluginDiagnosticCategory('authentication-wait-timeout');
+                reject(createPluginAuthenticationError());
+            }, PLUGIN_AUTHENTICATION_WAIT_TIMEOUT_MS);
+            handleAuthenticationChange();
+        }).finally(() => {
+            pluginAuthenticationWait = null;
+        });
+    }
+
+    return withPluginRequestAbort(pluginAuthenticationWait, signal);
+}
 
 function debugLog(message: string, detail?: unknown) {
     if (typeof window !== 'undefined' && (window as DebugWindow)['PTV_DEBUG'] === true) {
@@ -836,7 +961,8 @@ export function getPtvPluginApiDiagnostics(): PtvPluginApiDiagnostics {
         attemptedResponses: [...pluginApiDiagnostics.attemptedResponses],
         attemptedUrls: [...pluginApiDiagnostics.attemptedUrls],
         candidates: [...pluginApiDiagnostics.candidates],
-        lastError: pluginApiDiagnostics.lastError ? { ...pluginApiDiagnostics.lastError } : null
+        lastError: pluginApiDiagnostics.lastError ? { ...pluginApiDiagnostics.lastError } : null,
+        startupReasonCounts: { ...pluginApiDiagnostics.startupReasonCounts }
     };
 }
 
@@ -908,13 +1034,20 @@ function requestPluginJson<T>(
     apiClient: PtvJellyfinApiClient,
     path: string,
     options: PtvPluginPayloadRequestOptions & { method?: 'DELETE' | 'GET' | 'POST' | 'PUT' } = {}
-) {
+): Promise<T> {
     if (shouldSkipPluginApi()) {
         return Promise.reject(new Error('PTV plugin API is unavailable.'));
     }
 
+    const currentClient = getCurrentApiClient() || apiClient;
+
+    if (!isPluginAuthenticationReady(currentClient)) {
+        return waitForPluginAuthentication(currentClient, options.signal)
+            .then(authenticatedClient => requestPluginJson<T>(authenticatedClient, path, options));
+    }
+
     const method = options.method || 'GET';
-    const candidates = getPluginUrlCandidates(apiClient, path, options.params);
+    const candidates = getPluginUrlCandidates(currentClient, path, options.params);
     const responseCacheTtlMs = getPluginReadCacheTtlMs(method, path);
     const canUseResponseCache = responseCacheTtlMs > 0 && !options.bypassCache;
     const responseCacheKey = canUseResponseCache ?
@@ -958,6 +1091,9 @@ function requestPluginJson<T>(
     const inFlightRequest = dedupeKey ? inFlightPluginRequests.get(dedupeKey) : null;
 
     if (inFlightRequest) {
+        updatePluginApiDiagnostics({
+            deduplicatedRequestCount: pluginApiDiagnostics.deduplicatedRequestCount + 1
+        });
         debugLog('deduped plugin endpoint request', {
             dedupeKey,
             method,
@@ -977,9 +1113,9 @@ function requestPluginJson<T>(
         let request: Promise<unknown> | undefined;
 
         if (method === 'GET' && !options.signal) {
-            request = apiClient.getJSON?.(url, true);
+            request = currentClient.getJSON?.(url, true);
         } else if (method === 'GET') {
-            request = apiClient.fetch?.({
+            request = currentClient.fetch?.({
                 headers: {
                     Accept: 'application/json'
                 },
@@ -987,7 +1123,7 @@ function requestPluginJson<T>(
                 signal: options.signal,
                 type: method,
                 url
-            }, true) || apiClient.ajax?.({
+            }, true) || currentClient.ajax?.({
                 headers: {
                     Accept: 'application/json'
                 },
@@ -997,7 +1133,7 @@ function requestPluginJson<T>(
                 url
             });
         } else {
-            request = apiClient.ajax?.({
+            request = currentClient.ajax?.({
                 contentType: 'application/json',
                 data: options.body === undefined ? undefined : JSON.stringify(options.body),
                 headers: {
@@ -1007,7 +1143,7 @@ function requestPluginJson<T>(
                 signal: options.signal,
                 type: method,
                 url
-            }) || apiClient.fetch?.({
+            }) || currentClient.fetch?.({
                 contentType: 'application/json',
                 data: options.body === undefined ? undefined : JSON.stringify(options.body),
                 headers: {
@@ -1240,12 +1376,15 @@ function createRowsValidationCompatibilityResponse(settings: unknown) {
 export function resetPtvPluginApiAvailability() {
     pluginUnavailableUntil = 0;
     pluginApiDiagnostics = {
+        authenticationReadyRetryCount: pluginApiDiagnostics.authenticationReadyRetryCount,
+        authenticationWaitCount: pluginApiDiagnostics.authenticationWaitCount,
         attemptedOrigins: pluginApiDiagnostics.attemptedOrigins,
         attemptedResponses: pluginApiDiagnostics.attemptedResponses,
         attemptedUrl: null,
         attemptedUrls: pluginApiDiagnostics.attemptedUrls,
         authoritativePluginApiRoot,
         candidates: [],
+        deduplicatedRequestCount: pluginApiDiagnostics.deduplicatedRequestCount,
         lastError: null,
         lastFailedEndpoint: null,
         lastFailedStatusCode: null,
@@ -1257,6 +1396,7 @@ export function resetPtvPluginApiAvailability() {
         retryBackoffMs: pluginApiDiagnostics.retryBackoffMs,
         retryCount: pluginApiDiagnostics.retryCount,
         startupAttemptCount: pluginApiDiagnostics.startupAttemptCount,
+        startupReasonCounts: { ...pluginApiDiagnostics.startupReasonCounts },
         statusAttemptCount: pluginApiDiagnostics.statusAttemptCount,
         settingsAttemptCount: pluginApiDiagnostics.settingsAttemptCount,
         featuredAttemptCount: pluginApiDiagnostics.featuredAttemptCount

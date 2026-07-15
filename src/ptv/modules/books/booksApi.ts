@@ -36,6 +36,12 @@ import {
     hasPtvReadingMangaKeyword,
     isPtvReadingKindMatch
 } from './booksClassification';
+import {
+    createPtvReadingProgressiveLoader,
+    type PtvReadingProgressiveLoader,
+    shouldPreservePtvReadingIndex,
+    yieldPtvReadingIndexWork
+} from './readingProgressiveIndex';
 import type {
     PtvReadingCacheDiagnostic,
     PtvReadingHomeData,
@@ -97,12 +103,12 @@ const READING_INITIAL_LIMIT = 20;
 const DEFAULT_READING_LIMIT = 32;
 const READING_HOME_LIBRARY_PREVIEW_LIMIT = 50;
 const READING_LIBRARY_PAGE_SIZE = 50;
-const READING_LIBRARY_FETCH_CAP = 200;
+const READING_LIBRARY_INITIAL_INDEX_ITEM_COUNT = 200;
 const READING_LIBRARY_COUNT_TIMEOUT_MS = 3500;
 const READING_SHELF_TIMEOUT_MS = 6500;
 const READING_OPTIONAL_SHELF_TIMEOUT_MS = 2500;
 const READING_CONTINUE_LIMIT = 12;
-const READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 3;
+const READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 4;
 const READING_HOME_STORAGE_SCHEMA_VERSION = 4;
 const BOOKS_KEYWORDS = /\b(?:book|books|ebook|ebooks|novel|novels|light novel|reader)\b/i;
 const READING_PLACEHOLDER_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent([
@@ -131,13 +137,11 @@ type ScopedReadingItem = {
     library?: PtvReadingLibraryScope;
 };
 
-type PtvReadingPagedFetchResult = {
+type PtvReadingProgressiveLibraryState = {
     dropReasons: string[];
-    droppedItemCount: number;
-    entries: ScopedReadingItem[];
     lastReadingQueryUrl: string;
-    pageCount: number;
-    totalRecordCount: number;
+    library?: PtvReadingLibraryScope;
+    loader: PtvReadingProgressiveLoader<ScopedReadingItem>;
 };
 
 type ReadingItemsRequestOptions = {
@@ -152,6 +156,7 @@ const readingHomeSummaryCache = new Map<string, ReadingHomeCacheEntry>();
 const readingLibraryCache = new Map<string, PtvReadingLibraryScope[]>();
 const readingRecentlyAddedRequestCache = new Map<string, Promise<PtvReadingItem[]>>();
 const readingImageUrlCache = new Map<string, string>();
+const readingLibraryIndexGenerations = new Map<string, number>();
 
 function getCacheKey(kind: PtvReadingRouteKind | 'all' = 'all') {
     return [
@@ -171,6 +176,18 @@ function getReadingLibraryIndexCachePrefix() {
 
 function getReadingLibraryIndexCacheKey(kind: PtvReadingRouteKind) {
     return `${getReadingLibraryIndexCachePrefix()}${kind}:library-index`;
+}
+
+function getReadingLibrarySetIdentity(
+    libraries: PtvReadingLibraryScope[],
+    routeKind: PtvReadingRouteKind
+) {
+    const libraryIds = getReadingLibrariesForRoute(libraries, routeKind)
+        .map(library => library.id)
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right, 'en-US'));
+
+    return libraryIds.length ? libraryIds.join('|') : 'unscoped';
 }
 
 function getReadingHomeStorageKey(kind: PtvReadingRouteKind, initialOnly = false) {
@@ -674,112 +691,84 @@ async function getScopedReadingEntries(
         .map(item => entries.find(entry => entry.item.Id === item.Id) || { item });
 }
 
-async function fetchPagedReadingLibraryEntries(
+function createReadingProgressiveLibraryState(
     routeKind: PtvReadingRouteKind,
     query: PtvItemQuery,
-    library?: PtvReadingLibraryScope
-): Promise<PtvReadingPagedFetchResult> {
-    const entries: ScopedReadingItem[] = [];
-    const dropReasons: string[] = [];
+    library: PtvReadingLibraryScope | undefined,
+    isCurrent: () => boolean
+): PtvReadingProgressiveLibraryState {
+    const state: PtvReadingProgressiveLibraryState = {
+        dropReasons: [],
+        lastReadingQueryUrl: '',
+        library,
+        loader: null as unknown as PtvReadingProgressiveLoader<ScopedReadingItem>
+    };
     const baseQuery: PtvItemQuery = library?.id ? {
         ...query,
         ParentId: library.id
     } : query;
-    let lastReadingQueryUrl = '';
-    let pageCount = 0;
-    let totalRecordCount = 0;
 
-    while (entries.length < READING_LIBRARY_FETCH_CAP) {
-        const pageQuery: PtvItemQuery = {
-            ...baseQuery,
-            Limit: READING_LIBRARY_PAGE_SIZE,
-            StartIndex: entries.length
-        };
-        const requestOptions: ReadingItemsRequestOptions = {
-            enableImages: false,
-            fields: READING_PROBE_FIELDS,
-            stage: `${library?.name || routeKind} library index page ${pageCount + 1}`,
-            timeoutMs: READING_SHELF_TIMEOUT_MS
-        };
-        const result = await getItems<PtvReadingItem>(pageQuery, requestOptions);
-        const pageItems = result.Items || [];
+    state.loader = createPtvReadingProgressiveLoader({
+        fetchPage: async (startIndex, limit) => {
+            const pageQuery: PtvItemQuery = {
+                ...baseQuery,
+                Limit: limit,
+                StartIndex: startIndex
+            };
+            const requestOptions: ReadingItemsRequestOptions = {
+                enableImages: false,
+                fields: READING_PROBE_FIELDS,
+                stage: `${library?.name || routeKind} library index page ${Math.floor(startIndex / limit) + 1}`,
+                timeoutMs: READING_SHELF_TIMEOUT_MS
+            };
+            const result = await getItems<PtvReadingItem>(pageQuery, requestOptions);
 
-        lastReadingQueryUrl = getReadingItemsQueryUrl(pageQuery, requestOptions);
-        pageCount += 1;
-        totalRecordCount = typeof result.TotalRecordCount === 'number' ?
-            result.TotalRecordCount :
-            Math.max(totalRecordCount, entries.length + pageItems.length);
-        entries.push(...pageItems.map(item => ({
-            item: library ? {
-                ...item,
-                PtvReadingLibraryKindHint: library.kind,
-                PtvReadingLibraryName: library.name
-            } : item,
-            library
-        })));
+            state.lastReadingQueryUrl = getReadingItemsQueryUrl(pageQuery, requestOptions);
 
-        if (!pageItems.length || entries.length >= totalRecordCount) break;
-    }
-
-    const capDropCount = Math.max(0, totalRecordCount - Math.min(totalRecordCount, READING_LIBRARY_FETCH_CAP));
-
-    if (capDropCount) {
-        dropReasons.push(`${library?.name || 'Reading'}: capped at ${READING_LIBRARY_FETCH_CAP} item(s) for browser safety`);
-    }
-
-    recordPtvEvent('api', 'reading-library-page-fetch-complete', {
-        fetchedCount: entries.length,
-        lastReadingQueryUrl,
-        libraryId: library?.id || null,
-        libraryName: library?.name || null,
-        pageCount,
-        pageSize: READING_LIBRARY_PAGE_SIZE,
-        routeKind,
-        totalRecordCount
+            return {
+                items: (result.Items || []).map(item => ({
+                    item: library ? {
+                        ...item,
+                        PtvReadingLibraryKindHint: library.kind,
+                        PtvReadingLibraryName: library.name
+                    } : item,
+                    library
+                })),
+                totalRecordCount: typeof result.TotalRecordCount === 'number' ?
+                    result.TotalRecordCount :
+                    startIndex + (result.Items || []).length
+            };
+        },
+        getKey: entry => entry.item.Id || '',
+        initialItemCount: READING_LIBRARY_INITIAL_INDEX_ITEM_COUNT,
+        isCurrent,
+        pageSize: READING_LIBRARY_PAGE_SIZE
     });
 
-    return {
-        dropReasons,
-        droppedItemCount: capDropCount,
-        entries,
-        lastReadingQueryUrl,
-        pageCount,
-        totalRecordCount
-    };
+    return state;
 }
 
-function getEmptyPagedReadingResult(
+async function loadReadingProgressivePage(
     routeKind: PtvReadingRouteKind,
-    library: PtvReadingLibraryScope | undefined,
-    error: unknown
-): PtvReadingPagedFetchResult {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    state: PtvReadingProgressiveLibraryState,
+    stage: 'initial' | 'background'
+) {
+    try {
+        return stage === 'initial' ? await state.loader.loadInitial() : await state.loader.loadNext('background');
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
 
-    return {
-        dropReasons: [`${library?.name || routeKind}: fetch failed - ${errorMessage}`],
-        droppedItemCount: 0,
-        entries: [],
-        lastReadingQueryUrl: '',
-        pageCount: 0,
-        totalRecordCount: 0
-    };
-}
-
-function recoverPagedReadingEntries(
-    routeKind: PtvReadingRouteKind,
-    library: PtvReadingLibraryScope | undefined,
-    promise: Promise<PtvReadingPagedFetchResult>
-): Promise<PtvReadingPagedFetchResult> {
-    return promise.catch(error => {
+        state.dropReasons.push(`${state.library?.name || routeKind}: fetch failed - ${errorMessage}`);
+        state.loader.retire();
         recordPtvEvent('api', 'reading-library-index-section-failed', {
-            error: error instanceof Error ? error.message : String(error),
-            libraryId: library?.id || null,
-            libraryName: library?.name || null,
-            routeKind
+            error: errorMessage,
+            libraryName: state.library?.name || null,
+            routeKind,
+            stage
         });
 
-        return getEmptyPagedReadingResult(routeKind, library, error);
-    });
+        return state.loader.getSnapshot();
+    }
 }
 
 function getReadingKindCounts(items: PtvReadingItem[]): Record<PtvReadingItemKind, number> {
@@ -796,10 +785,70 @@ function getReadingKindCounts(items: PtvReadingItem[]): Record<PtvReadingItemKin
     });
 }
 
+function buildPtvReadingLibraryIndex(
+    routeKind: PtvReadingRouteKind,
+    libraries: PtvReadingLibraryScope[],
+    libraryDiagnostics: PtvReadingLibraryDiagnostic[],
+    selectedLibraries: PtvReadingLibraryScope[],
+    states: PtvReadingProgressiveLibraryState[],
+    startedAt: number,
+    stage: 'background' | 'complete' | 'initial' | 'retired'
+): PtvReadingLibraryIndex {
+    const snapshots = states.map(state => state.loader.getSnapshot());
+    const rawEntries = snapshots.reduce<ScopedReadingItem[]>((items, snapshot) => items.concat(snapshot.items), []);
+    const matchedEntries = rawEntries.filter(entry => matchesRouteKind(entry, routeKind));
+    const uniqueItems = uniquePtvReadingItems(matchedEntries.map(entry => entry.item));
+    const duplicateDropCount = Math.max(0, matchedEntries.length - uniqueItems.length);
+    const routeFilterDropCount = Math.max(0, rawEntries.length - matchedEntries.length);
+    const dropReasons = states.reduce<string[]>((reasons, state) => reasons.concat(state.dropReasons), []);
+
+    if (duplicateDropCount) dropReasons.push(`${routeKind}: ${duplicateDropCount} duplicate item(s) removed`);
+    if (routeFilterDropCount) dropReasons.push(`${routeKind}: ${routeFilterDropCount} item(s) excluded by reading kind filter`);
+
+    const sortedItems = [...uniqueItems].sort(byTitle);
+    const totalRecordCount = snapshots.reduce((total, snapshot) => total + snapshot.totalRecordCount, 0);
+    const isComplete = snapshots.length > 0 && snapshots.every(snapshot => snapshot.isComplete);
+    let resolvedStage = stage;
+
+    if (stage === 'retired') resolvedStage = 'retired';
+    else if (isComplete) resolvedStage = 'complete';
+    const debug: PtvReadingLibraryDebug = {
+        dropReasons,
+        droppedItemCount: duplicateDropCount + routeFilterDropCount,
+        fetchedItemCount: sortedItems.length,
+        indexAccumulatedCount: sortedItems.length,
+        indexIsComplete: isComplete,
+        indexStage: resolvedStage,
+        indexTotalPageCount: snapshots.reduce((total, snapshot) => total + snapshot.totalPageCount, 0),
+        jellyfinItemTotal: totalRecordCount,
+        jellyfinRouteItemTotal: sortedItems.length,
+        kindCounts: getReadingKindCounts(sortedItems),
+        lastReadingQueryUrl: [...states].reverse().find(state => state.lastReadingQueryUrl)?.lastReadingQueryUrl || '',
+        libraryDiagnostics,
+        pageCount: snapshots.reduce((total, snapshot) => total + snapshot.pageCount, 0),
+        pageSize: READING_LIBRARY_PAGE_SIZE,
+        readingLibraryNames: selectedLibraries.map(library => library.name),
+        requestDurationMs: Number((performance.now() - startedAt).toFixed(1)),
+        routeKind,
+        selectedReadingLibraryIds: selectedLibraries.map(library => library.id),
+        sectionDiagnostics: [],
+        statusCode: dropReasons.length ? null : 200,
+        totalRecordCountFromApi: totalRecordCount
+    };
+
+    return {
+        debug,
+        items: sortedItems,
+        libraries
+    };
+}
+
 export async function fetchPtvReadingLibraryIndex(
     routeKind: PtvReadingRouteKind,
     options: {
         forceRefresh?: boolean;
+        isCurrent?: () => boolean;
+        onProgress?: (index: PtvReadingLibraryIndex) => void;
     } = {}
 ): Promise<PtvReadingLibraryIndex> {
     const startedAt = performance.now();
@@ -811,83 +860,144 @@ export async function fetchPtvReadingLibraryIndex(
             READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION
         );
 
-        if (cachedIndex) return cachedIndex;
+        if (cachedIndex?.debug.indexIsComplete) {
+            return {
+                ...cachedIndex,
+                debug: {
+                    ...cachedIndex.debug,
+                    indexStage: 'cache'
+                }
+            };
+        }
     }
+
+    const generation = (readingLibraryIndexGenerations.get(cacheKey) || 0) + 1;
+
+    readingLibraryIndexGenerations.set(cacheKey, generation);
+    let expectedLibrarySetIdentity: string | null = null;
+
+    const isCurrent = () => readingLibraryIndexGenerations.get(cacheKey) === generation
+        && getReadingLibraryIndexCacheKey(routeKind) === cacheKey
+        && (
+            expectedLibrarySetIdentity === null
+            || getReadingLibrarySetIdentity(
+                readingLibraryCache.get(getCacheKey('all')) || [],
+                routeKind
+            ) === expectedLibrarySetIdentity
+        )
+        && options.isCurrent?.() !== false;
 
     const discovery = await fetchPtvReadingLibraryDiscovery(routeKind);
     const libraries = discovery.libraries;
+    expectedLibrarySetIdentity = getReadingLibrarySetIdentity(libraries, routeKind);
     const targetLibraries: Array<PtvReadingLibraryScope | undefined> = libraries.length ?
         getReadingLibrariesForRoute(libraries, routeKind) :
         [undefined];
     const selectedLibraries = targetLibraries.filter((library): library is PtvReadingLibraryScope => Boolean(library));
-    const results = await runPtvScheduledRequests(
-        targetLibraries,
-        library => recoverPagedReadingEntries(
-            routeKind,
-            library,
-            fetchPagedReadingLibraryEntries(routeKind, {
-                SortBy: 'SortName',
-                SortOrder: 'Ascending'
-            }, library)
-        ),
+    const states = targetLibraries.map(library => createReadingProgressiveLibraryState(
+        routeKind,
+        {
+            SortBy: 'SortName',
+            SortOrder: 'Ascending'
+        },
+        library,
+        isCurrent
+    ));
+
+    await runPtvScheduledRequests(
+        states,
+        state => loadReadingProgressivePage(routeKind, state, 'initial'),
         { concurrency: 2 }
     );
-    const rawEntries = results.reduce<ScopedReadingItem[]>((items, result) => items.concat(result.entries), []);
-    const matchedEntries = rawEntries.filter(entry => matchesRouteKind(entry, routeKind));
-    const uniqueItems = uniquePtvReadingItems(matchedEntries.map(entry => entry.item));
-    const duplicateDropCount = Math.max(0, matchedEntries.length - uniqueItems.length);
-    const routeFilterDropCount = Math.max(0, rawEntries.length - matchedEntries.length);
-    const dropReasons = results.reduce<string[]>((reasons, result) => reasons.concat(result.dropReasons), []);
 
-    if (duplicateDropCount) dropReasons.push(`${routeKind}: ${duplicateDropCount} duplicate item(s) removed`);
-    if (routeFilterDropCount) dropReasons.push(`${routeKind}: ${routeFilterDropCount} item(s) excluded by reading kind filter`);
-
-    const sortedItems = [...uniqueItems];
-
-    sortedItems.sort(byTitle);
-
-    const requestDurationMs = Number((performance.now() - startedAt).toFixed(1));
-    const debug: PtvReadingLibraryDebug = {
-        dropReasons,
-        droppedItemCount: results.reduce((total, result) => total + result.droppedItemCount, 0) + duplicateDropCount + routeFilterDropCount,
-        fetchedItemCount: sortedItems.length,
-        jellyfinItemTotal: results.reduce((total, result) => total + result.totalRecordCount, 0),
-        jellyfinRouteItemTotal: sortedItems.length,
-        kindCounts: getReadingKindCounts(sortedItems),
-        lastReadingQueryUrl: [...results].reverse().find(result => result.lastReadingQueryUrl)?.lastReadingQueryUrl || '',
-        libraryDiagnostics: discovery.diagnostics,
-        pageCount: results.reduce((total, result) => total + result.pageCount, 0),
-        pageSize: READING_LIBRARY_PAGE_SIZE,
-        readingLibraryNames: selectedLibraries.map(library => library.name),
-        requestDurationMs,
+    const index = buildPtvReadingLibraryIndex(
         routeKind,
-        selectedReadingLibraryIds: selectedLibraries.map(library => library.id),
-        sectionDiagnostics: [],
-        statusCode: results.some(result => result.dropReasons.length) ? null : 200,
-        totalRecordCountFromApi: results.reduce((total, result) => total + result.totalRecordCount, 0)
-    };
+        libraries,
+        discovery.diagnostics,
+        selectedLibraries,
+        states,
+        startedAt,
+        isCurrent() ? 'initial' : 'retired'
+    );
 
-    recordPtvEvent('api', 'reading-library-index-loaded', debug);
+    recordPtvEvent('api', 'reading-library-index-loaded', index.debug);
 
-    const index = {
-        debug,
-        items: sortedItems,
-        libraries
-    };
-
-    if (sortedItems.length || !dropReasons.length) {
+    if (index.debug.indexIsComplete && (index.items.length || !index.debug.dropReasons.length)) {
         await writePtvLibraryIndexCache(
             cacheKey,
             READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION,
             index,
             PTV_LIBRARY_INDEX_CACHE_TTL_MS
         );
+    } else if (isCurrent()) {
+        void (async () => {
+            while (isCurrent()) {
+                const activeStates = states.filter(state => state.loader.hasMore());
+
+                if (!activeStates.length) break;
+
+                await runPtvScheduledRequests(
+                    activeStates,
+                    state => loadReadingProgressivePage(routeKind, state, 'background'),
+                    { concurrency: 2 }
+                );
+
+                if (!isCurrent()) break;
+
+                const progressIndex = buildPtvReadingLibraryIndex(
+                    routeKind,
+                    libraries,
+                    discovery.diagnostics,
+                    selectedLibraries,
+                    states,
+                    startedAt,
+                    'background'
+                );
+
+                options.onProgress?.(progressIndex);
+                recordPtvEvent('api', 'reading-library-index-progress', {
+                    accumulatedCount: progressIndex.debug.indexAccumulatedCount,
+                    isComplete: progressIndex.debug.indexIsComplete,
+                    pageCount: progressIndex.debug.pageCount,
+                    routeKind,
+                    stage: progressIndex.debug.indexStage,
+                    totalRecordCount: progressIndex.debug.totalRecordCountFromApi
+                });
+
+                if (progressIndex.debug.indexIsComplete) {
+                    if (progressIndex.items.length || !progressIndex.debug.dropReasons.length) {
+                        await writePtvLibraryIndexCache(
+                            cacheKey,
+                            READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION,
+                            progressIndex,
+                            PTV_LIBRARY_INDEX_CACHE_TTL_MS
+                        );
+                    }
+
+                    break;
+                }
+
+                await yieldPtvReadingIndexWork();
+            }
+
+            if (!isCurrent()) {
+                states.forEach(state => {
+                    state.loader.retire();
+                });
+            }
+        })().catch(error => {
+            recordPtvEvent('api', 'reading-library-index-background-failed', {
+                error: error instanceof Error ? error.message : String(error),
+                routeKind
+            });
+        });
     }
 
     return index;
 }
 
 export function invalidatePtvReadingHomeCache() {
+    readingLibraryIndexGenerations.clear();
     readingHomeCache.clear();
     readingHomeSummaryCache.clear();
     readingLibraryCache.clear();
@@ -1195,10 +1305,7 @@ export function getPtvReadingImageUrl(
 
     if (cachedUrl) {
         recordPtvEvent('image', 'reading-image-profile-cache-hit', {
-            duplicateImageTransformPrevented: true,
             imageProfile: semanticProfile,
-            itemId: item.Id || null,
-            largestRequestedDimension: preferredImageType === 'Backdrop' ? canonicalSize : Math.round(canonicalSize * 1.5),
             preferredImageType
         });
 
@@ -1379,6 +1486,23 @@ export function mergePtvReadingLibraryIndex(
     const routeKind = homeData.kind;
     const existingItems = uniquePtvReadingItems(homeData.sections.reduce<PtvReadingItem[]>((items, section) => items.concat(section.items), []));
     const sectionDiagnostics = getSectionDiagnostics(homeData.sections);
+    const previousIndexCount = homeData.libraryDebug?.indexAccumulatedCount || 0;
+
+    if (shouldPreservePtvReadingIndex(
+        previousIndexCount,
+        libraryIndex.debug.indexAccumulatedCount,
+        libraryIndex.items.length
+    )) {
+        recordPtvEvent('cache', 'reading-progressive-index-preserved-fuller-result', {
+            kind: routeKind,
+            nextIndexCount: libraryIndex.debug.indexAccumulatedCount,
+            nextStage: libraryIndex.debug.indexStage,
+            previousIndexCount,
+            reason: 'incoming-index-less-complete-than-active-index'
+        });
+
+        return homeData;
+    }
 
     if (!libraryIndex.items.length && libraryIndex.debug.dropReasons.length && existingItems.length) {
         const existingItemCount = existingItems.length;
@@ -1445,7 +1569,7 @@ export function mergePtvReadingLibraryIndex(
     return {
         ...homeData,
         generatedAt: Date.now(),
-        isPartial: false,
+        isPartial: !libraryIndex.debug.indexIsComplete,
         libraries: libraryIndex.libraries.length ? libraryIndex.libraries : homeData.libraries,
         libraryDebug: {
             ...libraryIndex.debug,
@@ -1843,6 +1967,10 @@ function buildReadingLibraryDebug(
         }),
         droppedItemCount: 0,
         fetchedItemCount: allItems.length,
+        indexAccumulatedCount: allItems.length,
+        indexIsComplete: allItems.length >= routeItemTotal,
+        indexStage: allItems.length >= routeItemTotal ? 'complete' : 'initial',
+        indexTotalPageCount: Math.ceil(routeItemTotal / READING_LIBRARY_PAGE_SIZE),
         jellyfinItemTotal: Math.max(allLibraryRecordCount, allItems.length),
         jellyfinRouteItemTotal: routeItemTotal,
         kindCounts: getReadingKindCounts(allItems),
@@ -1907,7 +2035,7 @@ export function getPtvReadingHome(
             source: 'reading-memory-full'
         });
         recordPtvEvent('cache', 'reading-home-cache-hit', {
-            isPartial: false,
+            isPartial: Boolean(fullCached.data.isPartial),
             itemCount: cacheDiagnostics.itemCount,
             kind: routeKind,
             sectionCount: fullCached.data.sections.length

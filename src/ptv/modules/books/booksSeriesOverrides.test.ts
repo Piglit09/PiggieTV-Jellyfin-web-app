@@ -13,6 +13,7 @@ vi.mock('../../core/pluginApi', () => ({
 }));
 
 import {
+    getPtvReadingOverridePersistenceState,
     loadPtvReadingSeriesOverridesFromServer,
     savePtvReadingSeriesOverrides
 } from './booksSeriesOverrides';
@@ -70,6 +71,25 @@ describe('Reading series override persistence', () => {
         expect(reloadedOverrides.issue3).toMatchObject({
             issueNumber: 3,
             seriesTitle: 'Absolute Carnage vs. Deadpool'
+        });
+        expect(getPtvReadingOverridePersistenceState('comics')).toMatchObject({
+            authority: 'server',
+            endpointAvailable: true,
+            serverPersistenceConfirmed: true
+        });
+    });
+
+    it('labels an unavailable server contract as browser cache only', async () => {
+        pluginState.get.mockRejectedValue(Object.assign(new Error('Not found'), { status: 404 }));
+
+        await loadPtvReadingSeriesOverridesFromServer('manga');
+
+        expect(getPtvReadingOverridePersistenceState('manga')).toEqual({
+            authority: 'browser-cache',
+            endpointAvailable: false,
+            lastCategory: 'endpoint-missing',
+            routeKind: 'manga',
+            serverPersistenceConfirmed: false
         });
     });
 });

@@ -155,13 +155,37 @@ const ROUTE_MATCHERS = [
         className: 'ptv-route-browse',
         density: 'comfortable',
         elevation: 1,
-        features: ['browse', 'library', 'movies', 'shows', 'collections'],
+        features: ['browse', 'library', 'movies', 'collections'],
+        id: 'movies',
+        layout: 'media-home',
+        navigationItemId: 'home',
+        owner: 'movies',
+        pageType: 'browse',
+        pattern: ({ hash }) => /^#\/movies(?:[/?]|$)/i.test(hash)
+    },
+    {
+        className: 'ptv-route-browse',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['browse', 'library', 'shows'],
+        id: 'shows',
+        layout: 'media-home',
+        navigationItemId: 'home',
+        owner: 'shows',
+        pageType: 'browse',
+        pattern: ({ hash }) => /^#\/(?:shows|tv)(?:[/?]|$)/i.test(hash)
+    },
+    {
+        className: 'ptv-route-browse',
+        density: 'comfortable',
+        elevation: 1,
+        features: ['browse', 'library', 'collections'],
         id: 'browse',
         layout: 'media-home',
         navigationItemId: 'home',
         owner: 'browse',
         pageType: 'browse',
-        pattern: ({ hash }) => /^#\/(?:movies|shows|tv|collections)(?:[/?]|$)/i.test(hash)
+        pattern: ({ hash }) => /^#\/collections(?:[/?]|$)/i.test(hash)
     },
     {
         className: 'ptv-route-reading',

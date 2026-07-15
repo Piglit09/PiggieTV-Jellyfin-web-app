@@ -9,12 +9,14 @@ import {
 const TEST_PLUGIN_VERSION = ['10', '11', '8', '1'].join('.');
 
 describe('PiggieTV build information', () => {
-    it('uses safe unknown fallbacks for direct module imports', () => {
+    it('uses explicit provenance fallbacks for direct module imports', () => {
         const info = getPtvBuildInfo();
 
         expect(info.compatibility).toBe('unknown');
         expect(info.pluginVersion).toBe('unknown');
         expect(info.cacheSchemaVersion).toBe(7);
+        expect(info.frontendBuildDate).not.toBe('unknown');
+        expect(info.frontendBuildId).not.toBe('unknown');
     });
 
     it('reports development and production overrides', () => {

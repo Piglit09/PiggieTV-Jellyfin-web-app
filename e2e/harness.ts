@@ -11,6 +11,7 @@ import {
     type PtvFocusedBrowseLoaderScope
 } from '../src/ptv/pages/browse/focusedBrowseLoader';
 import { PtvUpdateService } from '../src/ptv/services/updateService';
+import { getPtvRouteOwnership } from '../src/ptv/shell/routes';
 
 const root = document.getElementById('app');
 
@@ -225,6 +226,10 @@ function renderRoute() {
     activeHash = window.location.hash || '#/home';
     root.replaceChildren();
     root.dataset.authenticationRoute = String(isPtvAuthenticationRoute(getLocationState()));
+    const ownership = getPtvRouteOwnership(getLocationState());
+
+    root.dataset.routeId = ownership.id;
+    root.dataset.routeOwner = ownership.owner;
 
     if (!shouldMountPtvAuthenticatedHeader(getLocationState())) {
         renderAuthentication();

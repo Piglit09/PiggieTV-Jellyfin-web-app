@@ -5,6 +5,7 @@ import type {
     PtvReadingRouteKind
 } from './booksTypes';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
+import { recordPtvEvent } from '../../core/observability';
 
 const PTV_READING_SERIES_OVERRIDE_VERSION = 1;
 const PTV_READING_SERIES_OVERRIDE_KEY_PREFIX = `ptv:reading:series-overrides:v${PTV_READING_SERIES_OVERRIDE_VERSION}:`;
@@ -14,6 +15,43 @@ type ReadingSeriesOverridesResponse = {
     overrides?: unknown;
     Overrides?: unknown;
 };
+
+export type PtvReadingOverridePersistenceState = Readonly<{
+    authority: 'browser-cache' | 'server';
+    endpointAvailable: boolean;
+    lastCategory: 'endpoint-missing' | 'plugin-unavailable' | 'request-failed' | 'server-confirmed';
+    routeKind: PtvReadingRouteKind;
+    serverPersistenceConfirmed: boolean;
+}>;
+
+const overridePersistenceState = new Map<PtvReadingRouteKind, PtvReadingOverridePersistenceState>();
+
+function setOverridePersistenceState(
+    routeKind: PtvReadingRouteKind,
+    state: Omit<PtvReadingOverridePersistenceState, 'routeKind'>
+) {
+    const nextState = { routeKind, ...state };
+
+    overridePersistenceState.set(routeKind, nextState);
+    recordPtvEvent('api', 'reading-series-override-persistence-state', nextState);
+
+    return nextState;
+}
+
+function getOverrideFailureCategory(error: unknown): PtvReadingOverridePersistenceState['lastCategory'] {
+    if (!error || typeof error !== 'object') return 'request-failed';
+
+    let status = 0;
+
+    if ('status' in error) status = Number(error.status);
+    else if ('statusCode' in error) status = Number(error.statusCode);
+
+    return status === 404 ? 'endpoint-missing' : 'request-failed';
+}
+
+export function getPtvReadingOverridePersistenceState(routeKind: PtvReadingRouteKind) {
+    return overridePersistenceState.get(routeKind) || null;
+}
 
 function getOverrideStorageKey(routeKind: PtvReadingRouteKind) {
     return `${PTV_READING_SERIES_OVERRIDE_KEY_PREFIX}${routeKind}`;
@@ -128,7 +166,15 @@ export async function loadPtvReadingSeriesOverridesFromServer(
     const cachedOverrides = loadPtvReadingSeriesOverrides(routeKind);
     const pluginApi = getCurrentPtvPluginApiClient();
 
-    if (!pluginApi) return cachedOverrides;
+    if (!pluginApi) {
+        setOverridePersistenceState(routeKind, {
+            authority: 'browser-cache',
+            endpointAvailable: false,
+            lastCategory: 'plugin-unavailable',
+            serverPersistenceConfirmed: false
+        });
+        return cachedOverrides;
+    }
 
     try {
         const response = await pluginApi.getReadingSeriesOverrides<ReadingSeriesOverridesResponse>(routeKind);
@@ -144,15 +190,35 @@ export async function loadPtvReadingSeriesOverridesFromServer(
 
             storeCachedOverrides(routeKind, authoritativeOverrides);
             markMigrationCompleted(routeKind);
+            setOverridePersistenceState(routeKind, {
+                authority: 'server',
+                endpointAvailable: true,
+                lastCategory: 'server-confirmed',
+                serverPersistenceConfirmed: true
+            });
 
             return authoritativeOverrides;
         }
 
         storeCachedOverrides(routeKind, serverOverrides);
         markMigrationCompleted(routeKind);
+        setOverridePersistenceState(routeKind, {
+            authority: 'server',
+            endpointAvailable: true,
+            lastCategory: 'server-confirmed',
+            serverPersistenceConfirmed: true
+        });
 
         return serverOverrides;
-    } catch {
+    } catch (error) {
+        const category = getOverrideFailureCategory(error);
+
+        setOverridePersistenceState(routeKind, {
+            authority: 'browser-cache',
+            endpointAvailable: category !== 'endpoint-missing',
+            lastCategory: category,
+            serverPersistenceConfirmed: false
+        });
         return cachedOverrides;
     }
 }
@@ -167,10 +233,36 @@ export async function savePtvReadingSeriesOverrides(
 
     const pluginApi = getCurrentPtvPluginApiClient();
 
-    if (!pluginApi) return false;
+    if (!pluginApi) {
+        setOverridePersistenceState(routeKind, {
+            authority: 'browser-cache',
+            endpointAvailable: false,
+            lastCategory: 'plugin-unavailable',
+            serverPersistenceConfirmed: false
+        });
+        return false;
+    }
 
-    await pluginApi.saveReadingSeriesOverrides(routeKind, { overrides: nextOverrides });
-    markMigrationCompleted(routeKind);
+    try {
+        await pluginApi.saveReadingSeriesOverrides(routeKind, { overrides: nextOverrides });
+        markMigrationCompleted(routeKind);
+        setOverridePersistenceState(routeKind, {
+            authority: 'server',
+            endpointAvailable: true,
+            lastCategory: 'server-confirmed',
+            serverPersistenceConfirmed: true
+        });
+    } catch (error) {
+        const category = getOverrideFailureCategory(error);
+
+        setOverridePersistenceState(routeKind, {
+            authority: 'browser-cache',
+            endpointAvailable: category !== 'endpoint-missing',
+            lastCategory: category,
+            serverPersistenceConfirmed: false
+        });
+        throw error;
+    }
 
     return true;
 }

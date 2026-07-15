@@ -25,6 +25,7 @@ export type PtvRuntimeDiagnostics = {
     runtimeCreateCount: number;
     runtimeGetCount: number;
     runtimeOwner: string;
+    runtimeSource: 'window.__PTV_RUNTIME_STATE__';
     runtimeReadyAwaitCount: number;
 };
 
@@ -263,6 +264,7 @@ export function getPtvRuntimeDiagnostics(): PtvRuntimeDiagnostics {
         runtimeCreateCount: state.runtimeCreateCount,
         runtimeGetCount: state.runtimeGetCount,
         runtimeOwner: state.runtimeOwner,
+        runtimeSource: 'window.__PTV_RUNTIME_STATE__',
         runtimeReadyAwaitCount: state.runtimeReadyAwaitCount
     };
 }

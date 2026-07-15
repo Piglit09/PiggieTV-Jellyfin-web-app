@@ -6,6 +6,8 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
 const frontendConfig = read('src/ptv/core/config.ts');
 const apiRoutes = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvApiRoutes.cs');
 const cacheValidator = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentValidator.cs');
+const statusController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs');
+const statusResponse = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvStatusResponse.cs');
 const project = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
 const packageJson = JSON.parse(read('package.json'));
 
@@ -43,6 +45,17 @@ if (contract.frontendCacheVersion !== contract.pluginCacheVersion) {
 
 for (const [label, sourceText] of requiredRoutes) {
     if (!frontendConfig.includes(sourceText)) failures.push(`Missing frontend ${label} contract: ${sourceText}`);
+}
+
+const backendContracts = [
+    ['reading override GET route', /\[HttpGet\("reading\/series-overrides\/\{routeKind\}"\)\]/],
+    ['reading override PUT route', /\[HttpPut\("reading\/series-overrides\/\{routeKind\}"\)\]/],
+    ['reading override status feature', /"readingSeriesOverrides"/]
+];
+
+for (const [label, pattern] of backendContracts) {
+    const source = label.includes('status') ? statusResponse : statusController;
+    if (!pattern.test(source)) failures.push(`Missing plugin ${label}.`);
 }
 
 if (failures.length) {

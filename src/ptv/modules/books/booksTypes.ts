@@ -141,6 +141,10 @@ export type PtvReadingLibraryDebug = {
     jellyfinItemTotal: number;
     jellyfinRouteItemTotal: number;
     kindCounts: Record<PtvReadingItemKind, number>;
+    indexAccumulatedCount: number;
+    indexIsComplete: boolean;
+    indexStage: 'background' | 'cache' | 'complete' | 'initial' | 'retired';
+    indexTotalPageCount: number;
     lastReadingQueryUrl: string;
     libraryDiagnostics: PtvReadingLibraryDiagnostic[];
     pageCount: number;

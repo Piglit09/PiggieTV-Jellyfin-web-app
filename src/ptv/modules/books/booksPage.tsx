@@ -77,10 +77,12 @@ import {
     buildReadingDiagnosticSections,
     canShowReadingDiagnostics
 } from './readingDiagnostics';
+import { shouldPreservePtvReadingIndex } from './readingProgressiveIndex';
 import type {
     PtvReadingHomeData,
     PtvReadingItem,
     PtvReadingLibraryDebug,
+    PtvReadingLibraryIndex,
     PtvReadingRouteKind,
     PtvReadingSection
 } from './booksTypes';
@@ -693,11 +695,30 @@ function getAllReadingItems(homeData: PtvReadingHomeData) {
     return uniquePtvReadingItems(homeData.sections.reduce<PtvReadingItem[]>((items, section) => items.concat(section.items), []));
 }
 
-function mergeReadingHomeRefresh(previous: PtvReadingHomeData, nextHomeData: PtvReadingHomeData, stage: string) {
+export function mergeReadingHomeRefresh(previous: PtvReadingHomeData, nextHomeData: PtvReadingHomeData, stage: string) {
     if (previous.kind !== nextHomeData.kind) return nextHomeData;
 
     const previousItemCount = getAllReadingItems(previous).length;
     const nextItemCount = getAllReadingItems(nextHomeData).length;
+    const previousIndexCount = previous.libraryDebug?.indexAccumulatedCount || 0;
+    const nextIndexCount = nextHomeData.libraryDebug?.indexAccumulatedCount || 0;
+
+    if (shouldPreservePtvReadingIndex(previousIndexCount, nextIndexCount, nextItemCount)) {
+        recordPtvEvent('cache', 'reading-background-refresh-preserved-progressive-index', {
+            kind: nextHomeData.kind,
+            nextIndexCount,
+            nextItemCount,
+            previousIndexCount,
+            previousItemCount,
+            reason: 'background-refresh-less-complete-than-active-index',
+            stage
+        });
+
+        return {
+            ...previous,
+            cacheDiagnostics: nextHomeData.cacheDiagnostics || previous.cacheDiagnostics
+        };
+    }
 
     if (previousItemCount > 0 && nextItemCount === 0) {
         recordPtvEvent('cache', 'reading-background-refresh-preserved-visible-cache', {
@@ -2044,12 +2065,27 @@ function ReadingLibraryView({ homeData, onSeriesOverrideChange, routeKind, serie
         if (!showSeriesToggle) return;
 
         recordPtvEvent('render', 'reading-series-grouping-ready', {
+            accumulatedItemCount: homeData.libraryDebug?.indexAccumulatedCount || browseItems.length,
+            final: homeData.libraryDebug?.indexIsComplete ?? !homeData.isPartial,
             itemCount: browseItems.length,
+            page: homeData.libraryDebug?.pageCount || 0,
             routeKind,
             seriesCount: groupedSeries.length,
+            stage: homeData.libraryDebug?.indexStage || (homeData.isPartial ? 'initial' : 'complete'),
             viewMode: browseViewMode
         });
-    }, [browseItems.length, browseViewMode, groupedSeries.length, routeKind, showSeriesToggle]);
+    }, [
+        browseItems.length,
+        browseViewMode,
+        groupedSeries.length,
+        homeData.isPartial,
+        homeData.libraryDebug?.indexAccumulatedCount,
+        homeData.libraryDebug?.indexIsComplete,
+        homeData.libraryDebug?.indexStage,
+        homeData.libraryDebug?.pageCount,
+        routeKind,
+        showSeriesToggle
+    ]);
 
     let libraryContent: React.ReactNode = null;
 
@@ -2075,6 +2111,11 @@ function ReadingLibraryView({ homeData, onSeriesOverrideChange, routeKind, serie
                     <span>{homeData.stats.resumedCount} in progress</span>
                     <span>{homeData.stats.favoriteCount} favorites</span>
                     <span>{homeData.stats.libraryCount} libraries</span>
+                    {homeData.libraryDebug && !homeData.libraryDebug.indexIsComplete ? (
+                        <span>
+                            Indexing {homeData.libraryDebug.indexAccumulatedCount} of {homeData.libraryDebug.totalRecordCountFromApi}
+                        </span>
+                    ) : null}
                     {homeData.stats.metadata.itemCount ? <span>{homeData.stats.metadata.itemCount} enriched</span> : null}
                     {metadataProviderSummaryLabels.map(label => (
                         <span key={label}>{label}</span>
@@ -2507,25 +2548,33 @@ export default function PiggieTvBooksPage() {
         ownerRequestId = readingRequestIdRef.current
     ) => {
         const libraryRequestId = ++readingLibraryIndexRequestIdRef.current;
+        const isCurrentIndexRequest = () => readingMountedRef.current
+            && ownerRequestId === readingRequestIdRef.current
+            && libraryRequestId === readingLibraryIndexRequestIdRef.current;
+        const applyLibraryIndex = (libraryIndex: PtvReadingLibraryIndex, eventName: string) => {
+            if (!isCurrentIndexRequest()) return;
 
-        return fetchPtvReadingLibraryIndex(kind, { forceRefresh })
+            setHomeData(previous => (
+                previous.kind === kind ? mergePtvReadingLibraryIndex(previous, libraryIndex) : previous
+            ));
+            recordPtvEvent('api', eventName, {
+                accumulatedCount: libraryIndex.debug.indexAccumulatedCount,
+                final: libraryIndex.debug.indexIsComplete,
+                itemCount: libraryIndex.items.length,
+                kind,
+                pageCount: libraryIndex.debug.pageCount,
+                stage: libraryIndex.debug.indexStage,
+                totalRecordCount: libraryIndex.debug.totalRecordCountFromApi
+            });
+        };
+
+        return fetchPtvReadingLibraryIndex(kind, {
+            forceRefresh,
+            isCurrent: isCurrentIndexRequest,
+            onProgress: libraryIndex => applyLibraryIndex(libraryIndex, 'reading-library-index-background-progress')
+        })
             .then(libraryIndex => {
-                if (
-                    !readingMountedRef.current
-                    || ownerRequestId !== readingRequestIdRef.current
-                    || libraryRequestId !== readingLibraryIndexRequestIdRef.current
-                ) {
-                    return;
-                }
-
-                setHomeData(previous => (
-                    previous.kind === kind ? mergePtvReadingLibraryIndex(previous, libraryIndex) : previous
-                ));
-                recordPtvEvent('api', 'reading-library-index-background-loaded', {
-                    itemCount: libraryIndex.items.length,
-                    kind,
-                    libraryDebug: libraryIndex.debug
-                });
+                applyLibraryIndex(libraryIndex, 'reading-library-index-background-loaded');
             })
             .catch(error => {
                 recordPtvEvent('api', 'reading-library-index-background-failed', {

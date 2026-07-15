@@ -8,7 +8,7 @@ const routeMocks = vi.hoisted(() => ({
         id: 'movies',
         layout: 'standard',
         normalizedPath: '/movies',
-        owner: 'shell',
+        owner: 'movies',
         pageType: 'browse',
         path: '/'
     }
@@ -45,6 +45,14 @@ import {
     startPtvRouteController
 } from './routeController';
 
+function getTestRouteFeatures(routeId: string) {
+    if (routeId === 'reading') return ['books', 'reading'];
+    if (routeId === 'dashboard') return ['dashboard'];
+    if (routeId === 'login') return ['auth'];
+
+    return ['browse', routeId];
+}
+
 describe('routeController lifecycle telemetry', () => {
     beforeAll(() => {
         window.history.replaceState(null, '', '/#/movies?view=genres');
@@ -75,5 +83,81 @@ describe('routeController lifecycle telemetry', () => {
         });
         expect(lifecycleEvent?.[2].routeKey).toContain('/movies?genre=Crime&view=genre');
         expect(lifecycleEvent?.[2].route).toBe('#/movies?view=genre&genre=Crime');
+    });
+
+    it('synchronizes Browse, Reading, Dashboard, authentication, and history transitions before lifecycle events', () => {
+        const transitions = [
+            {
+                hash: '#/movies?view=genre&genre=Crime',
+                owner: 'movies',
+                pageType: 'browse',
+                routeId: 'movies'
+            },
+            {
+                hash: '#/shows?view=network&network=AMC',
+                owner: 'shows',
+                pageType: 'browse',
+                routeId: 'shows'
+            },
+            {
+                hash: '#/reading/manga',
+                owner: 'reading',
+                pageType: 'reading',
+                routeId: 'reading'
+            },
+            {
+                hash: '#/dashboard/piggietv',
+                owner: 'dashboard',
+                pageType: 'dashboard',
+                routeId: 'dashboard'
+            },
+            {
+                hash: '#/login?serverid=server-one&url=https%3A%2F%2Fexample.invalid',
+                owner: 'login',
+                pageType: 'login',
+                routeId: 'login'
+            },
+            {
+                hash: '#/reading/manga',
+                owner: 'reading',
+                pageType: 'reading',
+                routeId: 'reading'
+            },
+            {
+                hash: '#/shows?view=network&network=AMC',
+                owner: 'shows',
+                pageType: 'browse',
+                routeId: 'shows'
+            }
+        ];
+
+        transitions.forEach((transition, index) => {
+            routeMocks.current = {
+                ...routeMocks.current,
+                features: getTestRouteFeatures(transition.routeId),
+                full: `/${transition.hash}`,
+                hash: transition.hash,
+                id: transition.routeId,
+                normalizedPath: transition.hash.split('?')[0].replace('#', ''),
+                owner: transition.owner,
+                pageType: transition.pageType
+            };
+            window.history.replaceState(null, '', `/${transition.hash}`);
+
+            recordPtvRouteGenerationLifecycle(index === 3 ? 'page-unmount' : 'page-render', {
+                page: index === 3 ? 'dashboard' : transition.routeId
+            });
+
+            const lifecycleEvents = eventMocks.recordPtvEvent.mock.calls.filter(call => (
+                call[0] === 'route' && call[1] === 'route-generation-counter'
+            ));
+            const lifecycleEvent = lifecycleEvents[lifecycleEvents.length - 1]?.[2];
+
+            expect(lifecycleEvent).toMatchObject({
+                routeId: transition.routeId,
+                routeOwner: transition.owner
+            });
+            expect(lifecycleEvent.routeKey).toContain(transition.hash.split('?')[0].replace('#', ''));
+        });
     });
 });

@@ -38,6 +38,28 @@ describe('PTV shell reading routes', () => {
     });
 });
 
+describe('PTV shell browse route ownership', () => {
+    it.each([
+        ['#/movies?view=genre&genre=Crime', 'movies'],
+        ['#/shows?view=network&network=AMC', 'shows'],
+        ['#/tv?view=latest', 'shows']
+    ])('classifies %s under its media owner', (hash, owner) => {
+        const route = getRoute(hash);
+
+        expect(route.id).toBe(owner);
+        expect(route.owner).toBe(owner);
+        expect(route.pageType).toBe('browse');
+        expect(route.className).toBe('ptv-route-browse');
+    });
+
+    it('keeps Collections under generic browse ownership', () => {
+        const route = getRoute('#/collections');
+
+        expect(route.id).toBe('browse');
+        expect(route.owner).toBe('browse');
+    });
+});
+
 describe('PTV shell authentication routes', () => {
     it.each([
         '#/login',

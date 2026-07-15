@@ -1,4 +1,4 @@
-import { PTV_CACHE, PTV_PLUGIN_API } from './config';
+import { PTV_CACHE, PTV_PLUGIN_API, PTV_RUNTIME } from './config';
 
 export type PtvBuildCompatibility =
     | 'compatible'
@@ -44,18 +44,21 @@ function safeBuildValue(value: unknown, fallback = 'unknown') {
     return normalized && SAFE_BUILD_VALUE.test(normalized) ? normalized : fallback;
 }
 
-function safeBuildDate(value: unknown) {
+function safeBuildDate(value: unknown, fallback = 'unavailable') {
     const normalized = typeof value === 'string' ? value.trim() : '';
-    return normalized && !Number.isNaN(Date.parse(normalized)) ? normalized : 'unknown';
+    return normalized && !Number.isNaN(Date.parse(normalized)) ? normalized : fallback;
 }
 
 function readCompileTimeValues() {
+    const fallbackLabel = PTV_RUNTIME.mode === 'development' ? 'development-fallback' : 'unavailable';
+
     return {
-        environment: typeof __PTV_BUILD_MODE__ === 'string' ? __PTV_BUILD_MODE__ : 'unknown',
-        frontendBuildDate: typeof __PTV_BUILD_DATE__ === 'string' ? __PTV_BUILD_DATE__ : 'unknown',
-        frontendBuildId: typeof __PTV_BUILD_ID__ === 'string' ? __PTV_BUILD_ID__ : 'unknown',
-        frontendCommitSha: typeof __COMMIT_SHA__ === 'string' ? __COMMIT_SHA__ : 'unknown',
-        jellyfinWebVersion: typeof __PACKAGE_JSON_VERSION__ === 'string' ? __PACKAGE_JSON_VERSION__ : 'unknown'
+        environment: typeof __PTV_BUILD_MODE__ === 'string' ? __PTV_BUILD_MODE__ : PTV_RUNTIME.mode,
+        fallbackLabel,
+        frontendBuildDate: typeof __PTV_BUILD_DATE__ === 'string' ? __PTV_BUILD_DATE__ : fallbackLabel,
+        frontendBuildId: typeof __PTV_BUILD_ID__ === 'string' ? __PTV_BUILD_ID__ : fallbackLabel,
+        frontendCommitSha: typeof __COMMIT_SHA__ === 'string' ? __COMMIT_SHA__ : fallbackLabel,
+        jellyfinWebVersion: typeof __PACKAGE_JSON_VERSION__ === 'string' ? __PACKAGE_JSON_VERSION__ : fallbackLabel
     };
 }
 
@@ -122,7 +125,10 @@ export function getPtvBuildInfo(
 ): PtvBuildInfo {
     const compileTime = readCompileTimeValues();
     const environment = overrides.environment || compileTime.environment;
-    const jellyfinWebVersion = safeBuildValue(overrides.jellyfinWebVersion || compileTime.jellyfinWebVersion);
+    const jellyfinWebVersion = safeBuildValue(
+        overrides.jellyfinWebVersion || compileTime.jellyfinWebVersion,
+        compileTime.fallbackLabel
+    );
     const compatibility = classifyPtvBuildCompatibility(pluginStatus, {
         jellyfinWebVersion,
         pluginConnected: overrides.pluginConnected
@@ -132,9 +138,18 @@ export function getPtvBuildInfo(
         cacheSchemaVersion: PTV_CACHE.featuredContentVersion,
         ...compatibility,
         environment: environment === 'development' || environment === 'production' ? environment : 'unknown',
-        frontendBuildDate: safeBuildDate(overrides.frontendBuildDate || compileTime.frontendBuildDate),
-        frontendBuildId: safeBuildValue(overrides.frontendBuildId || compileTime.frontendBuildId),
-        frontendCommitSha: safeBuildValue(overrides.frontendCommitSha || compileTime.frontendCommitSha),
+        frontendBuildDate: safeBuildDate(
+            overrides.frontendBuildDate || compileTime.frontendBuildDate,
+            compileTime.fallbackLabel
+        ),
+        frontendBuildId: safeBuildValue(
+            overrides.frontendBuildId || compileTime.frontendBuildId,
+            compileTime.fallbackLabel
+        ),
+        frontendCommitSha: safeBuildValue(
+            overrides.frontendCommitSha || compileTime.frontendCommitSha,
+            compileTime.fallbackLabel
+        ),
         jellyfinWebVersion,
         pluginApiVersion: pluginStatus?.apiVersion ?? 'unknown',
         pluginVersion: safeBuildValue(pluginStatus?.pluginVersion || pluginStatus?.version)

@@ -50,7 +50,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         _serviceProvider = serviceProvider;
 
         _logger.LogInformation(
-            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET /Ptv/v1/reading/metadata/googlebooks/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
+            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET/PUT /Ptv/v1/reading/series-overrides/{{routeKind}}, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET /Ptv/v1/reading/metadata/googlebooks/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
     }
 
     /// <summary>
@@ -76,6 +76,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 _logger.LogInformation("Advertising feature: rows");
                 _logger.LogInformation("Advertising feature: featuredContent");
                 _logger.LogInformation("Advertising feature: featuredContentRefresh");
+                _logger.LogInformation("Advertising feature: readingSeriesOverrides");
                 _logger.LogInformation("Advertising feature: integrations");
                 _logger.LogInformation("Advertising feature: tags");
                 _logger.LogInformation("Advertising feature: random");
@@ -94,6 +95,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         ["rows"] = true,
                         ["featuredContent"] = true,
                         ["featuredContentRefresh"] = true,
+                        ["readingSeriesOverrides"] = true,
                         ["musicMetadata"] = true,
                         ["readingMetadata"] = true,
                         ["integrations"] = true,
@@ -108,6 +110,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         "rows",
                         "featuredContent",
                         "featuredContentRefresh",
+                        "readingSeriesOverrides",
                         "musicMetadata",
                         "readingMetadata",
                         "integrations",

@@ -29,6 +29,7 @@ describe('PTV runtime accessors', () => {
         expect(diagnostics.runtimeCreateCount).toBe(1);
         expect(diagnostics.runtimeGetCount).toBe(1);
         expect(diagnostics.runtimeOwner).toBe('test-owner');
+        expect(diagnostics.runtimeSource).toBe('window.__PTV_RUNTIME_STATE__');
         expect(diagnostics.initializationCallSites).toEqual([
             'test-owner',
             'duplicate-owner'
