@@ -68,6 +68,7 @@ const config = {
             __PTV_BUILD_DATE__: JSON.stringify(PTV_BUILD_DATE),
             __PTV_BUILD_ID__: JSON.stringify(PTV_BUILD_ID),
             __PTV_BUILD_MODE__: JSON.stringify(DEV_MODE ? 'development' : 'production'),
+            __PTV_DEV_JELLYFIN_URL__: JSON.stringify(DEV_MODE ? process.env.PTV_DEV_JELLYFIN_URL || '' : ''),
             __USE_SYSTEM_FONTS__: !!JSON.parse(process.env.USE_SYSTEM_FONTS || '0'),
             __WEBPACK_SERVE__: !!JSON.parse(process.env.WEBPACK_SERVE || '0')
         }),

@@ -8,7 +8,6 @@ import {
     clearPtvMusicQueue,
     movePtvMusicQueueItem,
     nextPtvMusicTrack,
-    openPtvMusicPlayer,
     playPtvMusicTracks,
     previousPtvMusicTrack,
     removePtvMusicQueueItem,
@@ -202,10 +201,6 @@ function useRelatedMusicTracks(snapshot: PtvMusicQueueSnapshot) {
         isRelatedLoading,
         relatedItems
     };
-}
-
-function isPtvMusicRouteHash(hash = window.location.hash) {
-    return /^#\/music(?:[/?]|$)/i.test(hash);
 }
 
 function useMusicQueueSnapshot() {
@@ -786,49 +781,13 @@ function FullscreenPlayer({
     );
 }
 
-export function PtvMusicPlayerDock() {
+export function PtvMusicOverlayHost() {
     const snapshot = useMusicQueueSnapshot();
     const [isExpanded, setExpanded] = useState(false);
-    const [isMusicRoute, setMusicRoute] = useState(() => isPtvMusicRouteHash());
     const [isQueueOpen, setQueueOpen] = useState(false);
     const [isPlaylistModalOpen, setPlaylistModalOpen] = useState(false);
     const item = snapshot.currentItem;
     const lyrics = useLyrics(item);
-    const progress = useMemo(() => getProgressPercent(snapshot), [snapshot]);
-    const { isLiked, toggleLiked } = useLikedMusicItem(item, 'mini-favorite');
-
-    useEffect(() => {
-        const syncMusicRouteState = () => {
-            const nextIsMusicRoute = isPtvMusicRouteHash();
-
-            setMusicRoute(nextIsMusicRoute);
-
-            if (!nextIsMusicRoute) {
-                setExpanded(false);
-                setQueueOpen(false);
-                setPlaylistModalOpen(false);
-            }
-        };
-
-        syncMusicRouteState();
-        window.addEventListener('hashchange', syncMusicRouteState);
-        window.addEventListener('popstate', syncMusicRouteState);
-
-        return () => {
-            window.removeEventListener('hashchange', syncMusicRouteState);
-            window.removeEventListener('popstate', syncMusicRouteState);
-        };
-    }, []);
-
-    useEffect(() => {
-        document.documentElement.classList.toggle('ptv-music-active', Boolean(item));
-        document.body.classList.toggle('ptv-music-active', Boolean(item));
-
-        return () => {
-            document.documentElement.classList.remove('ptv-music-active');
-            document.body.classList.remove('ptv-music-active');
-        };
-    }, [item]);
 
     useEffect(() => {
         const syncPlayerRoute = () => {
@@ -860,10 +819,6 @@ export function PtvMusicPlayerDock() {
 
     if (!item) return null;
 
-    const openNowPlaying = () => {
-        openPtvMusicPlayer('mini-player');
-    };
-
     const closeExpandedPlayer = () => {
         setExpanded(false);
         recordPtvEvent('render', 'music-player-closed', {
@@ -877,90 +832,6 @@ export function PtvMusicPlayerDock() {
 
     return (
         <>
-            {isMusicRoute ? <div className='ptv-music-mini-player' data-ptv-music-player='mini'>
-                <button
-                    type='button'
-                    className='ptv-music-mini-progress'
-                    aria-label='Seek track'
-                    style={{ '--ptv-music-progress': `${progress}%` } as React.CSSProperties}
-                    onPointerDown={event => seekPtvMusicFromClientX(event.clientX, event.currentTarget)}
-                >
-                    <span />
-                </button>
-
-                <button
-                    type='button'
-                    className='ptv-music-mini-now-playing'
-                    onClick={openNowPlaying}
-                    aria-label='Open now playing'
-                >
-                    <img
-                        alt=''
-                        decoding='async'
-                        loading='lazy'
-                        src={getMusicImageUrl(item, 120)}
-                        onError={event => {
-                            event.currentTarget.src = getMusicImagePlaceholder();
-                        }}
-                    />
-                    <span>
-                        <strong>{getPtvMusicTitle(item)}</strong>
-                        <em>{getPtvMusicArtist(item)} - {getPtvMusicAlbum(item)}</em>
-                    </span>
-                </button>
-
-                <div className='ptv-music-mini-transport'>
-                    <PlayerButton icon='skipPrevious' label='Previous' onClick={() => void previousPtvMusicTrack()} />
-                    <PlayerButton
-                        className='ptv-music-control-primary'
-                        icon={snapshot.isPlaying ? 'pause' : 'play'}
-                        label={snapshot.isPlaying ? 'Pause' : 'Play'}
-                        onClick={() => void togglePtvMusicPlayPause()}
-                    />
-                    <PlayerButton icon='skipNext' label='Next' onClick={() => void nextPtvMusicTrack()} />
-                    <div className='ptv-music-mini-time'>
-                        <span>{formatTicks(snapshot.positionTicks)}</span>
-                        <span>{formatTicks(snapshot.runtimeTicks)}</span>
-                    </div>
-                </div>
-
-                <div className='ptv-music-mini-controls'>
-                    <PlayerButton
-                        icon='favorite'
-                        isActive={isLiked}
-                        label={isLiked ? 'Remove from Liked Songs' : 'Like song'}
-                        onClick={toggleLiked}
-                    />
-                    <PlayerButton className='ptv-music-control-add' label='Add to playlist' onClick={() => setPlaylistModalOpen(true)}>
-                        +
-                    </PlayerButton>
-                    <PlayerButton icon='shuffle' isActive={snapshot.isShuffled} label='Shuffle' onClick={() => togglePtvMusicShuffle()} />
-                    <PlayerButton
-                        icon='refresh'
-                        isActive={snapshot.repeatMode !== 'RepeatNone'}
-                        label={getRepeatLabel(snapshot.repeatMode)}
-                        onClick={() => setPtvMusicRepeatMode(getNextRepeatMode(snapshot.repeatMode))}
-                    >
-                        {snapshot.repeatMode === 'RepeatOne' ? '1' : null}
-                    </PlayerButton>
-                    <PlayerButton icon='playlists' label='Queue' onClick={() => setQueueOpen(true)} />
-                    <div className='ptv-music-mini-volume'>
-                        <button type='button' aria-label='Mute' onClick={() => togglePtvMusicMute()}>
-                            <PtvIcon name='volume' />
-                        </button>
-                        <input
-                            type='range'
-                            min={0}
-                            max={100}
-                            value={snapshot.volumeLevel}
-                            aria-label='Volume'
-                            onChange={event => setPtvMusicVolume(Number(event.target.value))}
-                        />
-                    </div>
-                    <PlayerButton icon='fullscreen' label='Full screen player' onClick={() => openPtvMusicPlayer('mini-fullscreen-button')} />
-                </div>
-            </div> : null}
-
             {isExpanded ? (
                 <FullscreenPlayer
                     lyrics={lyrics}
@@ -985,6 +856,6 @@ export function PtvMusicPlayerDock() {
     );
 }
 
-export default PtvMusicPlayerDock;
+export default PtvMusicOverlayHost;
 
 /* eslint-enable react/jsx-no-bind, no-void */

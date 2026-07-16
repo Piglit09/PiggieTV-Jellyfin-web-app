@@ -51,6 +51,18 @@ export default function PTVMediaDock() {
     const queueLabel = state.queueLength && state.queueLength > 1 ? `${state.queueLength} in queue` : '';
 
     useEffect(() => {
+        const ownsPlaybackPresentation = Boolean(state.active && state.itemId);
+
+        document.documentElement.classList.toggle('ptv-playback-presentation-owned', ownsPlaybackPresentation);
+        document.body.classList.toggle('ptv-playback-presentation-owned', ownsPlaybackPresentation);
+
+        return () => {
+            document.documentElement.classList.remove('ptv-playback-presentation-owned');
+            document.body.classList.remove('ptv-playback-presentation-owned');
+        };
+    }, [state.active, state.itemId]);
+
+    useEffect(() => {
         incrementPtvPerformanceCounter('dockRenderCount', {
             activeItemId: state.itemId || null,
             playbackStoreSource: state.source

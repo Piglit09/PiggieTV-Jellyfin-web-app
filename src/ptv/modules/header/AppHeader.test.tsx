@@ -76,4 +76,17 @@ describe('AppHeader authentication compatibility mode', () => {
         expect(container.querySelector('.ptv-mainDrawerHandle')).not.toBeNull();
         expect(container.querySelector('[data-ptv-auth-compatibility]')).toBeNull();
     });
+
+    it('replaces authentication anchors with the swipe target after login and removes it on logout', () => {
+        flushSync(() => root.render(<AppHeader isHidden />));
+        expect(container.querySelector('.mainDrawerHandle')).toBeNull();
+
+        flushSync(() => root.render(<AppHeader />));
+        expect(container.querySelector('.mainDrawerHandle')).not.toBeNull();
+        expect(container.querySelector('[data-ptv-auth-compatibility]')).toBeNull();
+
+        flushSync(() => root.render(<AppHeader isHidden />));
+        expect(container.querySelector('.mainDrawerHandle')).toBeNull();
+        expect(container.querySelector('[data-ptv-auth-compatibility="true"]')).not.toBeNull();
+    });
 });

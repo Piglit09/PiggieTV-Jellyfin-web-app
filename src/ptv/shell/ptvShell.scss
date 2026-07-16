@@ -461,6 +461,21 @@ html.ptv-layout-mobile .ptv-shell-nav-primary::-webkit-scrollbar {
     backdrop-filter: blur(calc(var(--ptv-glass-blur) + 2px)) saturate(1.32);
 }
 
+.ptv-shell-dropdown-panel.ptv-shell-dropdown-overlay {
+    left: var(--ptv-shell-dropdown-left, 14px);
+    max-height: var(--ptv-shell-dropdown-max-height, calc(100vh - 28px));
+    min-width: var(--ptv-shell-dropdown-min-width, 220px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    position: fixed;
+    right: auto;
+    top: var(--ptv-shell-dropdown-top, 74px);
+    touch-action: pan-y;
+    width: var(--ptv-shell-dropdown-width, 280px);
+    z-index: 10050;
+}
+
 html.ptv-client-mobile .ptv-shell-dropdown-panel,
 html.ptv-layout-mobile .ptv-shell-dropdown-panel {
     left: var(--ptv-shell-dropdown-left, 14px);
@@ -794,6 +809,10 @@ html.ptv-layout-mobile .ptv-shell-dropdown-panel {
 
 .ptv-runtime-media-dock-slot .ptv-media-dock {
     pointer-events: auto;
+}
+
+html[data-ptv-route-mode='native'].ptv-playback-presentation-owned .nowPlayingBar {
+    display: none !important;
 }
 
 .ptv-shell-media-dock-slot {

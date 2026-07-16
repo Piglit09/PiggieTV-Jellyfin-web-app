@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PtvUpdateService } from './updateService';
+import {
+    getPtvServiceWorkerScriptUrl,
+    PtvUpdateService
+} from './updateService';
 
 function createFixture(options: {
     getActivityReason?: () => string;
@@ -43,6 +46,10 @@ function createFixture(options: {
 
 describe('PiggieTV update service', () => {
     beforeEach(() => vi.restoreAllMocks());
+
+    it('resolves the worker relative to the served Jellyfin Web base path', () => {
+        expect(getPtvServiceWorkerScriptUrl()).toBe('serviceworker.js');
+    });
 
     it('stays idle when no service-worker registration exists', async () => {
         const service = new PtvUpdateService({

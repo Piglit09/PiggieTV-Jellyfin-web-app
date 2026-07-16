@@ -29,11 +29,11 @@ class NavDrawer {
     menuTouchStartX;
     menuTouchStartY;
     menuTouchStartTime;
-    edgeContainer = document.querySelector('.mainDrawerHandle');
     isPeeking = false;
     backgroundTouchStartX;
     backgroundTouchStartTime;
-    _edgeSwipeEnabled;
+    _edgeSwipeEnabled = false;
+    _edgeSwipeTarget;
 
     constructor(options) {
         this.options = options;
@@ -127,6 +127,11 @@ class NavDrawer {
 
     onEdgeTouchStart = (e) => {
         const options = this.options;
+        const edgeSwipeTarget = this._edgeSwipeTarget;
+
+        if (!edgeSwipeTarget) {
+            return;
+        }
 
         if (this.isPeeking) {
             this.onMenuTouchMove(e);
@@ -134,8 +139,8 @@ class NavDrawer {
             this.isPeeking = true;
 
             if (e.type === 'touchstart') {
-                dom.removeEventListener(this.edgeContainer, 'touchmove', this.onEdgeTouchMove, {});
-                dom.addEventListener(this.edgeContainer, 'touchmove', this.onEdgeTouchMove, {});
+                dom.removeEventListener(edgeSwipeTarget, 'touchmove', this.onEdgeTouchMove, {});
+                dom.addEventListener(edgeSwipeTarget, 'touchmove', this.onEdgeTouchMove, {});
             }
 
             this.onMenuTouchStart(e);
@@ -145,7 +150,9 @@ class NavDrawer {
     onEdgeTouchEnd = (e) => {
         if (this.isPeeking) {
             this.isPeeking = false;
-            dom.removeEventListener(this.edgeContainer, 'touchmove', this.onEdgeTouchMove, {});
+            if (this._edgeSwipeTarget) {
+                dom.removeEventListener(this._edgeSwipeTarget, 'touchmove', this.onEdgeTouchMove, {});
+            }
             this.onMenuTouchEnd(e);
         }
     };
@@ -298,36 +305,46 @@ class NavDrawer {
         }
     }
 
-    setEdgeSwipeEnabled(enabled) {
-        const options = this.options;
+    removeEdgeSwipeListeners(target) {
+        dom.removeEventListener(target, 'touchstart', this.onEdgeTouchStart, {
+            passive: true
+        });
+        dom.removeEventListener(target, 'touchmove', this.onEdgeTouchMove, {});
+        dom.removeEventListener(target, 'touchend', this.onEdgeTouchEnd, {
+            passive: true
+        });
+        dom.removeEventListener(target, 'touchcancel', this.onEdgeTouchEnd, {
+            passive: true
+        });
+    }
 
-        if (!options.disableEdgeSwipe && browser.touch) {
-            if (enabled) {
-                if (!this._edgeSwipeEnabled) {
-                    this._edgeSwipeEnabled = true;
-                    dom.addEventListener(this.edgeContainer, 'touchstart', this.onEdgeTouchStart, {
-                        passive: true
-                    });
-                    dom.addEventListener(this.edgeContainer, 'touchend', this.onEdgeTouchEnd, {
-                        passive: true
-                    });
-                    dom.addEventListener(this.edgeContainer, 'touchcancel', this.onEdgeTouchEnd, {
-                        passive: true
-                    });
-                }
-            } else if (this._edgeSwipeEnabled) {
-                this._edgeSwipeEnabled = false;
-                dom.removeEventListener(this.edgeContainer, 'touchstart', this.onEdgeTouchStart, {
-                    passive: true
-                });
-                dom.removeEventListener(this.edgeContainer, 'touchend', this.onEdgeTouchEnd, {
-                    passive: true
-                });
-                dom.removeEventListener(this.edgeContainer, 'touchcancel', this.onEdgeTouchEnd, {
-                    passive: true
-                });
-            }
+    setEdgeSwipeEnabled(enabled) {
+        const canEnable = enabled && !this.options.disableEdgeSwipe && browser.touch;
+        const nextTarget = canEnable ? document.querySelector('.mainDrawerHandle') : null;
+        const boundTarget = this._edgeSwipeTarget;
+
+        if (boundTarget && (!canEnable || boundTarget !== nextTarget)) {
+            this.removeEdgeSwipeListeners(boundTarget);
+            this._edgeSwipeTarget = null;
+            this._edgeSwipeEnabled = false;
+            this.isPeeking = false;
         }
+
+        if (!canEnable || !nextTarget || this._edgeSwipeTarget === nextTarget) {
+            return;
+        }
+
+        dom.addEventListener(nextTarget, 'touchstart', this.onEdgeTouchStart, {
+            passive: true
+        });
+        dom.addEventListener(nextTarget, 'touchend', this.onEdgeTouchEnd, {
+            passive: true
+        });
+        dom.addEventListener(nextTarget, 'touchcancel', this.onEdgeTouchEnd, {
+            passive: true
+        });
+        this._edgeSwipeTarget = nextTarget;
+        this._edgeSwipeEnabled = true;
     }
 
     initialize() {
@@ -370,4 +387,3 @@ class NavDrawer {
 }
 
 export default NavDrawer;
-

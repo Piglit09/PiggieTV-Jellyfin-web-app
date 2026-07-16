@@ -23,6 +23,7 @@ export declare global {
     const __PTV_BUILD_DATE__: string;
     const __PTV_BUILD_ID__: string;
     const __PTV_BUILD_MODE__: 'development' | 'production';
+    const __PTV_DEV_JELLYFIN_URL__: string;
     const __USE_SYSTEM_FONTS__: boolean;
     const __WEBPACK_SERVE__: boolean;
 }

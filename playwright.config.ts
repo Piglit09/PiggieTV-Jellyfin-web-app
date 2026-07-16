@@ -17,7 +17,7 @@ export default defineConfig({
         screenshot: 'only-on-failure',
         trace: 'retain-on-failure'
     },
-    webServer: {
+    webServer: process.env.PTV_LIVE_DEV_URL ? undefined : {
         command: 'node e2e/server.mjs',
         reuseExistingServer: !process.env.CI,
         timeout: 30_000,
@@ -25,4 +25,3 @@ export default defineConfig({
     },
     workers: process.env.CI ? 2 : undefined
 });
-

@@ -15,40 +15,51 @@ type PtvUrlOriginOptions = {
     pluginRoot?: string | null;
 };
 
+type PtvServerUrlResolutionOptions = {
+    development?: boolean;
+    pageUrl?: string;
+};
+
 const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const WEBPACK_DEV_PORTS = new Set(['8080', '8081']);
+
+function normalizeHostname(hostname: string) {
+    return String(hostname || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^\[/, '')
+        .replace(/\]$/, '')
+        .replace(/\.$/, '');
+}
 
 function getLocationOrigin() {
     return window.location.origin || `${window.location.protocol}//${window.location.host}`;
 }
 
 export function isPtvLocalDevHost(hostname = window.location.hostname) {
-    return LOCAL_DEV_HOSTS.has(hostname.toLowerCase());
+    return LOCAL_DEV_HOSTS.has(normalizeHostname(hostname));
 }
 
 function isPrivateLanHost(hostname: string) {
-    const normalizedHostname = hostname.toLowerCase();
+    const normalizedHostname = normalizeHostname(hostname);
 
     return /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(normalizedHostname)
         || /^192\.168\.\d{1,3}\.\d{1,3}$/.test(normalizedHostname)
-        || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(normalizedHostname);
+        || /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(normalizedHostname)
+        || /^(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):/i.test(normalizedHostname);
 }
 
 export function isPtvWebpackDevServerOrigin(
     hostname = window.location.hostname,
     port = window.location.port
 ) {
-    const normalizedHostname = hostname.toLowerCase();
+    const normalizedHostname = normalizeHostname(hostname);
 
     return WEBPACK_DEV_PORTS.has(String(port || ''))
         && (
             isPtvLocalDevHost(normalizedHostname)
             || isPrivateLanHost(normalizedHostname)
         );
-}
-
-function normalizeAssetPath(assetPath: string) {
-    return String(assetPath || '').trim().replace(/^\/+/, '');
 }
 
 function trimTrailingSlashes(value: string) {
@@ -59,6 +70,31 @@ function trimTrailingSlashes(value: string) {
     }
 
     return nextValue;
+}
+
+/** Normalize an explicit Jellyfin root without deriving it from the frontend host. */
+export function resolvePtvServerUrlForPage(
+    serverUrl: string,
+    options: PtvServerUrlResolutionOptions = {}
+) {
+    const value = String(serverUrl || '').trim();
+
+    if (!value) return '';
+
+    try {
+        // URL is already required by the current Jellyfin browser runtime.
+        // eslint-disable-next-line compat/compat
+        const pageUrl = new URL(options.pageUrl || window.location.href);
+        // eslint-disable-next-line compat/compat
+        const candidateUrl = new URL(value, pageUrl);
+        return trimTrailingSlashes(candidateUrl.href);
+    } catch {
+        return trimTrailingSlashes(value);
+    }
+}
+
+function normalizeAssetPath(assetPath: string) {
+    return String(assetPath || '').trim().replace(/^\/+/, '');
 }
 
 function isAbsoluteAssetUrl(url: string) {

@@ -282,3 +282,60 @@ Deployment order for the corrected pair: build/test the plugin and frontend from
 - Expected old-plugin behavior: connected, API/cache usable, Reading server persistence marked upgrade-required, browser fallback labeled local cache. Expected new-plugin behavior: compatible and server persistence available.
 - Automated release result: focused compatibility 12/12, full Vitest 351/351, plugin 9/9, TypeScript/scoped ESLint/contract/secret scan clean, Release build/publish clean, and production Webpack successful with only established size warnings.
 - After deployment, manually test an override save/reload, the old-plugin upgrade warning if rollback is exercised, dashboard version/capability labels, login/auth transitions, active playback, and normal service-worker update adoption. No routine cache purge is required.
+
+## 2026-07-15 Deployment Verification Handoff
+
+The local Jellyfin instance now runs the corrected five-file plugin `10.11.8.2`. Full status is healthy and advertises API v1, cache v7, and `readingSeriesOverrides`. Override GET/PUT succeeded for books, comics, manga, and reading; a synthetic value survived restart and was removed afterward. The complete pre-deployment plugin backup remains retained.
+
+The initial `.2` DLL exposed a real configuration defect: XML serialization failed on the nested Reading override dictionary and made full status return HTTP 500. Deploy only the newly rebuilt payload containing the deterministic XML surrogate and its 10/10 plugin test result.
+
+The matching production frontend candidate is build `10.11.11-ptv-20260715.7-78a6e2b6`, commit `78a6e2b6bc-dirty`. It includes the production runtime entry import, authenticated API-client readiness, Dashboard request deduplication, and relative `/web` service-worker registration. It was verified by serving repository `dist` directly through Jellyfin. The permanent Program Files web root is still unchanged because the current process could not write it; an administrator must deploy it or configure the service to use the verified directory.
+
+Live checks passed for query-bearing desktop/mobile login ownership, hidden compatibility anchors, authenticated Dashboard startup, canonical runtime provenance, sanitized debug export, service-worker activation without a reload loop, and the exact route sequence Shows -> Reading -> Dashboard -> Reading -> Shows -> back Reading -> forward Shows -> Login. Startup produced one successful request each for plain status, settings, full status, and featured, with zero pre-authentication plugin requests.
+
+Do not approve production until the permanent frontend reports the expected build ID and the real remote Manga library completes 1,818/1,818 indexing. Automation covers the same total in 37 pages after the 200-item first stage, but this machine has no live Manga data and cannot provide a real completion time. Retain both plugin and web-root backups until these checks pass.
+
+Final automated state: 354/354 Vitest, 10/10 plugin tests, frontend/plugin contract, TypeScript, scoped ESLint, production Webpack, secret scan, and `git diff --check` pass. No style source changed. No commit, push, remote deployment, rollback, or backup deletion was performed.
+
+## 2026-07-15 Android Dropdown Handoff
+
+The shared Movies/Shows dropdown no longer depends on the overflow boundary of the compact horizontal navigation. `PtvShellPrimaryDropdown` renders the active panel into `document.body`, owns outside/Escape dismissal, and computes a clamped fixed position from `window.visualViewport`. Horizontal navigation swipes are classified separately from taps, so Android's pointer-derived click opens once after a tap and is suppressed after a swipe.
+
+Automated verification is complete: focused dropdown 11/11, full Vitest 365/365, Android dropdown Playwright 9/9, full Playwright 36/36, TypeScript clean, changed-file ESLint clean, inherited PTV lint baseline unchanged, Stylelint clean, and production Webpack successful with the two known size warnings. The plugin was not touched or rebuilt.
+
+Before deployment sign-off, test a physical Android Chrome phone on Home, Movies, Shows, Music, and Reading: tap Movies/Shows, select each destination once, tap outside, press browser back/forward, rotate while open, and swipe the primary navigation without opening a menu. Repeat the basic tap/select/outside flow in iOS Safari and keyboard/remote Arrow Down, arrows, Enter, and Escape on desktop/TV. No cache schema or plugin restart is required; deploy the frontend normally and reload once.
+
+## 2026-07-15 Urgent Runtime Regression Handoff
+
+The blank/broken login and application regression was caused by drawer edge-swipe ownership, not by the primary-navigation portal. `NavDrawer` captured a missing `.mainDrawerHandle` while the authentication compatibility host was mounted, then the touch path attempted `target.addEventListener` on that null value. The corrected drawer resolves the handle when edge swipe is reconciled, no-ops while login owns no handle, retires the exact prior target, and binds a later authenticated handle once. `libraryMenu` now performs that reconciliation on every page show.
+
+Local release gate results: focused 32/32, full Vitest 370/370, TypeScript clean, changed-file ESLint clean, PTV Stylelint clean, Chromium Playwright 36/36, WebKit Playwright 34 passed/1 platform-policy skip, production Webpack successful with only the two known size warnings, secret scan clean, and `git diff --check` clean apart from line-ending notices. WebKit skips only the link-Tab-order assertion because Safari delegates link tabbing to the platform full-keyboard-access preference; every WebKit login, route, blank-root, history, dropdown, outside/Escape, and resize case runs. The initial WebKit command failed only because its browser binary was not installed; after `npx playwright install webkit`, the cross-browser matrix passed. An invalid `--runInBand=false` Vitest invocation ran no tests and was replaced by the successful full `npm test` run.
+
+Before deployment sign-off, verify on a physical Pixel/Android Chrome, iPad Safari, and desktop Chrome connected to Jellyfin: plain and query-bearing login, expired-session redirect, logout/login, successful authenticated Home, browser back/forward across auth, Movies/Shows dropdown tap and selection, and a normal authenticated drawer edge gesture. Confirm there is no header on login, no one-frame runtime overlay, no blank content root, and no duplicate edge-swipe response. This frontend-only fix requires no plugin restart or cache-schema migration; deploy the production frontend and use the normal service-worker reload path.
+
+## 2026-07-15 Split-Origin Runtime Handoff
+
+The frontend development host and Jellyfin host are intentionally different. The previous remediation incorrectly rebased a stale loopback Jellyfin candidate to the frontend hostname. Startup could pin loopback before Jellyfin recovered its saved server, leaving plugin requests on the stale root. Development now requires the explicit `PTV_DEV_JELLYFIN_URL`; the requested saved `serverid` and authenticated `ApiClient` are the next authorities, and a server transition retires the plugin root. Production bundles receive an empty development URL.
+
+The black Home spacer, bottom-only Reading navigation, and blank Dashboard body were a separate geometry defect. Shared shell CSS had changed stock Jellyfin animated containers and generic pages to relative flow. Those overrides are removed; only `.ptv-shell-main` and `.ptv-shell-page` own PTV geometry. Login keeps its already verified full-viewport authentication layout.
+
+Automated gates pass: focused 18/18; full Vitest 385/385; TypeScript; scoped ESLint; shell Stylelint; live Chromium 6/6; live WebKit 6/6; production Webpack; 119,166-path secret scan; production-address scan; and whitespace validation. The live matrix covers desktop, Pixel, and iPad profiles and proves explicit split-origin discovery wins over stale loopback storage. One initial full-suite cache timeout was non-reproducible: isolated and immediate full reruns passed. Webpack emitted only the established size warnings.
+
+Release remains HOLD because no supplied credential was used. Restart the existing Webpack development process with `PTV_DEV_JELLYFIN_URL` set to the real Jellyfin root, revoke the token exposed in the supplied capture, then verify authenticated Home, Reading, Dashboard, reload/history, Movies/Shows dropdowns, and logout/login on desktop Chrome, physical Pixel Chrome, and iPad Safari. Confirm both Jellyfin and `/Ptv/v1/*` requests remain on the intended backend. No plugin source changed and no Jellyfin restart is required for this frontend correction.
+
+## 2026-07-15 Music Playback And Live-Loading Handoff
+
+Music's second compact player was PiggieTV's route-specific renderer, not a second audio engine. The global `PTVMediaDock` is retained as the sole bottom-right mini player. The Music root remains persistent only for full-screen/queue/playlist overlays, and its window-owned root/load promise makes route remounts and HMR idempotent. The one module-level audio element, queue, and controller remain intact.
+
+Automated gates pass: focused 11/11; full Vitest 392/392 on the final run; TypeScript; scoped ESLint with zero errors and three existing nested-function warnings; Music/shell Stylelint; live Chromium 6/6; live WebKit 6/6; and production Webpack in 90.834 seconds with only the two established size warnings. The live matrix covers unauthenticated desktop, Android-layout, and iPad-layout startup plus explicit split-origin discovery. It does not prove signed-in Music playback.
+
+Before release sign-off, authenticate at the development frontend connected to the intended Jellyfin backend and verify:
+
+1. `#/music` shows one `.ptv-media-dock`, no `.ptv-music-mini-player`, and no visible Jellyfin `.nowPlayingBar` while PTV owns active playback.
+2. Exactly one `[data-ptv-music-native-player='true']` audio element exists; no additional controller, queue, root, or subscription appears after Music -> Home -> Reading -> Dashboard -> Music, browser back/forward, or a development HMR update.
+3. Play, pause, previous, next, seek, stop, queue, and full-screen controls remain synchronized; playback continues off Music and stopping playback removes the dock/ownership class.
+4. The hero changes from a real loading state to a live count, cached count, or explicit unavailable-live-count message. It never remains `Loading library tracks` after the current request settles or is retired.
+5. Dashboard status resolves against the explicit Jellyfin backend, has populated candidate/root/attempt fields after authentication, and settles with `loading=false` on success or failure. A historical `lastSuccessfulEndpoint` must not be treated as current health.
+6. Capture sanitized response code/duration, player/audio/subscription counts, loading transition, route mount/unmount counts, and event growth. Queue progress should grow at roughly one publication per second rather than the prior multi-owner flood.
+
+This is a frontend-only correction. Jellyfin/plugin restart is not required. Do not deploy until the authenticated physical checks pass; then deploy through the normal frontend/service-worker path without clearing user data.

@@ -28,7 +28,6 @@
     z-index: var(--ptv-shell-z-background);
 }
 
-.ptv-app-shell .mainAnimatedPages,
 .ptv-shell-main {
     position: relative;
     z-index: var(--ptv-shell-z-content);
@@ -37,7 +36,6 @@
 }
 
 .ptv-app-shell .mainAnimatedPage:not(#videoOsdPage):not(.videoOsdPage) {
-    min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
@@ -48,9 +46,12 @@
     overflow-y: auto;
 }
 
-.ptv-app-shell .page,
 .ptv-shell-page {
     position: relative;
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-app-shell .page {
     color: var(--ptv-color-text-primary);
 }
 

@@ -1,4 +1,4 @@
-import { playbackManager } from 'components/playback/playbackmanager';
+import { playbackManager } from '../../components/playback/playbackmanager';
 import Events from '../../utils/events';
 
 import {
@@ -83,6 +83,11 @@ let lastMusicSnapshot: PtvMusicQueueSnapshot | null = null;
 let musicUnsubscribe: (() => void) | null = null;
 let pollTimer: number | null = null;
 let reconcileTimer: number | null = null;
+const boundPlaybackManagerEvents: Array<{
+    handler: () => void;
+    name: string;
+    target: PtvPlaybackManagerLike;
+}> = [];
 
 function getPlaybackManager() {
     return playbackManager as PtvPlaybackManagerLike | null | undefined;
@@ -300,7 +305,9 @@ function publishPlaybackState(lastEvent = 'reconcile') {
         playbackStoreSource: nextState.source
     });
 
-    listeners.forEach(listener => listener(currentState));
+    listeners.forEach(listener => {
+        listener(currentState);
+    });
 }
 
 function scheduleReconcile(lastEvent: string) {
@@ -328,6 +335,11 @@ function bindPlaybackManagerEvent(name: string) {
 
     try {
         Events.on(playbackManagerLike, name, handler);
+        boundPlaybackManagerEvents.push({
+            handler,
+            name,
+            target: playbackManagerLike
+        });
     } catch (error) {
         recordPtvEvent('playback', 'global-playback-event-bind-failed', {
             error: error instanceof Error ? error.message : String(error),
@@ -362,6 +374,8 @@ export function startPtvPlaybackStateService() {
     }
 
     pollTimer = window.setInterval(() => {
+        if (lastMusicSnapshot?.currentItem) return;
+
         publishPlaybackState('low-frequency-reconcile');
     }, 1000);
 
@@ -481,6 +495,9 @@ export function previousPtvGlobalPlaybackTrack(state = getPtvGlobalPlaybackState
 export function disposePtvPlaybackStateServiceForTests() {
     musicUnsubscribe?.();
     musicUnsubscribe = null;
+    boundPlaybackManagerEvents.splice(0).forEach(({ handler, name, target }) => {
+        Events.off(target, name, handler);
+    });
     if (pollTimer !== null) {
         window.clearInterval(pollTimer);
         pollTimer = null;

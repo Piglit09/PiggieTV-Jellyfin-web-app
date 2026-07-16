@@ -43,6 +43,10 @@ type PtvUpdateListener = (snapshot: PtvUpdateSnapshot) => void;
 const DISMISSED_SESSION_KEY = 'ptv:update:dismissed';
 const RELOAD_SESSION_KEY = 'ptv:update:reloading';
 
+export function getPtvServiceWorkerScriptUrl() {
+    return 'serviceworker.js';
+}
+
 function getUpdateError(error: unknown) {
     return error instanceof Error ? error.message : String(error || 'Unknown service-worker error.');
 }

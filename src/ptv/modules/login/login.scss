@@ -12,9 +12,17 @@
             url('assets/backgrounds/PiggieTVBG.png') type('image/png')
         );
 
-    min-height: 100vh;
+    box-sizing: border-box;
 
-    overflow: hidden;
+    position: absolute !important;
+    inset: 0;
+
+    min-height: 100%;
+    padding: 0 !important;
+
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: auto;
 
     background:
         linear-gradient(
@@ -97,8 +105,10 @@
     display: grid;
     place-items: center;
 
-    min-height: calc(100vh - 5rem);
-    padding: 24px;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 100%;
+    padding: 24px !important;
 }
 
 :is(.ptv-login-page, #loginPage) h1,
@@ -508,7 +518,10 @@
 @media (max-width: 520px) {
     :is(.ptv-login-page, #loginPage) > .padded-left,
     :is(.ptv-login-page, #loginPage) > .padded-right {
-        padding: 18px;
+        padding:
+            max(18px, env(safe-area-inset-top))
+            18px
+            max(18px, env(safe-area-inset-bottom)) !important;
     }
 
     :is(.ptv-login-page, #loginPage) .ptv-login-panel {
@@ -517,6 +530,13 @@
 
     :is(.ptv-login-page, #loginPage) .ptv-extra-actions {
         grid-template-columns: 1fr;
+    }
+}
+
+@media (max-height: 720px) {
+    :is(.ptv-login-page, #loginPage) > .padded-left,
+    :is(.ptv-login-page, #loginPage) > .padded-right {
+        place-items: start center;
     }
 }
 

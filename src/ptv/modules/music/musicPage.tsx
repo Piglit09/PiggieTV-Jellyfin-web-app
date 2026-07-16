@@ -87,6 +87,10 @@ import {
     PTV_MUSIC_PLAYLISTS_CHANGED_EVENT,
     PtvMusicPlaylistModal
 } from './musicPlaylistModal';
+import {
+    getMusicHeroTrackCountLabel,
+    type MusicLibraryIndexLoadState
+} from './musicLoadState';
 import { buildPtvMusicRelatedTracks } from './musicRecommendations';
 import type {
     PtvRecommendationScoreDistribution
@@ -364,9 +368,9 @@ function logMusicPageEvent(name: string, detail: Record<string, unknown> = {}) {
 }
 
 function getMusicPerformanceNow() {
-    return typeof performance !== 'undefined' && typeof performance.now === 'function'
-        ? performance.now()
-        : Date.now();
+    return typeof performance !== 'undefined' && typeof performance.now === 'function' ?
+        performance.now() :
+        Date.now();
 }
 
 function getMusicQueueTimeoutMs() {
@@ -940,12 +944,10 @@ function filterAndSortMusicCatalogItems(
 
     return uniquePtvMusicItems(items)
         .filter(item => {
-            if (query && !getMusicCatalogSearchText(item).includes(query)) return false;
-            if (filter === 'favorites' && !item.UserData?.IsFavorite) return false;
-            if (filter === 'has-year' && !getItemYear(item)) return false;
-            if (filter === 'recent' && getMusicItemDateMs(item) < recentCutoffMs) return false;
-
-            return true;
+            return (!query || getMusicCatalogSearchText(item).includes(query))
+                && (filter !== 'favorites' || Boolean(item.UserData?.IsFavorite))
+                && (filter !== 'has-year' || Boolean(getItemYear(item)))
+                && (filter !== 'recent' || getMusicItemDateMs(item) >= recentCutoffMs);
         })
         .sort((left, right) => {
             if (sort === 'favorites') {
@@ -968,9 +970,9 @@ function filterAndSortMusicCatalogItems(
                     || getPtvMusicTitle(left).localeCompare(getPtvMusicTitle(right));
             }
 
-            return sort === 'title-desc'
-                ? getPtvMusicTitle(right).localeCompare(getPtvMusicTitle(left))
-                : getPtvMusicTitle(left).localeCompare(getPtvMusicTitle(right));
+            return sort === 'title-desc' ?
+                getPtvMusicTitle(right).localeCompare(getPtvMusicTitle(left)) :
+                getPtvMusicTitle(left).localeCompare(getPtvMusicTitle(right));
         });
 }
 
@@ -1724,10 +1726,11 @@ function QuickPicks({ items, subtitle = 'Library radio', title = 'Quick picks' }
 type MusicHomeHeroProps = Readonly<{
     homeData: PtvMusicHomeData;
     items: PtvMusicItem[];
+    libraryIndexLoadState: MusicLibraryIndexLoadState;
     onGenerated: (result: PtvMusicPlaylistResult) => void;
 }>;
 
-function MusicHomeHero({ homeData, items, onGenerated }: MusicHomeHeroProps) {
+function MusicHomeHero({ homeData, items, libraryIndexLoadState, onGenerated }: MusicHomeHeroProps) {
     const playbackActions = useMusicPlaybackActions();
     const heroItem = items[0] || getAllHomeTracks(homeData)[0] || null;
     const heroTracks = heroItem ? uniquePtvMusicItems([
@@ -1736,7 +1739,7 @@ function MusicHomeHero({ homeData, items, onGenerated }: MusicHomeHeroProps) {
         ...getAllHomeTracks(homeData)
     ]).slice(0, 36) : [];
     const libraryName = homeData.library?.name || 'Music';
-    const trackCountLabel = getMusicHeroTrackCountLabel(homeData);
+    const trackCountLabel = getMusicHeroTrackCountLabel(homeData, libraryIndexLoadState);
 
     const makeRadio = () => {
         if (!heroItem) return;
@@ -2239,10 +2242,11 @@ function SmartPlaylistPanel({ generated, onGenerated }: SmartPlaylistPanelProps)
 type MusicHomeViewProps = Readonly<{
     generated: PtvMusicPlaylistResult | null;
     homeData: PtvMusicHomeData;
+    libraryIndexLoadState: MusicLibraryIndexLoadState;
     onGenerated: (result: PtvMusicPlaylistResult) => void;
 }>;
 
-function MusicHomeView({ generated, homeData, onGenerated }: MusicHomeViewProps) {
+function MusicHomeView({ generated, homeData, libraryIndexLoadState, onGenerated }: MusicHomeViewProps) {
     const listenAgain = getListenAgainItems(homeData);
     const quickPicks = getQuickPicks(homeData);
     const continueListening = getSectionItems(homeData, 'continue-listening');
@@ -2265,7 +2269,12 @@ function MusicHomeView({ generated, homeData, onGenerated }: MusicHomeViewProps)
 
     return (
         <div className='ptv-music-view ptv-music-home-view'>
-            <MusicHomeHero homeData={homeData} items={listenAgain} onGenerated={onGenerated} />
+            <MusicHomeHero
+                homeData={homeData}
+                items={listenAgain}
+                libraryIndexLoadState={libraryIndexLoadState}
+                onGenerated={onGenerated}
+            />
             <MusicChips homeData={homeData} onGenerated={onGenerated} />
             <MusicRow
                 items={continueListening.length ? continueListening : listenAgain}
@@ -3554,15 +3563,6 @@ function getMusicLibraryCountLabel(
     return `${count} ${count === 1 ? singular : plural}`;
 }
 
-function getMusicHeroTrackCountLabel(homeData: PtvMusicHomeData) {
-    const state = getMusicLibraryCountState(homeData, 'tracks');
-
-    if (state === 'pending') return 'Loading library tracks';
-    if (state === 'failed' && homeData.stats.trackCount === 0) return '';
-
-    return `${homeData.stats.trackCount} library ${homeData.stats.trackCount === 1 ? 'track' : 'tracks'}`;
-}
-
 function mergeMusicHomeDataWithLibraryState(previous: PtvMusicHomeData, nextHomeData: PtvMusicHomeData): PtvMusicHomeData {
     if (!previous.libraryDebug) return nextHomeData;
 
@@ -3642,6 +3642,7 @@ export default function PiggieTvMusicPage() {
     const [albumDetail, setAlbumDetail] = useState<ItemDetailState>(getInitialItemDetail);
     const [playlistDetail, setPlaylistDetail] = useState<ItemDetailState>(getInitialItemDetail);
     const [isLoading, setLoading] = useState(true);
+    const [libraryIndexLoadState, setLibraryIndexLoadState] = useState<MusicLibraryIndexLoadState>('scheduled');
     const [errorMessage, setErrorMessage] = useState('');
     const activePlaybackActionRef = useRef<MusicPlaybackActionState | null>(null);
     const playbackTelemetryRef = useRef<MusicPlaybackActionTelemetry>({
@@ -3870,7 +3871,9 @@ export default function PiggieTvMusicPage() {
     }, [route.view]);
 
     const clearDeferredMusicWork = useCallback((ownerRoute = 'music', recordRouteExit = true) => {
-        musicDeferredTimersRef.current.forEach(timerId => window.clearTimeout(timerId));
+        musicDeferredTimersRef.current.forEach(timerId => {
+            window.clearTimeout(timerId);
+        });
         musicDeferredTimersRef.current = [];
 
         if (recordRouteExit) {
@@ -3904,6 +3907,9 @@ export default function PiggieTvMusicPage() {
         const libraryRequestId = ++musicLibraryIndexRequestIdRef.current;
 
         musicLibraryIndexActiveRequestKeyRef.current = libraryRequestKey;
+        if (musicMountedRef.current && ownerRequestId === musicRequestIdRef.current) {
+            setLibraryIndexLoadState('loading');
+        }
 
         return musicDataCoordinator.loadLibraryIndex({ forceRefresh })
             .then(libraryIndex => {
@@ -3916,6 +3922,7 @@ export default function PiggieTvMusicPage() {
                 }
 
                 setHomeData(previous => mergeMusicLibraryIndex(previous, libraryIndex));
+                setLibraryIndexLoadState('ready');
                 if (!libraryIndex.debug.failedSections.includes('playlists')) {
                     setPlaylists(libraryIndex.playlists.slice(0, PTV_MUSIC_LIBRARY_UI_RENDER_LIMIT));
                 }
@@ -3952,6 +3959,9 @@ export default function PiggieTvMusicPage() {
                 console.info('[PTV Music] music library UI counts', libraryUiDiagnostic);
             })
             .catch(error => {
+                if (musicMountedRef.current && ownerRequestId === musicRequestIdRef.current) {
+                    setLibraryIndexLoadState('failed');
+                }
                 recordPtvEvent('api', 'music-library-index-background-failed', {
                     error: getMusicErrorMessage(error)
                 });
@@ -3973,6 +3983,8 @@ export default function PiggieTvMusicPage() {
             || activeRouteView === 'albums'
             || activeRouteView === 'songs'
             || activeRouteView === 'playlists';
+
+        setLibraryIndexLoadState('scheduled');
 
         clearDeferredMusicWork(`music-${activeRouteView}-reload`, false);
         setLoading(true);
@@ -4317,13 +4329,13 @@ export default function PiggieTvMusicPage() {
         void Promise.all([
             fetchPtvMusicItem(route.id),
             fetchPtvMusicAlbumTracks(route.id)
-        ]).then(([item, tracks]) => {
+        ]).then(([item, albumTracks]) => {
             if (isMounted) {
                 setAlbumDetail({
                     error: '',
                     isLoading: false,
                     item,
-                    tracks
+                    tracks: albumTracks
                 });
             }
         }).catch(error => {
@@ -4357,13 +4369,13 @@ export default function PiggieTvMusicPage() {
         void Promise.all([
             fetchPtvMusicItem(route.id),
             fetchPtvMusicPlaylistTracks(route.id)
-        ]).then(([item, tracks]) => {
+        ]).then(([item, playlistTracks]) => {
             if (isMounted) {
                 setPlaylistDetail({
                     error: '',
                     isLoading: false,
                     item,
-                    tracks
+                    tracks: playlistTracks
                 });
             }
         }).catch(error => {
@@ -4441,7 +4453,14 @@ export default function PiggieTvMusicPage() {
                 return <PlayerView homeData={homeData} musicVideos={musicVideos} />;
             case 'home':
             default:
-                return <MusicHomeView generated={generated} homeData={homeData} onGenerated={setGenerated} />;
+                return (
+                    <MusicHomeView
+                        generated={generated}
+                        homeData={homeData}
+                        libraryIndexLoadState={libraryIndexLoadState}
+                        onGenerated={setGenerated}
+                    />
+                );
         }
     };
     const showToolbarTitle = shouldShowMusicToolbarTitle(route.view);

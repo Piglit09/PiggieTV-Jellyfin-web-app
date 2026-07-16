@@ -25,6 +25,7 @@ import {
 import { recordPtvRouteGenerationLifecycle } from './routeController';
 import { usePtvAdminDebugVisibility } from '../utils/usePtvAdminDebugVisibility';
 import PTVShellBackdrop from './PTVShellBackdrop';
+import PtvShellPrimaryDropdown from './PtvShellPrimaryDropdown';
 
 import './ptvShell.scss';
 
@@ -360,131 +361,6 @@ function getPtvShellNavGroups(section: PtvShellSection, hash: string): readonly 
             links: PTV_SHELL_SHOW_LINKS
         }
     ];
-}
-
-function PtvShellDropdown({
-    active,
-    icon,
-    id,
-    isOpen,
-    label,
-    onLinkClick,
-    onOpenFirstItem,
-    links,
-    onToggle
-}: PtvShellNavGroup & Readonly<{
-    isOpen: boolean;
-    onLinkClick: () => void;
-    onOpenFirstItem: () => void;
-    onToggle: () => void;
-}>) {
-    const panelId = `ptv-shell-${id}-menu`;
-    const panelRef = useRef<HTMLDivElement | null>(null);
-    const triggerRef = useRef<HTMLButtonElement | null>(null);
-    const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
-    const updatePanelPosition = useCallback(() => {
-        const rect = triggerRef.current?.getBoundingClientRect();
-
-        if (!rect) return;
-
-        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
-        const panelWidth = Math.min(Math.max(220, rect.width + 72), Math.max(220, viewportWidth - 28));
-        const left = Math.min(Math.max(14, rect.left), Math.max(14, viewportWidth - panelWidth - 14));
-        const top = Math.max(14, rect.bottom + 10);
-
-        setPanelStyle({
-            '--ptv-shell-dropdown-left': `${left}px`,
-            '--ptv-shell-dropdown-min-width': `${Math.max(220, rect.width)}px`,
-            '--ptv-shell-dropdown-top': `${top}px`,
-            '--ptv-shell-dropdown-width': `${panelWidth}px`
-        } as React.CSSProperties);
-    }, []);
-    const handleTriggerKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
-        if (event.key !== 'ArrowDown') return;
-
-        event.preventDefault();
-        updatePanelPosition();
-        onOpenFirstItem();
-        window.requestAnimationFrame(() => {
-            panelRef.current?.querySelector<HTMLAnchorElement>('a')?.focus();
-        });
-    }, [onOpenFirstItem, updatePanelPosition]);
-    const handleTriggerClick = useCallback(() => {
-        updatePanelPosition();
-        onToggle();
-    }, [onToggle, updatePanelPosition]);
-    const handlePanelKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-
-        const items = Array.from(panelRef.current?.querySelectorAll<HTMLAnchorElement>('a') || []);
-        if (!items.length) return;
-
-        event.preventDefault();
-        const currentIndex = Math.max(0, items.findIndex(item => item === document.activeElement));
-        const direction = event.key === 'ArrowDown' ? 1 : -1;
-        const nextIndex = (currentIndex + direction + items.length) % items.length;
-
-        items[nextIndex]?.focus();
-    }, []);
-
-    useEffect(() => {
-        if (!isOpen) return undefined;
-
-        const frame = window.requestAnimationFrame(updatePanelPosition);
-        const handleViewportChange = () => updatePanelPosition();
-
-        window.addEventListener('resize', handleViewportChange);
-        window.addEventListener('scroll', handleViewportChange, true);
-
-        return () => {
-            window.cancelAnimationFrame(frame);
-            window.removeEventListener('resize', handleViewportChange);
-            window.removeEventListener('scroll', handleViewportChange, true);
-        };
-    }, [isOpen, updatePanelPosition]);
-
-    return (
-        <div className={`ptv-shell-nav-dropdown${active ? ' is-active' : ''}${isOpen ? ' is-open' : ''}`}>
-            <button
-                ref={triggerRef}
-                aria-controls={panelId}
-                aria-expanded={isOpen}
-                aria-haspopup='menu'
-                className='ptv-shell-nav-button'
-                onClick={handleTriggerClick}
-                onKeyDown={handleTriggerKeyDown}
-                type='button'
-            >
-                <PtvIcon name={icon} />
-                <span>{label}</span>
-                <span className='ptv-shell-nav-caret' aria-hidden='true' />
-            </button>
-            {isOpen ? (
-                <div
-                    ref={panelRef}
-                    className='ptv-shell-dropdown-panel'
-                    id={panelId}
-                    onKeyDown={handlePanelKeyDown}
-                    role='menu'
-                    style={panelStyle}
-                    tabIndex={-1}
-                >
-                    {links.map(link => (
-                        <a
-                            key={link.id}
-                            className='ptv-shell-dropdown-link'
-                            href={link.href}
-                            onClick={onLinkClick}
-                            role='menuitem'
-                        >
-                            <PtvIcon name={link.icon} />
-                            <span>{link.label}</span>
-                        </a>
-                    ))}
-                </div>
-            ) : null}
-        </div>
-    );
 }
 
 function PtvShellDirectLink({ href, icon, label, onClick }: PtvShellNavLink & Readonly<{ onClick: () => void }>) {
@@ -1074,6 +950,7 @@ export default function PTVShell({
 
     useEffect(() => {
         if (!openPanel && !isSearchExpanded) return undefined;
+        if (openPanel === 'movies' || openPanel === 'shows') return undefined;
 
         const handlePointerDown = (event: PointerEvent) => {
             if (headerRef.current?.contains(event.target as Node)) return;
@@ -1157,7 +1034,7 @@ export default function PTVShell({
                 >
                     <div className='ptv-shell-nav-primary'>
                         {navGroups.map(group => (
-                            <PtvShellDropdown
+                            <PtvShellPrimaryDropdown
                                 key={group.id}
                                 {...group}
                                 isOpen={openPanel === group.id}

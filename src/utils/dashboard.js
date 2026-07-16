@@ -18,6 +18,10 @@ import itemIdentifier from '../components/itemidentifier/itemidentifier';
 import { getLocationSearch } from './url.ts';
 import { queryClient } from './query/queryClient';
 import { PTV_CONFIG } from 'ptv/core/config';
+import {
+    buildPtvServerOriginCandidates,
+    getRequestedPtvServerId
+} from 'ptv/core/serverOriginSelection';
 import { isPtvWebpackDevServerOrigin } from 'ptv/core/urlOrigins';
 
 const SERVER_DISCOVERY_TIMEOUT_MS = 2200;
@@ -28,32 +32,26 @@ export function getCurrentUser() {
 
 // TODO: investigate url prefix support for serverAddress function
 export async function serverAddress() {
-    const apiClient = window.ApiClient;
-
-    if (apiClient) {
-        const currentServerAddress = apiClient.serverAddress();
-
-        if (!isDevStaticServerUrl(currentServerAddress)) {
-            return Promise.resolve(currentServerAddress);
-        }
-    }
-
     // Use servers specified in config.json
     const configuredUrls = await webSettings.getServers();
-    const urls = [];
+    const requestedServerId = getRequestedPtvServerId(getLocationSearch());
+    const requestedServer = requestedServerId ?
+        ServerConnections.getServerInfo(requestedServerId) :
+        null;
+    const apiClient = ServerConnections.currentApiClient() || window.ApiClient;
+    const development = PTV_CONFIG.runtime.mode === 'development';
+    const urls = buildPtvServerOriginCandidates({
+        apiClient,
+        configuredUrls,
+        development,
+        explicitDevelopmentUrl: PTV_CONFIG.runtime.devJellyfinServerUrl,
+        fallbackOrigin: window.location.origin,
+        fallbackServer: requestedServer ? null : ServerConnections.getLastUsedServer(),
+        requestedServer,
+        runtimeUrls: PTV_CONFIG.runtime.jellyfinServerUrlCandidates || [PTV_CONFIG.serverUrl]
+    });
 
-    function addServerUrl(url) {
-        const normalizedUrl = trimTrailingSlash(String(url || '').trim());
-
-        if (normalizedUrl && !urls.includes(normalizedUrl)) {
-            urls.push(normalizedUrl);
-        }
-    }
-
-    (PTV_CONFIG.runtime.jellyfinServerUrlCandidates || [PTV_CONFIG.serverUrl]).forEach(addServerUrl);
-    configuredUrls.forEach(addServerUrl);
-
-    if (urls.length === 0) {
+    if (urls.length === 0 && !development) {
         // Otherwise use computed base URL
         let url;
         const index = window.location.href.toLowerCase().lastIndexOf('/web');
@@ -72,20 +70,15 @@ export async function serverAddress() {
         urls.push(url);
     }
 
-    console.debug('URL candidates:', urls);
+    console.debug(`[PTV] Discovering Jellyfin server from ${urls.length} candidate(s).`);
 
-    const promises = urls.map(url => fetchServerInfoWithTimeout(url));
+    for (const url of urls) {
+        const response = await fetchServerInfoWithTimeout(url);
 
-    return Promise.all(promises).then(responses => {
-        return responses.filter(obj => obj?.config);
-    }).then(configs => {
-        const selection = configs.find(obj => !obj.config.StartupWizardCompleted) || configs[0];
-        return selection?.url || getFallbackServerUrl(urls);
-    }).catch(error => {
-        console.error(error);
+        if (response?.config) return response.url;
+    }
 
-        return getFallbackServerUrl(urls);
-    });
+    return getFallbackServerUrl(urls);
 }
 
 function fetchServerInfo(url) {
@@ -106,8 +99,8 @@ function fetchServerInfo(url) {
                 url,
                 config
             };
-        }).catch(error => {
-            console.debug('[PTV] Server discovery candidate failed:', url, error);
+        }).catch(() => {
+            console.debug('[PTV] Jellyfin server discovery candidate was unreachable.');
         });
 }
 
@@ -116,7 +109,7 @@ function fetchServerInfoWithTimeout(url) {
         fetchServerInfo(url),
         new Promise(resolve => {
             window.setTimeout(() => {
-                console.debug('[PTV] Server discovery candidate timed out:', url);
+                console.debug('[PTV] Jellyfin server discovery candidate timed out.');
                 resolve(undefined);
             }, SERVER_DISCOVERY_TIMEOUT_MS);
         })
@@ -139,16 +132,6 @@ function isDevStaticServerUrl(url) {
     } catch {
         return false;
     }
-}
-
-function trimTrailingSlash(value) {
-    let nextValue = value;
-
-    while (nextValue.endsWith('/')) {
-        nextValue = nextValue.slice(0, -1);
-    }
-
-    return nextValue;
 }
 
 export function getCurrentUserId() {

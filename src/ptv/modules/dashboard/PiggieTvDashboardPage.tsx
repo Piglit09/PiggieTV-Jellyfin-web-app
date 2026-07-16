@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import Page from 'components/Page';
 import { getUserViewsQuery } from 'hooks/useUserViews';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import Events from 'utils/events';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 
@@ -41,7 +42,8 @@ import {
     getPtvPluginApiResolvedUrl,
     isPtvPluginApiCoolingDown,
     normalizePtvApiError,
-    resetPtvPluginApiAvailability
+    resetPtvPluginApiAvailability,
+    waitForCurrentPtvPluginApiClient
 } from '../../core/pluginApi';
 import {
     clearFeaturedContentCache,
@@ -3256,13 +3258,38 @@ const PiggieTvDashboardPage = () => {
     }, [pluginState]);
 
     useEffect(() => {
+        const clientWaitController = createDashboardAbortController();
+        const hydratePluginState = (origin: string) => {
+            void waitForCurrentPtvPluginApiClient({ signal: clientWaitController?.signal })
+                .then(() => {
+                    resetPtvPluginApiAvailability();
+                    return Promise.all([
+                        refreshPluginStatus(),
+                        loadPluginSettings({
+                            hydrateDrafts: true,
+                            origin
+                        })
+                    ]);
+                })
+                .catch((err: unknown) => {
+                    if (clientWaitController?.signal.aborted) return;
+
+                    setPluginState({
+                        connected: false,
+                        connectionState: 'endpoint-unreachable',
+                        error: getErrorMessage(err),
+                        loading: false,
+                        status: null
+                    });
+                });
+        };
+        const handleLocalUserSignedIn = () => hydratePluginState('authenticated client ready');
+
+        Events.on(ServerConnections, 'localusersignedin', handleLocalUserSignedIn);
+
         if (!initialHydrationStartedRef.current) {
             initialHydrationStartedRef.current = true;
-            void refreshPluginStatus();
-            void loadPluginSettings({
-                hydrateDrafts: true,
-                origin: 'dashboard mount'
-            });
+            hydratePluginState('dashboard mount');
         }
 
         syncCacheStatus();
@@ -3297,11 +3324,13 @@ const PiggieTvDashboardPage = () => {
         window.addEventListener(PTV_FEATURE_SETTINGS_CHANGE_EVENT, handleFeatureSettingsChange);
 
         return () => {
+            clientWaitController?.abort();
             Object.values(integrationTestAbortRef.current).forEach(controller => {
                 controller?.abort();
             });
             integrationTestAbortRef.current = {};
             integrationTestRequestRef.current = {};
+            Events.off(ServerConnections, 'localusersignedin', handleLocalUserSignedIn);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleCacheUpdate);
             window.removeEventListener('ptv:debug:change', handleDebugChange);

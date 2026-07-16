@@ -12,6 +12,11 @@ import {
 } from '../src/ptv/pages/browse/focusedBrowseLoader';
 import { PtvUpdateService } from '../src/ptv/services/updateService';
 import { getPtvRouteOwnership } from '../src/ptv/shell/routes';
+import {
+    getPtvDropdownOverlayPosition,
+    getPtvDropdownViewport,
+    hasPtvDropdownPointerMoved
+} from '../src/ptv/shell/primaryNavigationDropdown';
 
 const root = document.getElementById('app');
 
@@ -25,6 +30,11 @@ style.textContent = `
     body { min-height: 140vh; margin: 0; }
     button, a { min-height: 2.75rem; }
     .authenticated-header { display: flex; gap: 1rem; padding: 1rem; background: #211635; }
+    .primary-navigation-header { position: relative; z-index: 50; padding: 1rem; background: #211635; }
+    .primary-navigation-scroll { display: flex; gap: .75rem; overflow-x: auto; overflow-y: hidden; padding: .5rem; backdrop-filter: blur(18px); }
+    .primary-navigation-trigger { flex: 0 0 auto; min-width: 7rem; border: 1px solid #7955a5; border-radius: 1.4rem; color: #fff; background: #2b1b42; }
+    .primary-navigation-panel { position: fixed; z-index: 10050; display: grid; gap: .25rem; overflow-y: auto; padding: .65rem; border: 1px solid #a77ad8; border-radius: 1rem; background: rgba(35, 20, 57, .96); box-shadow: 0 1rem 3rem rgba(0, 0, 0, .55); }
+    .primary-navigation-panel a { display: flex; align-items: center; padding: .25rem .75rem; color: #fff; text-decoration: none; }
     .auth-card, .browse-page { margin: 5rem auto; width: min(90%, 60rem); padding: 2rem; border: 1px solid #7955a5; }
     .browse-items { display: flex; gap: 1rem; overflow-x: auto; }
     .browse-card { flex: 0 0 10rem; padding: 1rem; background: #2b1b42; }
@@ -44,6 +54,7 @@ const loadOwner = new PtvFocusedBrowseLoadOwner();
 const scrollPositions = new Map<string, number>();
 let activeHash = '';
 let renderedIds: string[] = [];
+let cleanupPrimaryNavigation = () => undefined;
 
 function addElement<K extends keyof HTMLElementTagNameMap>(
     parent: HTMLElement,
@@ -85,7 +96,7 @@ function getFixtureItems(label: string) {
     }));
 }
 
-function renderHeader() {
+function renderBasicHeader() {
     const header = addElement(root, 'header', {
         className: 'authenticated-header',
         text: 'PiggieTV authenticated navigation'
@@ -96,6 +107,194 @@ function renderHeader() {
     const movies = addElement(header, 'a', { text: 'Movies' });
 
     movies.href = '#/movies';
+}
+
+function renderPrimaryNavigationHeader() {
+    const header = addElement(root, 'header', { className: 'primary-navigation-header' });
+    const navigation = addElement(header, 'nav', { className: 'primary-navigation-scroll' });
+    const menus = [{
+        id: 'movies',
+        label: 'Movies',
+        links: [
+            { href: '#/movies', label: 'Movies' },
+            { href: '#/movies?view=anime', label: 'AniMovies' },
+            { href: '#/movies?view=collections', label: 'Collections' }
+        ]
+    }, {
+        id: 'shows',
+        label: 'Shows',
+        links: [
+            { href: '#/shows', label: 'TV Shows' },
+            { href: '#/shows?view=anime', label: 'Anime' },
+            { href: '#/shows?view=cartoons', label: 'Cartoons' }
+        ]
+    }];
+    let activeMenuId = '';
+    let activePanel: HTMLElement | null = null;
+    let activeTrigger: HTMLButtonElement | null = null;
+    let positionFrame = 0;
+    let gesture: Readonly<{ id: number; moved: boolean; startX: number; startY: number }> | null = null;
+    let suppressNextClick = false;
+
+    const closeMenu = (restoreFocus = false) => {
+        const trigger = activeTrigger;
+
+        activePanel?.remove();
+        activePanel = null;
+        activeMenuId = '';
+        activeTrigger = null;
+        navigation.querySelectorAll('button').forEach(button => {
+            button.setAttribute('aria-expanded', 'false');
+        });
+        if (restoreFocus) trigger?.focus();
+    };
+    const updatePosition = () => {
+        positionFrame = 0;
+        if (!activePanel || !activeTrigger) return;
+        const position = getPtvDropdownOverlayPosition(
+            activeTrigger.getBoundingClientRect(),
+            getPtvDropdownViewport(),
+            activePanel.getBoundingClientRect().height || 180
+        );
+
+        Object.assign(activePanel.style, {
+            left: `${position.left}px`,
+            maxHeight: `${position.maxHeight}px`,
+            top: `${position.top}px`,
+            width: `${position.width}px`
+        });
+    };
+    const schedulePosition = () => {
+        if (positionFrame) return;
+        positionFrame = window.requestAnimationFrame(updatePosition);
+    };
+    const openMenu = (trigger: HTMLButtonElement, menu: typeof menus[number], focusFirst = false) => {
+        closeMenu();
+        activeMenuId = menu.id;
+        activeTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+        const panel = document.createElement('div');
+
+        panel.className = 'primary-navigation-panel';
+        panel.dataset.e2ePrimaryMenu = menu.id;
+        panel.id = `primary-navigation-menu-${menu.id}`;
+        panel.setAttribute('aria-labelledby', trigger.id);
+        panel.setAttribute('role', 'menu');
+        menu.links.forEach(link => {
+            const anchor = addElement(panel, 'a', { text: link.label });
+
+            anchor.href = link.href;
+            anchor.setAttribute('role', 'menuitem');
+            anchor.addEventListener('click', () => {
+                document.documentElement.dataset.dropdownNavigationCount = String(
+                    Number(document.documentElement.dataset.dropdownNavigationCount || 0) + 1
+                );
+                closeMenu();
+            });
+        });
+        document.body.append(panel);
+        activePanel = panel;
+        updatePosition();
+        if (focusFirst) panel.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    };
+
+    menus.forEach(menu => {
+        const trigger = addElement(navigation, 'button', {
+            className: 'primary-navigation-trigger',
+            text: `${menu.label} ⌄`
+        });
+
+        trigger.type = 'button';
+        trigger.id = `primary-navigation-trigger-${menu.id}`;
+        trigger.setAttribute('aria-controls', `primary-navigation-menu-${menu.id}`);
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.setAttribute('aria-haspopup', 'menu');
+        trigger.addEventListener('pointerdown', event => {
+            gesture = { id: event.pointerId, moved: false, startX: event.clientX, startY: event.clientY };
+        });
+        trigger.addEventListener('pointermove', event => {
+            if (!gesture || event.pointerId !== gesture.id) return;
+            gesture = {
+                ...gesture,
+                moved: gesture.moved || hasPtvDropdownPointerMoved(
+                    gesture.startX,
+                    gesture.startY,
+                    event.clientX,
+                    event.clientY
+                )
+            };
+        });
+        trigger.addEventListener('pointerup', event => {
+            if (!gesture || event.pointerId !== gesture.id) return;
+            suppressNextClick = gesture.moved;
+            gesture = null;
+        });
+        trigger.addEventListener('pointercancel', () => {
+            suppressNextClick = true;
+            gesture = null;
+        });
+        trigger.addEventListener('click', event => {
+            if (suppressNextClick && event.detail !== 0) {
+                suppressNextClick = false;
+                return;
+            }
+            suppressNextClick = false;
+            if (activeMenuId === menu.id) closeMenu();
+            else openMenu(trigger, menu);
+        });
+        trigger.addEventListener('keydown', event => {
+            if (event.key !== 'ArrowDown') return;
+            event.preventDefault();
+            openMenu(trigger, menu, true);
+        });
+    });
+    for (const [label, href] of [
+        ['Music', '#/music'],
+        ['Reading', '#/reading'],
+        ['Request', '#/requests']
+    ]) {
+        const link = addElement(navigation, 'a', { text: label });
+
+        link.href = href;
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+        const target = event.target as Node | null;
+
+        if (!activePanel || !target || activePanel.contains(target) || activeTrigger?.contains(target)) return;
+        closeMenu();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape' && activePanel) closeMenu(true);
+    };
+
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('resize', schedulePosition);
+    window.addEventListener('orientationchange', schedulePosition);
+    navigation.addEventListener('scroll', schedulePosition, { passive: true });
+    window.visualViewport?.addEventListener('resize', schedulePosition);
+    window.visualViewport?.addEventListener('scroll', schedulePosition);
+    cleanupPrimaryNavigation = () => {
+        closeMenu();
+        if (positionFrame) window.cancelAnimationFrame(positionFrame);
+        document.removeEventListener('pointerdown', onPointerDown, true);
+        document.removeEventListener('keydown', onKeyDown, true);
+        window.removeEventListener('resize', schedulePosition);
+        window.removeEventListener('orientationchange', schedulePosition);
+        navigation.removeEventListener('scroll', schedulePosition);
+        window.visualViewport?.removeEventListener('resize', schedulePosition);
+        window.visualViewport?.removeEventListener('scroll', schedulePosition);
+        cleanupPrimaryNavigation = () => undefined;
+    };
+}
+
+function renderHeader() {
+    if (new URLSearchParams(window.location.search).get('dropdown') === '1') {
+        renderPrimaryNavigationHeader();
+    } else {
+        renderBasicHeader();
+    }
 }
 
 function renderAuthentication() {
@@ -224,6 +423,7 @@ function renderDiagnostics() {
 function renderRoute() {
     if (activeHash) scrollPositions.set(activeHash, window.scrollY);
     activeHash = window.location.hash || '#/home';
+    cleanupPrimaryNavigation();
     root.replaceChildren();
     root.dataset.authenticationRoute = String(isPtvAuthenticationRoute(getLocationState()));
     const ownership = getPtvRouteOwnership(getLocationState());

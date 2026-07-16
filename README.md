@@ -248,6 +248,19 @@ Run the local development server:
 npm start
 ```
 
+When the Webpack host and Jellyfin host differ, configure the backend explicitly before starting Webpack. The development server never infers or rewrites the Jellyfin hostname from the frontend hostname, and production builds ignore this variable.
+
+```sh
+PTV_DEV_JELLYFIN_URL=http://jellyfin-host:8096 npm start
+```
+
+PowerShell:
+
+```powershell
+$env:PTV_DEV_JELLYFIN_URL = 'http://jellyfin-host:8096'
+npm start
+```
+
 Type-check:
 
 ```sh

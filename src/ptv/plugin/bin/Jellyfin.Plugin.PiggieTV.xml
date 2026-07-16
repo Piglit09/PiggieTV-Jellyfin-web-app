@@ -580,6 +580,31 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.Routes">
             <summary>Gets or sets overrides indexed by route kind and Jellyfin item id.</summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.PersistedRoutes">
+            <summary>Gets or sets the XML-safe representation persisted by Jellyfin.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideRouteEntry">
+            <summary>
+            XML-safe persisted Reading route entry.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideRouteEntry.RouteKind">
+            <summary>Gets or sets the Reading route kind.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideRouteEntry.Overrides">
+            <summary>Gets or sets the persisted item corrections.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideItemEntry">
+            <summary>
+            XML-safe persisted Reading item correction entry.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideItemEntry.ItemId">
+            <summary>Gets or sets the Jellyfin item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideItemEntry.Value">
+            <summary>Gets or sets the correction value.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition">
             <summary>
             One administrator-defined Reading series correction.

@@ -6,8 +6,14 @@ import './music.scss';
 
 const MUSIC_QUEUE_ACTIVITY_EVENT = 'ptv:music-queue-activity';
 
-let musicPlayerRoot: import('react-dom/client').Root | null = null;
-let musicPlayerLoadPromise: Promise<void> | null = null;
+type PtvMusicOverlayWindow = Window & {
+    __ptvMusicOverlayLoadPromise?: Promise<void> | null;
+    __ptvMusicOverlayRoot?: import('react-dom/client').Root | null;
+};
+
+function getMusicOverlayWindow() {
+    return window as PtvMusicOverlayWindow;
+}
 
 recordPtvEvent('render', 'music-style-loaded', {
     module: 'music'
@@ -17,9 +23,11 @@ function isPtvMusicRouteHash(hash = window.location.hash) {
     return /^#\/music(?:[/?]|$)/i.test(hash);
 }
 
-function ensureMusicPlayerDock(source = 'unknown') {
-    if (musicPlayerRoot) return Promise.resolve();
-    if (musicPlayerLoadPromise) return musicPlayerLoadPromise;
+function ensureMusicPlayerOverlay(source = 'unknown') {
+    const overlayWindow = getMusicOverlayWindow();
+
+    if (overlayWindow.__ptvMusicOverlayRoot) return Promise.resolve();
+    if (overlayWindow.__ptvMusicOverlayLoadPromise) return overlayWindow.__ptvMusicOverlayLoadPromise;
 
     let host = document.querySelector('[data-ptv-music-player-root="true"]');
 
@@ -29,39 +37,39 @@ function ensureMusicPlayerDock(source = 'unknown') {
         document.body.append(host);
     }
 
-    musicPlayerLoadPromise = Promise.all([
+    overlayWindow.__ptvMusicOverlayLoadPromise = Promise.all([
         import('react'),
         import('react-dom/client'),
         import('./musicPlayer')
-    ]).then(([React, { createRoot }, { default: PtvMusicPlayerDock }]) => {
-        if (musicPlayerRoot) return;
+    ]).then(([React, { createRoot }, { default: PtvMusicOverlayHost }]) => {
+        if (overlayWindow.__ptvMusicOverlayRoot) return;
 
-        musicPlayerRoot = createRoot(host);
-        musicPlayerRoot.render(React.createElement(PtvMusicPlayerDock));
-        recordPtvEvent('render', 'music-player-ready', {
+        overlayWindow.__ptvMusicOverlayRoot = createRoot(host);
+        overlayWindow.__ptvMusicOverlayRoot.render(React.createElement(PtvMusicOverlayHost));
+        recordPtvEvent('render', 'music-player-overlay-ready', {
             persistent: true,
             source
         });
     }).catch(error => {
-        musicPlayerLoadPromise = null;
-        recordPtvEvent('render', 'music-player-load-failed', {
+        overlayWindow.__ptvMusicOverlayLoadPromise = null;
+        recordPtvEvent('render', 'music-player-overlay-load-failed', {
             error: error instanceof Error ? error.message : String(error),
             source
         });
-        console.warn('[PTV Music] Failed to load music player dock', error);
+        console.warn('[PTV Music] Failed to load music player overlay', error);
     });
 
-    return musicPlayerLoadPromise;
+    return overlayWindow.__ptvMusicOverlayLoadPromise;
 }
 
 function registerMusicPlayerActivationListeners() {
     const loadForRoute = () => {
         if (isPtvMusicRouteHash()) {
-            void ensureMusicPlayerDock('music-route');
+            void ensureMusicPlayerOverlay('music-route');
         }
     };
     const loadForQueue = () => {
-        void ensureMusicPlayerDock('queue-activity');
+        void ensureMusicPlayerOverlay('queue-activity');
     };
 
     loadForRoute();

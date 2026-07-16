@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Xml.Serialization;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.PiggieTV.Configuration;
@@ -130,7 +131,83 @@ public sealed class ReadingSeriesOverrideSettings
     public int SchemaVersion { get; set; } = 1;
 
     /// <summary>Gets or sets overrides indexed by route kind and Jellyfin item id.</summary>
+    [XmlIgnore]
     public Dictionary<string, Dictionary<string, ReadingSeriesOverrideDefinition>> Routes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Gets or sets the XML-safe representation persisted by Jellyfin.</summary>
+    [JsonIgnore]
+    [XmlArray("Routes")]
+    [XmlArrayItem("Route")]
+    public ReadingSeriesOverrideRouteEntry[] PersistedRoutes
+    {
+        get => Routes
+            .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(entry => new ReadingSeriesOverrideRouteEntry
+            {
+                RouteKind = entry.Key,
+                Overrides = entry.Value
+                    .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(item => new ReadingSeriesOverrideItemEntry
+                    {
+                        ItemId = item.Key,
+                        Value = item.Value
+                    })
+                    .ToArray()
+            })
+            .ToArray();
+        set
+        {
+            Routes = new Dictionary<string, Dictionary<string, ReadingSeriesOverrideDefinition>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var route in value ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(route.RouteKind))
+                {
+                    continue;
+                }
+
+                var items = new Dictionary<string, ReadingSeriesOverrideDefinition>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var item in route.Overrides ?? [])
+                {
+                    if (!string.IsNullOrWhiteSpace(item.ItemId) && item.Value is not null)
+                    {
+                        items[item.ItemId] = item.Value;
+                    }
+                }
+
+                Routes[route.RouteKind] = items;
+            }
+        }
+    }
+}
+
+/// <summary>
+/// XML-safe persisted Reading route entry.
+/// </summary>
+public sealed class ReadingSeriesOverrideRouteEntry
+{
+    /// <summary>Gets or sets the Reading route kind.</summary>
+    [XmlAttribute("Kind")]
+    public string RouteKind { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the persisted item corrections.</summary>
+    [XmlArray("Overrides")]
+    [XmlArrayItem("Override")]
+    public ReadingSeriesOverrideItemEntry[] Overrides { get; set; } = [];
+}
+
+/// <summary>
+/// XML-safe persisted Reading item correction entry.
+/// </summary>
+public sealed class ReadingSeriesOverrideItemEntry
+{
+    /// <summary>Gets or sets the Jellyfin item id.</summary>
+    [XmlAttribute("ItemId")]
+    public string ItemId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the correction value.</summary>
+    public ReadingSeriesOverrideDefinition? Value { get; set; }
 }
 
 /// <summary>

@@ -2138,116 +2138,6 @@ body.ptv-route-music-mounted .skinHeader {
     background: linear-gradient(110deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07));
 }
 
-.ptv-music-mini-player {
-    position: fixed;
-    z-index: calc(var(--ptv-shell-z-overlay, 1400) + 50);
-    right: 0;
-    bottom: 0;
-    left: 0;
-    display: grid;
-    grid-template-columns: minmax(220px, 1fr) auto minmax(260px, 1fr);
-    align-items: center;
-    gap: 18px;
-    min-height: var(--ptv-music-mini-height);
-    border-top: 1px solid var(--ptv-music-line);
-    background: rgba(28, 28, 31, 0.98);
-    color: var(--ptv-music-text);
-    padding: 10px 18px;
-    box-shadow: 0 -18px 70px rgba(0, 0, 0, 0.5);
-}
-
-[data-ptv-music-player-root='true'] .ptv-music-mini-progress,
-.ptv-music-mini-progress {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    height: 8px;
-    min-height: 8px;
-    max-height: 8px;
-    appearance: none;
-    border: 0;
-    border-radius: 0;
-    background: rgba(255, 255, 255, 0.14);
-    padding: 0;
-    cursor: pointer;
-}
-
-[data-ptv-music-player-root='true'] .ptv-music-mini-progress:hover,
-[data-ptv-music-player-root='true'] .ptv-music-mini-progress:focus-visible,
-.ptv-music-mini-progress:hover,
-.ptv-music-mini-progress:focus-visible {
-    background: rgba(255, 255, 255, 0.2);
-}
-
-[data-ptv-music-player-root='true'] .ptv-music-mini-progress span,
-.ptv-music-mini-progress span {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    display: block;
-    width: var(--ptv-music-progress, 0%);
-    background: linear-gradient(90deg, var(--ptv-music-purple), #d946ef, var(--ptv-music-pink));
-    pointer-events: none;
-}
-
-.ptv-music-mini-now-playing {
-    display: grid;
-    grid-template-columns: 52px minmax(0, 1fr);
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    text-align: left;
-}
-
-.ptv-music-mini-now-playing:hover {
-    background: transparent;
-}
-
-.ptv-music-mini-now-playing img {
-    width: 52px;
-    height: 52px;
-    border-radius: 5px;
-}
-
-.ptv-music-mini-now-playing span {
-    min-width: 0;
-}
-
-.ptv-music-mini-transport {
-    justify-content: center;
-}
-
-.ptv-music-mini-time {
-    min-width: 84px;
-    font-size: 0.78rem;
-    white-space: nowrap;
-}
-
-.ptv-music-mini-controls {
-    justify-content: end;
-}
-
-.ptv-music-mini-volume {
-    display: grid;
-    grid-template-columns: 36px 92px;
-    align-items: center;
-    gap: 8px;
-}
-
-.ptv-music-mini-volume button {
-    width: 36px;
-    min-width: 36px;
-    height: 36px;
-    min-height: 36px;
-}
-
 .ptv-music-fullscreen {
     position: fixed;
     z-index: calc(var(--ptv-shell-z-overlay, 1400) + 70);
@@ -2661,10 +2551,6 @@ body.ptv-route-music-mounted .skinHeader {
     margin: 0;
 }
 
-html.ptv-music-active .nowPlayingBar {
-    display: none !important;
-}
-
 @keyframes ptv-music-spin {
     to {
         transform: rotate(360deg);
@@ -2798,15 +2684,6 @@ html.ptv-music-active .nowPlayingBar {
     .ptv-music-track-row > span {
         display: none;
     }
-
-    .ptv-music-mini-player {
-        grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .ptv-music-mini-controls {
-        grid-column: 1 / -1;
-        justify-content: space-between;
-    }
 }
 
 @media (max-width: 620px) {
@@ -2880,17 +2757,6 @@ html.ptv-music-active .nowPlayingBar {
     .ptv-music-artist-hero {
         min-height: 360px;
         padding: 24px;
-    }
-
-    .ptv-music-mini-player {
-        gap: 10px;
-        padding: 9px 10px;
-    }
-
-    .ptv-music-mini-time,
-    .ptv-music-mini-volume,
-    .ptv-music-mini-controls .ptv-music-control:not(.ptv-music-control-primary):nth-last-child(-n + 2) {
-        display: none;
     }
 }
 

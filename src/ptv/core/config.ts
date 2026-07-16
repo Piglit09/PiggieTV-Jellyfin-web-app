@@ -1,10 +1,15 @@
-import { getPtvStaticAssetBaseUrl, isPtvWebpackDevServerOrigin } from './urlOrigins';
+import {
+    getPtvStaticAssetBaseUrl,
+    isPtvWebpackDevServerOrigin,
+    resolvePtvServerUrlForPage
+} from './urlOrigins';
 
 const isWebpackDevServer = typeof __WEBPACK_SERVE__ !== 'undefined' && __WEBPACK_SERVE__;
 const isDev = isWebpackDevServer || isPtvWebpackDevServerOrigin();
-const fallbackDevJellyfinServerUrl =
-    // eslint-disable-next-line sonarjs/no-clear-text-protocols
-    'http://10.16.0.50:8096';
+const configuredDevJellyfinServerUrl = isDev
+    && typeof __PTV_DEV_JELLYFIN_URL__ !== 'undefined' ?
+    __PTV_DEV_JELLYFIN_URL__ :
+    '';
 
 function trimTrailingSlash(value: string) {
     let nextValue = value;
@@ -17,7 +22,10 @@ function trimTrailingSlash(value: string) {
 }
 
 function addRuntimeCandidate(candidates: string[], url: string) {
-    const normalizedUrl = trimTrailingSlash(String(url || '').trim());
+    const normalizedUrl = trimTrailingSlash(resolvePtvServerUrlForPage(url, {
+        development: isDev,
+        pageUrl: window.location.href
+    }));
 
     if (!normalizedUrl || candidates.includes(normalizedUrl)) return;
 
@@ -34,30 +42,15 @@ function getStoredDevJellyfinServerUrl() {
     }
 }
 
-function getSameHostJellyfinUrl(port: string) {
-    const protocol = window.location.protocol || 'http:';
-    const hostname = window.location.hostname;
-
-    if (!hostname) return '';
-
-    return `${protocol}//${hostname}:${port}`;
-}
-
 function getJellyfinServerUrlCandidates() {
     const candidates: string[] = [];
 
     if (isDev) {
+        addRuntimeCandidate(candidates, configuredDevJellyfinServerUrl);
         addRuntimeCandidate(candidates, getStoredDevJellyfinServerUrl());
-
-        if (isPtvWebpackDevServerOrigin()) {
-            addRuntimeCandidate(candidates, getSameHostJellyfinUrl('8096'));
-            addRuntimeCandidate(candidates, getSameHostJellyfinUrl('8920'));
-        }
-
-        addRuntimeCandidate(candidates, fallbackDevJellyfinServerUrl);
+    } else {
+        addRuntimeCandidate(candidates, window.location.origin);
     }
-
-    addRuntimeCandidate(candidates, window.location.origin);
 
     return candidates;
 }
@@ -65,9 +58,10 @@ function getJellyfinServerUrlCandidates() {
 const jellyfinServerUrlCandidates = getJellyfinServerUrlCandidates();
 
 export const PTV_RUNTIME = {
+    devJellyfinServerUrl: isDev ? trimTrailingSlash(configuredDevJellyfinServerUrl) : '',
     devStaticAssetBaseUrl: isDev ? getPtvStaticAssetBaseUrl() : '',
     devStaticAssetOrigin: isDev ? window.location.origin : '',
-    jellyfinServerUrl: jellyfinServerUrlCandidates[0] || window.location.origin,
+    jellyfinServerUrl: jellyfinServerUrlCandidates[0] || (isDev ? '' : window.location.origin),
     jellyfinServerUrlCandidates,
     mode: isDev ? 'development' : 'production'
 } as const;

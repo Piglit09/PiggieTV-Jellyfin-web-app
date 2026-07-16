@@ -16,7 +16,8 @@ test.describe('general runtime integration', () => {
         await expect(page.locator('html')).not.toHaveAttribute('data-skip-waiting-requested', 'true');
     });
 
-    test('supports keyboard focus through authenticated navigation', async ({ page }) => {
+    test('supports keyboard focus through authenticated navigation', async ({ browserName, page }) => {
+        test.skip(browserName === 'webkit', 'Safari link tabbing depends on the platform full-keyboard-access preference.');
         await page.goto('/#/home');
         await page.keyboard.press('Tab');
 

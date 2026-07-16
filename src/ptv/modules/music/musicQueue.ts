@@ -31,6 +31,7 @@ const MUSIC_PLAYER_HASH = '#/music/player';
 const MUSIC_QUEUE_ACTIVITY_EVENT = 'ptv:music-queue-activity';
 const DEFAULT_PTV_MUSIC_VOLUME_LEVEL = 50;
 const DEFAULT_PTV_MUSIC_VOLUME = DEFAULT_PTV_MUSIC_VOLUME_LEVEL / 100;
+const MUSIC_QUEUE_PROGRESS_PUBLISH_INTERVAL_MS = 1000;
 const DIRECT_AUDIO_CONTAINERS = [
     'mp3',
     'flac',
@@ -60,6 +61,7 @@ let currentStreamMode: StreamMode = 'universal';
 let hasTriedDownloadFallback = false;
 let isShuffled = false;
 let lastProgressReportAt = 0;
+let lastQueueProgressPublishAt = 0;
 let nativePlaySessionSeed = Date.now();
 let playbackRunToken = 0;
 let playlist: PtvMusicQueueItem[] = [];
@@ -129,7 +131,12 @@ function getAudioElement() {
     audioElement.addEventListener('playing', () => emitQueueUpdated('playing'));
     audioElement.addEventListener('timeupdate', () => {
         reportPlaybackProgressThrottled();
-        emitQueueUpdated('timeupdate');
+        const now = Date.now();
+
+        if (now - lastQueueProgressPublishAt >= MUSIC_QUEUE_PROGRESS_PUBLISH_INTERVAL_MS) {
+            lastQueueProgressPublishAt = now;
+            emitQueueUpdated('timeupdate');
+        }
     });
     audioElement.addEventListener('volumechange', () => emitQueueUpdated('volume'));
 
@@ -565,12 +572,7 @@ export function subscribeToPtvMusicQueue(listener: QueueListener) {
     listeners.add(listener);
     listener(getPtvMusicQueueSnapshot());
 
-    const timer = window.setInterval(() => {
-        listener(getPtvMusicQueueSnapshot());
-    }, 1000);
-
     return () => {
-        window.clearInterval(timer);
         listeners.delete(listener);
     };
 }
@@ -582,9 +584,9 @@ export function playPtvMusicTracks(items: PtvMusicItem[], startIndex = 0, option
             startIndex
         });
 
-        return options.rejectOnPlaybackError
-            ? Promise.reject(new Error('Music queue is empty.'))
-            : Promise.resolve();
+        return options.rejectOnPlaybackError ?
+            Promise.reject(new Error('Music queue is empty.')) :
+            Promise.resolve();
     }
 
     const normalizedItems = items.map(normalizeQueueItem);

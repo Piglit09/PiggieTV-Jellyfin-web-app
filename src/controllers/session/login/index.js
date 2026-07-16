@@ -125,11 +125,9 @@ function showManualForm(context, showCancel, focusPassword) {
     context.querySelector('.btnManual').classList.add('hide');
     enhanceLoginPage(context);
 
-    if (focusPassword) {
-        context.querySelector('#txtManualPassword').focus();
-    } else {
-        context.querySelector('#txtManualName').focus();
-    }
+    const focusTarget = context.querySelector(focusPassword ? '#txtManualPassword' : '#txtManualName');
+
+    focusTarget?.focus({ preventScroll: true });
 
     if (showCancel) {
         context.querySelector('.btnCancel').classList.remove('hide');

@@ -280,6 +280,9 @@ The hardening pass does not change plugin routes, cache schema v7, recommendatio
 | 2026-07-14 | Replaced Reading's 200-item terminal cap with a cancellable 50-item progressive index: the first 200 items render promptly, later pages accumulate monotonically to the server total, only complete schema-v4 library indexes persist, and card grids remain incrementally mounted. Route lifecycle events now synchronize exact Movies, Shows, Reading, Dashboard, and authentication ownership before render/unmount telemetry. |
 | 2026-07-14 | Added authentication-gated/deduplicated plugin startup reads, canonical singleton runtime diagnostics, advertised and contract-tested Reading series-override routes, explicit development provenance fallbacks, and priority-aware image telemetry aggregation. |
 | 2026-07-15 | Established plugin `10.11.8.2` as the first release advertising durable Reading series overrides, with assembly-derived runtime identity, manifest/contract verification, and capability-aware frontend compatibility. |
+| 2026-07-15 | Deployment verification exposed and corrected plugin configuration XML serialization, production runtime entry ownership, authenticated plugin-client readiness, and base-path-safe service-worker registration. The corrected candidate pair is locally healthy; permanent web-root deployment and the real 1,818-item Manga completion run remain external deployment gates. |
+| 2026-07-15 | Made drawer edge-swipe listener ownership lifecycle-safe: missing authentication handles fail closed, exact bound targets are retired, replacement handles rebind once, and page-show reconciliation no longer depends on a page-type change. |
+| 2026-07-15 | Corrected split-origin development discovery with explicit `PTV_DEV_JELLYFIN_URL` precedence and stale plugin-root retirement. Restricted shell geometry to PTV-owned containers so native Jellyfin page hosts no longer insert a viewport spacer ahead of Home, Reading, or Dashboard. |
 
 ### Plugin Release Compatibility Boundary
 
@@ -288,3 +291,49 @@ Plugin `10.11.8.2` is the first release in this line that advertises durable `re
 The frontend evaluates transport compatibility and feature capability separately. Plugin `10.11.8.1` without `readingSeriesOverrides` remains connected but cannot claim server-persisted Reading corrections; reads may use browser cache and writes request a plugin upgrade. Plugin `10.11.8.2` with the advertised feature is compatible. The dashboard shows this distinction without creating a second runtime or treating cache fallback as server persistence.
 
 The release payload is the five-file `src/ptv/plugin/bin` publish output. Replacing the DLL/manifest requires a Jellyfin restart before deploying the matching frontend behavior.
+
+### Deployment Runtime Boundary
+
+Plugin configuration cannot serialize `ReadingSeriesOverrideSettings.Routes` as a nested dictionary through Jellyfin's XML serializer. The runtime model therefore keeps the dictionary out of XML and exposes a deterministic persisted route-list surrogate that reconstructs case-insensitive route and item maps. JSON/status behavior continues to use the runtime dictionary. A configuration round-trip test protects this boundary.
+
+The production Jellyfin-web entry imports `ptv/core/app` exactly once so the canonical PiggieTV runtime exists outside the development-only entry path. Plugin API consumers obtain the current authenticated Jellyfin API client through the shared readiness boundary; concurrent startup reads remain endpoint-deduplicated and do not issue pre-authentication requests. Dashboard diagnostics consume that singleton and never create a diagnostic runtime.
+
+Service-worker registration uses a path-relative `serviceworker.js` URL. This resolves to `/web/serviceworker.js` when Jellyfin is hosted under `/web` instead of incorrectly requesting a server-root asset. Update deferral during playback and unsaved workflows remains owned by `updateService`.
+
+The 2026-07-15 local deployment candidate verified plugin `10.11.8.2`, API v1, cache v7, `readingSeriesOverrides=true`, healthy cache/status, authenticated override GET/PUT for books/comics/manga/reading, and persistence across a clean Jellyfin restart. The installed plugin directory and web root were backed up before replacement and those backups must be retained until production sign-off. The permanent Jellyfin web root was not replaced because the current process lacked the required filesystem permission; the matching production `dist` was served through Jellyfin's explicit web-directory option for verification only.
+
+### Primary Navigation Dropdown Boundary
+
+Movies and Shows dropdown panels are body-level React portals owned by `PtvShellPrimaryDropdown`. They must not be rendered inside `.ptv-shell-nav-primary`: that container scrolls horizontally on compact layouts, and its overflow plus backdrop-filter containing block clips inline or fixed descendants on Android Chromium regardless of z-index.
+
+The trigger remains in the shared shell navigation and owns `aria-expanded`, `aria-controls`, keyboard activation, and touch gesture classification. The portal owns outside-pointer dismissal, Escape handling, focus return, and visual-viewport positioning. Its fixed overlay is clamped to the effective visual viewport and repositions after viewport resize/scroll, orientation changes, window scroll, and navigation-row scrolling. Page content remains below the overlay while dialogs, loading surfaces, and toasts retain higher layers. Route/history changes continue to close transient shell state through `PTVShell`.
+
+Pointer Events are the single input path. A normal touch releases into one native click, while movement beyond the horizontal gesture threshold suppresses that pointer-derived click so swiping the navigation row cannot open a menu. Do not add parallel touchstart/click handlers or timing-based dismissal workarounds.
+
+### Drawer Edge-Swipe Lifecycle Boundary
+
+The authentication compatibility host deliberately retains Jellyfin's hidden `.mainDrawer .scrollContainer` and `.skinHeader` anchors, but it must not mount the authenticated `.mainDrawerHandle`. `NavDrawer` therefore cannot capture the drawer handle during class construction or assume that a touch-capable route always owns one.
+
+`NavDrawer.setEdgeSwipeEnabled` resolves `.mainDrawerHandle` at lifecycle time and fails closed when it is absent. It records the exact element that received touch listeners, removes listeners from that same element when disabled or replaced, and marks edge swipe enabled only after a valid target is bound. `libraryMenu` reconciles edge-swipe ownership on every page-show event, not only when the coarse page type changes, so authentication-to-application and same-type DOM replacement transitions are safe and idempotent.
+
+This boundary fixes the cross-platform blank-screen regression caused by `dom.addEventListener(null, ...)` on touch-capable login startup. The body-level Movies/Shows dropdown portal did not create the null target and remains in place. Authentication still has no visible authenticated header, while successful navigation to an application route can bind the newly mounted handle exactly once.
+
+### Development Server-Origin And Login Layout Boundary
+
+Development server selection is explicit and split-origin safe. `PTV_DEV_JELLYFIN_URL` is injected only into development bundles; production always receives an empty value. The frontend host is never treated as evidence of the Jellyfin host, and loopback candidates are never rebased to the frontend hostname. Candidate precedence is the explicit development Jellyfin URL, the saved server matching the requested `serverid`, a valid authenticated `ApiClient`, and then bounded saved/configured fallbacks. `serverOriginSelection.ts` owns this ordering, while `urlOrigins.ts` only normalizes an already selected URL. Plugin API ownership follows the same active root and retires a stale pinned root when Jellyfin changes servers. Discovery and transition diagnostics do not log raw candidate URLs or credentials.
+
+Jellyfin's `.mainAnimatedPages`, `.mainAnimatedPage`, and generic `.page` elements retain their native positioning and height ownership. Shared shell styles apply geometry only to PTV-owned `.ptv-shell-main` and `.ptv-shell-page` elements. The previous global relative/min-height overrides inserted a viewport-height stock container before native PTV pages, producing the black Home spacer, bottom-displaced Reading navigation, and blank Dashboard content. Authentication retains its separately verified full-viewport, internally scrollable layout.
+
+Real-runtime verification is opt-in through `PTV_LIVE_DEV_URL` and `PTV_LIVE_JELLYFIN_URL`; it bypasses the isolated Playwright server and tests the actual Webpack/HMR bundle. It checks desktop, Pixel-sized, and iPad-sized login geometry, explicit split-origin discovery despite stale loopback storage, NavDrawer chunk provenance, service-worker ownership, unauthenticated Home redirect population, and browser errors. This is stronger than the static harness but does not replace authenticated physical-device verification of Home, Reading, and Dashboard.
+
+### Canonical Music Playback Presentation Boundary
+
+`PTVRuntimeRoot` is the persistent playback presentation owner and renders exactly one compact `PTVMediaDock` across PTV routes. Music's separately loaded body root is an overlay host only: it may render the full-screen player, queue drawer, and playlist dialog, but it must never render another compact player. Its root and load promise live on `window` so route remounts and HMR reuse the same overlay host.
+
+`musicQueue.ts` continues to own the single module-level native audio element (`data-ptv-music-native-player`) and queue. Queue publication from `timeupdate` is limited to once per second, and subscribers no longer create independent polling intervals. The global playback service subscribes once, removes playback-manager listeners during disposal, and suppresses its low-frequency reconcile while the native Music queue has a current item. Progress remains event-driven without multiplying state traffic by subscriber count.
+
+While a PTV-native route has an active dock item, `PTVMediaDock` applies `ptv-playback-presentation-owned`. The narrowly scoped native-route selector suppresses Jellyfin's `.nowPlayingBar`; cleanup restores stock presentation automatically when playback stops, the dock unmounts, or a native fallback owns the route. Do not replace this lifecycle boundary with a global `.nowPlayingBar { display: none }` rule.
+
+Music library count presentation has explicit `scheduled`, `loading`, `ready`, and `failed` states. Cached content immediately reports a cached count; a failed live index reports an unavailable-live-count fallback. `Loading library tracks` is reserved for an active current-generation request. Shared Music coordinator requests are logically retired through route/request generation and stale-response suppression; they are not represented as physically aborted when the shared API layer has no per-owner transport cancellation.
+
+Plugin startup selects an authenticated `ServerConnections` client first, then an authenticated `window.ApiClient`, before considering an unauthenticated fallback. This prevents a stale connection client from blocking candidate generation and leaving Dashboard diagnostics with null roots/responses. Split-origin development still takes its Jellyfin root from the explicit development backend, never from the frontend hostname.

@@ -2,7 +2,12 @@ import { ServerConnections } from 'lib/jellyfin-apiclient';
 import Events from '../../utils/events';
 
 import { PTV_PLUGIN_API, PTV_RUNTIME } from './config';
-import { classifyPtvRequestUrl, isPtvLocalDevHost, isPtvWebpackDevServerOrigin, type PtvRequestOriginKind } from './urlOrigins';
+import {
+    classifyPtvRequestUrl,
+    isPtvWebpackDevServerOrigin,
+    resolvePtvServerUrlForPage,
+    type PtvRequestOriginKind
+} from './urlOrigins';
 
 type PtvApiRequest = {
     contentType?: string;
@@ -118,6 +123,8 @@ let pluginUnavailableUntil = 0;
 let resolvedPluginApiRoot: string | null = null;
 let authoritativePluginApiRoot: string | null = null;
 const inFlightPluginRequests = new Map<string, Promise<unknown>>();
+const PLUGIN_API_CLIENT_WAIT_TIMEOUT_MS = 10_000;
+const PLUGIN_API_CLIENT_POLL_INTERVAL_MS = 50;
 const pluginReadResponseCache = new Map<string, {
     expiresAt: number;
     value: unknown;
@@ -271,7 +278,19 @@ function debugLog(message: string, detail?: unknown) {
 }
 
 function getCurrentApiClient(): PtvJellyfinApiClient | null {
-    return ServerConnections.currentApiClient?.() || null;
+    const windowApiClient = typeof window === 'undefined' ? null :
+        (window as Window & { ApiClient?: PtvJellyfinApiClient }).ApiClient;
+    const connectionApiClient = ServerConnections.currentApiClient?.() || null;
+
+    if (connectionApiClient && isPluginAuthenticationReady(connectionApiClient)) {
+        return connectionApiClient;
+    }
+
+    if (windowApiClient && isPluginAuthenticationReady(windowApiClient)) {
+        return windowApiClient;
+    }
+
+    return connectionApiClient || windowApiClient || null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -545,7 +564,11 @@ function addCandidate(candidates: string[], url: string) {
 }
 
 function getConfiguredJellyfinRoot() {
-    return PTV_RUNTIME.jellyfinServerUrl ? stripJellyfinWebPath(PTV_RUNTIME.jellyfinServerUrl) : '';
+    const configuredRoot = PTV_RUNTIME.mode === 'development' ?
+        PTV_RUNTIME.devJellyfinServerUrl || PTV_RUNTIME.jellyfinServerUrl :
+        PTV_RUNTIME.jellyfinServerUrl;
+
+    return configuredRoot ? stripJellyfinWebPath(configuredRoot) : '';
 }
 
 function getConfiguredJellyfinRoots() {
@@ -563,8 +586,7 @@ function getConfiguredJellyfinRoots() {
 function isLocalDevPluginCandidate(url: string) {
     const parsedUrl = getAnchorUrl(url);
 
-    return isPtvLocalDevHost(parsedUrl.hostname)
-        || isPtvWebpackDevServerOrigin(parsedUrl.hostname, parsedUrl.port);
+    return isPtvWebpackDevServerOrigin(parsedUrl.hostname, parsedUrl.port);
 }
 
 function addPluginApiCandidate(candidates: string[], url: string) {
@@ -590,13 +612,20 @@ function getPluginRootFromApiClient(apiClient: PtvJellyfinApiClient, path: strin
         const apiClientRoot = getRootForResolvedPath(apiClientPathUrl, path);
 
         if (apiClientRoot) {
-            return stripJellyfinWebPath(apiClientRoot);
+            return getPageSafeJellyfinRoot(apiClientRoot);
         }
     }
 
     const serverAddress = apiClient.serverAddress?.();
 
-    return serverAddress ? stripJellyfinWebPath(serverAddress) : '';
+    return serverAddress ? getPageSafeJellyfinRoot(serverAddress) : '';
+}
+
+function getPageSafeJellyfinRoot(value: string) {
+    return stripJellyfinWebPath(resolvePtvServerUrlForPage(value, {
+        development: PTV_RUNTIME.mode === 'development',
+        pageUrl: window.location.href
+    }));
 }
 
 function getPluginRootCandidates(
@@ -605,10 +634,29 @@ function getPluginRootCandidates(
     params?: Record<string, unknown>
 ) {
     const rootCandidates: string[] = [];
+    const apiClientRoot = getPluginRootFromApiClient(apiClient, path, params);
+    const activeRoot = PTV_RUNTIME.mode === 'development' && PTV_RUNTIME.devJellyfinServerUrl ?
+        getPageSafeJellyfinRoot(PTV_RUNTIME.devJellyfinServerUrl) :
+        apiClientRoot;
 
+    if (
+        activeRoot
+        && authoritativePluginApiRoot
+        && activeRoot !== authoritativePluginApiRoot
+    ) {
+        authoritativePluginApiRoot = null;
+        resolvedPluginApiRoot = null;
+        updatePluginApiDiagnostics({
+            authoritativePluginApiRoot: null,
+            originDriftWarning: 'Plugin API root retired after the active Jellyfin server changed.',
+            resolvedRoot: null
+        });
+    }
+
+    addCandidate(rootCandidates, activeRoot);
     addCandidate(rootCandidates, authoritativePluginApiRoot || '');
     addCandidate(rootCandidates, resolvedPluginApiRoot || '');
-    addCandidate(rootCandidates, getPluginRootFromApiClient(apiClient, path, params));
+    addCandidate(rootCandidates, apiClientRoot);
     getConfiguredJellyfinRoots().forEach(root => {
         addCandidate(rootCandidates, root);
     });
@@ -625,23 +673,15 @@ function setAuthoritativePluginApiRoot(root: string, source: string) {
 
     if (!normalizedRoot) return '';
 
-    if (authoritativePluginApiRoot && authoritativePluginApiRoot !== normalizedRoot) {
-        const warning = `Plugin API root drift blocked: ${normalizedRoot} from ${source}; using ${authoritativePluginApiRoot}.`;
-
-        console.warn(`[PTV Plugin API] ${warning}`);
-        updatePluginApiDiagnostics({
-            authoritativePluginApiRoot,
-            originDriftWarning: warning,
-            resolvedRoot: resolvedPluginApiRoot || authoritativePluginApiRoot
-        });
-
-        return authoritativePluginApiRoot;
-    }
+    const rootChanged = Boolean(authoritativePluginApiRoot && authoritativePluginApiRoot !== normalizedRoot);
 
     authoritativePluginApiRoot = normalizedRoot;
     resolvedPluginApiRoot = normalizedRoot;
     updatePluginApiDiagnostics({
         authoritativePluginApiRoot,
+        originDriftWarning: rootChanged ?
+            `Plugin API root updated after ${source}.` :
+            pluginApiDiagnostics.originDriftWarning,
         resolvedRoot: resolvedPluginApiRoot
     });
 
@@ -841,7 +881,9 @@ function notePluginApiAttempt(url: string, candidates: string[]) {
     let originDriftWarning = pluginApiDiagnostics.originDriftWarning;
 
     if (pluginApiOrigins.length > 1) {
-        originDriftWarning = `Multiple plugin API roots detected: ${pluginApiOrigins.join(', ')}. Using ${authoritativePluginApiRoot || resolvedPluginApiRoot || pluginApiOrigins[0]}.`;
+        originDriftWarning = authoritativePluginApiRoot || resolvedPluginApiRoot ?
+            'Plugin API server transition detected; the most recent successful root is active.' :
+            'Plugin API server transition detected; the active root is pending a successful request.';
 
         if (pluginApiDiagnostics.originDriftWarning !== originDriftWarning) {
             console.warn(`[PTV Plugin API] ${originDriftWarning}`);
@@ -886,6 +928,7 @@ function notePluginApiSuccess(url: string, path: string, candidates: string[]) {
         lastFailedEndpoint: null,
         lastFailedStatusCode: null,
         lastSuccessfulEndpoint: endpoint,
+        originDriftWarning: null,
         resolvedRoot: resolvedPluginApiRoot,
         resolvedUrl: url
     });
@@ -1375,6 +1418,8 @@ function createRowsValidationCompatibilityResponse(settings: unknown) {
 
 export function resetPtvPluginApiAvailability() {
     pluginUnavailableUntil = 0;
+    authoritativePluginApiRoot = null;
+    resolvedPluginApiRoot = null;
     pluginApiDiagnostics = {
         authenticationReadyRetryCount: pluginApiDiagnostics.authenticationReadyRetryCount,
         authenticationWaitCount: pluginApiDiagnostics.authenticationWaitCount,
@@ -1382,7 +1427,7 @@ export function resetPtvPluginApiAvailability() {
         attemptedResponses: pluginApiDiagnostics.attemptedResponses,
         attemptedUrl: null,
         attemptedUrls: pluginApiDiagnostics.attemptedUrls,
-        authoritativePluginApiRoot,
+        authoritativePluginApiRoot: null,
         candidates: [],
         deduplicatedRequestCount: pluginApiDiagnostics.deduplicatedRequestCount,
         lastError: null,
@@ -1390,8 +1435,8 @@ export function resetPtvPluginApiAvailability() {
         lastFailedStatusCode: null,
         lastResponseBody: null,
         lastSuccessfulEndpoint: pluginApiDiagnostics.lastSuccessfulEndpoint,
-        originDriftWarning: pluginApiDiagnostics.originDriftWarning,
-        resolvedRoot: resolvedPluginApiRoot,
+        originDriftWarning: null,
+        resolvedRoot: null,
         resolvedUrl: null,
         retryBackoffMs: pluginApiDiagnostics.retryBackoffMs,
         retryCount: pluginApiDiagnostics.retryCount,
@@ -1839,4 +1884,57 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
             );
         }
     };
+}
+
+export function waitForCurrentPtvPluginApiClient(options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+} = {}): Promise<NonNullable<ReturnType<typeof getCurrentPtvPluginApiClient>>> {
+    const immediateClient = getCurrentPtvPluginApiClient();
+
+    if (immediateClient) return Promise.resolve(immediateClient);
+
+    const timeoutMs = Math.max(0, options.timeoutMs ?? PLUGIN_API_CLIENT_WAIT_TIMEOUT_MS);
+
+    return new Promise((resolve, reject) => {
+        let intervalId: ReturnType<typeof setInterval> | null = null;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        const cleanup = () => {
+            if (intervalId !== null) clearInterval(intervalId);
+            if (timeoutId !== null) clearTimeout(timeoutId);
+            Events.off(ServerConnections, 'localusersignedin', checkForClient);
+            options.signal?.removeEventListener('abort', handleAbort);
+        };
+        const rejectUnavailable = (code: string, message: string) => {
+            cleanup();
+            reject(Object.assign(new Error(message), { code }));
+        };
+        const handleAbort = () => rejectUnavailable(
+            'PTV_PLUGIN_CLIENT_WAIT_ABORTED',
+            'PTV plugin API client wait was aborted.'
+        );
+        const checkForClient = () => {
+            const client = getCurrentPtvPluginApiClient();
+
+            if (!client) return;
+
+            cleanup();
+            resolve(client);
+        };
+
+        if (options.signal?.aborted) {
+            handleAbort();
+            return;
+        }
+
+        Events.on(ServerConnections, 'localusersignedin', checkForClient);
+        options.signal?.addEventListener('abort', handleAbort, { once: true });
+        intervalId = setInterval(checkForClient, PLUGIN_API_CLIENT_POLL_INTERVAL_MS);
+        timeoutId = setTimeout(() => rejectUnavailable(
+            'PTV_PLUGIN_CLIENT_WAIT_TIMEOUT',
+            'PTV plugin API client did not become available before the readiness timeout.'
+        ), timeoutMs);
+        checkForClient();
+    });
 }

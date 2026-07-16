@@ -23,6 +23,7 @@ import taskButton from './scripts/taskbutton';
 import { pageClassOn, serverAddress } from './utils/dashboard';
 import Events from './utils/events';
 import { initializeServerConnections } from './scripts/serverNotifications';
+import { getPtvServiceWorkerScriptUrl } from './ptv/services/updateService';
 
 import RootApp from './RootApp';
 
@@ -49,6 +50,7 @@ import './styles/librarybrowser.scss';
 import './elements/emby-scroller/emby-scroller.scss';
 // PiggieTV styles and runtime hooks. Keep this after stock styles so PTV owns the visual layer.
 import './ptv/styles/ptv.scss';
+import './ptv/core/app';
 import './ptv/modules/header';
 import './ptv/modules/dashboard';
 import './ptv/modules/settings';
@@ -83,7 +85,7 @@ build: ${__JF_BUILD_VERSION__}`);
 
     if (serverUrl) {
         if (__WEBPACK_SERVE__) {
-            console.info('[PTV] Using development Jellyfin server:', serverUrl);
+            console.info('[PTV] Using the configured development Jellyfin server.');
         }
 
         ServerConnections.initApiClient(serverUrl);
@@ -216,7 +218,8 @@ function registerServiceWorker() {
         return;
     }
 
-    navigator.serviceWorker.register('/serviceworker.js').catch(err => {
+    // eslint-disable-next-line compat/compat
+    navigator.serviceWorker.register(getPtvServiceWorkerScriptUrl()).catch(err => {
         console.warn('[PTV] Service worker registration failed:', err);
     });
 }

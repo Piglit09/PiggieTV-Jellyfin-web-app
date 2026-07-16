@@ -771,25 +771,19 @@ function updateMenuForPageType(isDashboardPage, isLibraryPage) {
         if (isLibraryPage) {
             bodyClassList.add('libraryDocument');
             bodyClassList.remove('hideMainDrawer');
-
-            if (navDrawerInstance) {
-                navDrawerInstance.setEdgeSwipeEnabled(true);
-            }
         } else if (isDashboardPage) {
             bodyClassList.remove('libraryDocument');
             bodyClassList.remove('hideMainDrawer');
-
-            if (navDrawerInstance) {
-                navDrawerInstance.setEdgeSwipeEnabled(true);
-            }
         } else {
             bodyClassList.remove('libraryDocument');
             bodyClassList.add('hideMainDrawer');
-
-            if (navDrawerInstance) {
-                navDrawerInstance.setEdgeSwipeEnabled(false);
-            }
         }
+    }
+
+    // The authenticated header can replace its drawer handle without changing
+    // Jellyfin's page type, so reconcile the listener target on every page show.
+    if (navDrawerInstance) {
+        navDrawerInstance.setEdgeSwipeEnabled(isLibraryPage || isDashboardPage);
     }
 
     if (requiresUserRefresh) {
@@ -858,6 +852,7 @@ function loadNavDrawer() {
     return new Promise(function (resolve) {
         import('../lib/navdrawer/navdrawer').then(({ default: NavDrawer }) => {
             navDrawerInstance = new NavDrawer(getNavDrawerOptions());
+            navDrawerInstance.setEdgeSwipeEnabled(currentPageType === 1 || currentPageType === 2);
 
             if (!layoutManager.tv) {
                 navDrawerElement.classList.remove('hide');
