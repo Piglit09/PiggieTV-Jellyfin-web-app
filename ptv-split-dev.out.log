@@ -368,3 +368,87 @@ javascript modules 145 KiB
   ../node_modules/css-loader/dist/cjs.js!../node_modules/postcss-loader/dist/cjs.js??ruleSet[1].rules[6].oneOf[1].use[2]!../node_modules/sass-loader/dist/cjs.js![1m./ptv/modules/music/music.scss[39m[22m 145 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
 webpack 5.99.9 compiled [1m[32msuccessfully[39m[22m in 2167 ms
 No typescript errors found.
+assets by status 127 MiB [1m[32m[cached][39m[22m 2280 assets
+assets by status 13.2 MiB [1m[32m[emitted][39m[22m
+  assets by path [1m[32m*.js[39m[22m 13.2 MiB
+    assets by chunk 13 MiB (name: main.jellyfin)
+      asset [1m[32mmain.jellyfin.bundle.js[39m[22m 13 MiB [1m[32m[emitted][39m[22m (name: main.jellyfin)
+      asset [1m[32mmain.jellyfin.5253b0ba7f891118276a.hot-update.js[39m[22m 21.4 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main.jellyfin)
+    assets by chunk 120 KiB (name: runtime)
+      asset [1m[32mruntime.bundle.js[39m[22m 119 KiB [1m[32m[emitted][39m[22m (name: runtime)
+      asset [1m[32mruntime.5253b0ba7f891118276a.hot-update.js[39m[22m 839 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: runtime)
+  asset [1m[32mindex.html[39m[22m 7.09 KiB [1m[32m[emitted][39m[22m
+  asset [1m[32mruntime.5253b0ba7f891118276a.hot-update.json[39m[22m 47 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+cached modules 38.1 MiB (javascript) 42.7 KiB (css/mini-extract) 26.1 MiB (asset) [1m[32m[cached][39m[22m 6027 modules
+runtime modules 101 KiB 20 modules
+javascript modules 11.1 KiB
+  modules by path [1m./apps/[39m[22m 800 bytes 5 modules
+  modules by path [1m./controllers/[39m[22m 800 bytes
+    [1m./controllers/ lazy ^\.\/.*$ chunkName: [request] namespace object[39m[22m 160 bytes [1m[33m[built][39m[22m
+    + 4 modules
+  modules by path [1m./components/[39m[22m 436 bytes
+    [1m./components/images/blurhash.worker.ts[39m[22m 116 bytes [1m[31m[not cacheable][39m[22m [1m[33m[built][39m[22m
+    + 2 modules
+  cacheable modules 8.78 KiB
+    [1m./ptv/shell/PTVRuntimeRoot.tsx[39m[22m 1.86 KiB [1m[33m[code generated][39m[22m
+    [1m./ptv/shell/PTVMediaDock.tsx[39m[22m 6.92 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m./strings/ lazy ^\.\/.*$ chunkName: [request] namespace object[39m[22m 160 bytes [1m[33m[built][39m[22m
+  [1m./plugins/ lazy ^\.\/.*$ chunkName: [request] namespace object[39m[22m 160 bytes [1m[33m[built][39m[22m
+webpack 5.99.9 compiled [1m[32msuccessfully[39m[22m in 2256 ms
+No typescript errors found.
+assets by status 127 MiB [1m[32m[cached][39m[22m 2280 assets
+assets by status 13.2 MiB [1m[32m[emitted][39m[22m
+  assets by path [1m[32m*.js[39m[22m 13.2 MiB
+    assets by chunk 13.1 MiB (name: main.jellyfin)
+      asset [1m[32mmain.jellyfin.bundle.js[39m[22m 13 MiB [1m[32m[emitted][39m[22m (name: main.jellyfin)
+      asset [1m[32mmain.jellyfin.6eb36e42e53b3e6c95ef.hot-update.js[39m[22m 34.9 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main.jellyfin)
+    assets by chunk 120 KiB (name: runtime)
+      asset [1m[32mruntime.bundle.js[39m[22m 119 KiB [1m[32m[emitted][39m[22m (name: runtime)
+      asset [1m[32mruntime.6eb36e42e53b3e6c95ef.hot-update.js[39m[22m 839 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: runtime)
+  asset [1m[32mindex.html[39m[22m 7.09 KiB [1m[32m[emitted][39m[22m
+  asset [1m[32mruntime.6eb36e42e53b3e6c95ef.hot-update.json[39m[22m 47 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+cached modules 38.1 MiB (javascript) 42.7 KiB (css/mini-extract) 26.1 MiB (asset) [1m[32m[cached][39m[22m 6042 modules
+runtime modules 101 KiB 20 modules
+javascript modules 13.2 KiB
+  [1m./ptv/services/updateService.ts[39m[22m 13.1 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m./components/images/blurhash.worker.ts[39m[22m 116 bytes [1m[31m[not cacheable][39m[22m [1m[33m[built][39m[22m
+webpack 5.99.9 compiled [1m[32msuccessfully[39m[22m in 1966 ms
+Found 1 error in 2191 ms.
+assets by status 140 MiB [1m[32m[cached][39m[22m 2284 assets
+cached modules 38.1 MiB (javascript) 42.7 KiB (css/mini-extract) 26.1 MiB (asset) 101 KiB (runtime) [1m[32m[cached][39m[22m 6063 modules
+[1m./components/images/blurhash.worker.ts[39m[22m 116 bytes [1m[31m[not cacheable][39m[22m [1m[33m[built][39m[22m
+webpack 5.99.9 compiled [1m[32msuccessfully[39m[22m in 1844 ms
+No typescript errors found.
+assets by status 127 MiB [1m[32m[cached][39m[22m 2280 assets
+assets by status 13.2 MiB [1m[32m[emitted][39m[22m
+  assets by path [1m[32m*.js[39m[22m 13.2 MiB
+    assets by chunk 13.1 MiB (name: main.jellyfin)
+      asset [1m[32mmain.jellyfin.bundle.js[39m[22m 13 MiB [1m[32m[emitted][39m[22m (name: main.jellyfin)
+      asset [1m[32mmain.jellyfin.21896e02048bfd7f05e5.hot-update.js[39m[22m 35.1 KiB [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: main.jellyfin)
+    assets by chunk 120 KiB (name: runtime)
+      asset [1m[32mruntime.bundle.js[39m[22m 119 KiB [1m[32m[emitted][39m[22m (name: runtime)
+      asset [1m[32mruntime.21896e02048bfd7f05e5.hot-update.js[39m[22m 839 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m (name: runtime)
+  asset [1m[32mindex.html[39m[22m 7.09 KiB [1m[32m[emitted][39m[22m
+  asset [1m[32mruntime.21896e02048bfd7f05e5.hot-update.json[39m[22m 47 bytes [1m[32m[emitted][39m[22m [1m[32m[immutable][39m[22m [1m[32m[hmr][39m[22m
+cached modules 38.1 MiB (javascript) 42.7 KiB (css/mini-extract) 26.1 MiB (asset) [1m[32m[cached][39m[22m 6042 modules
+runtime modules 101 KiB 20 modules
+javascript modules 13.3 KiB
+  [1m./ptv/services/updateService.ts[39m[22m 13.1 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1m./components/images/blurhash.worker.ts[39m[22m 116 bytes [1m[31m[not cacheable][39m[22m [1m[33m[built][39m[22m
+webpack 5.99.9 compiled [1m[32msuccessfully[39m[22m in 1837 ms
+No typescript errors found.
+assets by status 140 MiB [1m[32m[cached][39m[22m 2284 assets
+cached modules 38.1 MiB (javascript) 42.7 KiB (css/mini-extract) 26.1 MiB (asset) 101 KiB (runtime) [1m[32m[cached][39m[22m 6063 modules
+[1m./components/images/blurhash.worker.ts[39m[22m 116 bytes [1m[31m[not cacheable][39m[22m [1m[33m[built][39m[22m
+webpack 5.99.9 compiled [1m[32msuccessfully[39m[22m in 1847 ms
+No typescript errors found.
+assets by status 140 MiB [1m[32m[cached][39m[22m 2284 assets
+cached modules 38.1 MiB (javascript) 42.7 KiB (css/mini-extract) 26.1 MiB (asset) 101 KiB (runtime) [1m[32m[cached][39m[22m 6063 modules
+[1m./components/images/blurhash.worker.ts[39m[22m 116 bytes [1m[31m[not cacheable][39m[22m [1m[33m[built][39m[22m
+webpack 5.99.9 compiled [1m[32msuccessfully[39m[22m in 1789 ms
+No typescript errors found.
+assets by status 140 MiB [1m[32m[cached][39m[22m 2284 assets
+cached modules 38.1 MiB (javascript) 42.7 KiB (css/mini-extract) 26.1 MiB (asset) 101 KiB (runtime) [1m[32m[cached][39m[22m 6063 modules
+[1m./components/images/blurhash.worker.ts[39m[22m 116 bytes [1m[31m[not cacheable][39m[22m [1m[33m[built][39m[22m
+webpack 5.99.9 compiled [1m[32msuccessfully[39m[22m in 1864 ms
+No typescript errors found.

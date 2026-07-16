@@ -32,16 +32,18 @@ type PtvServiceWorkerContainerLike = {
 };
 
 type PtvUpdateServiceOptions = {
+    activationTimeoutMs?: number;
     getActivityReason?: () => string;
     reload?: () => void;
     serviceWorker?: PtvServiceWorkerContainerLike;
-    sessionStorage?: Pick<Storage, 'getItem' | 'setItem'>;
+    sessionStorage?: Pick<Storage, 'getItem' | 'setItem'> & Partial<Pick<Storage, 'removeItem'>>;
 };
 
 type PtvUpdateListener = (snapshot: PtvUpdateSnapshot) => void;
 
 const DISMISSED_SESSION_KEY = 'ptv:update:dismissed';
 const RELOAD_SESSION_KEY = 'ptv:update:reloading';
+const DEFAULT_ACTIVATION_TIMEOUT_MS = 3000;
 
 export function getPtvServiceWorkerScriptUrl() {
     return 'serviceworker.js';
@@ -73,12 +75,16 @@ export function getPtvUnsafeUpdateActivityReason() {
 }
 
 export class PtvUpdateService {
+    private readonly activationTimeoutMs: number;
     private readonly getActivityReason: () => string;
     private readonly listeners = new Set<PtvUpdateListener>();
     private readonly reload: () => void;
     private readonly serviceWorker?: PtvServiceWorkerContainerLike;
-    private readonly sessionStorage?: Pick<Storage, 'getItem' | 'setItem'>;
+    private readonly sessionStorage?: Pick<Storage, 'getItem' | 'setItem'> & Partial<Pick<Storage, 'removeItem'>>;
+    private activationFallbackTimer: number | null = null;
+    private applyInProgress = false;
     private registration?: PtvRegistrationLike;
+    private reloadTriggered = false;
     private started = false;
     private waitingWorker?: PtvWorkerLike;
     private snapshot: PtvUpdateSnapshot = {
@@ -88,6 +94,7 @@ export class PtvUpdateService {
     };
 
     constructor(options: PtvUpdateServiceOptions = {}) {
+        this.activationTimeoutMs = options.activationTimeoutMs ?? DEFAULT_ACTIVATION_TIMEOUT_MS;
         this.getActivityReason = options.getActivityReason || getPtvUnsafeUpdateActivityReason;
         this.reload = options.reload || (() => window.location.reload());
         // The optional API is guarded by runtime presence and unavailable clients keep the current bundle.
@@ -109,6 +116,7 @@ export class PtvUpdateService {
     async start() {
         if (this.started || !this.serviceWorker) return;
         this.started = true;
+        this.clearSessionValue(RELOAD_SESSION_KEY);
 
         this.serviceWorker.addEventListener?.('controllerchange', () => this.handleControllerChange());
 
@@ -141,6 +149,7 @@ export class PtvUpdateService {
 
     applyWhenSafe() {
         if (!this.waitingWorker) return false;
+        if (this.applyInProgress || this.snapshot.state === 'applying') return false;
 
         const activityReason = this.getActivityReason();
         if (activityReason) {
@@ -148,8 +157,23 @@ export class PtvUpdateService {
             return false;
         }
 
+        this.applyInProgress = true;
+        this.reloadTriggered = false;
+        this.clearSessionValue(RELOAD_SESSION_KEY);
         this.setSnapshot({ activityReason: '', error: '', state: 'applying' });
-        this.waitingWorker.postMessage?.({ type: 'SKIP_WAITING' });
+
+        if (typeof this.waitingWorker.postMessage !== 'function') {
+            this.triggerReloadOnce();
+            return true;
+        }
+
+        try {
+            this.waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+            this.scheduleActivationFallback();
+        } catch {
+            this.triggerReloadOnce();
+        }
+
         return true;
     }
 
@@ -178,6 +202,10 @@ export class PtvUpdateService {
 
     private markUpdateAvailable(worker?: PtvWorkerLike | null) {
         if (!worker) return;
+        this.clearActivationFallback();
+        this.applyInProgress = false;
+        this.reloadTriggered = false;
+        this.clearSessionValue(RELOAD_SESSION_KEY);
         this.waitingWorker = worker;
 
         if (this.readSessionValue(DISMISSED_SESSION_KEY) === 'true') {
@@ -189,10 +217,34 @@ export class PtvUpdateService {
     }
 
     private handleControllerChange() {
-        if (this.snapshot.state !== 'applying') return;
-        if (this.readSessionValue(RELOAD_SESSION_KEY) === 'true') return;
+        if (!this.applyInProgress || this.snapshot.state !== 'applying') return;
 
+        this.triggerReloadOnce();
+    }
+
+    private scheduleActivationFallback() {
+        this.clearActivationFallback();
+        this.activationFallbackTimer = window.setTimeout(() => {
+            this.activationFallbackTimer = null;
+            this.triggerReloadOnce();
+        }, this.activationTimeoutMs);
+    }
+
+    private clearActivationFallback() {
+        if (this.activationFallbackTimer === null) return;
+
+        window.clearTimeout(this.activationFallbackTimer);
+        this.activationFallbackTimer = null;
+    }
+
+    private triggerReloadOnce() {
+        if (this.reloadTriggered) return;
+
+        this.reloadTriggered = true;
+        this.applyInProgress = false;
+        this.clearActivationFallback();
         this.writeSessionValue(RELOAD_SESSION_KEY, 'true');
+        this.setSnapshot({ activityReason: '', error: '', state: 'idle' });
         this.reload();
     }
 
@@ -207,6 +259,14 @@ export class PtvUpdateService {
     private writeSessionValue(key: string, value: string) {
         try {
             this.sessionStorage?.setItem(key, value);
+        } catch {
+            // Session storage is an optimization, not a requirement.
+        }
+    }
+
+    private clearSessionValue(key: string) {
+        try {
+            this.sessionStorage?.removeItem?.(key);
         } catch {
             // Session storage is an optimization, not a requirement.
         }

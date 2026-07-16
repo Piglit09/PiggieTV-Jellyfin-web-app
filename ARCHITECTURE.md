@@ -283,6 +283,7 @@ The hardening pass does not change plugin routes, cache schema v7, recommendatio
 | 2026-07-15 | Deployment verification exposed and corrected plugin configuration XML serialization, production runtime entry ownership, authenticated plugin-client readiness, and base-path-safe service-worker registration. The corrected candidate pair is locally healthy; permanent web-root deployment and the real 1,818-item Manga completion run remain external deployment gates. |
 | 2026-07-15 | Made drawer edge-swipe listener ownership lifecycle-safe: missing authentication handles fail closed, exact bound targets are retired, replacement handles rebind once, and page-show reconciliation no longer depends on a page-type change. |
 | 2026-07-15 | Corrected split-origin development discovery with explicit `PTV_DEV_JELLYFIN_URL` precedence and stale plugin-root retirement. Restricted shell geometry to PTV-owned containers so native Jellyfin page hosts no longer insert a viewport spacer ahead of Home, Reading, or Dashboard. |
+| 2026-07-16 | Restricted the global media dock to PTV Music-owned audio and made frontend update activation idempotent, controller-driven, timeout-bounded, and reload-safe. |
 
 ### Plugin Release Compatibility Boundary
 
@@ -337,3 +338,9 @@ While a PTV-native route has an active dock item, `PTVMediaDock` applies `ptv-pl
 Music library count presentation has explicit `scheduled`, `loading`, `ready`, and `failed` states. Cached content immediately reports a cached count; a failed live index reports an unavailable-live-count fallback. `Loading library tracks` is reserved for an active current-generation request. Shared Music coordinator requests are logically retired through route/request generation and stale-response suppression; they are not represented as physically aborted when the shared API layer has no per-owner transport cancellation.
 
 Plugin startup selects an authenticated `ServerConnections` client first, then an authenticated `window.ApiClient`, before considering an unauthenticated fallback. This prevents a stale connection client from blocking candidate generation and leaving Dashboard diagnostics with null roots/responses. Split-origin development still takes its Jellyfin root from the explicit development backend, never from the frontend hostname.
+
+### Media Dock And Frontend Update Ownership Boundary
+
+`playbackStateService` is intentionally a universal state observer, but `PTVMediaDock` is not a universal Jellyfin playback renderer. The dock positively requires an active `ptv-music` source with audio media/item identity. Video playback routes retire dock presentation immediately, even during the brief handoff before a stale Music snapshot is replaced. Movie, Episode, Series, Trailer, and other video sessions remain owned by Jellyfin's video player UI and never acquire `ptv-playback-presentation-owned`.
+
+Frontend update application has one in-flight owner. A waiting worker receives `SKIP_WAITING`; `controllerchange` triggers exactly one reload. If the transition never arrives, a bounded activation timer performs the same one-shot reload. Missing worker activation support falls back directly. The reload marker is scoped to the current attempt and cleared when the service starts or a new waiting worker is adopted, so an old session marker cannot suppress future updates. The notice leaves its applying state before reload and repeated clicks/controller events cannot multiply attempts.

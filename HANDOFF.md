@@ -339,3 +339,13 @@ Before release sign-off, authenticate at the development frontend connected to t
 6. Capture sanitized response code/duration, player/audio/subscription counts, loading transition, route mount/unmount counts, and event growth. Queue progress should grow at roughly one publication per second rather than the prior multi-owner flood.
 
 This is a frontend-only correction. Jellyfin/plugin restart is not required. Do not deploy until the authenticated physical checks pass; then deploy through the normal frontend/service-worker path without clearing user data.
+
+## 2026-07-16 Playback Dock And Update Reload Handoff
+
+The bottom-right dock leaked onto Jellyfin video playback because it treated the universal global playback snapshot as universal presentation ownership. It now renders only an active PTV Music-owned Audio item and also listens to route changes so `#/video` hides it before any stale Music snapshot can appear over the video player. Movie, Episode, Series, and Trailer coverage is explicit; returning to Music restores one dock.
+
+The frontend update button stalled because activation had no timeout/direct fallback and the session reload marker from a prior attempt was never retired. The update service now owns one activation attempt, posts `SKIP_WAITING`, reloads exactly once on `controllerchange`, falls back after three seconds, directly reloads if worker messaging is unavailable, clears stale markers, and removes the notice before the reload call. Repeated clicks and late controller events are idempotent.
+
+Automated gates pass: focused 22/22; final full Vitest 403/403; TypeScript; scoped ESLint; E2E Webpack; Playwright 8/8; production Webpack in 92.581 seconds with only known size warnings; secret scan; and whitespace validation. One first-run featured-cache timeout passed isolated 4/4 and on the immediate full rerun.
+
+Release remains HOLD until an authenticated physical client proves: one dock for Music; no PTV dock for movie/episode playback; Music restoration after video; and an actual waiting service worker reloads into the new bundle without a stuck notice or loop. This is frontend-only: no Jellyfin/plugin restart, cache-schema migration, user-data clear, plugin deployment, commit, or push was performed.

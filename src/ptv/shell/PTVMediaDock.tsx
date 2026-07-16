@@ -39,20 +39,51 @@ function stopEvent(event: React.MouseEvent<HTMLElement>) {
     event.stopPropagation();
 }
 
+function subscribeToPlaybackRoute(listener: () => void) {
+    window.addEventListener('hashchange', listener);
+    window.addEventListener('popstate', listener);
+
+    return () => {
+        window.removeEventListener('hashchange', listener);
+        window.removeEventListener('popstate', listener);
+    };
+}
+
+function getPlaybackRouteHash() {
+    return window.location.hash || '';
+}
+
+export function isPtvMusicDockPlayback(
+    state: PtvGlobalPlaybackState,
+    routeHash = getPlaybackRouteHash()
+) {
+    if (/^#\/(?:playback|video|livetv|nowplaying)(?:[/?]|$)/i.test(routeHash)) return false;
+    if (!state.active || !state.itemId || state.source !== 'ptv-music') return false;
+
+    const itemType = String(state.itemType || '').trim().toLowerCase();
+    const mediaType = String(state.mediaType || '').trim().toLowerCase();
+
+    return mediaType === 'audio' && (!itemType || itemType === 'audio');
+}
+
 export default function PTVMediaDock() {
     const state = useSyncExternalStore(
         subscribeToPtvGlobalPlaybackState,
         getPtvGlobalPlaybackState,
         getPtvGlobalPlaybackState
     );
+    const routeHash = useSyncExternalStore(
+        subscribeToPlaybackRoute,
+        getPlaybackRouteHash,
+        getPlaybackRouteHash
+    );
+    const ownsPlaybackPresentation = isPtvMusicDockPlayback(state, routeHash);
     const progressPercent = ticksToPercent(state.positionTicks, state.durationTicks);
     const title = state.name || 'Now Playing';
     const kicker = getPlaybackKicker(state);
     const queueLabel = state.queueLength && state.queueLength > 1 ? `${state.queueLength} in queue` : '';
 
     useEffect(() => {
-        const ownsPlaybackPresentation = Boolean(state.active && state.itemId);
-
         document.documentElement.classList.toggle('ptv-playback-presentation-owned', ownsPlaybackPresentation);
         document.body.classList.toggle('ptv-playback-presentation-owned', ownsPlaybackPresentation);
 
@@ -60,7 +91,7 @@ export default function PTVMediaDock() {
             document.documentElement.classList.remove('ptv-playback-presentation-owned');
             document.body.classList.remove('ptv-playback-presentation-owned');
         };
-    }, [state.active, state.itemId]);
+    }, [ownsPlaybackPresentation]);
 
     useEffect(() => {
         incrementPtvPerformanceCounter('dockRenderCount', {
@@ -105,7 +136,7 @@ export default function PTVMediaDock() {
         void stopPtvGlobalPlayback(state);
     }, [state]);
 
-    if (!state.active || !state.itemId) return null;
+    if (!ownsPlaybackPresentation) return null;
 
     return (
         <aside

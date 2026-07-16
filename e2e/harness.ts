@@ -456,9 +456,11 @@ async function startUpdateScenario() {
 
     if (params.get('update') !== 'waiting') return;
 
+    const controllerListeners = new Map<string, () => void>();
     const waitingWorker = {
         postMessage: () => {
             document.documentElement.dataset.skipWaitingRequested = 'true';
+            window.queueMicrotask(() => controllerListeners.get('controllerchange')?.());
         },
         state: 'installed'
     };
@@ -468,6 +470,8 @@ async function startUpdateScenario() {
             document.documentElement.dataset.reloadRequested = 'true';
         },
         serviceWorker: {
+            addEventListener: (type, listener) => controllerListeners.set(type, listener),
+            controller: {},
             getRegistration: async () => ({ waiting: waitingWorker })
         },
         sessionStorage: window.sessionStorage

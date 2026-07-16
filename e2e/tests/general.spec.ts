@@ -6,6 +6,8 @@ test.describe('general runtime integration', () => {
         await expect(page.locator('#update-notice')).toContainText('PiggieTV update available');
         await page.getByRole('button', { name: 'Reload' }).click();
         await expect(page.locator('html')).toHaveAttribute('data-skip-waiting-requested', 'true');
+        await expect(page.locator('html')).toHaveAttribute('data-reload-requested', 'true');
+        await expect(page.locator('#update-notice')).toHaveCount(0);
     });
 
     test('defers an update while playback is active', async ({ page }) => {
