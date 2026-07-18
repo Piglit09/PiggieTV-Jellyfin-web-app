@@ -35,6 +35,10 @@ import Dashboard from 'utils/dashboard';
 import Events from 'utils/events';
 import { getItemBackdropImageUrl } from 'utils/jellyfin-apiclient/backdropImage';
 
+import { emit as emitPtvEvent } from '../../ptv/core/events';
+import { DetailRequestGate } from './detailRequestGate';
+import { normalizeItemMediaSources } from './mediaSourceDeduplication';
+
 import 'elements/emby-itemscontainer/emby-itemscontainer';
 import 'elements/emby-checkbox/emby-checkbox';
 import 'elements/emby-button/emby-button';
@@ -93,6 +97,71 @@ function hideAll(page, className, show) {
             elem.classList.add('hide');
         }
     }
+}
+
+function isDetailItemCurrent(page, item) {
+    return !page.dataset.ptvDetailItemId || page.dataset.ptvDetailItemId === item?.Id;
+}
+
+function resetDetailPageForItem(page, itemId) {
+    page.dataset.ptvDetailItemId = itemId || '';
+    page.classList.add('ptv-detail-data-loading');
+    page.querySelector('.detailLogo')?.classList.add('hide');
+    page.querySelectorAll('.detailImageContainer').forEach(container => {
+        container.classList.add('ptv-detail-artwork-pending');
+        container.innerHTML = '';
+    });
+    const nameContainer = page.querySelector('.nameContainer');
+    if (nameContainer) nameContainer.innerHTML = '';
+    page.querySelector('.mainDetailButtons')?.classList.add('hide');
+    page.querySelectorAll(`
+        .nextUpItems,
+        .similarContent,
+        .moreFromSeasonSection .itemsContainer,
+        .moreFromArtistSection .itemsContainer,
+        .collectionItems,
+        #childrenCollapsible .itemsContainer,
+        #listChildrenCollapsible .itemsContainer,
+        #additionalPartsContent,
+        #castContent,
+        #guestCastContent,
+        #musicVideosContent,
+        #scenesContent,
+        #seriesScheduleList,
+        #specialsContent
+    `)
+        .forEach(container => {
+            container.innerHTML = '';
+        });
+    page.querySelectorAll(`
+        .nextUpSection,
+        .moreFromSeasonSection,
+        .moreFromArtistSection,
+        #additionalPartsCollapsible,
+        #castCollapsible,
+        #childrenCollapsible,
+        #guestCastCollapsible,
+        #listChildrenCollapsible,
+        #musicVideosCollapsible,
+        #scenesCollapsible,
+        #seriesScheduleSection,
+        #similarCollapsible,
+        #specialsCollapsible
+    `).forEach(section => {
+        section.classList.add('hide');
+    });
+}
+
+function preloadImage(url) {
+    if (!url) return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.decoding = 'async';
+        image.onload = resolve;
+        image.onerror = reject;
+        image.src = url;
+    });
 }
 
 function getContextMenuOptions(item, user, button) {
@@ -591,6 +660,8 @@ function reloadFromItem(instance, page, params, item, user) {
     }
 
     itemContextMenu.getCommands(getContextMenuOptions(item, user)).then(commands => {
+        if (!isDetailItemCurrent(page, item)) return;
+
         if (commands.length) {
             hideAll(page, 'btnMoreCommands', true);
         } else {
@@ -688,8 +759,16 @@ function renderLogo(page, item, apiClient) {
     const url = logoImageUrl(item, apiClient, {});
 
     if (url) {
-        detailLogo.classList.remove('hide');
-        imageLoader.setLazyImage(detailLogo, url);
+        detailLogo.classList.add('hide', 'ptv-detail-artwork-pending');
+        preloadImage(url).then(() => {
+            if (!isDetailItemCurrent(page, item)) return;
+
+            imageLoader.setLazyImage(detailLogo, url);
+            detailLogo.classList.remove('hide', 'ptv-detail-artwork-pending');
+            detailLogo.classList.add('ptv-detail-artwork-ready');
+        }).catch(() => {
+            if (isDetailItemCurrent(page, item)) detailLogo.classList.add('hide');
+        });
     } else {
         detailLogo.classList.add('hide');
     }
@@ -778,8 +857,14 @@ function renderDetailImage(apiClient, elem, item, loader) {
         { width: dom.getWindowSize().innerWidth * 0.25 }
     );
 
+    const page = elem.closest('.itemDetailPage');
+
+    if (page && !isDetailItemCurrent(page, item)) return;
+
     elem.innerHTML = html;
     loader.lazyChildren(elem);
+    elem.classList.remove('ptv-detail-artwork-pending');
+    elem.classList.add('ptv-detail-artwork-ready');
 }
 
 function renderImage(page, item, apiClient) {
@@ -813,8 +898,11 @@ function renderNextUp(page, item, user) {
     ServerConnections.getApiClient(item.ServerId).getNextUpEpisodes({
         SeriesId: item.Id,
         UserId: user.Id,
-        Fields: 'MediaSourceCount'
+        Fields: 'MediaSourceCount,MediaSources'
     }).then(function (result) {
+        if (!isDetailItemCurrent(page, item)) return;
+
+        result.Items = result.Items.map(normalizeItemMediaSources);
         if (result.Items.length) {
             section.classList.remove('hide');
         } else {
@@ -1154,6 +1242,8 @@ function renderLyricsContainer(view, item, apiClient) {
             type: 'GET',
             dataType: 'json'
         }).then((response) => {
+            if (!isDetailItemCurrent(view, item)) return;
+
             if (!response.Lyrics) {
                 lyricContainer.classList.add('hide');
                 return;
@@ -1186,8 +1276,11 @@ function renderMoreFromSeason(view, item, apiClient) {
         apiClient.getEpisodes(item.SeriesId, {
             SeasonId: item.SeasonId,
             UserId: userId,
-            Fields: 'ItemCounts,PrimaryImageAspectRatio,CanDelete,MediaSourceCount'
+            Fields: 'ItemCounts,PrimaryImageAspectRatio,CanDelete,MediaSourceCount,MediaSources'
         }).then(function (result) {
+            if (!isDetailItemCurrent(view, item)) return;
+
+            result.Items = result.Items.map(normalizeItemMediaSources);
             if (result.Items.length < 2) {
                 section.classList.add('hide');
                 return;
@@ -1243,6 +1336,8 @@ function renderMoreFromArtist(view, item, apiClient) {
         }
 
         apiClient.getItems(apiClient.getCurrentUserId(), query).then(function (result) {
+            if (!isDetailItemCurrent(view, item)) return;
+
             if (!result.Items.length) {
                 section.classList.add('hide');
                 return;
@@ -1296,6 +1391,8 @@ function renderSimilarItems(page, item, context) {
         }
 
         apiClient.getSimilarItems(item.Id, options).then(function (result) {
+            if (!isDetailItemCurrent(page, item)) return;
+
             if (!result.Items.length) {
                 similarCollapsible.classList.add('hide');
                 return;
@@ -1408,7 +1505,7 @@ function renderChildren(page, item) {
             Fields: fields
         });
     } else if (item.Type == 'Season') {
-        fields += ',Overview';
+        fields += ',Overview,MediaSources';
         promise = apiClient.getEpisodes(item.SeriesId, {
             seasonId: item.Id,
             userId: userId,
@@ -1420,6 +1517,9 @@ function renderChildren(page, item) {
 
     promise = promise || apiClient.getItems(apiClient.getCurrentUserId(), query);
     promise.then(function (result) {
+        if (!isDetailItemCurrent(page, item)) return;
+
+        result.Items = result.Items.map(normalizeItemMediaSources);
         let html = '';
         let scrollX = false;
         let isList = false;
@@ -1650,6 +1750,8 @@ function renderChannelGuide(page, apiClient, item) {
             ImageTypeLimit: 0,
             EnableUserData: false
         }).then(function (result) {
+            if (!isDetailItemCurrent(page, item)) return;
+
             renderProgramsForChannel(page, result);
         });
     }
@@ -1668,6 +1770,8 @@ function renderSeriesSchedule(page, item) {
         Fields: 'ChannelInfo,ChannelImage',
         LibrarySeriesId: item.Id
     }).then(function (result) {
+        if (!isDetailItemCurrent(page, item)) return;
+
         if (result.Items.length) {
             page.querySelector('#seriesScheduleSection').classList.remove('hide');
         } else {
@@ -1818,6 +1922,8 @@ function renderMusicVideos(page, item, user) {
     };
 
     ServerConnections.getApiClient(item.ServerId).getItems(user.Id, request).then(function (result) {
+        if (!isDetailItemCurrent(page, item)) return;
+
         if (result.Items.length) {
             page.querySelector('#musicVideosCollapsible').classList.remove('hide');
             const musicVideosContent = page.querySelector('#musicVideosContent');
@@ -1831,6 +1937,8 @@ function renderMusicVideos(page, item, user) {
 
 function renderAdditionalParts(page, item, user) {
     ServerConnections.getApiClient(item.ServerId).getAdditionalVideoParts(user.Id, item.Id).then(function (result) {
+        if (!isDetailItemCurrent(page, item)) return;
+
         if (result.Items.length) {
             page.querySelector('#additionalPartsCollapsible').classList.remove('hide');
             const additionalPartsContent = page.querySelector('#additionalPartsContent');
@@ -1854,6 +1962,8 @@ function renderScenes(page, item) {
         const scenesContent = page.querySelector('#scenesContent');
 
         import('../../components/cardbuilder/chaptercardbuilder').then(({ default: chaptercardbuilder }) => {
+            if (!isDetailItemCurrent(page, item)) return;
+
             chaptercardbuilder.buildChapterCards(item, chapters, {
                 itemsContainer: scenesContent,
                 backdropShape: 'overflowBackdrop',
@@ -1880,6 +1990,8 @@ function getVideosHtml(items) {
 
 function renderSpecials(page, item, user) {
     ServerConnections.getApiClient(item.ServerId).getSpecialFeatures(user.Id, item.Id).then(function (specials) {
+        if (!isDetailItemCurrent(page, item)) return;
+
         const specialsContent = page.querySelector('#specialsContent');
         specialsContent.innerHTML = getVideosHtml(specials);
         imageLoader.lazyChildren(specialsContent);
@@ -1896,6 +2008,8 @@ function renderCast(page, item, people) {
     const castContent = page.querySelector('#castContent');
 
     import('../../components/cardbuilder/peoplecardbuilder').then(({ default: peoplecardbuilder }) => {
+        if (!isDetailItemCurrent(page, item)) return;
+
         peoplecardbuilder.buildPeopleCards(people, {
             itemsContainer: castContent,
             coverImage: true,
@@ -1916,6 +2030,8 @@ function renderGuestCast(page, item, people) {
     const guestCastContent = page.querySelector('#guestCastContent');
 
     import('../../components/cardbuilder/peoplecardbuilder').then(({ default: peoplecardbuilder }) => {
+        if (!isDetailItemCurrent(page, item)) return;
+
         peoplecardbuilder.buildPeopleCards(people, {
             itemsContainer: guestCastContent,
             coverImage: true,
@@ -1958,11 +2074,29 @@ export default function (view, params) {
         loading.show();
 
         const apiClient = getApiClient();
+        const itemId = String(pageParams.id || '');
+        const request = detailRequestGate.begin(itemId);
+
+        currentItem = null;
+        resetDetailPageForItem(page, itemId);
 
         Promise.all([getPromise(apiClient, pageParams), apiClient.getCurrentUser()]).then(([item, user]) => {
-            currentItem = item;
-            reloadFromItem(instance, page, pageParams, item, user);
+            if (!detailRequestGate.isCurrent(request)) return;
+
+            const normalizedItem = normalizeItemMediaSources(item);
+            currentItem = normalizedItem;
+            reloadFromItem(instance, page, pageParams, normalizedItem, user);
+            page.classList.remove('ptv-detail-data-loading');
+            emitPtvEvent('detailsrendered', {
+                item: normalizedItem,
+                itemId,
+                page
+            });
         }).catch((error) => {
+            if (!detailRequestGate.isCurrent(request)) return;
+
+            page.classList.remove('ptv-detail-data-loading');
+            loading.hide();
             console.error('failed to get item or current user: ', error);
         });
     }
@@ -2122,6 +2256,7 @@ export default function (view, params) {
 
     let currentItem;
     const self = this;
+    const detailRequestGate = new DetailRequestGate();
 
     function init() {
         const apiClient = getApiClient();
@@ -2151,10 +2286,12 @@ export default function (view, params) {
             libraryMenu.setTransparentMenu(!layoutManager.mobile);
 
             if (e.detail.isRestored) {
-                if (currentItem) {
+                if (currentItem?.Id === params.id) {
                     libraryMenu.setTitle('');
                     renderTrackSelections(page, self, currentItem, true);
                     renderBackdrop(page, currentItem);
+                } else {
+                    reload(self, page, params);
                 }
             } else {
                 reload(self, page, params);
@@ -2166,12 +2303,14 @@ export default function (view, params) {
             itemShortcuts.on(view.querySelector('.nameContainer'));
         });
         view.addEventListener('viewbeforehide', function () {
+            detailRequestGate.retire();
             itemShortcuts.off(view.querySelector('.nameContainer'));
             Events.off(apiClient, 'message', onWebSocketMessage);
             Events.off(playbackManager, 'playerchange', onPlayerChange);
             libraryMenu.setTransparentMenu(false);
         });
         view.addEventListener('viewdestroy', function () {
+            detailRequestGate.retire();
             currentItem = null;
             self._currentPlaybackMediaSources = null;
             self.currentRecordingFields = null;

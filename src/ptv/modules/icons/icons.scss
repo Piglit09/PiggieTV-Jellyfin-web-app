@@ -1042,7 +1042,10 @@ span.material-icons.ptv-icon-legacy.ptv-icon-users::after {
     -webkit-mask-size: contain !important;
 }
 
-.ptv-header-icon-btn .ptv-icon {
+.ptv-header-icon-btn .ptv-icon,
+.ptv-shell-icon-button .ptv-icon,
+.ptv-shell-search-trigger .ptv-icon,
+.ptv-shell-search-clear .ptv-icon {
     margin: 0 !important;
 }
 

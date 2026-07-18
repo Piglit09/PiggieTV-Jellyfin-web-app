@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 
+import { ServerConnections } from 'lib/jellyfin-apiclient';
+import Events from '../../utils/events';
+
 import { getPtvCurrentUser, isPtvAdminUser } from '../api';
 import { PTV_EVENTS } from '../core/config';
 import { isPtvDebugEnabled, recordPtvEvent, setPtvDebugAdminAccess } from '../core/observability';
@@ -10,6 +13,11 @@ type PtvDebugChangeDetail = Readonly<{
 
 let adminDebugAccess: boolean | null = null;
 let adminDebugAccessPromise: Promise<boolean> | null = null;
+
+export function invalidatePtvAdminDebugAccess() {
+    adminDebugAccess = null;
+    adminDebugAccessPromise = null;
+}
 
 function getDebugEnabledFromEvent(event: Event) {
     const detail = (event as CustomEvent<PtvDebugChangeDetail>).detail;
@@ -25,8 +33,17 @@ function getPtvAdminDebugAccess() {
     if (!adminDebugAccessPromise) {
         adminDebugAccessPromise = getPtvCurrentUser()
             .then(user => {
-                adminDebugAccess = isPtvAdminUser(user);
-                return adminDebugAccess;
+                const isAdmin = isPtvAdminUser(user);
+
+                // Authentication can settle after the shell mounts. Do not cache
+                // an unauthenticated result across the later sign-in event.
+                if (user?.Id) {
+                    adminDebugAccess = isAdmin;
+                } else {
+                    adminDebugAccessPromise = null;
+                }
+
+                return isAdmin;
             })
             .catch(error => {
                 adminDebugAccessPromise = null;
@@ -44,27 +61,49 @@ export function usePtvAdminDebugVisibility() {
     useEffect(() => {
         let isMounted = true;
 
-        void getPtvAdminDebugAccess()
-            .then(isAdminUser => {
-                setPtvDebugAdminAccess(isAdminUser);
+        const updateAdminAccess = () => {
+            void getPtvAdminDebugAccess()
+                .then(isAdminUser => {
+                    setPtvDebugAdminAccess(isAdminUser);
 
-                if (isMounted) {
-                    setAdmin(isAdminUser);
-                }
-            })
-            .catch(error => {
-                setPtvDebugAdminAccess(false);
-                recordPtvEvent('api', 'admin-debug-user-policy-failed', {
-                    error: error instanceof Error ? error.message : String(error)
+                    if (isMounted) {
+                        setAdmin(isAdminUser);
+                    }
+                })
+                .catch(error => {
+                    setPtvDebugAdminAccess(false);
+                    recordPtvEvent('api', 'admin-debug-user-policy-failed', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+
+                    if (isMounted) {
+                        setAdmin(false);
+                    }
                 });
+        };
 
-                if (isMounted) {
-                    setAdmin(false);
-                }
-            });
+        const handleLocalUserSignedIn = () => {
+            invalidatePtvAdminDebugAccess();
+            updateAdminAccess();
+        };
+
+        const handleLocalUserSignedOut = () => {
+            invalidatePtvAdminDebugAccess();
+            setPtvDebugAdminAccess(false);
+
+            if (isMounted) {
+                setAdmin(false);
+            }
+        };
+
+        Events.on(ServerConnections, 'localusersignedin', handleLocalUserSignedIn);
+        Events.on(ServerConnections, 'localusersignedout', handleLocalUserSignedOut);
+        updateAdminAccess();
 
         return () => {
             isMounted = false;
+            Events.off(ServerConnections, 'localusersignedin', handleLocalUserSignedIn);
+            Events.off(ServerConnections, 'localusersignedout', handleLocalUserSignedOut);
         };
     }, []);
 

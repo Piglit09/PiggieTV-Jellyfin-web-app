@@ -33,6 +33,7 @@ import LibraryMenu from '../../../scripts/libraryMenu';
 import { setBackdropTransparency, TRANSPARENCY_LEVEL } from '../../../components/backdrop/backdrop';
 import { pluginManager } from '../../../components/pluginManager';
 import { PluginType } from '../../../types/plugin.ts';
+import { getEpisodePlaybackTitle } from './videoDisplayTitle';
 
 function getOpenedDialog() {
     return document.querySelector('.dialogContainer .dialog.opened');
@@ -234,12 +235,13 @@ export default function (view) {
     }
 
     function setTitle(item, parentName) {
-        let itemName = itemHelper.getDisplayName(item, {
+        const episodeTitle = getEpisodePlaybackTitle(item, parentName);
+        let itemName = episodeTitle || itemHelper.getDisplayName(item, {
             includeParentInfo: item.Type !== 'Program',
             includeIndexNumber: item.Type !== 'Program'
         });
 
-        if (itemName && parentName) {
+        if (!episodeTitle && itemName && parentName) {
             itemName = `${parentName} - ${itemName}`;
         }
 
@@ -251,7 +253,7 @@ export default function (view) {
         let title = itemName;
         if (item.Type == 'Movie' && item.ProductionYear) {
             title += ` (${datetime.toLocaleString(item.ProductionYear, { useGrouping: false })})`;
-        } else if (item.PremiereDate) {
+        } else if (!episodeTitle && item.PremiereDate) {
             try {
                 const year = datetime.toLocaleString(datetime.parseISO8601Date(item.PremiereDate).getFullYear(), { useGrouping: false });
                 title += ` (${year})`;
@@ -261,6 +263,7 @@ export default function (view) {
         }
 
         LibraryMenu.setTitle(title);
+        view.querySelector('.osdTitle').textContent = title;
 
         const documentTitle = parentName || (item ? item.Name : null);
 
@@ -2070,4 +2073,3 @@ export default function (view) {
         });
     }
 }
-

@@ -16,6 +16,7 @@ import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { copy } from 'scripts/clipboard';
 import dom from 'utils/dom';
 import { getReadableSize } from 'utils/file';
+import { normalizeItemMediaSources } from '../../controllers/itemDetails/mediaSourceDeduplication';
 
 import 'components/formdialog.scss';
 import 'components/listview/listview.scss';
@@ -35,10 +36,11 @@ const copyButtonHtml = layoutManager.tv ? '' :
 const attributeDelimiterHtml = layoutManager.tv ? '' : '<span class="hide">: </span>';
 
 function setMediaInfo(user, page, item) {
-    let html = item.MediaSources.map(version => {
-        return getMediaSourceHtml(user, item, version);
+    const normalizedItem = normalizeItemMediaSources(item);
+    let html = normalizedItem.MediaSources.map(version => {
+        return getMediaSourceHtml(user, normalizedItem, version);
     }).join('<div style="border-top:1px solid #444;margin: 1em 0;"></div>');
-    if (item.MediaSources.length > 1) {
+    if (normalizedItem.MediaSources.length > 1) {
         html = `<br/>${html}`;
     }
     const mediaInfoContent = page.querySelector('#mediaInfoContent');

@@ -3,6 +3,7 @@
     align-self: start;
     width: 100% !important;
     max-width: 440px;
+    aspect-ratio: 2 / 3;
     margin: 0 !important;
 
     border: 1px solid rgba(205, 174, 255, 0.18);
@@ -17,6 +18,22 @@
         inset 0 1px 0 rgba(255, 255, 255, 0.12);
     backdrop-filter: blur(18px) saturate(1.28);
     overflow: hidden;
+}
+
+.ptv-detail-page .detailImageContainer.ptv-detail-artwork-pending {
+    background:
+        linear-gradient(110deg, transparent 24%, rgb(255 255 255 / 7%) 42%, transparent 60%),
+        linear-gradient(145deg, rgb(79 39 122 / 36%), rgb(17 9 31 / 48%));
+    background-size: 220% 100%, 100% 100%;
+}
+
+.ptv-detail-page .ptv-detail-artwork-image {
+    opacity: 0;
+    transition: opacity 180ms ease;
+}
+
+.ptv-detail-page .ptv-detail-artwork-image.ptv-detail-artwork-ready {
+    opacity: 1;
 }
 
 .ptv-detail-page .detailImageContainer .card {

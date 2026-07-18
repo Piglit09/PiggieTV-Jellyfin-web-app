@@ -199,6 +199,19 @@
     padding: 0 !important;
 }
 
+.ptv-detail-page .detailRibbon .infoWrapper,
+.ptv-detail-page .mainDetailButtons,
+.ptv-detail-page .detailPagePrimaryContent {
+    transition: opacity 180ms ease;
+}
+
+.ptv-detail-page.ptv-detail-data-loading .detailRibbon .infoWrapper,
+.ptv-detail-page.ptv-detail-data-loading .mainDetailButtons,
+.ptv-detail-page.ptv-detail-data-loading .detailPagePrimaryContent {
+    opacity: 0;
+    pointer-events: none;
+}
+
 @media (max-width: 900px) {
     .ptv-detail-page .itemBackdrop {
         height: clamp(360px, 52vh, 540px) !important;

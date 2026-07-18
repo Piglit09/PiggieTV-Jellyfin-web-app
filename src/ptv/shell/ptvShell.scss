@@ -402,10 +402,19 @@ html.ptv-layout-mobile .ptv-shell-nav-primary::-webkit-scrollbar {
         0 10px 28px rgb(0 0 0 / 26%),
         0 0 24px rgb(170 80 255 / 13%);
     height: 42px;
-    justify-content: center;
+    display: grid;
+    line-height: 0;
+    place-items: center;
     padding: 0;
     width: 42px;
     backdrop-filter: blur(calc(var(--ptv-glass-blur) - 6px)) saturate(1.28);
+}
+
+.ptv-shell-icon-button > .ptv-icon {
+    align-self: center;
+    display: block;
+    justify-self: center;
+    margin: 0;
 }
 
 .ptv-shell-nav-button:hover,

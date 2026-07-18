@@ -1,6 +1,7 @@
 import { on } from '../../core/events';
 import { registerModule } from '../../core/lifecycle';
 import { runIconEngine, scheduleIconEngine } from '../../utils/icons';
+import { mountPtvSettingsShell } from './settingsShell';
 
 import './settings.scss';
 
@@ -82,6 +83,8 @@ function enhanceSettingsIcons() {
 }
 
 function init({ scope }) {
+    document.documentElement.classList.add('ptv-route-settings-page');
+    scope.add(mountPtvSettingsShell());
     const runScopedHydrationPasses = () => runDelayedHydrationPasses(scope);
     scope.mutationObserver((mutations) => {
         if (!isSettingsRoute()) return;
@@ -126,6 +129,10 @@ function refresh({ scope }) {
     runDelayedHydrationPasses(scope);
 }
 
+function destroy() {
+    document.documentElement.classList.remove('ptv-route-settings-page');
+}
+
 registerModule({
     density: 'dense',
     features: ['settings', 'preferences'],
@@ -150,6 +157,7 @@ registerModule({
             type: 'settings-list'
         }
     ],
+    destroy,
     init,
     refresh
 });

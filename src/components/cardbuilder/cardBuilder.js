@@ -19,6 +19,7 @@ import {
     getPtvQualityAttribute,
     getPtvQualityPillsHtml
 } from 'ptv/modules/cards/qualityTags';
+import { getUniqueMediaSourceCount } from 'controllers/itemDetails/mediaSourceDeduplication';
 
 import focusManager from '../focusManager';
 import imageLoader from '../images/imageLoader';
@@ -1075,7 +1076,7 @@ function buildCard(index, item, apiClient, options) {
         progressHtml = '';
     }
 
-    const mediaSourceCount = item.MediaSourceCount || 1;
+    const mediaSourceCount = getUniqueMediaSourceCount(item);
     if (mediaSourceCount > 1 && options.disableIndicators !== true) {
         innerCardFooter += '<div class="mediaSourceIndicator">' + mediaSourceCount + '</div>';
     }

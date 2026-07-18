@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const shellStyles = fs.readFileSync(path.join(__dirname, 'ptvShell.scss'), 'utf8');
 const detailsStyles = fs.readFileSync(path.join(__dirname, '../modules/details/details-shell.scss'), 'utf8');
+const iconStyles = fs.readFileSync(path.join(__dirname, '../modules/icons/icons.scss'), 'utf8');
 
 function getRuleBodies(source: string, selector: string) {
     const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -38,6 +39,9 @@ describe('PiggieTV shell surface hierarchy', () => {
         expect(iconRule).toContain('rgb(35 18 58 / 36%)');
         expect(iconRule).toContain('border-color: rgb(210 170 255 / 22%)');
         expect(iconRule).toContain('backdrop-filter: blur(');
+        expect(iconRule).toContain('display: grid');
+        expect(iconRule).toContain('line-height: 0');
+        expect(iconRule).toContain('place-items: center');
     });
 
     it('does not let details styles recreate a wide header surface', () => {
@@ -45,5 +49,11 @@ describe('PiggieTV shell surface hierarchy', () => {
         expect(detailsStyles).toContain('.ptv-details-backdrop');
         expect(detailsStyles).toContain('--ptv-details-glass-bg');
         expect(detailsStyles).toContain('.ptv-details-glass');
+    });
+
+    it('neutralizes the global icon margin inside every shell utility button', () => {
+        expect(iconStyles).toMatch(/\.ptv-shell-icon-button \.ptv-icon,[\s\S]*?margin:\s*0 !important/);
+        expect(iconStyles).toContain('.ptv-shell-search-trigger .ptv-icon');
+        expect(iconStyles).toContain('.ptv-shell-search-clear .ptv-icon');
     });
 });

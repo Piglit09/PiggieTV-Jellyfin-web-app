@@ -394,3 +394,21 @@ All details glass is scoped below `.ptv-detail-page`. The page defines transluce
 `PTVShell` owns layout and interaction, but its outer `.ptv-shell-header` is never a visual surface. The header remains transparent with no border, shadow, or backdrop filter across desktop, tablet, mobile, native details, and PTV dashboard routes. The symmetric desktop grid gives the primary navigation physical viewport-center ownership independent of logo and utility widths.
 
 Glass is limited to deliberate controls: `.ptv-shell-nav-primary` owns the centered navigation pill, while each `.ptv-shell-icon-button` owns a compact purple-tinted glass surface and Search retains the larger circular treatment. Details styles may change safe-area geometry but cannot restyle the shared header root. Android dropdowns remain portal-owned, and low-power profiles remove expensive filters from nav and utility controls without changing their hierarchy.
+
+### Details Hydration And Video Presentation Boundary
+
+The Jellyfin item-details controller owns one item-scoped request generation. Starting a new Movie, Series, Season, or Episode request immediately clears stale visible detail state, retires the prior generation, and permits asynchronous sections to commit only while both generation and item ID still match. The controller does not mark a native detail enhancement complete before an authenticated API client exists, avoiding the refresh-only failure where the first navigation permanently skipped artwork enhancement.
+
+Details artwork is resolved and preloaded before display. Backdrop candidates prefer the item, then related parent/season/series artwork, then current Thumb and Primary images. Candidate failure advances without leaving a blank page, and poster/logo slots keep stable geometry while images transition from pending to ready. Independent season, episode, cast, related-item, and image requests may run concurrently, but stale responses cannot mutate the active item.
+
+Media-version UI consumes a shared normalized source list. Stable file identity prefers path, then source ID, then bounded source metadata, and richer duplicate records win. Version badges and selectors therefore represent unique playable sources rather than duplicated API rows.
+
+Jellyfin retains ownership of `#/video`. Its PTV presentation uses translucent purple-blue control glass, with low-power and unsupported-filter fallbacks. Episode playback headings combine the series title, season/episode index, and episode title; the controller's known parent title is used when the playback DTO omits `SeriesName`. Movie title behavior and the existing Music-to-video ownership handoff are unchanged.
+
+### Auth-Aware Shell Utilities And Details Render Handoff
+
+Administrator shell visibility follows Jellyfin authentication lifecycle rather than a one-time mount snapshot. An unauthenticated lookup is not cached as an authoritative non-admin result; `localusersignedin` invalidates and resolves access again, while `localusersignedout` removes administrator controls immediately. The Dashboard utility therefore appears after delayed authentication without remounting the shell. Shell icon components explicitly neutralize the global icon margin rule so every glyph remains centered in its equal-size glass control.
+
+The stock Settings lifecycle now mounts the same header-only `PTVShell` used by other native presentation routes and applies a narrowly scoped header safe area to Settings roots. Settings content and Jellyfin ownership remain unchanged; only duplicated legacy shell chrome is replaced while the route is active.
+
+Native Details enhancement consumes the exact item emitted by the item-details controller after the active request generation commits. It no longer launches a second full item fetch during normal navigation or treats an early DOM mutation as final ownership. Direct item artwork is applied immediately, optional parent artwork resolves as a same-item background upgrade, and later Jellyfin DOM mutations only reapply native classes. Poster image markup commits with stable geometry and uses the shared image loader instead of an additional blocking preload. This closes the first-navigation/plain-layout race while retaining stale-item suppression and the existing video/Music ownership boundary.

@@ -436,3 +436,24 @@ Status: implementation and deterministic desktop/tablet/mobile verification pass
 - Details artwork and panel glass remain unchanged. Android portal dropdown behavior and the video-to-Music playback handoff remain protected by passing tests. Production Autoprefixer emits `-webkit-backdrop-filter` for the shell utility glass.
 - Verification: focused Vitest 6 files/26 tests; full Vitest 62 files/439 tests; TypeScript passed; scoped ESLint passed; shell/details Stylelint passed; focused shell/details/dropdown Playwright 15/15 plus the added tablet rerun 5/5; full Playwright 42 passed/6 opt-in live skipped; production Webpack completed in 90.6 seconds with only established size warnings; `git diff --check` passed with line-ending notices only.
 - Frontend-only scope. No plugin/backend, cache schema, playback ownership, deployment, restart, commit, push, or remote state changed.
+
+### 2026-07-17 Details Lifecycle, Artwork, Versions, And Video Polish
+
+Status: implementation and deterministic automated verification pass; authenticated physical Movie/Series/Season/Episode and video inspection remains pending.
+
+- Root causes fixed: old detail generations could commit after navigation; first navigation could be marked handled before the authenticated API client was available; artwork lacked parent fallbacks and preload ownership; duplicated media-source rows drove false version counts; shell icons inherited line-height offsets; and video controls retained an overly dark stock surface.
+- Details now clear stale state immediately, gate all asynchronous commits by generation and item ID, preload stable poster/logo/backdrop slots, resolve parent artwork fallbacks, and preserve a themed background when all candidates fail. Series/season supporting requests run concurrently without allowing late data to replace the active item.
+- Version indicators and selectors share deterministic media-source deduplication. Episode video headings render `Series · SxxExx - Episode`, including a parent-title fallback. Top-right utility icons use equal grid-centered controls, and the video OSD uses readable translucent purple-blue glass.
+- Verification: focused suites passed; final full Vitest passed 66 files/450 tests; TypeScript passed; scoped ESLint passed with six pre-existing warning comments/comparator warnings and no errors; changed Stylelint passed; focused desktop/mobile/tablet Playwright passed 7/7; production Webpack compiled in 84.892 seconds with only established asset/entrypoint size warnings; `git diff --check` passed with repository line-ending notices only.
+- Scope remains frontend-only. Plugin/backend source, API/cache contracts, video ownership, Music pause-on-video/no-auto-resume behavior, deployment, restart, commit, push, and remote state were not changed.
+
+### 2026-07-18 Shell Utilities, Settings Shell, And First-Navigation Details Correction
+
+Status: implementation and deterministic verification pass; authenticated physical timing and visual confirmation remain pending.
+
+- Dashboard icon root cause: the shared admin-visibility hook cached an unauthenticated `false` before Jellyfin user readiness and never reconsidered it. It now reacts to Jellyfin sign-in/sign-out lifecycle, invalidates provisional access, and restores/removes administrator controls without a shell remount.
+- Icon alignment root cause: a late global `.ptv-icon` rule forced a right margin into shell utility buttons. Shell/search utility contexts now reset that margin, preserving equal-size grid centering inside the individual glass controls.
+- Details first-navigation root cause: the PTV enhancer could run before the Jellyfin controller finished replacing/populating details DOM, mark the page handled, and separately refetch the item and preload its poster. The controller now emits the committed active item; PTV consumes it, applies direct artwork immediately, upgrades parent artwork only for the same active item, and reapplies layout classes after later DOM mutations without duplicate item/image work.
+- Settings root cause: the route only restyled stock content and never mounted `PTVShell`. Settings now mounts a lifecycle-owned header-only shell and scoped header-safe content spacing.
+- Verification: focused Vitest 6 files/24 tests plus clean admin teardown rerun 2/2; final full Vitest 69 files/457 tests; TypeScript passed; scoped ESLint zero errors with five inherited item-details warnings; Stylelint passed; focused Playwright shell/details 7/7; production Webpack compiled in 106.7 seconds with only established asset/entrypoint size warnings; `git diff --check` passed with line-ending notices only.
+- Scope remains frontend-only. Plugin/backend code, API/cache contracts, `#/video`, Music pause-on-video/no-auto-resume behavior, deployment, restart, commit, push, and remote state were not changed.

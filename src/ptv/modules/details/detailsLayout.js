@@ -66,7 +66,7 @@ function setBackdropFallback(backdrop) {
 }
 
 function loadBackdropCandidate(page, state, candidateIndex) {
-    if (backdropStates.get(page) !== state) return;
+    if (backdropStates.get(page) !== state || (state.itemId && page.dataset.ptvDetailsBackdropItemId !== state.itemId)) return;
 
     const candidate = state.candidates[candidateIndex];
 
@@ -83,15 +83,36 @@ function loadBackdropCandidate(page, state, candidateIndex) {
     state.image.src = candidate.url;
 }
 
-export function setPtvDetailsBackdropCandidates(page, candidates = []) {
+export function resetPtvDetailsBackdrop(page, itemId = '') {
     if (!(page instanceof HTMLElement)) return false;
 
+    const currentState = backdropStates.get(page);
+    currentState?.image.removeEventListener('load', currentState.handleLoad);
+    currentState?.image.removeEventListener('error', currentState.handleError);
+    backdropStates.delete(page);
+
+    const backdrop = ensureDetailsBackdrop(page);
+    const image = backdrop.querySelector(`.${DETAILS_BACKDROP_IMAGE_CLASS}`);
+    image.removeAttribute('src');
+    page.dataset.ptvDetailsBackdropItemId = itemId;
+    setBackdropFallback(backdrop);
+
+    return true;
+}
+
+export function setPtvDetailsBackdropCandidates(page, candidates = [], itemId = page?.dataset?.ptvDetailsBackdropItemId || '') {
+    if (!(page instanceof HTMLElement)) return false;
+
+    page.dataset.ptvDetailsBackdropItemId = itemId;
     const backdrop = ensureDetailsBackdrop(page);
     const image = backdrop.querySelector(`.${DETAILS_BACKDROP_IMAGE_CLASS}`);
     const normalizedCandidates = candidates
         .filter(candidate => candidate?.url)
         .filter((candidate, index, values) => values.findIndex(value => value.url === candidate.url) === index);
-    const signature = normalizedCandidates.map(candidate => `${candidate.requestedType || 'image'}:${candidate.url}`).join('|');
+    const candidateSignature = normalizedCandidates
+        .map(candidate => `${candidate.requestedType || 'image'}:${candidate.url}`)
+        .join('|');
+    const signature = `${itemId}|${candidateSignature}`;
     const currentState = backdropStates.get(page);
 
     if (currentState?.signature === signature) return true;
@@ -105,12 +126,13 @@ export function setPtvDetailsBackdropCandidates(page, candidates = []) {
         handleError: null,
         handleLoad: null,
         image,
+        itemId,
         index: 0,
         signature
     };
 
     state.handleLoad = () => {
-        if (backdropStates.get(page) !== state) return;
+        if (backdropStates.get(page) !== state || (state.itemId && page.dataset.ptvDetailsBackdropItemId !== state.itemId)) return;
 
         backdrop.classList.remove(`${DETAILS_BACKDROP_CLASS}--fallback`, `${DETAILS_BACKDROP_CLASS}--loading`);
         backdrop.classList.add(`${DETAILS_BACKDROP_CLASS}--image`);

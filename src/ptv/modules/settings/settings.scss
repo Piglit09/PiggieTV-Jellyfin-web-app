@@ -2,6 +2,18 @@
    PiggieTV Settings / Preferences
    ========================================================================== */
 
+html.ptv-route-settings-page :is(
+#myPreferencesMenuPage,
+#userProfilePage,
+.userPreferencesPage,
+.userProfilePage,
+.settingsPage,
+.userSettingsPage
+) {
+    box-sizing: border-box;
+    padding-top: var(--ptv-header-safe-height, 96px) !important;
+}
+
 #myPreferencesMenuPage {
     background:
         radial-gradient(

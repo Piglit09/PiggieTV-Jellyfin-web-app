@@ -412,3 +412,23 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 - Gates: focused Vitest 26/26; full Vitest 439/439; TypeScript; scoped ESLint; shell/details Stylelint; focused Playwright 15/15 plus tablet rerun 5/5; full Playwright 42 passed/6 live skipped; production Webpack in 90.6 seconds with established size warnings; production CSS includes the WebKit backdrop-filter prefix.
 - Manual hardware check remains: compare Home, Details, browse, Music, Reading, and Dashboard on desktop, Pixel/Android Chrome, and iPad Safari. Confirm no full-width glass strip, dropdowns remain above content, and bright backdrops preserve icon readability.
 - No Jellyfin restart or plugin deployment is required. Deploy only the complete frontend bundle atomically and accept the normal service-worker update.
+
+## 2026-07-17 details lifecycle and video presentation hardening
+
+- Item details now own a request generation and matching item ID. Navigation clears stale detail DOM immediately, retires prior work, and suppresses late season/episode/cast/related/artwork commits. The initial enhancement waits for an authenticated API client instead of recording a false handled state.
+- Backdrop selection is deterministic and preloaded: item Backdrop, related parent/season/series Backdrop, current Thumb, current Primary, then themed fallback. Poster/logo slots retain stable ratios while loading, preventing first-navigation layout snapping.
+- Media-source duplicates are collapsed before version badges and selectors render, so one real playable file cannot advertise duplicate versions. The video header now renders `Series · SxxExx - Episode`; Movie behavior is unchanged.
+- Top-right utility icons are centered in equal glass buttons. Video controls now use lighter transparent purple-blue glass with readable progress, captions, buttons, and timestamps. Low-power/filter fallbacks remain bounded.
+- Final gates: full Vitest 66 files/450 tests; TypeScript passed; scoped ESLint had no errors (existing warnings only); changed Stylelint passed; focused Playwright 7/7 at desktop/mobile/tablet; production Webpack compiled in 84.892 seconds with established size warnings; whitespace validation passed.
+- Manual authenticated checks remain: direct and in-app Movie, Series, Season, and Episode navigation; parent-backdrop fallback and image-failure fallback; one-file versus genuinely multi-version episodes; exact episode video heading; bright-video control readability; and confirmation that Music still pauses, the dock hides, and Music does not auto-resume after video.
+- No plugin/backend change or Jellyfin restart is required. Deploy the complete frontend output atomically and accept the normal service-worker update.
+
+## 2026-07-18 shell utility, Settings, and Details navigation correction
+
+- Dashboard utility visibility now survives shells mounted before authentication. Sign-in forces an administrator access refresh; sign-out clears it immediately. The icon remains admin-only.
+- Top-right glyphs are centered by resetting the inherited global icon margin inside shell/search glass controls. The existing equal-size grid and Android body-portal dropdown implementation remain intact.
+- Settings now mounts one header-only shared `PTVShell` and adds scoped header-safe padding to the stock Settings content. No settings data or backend behavior changed.
+- Details no longer waits for a redundant full item request on normal navigation. The item controller emits the exact committed item after stale-generation validation; PTV immediately applies its artwork and may later upgrade to related parent artwork only if the item is still active. Shared lazy image loading replaces a second poster preload, and later DOM mutations cannot erase the native glass/layout classes.
+- Final gates: focused 24/24; full Vitest 69 files/457 tests; TypeScript; scoped ESLint with no errors; changed Stylelint; focused Details/shell Playwright 7/7; production Webpack in 106.7 seconds with established size warnings; whitespace validation passed.
+- Manual authenticated checks at `10.16.0.125:8082`: sign in as an administrator and confirm Dashboard appears without refresh; open Settings and confirm one PTV header; navigate in-app between Movie, Series, Season, and Episode details and confirm the first paint already has the correct item, backdrop, glass layout, and centered utilities; compare Network timing/request count; verify Music still pauses and the dock hides for video.
+- No plugin deployment or Jellyfin restart is required. Deploy the complete frontend bundle atomically and accept the normal service-worker update/cache refresh.

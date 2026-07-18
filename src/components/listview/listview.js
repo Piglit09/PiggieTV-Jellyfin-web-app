@@ -19,6 +19,7 @@ import '../../elements/emby-playstatebutton/emby-playstatebutton';
 import { getDefaultBackgroundClass } from '../cardbuilder/cardBuilderUtils';
 import markdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
+import { getUniqueMediaSourceCount } from 'controllers/itemDetails/mediaSourceDeduplication';
 
 function getIndex(item, options) {
     if (options.index === 'disc') {
@@ -290,7 +291,7 @@ export function getListViewHtml(options) {
                 html += '<div class="' + imageClass + ' cardImageContainer ' + getDefaultBackgroundClass(item.Name) + '">' + cardBuilder.getDefaultText(item, options);
             }
 
-            const mediaSourceCount = item.MediaSourceCount || 1;
+            const mediaSourceCount = getUniqueMediaSourceCount(item);
             if (mediaSourceCount > 1 && options.disableIndicators !== true) {
                 html += '<div class="mediaSourceIndicator">' + mediaSourceCount + '</div>';
             }

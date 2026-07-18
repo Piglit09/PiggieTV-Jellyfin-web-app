@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     preparePtvDetailsLayout,
     releasePtvDetailsLayout,
+    resetPtvDetailsBackdrop,
     setPtvDetailsBackdropCandidates
 } from './detailsLayout';
 
@@ -125,6 +126,37 @@ describe('native PTV details layout ownership', () => {
 
         expect(page.querySelector('.ptv-details-backdrop')?.classList.contains('ptv-details-backdrop--fallback')).toBe(true);
         expect(page.querySelector('.ptv-details-backdrop')?.getAttribute('data-ptv-backdrop-source')).toBe('fallback');
+
+        releasePtvDetailsLayout(page);
+        page.remove();
+    });
+
+    it('retires stale artwork loads when navigation reuses the details page', () => {
+        const page = createDetailsPage();
+
+        preparePtvDetailsLayout(page);
+        resetPtvDetailsBackdrop(page, 'series-one');
+        setPtvDetailsBackdropCandidates(page, [
+            { requestedType: 'Backdrop', url: 'https://example.test/series-one.jpg' }
+        ], 'series-one');
+
+        const image = page.querySelector<HTMLImageElement>('.ptv-details-backdrop__image');
+        const backdrop = page.querySelector<HTMLElement>('.ptv-details-backdrop');
+
+        resetPtvDetailsBackdrop(page, 'episode-two');
+        setPtvDetailsBackdropCandidates(page, [
+            { requestedType: 'Backdrop', url: 'https://example.test/episode-two.jpg' },
+            { requestedType: 'Primary', url: 'https://example.test/episode-two-primary.jpg' }
+        ], 'episode-two');
+
+        expect(page.dataset.ptvDetailsBackdropItemId).toBe('episode-two');
+        expect(image?.src).toBe('https://example.test/episode-two.jpg');
+
+        image?.dispatchEvent(new Event('load'));
+        expect(backdrop?.dataset.ptvBackdropSource).toBe('Backdrop');
+
+        image?.dispatchEvent(new Event('error'));
+        expect(image?.src).toBe('https://example.test/episode-two-primary.jpg');
 
         releasePtvDetailsLayout(page);
         page.remove();
