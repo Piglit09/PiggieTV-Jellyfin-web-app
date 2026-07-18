@@ -9,6 +9,7 @@ import { useRouteError } from 'react-router-dom';
 
 import loading from 'components/loading/loading';
 import Page from 'components/Page';
+import { tryRecoverPtvChunkLoadError } from 'ptv/services/chunkLoadRecovery';
 
 interface ErrorBoundaryParams {
     pageClasses?: string[]
@@ -21,7 +22,10 @@ const ErrorBoundary: FC<ErrorBoundaryParams> = ({
 
     useEffect(() => {
         loading.hide();
-    }, []);
+        if (process.env.NODE_ENV === 'production') {
+            tryRecoverPtvChunkLoadError(error, { buildId: __PTV_BUILD_ID__ });
+        }
+    }, [error]);
 
     return (
         <Page

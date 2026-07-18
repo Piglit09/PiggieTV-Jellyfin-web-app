@@ -24,6 +24,10 @@ import { pageClassOn, serverAddress } from './utils/dashboard';
 import Events from './utils/events';
 import { initializeServerConnections } from './scripts/serverNotifications';
 import { getPtvServiceWorkerScriptUrl } from './ptv/services/updateService';
+import {
+    clearPtvChunkRecoveryQuery,
+    installPtvChunkAssetVersioning
+} from './ptv/services/chunkLoadRecovery';
 
 import RootApp from './RootApp';
 
@@ -55,6 +59,13 @@ import './ptv/modules/header';
 import './ptv/modules/dashboard';
 import './ptv/modules/settings';
 import './ptv/modules/playback';
+
+if (process.env.NODE_ENV === 'production') {
+    // Webpack and DefinePlugin provide these values to the production entry module.
+    // eslint-disable-next-line no-undef
+    installPtvChunkAssetVersioning(__webpack_require__, `${__PTV_BUILD_ID__}-${__COMMIT_SHA__}`);
+    clearPtvChunkRecoveryQuery();
+}
 
 async function init() {
     // Log current version to console to help out with issue triage and debugging

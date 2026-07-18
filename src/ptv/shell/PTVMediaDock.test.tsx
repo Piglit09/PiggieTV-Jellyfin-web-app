@@ -142,11 +142,13 @@ describe('PTV global media dock ownership', () => {
             itemId: 'music-item',
             itemType: 'Audio',
             mediaType: 'Audio',
+            paused: true,
             source: 'ptv-music'
         };
         renderDock();
 
         expect(container.querySelectorAll('.ptv-media-dock')).toHaveLength(1);
+        expect(playbackMocks.state.paused).toBe(true);
         expect(document.documentElement.classList.contains('ptv-playback-presentation-owned')).toBe(true);
     });
 });

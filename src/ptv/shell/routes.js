@@ -87,7 +87,7 @@ const ROUTE_MATCHERS = [
         layout: 'media-detail',
         owner: 'details',
         pageType: 'details',
-        pattern: ({ hash }) => hash.includes('/details') || hash.includes('/item')
+        pattern: ({ hash }) => /^#\/(?:details|item)(?:[/?]|$)/i.test(hash)
     },
     {
         className: 'ptv-route-recommendations-hub',

@@ -96,6 +96,15 @@ body.ptv-native-shell-mounted .appFooter {
     --ptv-backdrop-bottom-fade: linear-gradient(180deg, rgb(3 4 9 / 12%) 0%, rgb(3 4 9 / 46%) 72%, rgb(3 4 9 / 76%) 100%);
 }
 
+.ptv-shell-frame-header-only {
+    height: var(--ptv-header-safe-height);
+    inset: 0 0 auto;
+    min-height: 0;
+    pointer-events: none;
+    position: fixed;
+    z-index: 9500;
+}
+
 .ptv-shell-page-content {
     min-height: 100%;
     position: relative;
@@ -155,9 +164,12 @@ body.ptv-native-shell-mounted .appFooter {
 
 .ptv-shell-header {
     align-items: center;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
     display: grid;
     gap: clamp(12px, 1.2vw, 22px);
-    grid-template-columns: max-content minmax(0, 1fr) max-content;
+    grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
     left: clamp(20px, 2.4vw, 52px);
     min-height: 60px;
     pointer-events: none;
@@ -165,6 +177,7 @@ body.ptv-native-shell-mounted .appFooter {
     right: clamp(20px, 2.4vw, 52px);
     top: clamp(16px, 2vw, 34px);
     z-index: 9000;
+    backdrop-filter: none;
 }
 
 .ptv-shell-brand,
@@ -188,7 +201,7 @@ body.ptv-native-shell-mounted .appFooter {
 
 .ptv-shell-header-primary {
     grid-column: 2;
-    justify-self: end;
+    justify-self: center;
     max-width: 100%;
     min-width: 0;
     overflow: visible;
@@ -380,10 +393,19 @@ html.ptv-layout-mobile .ptv-shell-nav-primary::-webkit-scrollbar {
 }
 
 .ptv-shell-icon-button {
+    background:
+        linear-gradient(145deg, rgb(255 255 255 / 10%), transparent 52%),
+        rgb(35 18 58 / 36%);
+    border-color: rgb(210 170 255 / 22%);
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 13%),
+        0 10px 28px rgb(0 0 0 / 26%),
+        0 0 24px rgb(170 80 255 / 13%);
     height: 42px;
     justify-content: center;
     padding: 0;
     width: 42px;
+    backdrop-filter: blur(calc(var(--ptv-glass-blur) - 6px)) saturate(1.28);
 }
 
 .ptv-shell-nav-button:hover,
@@ -1069,13 +1091,9 @@ html[data-ptv-route-mode='native'].ptv-playback-presentation-owned .nowPlayingBa
     }
 
     .ptv-shell-header {
-        background:
-            linear-gradient(180deg, rgb(22 14 36 / 72%), rgb(9 7 18 / 48%)),
-            rgb(9 7 18 / 36%);
-        border-bottom: 1px solid rgb(221 202 255 / 12%);
-        box-shadow:
-            inset 0 1px 0 rgb(255 255 255 / 8%),
-            0 14px 34px rgb(0 0 0 / 28%);
+        background: transparent;
+        border: 0;
+        box-shadow: none;
         column-gap: 8px;
         grid-template-columns: minmax(0, 1fr) auto;
         left: 14px;
@@ -1088,7 +1106,7 @@ html[data-ptv-route-mode='native'].ptv-playback-presentation-owned .nowPlayingBa
         row-gap: 8px;
         top: 0;
         z-index: 9800;
-        backdrop-filter: blur(18px) saturate(1.2);
+        backdrop-filter: none;
     }
 
     .ptv-shell-header-left {
@@ -1224,6 +1242,7 @@ html[data-ptv-route-mode='native'].ptv-playback-presentation-owned .nowPlayingBa
 }
 
 html[data-ptv-render-profile='low-power'] .ptv-shell-search,
+html[data-ptv-render-profile='low-power'] .ptv-shell-icon-button,
 html[data-ptv-render-profile='low-power'] .ptv-shell-backdrop-image,
 html[data-ptv-render-profile='low-power'] .ptv-shell-nav-primary,
 html[data-ptv-render-profile='low-power'] .ptv-shell-dropdown-panel,
@@ -1232,6 +1251,7 @@ html[data-ptv-render-profile='low-power'] .ptv-shell-user-panel,
 html[data-ptv-render-profile='low-power'] .ptv-shell-context-link,
 html[data-ptv-render-profile='low-power'] .ptv-media-dock,
 html[data-ptv-client-kind='tv'] .ptv-shell-search,
+html[data-ptv-client-kind='tv'] .ptv-shell-icon-button,
 html[data-ptv-client-kind='tv'] .ptv-shell-backdrop-image,
 html[data-ptv-client-kind='tv'] .ptv-shell-nav-primary,
 html[data-ptv-client-kind='tv'] .ptv-shell-dropdown-panel,

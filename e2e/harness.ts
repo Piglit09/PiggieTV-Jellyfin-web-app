@@ -17,6 +17,9 @@ import {
     getPtvDropdownViewport,
     hasPtvDropdownPointerMoved
 } from '../src/ptv/shell/primaryNavigationDropdown';
+import { preparePtvDetailsLayout } from '../src/ptv/modules/details/detailsLayout';
+import '../src/ptv/modules/details/details.scss';
+import '../src/ptv/shell/ptvShell.scss';
 
 const root = document.getElementById('app');
 
@@ -29,7 +32,7 @@ style.textContent = `
     html { min-height: 100%; background: #090812; color: #fff; font-family: sans-serif; }
     body { min-height: 140vh; margin: 0; }
     button, a { min-height: 2.75rem; }
-    .authenticated-header { display: flex; gap: 1rem; padding: 1rem; background: #211635; }
+    .authenticated-header { display: grid; }
     .primary-navigation-header { position: relative; z-index: 50; padding: 1rem; background: #211635; }
     .primary-navigation-scroll { display: flex; gap: .75rem; overflow-x: auto; overflow-y: hidden; padding: .5rem; backdrop-filter: blur(18px); }
     .primary-navigation-trigger { flex: 0 0 auto; min-width: 7rem; border: 1px solid #7955a5; border-radius: 1.4rem; color: #fff; background: #2b1b42; }
@@ -42,6 +45,22 @@ style.textContent = `
     .is-active { outline: 3px solid #bc7cff; }
     #diagnostics { padding: 1rem; background: #16101f; }
     #update-notice { position: fixed; right: 1rem; bottom: 1rem; padding: 1rem; background: #321c4f; }
+    body.ptv-e2e-details { min-height: 100vh; }
+    body.ptv-e2e-details .authenticated-header { position: fixed; z-index: 9500; }
+    .itemDetailPage .itemBackdrop { position: relative; height: 40vh; background: linear-gradient(135deg, #203b56, #47205d); }
+    .itemDetailPage .detailPageWrapperContainer { display: flex; flex-direction: column; min-height: 60vh; }
+    .itemDetailPage .detailRibbon { height: 7.2em; margin-top: -7.2em; padding-left: 32.45vw; }
+    .itemDetailPage .detailPagePrimaryContent { padding-right: 2%; padding-left: 32.45vw; }
+    .itemDetailPage .detailLogo { position: absolute; top: 10vh; right: 25vw; }
+    .itemDetailPage .detailImageContainer .card { position: relative; top: -12.96em; left: 3.3%; width: 25vw; margin-bottom: -12.96em; }
+    .detail-poster-fixture { display: grid; aspect-ratio: 2 / 3; place-items: center; min-height: 18rem; background: linear-gradient(145deg, #69469e, #171027); font-size: 1.5rem; }
+    .detail-shelf-fixture { display: flex; gap: 1rem; overflow-x: auto; }
+    .detail-shelf-fixture > div { flex: 0 0 10rem; min-height: 7rem; padding: 1rem; background: #2b1b42; }
+    .hide-desktop { display: none; }
+    @media (max-width: 900px) {
+        .hide-mobile { display: none !important; }
+        .hide-desktop { display: block; }
+    }
 `;
 document.head.append(style);
 
@@ -97,16 +116,31 @@ function getFixtureItems(label: string) {
 }
 
 function renderBasicHeader() {
+    root.classList.add('ptv-shell-frame');
     const header = addElement(root, 'header', {
-        className: 'authenticated-header',
-        text: 'PiggieTV authenticated navigation'
+        className: 'authenticated-header ptv-shell-header'
     });
-    const home = addElement(header, 'a', { text: 'Home' });
+    const left = addElement(header, 'div', { className: 'ptv-shell-header-left' });
+    const home = addElement(left, 'a', { className: 'ptv-shell-brand', text: 'Home' });
 
     home.href = '#/home';
-    const movies = addElement(header, 'a', { text: 'Movies' });
+    const navigation = addElement(header, 'nav', { className: 'ptv-shell-nav ptv-shell-header-primary' });
+    const navigationPill = addElement(navigation, 'div', { className: 'ptv-shell-nav-primary' });
+    const movies = addElement(navigationPill, 'a', { className: 'ptv-shell-nav-button', text: 'Movies' });
 
     movies.href = '#/movies';
+    const right = addElement(header, 'div', { className: 'ptv-shell-header-right' });
+    const actions = addElement(right, 'div', { className: 'ptv-shell-actions' });
+
+    for (const label of ['Notifications', 'Settings', 'Profile']) {
+        const action = addElement(actions, 'button', { className: 'ptv-shell-icon-button', text: label.slice(0, 1) });
+
+        action.setAttribute('aria-label', label);
+    }
+    const search = addElement(right, 'form', { className: 'ptv-shell-search' });
+    const searchButton = addElement(search, 'button', { className: 'ptv-shell-search-trigger', text: 'S' });
+
+    searchButton.setAttribute('aria-label', 'Search');
 }
 
 function renderPrimaryNavigationHeader() {
@@ -412,6 +446,77 @@ function renderBrowse(path: string, search: string) {
     void loadBrowse(container, path, search);
 }
 
+function renderDetails() {
+    document.body.classList.add('ptv-e2e-details');
+    const page = addElement(root, 'main', {
+        className: 'itemDetailPage',
+        id: 'itemDetailPage'
+    });
+
+    page.innerHTML = `
+        <div class="itemBackdrop" style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221600%22 height=%22900%22%3E%3Crect width=%221600%22 height=%22900%22 fill=%22%23211a4a%22/%3E%3Ccircle cx=%221150%22 cy=%22280%22 r=%22360%22 fill=%22%237d3fc7%22/%3E%3C/svg%3E')"></div>
+        <div class="detailLogo" aria-label="Fixture title logo"></div>
+        <div class="detailPageWrapperContainer">
+            <div class="detailPagePrimaryContainer">
+                <div class="detailImageContainer hide-mobile">
+                    <div class="card"><div class="detail-poster-fixture">Poster</div></div>
+                </div>
+                <div class="detailRibbon">
+                    <div class="infoWrapper">
+                        <div class="detailImageContainer hide-desktop">
+                            <div class="card"><div class="detail-poster-fixture">Poster</div></div>
+                        </div>
+                        <div class="detailNameContainer">
+                            <h1 class="itemName">PiggieTV Native Details</h1>
+                            <div class="itemMiscInfo">
+                                <span class="mediaInfoItem">2026</span>
+                                <span class="mediaInfoItem">PG-13</span>
+                                <span class="mediaInfoItem">2h 5m</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mainDetailButtons">
+                        <button class="detailButton btnPlay" type="button">Play</button>
+                        <button class="detailButton" type="button">More</button>
+                    </div>
+                </div>
+                <div class="detailPagePrimaryContent padded-right">
+                    <div class="detailSection">
+                        <div class="detailSectionContent">
+                            <p class="itemGenres"><a href="#genre-action">Action</a><a href="#genre-drama">Drama</a><a href="#genre-scifi">Science Fiction</a></p>
+                            <p class="overview">A representative overview long enough to prove that native details metadata retains a readable line length instead of inheriting Jellyfin's large desktop left offset.</p>
+                            <div class="itemTags"><a href="#tag-one">Adventure</a><a href="#tag-two">Character drama</a><a href="#tag-three">Mystery</a></div>
+                        </div>
+                        <div class="itemDetailsGroup">
+                            <div class="detailsGroupItem genresGroup">
+                                <div class="label">Genres</div>
+                                <div class="genres content"><a href="#genre-action">Action</a><a href="#genre-drama">Drama</a></div>
+                            </div>
+                            <div class="detailsGroupItem studiosGroup">
+                                <div class="label">Studios</div>
+                                <div class="studios content"><a href="#studio-one">PiggieTV Studios</a><a href="#studio-two">Example Pictures</a></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="detailPageSecondaryContainer">
+                <div class="detailPageContent">
+                    <section class="verticalSection detailVerticalSection" id="castCollapsible">
+                        <h2 class="sectionTitle padded-right">Cast &amp; Crew</h2>
+                        <div is="emby-scroller"><div class="itemsContainer detail-shelf-fixture"><div>Person 1</div><div>Person 2</div></div></div>
+                    </section>
+                    <section class="verticalSection detailVerticalSection" id="similarCollapsible">
+                        <h2 class="sectionTitle padded-right">More Like This</h2>
+                        <div is="emby-scroller"><div class="itemsContainer detail-shelf-fixture"><div>Title 1</div><div>Title 2</div></div></div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    `;
+    preparePtvDetailsLayout(page);
+}
+
 function renderDiagnostics() {
     const params = new URLSearchParams(window.location.search);
     const allowed = params.get('admin') === '1' && params.get('debug') === '1';
@@ -424,6 +529,7 @@ function renderRoute() {
     if (activeHash) scrollPositions.set(activeHash, window.scrollY);
     activeHash = window.location.hash || '#/home';
     cleanupPrimaryNavigation();
+    document.body.classList.remove('ptv-e2e-details');
     root.replaceChildren();
     root.dataset.authenticationRoute = String(isPtvAuthenticationRoute(getLocationState()));
     const ownership = getPtvRouteOwnership(getLocationState());
@@ -441,6 +547,8 @@ function renderRoute() {
 
     if (path === '/movies' || path === '/shows') {
         renderBrowse(path, search);
+    } else if (path === '/details' || path.startsWith('/item/')) {
+        renderDetails();
     } else {
         addElement(root, 'main', { className: 'browse-page', text: 'PiggieTV Home' });
     }

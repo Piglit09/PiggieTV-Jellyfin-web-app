@@ -1,20 +1,33 @@
 .ptv-detail-page .detailImageContainer {
-    align-self: stretch;
+    position: relative;
+    align-self: start;
     width: 100% !important;
-    max-width: 500px;
+    max-width: 440px;
     margin: 0 !important;
 
     border: 1px solid rgba(205, 174, 255, 0.18);
     border-radius: var(--ptv-radius-lg, 22px);
-    background-color: rgba(11, 6, 22, 0.72);
+    background-color: rgba(34, 16, 58, 0.34);
     background-position: center !important;
     background-repeat: no-repeat !important;
     background-size: cover !important;
     box-shadow:
         0 26px 70px rgba(0, 0, 0, 0.54),
-        0 0 34px rgba(167, 139, 250, 0.18),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        0 0 42px rgba(167, 91, 255, 0.26),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(18px) saturate(1.28);
     overflow: hidden;
+}
+
+.ptv-detail-page .detailImageContainer .card {
+    float: none;
+    inset: auto !important;
+    margin: 0 !important;
+    max-height: none;
+    max-width: 100%;
+    position: relative;
+    top: auto !important;
+    width: 100% !important;
 }
 
 .ptv-detail-page .detailImageContainer::after {
@@ -35,5 +48,8 @@
 }
 
 .ptv-detail-page .detailImageContainer.hide-desktop {
+    width: min(100%, 260px) !important;
     margin-bottom: 18px !important;
+    margin-right: auto !important;
+    margin-left: auto !important;
 }

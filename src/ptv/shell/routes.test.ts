@@ -60,6 +60,34 @@ describe('PTV shell browse route ownership', () => {
     });
 });
 
+describe('PTV shell details route ownership', () => {
+    it.each([
+        '#/details?id=movie-id',
+        '#/details?id=series-id&serverId=server-id',
+        '#/item/episode-id'
+    ])('classifies %s as a PTV-owned details route', hash => {
+        const route = getRoute(hash);
+
+        expect(route.id).toBe('details');
+        expect(route.owner).toBe('details');
+        expect(route.pageType).toBe('details');
+    });
+
+    it('does not misclassify Jellyfin video playback as details', () => {
+        const route = getRoute('#/video');
+
+        expect(route.id).not.toBe('details');
+        expect(route.owner).not.toBe('details');
+    });
+
+    it('does not steal native Music item routes', () => {
+        const route = getRoute('#/music/item/track-id');
+
+        expect(route.id).toBe('music');
+        expect(route.owner).toBe('music');
+    });
+});
+
 describe('PTV shell authentication routes', () => {
     it.each([
         '#/login',

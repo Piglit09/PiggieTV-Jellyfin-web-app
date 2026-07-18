@@ -41,6 +41,7 @@ vi.mock('./routes', () => ({
 }));
 
 import {
+    getPtvRouteControllerState,
     recordPtvRouteGenerationLifecycle,
     startPtvRouteController
 } from './routeController';
@@ -83,6 +84,49 @@ describe('routeController lifecycle telemetry', () => {
         });
         expect(lifecycleEvent?.[2].routeKey).toContain('/movies?genre=Crime&view=genre');
         expect(lifecycleEvent?.[2].route).toBe('#/movies?view=genre&genre=Crime');
+    });
+
+    it('treats shared details routes as native without taking over video playback', () => {
+        routeMocks.current = {
+            ...routeMocks.current,
+            features: ['details'],
+            full: '/#/details?id=movie-id',
+            hash: '#/details?id=movie-id',
+            id: 'details',
+            normalizedPath: '/details',
+            owner: 'details',
+            pageType: 'details'
+        };
+        window.history.replaceState(null, '', '/#/details?id=movie-id');
+
+        recordPtvRouteGenerationLifecycle('page-render', { page: 'details' });
+
+        expect(getPtvRouteControllerState()).toMatchObject({
+            canRenderNative: true,
+            fallbackReason: '',
+            mode: 'native',
+            owner: 'details'
+        });
+
+        routeMocks.current = {
+            ...routeMocks.current,
+            features: ['playback'],
+            full: '/#/video',
+            hash: '#/video',
+            id: 'playback',
+            normalizedPath: '/video',
+            owner: 'playback',
+            pageType: 'playback'
+        };
+        window.history.replaceState(null, '', '/#/video');
+
+        recordPtvRouteGenerationLifecycle('page-render', { page: 'playback' });
+
+        expect(getPtvRouteControllerState()).toMatchObject({
+            canRenderNative: false,
+            mode: 'enhanced',
+            owner: 'playback'
+        });
     });
 
     it('synchronizes Browse, Reading, Dashboard, authentication, and history transitions before lifecycle events', () => {

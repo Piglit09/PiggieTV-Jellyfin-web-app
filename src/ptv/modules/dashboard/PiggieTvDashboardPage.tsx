@@ -363,6 +363,7 @@ type PluginConnectionState =
     | 'degraded'
     | 'endpoint-unreachable'
     | 'plugin-missing'
+    | 'server-error'
     | 'timeout'
     | 'unauthorized'
     | 'using-fallback'
@@ -979,6 +980,7 @@ function classifyPluginError(err: unknown): PluginConnectionState {
 
     if (normalizedError.kind === 'unauthorized' || normalizedError.kind === 'forbidden') return 'unauthorized';
     if (normalizedError.kind === 'missing') return 'plugin-missing';
+    if (normalizedError.kind === 'server') return 'server-error';
     if (normalizedError.kind === 'timeout') return 'timeout';
     if (isPtvPluginApiCoolingDown()) return 'endpoint-unreachable';
 
@@ -1123,6 +1125,7 @@ function getPluginStateLabel(state: PluginConnectionState) {
         degraded: 'degraded',
         'endpoint-unreachable': 'endpoint unreachable',
         'plugin-missing': 'plugin missing',
+        'server-error': 'plugin server error',
         timeout: 'timeout',
         unauthorized: 'unauthorized',
         'using-fallback': 'using fallback',
@@ -1143,6 +1146,10 @@ function getPluginHelpMessage(
         return cacheSource === 'memory' ?
             'Using memory fallback. Cache will reset after reload.' :
             'Using fallback cache while the plugin endpoint is unavailable.';
+    }
+
+    if (state === 'server-error') {
+        return 'The plugin endpoint responded with a server error. Inspect Jellyfin logs and the installed plugin configuration.';
     }
 
     if (state === 'unauthorized') {

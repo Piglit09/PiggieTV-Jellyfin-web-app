@@ -578,10 +578,22 @@
             <summary>Gets or sets the persistence schema version.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.Routes">
-            <summary>Gets or sets overrides indexed by route kind and Jellyfin item id.</summary>
+            <summary>Gets or sets the deterministic XML-safe representation persisted by Jellyfin.</summary>
         </member>
-        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.PersistedRoutes">
-            <summary>Gets or sets the XML-safe representation persisted by Jellyfin.</summary>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.GetRoute(System.String)">
+            <summary>Gets a defensive snapshot of the overrides for one Reading route.</summary>
+            <param name="routeKind">Reading route kind.</param>
+            <returns>Overrides indexed by Jellyfin item id.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.SetRoute(System.String,System.Collections.Generic.IReadOnlyDictionary{System.String,Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideDefinition})">
+            <summary>Replaces the overrides for one Reading route.</summary>
+            <param name="routeKind">Reading route kind.</param>
+            <param name="overrides">Overrides indexed by Jellyfin item id.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideSettings.RemoveRoute(System.String)">
+            <summary>Removes all overrides for one Reading route.</summary>
+            <param name="routeKind">Reading route kind.</param>
+            <returns><see langword="true"/> when a route was removed.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.ReadingSeriesOverrideRouteEntry">
             <summary>

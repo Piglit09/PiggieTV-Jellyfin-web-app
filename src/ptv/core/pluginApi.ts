@@ -52,6 +52,7 @@ export type PtvNormalizedApiErrorKind =
     | 'forbidden'
     | 'missing'
     | 'network'
+    | 'server'
     | 'timeout'
     | 'unauthorized'
     | 'unknown'
@@ -93,6 +94,9 @@ export type PtvPluginApiDiagnostics = {
         url: string;
     }>;
     attemptedResponses: Array<{
+        durationMs: number;
+        endpoint: string;
+        ok: boolean;
         responseBody: string | null;
         status: number | null;
         url: string;
@@ -439,6 +443,16 @@ export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
             message: rawMessage && rawMessage !== 'Bad Request' ?
                 `Bad request: ${rawMessage}` :
                 'Bad request: plugin rejected the payload',
+            responseBody,
+            status
+        };
+    }
+
+    if (status !== undefined && status >= 500) {
+        return {
+            code,
+            kind: 'server',
+            message: `Plugin server error: endpoint returned HTTP ${status}`,
             responseBody,
             status
         };
@@ -910,9 +924,38 @@ function notePluginApiAttempt(url: string, candidates: string[]) {
     debugLog('trying plugin endpoint', { originKind, url });
 }
 
-function notePluginApiSuccess(url: string, path: string, candidates: string[]) {
+function getSanitizedPluginDiagnosticUrl(url: string) {
+    try {
+        return getAnchorUrl(url).pathname || `/${normalizePluginPath(url)}`;
+    } catch {
+        return `/${normalizePluginPath(url)}`;
+    }
+}
+
+function getPluginRequestDuration(startedAt: number) {
+    return Number(Math.max(0, performance.now() - startedAt).toFixed(1));
+}
+
+function notePluginApiSuccess(
+    url: string,
+    path: string,
+    candidates: string[],
+    status: number,
+    durationMs: number
+) {
     const resolvedRoot = getRootForResolvedPath(url, path);
     const endpoint = getEndpointName(path);
+    const attemptedResponses = [
+        ...pluginApiDiagnostics.attemptedResponses,
+        {
+            durationMs,
+            endpoint,
+            ok: true,
+            responseBody: null,
+            status,
+            url: getSanitizedPluginDiagnosticUrl(url)
+        }
+    ].slice(-40);
 
     if (resolvedRoot) {
         const pinnedRoot = setAuthoritativePluginApiRoot(resolvedRoot, 'successful-request');
@@ -922,6 +965,7 @@ function notePluginApiSuccess(url: string, path: string, candidates: string[]) {
 
     updatePluginApiDiagnostics({
         authoritativePluginApiRoot,
+        attemptedResponses,
         attemptedUrl: url,
         candidates: [...candidates],
         lastError: null,
@@ -936,14 +980,24 @@ function notePluginApiSuccess(url: string, path: string, candidates: string[]) {
     debugLog('resolved plugin endpoint', pluginApiDiagnostics);
 }
 
-function notePluginApiFailure(err: unknown, path: string, url: string, candidates: string[]) {
-    const normalizedError = withEndpointErrorDetail(err, getEndpointName(path), url);
+function notePluginApiFailure(
+    err: unknown,
+    path: string,
+    url: string,
+    candidates: string[],
+    durationMs: number
+) {
+    const endpoint = getEndpointName(path);
+    const normalizedError = withEndpointErrorDetail(err, endpoint, url);
     const attemptedResponses = [
         ...pluginApiDiagnostics.attemptedResponses,
         {
+            durationMs,
+            endpoint,
+            ok: false,
             responseBody: normalizedError.responseBody || null,
             status: normalizedError.status || null,
-            url
+            url: getSanitizedPluginDiagnosticUrl(url)
         }
     ].slice(-40);
 
@@ -1150,6 +1204,8 @@ function requestPluginJson<T>(
 
     const runAttempt = (candidateIndex: number): Promise<T> => {
         const url = candidates[candidateIndex];
+        const startedAt = performance.now();
+        let responseStatus = 200;
 
         notePluginApiAttempt(url, candidates);
 
@@ -1204,14 +1260,24 @@ function requestPluginJson<T>(
         }
 
         return request
-            .then(response => parsePluginResponse<T>(response))
+            .then(response => {
+                responseStatus = getHttpStatus(response) || 200;
+
+                return parsePluginResponse<T>(response);
+            })
             .then(result => {
-                notePluginApiSuccess(url, path, candidates);
+                notePluginApiSuccess(
+                    url,
+                    path,
+                    candidates,
+                    responseStatus,
+                    getPluginRequestDuration(startedAt)
+                );
 
                 return result;
             })
             .catch((err: unknown) => {
-                notePluginApiFailure(err, path, url, candidates);
+                notePluginApiFailure(err, path, url, candidates, getPluginRequestDuration(startedAt));
 
                 if (
                     candidateIndex < candidates.length - 1

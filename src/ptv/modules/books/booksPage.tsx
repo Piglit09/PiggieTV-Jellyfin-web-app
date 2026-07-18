@@ -77,6 +77,10 @@ import {
     buildReadingDiagnosticSections,
     canShowReadingDiagnostics
 } from './readingDiagnostics';
+import {
+    getReadingPageRenderIdentity,
+    shouldPublishReadingIndexProgress
+} from './readingIndexPublishing';
 import { shouldPreservePtvReadingIndex } from './readingProgressiveIndex';
 import type {
     PtvReadingHomeData,
@@ -2485,6 +2489,7 @@ export default function PiggieTvBooksPage() {
     const readingFullyLoadedRecordedRef = useRef(false);
     const readingLibraryIndexRequestIdRef = useRef(0);
     const readingMountedRef = useRef(false);
+    const readingPageRenderIdentityRef = useRef('');
     const readingRequestIdRef = useRef(0);
     const [homeData, setHomeData] = useState<PtvReadingHomeData>(EMPTY_HOME_DATA);
     const [searchResults, setSearchResults] = useState<PtvReadingItem[]>([]);
@@ -2548,15 +2553,26 @@ export default function PiggieTvBooksPage() {
         ownerRequestId = readingRequestIdRef.current
     ) => {
         const libraryRequestId = ++readingLibraryIndexRequestIdRef.current;
+        let lastPublishedIndex: PtvReadingLibraryIndex | null = null;
         const isCurrentIndexRequest = () => readingMountedRef.current
             && ownerRequestId === readingRequestIdRef.current
             && libraryRequestId === readingLibraryIndexRequestIdRef.current;
         const applyLibraryIndex = (libraryIndex: PtvReadingLibraryIndex, eventName: string) => {
             if (!isCurrentIndexRequest()) return;
+            if (
+                eventName === 'reading-library-index-background-progress'
+                && !shouldPublishReadingIndexProgress(lastPublishedIndex, libraryIndex)
+            ) return;
 
             setHomeData(previous => (
                 previous.kind === kind ? mergePtvReadingLibraryIndex(previous, libraryIndex) : previous
             ));
+            if (
+                !lastPublishedIndex
+                || libraryIndex.debug.indexAccumulatedCount >= lastPublishedIndex.debug.indexAccumulatedCount
+            ) {
+                lastPublishedIndex = libraryIndex;
+            }
             recordPtvEvent('api', eventName, {
                 accumulatedCount: libraryIndex.debug.indexAccumulatedCount,
                 final: libraryIndex.debug.indexIsComplete,
@@ -3059,6 +3075,11 @@ export default function PiggieTvBooksPage() {
     useEffect(() => {
         if (!homeData.generatedAt) return;
 
+        const renderIdentity = getReadingPageRenderIdentity(homeData, route.kind, route.view);
+
+        if (readingPageRenderIdentityRef.current === renderIdentity) return;
+        readingPageRenderIdentityRef.current = renderIdentity;
+
         recordPtvEvent('render', 'reading-page-rendered', {
             itemCount: homeData.stats.itemCount,
             kind: route.kind,
@@ -3072,7 +3093,6 @@ export default function PiggieTvBooksPage() {
             route: route.view,
             sectionCount: homeData.sections.length
         });
-        verifyReadingShell();
     }, [homeData, route.kind, route.view]);
 
     useEffect(() => {

@@ -115,8 +115,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         var configuration = GetConfiguration();
 
         configuration.ReadingSeriesOverrides ??= new ReadingSeriesOverrideSettings();
-        configuration.ReadingSeriesOverrides.Routes ??= new(StringComparer.OrdinalIgnoreCase);
-        configuration.ReadingSeriesOverrides.Routes.TryGetValue(normalizedRouteKind, out var storedOverrides);
+        var storedOverrides = configuration.ReadingSeriesOverrides.GetRoute(normalizedRouteKind);
 
         return CreateReadingSeriesOverridesResponse(normalizedRouteKind, storedOverrides);
     }
@@ -130,8 +129,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
 
         configuration.ReadingSeriesOverrides ??= new ReadingSeriesOverrideSettings();
         configuration.ReadingSeriesOverrides.SchemaVersion = 1;
-        configuration.ReadingSeriesOverrides.Routes ??= new(StringComparer.OrdinalIgnoreCase);
-        configuration.ReadingSeriesOverrides.Routes[normalizedRouteKind] = sanitizedOverrides;
+        configuration.ReadingSeriesOverrides.SetRoute(normalizedRouteKind, sanitizedOverrides);
         SaveConfiguration(configuration);
 
         _logger.LogInformation(

@@ -26,4 +26,6 @@ export declare global {
     const __PTV_DEV_JELLYFIN_URL__: string;
     const __USE_SYSTEM_FONTS__: boolean;
     const __WEBPACK_SERVE__: boolean;
+
+    const __webpack_require__: import('./ptv/services/chunkLoadRecovery').PtvWebpackRuntime;
 }

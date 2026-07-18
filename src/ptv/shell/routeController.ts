@@ -44,6 +44,7 @@ type PtvRouteLike = {
 
 const NATIVE_ROUTE_FEATURES = new Set([
     'browse',
+    'details',
     'signup',
     'request',
     'calendar',
@@ -56,7 +57,6 @@ const ENHANCED_ROUTE_FEATURES = new Set([
     'books',
     'comics',
     'home',
-    'details',
     'library',
     'login',
     'manga',
@@ -94,6 +94,10 @@ function seedPtvNativeRoute(path: string, mode: PtvRouteTakeoverMode = 'native')
 
 [
     '/home',
+    '/details',
+    '/details/*',
+    '/item',
+    '/item/*',
     '/movies',
     '/movies/*',
     '/shows',

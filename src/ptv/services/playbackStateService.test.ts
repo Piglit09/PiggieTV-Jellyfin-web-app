@@ -3,15 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PtvMusicQueueSnapshot } from '../modules/music/musicTypes';
 
 const playbackMocks = vi.hoisted(() => ({
+    currentItem: null as Record<string, unknown> | null,
+    currentPlayer: null as Record<string, unknown> | null,
     eventOff: vi.fn(),
     eventOn: vi.fn(),
+    eventHandlers: new Map<string, () => void>(),
     incrementCounter: vi.fn(),
+    pauseMusic: vi.fn(async () => undefined),
     queueListener: null as ((snapshot: PtvMusicQueueSnapshot) => void) | null,
     queueUnsubscribe: vi.fn()
 }));
 
 vi.mock('../../components/playback/playbackmanager', () => ({
-    playbackManager: {}
+    playbackManager: {
+        currentItem: vi.fn(() => playbackMocks.currentItem),
+        getCurrentPlayer: vi.fn(() => playbackMocks.currentPlayer),
+        getPlayerState: vi.fn(() => ({}))
+    }
 }));
 
 vi.mock('../../utils/events', () => ({
@@ -38,6 +46,7 @@ vi.mock('../core/observability', () => ({
 vi.mock('../modules/music/musicQueue', () => ({
     nextPtvMusicTrack: vi.fn(),
     openPtvMusicPlayer: vi.fn(),
+    pausePtvMusicPlayback: playbackMocks.pauseMusic,
     previousPtvMusicTrack: vi.fn(),
     stopPtvMusicPlayback: vi.fn(),
     subscribeToPtvMusicQueue: vi.fn((listener: (snapshot: PtvMusicQueueSnapshot) => void) => {
@@ -56,10 +65,14 @@ vi.mock('./performanceMonitor', () => ({
 
 import {
     disposePtvPlaybackStateServiceForTests,
+    getPtvGlobalPlaybackState,
     startPtvPlaybackStateService
 } from './playbackStateService';
 
-function createMusicSnapshot(currentItem: PtvMusicQueueSnapshot['currentItem']): PtvMusicQueueSnapshot {
+function createMusicSnapshot(
+    currentItem: PtvMusicQueueSnapshot['currentItem'],
+    isPlaying = Boolean(currentItem)
+): PtvMusicQueueSnapshot {
     return {
         autoQueueSeedItem: null,
         autoQueueSeedRevision: 0,
@@ -67,7 +80,7 @@ function createMusicSnapshot(currentItem: PtvMusicQueueSnapshot['currentItem']):
         currentItem,
         isAudio: Boolean(currentItem),
         isMuted: false,
-        isPlaying: Boolean(currentItem),
+        isPlaying,
         isShuffled: false,
         playlist: currentItem ? [currentItem] : [],
         positionTicks: 0,
@@ -82,9 +95,17 @@ describe('global playback state reconciliation', () => {
         vi.useFakeTimers();
         playbackMocks.eventOff.mockClear();
         playbackMocks.eventOn.mockClear();
+        playbackMocks.eventOn.mockImplementation((_target, name: string, handler: () => void) => {
+            playbackMocks.eventHandlers.set(name, handler);
+        });
+        playbackMocks.eventHandlers.clear();
         playbackMocks.incrementCounter.mockClear();
+        playbackMocks.pauseMusic.mockClear();
         playbackMocks.queueUnsubscribe.mockClear();
         playbackMocks.queueListener = null;
+        playbackMocks.currentItem = null;
+        playbackMocks.currentPlayer = null;
+        window.location.hash = '#/home';
     });
 
     afterEach(() => {
@@ -96,7 +117,7 @@ describe('global playback state reconciliation', () => {
         const intervalSpy = vi.spyOn(window, 'setInterval');
 
         startPtvPlaybackStateService();
-        expect(intervalSpy).toHaveBeenCalledTimes(1);
+        expect(intervalSpy).not.toHaveBeenCalled();
         expect(playbackMocks.eventOn).toHaveBeenCalledTimes(5);
 
         playbackMocks.queueListener?.(createMusicSnapshot({
@@ -116,8 +137,8 @@ describe('global playback state reconciliation', () => {
 
         playbackMocks.queueListener?.(createMusicSnapshot(null));
         playbackMocks.incrementCounter.mockClear();
-        vi.advanceTimersByTime(1_000);
-        expect(playbackMocks.incrementCounter).toHaveBeenCalledWith(
+        vi.advanceTimersByTime(3_000);
+        expect(playbackMocks.incrementCounter).not.toHaveBeenCalledWith(
             'playbackEventsReceived',
             expect.objectContaining({ lastPlaybackEvent: 'low-frequency-reconcile' })
         );
@@ -125,5 +146,99 @@ describe('global playback state reconciliation', () => {
         disposePtvPlaybackStateServiceForTests();
         expect(playbackMocks.queueUnsubscribe).toHaveBeenCalledTimes(1);
         expect(playbackMocks.eventOff).toHaveBeenCalledTimes(5);
+    });
+
+    it('polls only while a Jellyfin playback source is active', () => {
+        const intervalSpy = vi.spyOn(window, 'setInterval');
+
+        startPtvPlaybackStateService();
+        playbackMocks.currentPlayer = {};
+        playbackMocks.currentItem = {
+            Id: 'video',
+            MediaType: 'Video',
+            Name: 'Video',
+            Type: 'Movie'
+        };
+        playbackMocks.eventHandlers.get('playbackstart')?.();
+        vi.advanceTimersByTime(80);
+
+        expect(intervalSpy).toHaveBeenCalledTimes(1);
+        playbackMocks.incrementCounter.mockClear();
+        vi.advanceTimersByTime(1_000);
+        expect(playbackMocks.incrementCounter).toHaveBeenCalledWith(
+            'playbackEventsReceived',
+            expect.objectContaining({ lastPlaybackEvent: 'low-frequency-reconcile' })
+        );
+
+        playbackMocks.currentItem = null;
+        playbackMocks.currentPlayer = null;
+        playbackMocks.eventHandlers.get('playbackstop')?.();
+        vi.advanceTimersByTime(80);
+        playbackMocks.incrementCounter.mockClear();
+        vi.advanceTimersByTime(3_000);
+        expect(playbackMocks.incrementCounter).not.toHaveBeenCalledWith(
+            'playbackEventsReceived',
+            expect.objectContaining({ lastPlaybackEvent: 'low-frequency-reconcile' })
+        );
+    });
+
+    it('hands playback ownership to video immediately and preserves a paused music queue', async () => {
+        const track = {
+            Id: 'track',
+            MediaType: 'Audio',
+            Name: 'Track',
+            RunTimeTicks: 30_000_000,
+            Type: 'Audio'
+        };
+
+        startPtvPlaybackStateService();
+        playbackMocks.queueListener?.(createMusicSnapshot(track));
+        expect(getPtvGlobalPlaybackState()).toMatchObject({
+            paused: false,
+            queueLength: 1,
+            source: 'ptv-music'
+        });
+
+        window.location.hash = '#/video';
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+        expect(playbackMocks.pauseMusic).toHaveBeenCalledTimes(1);
+        expect(playbackMocks.pauseMusic).toHaveBeenCalledWith('playback-route-change');
+        expect(getPtvGlobalPlaybackState()).toMatchObject({
+            active: false,
+            source: 'none'
+        });
+
+        playbackMocks.currentPlayer = {};
+        playbackMocks.currentItem = {
+            Id: 'video',
+            MediaType: 'Video',
+            Name: 'Video',
+            Type: 'Movie'
+        };
+        playbackMocks.eventHandlers.get('playbackstart')?.();
+        vi.advanceTimersByTime(80);
+
+        expect(playbackMocks.pauseMusic).toHaveBeenCalledTimes(1);
+        expect(getPtvGlobalPlaybackState()).toMatchObject({
+            itemId: 'video',
+            source: 'jellyfin-player'
+        });
+
+        playbackMocks.queueListener?.(createMusicSnapshot(track, false));
+        playbackMocks.currentPlayer = null;
+        playbackMocks.currentItem = null;
+        playbackMocks.eventHandlers.get('playbackstop')?.();
+        vi.advanceTimersByTime(80);
+
+        window.location.hash = '#/details?id=video';
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+        expect(getPtvGlobalPlaybackState()).toMatchObject({
+            paused: true,
+            queueLength: 1,
+            source: 'ptv-music'
+        });
+        expect(playbackMocks.pauseMusic).toHaveBeenCalledTimes(1);
     });
 });

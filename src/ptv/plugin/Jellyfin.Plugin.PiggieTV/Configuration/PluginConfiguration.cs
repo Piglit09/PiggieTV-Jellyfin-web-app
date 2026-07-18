@@ -127,20 +127,19 @@ public sealed class PluginConfiguration : PiggieTVPluginConfiguration
 /// </summary>
 public sealed class ReadingSeriesOverrideSettings
 {
+    private readonly Dictionary<string, Dictionary<string, ReadingSeriesOverrideDefinition>> _routes =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Gets or sets the persistence schema version.</summary>
     public int SchemaVersion { get; set; } = 1;
 
-    /// <summary>Gets or sets overrides indexed by route kind and Jellyfin item id.</summary>
-    [XmlIgnore]
-    public Dictionary<string, Dictionary<string, ReadingSeriesOverrideDefinition>> Routes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Gets or sets the XML-safe representation persisted by Jellyfin.</summary>
+    /// <summary>Gets or sets the deterministic XML-safe representation persisted by Jellyfin.</summary>
     [JsonIgnore]
     [XmlArray("Routes")]
     [XmlArrayItem("Route")]
-    public ReadingSeriesOverrideRouteEntry[] PersistedRoutes
+    public ReadingSeriesOverrideRouteEntry[] Routes
     {
-        get => Routes
+        get => _routes
             .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
             .Select(entry => new ReadingSeriesOverrideRouteEntry
             {
@@ -157,11 +156,13 @@ public sealed class ReadingSeriesOverrideSettings
             .ToArray();
         set
         {
-            Routes = new Dictionary<string, Dictionary<string, ReadingSeriesOverrideDefinition>>(StringComparer.OrdinalIgnoreCase);
+            _routes.Clear();
 
             foreach (var route in value ?? [])
             {
-                if (string.IsNullOrWhiteSpace(route.RouteKind))
+                var routeKind = NormalizeKey(route.RouteKind);
+
+                if (routeKind is null)
                 {
                     continue;
                 }
@@ -170,15 +171,78 @@ public sealed class ReadingSeriesOverrideSettings
 
                 foreach (var item in route.Overrides ?? [])
                 {
-                    if (!string.IsNullOrWhiteSpace(item.ItemId) && item.Value is not null)
+                    var itemId = NormalizeKey(item.ItemId);
+
+                    if (itemId is not null && item.Value is not null)
                     {
-                        items[item.ItemId] = item.Value;
+                        items[itemId] = item.Value;
                     }
                 }
 
-                Routes[route.RouteKind] = items;
+                _routes[routeKind] = items;
             }
         }
+    }
+
+    /// <summary>Gets a defensive snapshot of the overrides for one Reading route.</summary>
+    /// <param name="routeKind">Reading route kind.</param>
+    /// <returns>Overrides indexed by Jellyfin item id.</returns>
+    public IReadOnlyDictionary<string, ReadingSeriesOverrideDefinition> GetRoute(string? routeKind)
+    {
+        var key = NormalizeKey(routeKind);
+
+        if (key is null || !_routes.TryGetValue(key, out var items))
+        {
+            return new Dictionary<string, ReadingSeriesOverrideDefinition>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return new Dictionary<string, ReadingSeriesOverrideDefinition>(items, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Replaces the overrides for one Reading route.</summary>
+    /// <param name="routeKind">Reading route kind.</param>
+    /// <param name="overrides">Overrides indexed by Jellyfin item id.</param>
+    public void SetRoute(
+        string? routeKind,
+        IReadOnlyDictionary<string, ReadingSeriesOverrideDefinition>? overrides)
+    {
+        var key = NormalizeKey(routeKind);
+
+        if (key is null)
+        {
+            throw new ArgumentException("Reading route kind is required.", nameof(routeKind));
+        }
+
+        var items = new Dictionary<string, ReadingSeriesOverrideDefinition>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in overrides ?? new Dictionary<string, ReadingSeriesOverrideDefinition>())
+        {
+            var itemId = NormalizeKey(item.Key);
+
+            if (itemId is not null && item.Value is not null)
+            {
+                items[itemId] = item.Value;
+            }
+        }
+
+        _routes[key] = items;
+    }
+
+    /// <summary>Removes all overrides for one Reading route.</summary>
+    /// <param name="routeKind">Reading route kind.</param>
+    /// <returns><see langword="true"/> when a route was removed.</returns>
+    public bool RemoveRoute(string? routeKind)
+    {
+        var key = NormalizeKey(routeKind);
+
+        return key is not null && _routes.Remove(key);
+    }
+
+    private static string? NormalizeKey(string? value)
+    {
+        var normalized = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 }
 

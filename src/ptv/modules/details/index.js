@@ -5,6 +5,18 @@ import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { isPiggieTvReaderItem, resolveReaderSource } from '../reader/sourceResolver';
 import { loadReaderProgress } from '../reader/readerProgressStore';
 import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
+import { getPtvItemImageCandidates } from '../../api';
+import { getPtvPerformanceProfile } from '../../core/clientProfile';
+import {
+    getPtvDetailsShellSection,
+    mountPtvDetailsShell,
+    setPtvDetailsShellSection
+} from './detailsShell';
+import {
+    preparePtvDetailsLayout,
+    releasePtvDetailsLayout,
+    setPtvDetailsBackdropCandidates
+} from './detailsLayout';
 
 import './details.scss';
 
@@ -233,7 +245,7 @@ function enhanceDetails() {
 
     if (!page) return;
 
-    page.classList.add('ptv-detail-page');
+    preparePtvDetailsLayout(page);
     normalizeDetailButtons(page);
     repairDetailImages(page);
     enhanceReaderActions(page);
@@ -314,6 +326,20 @@ function enhanceReaderActions(page) {
 
     apiClient.getItem(apiClient.getCurrentUserId(), id)
         .then(item => {
+            setPtvDetailsShellSection(getPtvDetailsShellSection(item));
+            const { heroBackdropMaxWidth } = getPtvPerformanceProfile();
+            const backdropCandidates = getPtvItemImageCandidates(item, {
+                baseOptions: {
+                    maxWidth: heroBackdropMaxWidth,
+                    quality: 90
+                },
+                includeParentPrimary: false,
+                includeSeriesPrimary: false,
+                order: ['Backdrop', 'Thumb', 'Primary']
+            });
+
+            setPtvDetailsBackdropCandidates(page, backdropCandidates);
+
             if (!isPiggieTvReaderItem(item)) {
                 page.querySelector(`.${READER_ACTIONS_CLASS}`)?.remove();
                 return;
@@ -328,6 +354,7 @@ function enhanceReaderActions(page) {
 
 function init({ scope } = {}) {
     document.documentElement.classList.add('ptv-route-detail-page');
+    scope?.add(mountPtvDetailsShell());
     enhanceDetails();
     scope?.watchDom(enhanceDetails);
 }
@@ -338,6 +365,9 @@ function refresh() {
 
 function destroy() {
     document.documentElement.classList.remove('ptv-route-detail-page');
+    document.querySelectorAll(DETAIL_PAGE_SELECTOR).forEach(page => {
+        releasePtvDetailsLayout(page);
+    });
 }
 
 registerModule({
@@ -350,7 +380,7 @@ registerModule({
         id: 'details',
         layout: 'media-detail',
         pageType: 'details',
-        pattern: /#\/(?:details|item)/i,
+        pattern: /#\/(?:details|item)(?:[/?]|$)/i,
         surface: 1
     },
     surface: 1,

@@ -696,6 +696,37 @@ export function clearPtvMusicQueue() {
     return Promise.resolve(emitQueueUpdated('clear'));
 }
 
+export function pausePtvMusicPlayback(reason = 'unknown') {
+    const item = currentItem;
+
+    if (!item) return Promise.resolve(getPtvMusicQueueSnapshot());
+
+    const audio = getAudioElement();
+
+    playbackRunToken += 1;
+    currentPlayPromise = null;
+
+    try {
+        audio.pause();
+        reportPlayback('reportPlaybackProgress', item);
+    } catch (error) {
+        recordPtvEvent('render', 'music-playback-error', {
+            engine: 'native-audio',
+            error: error instanceof Error ? error.message : String(error),
+            itemId: item.Id || null,
+            stage: 'pause-for-owner-handoff'
+        });
+    }
+
+    recordPtvEvent('playback', 'music-player-paused-for-owner-handoff', {
+        itemId: item.Id || null,
+        queueCount: playlist.length,
+        reason
+    });
+
+    return Promise.resolve(emitQueueUpdated('owner-handoff-pause'));
+}
+
 export function stopPtvMusicPlayback(reason = 'unknown') {
     const item = currentItem;
     const audio = getAudioElement();

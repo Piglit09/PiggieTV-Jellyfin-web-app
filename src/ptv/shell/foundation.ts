@@ -8,6 +8,7 @@ import {
     getPtvRouteControllerState,
     type PtvRouteControllerState
 } from './routeController';
+import { getHeaderStatusForRoute } from './shellHeaderState';
 
 export type PtvShellFoundationStatus = {
     active: boolean;
@@ -71,7 +72,7 @@ function getPtvShellHeaderStatus() {
 
 export function getPtvShellFoundationStatus(): PtvShellFoundationStatus {
     const currentRoute = getPtvRouteControllerState();
-    const header = getPtvShellHeaderStatus();
+    const header = getHeaderStatusForRoute(getPtvShellHeaderStatus(), currentRoute);
 
     if (status.route.full !== currentRoute.full || status.currentRoute !== currentRoute.routeId) {
         return {

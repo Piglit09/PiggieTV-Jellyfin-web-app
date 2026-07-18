@@ -67,6 +67,7 @@ export type PTVShellProps = Readonly<{
     children: React.ReactNode;
     className?: string;
     contextualLinks?: readonly PtvShellNavLink[];
+    headerOnly?: boolean;
     onNavigationOpenChange?: (open: boolean) => void;
     section?: PtvShellSection;
     title?: string;
@@ -102,7 +103,7 @@ type PtvShellDebugStatus = {
 let shellHeaderStatusBridgeInstalled = false;
 let shellHeaderRenderCount = 0;
 let shellMountedAt = 0;
-let shellStatus: Omit<PtvShellDebugStatus, 'currentRoute' | 'domNodeCount' | 'mountedForMs'> = {
+const createEmptyPtvShellStatus = (): Omit<PtvShellDebugStatus, 'currentRoute' | 'domNodeCount' | 'mountedForMs'> => ({
     activeSecondaryNav: '',
     headerRenderCount: 0,
     mounted: false,
@@ -119,7 +120,8 @@ let shellStatus: Omit<PtvShellDebugStatus, 'currentRoute' | 'domNodeCount' | 'mo
     searchQuery: '',
     section: '',
     shellSource: 'page-shell'
-};
+});
+let shellStatus = createEmptyPtvShellStatus();
 
 const PTV_SHELL_MOVIE_LINKS: readonly PtvShellNavLink[] = [
     { id: 'movies', label: 'Movies', href: PTV_ROUTES.movies, icon: 'movies' },
@@ -298,6 +300,12 @@ function updatePtvShellDebugStatus(nextStatus: Partial<typeof shellStatus>) {
         ...shellStatus,
         ...nextStatus
     };
+}
+
+function resetPtvShellDebugStatus() {
+    shellHeaderRenderCount = 0;
+    shellMountedAt = 0;
+    shellStatus = createEmptyPtvShellStatus();
 }
 
 function getPtvShellSearchRouteQuery(hash = window.location.hash || '') {
@@ -878,6 +886,7 @@ export default function PTVShell({
     children,
     className = '',
     contextualLinks,
+    headerOnly = false,
     onNavigationOpenChange,
     section = 'home',
     title
@@ -997,15 +1006,14 @@ export default function PTVShell({
             route: window.location.hash || window.location.pathname,
             section
         });
+        const mountedHeader = headerRef.current;
 
         return () => {
             unregisterShellInstance();
-            shellMountedAt = 0;
-            shellHeaderRenderCount = 0;
-            updatePtvShellDebugStatus({
-                mounted: false,
-                mountedAt: ''
-            });
+            const otherMountedHeader = Array.from(document.querySelectorAll<HTMLElement>('.ptv-shell-header'))
+                .some(node => node !== mountedHeader);
+
+            if (!otherMountedHeader) resetPtvShellDebugStatus();
             incrementPtvPerformanceCounter('pageUnmountCount', {
                 route: window.location.hash || window.location.pathname,
                 section
@@ -1015,11 +1023,11 @@ export default function PTVShell({
 
     return (
         <div
-            className={`ptv-shell-frame ptv-shell-frame-${section} ${className}`.trim()}
+            className={`ptv-shell-frame ptv-shell-frame-${section}${headerOnly ? ' ptv-shell-frame-header-only' : ''} ${className}`.trim()}
             data-ptv-route-mode='native'
             data-ptv-shell-section={section}
         >
-            <PTVShellBackdrop source={backdropSource || section} url={backdropUrl} />
+            {headerOnly ? null : <PTVShellBackdrop source={backdropSource || section} url={backdropUrl} />}
 
             <header ref={headerRef} className='ptv-shell-header' aria-label='PiggieTV application shell'>
                 <div className='ptv-shell-header-left'>
@@ -1069,11 +1077,13 @@ export default function PTVShell({
                 </div>
             </header>
 
-            <PtvShellContextNav links={contextLinks} title={title} />
+            {headerOnly ? null : <PtvShellContextNav links={contextLinks} title={title} />}
 
-            <div className='ptv-shell-page-content'>
-                {children}
-            </div>
+            {headerOnly ? null : (
+                <div className='ptv-shell-page-content'>
+                    {children}
+                </div>
+            )}
         </div>
     );
 }

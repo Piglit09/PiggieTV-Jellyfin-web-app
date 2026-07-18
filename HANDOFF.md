@@ -349,3 +349,66 @@ The frontend update button stalled because activation had no timeout/direct fall
 Automated gates pass: focused 22/22; final full Vitest 403/403; TypeScript; scoped ESLint; E2E Webpack; Playwright 8/8; production Webpack in 92.581 seconds with only known size warnings; secret scan; and whitespace validation. One first-run featured-cache timeout passed isolated 4/4 and on the immediate full rerun.
 
 Release remains HOLD until an authenticated physical client proves: one dock for Music; no PTV dock for movie/episode playback; Music restoration after video; and an actual waiting service worker reloads into the new bundle without a stuck notice or loop. This is frontend-only: no Jellyfin/plugin restart, cache-schema migration, user-data clear, plugin deployment, commit, or push was performed.
+
+## 2026-07-16 Reading override XML serialization handoff
+
+- Corrected source is ready in the working tree. Do not revert the Music/video dock or service-worker fixes from the preceding commits.
+- Deploy only the five files from `src/ptv/plugin/bin` to `/var/lib/jellyfin/plugins/PTV_Plugin/`: DLL, deps JSON, PDB, XML documentation, and `meta.json`.
+- DLL assembly/file version and manifest version are all `10.11.8.2`. The corrected staged DLL SHA-256 is `51E6BBD8D7A742A01528DC59E5A8A21AD718A602BF868F16B64C0B64A886DD05`.
+- Before replacement, stop Jellyfin and back up the complete installed plugin directory. Replace all five files together, preserve Jellyfin ownership/permissions, and restart Jellyfin.
+- Required live checks after restart: authenticated `/Ptv/v1/status`, `/status?full`, `/settings`, and `/featured` return 200; full status advertises `readingSeriesOverrides=true`; dashboard reports connected rather than fallback; Jellyfin logs contain no `Cannot serialize member ... ReadingSeriesOverrideSettings.Routes` error.
+- Automated verification passed: plugin 13/13, focused frontend 7/7, full Vitest 405/405, TypeScript, scoped ESLint, plugin contract, secret scan, production Webpack, and whitespace validation.
+- Deployment was not attempted because neither `10.16.0.240` nor `10.16.0.50` accepted available non-interactive SSH authentication. No remote state changed.
+
+## 2026-07-16 production chunk coherency handoff
+
+- The reported `ChunkLoadError` was not caused by a missing source artifact: `90212.432920e11e02eefe99af.chunk.js` exists in the production output and was served by the Jellyfin origin. The public bare path returned HTTP 503 while a query-versioned request returned 200 during diagnosis, then recovered to 200, identifying an intermittent CDN/path-cache plus release-generation coherency failure.
+- Deploy the complete matching frontend output. Use `scripts/deploy-jellyfin-web.ps1` or preserve its ordering: copy all assets first, verify them, retain old content-hashed chunks, and replace root `index.html` last. Do not copy only `main`/`runtime` bundles.
+- New production clients request async JS/CSS with a build-scoped `ptv_asset` query. A caught same-origin chunk failure gets one session-bounded document reload with the current hash route preserved; it cannot reload-loop or treat an ordinary error as a stale bundle.
+- Automated gates pass: focused 5/5; full Vitest 410/410; TypeScript; scoped ESLint; production Webpack; clean-target deployment simulation for 2,498 files; and whitespace validation. Webpack reports only established size warnings.
+- A frontend deployment does not require a Jellyfin restart by itself. The corrected XML-safe plugin payload is still a separate deployment: the supplied startup log proves the installed `10.11.8.2` DLL still contains the old public dictionary model and throws during configuration serialization. Replace all five staged plugin files and restart Jellyfin before considering plugin status healthy.
+
+## 2026-07-16 authenticated diagnostics cleanup handoff
+
+- The latest authenticated export is the live-health authority: plugin connected at `10.11.8.2`, API `1`, cache `7`, Reading overrides compatible, and the Reading index complete at 2,911/2,911.
+- Dashboard/fallback routes now reject stale native Reading header state. Verify `#/reading -> #/dashboard/piggietv` reports Dashboard as the route and no Reading page title, nav group, or header section.
+- Reading index progress is deliberately coalesced. The UI must still reach and report 2,911/2,911, but `reading-page-rendered` and `reading-shell-ready` should grow only when route/stage/section readiness changes, not for every background page.
+- Idle playback state owns no reconcile interval. Confirm no low-frequency reconcile growth with null item/session/source; active Jellyfin playback must still reconcile and the previously fixed video mini-player behavior must remain unchanged.
+- Successful plugin status/settings/featured calls now populate attempted responses with sanitized path, HTTP status, and duration. No query string, server origin, token, or authorization value should appear.
+- Automated gates pass: focused 13/13; final full Vitest 415/415; TypeScript; scoped lint for new helpers/services/API; the PTV lint baseline with no per-file increase; and production Webpack in 107.006 seconds with only established size warnings. One first-run featured-cache timeout passed isolated 4/4 and on the immediate full rerun.
+- This is a frontend-only cleanup. No Jellyfin restart or plugin redeployment is required for these changes. Deploy the complete matching frontend bundle through the existing atomic asset-first/index-last process, then accept the normal service-worker update.
+
+## 2026-07-16 details ownership and video playback handoff
+
+- Details routes now have native PiggieTV presentation ownership. Verify `#/details?id=<movie>`, Series, Episode, and any shared item route show one current PiggieTV header, no visible legacy Jellyfin header, and details content beginning immediately below the safe header area. `#/music/item/...` must remain Music-owned and `#/video` must remain Jellyfin-owned.
+- Video ownership now pauses, rather than clears, native Music. The current queue, item, index, and position survive; active global state must no longer report `ptv-music` while video owns playback; leaving video must not restart audio. After returning to a non-video route, the paused dock may reappear and only an explicit Play command may resume it.
+- Automated gates: focused 40/40; full Vitest 431/431 on the final run; TypeScript; scoped regression ESLint; changed Stylelint; E2E harness 36 passed/6 live skipped; production Webpack in 106.7 seconds; and whitespace validation. Webpack retained only established size warnings. One initial full-suite featured-cache timeout passed isolated and on immediate full rerun.
+- Authenticated physical verification is still required. The opt-in live Playwright run reached `10.16.0.125:8082`, but clean browser contexts had no saved server/session and stopped at Jellyfin's Select Server page, so it could not exercise the requested signed-in details or playback sequence.
+- No plugin/backend change or Jellyfin restart is required. Deploy the complete frontend build through the existing atomic asset-first/index-last process and accept the normal service-worker update; do not clear user data merely for this patch.
+
+## 2026-07-16 native details geometry correction
+
+- The details route ownership fix remains intact. A new reversible layout lifecycle isolates the native page from stock Jellyfin details geometry, assigns named poster/ribbon/content grid areas, moves the logo into the native ribbon while mounted, and restores it during teardown.
+- Tightly scoped details styles remove the flowing `40vh` backdrop gap, stock ribbon height, viewport-width content inset, and secondary shelf offsets. Overview/meta use normal widths, tags/genres/studios/external links wrap horizontally, desktop content is centered, mobile stacks cleanly, and the secondary region includes Music-dock-safe bottom padding.
+- Automated gates pass: focused 42/42; full Vitest 433/433; TypeScript; scoped ESLint; details Stylelint; Playwright 38 passed/6 opt-in live skipped; production Webpack in 101.095 seconds; and details whitespace validation. Webpack emitted only its established size warnings.
+- The opt-in dev-host probe reached `10.16.0.125:8082`, but a clean profile landed on Select Server. With the backend environment supplied, the split-origin test still observed the dev bundle's retained localhost selection. Authenticated movie, Series, Episode, dock-clearance, and Music -> video audible checks therefore remain manual.
+- Manual production check: authenticate against `10.16.0.50:8096`; open movie, Series, and Episode details; verify one PiggieTV header, no blank top gap, readable wrapping metadata, aligned Cast & Crew/related shelves, and unobstructed controls with Music active. Start video and confirm Music pauses, the dock hides, and Music does not resume until explicitly played.
+- No plugin/backend change, deployment, Jellyfin restart, commit, push, or remote operation occurred.
+
+## 2026-07-17 native details artwork and premium glass
+
+- Native details now use one fixed full-page artwork layer with Backdrop -> Thumb -> Primary -> themed-gradient fallback. The legacy flowing backdrop remains suppressed so it cannot recreate the large top gap.
+- The title ribbon, poster, action group, metadata, content panels, Cast & Crew, and related shelves share scoped translucent purple-glass tokens with border, glow, inset highlight, and readable masks. Filter, low-power, and reduced-motion fallbacks retain the same content geometry.
+- Deterministic visual verification shows artwork visible across the page, one unobstructed PiggieTV header, a strong translucent title panel, readable metadata glass, and Cast & Crew/More Like This aligned to the main container. Desktop and mobile focused Playwright checks passed 2/2.
+- Automated gates: focused Vitest 15/15; full Vitest 436/436; TypeScript; scoped ESLint; details Stylelint; production Webpack in 101.809 seconds with established size warnings; and whitespace validation.
+- Manual authenticated checks remain: open Movie, Series, Season, and Episode details with real artwork; confirm each fallback order; verify the Music dock clears controls; then start video and confirm Music still pauses, the dock hides, and audio does not auto-resume.
+- This is frontend-only. No plugin/backend deployment or Jellyfin restart is required; deploy the complete matching frontend bundle atomically and accept the normal service-worker update.
+
+## 2026-07-17 shared shell surface correction
+
+- The outer shared header is layout-only and visibly transparent. The centered primary nav remains its own glass pill; top-right utilities own individual purple glass buttons and Search remains larger and circular. Details routes can no longer recreate a full-width header strip.
+- Automated geometry covers Home, Shows browse, and Details at `2560x1271`, Details at `1024x1366`, and Shows at `390x844`. It verifies one transparent header, centered glass nav, glass utilities, larger Search, and no mobile/tablet horizontal overflow.
+- Android dropdown portal coverage remains green. Music queue, playback-state, and media-dock tests remain green, including video ownership, dock suppression, queue preservation, and no automatic Music resume.
+- Gates: focused Vitest 26/26; full Vitest 439/439; TypeScript; scoped ESLint; shell/details Stylelint; focused Playwright 15/15 plus tablet rerun 5/5; full Playwright 42 passed/6 live skipped; production Webpack in 90.6 seconds with established size warnings; production CSS includes the WebKit backdrop-filter prefix.
+- Manual hardware check remains: compare Home, Details, browse, Music, Reading, and Dashboard on desktop, Pixel/Android Chrome, and iPad Safari. Confirm no full-width glass strip, dropdowns remain above content, and bright backdrops preserve icon readability.
+- No Jellyfin restart or plugin deployment is required. Deploy only the complete frontend bundle atomically and accept the normal service-worker update.

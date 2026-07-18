@@ -80,6 +80,12 @@ describe('plugin API authentication startup', () => {
             'pre-authentication-wait': 6
         });
         expect(diagnostics.attemptedResponses.every(entry => entry.status !== 401)).toBe(true);
+        expect(diagnostics.attemptedResponses.slice(-3)).toEqual([
+            expect.objectContaining({ endpoint: 'status', ok: true, status: 200, url: '/Ptv/v1/status' }),
+            expect.objectContaining({ endpoint: 'settings', ok: true, status: 200, url: '/Ptv/v1/settings' }),
+            expect.objectContaining({ endpoint: 'featuredContent', ok: true, status: 200, url: '/Ptv/v1/featured' })
+        ]);
+        expect(diagnostics.attemptedResponses.slice(-3).every(entry => entry.durationMs >= 0)).toBe(true);
     });
 
     it('uses the authenticated window client during a direct dashboard load', async () => {

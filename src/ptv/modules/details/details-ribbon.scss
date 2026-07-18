@@ -2,22 +2,48 @@
     position: relative;
 
     display: grid !important;
+    box-sizing: border-box;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 18px;
     align-items: center;
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
 
     padding: 18px 20px !important;
-    margin: 0 0 18px !important;
+    margin: 0 !important;
 
-    border: 1px solid rgba(205, 174, 255, 0.18);
+    border: 1px solid var(--ptv-details-glass-border);
     border-radius: var(--ptv-radius-lg, 22px);
-    background:
-        radial-gradient(ellipse at 10% 0%, rgba(125, 214, 255, 0.13), transparent 36%),
-        linear-gradient(120deg, rgba(70, 83, 125, 0.56), rgba(53, 27, 74, 0.68) 58%, rgba(24, 12, 38, 0.82));
-    box-shadow:
-        0 20px 56px rgba(0, 0, 0, 0.38),
-        inset 0 1px 0 rgba(255, 255, 255, 0.07);
-    backdrop-filter: blur(16px) saturate(1.16);
+    background: var(--ptv-details-glass-bg-strong);
+}
+
+.ptv-detail-page .detailRibbon .infoWrapper {
+    width: 100%;
+    min-width: 0;
+    max-width: none !important;
+}
+
+.ptv-detail-page .detailLogo.ptv-detail-native-logo {
+    position: relative !important;
+    inset: auto !important;
+
+    display: block !important;
+    width: min(52%, 420px) !important;
+    height: clamp(74px, 8vw, 128px) !important;
+    max-height: 128px !important;
+    margin: 0 0 14px !important;
+
+    background-position: left center !important;
+    background-repeat: no-repeat !important;
+    background-size: contain !important;
+
+    transform: none !important;
+    filter: drop-shadow(0 14px 30px rgba(0, 0, 0, 0.44));
+}
+
+.ptv-detail-page .detailLogo.ptv-detail-native-logo.hide {
+    display: none !important;
 }
 
 .ptv-detail-page .detailNameContainer {
@@ -33,7 +59,11 @@
     font-weight: 900 !important;
     line-height: 1.05 !important;
     letter-spacing: 0 !important;
+    overflow: visible !important;
+    overflow-wrap: anywhere;
+    text-overflow: clip !important;
     text-shadow: 0 8px 22px rgba(0, 0, 0, 0.36);
+    white-space: normal !important;
 }
 
 .ptv-detail-page .itemName.originalTitle,
@@ -52,6 +82,16 @@
     gap: 8px;
 }
 
+.ptv-detail-page .mainDetailButtons.ptv-details-glass-actions {
+    padding: 6px;
+
+    border: 1px solid rgba(210, 170, 255, 0.12);
+    border-radius: 16px;
+    background: rgba(24, 10, 43, 0.2);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(14px) saturate(1.24);
+}
+
 .ptv-detail-page .detailButton {
     min-width: 48px !important;
     height: 46px !important;
@@ -59,7 +99,7 @@
 
     border: 1px solid rgba(205, 174, 255, 0.18) !important;
     border-radius: 12px !important;
-    background: rgba(26, 34, 76, 0.58) !important;
+    background: rgba(35, 18, 68, 0.38) !important;
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.08),
         0 8px 22px rgba(0, 0, 0, 0.26) !important;
@@ -97,6 +137,16 @@
 @media (max-width: 900px) {
     .ptv-detail-page .detailRibbon {
         grid-template-columns: 1fr;
+        padding: 18px !important;
+    }
+
+    .ptv-detail-page .detailLogo.ptv-detail-native-logo {
+        width: min(72vw, 320px) !important;
+        height: 92px !important;
+        margin-right: auto !important;
+        margin-left: auto !important;
+
+        background-position: center !important;
     }
 
     .ptv-detail-page .mainDetailButtons {

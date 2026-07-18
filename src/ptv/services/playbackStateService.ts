@@ -11,6 +11,7 @@ import { recordPtvEvent } from '../core/observability';
 import {
     nextPtvMusicTrack,
     openPtvMusicPlayer,
+    pausePtvMusicPlayback,
     previousPtvMusicTrack,
     stopPtvMusicPlayback,
     subscribeToPtvMusicQueue,
@@ -83,6 +84,9 @@ let lastMusicSnapshot: PtvMusicQueueSnapshot | null = null;
 let musicUnsubscribe: (() => void) | null = null;
 let pollTimer: number | null = null;
 let reconcileTimer: number | null = null;
+let routeChangeHandler: (() => void) | null = null;
+let videoMusicPauseRequested = false;
+let videoPlaybackOwnsState = false;
 const boundPlaybackManagerEvents: Array<{
     handler: () => void;
     name: string;
@@ -237,9 +241,65 @@ function getJellyfinPlaybackState(lastEvent = ''): PtvGlobalPlaybackState {
     }
 }
 
+function isVideoPlaybackRoute(hash = window.location.hash || '') {
+    return /^#\/video(?:[/?]|$)/i.test(hash);
+}
+
+function isVideoPlaybackState(state: PtvGlobalPlaybackState) {
+    const mediaType = String(state.mediaType || '').toLowerCase();
+    const itemType = String(state.itemType || '').toLowerCase();
+
+    return state.active && (
+        mediaType === 'video'
+        || ['episode', 'movie', 'series', 'trailer', 'video'].includes(itemType)
+    );
+}
+
+function synchronizeVideoPlaybackOwnership(
+    jellyfinState: PtvGlobalPlaybackState,
+    reason: string
+) {
+    const nextVideoOwnership = isVideoPlaybackRoute() || isVideoPlaybackState(jellyfinState);
+
+    videoPlaybackOwnsState = nextVideoOwnership;
+
+    if (!nextVideoOwnership) {
+        videoMusicPauseRequested = false;
+        return;
+    }
+
+    if (!lastMusicSnapshot?.isPlaying || videoMusicPauseRequested) return;
+
+    videoMusicPauseRequested = true;
+    recordPtvPerformanceEntry('playback', 'playback-owner-handoff', {
+        from: 'ptv-music',
+        reason,
+        to: 'jellyfin-video'
+    });
+    void pausePtvMusicPlayback(reason).catch(error => {
+        videoMusicPauseRequested = false;
+        recordPtvEvent('playback', 'music-pause-for-video-failed', {
+            error: error instanceof Error ? error.message : String(error),
+            reason
+        });
+    });
+}
+
 function selectPlaybackState(lastEvent = '') {
     const jellyfinState = getJellyfinPlaybackState(lastEvent);
     const musicState = getMusicPlaybackState(lastMusicSnapshot);
+
+    synchronizeVideoPlaybackOwnership(jellyfinState, lastEvent || 'playback-state-selection');
+
+    if (videoPlaybackOwnsState) {
+        if (isVideoPlaybackState(jellyfinState)) return jellyfinState;
+
+        return {
+            ...EMPTY_PLAYBACK_STATE,
+            lastEvent,
+            lastUpdatedAt: Date.now()
+        };
+    }
 
     if (musicState.active && (!jellyfinState.active || !musicState.paused)) return musicState;
     if (jellyfinState.active) return jellyfinState;
@@ -270,12 +330,29 @@ function getStateSignature(state: PtvGlobalPlaybackState) {
     ].join('|');
 }
 
+function synchronizeLowFrequencyReconcile(state: PtvGlobalPlaybackState) {
+    const shouldPoll = state.active && state.source === 'jellyfin-player';
+
+    if (!shouldPoll && pollTimer !== null) {
+        window.clearInterval(pollTimer);
+        pollTimer = null;
+        return;
+    }
+
+    if (shouldPoll && pollTimer === null) {
+        pollTimer = window.setInterval(() => {
+            publishPlaybackState('low-frequency-reconcile');
+        }, 1000);
+    }
+}
+
 function publishPlaybackState(lastEvent = 'reconcile') {
     incrementPtvPerformanceCounter('playbackEventsReceived', {
         lastPlaybackEvent: lastEvent
     });
 
     const nextState = selectPlaybackState(lastEvent);
+    synchronizeLowFrequencyReconcile(nextState);
     const previousSignature = getStateSignature(currentState);
     const nextSignature = getStateSignature(nextState);
 
@@ -322,7 +399,10 @@ function scheduleReconcile(lastEvent: string) {
 }
 
 function bindPlaybackManagerEvent(name: string) {
-    const handler = () => scheduleReconcile(name);
+    const handler = () => {
+        synchronizeVideoPlaybackOwnership(getJellyfinPlaybackState(name), name);
+        scheduleReconcile(name);
+    };
     const playbackManagerLike = getPlaybackManager();
 
     if (!playbackManagerLike || (typeof playbackManagerLike !== 'object' && typeof playbackManagerLike !== 'function')) {
@@ -362,9 +442,17 @@ export function startPtvPlaybackStateService() {
     bindPlaybackManagerEvent('playerchange');
     bindPlaybackManagerEvent('playbackcancelled');
 
+    routeChangeHandler = () => {
+        synchronizeVideoPlaybackOwnership(getJellyfinPlaybackState('playback-route-change'), 'playback-route-change');
+        publishPlaybackState('playback-route-change');
+    };
+    window.addEventListener('hashchange', routeChangeHandler);
+    window.addEventListener('popstate', routeChangeHandler);
+
     try {
         musicUnsubscribe = subscribeToPtvMusicQueue(snapshot => {
             lastMusicSnapshot = snapshot;
+            if (!snapshot.isPlaying) videoMusicPauseRequested = false;
             publishPlaybackState('ptv-music-queue');
         });
     } catch (error) {
@@ -372,12 +460,6 @@ export function startPtvPlaybackStateService() {
             error: error instanceof Error ? error.message : String(error)
         });
     }
-
-    pollTimer = window.setInterval(() => {
-        if (lastMusicSnapshot?.currentItem) return;
-
-        publishPlaybackState('low-frequency-reconcile');
-    }, 1000);
 
     const root = window.PTV || (window.PTV = {});
 
@@ -498,6 +580,11 @@ export function disposePtvPlaybackStateServiceForTests() {
     boundPlaybackManagerEvents.splice(0).forEach(({ handler, name, target }) => {
         Events.off(target, name, handler);
     });
+    if (routeChangeHandler) {
+        window.removeEventListener('hashchange', routeChangeHandler);
+        window.removeEventListener('popstate', routeChangeHandler);
+        routeChangeHandler = null;
+    }
     if (pollTimer !== null) {
         window.clearInterval(pollTimer);
         pollTimer = null;
@@ -508,6 +595,8 @@ export function disposePtvPlaybackStateServiceForTests() {
     }
     initialized = false;
     lastMusicSnapshot = null;
+    videoMusicPauseRequested = false;
+    videoPlaybackOwnsState = false;
     listeners.clear();
     currentState = EMPTY_PLAYBACK_STATE;
 }

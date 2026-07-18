@@ -344,3 +344,53 @@ Plugin startup selects an authenticated `ServerConnections` client first, then a
 `playbackStateService` is intentionally a universal state observer, but `PTVMediaDock` is not a universal Jellyfin playback renderer. The dock positively requires an active `ptv-music` source with audio media/item identity. Video playback routes retire dock presentation immediately, even during the brief handoff before a stale Music snapshot is replaced. Movie, Episode, Series, Trailer, and other video sessions remain owned by Jellyfin's video player UI and never acquire `ptv-playback-presentation-owned`.
 
 Frontend update application has one in-flight owner. A waiting worker receives `SKIP_WAITING`; `controllerchange` triggers exactly one reload. If the transition never arrives, a bounded activation timer performs the same one-shot reload. Missing worker activation support falls back directly. The reload marker is scoped to the current attempt and cleared when the service starts or a new waiting worker is adopted, so an old session marker cannot suppress future updates. The notice leaves its applying state before reload and repeated clicks/controller events cannot multiply attempts.
+
+### XML-Safe Reading Override Configuration Boundary
+
+Jellyfin configuration types must not expose public `Dictionary` or `IDictionary` properties, even when a property is annotated with `XmlIgnore`. `ReadingSeriesOverrideSettings` therefore owns its case-insensitive dictionary privately and exposes only a deterministic `ReadingSeriesOverrideRouteEntry[] Routes` XML property. The array retains the established `<Routes><Route ...>` wire shape so existing persisted list-form data round-trips without a schema or capability change.
+
+Runtime callers use `GetRoute`, `SetRoute`, and `RemoveRoute`; they never mutate serialized storage directly. Route and item entries are sorted before serialization, input keys are normalized, and returned dictionaries are defensive snapshots. Reflection and XML round-trip tests protect the complete public configuration graph from future `IDictionary` regressions.
+
+Plugin API transport failures are classified separately from HTTP failures. A response with status 500 or greater is a `server` error and the dashboard reports `plugin server error`; network failures remain `network` errors. Sanitized response bodies and status codes remain bounded in diagnostics without credentials or authorization data.
+
+### Production Bundle Coherency Boundary
+
+The document entry is the deployment commit point for Jellyfin-web. Deployment copies and SHA-256 verifies every bundle, stylesheet, and content-hashed async chunk before replacing root `index.html` atomically. Existing content-hashed chunks are retained so clients running an older runtime can finish loading while a new build is published.
+
+Production startup wraps Webpack's async JavaScript and extracted-CSS filename resolvers once. Requests retain their immutable emitted filenames and add a build-scoped `ptv_asset` query derived from frontend build and commit identity. This prevents a CDN failure cached against a bare chunk pathname from poisoning every client and separates otherwise identical paths across release generations.
+
+Route chunk failures remain recoverable without a reload loop. The router error boundary recognizes only same-origin JavaScript/CSS chunk failures, records one build-and-request-scoped attempt in session storage, and reloads the current document with its hash route preserved. Successful startup removes the visible recovery marker. Ordinary application errors and cross-origin failures are not reloaded.
+
+### Shell, Reading Progress, Playback Reconcile, And Plugin Diagnostics Boundary
+
+Shell header diagnostics are valid only while a mounted native shell matches the active route owner. `shellHeaderState.ts` reconciles the live route with the mounted header section, and fallback/admin routes intentionally expose no native page-header state. The final native shell unmount clears all retained header fields; a replacement shell may keep ownership without an empty-state race.
+
+Reading background indexing may accumulate every server page, but it does not publish every transport page into React. Progress publication is monotonic and bounded to meaningful milestones, while render telemetry keys off route, partial/final stage, and section readiness instead of raw accumulated count. Completion is always published, so a 2,911/2,911 index remains observable without producing a render and shell-ready event for each background batch.
+
+Low-frequency Jellyfin playback reconcile exists only while an active Jellyfin playback source is present. Idle state, native Music queue state, and stopped sessions own no interval. This does not alter the video mini-player presentation boundary or the event-driven native Music queue.
+
+Plugin API attempted-response diagnostics contain both success and failure outcomes. Each bounded entry records a sanitized endpoint path, HTTP status, success flag, and request duration; query strings, origins, credentials, and authorization data are excluded. A connected status/settings/featured sequence is therefore visible as successful transport evidence instead of leaving an empty attempted-response list.
+
+### Details Route And Video Playback Ownership Boundary
+
+Hash routes rooted at `#/details` and `#/item` are PiggieTV-native presentation routes. The existing Jellyfin details view continues to own item metadata and actions, but PiggieTV mounts one header-only `PTVShell`, suppresses the legacy Jellyfin header through native route ownership, and applies header-safe top geometry to the details content. The matcher is boundary-aware so `#/music/item/...` remains a Music route and `#/video` remains owned by Jellyfin's video player.
+
+Video playback owns the global playback surface as soon as the route enters `#/video` or Jellyfin publishes an active video session. The ownership handoff pauses the single native PiggieTV audio element through `pausePtvMusicPlayback`; it preserves queue, current index, source playlist, and playback position, but clears active PiggieTV Music publication while video owns playback. Leaving video does not resume Music. A paused Music state may return to the dock after video ownership ends, and playback resumes only after an explicit user command.
+
+### Native Details Layout Isolation Boundary
+
+PiggieTV-owned details presentation uses the existing Jellyfin details controller for metadata and actions, but it cannot inherit Jellyfin's stock document-flow geometry. `detailsLayout.js` gives the active page explicit native root/content/primary/secondary classes and temporarily moves the stock logo into the native ribbon; teardown restores the original DOM position so fallback ownership remains reversible.
+
+The native primary section has named grid areas for poster, ribbon, and content. This is required because Jellyfin supplies three primary children; an unnamed two-column grid placed the third child on an implicit second row and retained stock viewport-width padding. Details styles reset the flowing `40vh` backdrop, fixed ribbon height, `32.45vw` primary-content inset, stock section margins, and absolute logo positioning only below `.ptv-detail-page`. Overview and metadata keep a readable bounded width, taxonomy/external links wrap as horizontal chips, and Cast & Crew/related shelves share the same centered container. Mobile switches the named grid to one column without transform-based scaling or horizontal overflow. The secondary container reserves bottom space for the persistent Music dock while leaving `#/video` playback ownership unchanged.
+
+### Native Details Artwork And Glass Boundary
+
+Native details pages own one fixed, page-wide artwork layer independent of Jellyfin's flowing `.itemBackdrop`. After item hydration, the details controller resolves `Backdrop`, `Thumb`, and `Primary` candidates in that order and hands the bounded list to `detailsLayout.js`. Failed candidates advance without remounting the page; an empty or exhausted list retains a themed purple gradient. The layer is removed with the details lifecycle and cannot affect Music-owned item routes or Jellyfin-owned video playback.
+
+All details glass is scoped below `.ptv-detail-page`. The page defines translucent fill, strong-fill, border, highlight, glow, and blur/saturation tokens used by the title ribbon, poster, action group, metadata, primary sections, Cast & Crew, and related shelves. The fixed backdrop remains visible through those surfaces behind readability masks and a restrained purple wash. Unsupported backdrop filtering receives a more opaque purple fallback, while low-power and reduced-motion profiles reduce blur and transitions without changing layout or content ownership.
+
+### Shared Shell Surface Hierarchy
+
+`PTVShell` owns layout and interaction, but its outer `.ptv-shell-header` is never a visual surface. The header remains transparent with no border, shadow, or backdrop filter across desktop, tablet, mobile, native details, and PTV dashboard routes. The symmetric desktop grid gives the primary navigation physical viewport-center ownership independent of logo and utility widths.
+
+Glass is limited to deliberate controls: `.ptv-shell-nav-primary` owns the centered navigation pill, while each `.ptv-shell-icon-button` owns a compact purple-tinted glass surface and Search retains the larger circular treatment. Details styles may change safe-area geometry but cannot restyle the shared header root. Android dropdowns remain portal-owned, and low-power profiles remove expensive filters from nav and utility controls without changing their hierarchy.
