@@ -17,6 +17,7 @@ export type PtvRenderClientSignals = {
     isRoku?: boolean;
     isTablet?: boolean;
     isTenFootClient?: boolean;
+    isTizen?: boolean;
     isTv: boolean;
     isWebOs: boolean;
     supportsBackdropFilter: boolean;
@@ -94,6 +95,7 @@ export function getPtvRenderProfile(client: PtvRenderClientSignals): PtvRenderPr
         || client.isWebOs
         || client.isAndroidTv
         || client.isRoku
+        || client.isTizen
         || client.isTenFootClient
     );
 

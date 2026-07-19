@@ -58,6 +58,7 @@ export function isPtvMusicDockPlayback(
     routeHash = getPlaybackRouteHash()
 ) {
     if (/^#\/(?:playback|video|livetv|nowplaying)(?:[/?]|$)/i.test(routeHash)) return false;
+    if (/^#\/music\/player(?:[/?]|$)/i.test(routeHash)) return false;
     if (!state.active || !state.itemId || state.source !== 'ptv-music') return false;
 
     const itemType = String(state.itemType || '').trim().toLowerCase();

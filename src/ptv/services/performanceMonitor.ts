@@ -30,15 +30,21 @@ type PtvPerformanceCounters = {
     pageUnmountCount: number;
     persistentRuntimeMountCount: number;
     playbackEventsReceived: number;
+    playbackDeduplicatedEventCount: number;
+    playbackNormalizedEventCount: number;
     playbackProviderMountCount: number;
+    playbackRawEventCount: number;
     playbackRenderCount: number;
+    playbackStoreSubscriberCount: number;
     playbackSubscriptionCount: number;
     playbackUpdatesPublished: number;
     playbackUpdatesSuppressed: number;
     requestCount: number;
+    routeOnlyEventCount: number;
     routePageMountCount: number;
     shellMountCount: number;
     storageEvictionCount: number;
+    trackChangeCount: number;
     timeoutCount: number;
 };
 
@@ -67,15 +73,21 @@ const counters: PtvPerformanceCounters = {
     pageUnmountCount: 0,
     persistentRuntimeMountCount: 0,
     playbackEventsReceived: 0,
+    playbackDeduplicatedEventCount: 0,
+    playbackNormalizedEventCount: 0,
     playbackProviderMountCount: 0,
+    playbackRawEventCount: 0,
     playbackRenderCount: 0,
+    playbackStoreSubscriberCount: 0,
     playbackSubscriptionCount: 0,
     playbackUpdatesPublished: 0,
     playbackUpdatesSuppressed: 0,
     requestCount: 0,
+    routeOnlyEventCount: 0,
     routePageMountCount: 0,
     shellMountCount: 0,
     storageEvictionCount: 0,
+    trackChangeCount: 0,
     timeoutCount: 0
 };
 
@@ -185,15 +197,21 @@ export function clearPtvPerformanceMonitor() {
     counters.pageUnmountCount = 0;
     counters.persistentRuntimeMountCount = 0;
     counters.playbackEventsReceived = 0;
+    counters.playbackDeduplicatedEventCount = 0;
+    counters.playbackNormalizedEventCount = 0;
     counters.playbackProviderMountCount = 0;
+    counters.playbackRawEventCount = 0;
     counters.playbackRenderCount = 0;
+    counters.playbackStoreSubscriberCount = 0;
     counters.playbackSubscriptionCount = 0;
     counters.playbackUpdatesPublished = 0;
     counters.playbackUpdatesSuppressed = 0;
     counters.requestCount = 0;
+    counters.routeOnlyEventCount = 0;
     counters.routePageMountCount = 0;
     counters.shellMountCount = 0;
     counters.storageEvictionCount = 0;
+    counters.trackChangeCount = 0;
     counters.timeoutCount = 0;
     previousRoute = '';
 }

@@ -1,16 +1,11 @@
-import React from 'react';
 import { flushSync } from 'react-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../shell/PTVShell', () => ({
-    default: ({ headerOnly, section }: { headerOnly?: boolean; section?: string }) => (
-        <header
-            className='ptv-shell-header'
-            data-header-only={String(Boolean(headerOnly))}
-            data-section={section}
-        />
-    )
+const observabilityMocks = vi.hoisted(() => ({
+    recordPtvEvent: vi.fn()
 }));
+
+vi.mock('../../core/observability', () => observabilityMocks);
 
 import { mountPtvSettingsShell, unmountPtvSettingsShell } from './settingsShell';
 
@@ -19,15 +14,15 @@ describe('PTV settings shell ownership', () => {
         flushSync(() => unmountPtvSettingsShell());
     });
 
-    it('mounts one shared PTV settings header', () => {
+    it('keeps enhanced Settings Jellyfin-owned without mounting a native PTV shell', () => {
         flushSync(() => mountPtvSettingsShell());
         flushSync(() => mountPtvSettingsShell());
 
-        const host = document.querySelector('#ptv-settings-shell-root');
-        const header = host?.querySelector<HTMLElement>('.ptv-shell-header');
-
-        expect(document.querySelectorAll('#ptv-settings-shell-root')).toHaveLength(1);
-        expect(header?.dataset.headerOnly).toBe('true');
-        expect(header?.dataset.section).toBe('settings');
+        expect(document.querySelector('#ptv-settings-shell-root')).toBeNull();
+        expect(document.querySelector('.ptv-shell-header')).toBeNull();
+        expect(observabilityMocks.recordPtvEvent).toHaveBeenCalledWith('render', 'settings-enhancement-mounted', {
+            nativeShellMounted: false,
+            owner: 'jellyfin'
+        });
     });
 });

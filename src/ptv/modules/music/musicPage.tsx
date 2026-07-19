@@ -285,6 +285,27 @@ type ArtistDetailState = Readonly<{
     topSongs: PtvMusicItem[];
 }>;
 
+const ARTIST_ALBUM_INITIAL_LIMIT = 16;
+const ARTIST_TRACK_INITIAL_LIMIT = 24;
+const artistDetailCache = new Map<string, ArtistDetailState>();
+
+type ProgressiveArtistCallbacks = Readonly<{
+    onAlbums: (items: PtvMusicItem[]) => void;
+    onSummary: (item: PtvMusicItem) => void;
+    onTracks: (items: PtvMusicItem[]) => void;
+}>;
+
+async function loadProgressiveArtistDetail(artistId: string, callbacks: ProgressiveArtistCallbacks) {
+    const artist = await fetchPtvMusicItem(artistId);
+    const artistName = getPtvMusicTitle(artist);
+
+    callbacks.onSummary(artist);
+    await Promise.allSettled([
+        fetchPtvMusicAlbumsByArtist(artistId, artistName, ARTIST_ALBUM_INITIAL_LIMIT).then(callbacks.onAlbums),
+        fetchPtvMusicTracksByArtist(artistId, artistName, ARTIST_TRACK_INITIAL_LIMIT).then(callbacks.onTracks)
+    ]);
+}
+
 type ItemDetailState = Readonly<{
     error: string;
     isLoading: boolean;
@@ -4269,35 +4290,81 @@ export default function PiggieTvMusicPage() {
 
     useEffect(() => {
         let isMounted = true;
+        const artistRouteEnteredAt = performance.now();
 
         if (route.view !== 'artist' || !route.id) {
             setArtistDetail(getInitialArtistDetail());
             return undefined;
         }
 
-        setArtistDetail({
-            ...getInitialArtistDetail(),
-            isLoading: true
-        });
+        const cachedDetail = artistDetailCache.get(route.id);
 
-        void fetchPtvMusicItem(route.id)
-            .then(artist => Promise.all([
-                fetchPtvMusicTracksByArtist(route.id, getPtvMusicTitle(artist), 80),
-                fetchPtvMusicAlbumsByArtist(route.id, getPtvMusicTitle(artist), 36)
-            ]).then(([topSongs, nextAlbums]) => ({
-                albums: nextAlbums,
-                artist,
-                topSongs
-            })))
-            .then(detail => {
-                if (isMounted) {
-                    setArtistDetail({
-                        ...detail,
-                        error: '',
-                        isLoading: false
-                    });
-                }
-            })
+        if (cachedDetail?.artist) {
+            setArtistDetail(cachedDetail);
+            recordPtvEvent('cache', 'music-artist-summary-cache-hit', {
+                artistCacheHit: true,
+                artistId: route.id,
+                artistSummaryVisibleMs: Math.round((performance.now() - artistRouteEnteredAt) * 10) / 10
+            });
+        } else {
+            setArtistDetail({
+                ...getInitialArtistDetail(),
+                isLoading: true
+            });
+        }
+
+        void loadProgressiveArtistDetail(route.id, {
+            onSummary: artist => {
+                if (!isMounted) return;
+
+                const summaryDetail: ArtistDetailState = {
+                    albums: cachedDetail?.albums || [],
+                    artist,
+                    error: '',
+                    isLoading: false,
+                    topSongs: cachedDetail?.topSongs || []
+                };
+
+                artistDetailCache.set(route.id, summaryDetail);
+                setArtistDetail(summaryDetail);
+                recordPtvEvent('render', 'music-artist-summary-visible', {
+                    artistCacheHit: Boolean(cachedDetail),
+                    artistId: route.id,
+                    artistFirstInteractiveMs: Math.round((performance.now() - artistRouteEnteredAt) * 10) / 10,
+                    artistSummaryVisibleMs: Math.round((performance.now() - artistRouteEnteredAt) * 10) / 10
+                });
+            },
+            onAlbums: artistAlbums => {
+                if (!isMounted) return;
+
+                setArtistDetail(current => {
+                    const next = { ...current, albums: artistAlbums };
+
+                    artistDetailCache.set(route.id, next);
+                    return next;
+                });
+                recordPtvEvent('render', 'music-artist-albums-visible', {
+                    artistAlbumsVisibleMs: Math.round((performance.now() - artistRouteEnteredAt) * 10) / 10,
+                    artistId: route.id,
+                    artistQueryItemCount: artistAlbums.length
+                });
+            },
+            onTracks: topSongs => {
+                if (!isMounted) return;
+
+                setArtistDetail(current => {
+                    const next = { ...current, topSongs };
+
+                    artistDetailCache.set(route.id, next);
+                    return next;
+                });
+                recordPtvEvent('render', 'music-artist-tracks-visible', {
+                    artistId: route.id,
+                    artistQueryItemCount: topSongs.length,
+                    artistTracksVisibleMs: Math.round((performance.now() - artistRouteEnteredAt) * 10) / 10
+                });
+            }
+        })
             .catch(error => {
                 if (isMounted) {
                     setArtistDetail({
@@ -4309,6 +4376,12 @@ export default function PiggieTvMusicPage() {
             });
 
         return () => {
+            if (isMounted) {
+                recordPtvEvent('api', 'music-artist-request-cancelled', {
+                    artistId: route.id,
+                    artistRequestCancelled: true
+                });
+            }
             isMounted = false;
         };
     }, [route.id, route.view]);

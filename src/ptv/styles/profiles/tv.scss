@@ -1,0 +1,340 @@
+/* Authoritative ten-foot geometry. This file intentionally loads after desktop/mobile styles. */
+
+html.ptv-render-tv {
+    --ptv-tv-safe-x: 64px;
+    --ptv-tv-safe-y: 36px;
+    --ptv-tv-header-height: 76px;
+    --ptv-tv-hero-height: 580px;
+    --ptv-tv-card-width: 190px;
+    --ptv-tv-card-height: 285px;
+    --ptv-tv-card-outer-width: 206px;
+    --ptv-tv-card-gap: 20px;
+    --ptv-tv-focus-ring: 4px;
+    --ptv-tv-focus-scale: 1.08;
+    --ptv-tv-body-size: 22px;
+    --ptv-tv-title-size: 42px;
+    --ptv-shell-header-height: var(--ptv-tv-header-height);
+
+    font-size: var(--ptv-tv-body-size);
+}
+
+html.ptv-render-tv[data-ptv-route-native='true'] .skinHeader,
+html.ptv-render-tv[data-ptv-route-native='true'] .mainDrawer,
+html.ptv-render-tv[data-ptv-route-native='true'] .ptv-mainDrawer,
+html.ptv-render-tv[data-ptv-route-native='true'] .mainDrawerHandle,
+html.ptv-render-tv[data-ptv-route-native='true'] .drawerHandle,
+html.ptv-render-tv[data-ptv-route-native='true'] .appfooter,
+html.ptv-render-tv.ptv-native-shell-mounted .skinHeader,
+html.ptv-render-tv.ptv-native-shell-mounted .mainDrawer,
+html.ptv-render-tv.ptv-native-shell-mounted .ptv-mainDrawer,
+html.ptv-render-tv.ptv-native-shell-mounted .mainDrawerHandle,
+html.ptv-render-tv.ptv-native-shell-mounted .drawerHandle,
+html.ptv-render-tv.ptv-native-shell-mounted .appfooter {
+    display: none !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+}
+
+html.ptv-render-tv .ptv-shell-header {
+    gap: 20px;
+    grid-template-columns: minmax(180px, 1fr) max-content minmax(260px, 1fr);
+    left: var(--ptv-tv-safe-x);
+    min-height: var(--ptv-tv-header-height);
+    right: var(--ptv-tv-safe-x);
+    top: var(--ptv-tv-safe-y);
+}
+
+html.ptv-render-tv .ptv-shell-brand {
+    min-height: 64px;
+}
+
+html.ptv-render-tv .ptv-shell-brand img {
+    max-height: 64px;
+    max-width: 196px;
+}
+
+html.ptv-render-tv .ptv-shell-nav-primary {
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-height: 66px;
+    padding: 7px;
+}
+
+html.ptv-render-tv .ptv-shell-nav-button {
+    font-size: 19px;
+    min-height: 52px;
+    padding: 0 21px;
+}
+
+html.ptv-render-tv .ptv-shell-header-right {
+    gap: 10px;
+    max-width: none;
+}
+
+html.ptv-render-tv .ptv-shell-icon-button,
+html.ptv-render-tv .ptv-shell-search,
+html.ptv-render-tv .ptv-shell-search-trigger {
+    height: 56px;
+    min-height: 56px;
+    width: 56px;
+}
+
+html.ptv-render-tv .ptv-shell-icon-button .ptv-icon,
+html.ptv-render-tv .ptv-shell-search-trigger .ptv-icon {
+    --ptv-icon-size: 24px;
+}
+
+html.ptv-render-tv .ptv-cinematic-hero,
+html.ptv-render-tv .ptv-cinematic-hero--home,
+html.ptv-render-tv .ptv-cinematic-hero--browse,
+html.ptv-render-tv .ptv-native-home-hero,
+html.ptv-render-tv .ptv-browse-hero {
+    box-sizing: border-box;
+    height: var(--ptv-tv-hero-height) !important;
+    min-height: var(--ptv-tv-hero-height) !important;
+    max-height: var(--ptv-tv-hero-height) !important;
+}
+
+html.ptv-render-tv .ptv-native-home-hero-content,
+html.ptv-render-tv .ptv-browse-hero-copy {
+    bottom: 58px;
+    box-sizing: border-box;
+    left: var(--ptv-tv-safe-x);
+    max-width: 760px;
+    padding: 0;
+    right: auto;
+    width: 760px;
+}
+
+html.ptv-render-tv .ptv-native-home-title-logo,
+html.ptv-render-tv .ptv-browse-hero-logo {
+    height: auto;
+    max-height: 160px;
+    max-width: 500px;
+    object-fit: contain;
+    object-position: left center;
+    width: auto;
+}
+
+html.ptv-render-tv .ptv-native-home-logo {
+    display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    max-width: 0 !important;
+    width: 0 !important;
+}
+
+html.ptv-render-tv .ptv-native-home-hero h1,
+html.ptv-render-tv .ptv-browse-hero h1 {
+    font-size: 64px;
+    line-height: 1.02;
+    max-width: 720px;
+}
+
+html.ptv-render-tv .ptv-native-home-overview,
+html.ptv-render-tv .ptv-browse-hero-overview {
+    font-size: 22px;
+    line-height: 1.45;
+    max-width: 720px;
+}
+
+html.ptv-render-tv .ptv-native-home-rows,
+html.ptv-render-tv .ptv-browse-content,
+html.ptv-render-tv .ptv-shell-context-nav {
+    box-sizing: border-box;
+    padding-right: var(--ptv-tv-safe-x);
+    padding-left: var(--ptv-tv-safe-x);
+}
+
+html.ptv-render-tv .ptv-native-home-row-heading h2,
+html.ptv-render-tv .ptv-browse-row-header h2 {
+    font-size: var(--ptv-tv-title-size);
+}
+
+html.ptv-render-tv .ptv-native-home-scroller,
+html.ptv-render-tv .ptv-browse-card-rail {
+    gap: var(--ptv-tv-card-gap);
+    overflow-y: visible;
+    scroll-padding-inline: 12px;
+}
+
+html.ptv-render-tv .ptv-native-home-row,
+html.ptv-render-tv .ptv-browse-row,
+html.ptv-render-tv .ptv-native-home-row-rail,
+html.ptv-render-tv .ptv-browse-row-rail {
+    overflow: visible;
+}
+
+html.ptv-render-tv .ptv-native-home-card-cell {
+    flex: 0 0 var(--ptv-tv-card-outer-width) !important;
+    max-width: var(--ptv-tv-card-outer-width) !important;
+    min-width: var(--ptv-tv-card-outer-width) !important;
+    width: var(--ptv-tv-card-outer-width) !important;
+}
+
+html.ptv-render-tv .ptv-native-card {
+    box-sizing: border-box;
+    padding: 8px;
+    width: var(--ptv-tv-card-outer-width);
+}
+
+html.ptv-render-tv .ptv-native-card-image-wrap {
+    aspect-ratio: auto !important;
+    height: var(--ptv-tv-card-height) !important;
+    width: var(--ptv-tv-card-width) !important;
+}
+
+html.ptv-render-tv .ptv-native-card-image {
+    height: 100% !important;
+    object-fit: cover;
+    width: 100% !important;
+}
+
+html.ptv-render-tv .ptv-native-card-copy {
+    min-height: 62px;
+}
+
+html.ptv-render-tv .ptv-native-card-spotlight {
+    display: none !important;
+}
+
+html.ptv-render-tv .ptv-browse-card-rail {
+    grid-auto-columns: var(--ptv-tv-card-outer-width) !important;
+    padding: 20px 12px 28px;
+}
+
+html.ptv-render-tv .ptv-browse-card {
+    box-sizing: border-box;
+    min-width: var(--ptv-tv-card-outer-width) !important;
+    padding: 8px;
+    width: var(--ptv-tv-card-outer-width) !important;
+}
+
+html.ptv-render-tv .ptv-browse-card-art {
+    aspect-ratio: auto !important;
+    height: var(--ptv-tv-card-height) !important;
+    width: var(--ptv-tv-card-width) !important;
+}
+
+html.ptv-render-tv .ptv-browse-card-title {
+    font-size: 18px;
+}
+
+html.ptv-render-tv .ptv-browse-card-meta {
+    font-size: 16px;
+}
+
+html.ptv-render-tv .ptv-row-nav,
+html.ptv-render-tv .ptv-browse-row-nav {
+    height: 60px;
+    opacity: 1;
+    visibility: visible;
+    width: 60px;
+}
+
+html.ptv-render-tv .ptv-tv-focus-visible,
+html.ptv-render-tv .ptv-shell-frame a:focus,
+html.ptv-render-tv .ptv-shell-frame button:focus,
+html.ptv-render-tv .ptv-shell-frame [tabindex]:focus {
+    box-shadow: 0 0 0 var(--ptv-tv-focus-ring) #7ce7ff, 0 0 30px rgb(177 91 255 / 78%) !important;
+    outline: var(--ptv-tv-focus-ring) solid rgb(255 255 255 / 88%) !important;
+    outline-offset: 4px !important;
+    position: relative;
+    z-index: 80;
+}
+
+html.ptv-render-tv .ptv-native-card:hover,
+html.ptv-render-tv .ptv-browse-card:hover {
+    transform: none !important;
+}
+
+html.ptv-render-tv .ptv-native-card:focus-within,
+html.ptv-render-tv .ptv-browse-card:focus,
+html.ptv-render-tv .ptv-browse-card.ptv-tv-focus-visible {
+    filter: brightness(1.08) saturate(1.08);
+    transform: translateY(-8px) scale(var(--ptv-tv-focus-scale)) !important;
+}
+
+html.ptv-render-tv .ptv-detail-page .detailPageWrapperContainer {
+    box-sizing: border-box;
+    max-width: 1780px;
+    padding: calc(var(--ptv-tv-safe-y) + var(--ptv-tv-header-height) + 38px) var(--ptv-tv-safe-x) 72px !important;
+    width: 100%;
+}
+
+html.ptv-render-tv .ptv-detail-page .detailPagePrimaryContainer {
+    gap: 36px;
+    grid-template-columns: 320px minmax(0, 1040px);
+    justify-content: center;
+}
+
+html.ptv-render-tv .ptv-detail-page .detailImageContainer,
+html.ptv-render-tv .ptv-detail-page .detailImageContainer img {
+    max-width: 320px !important;
+    width: 320px !important;
+}
+
+html.ptv-render-tv .ptv-detail-page .detailRibbon,
+html.ptv-render-tv .ptv-detail-page .detailPagePrimaryContent {
+    max-width: 1040px;
+}
+
+html.ptv-render-tv .ptv-detail-page .mainDetailButtons button,
+html.ptv-render-tv .ptv-detail-page .mainDetailButtons .button-flat {
+    min-height: 58px;
+    min-width: 58px;
+}
+
+html.ptv-render-tv.ptv-no-content-visibility .ptv-shell-frame * {
+    content-visibility: visible !important;
+}
+
+@media (max-width: 1500px), (max-height: 820px) {
+    html.ptv-render-tv {
+        --ptv-tv-safe-x: 40px;
+        --ptv-tv-safe-y: 24px;
+        --ptv-tv-header-height: 72px;
+        --ptv-tv-hero-height: 430px;
+        --ptv-tv-card-width: 148px;
+        --ptv-tv-card-height: 222px;
+        --ptv-tv-card-outer-width: 164px;
+        --ptv-tv-card-gap: 14px;
+        --ptv-tv-body-size: 16px;
+        --ptv-tv-title-size: 28px;
+    }
+
+    html.ptv-render-tv .ptv-shell-nav-button {
+        font-size: 15px;
+        padding: 0 15px;
+    }
+
+    html.ptv-render-tv .ptv-native-home-hero h1,
+    html.ptv-render-tv .ptv-browse-hero h1 {
+        font-size: 50px;
+    }
+
+    html.ptv-render-tv .ptv-detail-page .detailPagePrimaryContainer {
+        grid-template-columns: 280px minmax(0, 900px);
+    }
+
+    html.ptv-render-tv .ptv-detail-page .detailImageContainer,
+    html.ptv-render-tv .ptv-detail-page .detailImageContainer img {
+        max-width: 280px !important;
+        width: 280px !important;
+    }
+}
+
+@media (min-width: 3000px) and (min-height: 1800px) {
+    html.ptv-render-tv {
+        --ptv-tv-safe-x: 112px;
+        --ptv-tv-safe-y: 64px;
+        --ptv-tv-header-height: 136px;
+        --ptv-tv-hero-height: 1080px;
+        --ptv-tv-card-width: 320px;
+        --ptv-tv-card-height: 480px;
+        --ptv-tv-card-outer-width: 344px;
+        --ptv-tv-card-gap: 30px;
+        --ptv-tv-body-size: 28px;
+        --ptv-tv-title-size: 54px;
+    }
+}

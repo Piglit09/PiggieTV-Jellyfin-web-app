@@ -457,3 +457,15 @@ Status: implementation and deterministic verification pass; authenticated physic
 - Settings root cause: the route only restyled stock content and never mounted `PTVShell`. Settings now mounts a lifecycle-owned header-only shell and scoped header-safe content spacing.
 - Verification: focused Vitest 6 files/24 tests plus clean admin teardown rerun 2/2; final full Vitest 69 files/457 tests; TypeScript passed; scoped ESLint zero errors with five inherited item-details warnings; Stylelint passed; focused Playwright shell/details 7/7; production Webpack compiled in 106.7 seconds with only established asset/entrypoint size warnings; `git diff --check` passed with line-ending notices only.
 - Scope remains frontend-only. Plugin/backend code, API/cache contracts, `#/video`, Music pause-on-video/no-auto-resume behavior, deployment, restart, commit, push, and remote state were not changed.
+
+### 2026-07-18 TV Compatibility And webOS Recovery Pass
+
+Status: source and automated validation pass; physical TV verification remains open.
+
+- Replaced dimension-driven TV assumptions with an authoritative client-profile decision covering LG webOS, Samsung Tizen, Android TV, Fire TV, Roku, explicit ten-foot clients, capabilities, platform classes, and a bounded detection reason. A normal 1920x1080 desktop browser remains desktop.
+- Added centralized TV and webOS profile styles. Ten-foot mode now uses fixed nonshrinking cards, overscan-safe gutters, bounded heroes/title art, large shell controls, visible rail navigation, details geometry, and 720p/1080p/4K tokens. webOS receives static translucent purple surfaces without relying on backdrop-filter, reflections, or scale-heavy animation.
+- Added a route-scoped TV focus engine with geometric arrow navigation, focus restoration, scroll-into-view, back-key handling, and strong visible focus. Desktop hover expansion is disabled in TV mode.
+- Native Music/Reading aliases now participate in route ownership, and `PTVShell` establishes shell ownership in the layout phase to reduce first-frame legacy-header exposure. Jellyfin video ownership and the Music-to-video handoff were not changed.
+- Diagnostics now report TV platform/reason, coarse-pointer and hover flags, CSS capabilities, applied root classes, a clipped user agent, and bounded mounted row/card counts.
+- Verification: focused Vitest 4 files/23 tests; full Vitest 72 files/477 tests; TypeScript passed; scoped new-code ESLint passed; changed Stylelint passed; Playwright 43 passed with 6 opt-in live-server cases skipped; production Webpack compiled successfully with the two established size warnings.
+- Deployment boundary: frontend only. No plugin build, API/cache schema, Jellyfin restart, commit, push, or remote deployment occurred. Deploy the complete frontend bundle atomically, accept the service-worker update or clear the wrapper cache, then physically retest LG webOS, Tizen, Android TV/Fire TV, and the remaining client wrappers.

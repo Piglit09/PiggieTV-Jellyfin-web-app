@@ -129,6 +129,36 @@ describe('routeController lifecycle telemetry', () => {
         });
     });
 
+    it.each([
+        ['#/music', 'music'],
+        ['#/music/albums', 'music'],
+        ['#/books', 'reading'],
+        ['#/comics', 'reading'],
+        ['#/manga', 'reading'],
+        ['#/maga', 'reading']
+    ])('keeps PTV-rendered route %s under native shell ownership', (hash, owner) => {
+        routeMocks.current = {
+            ...routeMocks.current,
+            features: owner === 'music' ? ['music'] : ['books', 'reading'],
+            full: `/${hash}`,
+            hash,
+            id: owner,
+            normalizedPath: hash.replace('#', ''),
+            owner,
+            pageType: owner
+        };
+        window.history.replaceState(null, '', `/${hash}`);
+
+        recordPtvRouteGenerationLifecycle('page-render', { page: owner });
+
+        expect(getPtvRouteControllerState()).toMatchObject({
+            canRenderNative: true,
+            fallbackReason: '',
+            mode: 'native',
+            owner
+        });
+    });
+
     it('synchronizes Browse, Reading, Dashboard, authentication, and history transitions before lifecycle events', () => {
         const transitions = [
             {

@@ -34,3 +34,5 @@
 @use '../modules/dashboard/admin-forms';
 @use '../modules/dashboard/admin-system';
 @use './debug';
+@use './profiles/tv';
+@use './profiles/webos';

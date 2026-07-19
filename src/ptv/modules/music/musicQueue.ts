@@ -272,12 +272,6 @@ function reportPlaybackProgressThrottled() {
     reportPlayback('reportPlaybackProgress');
 }
 
-function openPtvMusicPlayerAfterPlay() {
-    if (window.location.hash !== MUSIC_PLAYER_HASH) {
-        window.location.hash = MUSIC_PLAYER_HASH;
-    }
-}
-
 function getNextPlaylistIndex() {
     if (!playlist.length) return -1;
     if (currentIndex + 1 < playlist.length) return currentIndex + 1;
@@ -406,8 +400,6 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
                 itemId: item.Id || null,
                 queueCount: playlist.length
             });
-            openPtvMusicPlayerAfterPlay();
-
             return emitQueueUpdated('play-started');
         })
         .catch(error => handleNativePlaybackError(error, 'play', options))
@@ -559,6 +551,7 @@ export function openPtvMusicPlayer(source = 'unknown') {
     recordPtvEvent('render', 'music-player-open-requested', {
         engine: 'native-audio',
         hash: window.location.hash,
+        navigationReason: 'explicit-user-action',
         source
     });
 

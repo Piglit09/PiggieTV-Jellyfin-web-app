@@ -60,7 +60,7 @@ Home should render from fresh plugin cache first, then refresh/defer slow Jellyf
 | Music route entry | `modules/music/index.ts` | Exposes the Music module to the PTV router/module loader. |
 | Music data API | `modules/music/musicApi.ts` | Fetch full library counts and paged Jellyfin data. Watch for limits, filters, and metadata fallback order. |
 | Music UI shell | `modules/music/musicPage.tsx` | Owns Music navigation, Library/Artist/Album/Playlist views, debug panel, and view-specific rendering. |
-| Now playing UI | `modules/music/musicPlayer.tsx` | Current-song player, queue, controls, backdrop, and waveform/progress UI. |
+| Now playing UI | `modules/music/musicPage.tsx` (`PlayerView`) | Authoritative current-song player, queue, controls, backdrop, lyrics, and progress UI. |
 | Playlist modal | `modules/music/musicPlaylistModal.tsx` | Add-to-playlist and quick-create dialog. |
 | Playlist storage | `modules/music/musicPlaylists.ts` | User/server scoped playlist persistence. |
 | Liked songs | `modules/music/musicLikes.ts` | User/server scoped liked songs list and favorite state. |

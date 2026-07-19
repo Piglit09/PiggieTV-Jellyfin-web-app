@@ -1,13 +1,14 @@
 import { applyPtvClientProfileClasses } from './clientProfile';
+import { syncPtvTvFocusEngine } from './tvFocus';
 
-applyPtvClientProfileClasses();
+syncPtvTvFocusEngine(applyPtvClientProfileClasses());
 
 if (typeof window !== 'undefined') {
     let ptvProfileRefreshTimer = 0;
     const refreshPtvClientProfile = () => {
         window.clearTimeout(ptvProfileRefreshTimer);
         ptvProfileRefreshTimer = window.setTimeout(() => {
-            applyPtvClientProfileClasses();
+            syncPtvTvFocusEngine(applyPtvClientProfileClasses());
         }, 120);
     };
 

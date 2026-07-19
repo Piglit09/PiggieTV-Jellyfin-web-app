@@ -390,6 +390,11 @@ export function registerPtvNativeShellInstance(section: string) {
     incrementPtvPerformanceCounter('nativeShellMountCount', {
         activeNativeShellCount: activeNativeShellInstances.size,
         route: route.routeKey,
+        shellInstanceId: id,
+        shellMode: 'native',
+        shellMountReason: 'route-render',
+        shellOwner: section,
+        shellRouteGeneration: route.routeKey,
         section
     });
     incrementPtvPerformanceCounter('shellMountCount', {
@@ -401,7 +406,12 @@ export function registerPtvNativeShellInstance(section: string) {
     if (activeNativeShellInstances.size > 1) {
         recordPtvEvent('render', 'ptv-duplicate-native-shell-detected', {
             activeNativeShellCount: activeNativeShellInstances.size,
+            duplicateShellRejected: false,
             route: route.routeKey,
+            shellInstanceId: id,
+            shellMode: 'native',
+            shellOwner: section,
+            shellRouteGeneration: route.routeKey,
             section
         });
     }
@@ -409,6 +419,14 @@ export function registerPtvNativeShellInstance(section: string) {
     return () => {
         activeNativeShellInstances.delete(id);
         syncNativeShellDocumentState();
+        recordPtvEvent('render', 'ptv-native-shell-unmounted', {
+            activeNativeShellCount: activeNativeShellInstances.size,
+            shellInstanceId: id,
+            shellMode: 'native',
+            shellOwner: section,
+            shellRouteGeneration: route.routeKey,
+            shellUnmountReason: 'react-cleanup'
+        });
     };
 }
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES } from '../core/config';
 import { recordPtvEvent } from '../core/observability';
@@ -983,7 +983,7 @@ export default function PTVShell({
         };
     }, [isSearchExpanded, openPanel, searchQuery]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         ensurePtvShellHeaderStatusBridge();
         shellMountedAt = performance.now();
         runPtvClientCacheMigration();
@@ -1019,7 +1019,7 @@ export default function PTVShell({
                 section
             });
         };
-    }, []);
+    }, [section]);
 
     return (
         <div

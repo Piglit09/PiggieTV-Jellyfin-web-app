@@ -43,6 +43,7 @@ const PTV_RESTORED_HIDDEN_CLASS_KEY = 'ptvRestoredHiddenClass';
 const PTV_RESTORED_OSD_HIDDEN_CLASS_KEY = 'ptvRestoredOsdHiddenClass';
 const STALL_RECOVERY_DELAY_MS = 12000;
 const STALL_SETTLE_HIDE_MS = 900;
+const CONNECTION_WARNING_DEBOUNCE_MS = 1800;
 const PLAYBACK_DIAGNOSTIC_THROTTLE_MS = 1500;
 const MAX_RETRIED_SOURCE_KEYS = 12;
 
@@ -58,6 +59,7 @@ let lastKnownOsdVisible = false;
 let lastStartupVolumeKey = '';
 let playbackStallTimer = null;
 let reconnectingHideTimer = null;
+let reconnectingShowTimer = null;
 let playbackStallCount = 0;
 let playbackRetryCount = 0;
 let lastVideoProgressAt = 0;
@@ -803,7 +805,7 @@ function getOrCreateReconnectingBanner() {
     banner.className = PLAYER_RECONNECTING_CLASS;
     banner.dataset.ptvEnhanced = 'true';
     banner.setAttribute('aria-live', 'polite');
-    banner.textContent = 'Reconnecting...';
+    banner.textContent = 'Buffering...';
     root.appendChild(banner);
 
     return banner;
@@ -816,24 +818,35 @@ function clearReconnectingHideTimer() {
     reconnectingHideTimer = null;
 }
 
+function clearReconnectingShowTimer() {
+    if (!reconnectingShowTimer) return;
+
+    window.clearTimeout(reconnectingShowTimer);
+    reconnectingShowTimer = null;
+}
+
 function setReconnectingState(visible, reason = '') {
     clearReconnectingHideTimer();
 
     if (visible) {
         reconnectingReason = reason;
-        getOrCreateReconnectingBanner();
+        const banner = getOrCreateReconnectingBanner();
+
+        banner.textContent = reason === 'recovering-playback' ? 'Recovering playback...' : 'Buffering...';
         document.documentElement.classList.add(PLAYER_RECONNECTING_VISIBLE_CLASS);
         document.body.classList.add(PLAYER_RECONNECTING_VISIBLE_CLASS);
         return;
     }
 
     reconnectingReason = '';
+    clearReconnectingShowTimer();
     document.documentElement.classList.remove(PLAYER_RECONNECTING_VISIBLE_CLASS);
     document.body.classList.remove(PLAYER_RECONNECTING_VISIBLE_CLASS);
 }
 
 function hideReconnectingStateSoon(reason = 'settled') {
     clearReconnectingHideTimer();
+    clearReconnectingShowTimer();
 
     reconnectingHideTimer = window.setTimeout(() => {
         reconnectingHideTimer = null;
@@ -1258,6 +1271,7 @@ function retryCurrentPlaybackSource(video, reason) {
         restoreTime: Number(restoreTime.toFixed(2)),
         strategy: hlsPlayer?.startLoad ? 'hls-start-load' : 'native-reload'
     });
+    setReconnectingState(true, 'recovering-playback');
 
     try {
         if (hlsPlayer?.startLoad) {
@@ -1335,9 +1349,23 @@ function schedulePlaybackStallRecovery(reason) {
     if (!video || video.paused || video.ended) return;
 
     playbackStallCount += 1;
-    setReconnectingState(true, reason);
     recordPlaybackDiagnostic('ptv-playback-stall-detected', reason, {}, true);
     clearPlaybackStallTimer();
+    clearReconnectingShowTimer();
+
+    reconnectingShowTimer = window.setTimeout(() => {
+        reconnectingShowTimer = null;
+        const activeVideo = currentVideo;
+
+        if (!activeVideo || activeVideo.paused || activeVideo.ended || hasBufferedAhead(activeVideo)) {
+            recordPlaybackDiagnostic('ptv-false-reconnect-suppressed', reason, {
+                falseReconnectSuppressedCount: 1
+            });
+            return;
+        }
+
+        setReconnectingState(true, reason);
+    }, CONNECTION_WARNING_DEBOUNCE_MS);
 
     playbackStallTimer = window.setTimeout(() => {
         recoverFromPlaybackStall(reason);
@@ -1347,6 +1375,7 @@ function schedulePlaybackStallRecovery(reason) {
 function resetPlaybackDiagnostics() {
     clearPlaybackStallTimer();
     clearReconnectingHideTimer();
+    clearReconnectingShowTimer();
     setReconnectingState(false);
     playbackStallCount = 0;
     playbackRetryCount = 0;

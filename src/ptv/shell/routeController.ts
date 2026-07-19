@@ -106,14 +106,26 @@ function seedPtvNativeRoute(path: string, mode: PtvRouteTakeoverMode = 'native')
     '/tv/*',
     '/collections',
     '/collections/*',
+    '/music',
+    '/music/*',
     '/reading',
     '/reading/*',
+    '/books',
+    '/books/*',
+    '/comics',
+    '/comics/*',
+    '/manga',
+    '/manga/*',
+    '/maga',
+    '/maga/*',
     '/search',
     '/requests',
     '/request',
     '/ptv/request',
     '/calendar'
-].forEach(path => seedPtvNativeRoute(path));
+].forEach(path => {
+    seedPtvNativeRoute(path);
+});
 
 function getCurrentRouteDiagnostics(route?: PtvRouteLike) {
     return {

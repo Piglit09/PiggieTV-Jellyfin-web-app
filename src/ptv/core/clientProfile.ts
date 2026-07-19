@@ -12,6 +12,17 @@ type NavigatorWithHardwareHints = Navigator & {
 };
 
 export type PtvClientKind = 'desktop' | 'firetv' | 'mobile' | 'tv' | 'webos';
+export type PtvTvPlatform = 'android-tv' | 'fire-tv' | 'generic-tv' | 'none' | 'roku' | 'ten-foot' | 'tizen' | 'webos';
+
+const PTV_TV_PLATFORM_CLASSES: Exclude<PtvTvPlatform, 'none'>[] = [
+    'android-tv',
+    'fire-tv',
+    'generic-tv',
+    'roku',
+    'ten-foot',
+    'tizen',
+    'webos'
+];
 export type PtvLayoutMode = 'compact-mobile' | 'desktop' | 'mobile' | 'tablet' | 'ten-foot';
 export type PtvPointerType = 'coarse' | 'fine' | 'none' | 'unknown';
 export type PtvHoverCapability = 'hover' | 'none' | 'unknown';
@@ -30,6 +41,7 @@ export type PtvResponsiveSignals = {
 };
 
 export type PtvClientProfile = {
+    hasHover: boolean;
     isAndroidTv: boolean;
     isCoarsePointer: boolean;
     isConstrainedHardware: boolean;
@@ -39,13 +51,31 @@ export type PtvClientProfile = {
     isRoku: boolean;
     isTablet: boolean;
     isTenFootClient: boolean;
+    isTizen: boolean;
     isTv: boolean;
     isWebOs: boolean;
     kind: PtvClientKind;
     layoutMode: PtvLayoutMode;
     renderProfile: PtvRenderProfileContract;
     responsive: PtvResponsiveSignals;
+    supportsAspectRatio: boolean;
     supportsBackdropFilter: boolean;
+    supportsContainerQueries: boolean;
+    supportsContentVisibility: boolean;
+    tvDetectionReason: string;
+    tvPlatform: PtvTvPlatform;
+    userAgent: string;
+};
+
+export type PtvTvDetection = {
+    isAndroidTv: boolean;
+    isFireTv: boolean;
+    isRoku: boolean;
+    isTizen: boolean;
+    isTv: boolean;
+    isWebOs: boolean;
+    reason: string;
+    tvPlatform: PtvTvPlatform;
 };
 
 type MutablePerformanceValue<T> =
@@ -69,6 +99,7 @@ const FIRE_TV_PATTERN = /(aft[a-z0-9]*|fire\s?tv|amazonwebappplatform)/i;
 const WEB_OS_PATTERN = /(web0s|webos|netcast|lg\s?browser|lge)/i;
 const ANDROID_TV_PATTERN = /(android\s?tv|google\s?tv|googletv|shield\s?android|nvidia\s?shield|mi\s?box|bravia.*android)/i;
 const ROKU_PATTERN = /(roku|dvp)/i;
+const TIZEN_PATTERN = /(tizen|smart-tv.*samsung|samsung.*smart-tv)/i;
 const TV_CLIENT_PATTERNS = [
     /(aft[a-z0-9]*|fire\s?tv|roku|dvp|tizen|web0s|webos)/i,
     /(smart-tv|smarttv|hbbtv|netcast|viera|bravia|crkey|appletv|xbox|playstation)/i
@@ -82,12 +113,75 @@ function getNavigator(): NavigatorWithHardwareHints | null {
     return navigator as NavigatorWithHardwareHints;
 }
 
+function supportsCssProperty(property: string, value: string) {
+    if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function') {
+        return CSS.supports(property, value);
+    }
+
+    return false;
+}
+
 function supportsBackdropFilter() {
     if (typeof document === 'undefined') return false;
 
     const style = document.documentElement.style;
 
-    return 'backdropFilter' in style || 'webkitBackdropFilter' in style;
+    return 'backdropFilter' in style
+        || 'webkitBackdropFilter' in style
+        || supportsCssProperty('backdrop-filter', 'blur(1px)')
+        || supportsCssProperty('-webkit-backdrop-filter', 'blur(1px)');
+}
+
+export function detectPtvTvClient(userAgent: string, hasTenFootSignal = false): PtvTvDetection {
+    const isFireTv = FIRE_TV_PATTERN.test(userAgent);
+    const isWebOs = WEB_OS_PATTERN.test(userAgent);
+    const isAndroidTv = ANDROID_TV_PATTERN.test(userAgent);
+    const isRoku = ROKU_PATTERN.test(userAgent);
+    const isTizen = TIZEN_PATTERN.test(userAgent);
+    const hasGenericTvUserAgent = TV_CLIENT_PATTERNS.some(pattern => pattern.test(userAgent));
+    const isTv = isFireTv
+        || isWebOs
+        || isAndroidTv
+        || isRoku
+        || isTizen
+        || hasTenFootSignal
+        || hasGenericTvUserAgent;
+    let tvPlatform: PtvTvPlatform = 'none';
+    let reason = 'no-tv-signal';
+
+    if (isFireTv) {
+        tvPlatform = 'fire-tv';
+        reason = 'fire-tv-user-agent';
+    } else if (isWebOs) {
+        tvPlatform = 'webos';
+        reason = 'webos-user-agent';
+    } else if (isTizen) {
+        tvPlatform = 'tizen';
+        reason = 'tizen-user-agent';
+    } else if (isAndroidTv) {
+        tvPlatform = 'android-tv';
+        reason = 'android-tv-user-agent';
+    } else if (isRoku) {
+        tvPlatform = 'roku';
+        reason = 'roku-user-agent';
+    } else if (hasTenFootSignal) {
+        tvPlatform = 'ten-foot';
+        reason = 'jellyfin-ten-foot-class';
+    } else if (hasGenericTvUserAgent) {
+        tvPlatform = 'generic-tv';
+        reason = 'generic-tv-user-agent';
+    }
+
+    return {
+        isAndroidTv,
+        isFireTv,
+        isRoku,
+        isTizen,
+        isTv,
+        isWebOs,
+        reason,
+        tvPlatform
+    };
 }
 
 function hasCoarsePointer() {
@@ -122,6 +216,45 @@ function getHoverCapability(): PtvHoverCapability {
     return 'unknown';
 }
 
+function selectResponsiveLayout(
+    hasTenFootSignal: boolean,
+    hasMobileUserAgent: boolean,
+    hasTabletUserAgent: boolean,
+    pointerType: PtvPointerType,
+    viewportWidth: number,
+    viewportHeight: number
+) {
+    if (hasTenFootSignal) {
+        return { layoutMode: 'ten-foot' as const, layoutModeReason: 'ten-foot-signal', matchedMediaQuery: 'tv-or-ten-foot' };
+    }
+
+    if (viewportWidth > 0 && viewportWidth <= 390) {
+        return { layoutMode: 'compact-mobile' as const, layoutModeReason: 'viewport-width<=390', matchedMediaQuery: '(max-width: 390px)' };
+    }
+
+    if (viewportWidth > 0 && viewportWidth <= 600) {
+        return { layoutMode: 'mobile' as const, layoutModeReason: 'viewport-width<=600', matchedMediaQuery: '(max-width: 600px)' };
+    }
+
+    if (viewportWidth > 0 && viewportWidth <= 1024) {
+        return { layoutMode: 'tablet' as const, layoutModeReason: 'viewport-width<=1024', matchedMediaQuery: '(max-width: 1024px)' };
+    }
+
+    if (hasMobileUserAgent) {
+        return { layoutMode: 'mobile' as const, layoutModeReason: 'mobile-user-agent', matchedMediaQuery: 'mobile-user-agent' };
+    }
+
+    if (hasTabletUserAgent) {
+        return { layoutMode: 'tablet' as const, layoutModeReason: 'tablet-user-agent', matchedMediaQuery: 'tablet-user-agent' };
+    }
+
+    if (pointerType === 'coarse' && viewportWidth > 0 && viewportWidth <= 1366 && viewportHeight <= 1024) {
+        return { layoutMode: 'tablet' as const, layoutModeReason: 'coarse-pointer-tablet-viewport', matchedMediaQuery: '(pointer: coarse) and (max-width: 1366px)' };
+    }
+
+    return { layoutMode: 'desktop' as const, layoutModeReason: 'desktop-default', matchedMediaQuery: '(min-width: 1025px)' };
+}
+
 function getResponsiveSignals(
     hasTenFootSignal: boolean,
     hasMobileUserAgent: boolean,
@@ -136,39 +269,14 @@ function getResponsiveSignals(
     const pointerType = getPointerType();
     const hoverCapability = getHoverCapability();
     const devicePixelRatio = getViewportNumber(typeof window !== 'undefined' ? window.devicePixelRatio : 0) || 1;
-    let layoutMode: PtvLayoutMode = 'desktop';
-    let layoutModeReason = 'desktop-default';
-    let matchedMediaQuery = '(min-width: 1025px)';
-
-    if (hasTenFootSignal) {
-        layoutMode = 'ten-foot';
-        layoutModeReason = 'ten-foot-signal';
-        matchedMediaQuery = 'tv-or-ten-foot';
-    } else if (viewportWidth > 0 && viewportWidth <= 390) {
-        layoutMode = 'compact-mobile';
-        layoutModeReason = 'viewport-width<=390';
-        matchedMediaQuery = '(max-width: 390px)';
-    } else if (viewportWidth > 0 && viewportWidth <= 600) {
-        layoutMode = 'mobile';
-        layoutModeReason = 'viewport-width<=600';
-        matchedMediaQuery = '(max-width: 600px)';
-    } else if (viewportWidth > 0 && viewportWidth <= 1024) {
-        layoutMode = 'tablet';
-        layoutModeReason = 'viewport-width<=1024';
-        matchedMediaQuery = '(max-width: 1024px)';
-    } else if (hasMobileUserAgent) {
-        layoutMode = 'mobile';
-        layoutModeReason = 'mobile-user-agent';
-        matchedMediaQuery = 'mobile-user-agent';
-    } else if (hasTabletUserAgent) {
-        layoutMode = 'tablet';
-        layoutModeReason = 'tablet-user-agent';
-        matchedMediaQuery = 'tablet-user-agent';
-    } else if (pointerType === 'coarse' && viewportWidth > 0 && viewportWidth <= 1366 && viewportHeight <= 1024) {
-        layoutMode = 'tablet';
-        layoutModeReason = 'coarse-pointer-tablet-viewport';
-        matchedMediaQuery = '(pointer: coarse) and (max-width: 1366px)';
-    }
+    const { layoutMode, layoutModeReason, matchedMediaQuery } = selectResponsiveLayout(
+        hasTenFootSignal,
+        hasMobileUserAgent,
+        hasTabletUserAgent,
+        pointerType,
+        viewportWidth,
+        viewportHeight
+    );
 
     return {
         devicePixelRatio,
@@ -214,20 +322,20 @@ function getClientKind(
 export function getPtvClientProfile(): PtvClientProfile {
     const nav = getNavigator();
     const userAgent = nav?.userAgent || '';
-    const isFireTv = FIRE_TV_PATTERN.test(userAgent);
-    const isWebOs = WEB_OS_PATTERN.test(userAgent);
-    const isAndroidTv = ANDROID_TV_PATTERN.test(userAgent);
-    const isRoku = ROKU_PATTERN.test(userAgent);
     const isTenFootClient = typeof document !== 'undefined'
         && (
             document.documentElement.classList.contains('layout-tv')
             || document.body?.classList.contains('layout-tv')
         );
-    const isTv = isWebOs
-        || isAndroidTv
-        || isRoku
-        || isTenFootClient
-        || TV_CLIENT_PATTERNS.some(pattern => pattern.test(userAgent));
+    const tvDetection = detectPtvTvClient(userAgent, isTenFootClient);
+    const {
+        isAndroidTv,
+        isFireTv,
+        isRoku,
+        isTizen,
+        isTv,
+        isWebOs
+    } = tvDetection;
     const responsive = getResponsiveSignals(
         isFireTv || isWebOs || isAndroidTv || isRoku || isTenFootClient || isTv,
         MOBILE_CLIENT_PATTERN.test(userAgent),
@@ -243,6 +351,7 @@ export function getPtvClientProfile(): PtvClientProfile {
         || responsive.layoutMode === 'mobile'
     );
     const isCoarsePointer = hasCoarsePointer();
+    const hasHover = responsive.hoverCapability === 'hover';
     const constrainedHardware = isConstrainedHardware(nav);
     const isLowPower = isFireTv || isTv || (!isMobile && !isTablet && constrainedHardware);
     const baseProfile = {
@@ -255,17 +364,25 @@ export function getPtvClientProfile(): PtvClientProfile {
         isRoku,
         isTablet,
         isTenFootClient,
+        isTizen,
         isTv,
         isWebOs,
         layoutMode: responsive.layoutMode,
         responsive,
-        supportsBackdropFilter: supportsBackdropFilter()
+        supportsAspectRatio: supportsCssProperty('aspect-ratio', '1 / 1'),
+        supportsBackdropFilter: supportsBackdropFilter(),
+        supportsContainerQueries: supportsCssProperty('container-type', 'inline-size'),
+        supportsContentVisibility: supportsCssProperty('content-visibility', 'auto')
     };
 
     return {
         ...baseProfile,
+        hasHover,
         kind: getClientKind(isFireTv, isWebOs, isTv, isMobile, isTablet),
-        renderProfile: getPtvRenderProfile(baseProfile)
+        renderProfile: getPtvRenderProfile(baseProfile),
+        tvDetectionReason: tvDetection.reason,
+        tvPlatform: tvDetection.tvPlatform,
+        userAgent
     };
 }
 
@@ -305,20 +422,35 @@ export function applyPtvClientProfileClasses(profile = getPtvClientProfile()) {
     root.classList.toggle('ptv-client-webos', profile.isWebOs);
     root.classList.toggle('ptv-client-android-tv', profile.isAndroidTv);
     root.classList.toggle('ptv-client-roku', profile.isRoku);
+    root.classList.toggle('ptv-client-tizen', profile.isTizen);
     root.classList.toggle('ptv-client-ten-foot', profile.isTenFootClient);
     root.classList.toggle('ptv-client-tv', profile.isTv);
     root.classList.toggle('ptv-client-mobile', profile.isMobile);
     root.classList.toggle('ptv-client-tablet', profile.isTablet);
     root.classList.toggle('ptv-client-coarse-pointer', profile.isCoarsePointer);
+    root.classList.toggle('ptv-has-hover', profile.hasHover);
+    root.classList.toggle('ptv-no-hover', !profile.hasHover);
     root.classList.toggle('ptv-client-low-power', profile.isLowPower);
     root.classList.toggle('ptv-client-constrained-hardware', profile.isConstrainedHardware);
+    PTV_TV_PLATFORM_CLASSES.forEach(platform => {
+        root.classList.toggle(`ptv-platform-${platform}`, profile.tvPlatform === platform);
+    });
     root.classList.toggle('ptv-no-backdrop-filter', !profile.supportsBackdropFilter);
+    root.classList.toggle('ptv-no-container-queries', !profile.supportsContainerQueries);
+    root.classList.toggle('ptv-no-aspect-ratio', !profile.supportsAspectRatio);
+    root.classList.toggle('ptv-no-content-visibility', !profile.supportsContentVisibility);
     (['compact-mobile', 'mobile', 'tablet', 'desktop', 'ten-foot'] as const).forEach(mode => {
         root.classList.toggle(`ptv-layout-${mode}`, profile.layoutMode === mode);
     });
     root.dataset.ptvClientProfile = profile.kind;
     root.dataset.ptvLayoutMode = profile.layoutMode;
     root.dataset.ptvLayoutReason = profile.responsive.layoutModeReason;
+    root.dataset.ptvTvPlatform = profile.tvPlatform;
+    root.dataset.ptvTvDetectionReason = profile.tvDetectionReason;
+    root.dataset.ptvSupportsBackdropFilter = String(profile.supportsBackdropFilter);
+    root.dataset.ptvSupportsContainerQueries = String(profile.supportsContainerQueries);
+    root.dataset.ptvSupportsAspectRatio = String(profile.supportsAspectRatio);
+    root.dataset.ptvSupportsContentVisibility = String(profile.supportsContentVisibility);
     applyPtvRenderProfileClasses(root, profile.renderProfile);
 
     return profile;

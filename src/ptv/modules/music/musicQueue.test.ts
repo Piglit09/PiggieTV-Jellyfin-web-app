@@ -27,6 +27,8 @@ vi.mock('./musicPlaylists', () => ({
 
 import {
     getPtvMusicQueueSnapshot,
+    nextPtvMusicTrack,
+    openPtvMusicPlayer,
     pausePtvMusicPlayback,
     playPtvMusicTracks,
     stopPtvMusicPlayback,
@@ -117,5 +119,35 @@ describe('native Music queue subscriptions', () => {
         expect(playSpy).toHaveBeenCalledTimes(1);
         expect(pauseSpy).toHaveBeenCalled();
         expect(loadSpy).toHaveBeenCalled();
+    });
+
+    it('keeps track transitions separate from explicit player navigation', async () => {
+        let paused = true;
+
+        vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+            paused = false;
+            Object.defineProperty(this, 'paused', {
+                configurable: true,
+                get: () => paused
+            });
+            return Promise.resolve();
+        });
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+            paused = true;
+        });
+        window.location.hash = '#/music/artist/artist-one';
+
+        await playPtvMusicTracks([
+            { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' },
+            { Id: 'track-two', MediaType: 'Audio', Name: 'Track Two', Type: 'Audio' }
+        ], 0);
+        await nextPtvMusicTrack();
+
+        expect(getPtvMusicQueueSnapshot().currentItem?.Id).toBe('track-two');
+        expect(window.location.hash).toBe('#/music/artist/artist-one');
+
+        openPtvMusicPlayer('test-explicit-player-button');
+        expect(window.location.hash).toBe('#/music/player');
     });
 });

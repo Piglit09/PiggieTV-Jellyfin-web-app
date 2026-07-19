@@ -140,6 +140,13 @@ export default function PtvShellPrimaryDropdown({
         gestureRef.current = null;
     }, []);
     const handlePanelKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key === 'BrowserBack' || event.key === 'GoBack' || event.key === 'XF86Back') {
+            event.preventDefault();
+            requestClose();
+            window.requestAnimationFrame(() => triggerRef.current?.focus());
+            return;
+        }
+
         if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
 
         const items = Array.from(panelRef.current?.querySelectorAll<HTMLAnchorElement>('a') || []);
@@ -151,12 +158,17 @@ export default function PtvShellPrimaryDropdown({
         const nextIndex = (currentIndex + direction + items.length) % items.length;
 
         items[nextIndex]?.focus();
-    }, []);
+    }, [requestClose]);
 
     useEffect(() => {
         if (!isOpen) return undefined;
 
         schedulePanelPosition();
+        if (document.activeElement === triggerRef.current) {
+            window.requestAnimationFrame(() => {
+                panelRef.current?.querySelector<HTMLAnchorElement>('[role="menuitem"]')?.focus();
+            });
+        }
         const visualViewport = window.visualViewport;
         const navScroller = triggerRef.current?.closest('.ptv-shell-nav-primary');
 
@@ -191,7 +203,7 @@ export default function PtvShellPrimaryDropdown({
             requestClose();
         };
         const handleEscape = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape') return;
+            if (!['Escape', 'BrowserBack', 'GoBack', 'XF86Back'].includes(event.key)) return;
 
             event.preventDefault();
             requestClose();

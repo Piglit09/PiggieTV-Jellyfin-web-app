@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import Events from '../../utils/events';
 
+// eslint-disable-next-line @typescript-eslint/naming-convention
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const authState = vi.hoisted(() => ({

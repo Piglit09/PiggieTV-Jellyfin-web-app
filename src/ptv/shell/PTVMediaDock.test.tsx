@@ -124,6 +124,14 @@ describe('PTV global media dock ownership', () => {
         expect(document.body.classList.contains('ptv-playback-presentation-owned')).toBe(false);
     });
 
+    it('hides the compact dock while the authoritative full-screen Music player owns the route', () => {
+        window.location.hash = '#/music/player';
+        renderDock();
+
+        expect(container.querySelector('.ptv-media-dock')).toBeNull();
+        expect(document.body.classList.contains('ptv-playback-presentation-owned')).toBe(false);
+    });
+
     it('restores the Music dock after video playback hands back to PTV audio', () => {
         window.location.hash = '#/video';
         playbackMocks.state = {

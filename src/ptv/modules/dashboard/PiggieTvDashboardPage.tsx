@@ -3669,7 +3669,13 @@ const PiggieTvDashboardPage = () => {
                                         <Typography>Render profile: {performanceProfile.renderProfile.id}</Typography>
                                         <Typography>Client profile: {clientProfile.kind}</Typography>
                                         <Typography>
-                                            Flags: fireTv={String(clientProfile.isFireTv)}, webOs={String(clientProfile.isWebOs)}, tv={String(clientProfile.isTv)}, mobile={String(clientProfile.isMobile)}, lowPower={String(performanceProfile.isLowPower)}
+                                            TV: platform={clientProfile.tvPlatform}, reason={clientProfile.tvDetectionReason}, tv={String(clientProfile.isTv)}, tenFoot={String(clientProfile.isTenFootClient)}
+                                        </Typography>
+                                        <Typography>
+                                            Flags: androidTv={String(clientProfile.isAndroidTv)}, fireTv={String(clientProfile.isFireTv)}, webOs={String(clientProfile.isWebOs)}, tizen={String(clientProfile.isTizen)}, roku={String(clientProfile.isRoku)}, coarsePointer={String(clientProfile.isCoarsePointer)}, hover={String(clientProfile.hasHover)}, mobile={String(clientProfile.isMobile)}, lowPower={String(performanceProfile.isLowPower)}
+                                        </Typography>
+                                        <Typography>
+                                            CSS capabilities: backdropFilter={String(clientProfile.supportsBackdropFilter)}, containerQueries={String(clientProfile.supportsContainerQueries)}, aspectRatio={String(clientProfile.supportsAspectRatio)}, contentVisibility={String(clientProfile.supportsContentVisibility)}
                                         </Typography>
                                         <Typography>FPS: {getFpsLabel(currentFps, averageFps)}</Typography>
                                         <Typography>Dropped frames: {droppedFrames ?? 'n/a'}</Typography>

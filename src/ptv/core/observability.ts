@@ -43,9 +43,11 @@ type PtvDebugEvent = {
 
 type PtvImageTracker = {
     completed: boolean;
+    imageInstanceId: string;
     lastEventAt: number;
     lastEventKey: string;
     resetCount: number;
+    routeKey: string;
     sourceComponent: string;
     startedAt: number;
     url: string;
@@ -96,6 +98,15 @@ type PtvDebugReadingSummary = {
     readingLibraryDiscoveryMs: number | null;
     readingShelfFetch: PtvDebugSummary;
     readingSlowFetchesAborted: string[];
+};
+
+type PtvDebugTvRenderSummary = {
+    activeCardCount: number;
+    mountedHomeCardCount: number;
+    mountedHomeRowCount: number;
+    peakMountedCardCount: number;
+    plannedHomeCardCount: number;
+    visibleBrowseShelfCount: number;
 };
 
 type PtvDebugApi = {
@@ -152,7 +163,7 @@ const observedImageRetrySuppressions = new Map<string, number>();
 const observedResourceEntries = new Map<string, number>();
 const IMAGE_EVENT_DEDUPE_MS = 15 * 1000;
 const IMAGE_ERROR_SUPPRESSION_MS = 5 * 60 * 1000;
-const IMAGE_MAX_LIFECYCLE_MS = 2 * 60 * 1000;
+const IMAGE_MAX_LIFECYCLE_MS = 15 * 1000;
 const IMAGE_TRACKER_RESET_DEDUPE_MS = 30 * 1000;
 const STATIC_LOGO_EVENT_SUPPRESSION_MS = 5 * 60 * 1000;
 const IMAGE_DEDUPE_LIMIT = 500;
@@ -165,6 +176,8 @@ let debugCacheStatusProvider: (() => unknown) | null = null;
 let debugShellStatusProvider: (() => unknown) | null = null;
 let debugSignupStatusProvider: (() => unknown) | null = null;
 let resourceObserver: PerformanceObserver | null = null;
+let resourceObserverAttachedAt = 0;
+let imageInstanceSequence = 0;
 
 function now() {
     return Math.round(performance.now());
@@ -332,14 +345,26 @@ export function recordPtvStartupEvent(owner = 'observability') {
 
     recordPtvEvent('profile', 'ptv:init', {
         clientProfile: {
+            hasHover: clientProfile.hasHover,
+            isAndroidTv: clientProfile.isAndroidTv,
+            isCoarsePointer: clientProfile.isCoarsePointer,
             isFireTv: clientProfile.isFireTv,
             isLowPower: clientProfile.isLowPower,
             isMobile: clientProfile.isMobile,
+            isRoku: clientProfile.isRoku,
+            isTenFootClient: clientProfile.isTenFootClient,
+            isTizen: clientProfile.isTizen,
             isTv: clientProfile.isTv,
             isWebOs: clientProfile.isWebOs,
             kind: clientProfile.kind,
             layoutMode: clientProfile.layoutMode,
-            responsive: clientProfile.responsive
+            responsive: clientProfile.responsive,
+            supportsAspectRatio: clientProfile.supportsAspectRatio,
+            supportsBackdropFilter: clientProfile.supportsBackdropFilter,
+            supportsContainerQueries: clientProfile.supportsContainerQueries,
+            supportsContentVisibility: clientProfile.supportsContentVisibility,
+            tvDetectionReason: clientProfile.tvDetectionReason,
+            tvPlatform: clientProfile.tvPlatform
         },
         existingRuntimeDetected: false,
         initializationAttemptCount: ptvWindow.__PTV_INITIALIZATION_ATTEMPT_COUNT__,
@@ -419,6 +444,16 @@ function getLatestEvent(type: PtvDebugEventType, name: string) {
     return null;
 }
 
+function getLatestEventByNames(type: PtvDebugEventType, names: string[]) {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+
+        if (event.type === type && names.includes(event.name)) return event;
+    }
+
+    return null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -454,6 +489,72 @@ function getRecordStringArray(detail: Record<string, unknown>, key: string) {
     const value = detail[key];
 
     return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function getTvRenderSummary(): PtvDebugTvRenderSummary {
+    const homeDetail = getLatestEvent('render', 'native-home-render-complete')?.detail;
+    const latestBrowseDetail = getLatestEventByNames('render', [
+        'ptv-browse-row-render-mounted',
+        'ptv-browse-row-render-unmounted'
+    ])?.detail;
+    let peakMountedCardCount = 0;
+
+    events.forEach(event => {
+        if (event.type !== 'render' || !isRecord(event.detail)) return;
+
+        const peak = getRecordNumber(event.detail, [
+            'peakMountedCardCount',
+            'mountedCardsRendered'
+        ]);
+
+        if (peak !== null) peakMountedCardCount = Math.max(peakMountedCardCount, peak);
+    });
+
+    const getDetailNumber = (detail: unknown, keys: string[]) => {
+        if (!isRecord(detail)) return 0;
+
+        return getRecordNumber(detail, keys) || 0;
+    };
+
+    return {
+        activeCardCount: getDetailNumber(latestBrowseDetail, ['activeCardCount']),
+        mountedHomeCardCount: getDetailNumber(homeDetail, ['mountedCardsRendered']),
+        mountedHomeRowCount: getDetailNumber(homeDetail, ['mountedRows']),
+        peakMountedCardCount,
+        plannedHomeCardCount: getDetailNumber(homeDetail, ['totalCardsPlanned']),
+        visibleBrowseShelfCount: getDetailNumber(latestBrowseDetail, ['visibleShelfCount'])
+    };
+}
+
+function getPlaybackOwnershipSummary() {
+    if (typeof document === 'undefined') {
+        return {
+            audioElementCount: 0,
+            duplicatePlayerSuppressed: 0,
+            fullScreenMusicPlayerCount: 0,
+            hiddenPlayerCount: 0,
+            miniPlayerCount: 0,
+            playbackControllerCount: 0,
+            playbackPortalCount: 0
+        };
+    }
+
+    const fullScreenSelector = '.ptv-music-now-playing-view, .ptv-music-fullscreen';
+    const fullScreenPlayers = Array.from(document.querySelectorAll<HTMLElement>(fullScreenSelector));
+
+    return {
+        audioElementCount: document.querySelectorAll('audio[data-ptv-music-native-player="true"]').length,
+        duplicatePlayerSuppressed: getEventCount('render', 'duplicate-music-player-overlay-suppressed'),
+        fullScreenMusicPlayerCount: fullScreenPlayers.length,
+        hiddenPlayerCount: fullScreenPlayers.filter(element => {
+            const style = window.getComputedStyle(element);
+
+            return style.display === 'none' || style.visibility === 'hidden' || element.hidden;
+        }).length,
+        miniPlayerCount: document.querySelectorAll('.ptv-media-dock-ptv-music').length,
+        playbackControllerCount: document.querySelectorAll('audio[data-ptv-music-native-player="true"]').length ? 1 : 0,
+        playbackPortalCount: document.querySelectorAll('[data-ptv-music-player-root="true"]').length
+    };
 }
 
 function getLatestRecommendationNumber(names: string[], keys: string[]) {
@@ -761,11 +862,15 @@ function createImageTracker(
     previousTracker?: PtvImageTracker,
     completed = false
 ): PtvImageTracker {
+    imageInstanceSequence += 1;
+
     return {
         completed,
+        imageInstanceId: `image-${imageInstanceSequence}`,
         lastEventAt: previousTracker?.lastEventAt || 0,
         lastEventKey: previousTracker?.lastEventKey || '',
         resetCount: previousTracker?.resetCount || 0,
+        routeKey: `${window.location.pathname}${window.location.hash}`,
         sourceComponent: getImageSourceComponent(image),
         startedAt: completed ? previousTracker?.startedAt || performance.now() : performance.now(),
         url
@@ -916,8 +1021,20 @@ function handleImageError(image: HTMLImageElement, tracker: PtvImageTracker | un
 
 function handleImageLoad(image: HTMLImageElement, tracker: PtvImageTracker | undefined, eventName: string, url: string) {
     const observerAgeMs = tracker ? performance.now() - tracker.startedAt : 0;
+    const currentRouteKey = `${window.location.pathname}${window.location.hash}`;
 
     markImageTrackerComplete(image, tracker, eventName, url);
+
+    if (tracker && tracker.routeKey !== currentRouteKey) {
+        recordPtvEvent('image', 'image-timing-route-mismatch', {
+            ...getImageEventDetail(image, url),
+            imageTimingRouteMismatch: true,
+            observerAttachedAt: tracker.startedAt,
+            routeKey: currentRouteKey,
+            trackerRouteKey: tracker.routeKey
+        });
+        return;
+    }
 
     if (isStaticLogoUrl(url) && observerAgeMs > 1000) {
         const resourceDurationMs = getImageResourceDuration(url);
@@ -934,7 +1051,8 @@ function handleImageLoad(image: HTMLImageElement, tracker: PtvImageTracker | und
     if (observerAgeMs > IMAGE_MAX_LIFECYCLE_MS) {
         recordPtvEvent('image', 'image-duration-discarded', {
             ...getImageEventDetail(image, url),
-            observerAgeMs: Number(observerAgeMs.toFixed(1))
+            observerAgeMs: Number(observerAgeMs.toFixed(1)),
+            staleImageTimingDiscarded: true
         });
         return;
     }
@@ -1004,9 +1122,11 @@ function markImageTrackerComplete(
 ) {
     const nextTracker = tracker || {
         completed: false,
+        imageInstanceId: `image-${++imageInstanceSequence}`,
         lastEventAt: 0,
         lastEventKey: '',
         resetCount: 0,
+        routeKey: `${window.location.pathname}${window.location.hash}`,
         sourceComponent: getImageSourceComponent(image),
         startedAt: performance.now(),
         url
@@ -1026,6 +1146,7 @@ function startResourceObserver() {
     if (!PerformanceObserverCtor || resourceObserver) return;
 
     try {
+        resourceObserverAttachedAt = performance.now();
         const setResourceTimingBufferSize = performance['setResourceTimingBufferSize'];
 
         if (typeof setResourceTimingBufferSize === 'function') {
@@ -1035,6 +1156,16 @@ function startResourceObserver() {
         resourceObserver = new PerformanceObserverCtor(list => {
             list.getEntries().forEach(entry => {
                 if ((entry as PerformanceResourceTiming).initiatorType !== 'img') return;
+
+                if (entry.startTime < resourceObserverAttachedAt - 1) {
+                    recordPtvEvent('image', 'stale-image-resource-timing-discarded', {
+                        observerAttachedAt: Number(resourceObserverAttachedAt.toFixed(1)),
+                        resourceStartTime: Number(entry.startTime.toFixed(1)),
+                        staleImageTimingDiscarded: true,
+                        url: entry.name
+                    });
+                    return;
+                }
 
                 if (shouldSuppressResourceEntry(entry as PerformanceResourceTiming)) return;
 
@@ -1084,6 +1215,7 @@ function shouldSuppressResourceEntry(entry: PerformanceResourceTiming) {
 function stopResourceObserver() {
     resourceObserver?.disconnect();
     resourceObserver = null;
+    resourceObserverAttachedAt = 0;
 }
 
 function startDebugObservers() {
@@ -1315,9 +1447,16 @@ export function getPtvDebugReport() {
                 timings: getTimingSummary('cache')
             },
             clientProfile: {
+                appliedClasses: [],
+                hasHover: false,
+                isAndroidTv: false,
+                isCoarsePointer: false,
                 isFireTv: false,
                 isLowPower: false,
                 isMobile: false,
+                isRoku: false,
+                isTenFootClient: false,
+                isTizen: false,
                 isTv: false,
                 isWebOs: false,
                 kind: 'desktop',
@@ -1334,10 +1473,17 @@ export function getPtvDebugReport() {
                     visualViewportHeight: 0,
                     visualViewportWidth: 0
                 },
-                supportsBackdropFilter: false
+                supportsAspectRatio: false,
+                supportsBackdropFilter: false,
+                supportsContainerQueries: false,
+                supportsContentVisibility: false,
+                tvDetectionReason: 'diagnostics-disabled',
+                tvPlatform: 'none',
+                userAgent: 'unavailable'
             },
             events: [],
             home: getHomeSummary(),
+            playbackOwnership: getPlaybackOwnershipSummary(),
             images: {
                 cachedFailures: 0,
                 errors: 0,
@@ -1364,6 +1510,7 @@ export function getPtvDebugReport() {
             signup: null,
             timings: [],
             timestamp: now(),
+            tvRender: getTvRenderSummary(),
             runtime: getPtvRuntimeDiagnostics()
         };
     }
@@ -1376,6 +1523,12 @@ export function getPtvDebugReport() {
         id: document.documentElement.dataset.ptvRenderProfile || 'unknown',
         tier: document.documentElement.dataset.ptvRenderTier || 'unknown'
     };
+    let appliedClasses: string[] = [];
+
+    if (typeof document !== 'undefined') {
+        appliedClasses = Array.from(document.documentElement.classList)
+            .filter(className => className.startsWith('ptv-'));
+    }
 
     return {
         active: debugEnabled,
@@ -1388,18 +1541,32 @@ export function getPtvDebugReport() {
             timings: getTimingSummary('cache')
         },
         clientProfile: {
+            appliedClasses,
+            hasHover: clientProfile.hasHover,
+            isAndroidTv: clientProfile.isAndroidTv,
+            isCoarsePointer: clientProfile.isCoarsePointer,
             isFireTv: clientProfile.isFireTv,
             isLowPower: clientProfile.isLowPower,
             isMobile: clientProfile.isMobile,
+            isRoku: clientProfile.isRoku,
+            isTenFootClient: clientProfile.isTenFootClient,
+            isTizen: clientProfile.isTizen,
             isTv: clientProfile.isTv,
             isWebOs: clientProfile.isWebOs,
             kind: clientProfile.kind,
             layoutMode: clientProfile.layoutMode,
             responsive: clientProfile.responsive,
-            supportsBackdropFilter: clientProfile.supportsBackdropFilter
+            supportsAspectRatio: clientProfile.supportsAspectRatio,
+            supportsBackdropFilter: clientProfile.supportsBackdropFilter,
+            supportsContainerQueries: clientProfile.supportsContainerQueries,
+            supportsContentVisibility: clientProfile.supportsContentVisibility,
+            tvDetectionReason: clientProfile.tvDetectionReason,
+            tvPlatform: clientProfile.tvPlatform,
+            userAgent: clientProfile.userAgent.slice(0, 320)
         },
         events: [...events],
         home: getHomeSummary(),
+        playbackOwnership: getPlaybackOwnershipSummary(),
         images: {
             cachedFailures: getEventCount('image', 'image-url-failure-cached'),
             errors: getEventCount('image', 'image-error') + getEventCount('image', 'image-failed-once'),
@@ -1423,6 +1590,7 @@ export function getPtvDebugReport() {
         signup: debugSignupStatusProvider?.() || null,
         timings: [...timings],
         timestamp: now(),
+        tvRender: getTvRenderSummary(),
         runtime: getPtvRuntimeDiagnostics()
     };
 }

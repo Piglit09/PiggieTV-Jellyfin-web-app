@@ -432,3 +432,14 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 - Final gates: focused 24/24; full Vitest 69 files/457 tests; TypeScript; scoped ESLint with no errors; changed Stylelint; focused Details/shell Playwright 7/7; production Webpack in 106.7 seconds with established size warnings; whitespace validation passed.
 - Manual authenticated checks at `10.16.0.125:8082`: sign in as an administrator and confirm Dashboard appears without refresh; open Settings and confirm one PTV header; navigate in-app between Movie, Series, Season, and Episode details and confirm the first paint already has the correct item, backdrop, glass layout, and centered utilities; compare Network timing/request count; verify Music still pauses and the dock hides for video.
 - No plugin deployment or Jellyfin restart is required. Deploy the complete frontend bundle atomically and accept the normal service-worker update/cache refresh.
+
+## 2026-07-18 TV compatibility and webOS recovery handoff
+
+- The supplied LG photos are the pre-fix physical baseline: oversized/cropped hero branding, tiny or collapsed cards, legacy Jellyfin chrome on native Details, and unusable ten-foot spacing/focus. Do not describe these cases as physically fixed until the new frontend is deployed and the same TV is retested.
+- TV classification now comes from `clientProfile.ts`, not viewport size. Inspect `html[data-ptv-tv-platform]`, `html[data-ptv-tv-reason]`, root `ptv-render-tv`/`ptv-platform-*` classes, and Dashboard TV diagnostics when triaging a device.
+- TV layout ownership is centralized in `src/ptv/styles/profiles/tv.scss`; LG-specific performance fallback is in `webos.scss`. Avoid adding page-local TV transforms, global scaling, or duplicate media queries.
+- Remote focus is centralized in `tvFocus.ts`. New TV-focusable controls should be semantic buttons/links or carry the existing focusable selector contract; do not add mouse-only interactions.
+- Automated gates passed: focused 23/23; full Vitest 477/477; TypeScript; scoped new-code ESLint; changed Stylelint; Playwright 43 passed/6 live skipped; production Webpack success with established size warnings.
+- Deployment: publish the complete frontend output atomically. Jellyfin/plugin restart is not required for these frontend-only changes. Accept the service-worker update and fully close/relaunch wrapper apps if they retain the old web bundle.
+- Physical matrix still required: LG webOS at 1080p and 4K; Samsung Tizen; Android TV and Fire TV; Roku; Chromecast receiver; iOS wrapper; PiggieTV Android. Verify Home, Movies, Shows, Details, Music, Reading, Requests, Dashboard, Settings, Login, and video handoff with directional keys, OK, Back, rail scrolling, and focus restoration.
+- Preserve the unrelated existing `webpack.dev.js` working-tree change when preparing a commit.

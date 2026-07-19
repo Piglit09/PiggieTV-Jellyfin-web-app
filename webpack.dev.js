@@ -18,6 +18,8 @@ module.exports = merge(common, {
         ]
     },
     devServer: {
+        host: '0.0.0.0',
+        allowedHosts: 'all',
         compress: true,
         client: {
             overlay: {

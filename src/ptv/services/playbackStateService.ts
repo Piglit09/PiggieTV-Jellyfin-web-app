@@ -25,6 +25,7 @@ import type {
 import {
     incrementPtvPerformanceCounter,
     recordPtvPerformanceEntry,
+    setPtvPerformanceCounter,
     setPtvPlaybackSubscriptionCount
 } from './performanceMonitor';
 
@@ -350,6 +351,9 @@ function publishPlaybackState(lastEvent = 'reconcile') {
     incrementPtvPerformanceCounter('playbackEventsReceived', {
         lastPlaybackEvent: lastEvent
     });
+    incrementPtvPerformanceCounter('playbackRawEventCount', {
+        lastPlaybackEvent: lastEvent
+    });
 
     const nextState = selectPlaybackState(lastEvent);
     synchronizeLowFrequencyReconcile(nextState);
@@ -363,10 +367,30 @@ function publishPlaybackState(lastEvent = 'reconcile') {
             lastPlaybackEvent: lastEvent,
             playbackStoreSource: nextState.source
         });
+        incrementPtvPerformanceCounter('playbackDeduplicatedEventCount', {
+            lastPlaybackEvent: lastEvent
+        });
         return;
     }
 
+    const previousItemId = currentState.itemId || '';
     currentState = nextState;
+    incrementPtvPerformanceCounter('playbackNormalizedEventCount', {
+        lastPlaybackEvent: lastEvent
+    });
+    if (previousItemId && nextState.itemId && previousItemId !== nextState.itemId) {
+        incrementPtvPerformanceCounter('trackChangeCount', {
+            activeItemId: nextState.itemId,
+            previousItemId
+        });
+        recordPtvEvent('playback', 'track-transition-without-navigation', {
+            nextItemId: nextState.itemId,
+            playerNavigationReason: 'none',
+            previousItemId,
+            route: window.location.hash,
+            trackTransitionWithoutNavigation: true
+        });
+    }
     incrementPtvPerformanceCounter('playbackUpdatesPublished', {
         activeItemId: nextState.itemId || null,
         activeSessionId: nextState.sessionId || null,
@@ -444,6 +468,9 @@ export function startPtvPlaybackStateService() {
 
     routeChangeHandler = () => {
         synchronizeVideoPlaybackOwnership(getJellyfinPlaybackState('playback-route-change'), 'playback-route-change');
+        incrementPtvPerformanceCounter('routeOnlyEventCount', {
+            route: window.location.hash || window.location.pathname
+        });
         publishPlaybackState('playback-route-change');
     };
     window.addEventListener('hashchange', routeChangeHandler);
@@ -479,11 +506,17 @@ export function subscribeToPtvGlobalPlaybackState(listener: PlaybackListener) {
     startPtvPlaybackStateService();
     listeners.add(listener);
     setPtvPlaybackSubscriptionCount(listeners.size);
+    setPtvPerformanceCounter('playbackStoreSubscriberCount', listeners.size, {
+        source: 'global-playback-state-service'
+    });
     listener(currentState);
 
     return () => {
         listeners.delete(listener);
         setPtvPlaybackSubscriptionCount(listeners.size);
+        setPtvPerformanceCounter('playbackStoreSubscriberCount', listeners.size, {
+            source: 'global-playback-state-service'
+        });
     };
 }
 

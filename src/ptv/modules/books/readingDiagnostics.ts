@@ -242,7 +242,10 @@ export function buildReadingDiagnosticSections({
                 row('Manual series', seriesDiagnostics?.manualSeriesCount ?? 'n/a'),
                 row('Overrides', seriesDiagnostics?.overrideCount ?? 'n/a'),
                 row('Override items', formatEntries(seriesDiagnostics?.overrideItemIds || [], getCompactIdentifier)),
-                row('Kind counts', Object.entries(debug.kindCounts).map(([kind, count]) => `${kind}=${count}`).join(' | ')),
+                row(
+                    debug.routeKind === 'reading' ? 'Shelf sample counts by kind' : 'Indexed counts by kind',
+                    Object.entries(debug.kindCounts).map(([kind, count]) => `${kind}=${count}`).join(' | ')
+                ),
                 row('Dropped items', debug.droppedItemCount),
                 row('Drop reasons', formatEntries(debug.dropReasons))
             ]
