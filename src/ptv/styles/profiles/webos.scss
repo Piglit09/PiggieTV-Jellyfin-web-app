@@ -1,8 +1,13 @@
-/* webOS keeps the TV layout but avoids effects that older LG Chromium builds render unreliably. */
+/*
+ * webOS keeps the TV layout but avoids effects that older LG Chromium builds render unreliably.
+ * These static translucent fills are intentionally lighter than the general TV fallback. Blur
+ * remains disabled because it creates an extra composited backdrop surface on older LG hardware;
+ * lowering fill opacity gives the glass more depth without adding that per-frame rendering cost.
+ */
 
 html.ptv-platform-webos {
-    --ptv-webos-glass: rgb(39 21 62 / 84%);
-    --ptv-webos-glass-strong: rgb(48 25 76 / 92%);
+    --ptv-webos-glass: rgb(39 21 62 / 76%);
+    --ptv-webos-glass-strong: rgb(48 25 76 / 86%);
     --ptv-webos-border: rgb(219 184 255 / 32%);
 }
 

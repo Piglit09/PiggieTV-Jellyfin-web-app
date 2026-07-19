@@ -21,6 +21,7 @@ import { startPtvRouteController } from '../shell/routeController';
 import { startPtvShellFoundation } from '../shell/foundation';
 import { startPtvRuntimeRoot } from '../shell/PTVRuntimeRoot';
 import { startPtvPerformanceMonitor } from '../services/performanceMonitor';
+import { startPtvPluginRemoteDiagnosticsTransport } from '../services/pluginRemoteDiagnosticsTransport';
 import '../instrumentation';
 import '../primitives/stockPatterns';
 import '../shell/overlays';
@@ -33,6 +34,7 @@ function startPtvRuntimeServices() {
     createPtvRuntime('core-app');
     registerPtvRuntimeFeature('router', startRouter);
     registerPtvRuntimeFeature('performance-monitor', startPtvPerformanceMonitor);
+    registerPtvRuntimeFeature('remote-diagnostics', startPtvPluginRemoteDiagnosticsTransport);
     registerPtvRuntimeFeature('route-controller', startPtvRouteController);
     registerPtvRuntimeFeature('shell-foundation', startPtvShellFoundation);
     registerPtvRuntimeFeature('runtime-root', startPtvRuntimeRoot);

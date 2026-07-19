@@ -66,6 +66,11 @@ public static class PtvApiRoutes
     public const string V1ImageDiagnostics = $"{V1}/diagnostics/images";
 
     /// <summary>
+    /// Versioned ephemeral remote client diagnostics route.
+    /// </summary>
+    public const string V1RemoteDiagnostics = $"{V1}/diagnostics/clients";
+
+    /// <summary>
     /// Versioned music metadata lookup route.
     /// </summary>
     public const string V1MusicMetadataSearch = $"{V1}/music/metadata/search";

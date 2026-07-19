@@ -206,6 +206,8 @@ window.PTV?.performanceOverlay?.(true)
 
 The goal is to make performance, cache behavior, route ownership, signup/email health, duplicate mounts, image churn, and fallback behavior observable instead of guessed. Debug reports redact secrets and include configured booleans instead of SMTP/API key values.
 
+Administrators can also select a recently seen device in **Performance / Debug**, start an automatically expiring 5- or 10-minute remote diagnostic session, request a one-time snapshot, and view or download the bounded report. This transport is authenticated to the local PiggieTV plugin, memory-only, off except for minimal client presence by default, and never sends telemetry to an external service. See [Remote Client Diagnostics](src/ptv/docs/remote-diagnostics.md).
+
 ## Repository Layout
 
 PiggieTV-specific work is kept under `src/ptv` for compatibility with upstream Jellyfin Web.
@@ -332,8 +334,10 @@ PiggieTV architecture docs live in `src/ptv/docs`:
 - [API contracts](src/ptv/docs/api-contracts.md)
 - [Cache lifecycle](src/ptv/docs/cache-lifecycle.md)
 - [Plugin responsibilities](src/ptv/docs/plugin-responsibilities.md)
+- [Remote client diagnostics](src/ptv/docs/remote-diagnostics.md)
 - [Render profiles](src/ptv/docs/render-profiles.md)
 - [Static assets](src/ptv/docs/static-assets.md)
+- [LG webOS CLI helper](src/ptv/docs/webos-cli.md)
 
 Plugin-specific notes:
 

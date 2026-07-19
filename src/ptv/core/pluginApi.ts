@@ -1119,6 +1119,10 @@ function parsePluginResponse<T>(response: unknown): Promise<T> {
         return Promise.reject(createPluginHttpError(status, response));
     }
 
+    if (status === 204) {
+        return Promise.resolve(undefined as T);
+    }
+
     if (isJsonResponseLike(response)) {
         return response.json().then(value => value as T);
     }
@@ -1597,6 +1601,83 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
         },
         getStatus<T = unknown>(options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.status, options);
+        },
+        checkInRemoteDiagnostics<TResponse = unknown, TPresence = unknown>(presence: TPresence, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.remoteDiagnosticsCheckIn,
+                {
+                    ...options,
+                    body: presence,
+                    method: 'POST'
+                }
+            );
+        },
+        publishRemoteDiagnosticsReport<TReport = unknown>(report: TReport, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<void>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.remoteDiagnosticsReport,
+                {
+                    ...options,
+                    body: report,
+                    method: 'POST'
+                }
+            );
+        },
+        getRemoteDiagnosticsClients<T = unknown>(profile?: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.remoteDiagnosticsClients,
+                {
+                    ...options,
+                    params: profile ? { profile } : undefined
+                }
+            );
+        },
+        startRemoteDiagnosticsSession<T = unknown>(clientId: string, durationMinutes: 5 | 10, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsClients}/${encodeURIComponent(clientId)}/sessions`,
+                {
+                    ...options,
+                    body: { durationMinutes },
+                    method: 'POST'
+                }
+            );
+        },
+        stopRemoteDiagnosticsSession(clientId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<void>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsClients}/${encodeURIComponent(clientId)}/sessions`,
+                {
+                    ...options,
+                    method: 'DELETE'
+                }
+            );
+        },
+        requestRemoteDiagnosticsSnapshot<T = unknown>(clientId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsClients}/${encodeURIComponent(clientId)}/snapshot`,
+                {
+                    ...options,
+                    body: {},
+                    method: 'POST'
+                }
+            );
+        },
+        getRemoteDiagnosticsReport<T = unknown>(clientId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsClients}/${encodeURIComponent(clientId)}/report`,
+                options
+            );
+        },
+        getRemoteDiagnosticsReportDownloadUrl(clientId: string) {
+            return getPluginUrl(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsClients}/${encodeURIComponent(clientId)}/report/download`
+            );
         },
         getSettings<T = unknown>(options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.settings, options);

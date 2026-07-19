@@ -1,8 +1,10 @@
 # PiggieTV Architecture
 
-Current as of 2026-07-14.
+Current as of 2026-07-19.
 
 This document describes the architecture present in the current worktree. It records stable boundaries and ownership. Use `PROJECT_STATE.md` for delivery state, `HANDOFF.md` for continuation instructions, and `DEBUG_LOG.md` for issue history.
+
+Project-memory maintenance is part of project completion: every completed project prompt updates `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` so operational guidance, current state, and architectural boundaries cannot silently diverge.
 
 ## System Boundary
 
@@ -14,6 +16,7 @@ Browser / TV client
   -> PiggieTV frontend under src/ptv
        -> Jellyfin ApiClient and item APIs
        -> PiggieTV plugin API under /Ptv/v1
+       -> leased local remote-diagnostics agent and plugin transport
        -> browser memory/local storage caches
 
 Jellyfin server
@@ -24,6 +27,7 @@ Jellyfin server
        -> integrations and signup services
        -> Google Books proxy search
        -> durable Reading series overrides
+       -> bounded in-memory remote-diagnostics coordination
 ```
 
 The plugin extends Jellyfin; it does not replace Jellyfin's database or media pipeline. The frontend must continue to degrade to Jellyfin behavior when a native PTV route or plugin capability is unavailable.
@@ -39,6 +43,7 @@ The plugin extends Jellyfin; it does not replace Jellyfin's database or media pi
 - route controller
 - shell foundation
 - persistent runtime root
+- capability-gated remote-diagnostics agent and plugin transport
 
 Feature and listener registration are keyed and duplicate attempts are suppressed and exposed through runtime diagnostics. Individual components should consume `getPtvRuntime()` or `awaitPtvRuntimeReady()` and must not run the full initializer.
 
@@ -86,6 +91,7 @@ The PTV shell hides Jellyfin's legacy header and drawer only while the native sh
 | Featured cache | `src/ptv/modules/cache/featuredContentCache.ts` | Cache v7 validation, memory/server reads, stale-while-revalidate, invalidation |
 | Playback | `src/ptv/modules/playback`, `src/ptv/services/playbackStateService.ts` | Shared playback state and startup orchestration |
 | Dashboard | `src/ptv/modules/dashboard` | Status, settings, recommendations, Row Builder, integrations, debug surfaces |
+| Remote diagnostics | `src/ptv/core/remoteDiagnosticsModel.ts`, `src/ptv/services/remoteDiagnostics.ts`, `src/ptv/services/pluginRemoteDiagnosticsTransport.ts`, companion plugin | Temporary local client presence, leased collectors, sanitized reports, admin control/read surfaces |
 | Shell services | `src/ptv/services`, `src/ptv/shell` | Notifications, performance, route lifecycle, global media dock |
 
 ## Home And Recommendation Data
@@ -167,12 +173,13 @@ The plugin controller is rooted at `/Ptv/v1`. Important endpoint groups are:
 | Row Builder | `GET/POST /rows`, `POST /rows/validate`, `POST /rows/preview` |
 | Reading | `GET /reading/metadata/googlebooks/search`, `GET/PUT /reading/series-overrides/{routeKind}` |
 | Music | `GET /music/metadata/search` |
+| Remote diagnostics | `POST /diagnostics/clients/check-in`, `POST /diagnostics/clients/report`, `GET /diagnostics/clients`, `POST/DELETE /diagnostics/clients/{clientId}/sessions`, `POST /diagnostics/clients/{clientId}/snapshot`, `GET /diagnostics/clients/{clientId}/report`, `GET /diagnostics/clients/{clientId}/report/download` |
 | Integrations | status, Seerr, Sonarr/Radarr/Lidarr/Prowlarr tests, calendar, downloads, tags, random items |
 | Signup | create user, verification, password reset, admin settings/invites |
 
-Mutating settings, featured content, and Reading series overrides require the plugin's write/admin authorization checks. Secrets belong in plugin configuration and must never be returned in diagnostics or persisted in frontend caches.
+Mutating settings, featured content, and Reading series overrides require the plugin's write/admin authorization checks. Remote-diagnostics presence and report upload require authentication; client listing, session commands, snapshots, and report reads/downloads require administrator elevation. Secrets belong in plugin configuration and must never be returned in diagnostics or persisted in frontend caches.
 
-The frontend and plugin are a coupled deployment for features that depend on new API contracts. A frontend-only deployment will fall back where possible, but durable Reading overrides and native Google Books search require the matching plugin build and a Jellyfin restart.
+The frontend and plugin are a coupled deployment for features that depend on new API contracts. A frontend-only deployment will fall back where possible, but durable Reading overrides, native Google Books search, and remote diagnostics require the matching plugin build and a Jellyfin restart. Capability checks, rather than plugin version alone, determine whether the remote-diagnostics transport and Dashboard panel are enabled.
 
 ## Rendering And Performance
 
@@ -212,6 +219,20 @@ Trending is deterministic and local-library-only. The score is `PlayCount * 20 +
 
 Browse diagnostics require administrator access plus explicit debug mode, remain collapsed and bounded, and expose only safe route/scope/filter/count/timing state. Focused-load telemetry records a sanitized loader identity with the exact public filter label plus category, page/offset/limit, count, total, duration, scope status, and sort state. Internal keys may use stable Jellyfin IDs; exported diagnostics never expose request URLs, origins, user/item IDs, tokens, resolved library IDs, or arbitrary raw parent/search identifiers.
 
+## Local Remote Diagnostics Boundary
+
+Remote diagnostics is temporary local troubleshooting, not telemetry. `remoteDiagnosticsModel.ts` owns schema-1 leases, profile tags, event sanitization, ring-buffer reduction, and payload budgeting. `remoteDiagnostics.ts` owns collector lifecycle and publishes an intentionally small API at `window.PTV.remoteDiagnostics`. `pluginRemoteDiagnosticsTransport.ts` connects that agent to the active authenticated plugin root only when `/status` advertises `remoteDiagnostics`. A negative capability result is cached for five minutes so an older plugin is not polled every 30 seconds, while later plugin upgrades recover without a browser-data reset.
+
+The client checks in every 30 seconds. No expensive collectors run without an accepted lease. Administrators may start only five- or ten-minute sessions; a snapshot command grants a one-minute lease. The server returns relative `durationMs` with its issuance time, and the browser normalizes the deadline to its local clock so server/client skew cannot prematurely expire or extend a session. Explicit disable, manual Stop, natural expiry, disposal, and capability loss tear down listeners, timers, and patched fetch/XHR hooks. Active sessions publish periodically every 15 seconds, with additional explicit and final snapshots when requested or ending; Dashboard refreshes its client list on a 15-second cadence and loads reports only on an explicit View/Download action.
+
+Collector output is deliberately coarse: profile class, route transitions and two-frame render timing, navigation, playback state without content identity, recognized input keys, structured error category/name, failed same-origin versus cross-origin requests with sanitized paths, connectivity, long tasks, sampled FPS/stutter, rounded memory, and an allowlisted operational log tail. Raw user agents, arbitrary error/log detail, credentials, authorization, query strings, private origins, user/item/source identifiers, titles, and local/media paths are omitted or normalized. Both the client model and plugin controller sanitize independently.
+
+The client ring retains at most 300 events and budgets serialized samples to 160 KiB, leaving headroom under the plugin's 192 KiB report request limit. Presence requests are capped at 8 KiB. The controller also bounds JSON to depth 10, 4,000 nodes, 500 array entries, 96 object properties, and 1,024 characters per string before storing a second sanitized representation.
+
+Client IDs are opaque and session-scoped in browser session storage; only the normalized active lease is stored beside them. The plugin hashes the authenticated Jellyfin identity and binds each client ID, lease, and report to that owner. Presence/report upload requires authentication, and administrator elevation is required for listing, commands, snapshots, and report reads/downloads. The in-memory store is capped at 64 clients, expires clients and reports after 30 minutes, retains only the newest report per client/session, and writes nothing to disk or an external service. Natural expiry has a 30-second final-report grace so late final uploads can preserve the newest `generatedAt`; manual Stop revokes immediately.
+
+The Dashboard is an administrative control surface over this state, not a passive recorder. It supports coarse profile filtering, explicit client selection, 5/10-minute Start, Stop, Snapshot, View, and Download. It clears a previously viewed report when client selection changes so stale evidence is not presented as the active client.
+
 ## Validation Boundaries
 
 The current repository uses:
@@ -224,9 +245,11 @@ The current repository uses:
 
 `src/ptv/core/config.ts` must remain importable outside Webpack. Its development-server check uses `typeof __WEBPACK_SERVE__ !== 'undefined'` before reading the compile-time constant; direct access breaks Vitest and other Node-based consumers.
 
-The final 2026-07-14 browse audit verified 36 Vitest files/283 tests, including 6 focused browse/route/directory files with 37 tests. TypeScript and the production Webpack build pass; Webpack compiled in 184.232 seconds and emitted only the established aggregate asset/entrypoint size warnings. The new standalone/data files lint clean. `NativeBrowsePage.tsx` retains its committed 17-error/2-warning ESLint baseline, `PTVShell.tsx` retains its committed 26-error/1-warning baseline, and `nativeBrowse.scss:492` retains the same selector-order Stylelint baseline at HEAD and in the worktree. `git diff --check` and the changed-file secret/private-data scan pass. No plugin source or API contract changed, so the companion plugin was not rebuilt for this frontend-only correction.
+The historical 2026-07-14 browse audit verified 36 Vitest files/283 tests, including 6 focused browse/route/directory files with 37 tests. Its frontend-only deployment statement applies only to that dated browse correction and is superseded for the current worktree.
 
-The current development server at `http://localhost:8080/` returns HTTP 200 and serves a bundle containing the current shell mount attribution and **Studios & Networks** label. This proves the newest local bundle is being served, not authenticated Jellyfin route behavior. The live role/debug matrix, real-library counts, history/scroll restoration, and touch/TV behavior remain deployment checks.
+The authoritative 2026-07-19 verification covers 58/58 targeted frontend tests, 20/20 companion-plugin tests, TypeScript/build checking, changed-source ESLint, webOS Stylelint, the plugin contract, production Webpack, and `git diff --check`. Webpack retains only the two established aggregate asset/entrypoint warnings. The refreshed five-file plugin payload is newer than all plugin C# source, and repository hygiene checks find no tracked `.dotnet-home`, Vite result, split-development log/PID, or nested plugin project/test `bin`/`obj` output.
+
+The earlier development-server probe at `http://localhost:8080/` proved only that its then-current local bundle was served, not authenticated Jellyfin route behavior. Authenticated role/diagnostics checks, real-library behavior, and physical touch/TV behavior remain deployment checks for the current matching frontend/plugin build.
 
 Local automated validation cannot prove authenticated Jellyfin behavior, live Google Books/ComicVine application, restart persistence, Fire TV input, or real-device responsive behavior. Those remain deployment checks.
 
@@ -250,6 +273,10 @@ The first 2026-07-14 authentication correction correctly removed visible authent
 - Keep provider descriptions out of canonical titles.
 - Keep Reading metadata apply field-selective; do not restore broad recursive replacement.
 - Preserve Jellyfin fallbacks for unsupported routes and missing plugin capabilities.
+- Keep remote diagnostics inactive without an explicit bounded lease, local to the authenticated PiggieTV/Jellyfin deployment, memory-only, size-limited, and sanitized independently at client and server boundaries.
+- Keep presence/report upload authenticated and every client-list/session/report administrative operation administrator-only.
+- Preserve `src/ptv/plugin/bin` as the intentional five-file deployable payload; keep nested plugin project/test `bin`/`obj` and other machine-local caches/logs untracked.
+- Finish every project prompt by reconciling `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` with the resulting code, tests, deployment boundary, and open risks.
 
 ## Change Record
 
@@ -401,7 +428,7 @@ The Jellyfin item-details controller owns one item-scoped request generation. St
 
 Details artwork is resolved and preloaded before display. Backdrop candidates prefer the item, then related parent/season/series artwork, then current Thumb and Primary images. Candidate failure advances without leaving a blank page, and poster/logo slots keep stable geometry while images transition from pending to ready. Independent season, episode, cast, related-item, and image requests may run concurrently, but stale responses cannot mutate the active item.
 
-Media-version UI consumes a shared normalized source list. Stable file identity prefers path, then source ID, then bounded source metadata, and richer duplicate records win. Version badges and selectors therefore represent unique playable sources rather than duplicated API rows.
+Media-version UI consumes one shared conflict-safe normalized source list. Exact normalized path equality is authoritative and always joins aliases even when probe metadata differs. Matching source IDs merge only when their shared technical fields do not conflict. A strong signature over container, runtime, bitrate, size, media name, and normalized audio/video stream details can identify mount-path or virtual-path aliases across different paths/IDs. ID- and technical-signature candidate edges join graph clusters only when doing so would introduce no hard technical conflict anywhere in the resulting alias cluster, preventing a sparse or reused-ID bridge from hiding a real playable version. The richest record represents an alias cluster; comparison diagnostics are capped at 24 and expose only candidate indices, reasons, and signal names, never paths, titles, or IDs.
 
 Jellyfin retains ownership of `#/video`. Its PTV presentation uses translucent purple-blue control glass, with low-power and unsupported-filter fallbacks. Episode playback headings combine the series title, season/episode index, and episode title; the controller's known parent title is used when the playback DTO omits `SeriesName`. Movie title behavior and the existing Music-to-video ownership handoff are unchanged.
 
@@ -417,8 +444,22 @@ Native Details enhancement consumes the exact item emitted by the item-details c
 
 TV layout is selected once by `detectPtvTvClient` and represented by the client profile, root classes, data attributes, diagnostics, and focus engine. LG webOS, Samsung Tizen, Android TV, Fire TV, Roku user agents, and explicit Jellyfin ten-foot signals enter `ptv-render-tv`; screen dimensions alone never convert an ordinary desktop browser into TV mode. The profile also records coarse pointer, hover, backdrop-filter, container-query, aspect-ratio, and content-visibility capabilities so CSS and runtime behavior share one source of truth.
 
-`src/ptv/styles/profiles/tv.scss` is the late-loaded ten-foot override. It owns fixed card geometry, nonshrinking rails, 720p/1080p/4K variables, overscan-safe page gutters, bounded heroes and title art, visible row controls, large shell targets, details geometry, and focus elevation. Native PTV routes suppress Jellyfin's header and drawer only while the native shell is mounted. `src/ptv/styles/profiles/webos.scss` removes filter-dependent glass, expensive reflections, and scale animation while retaining static translucent purple surfaces and the same layout.
+`src/ptv/styles/profiles/tv.scss` is the late-loaded ten-foot override. It owns fixed card geometry, nonshrinking rails, 720p/1080p/4K variables, overscan-safe page gutters, bounded heroes and title art, visible row controls, large shell targets, details geometry, and focus elevation. Native PTV routes suppress Jellyfin's header and drawer only while the native shell is mounted. `src/ptv/styles/profiles/webos.scss` removes filter-dependent glass, expensive reflections, and scale animation while retaining the same layout. Its static regular/strong glass fills are intentionally lighter at 76%/86% opacity; blur and expensive animation remain disabled so the readability improvement does not restore the original webOS performance cost.
 
-`tvFocus.ts` owns directional keyboard/remote movement within the mounted PTV shell, chooses the nearest candidate geometrically, scrolls the target into view, restores route-local focus, and maps supported back keys to browser history. TV mode disables desktop hover expansion; focus is the authoritative interaction state. Native routes include Home, Movies, Shows, Details, Music, Reading, Requests, and PTV dashboard paths, including legacy Reading aliases. Jellyfin-owned video playback remains outside this ownership boundary.
+`tvFocus.ts` owns directional keyboard/remote movement within the mounted PTV shell, chooses the nearest candidate geometrically, scrolls the target into view, restores route-local focus, and maps supported back keys to browser history. Activation normalizes Enter, Select, OK, and Accept plus legacy select key codes 13, 23, and 66. Back handling recognizes webOS 461 and Tizen 10009. The portal-owned primary dropdown consumes those semantics exactly once, wraps arrows, focuses the first/last option appropriately, closes on Back, restores the trigger, and preserves pointer activation. TV mode disables desktop hover expansion; focus is the authoritative interaction state. Native routes include Home, Movies, Shows, Details, Music, Reading, Requests, and PTV dashboard paths, including legacy Reading aliases. Jellyfin-owned video playback remains outside this ownership boundary.
+
+`scripts/ptv-webos.mjs` is an operational wrapper around installed LG `ares` tools, not an application packager or runtime dependency. Device, application ID, and package path are always explicit; input validation rejects shell metacharacters, dry-run shows the exact command, and the wrapper never guesses an app ID, IPK, or target. Packaging/signing stays with the host webOS application project outside this repository. Discovery and dry runs are safe verification; install, launch, close, inspect, and log attachment still require deliberate access to a configured physical device.
 
 Physical-device evidence remains authoritative. Browser unit, style-contract, and Playwright viewport coverage can prove deterministic classification and geometry, but cannot certify firmware-specific webOS/Tizen engines or native wrapper key dispatch. A frontend deployment and cache/service-worker refresh are required before retesting the supplied LG failure cases.
+
+### 2026-07-19 Media Identity, Remote Diagnostics, And Artifact Boundary
+
+Media-version normalization, TV activation, and remote diagnostics share one rule: normalize equivalent platform signals at a narrow boundary, but retain conflicts and authority distinctions that affect real behavior. ID/signature aliases cannot erase hard technical conflicts while exact-path equality remains authoritative; remote key aliases cannot dispatch an action twice; and a diagnostics client cannot cross its authenticated owner/session boundary.
+
+Remote diagnostics adds a coupled frontend/plugin contract without changing the persistent plugin configuration schema or writing captured reports to disk. The plugin advertises the capability explicitly, holds only bounded ephemeral coordination state, and applies authentication/administrator checks at the controller boundary. The frontend performs no collection until that capability and a valid bounded lease are both present.
+
+Repository outputs now have an explicit ownership split. `src/ptv/plugin/bin` contains exactly the five intentional deployment artifacts and remains tracked. Nested `bin`/`obj` under plugin projects/tests, `.dotnet-home/`, the Vite result cache, and split-development logs/PID are rebuildable machine-local output and remain ignored/untracked. Production `dist` output is still deployment output rather than source. Older handoff instructions to restore those generated files are superseded.
+
+Project-memory documents are part of the delivery boundary. `HANDOFF.md` records continuation and live verification, `PROJECT_STATE.md` records the authoritative current ledger, and `ARCHITECTURE.md` records durable ownership and security boundaries. Every completed project prompt reconciles all three before completion is reported.
+
+The final local gate passed 58/58 targeted frontend tests, 20/20 plugin tests, TypeScript/build checking, changed-source ESLint, webOS Stylelint, the plugin contract, production Webpack, and whitespace validation. The remaining evidence boundary is authenticated coupled deployment plus physical LG/webOS and broader TV verification; live state-changing `ares` commands were intentionally not exercised.

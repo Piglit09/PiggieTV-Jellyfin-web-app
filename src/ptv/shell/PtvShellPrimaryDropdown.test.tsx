@@ -41,6 +41,24 @@ function dispatchActivation(target: EventTarget, detail = 1) {
     target.dispatchEvent(new MouseEvent('click', { bubbles: true, detail }));
 }
 
+function dispatchRemoteKey(target: EventTarget, key: string, keyCode = 0) {
+    const event = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key
+    });
+
+    if (keyCode) {
+        Object.defineProperties(event, {
+            keyCode: { value: keyCode },
+            which: { value: keyCode }
+        });
+    }
+
+    target.dispatchEvent(event);
+    return event;
+}
+
 type FixtureDropdownProps = Readonly<{
     id: 'movies' | 'shows';
     onNavigate: () => void;
@@ -180,6 +198,52 @@ describe('PtvShellPrimaryDropdown', () => {
             key: 'ArrowDown'
         })));
         expect(document.activeElement).toBe(items[0]);
+    });
+
+    it('opens and selects exactly once with Enter and remote OK variants', () => {
+        const onNavigate = vi.fn();
+        flushSync(() => root.render(<DropdownFixture onNavigate={onNavigate} />));
+        const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+
+        flushSync(() => dispatchRemoteKey(trigger, 'Unidentified', 13));
+        flushAnimationFrames();
+
+        const firstItem = document.querySelector<HTMLAnchorElement>('[data-ptv-shell-primary-menu="movies"] a')!;
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        expect(document.activeElement).toBe(firstItem);
+
+        flushSync(() => dispatchRemoteKey(firstItem, 'Select'));
+
+        expect(onNavigate).toHaveBeenCalledTimes(1);
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+        flushSync(() => dispatchRemoteKey(trigger, 'Enter'));
+        flushAnimationFrames();
+        const reopenedItem = document.querySelector<HTMLAnchorElement>('[data-ptv-shell-primary-menu="movies"] a')!;
+        flushSync(() => dispatchRemoteKey(reopenedItem, 'Enter'));
+
+        expect(onNavigate).toHaveBeenCalledTimes(2);
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('navigates with legacy D-pad codes and closes with the webOS Back code', () => {
+        const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+
+        flushSync(() => dispatchRemoteKey(trigger, 'Select'));
+        flushAnimationFrames();
+
+        const panel = document.querySelector<HTMLElement>('[data-ptv-shell-primary-menu="movies"]')!;
+        const items = Array.from(panel.querySelectorAll<HTMLAnchorElement>('a'));
+        expect(document.activeElement).toBe(items[0]);
+
+        flushSync(() => dispatchRemoteKey(items[0]!, 'Unidentified', 40));
+        expect(document.activeElement).toBe(items[1]);
+
+        flushSync(() => dispatchRemoteKey(items[1]!, 'Unidentified', 461));
+        flushAnimationFrames();
+
+        expect(trigger.getAttribute('aria-expanded')).toBe('false');
+        expect(document.activeElement).toBe(trigger);
     });
 
     it('returns focus after Escape and dismisses for an outside pointer', () => {

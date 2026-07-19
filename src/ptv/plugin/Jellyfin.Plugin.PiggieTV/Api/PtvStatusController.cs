@@ -80,6 +80,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 _logger.LogInformation("Advertising feature: integrations");
                 _logger.LogInformation("Advertising feature: tags");
                 _logger.LogInformation("Advertising feature: random");
+                _logger.LogInformation("Advertising feature: remoteDiagnostics");
 
                 var safeResponse = new
                 {
@@ -101,7 +102,8 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         ["integrations"] = true,
                         ["signup"] = true,
                         ["tags"] = true,
-                        ["random"] = true
+                        ["random"] = true,
+                        ["remoteDiagnostics"] = true
                     },
                     features = new[]
                     {
@@ -116,7 +118,8 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         "integrations",
                         "signup",
                         "tags",
-                        "random"
+                        "random",
+                        "remoteDiagnostics"
                     },
                     ok = true,
                     integrations = PtvStatusIntegrations.Create(),

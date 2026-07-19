@@ -1,12 +1,16 @@
 # PiggieTV Handoff
 
-Updated 2026-07-14 for HEAD `568e7eac3b`; Reading production-hardening source is present in `71666e7d02`.
+Updated 2026-07-19 for HEAD `6d483399b3` plus the current uncommitted worktree.
+
+Project-memory rule: after every completed project prompt, update `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` before reporting completion. Record the resulting behavior, validation, deployment boundary, and remaining risks; do not leave the top-level current-state text pointing at an older task.
 
 ## Where The Project Is
 
 PiggieTV is a Jellyfin Web customization with a guarded singleton runtime, shared PTV shell, native Home/media/Music/Reading/Requests routes, persistent playback UI, featured cache v7, recommendation and Row Builder tooling, and a companion .NET 9 Jellyfin plugin.
 
-The Reading hardening task remains complete and unchanged. Movies/Shows focused browse is implemented, and the current worktree finishes focused-loader identity, exact-value genre directory presentation, truthful Studios & Networks terminology, and shell mount attribution before deployment. One complete normalized key controls focused effect ownership and cache isolation; exported diagnostics retain exact public filters while excluding raw Jellyfin IDs. The next work is review/commit followed by frontend deployment and the remaining authenticated route matrix, not another broad rewrite.
+The Reading, focused-browse, Details, playback, and baseline TV compatibility work remains in place. The current worktree adds conflict-safe media-source deduplication, stronger TV OK/select and dropdown behavior, lighter static webOS glass, an administrator-controlled local remote-diagnostics path spanning the frontend and companion plugin, optional LG webOS CLI helpers, and repository hygiene that stops tracking machine-local/generated output while preserving the five-file deployable plugin payload.
+
+The implementation and automated verification are complete. The next meaningful work is review/commit, coupled frontend/plugin deployment, then authenticated physical LG testing. Do not describe remote-key behavior or webOS visuals as hardware-verified until the rebuilt frontend has been loaded on the TV.
 
 ## Important Current Decisions
 
@@ -24,8 +28,14 @@ The Reading hardening task remains complete and unchanged. Movies/Shows focused 
 - Reading diagnostics require both admin authorization and explicit debug mode.
 - Genre display normalization never rewrites the query value. Exact case-insensitive deduplication and explicit alias groups are allowed; fuzzy genre merging is not.
 - Shows `view=networks` remains URL-compatible, while its visible directory label is **Studios & Networks** because the data path is `getStudios` plus `StudioIds`.
+- Media-source deduplication is conflict-safe: exact normalized paths are authoritative, reused source IDs cannot hide technically distinct files, and strong technical signatures may join path/ID aliases only when the resulting alias cluster contains no hard technical conflict across any members.
+- TV remote activation treats Enter, Select/OK/Accept, and supported numeric key codes as one semantic activation. Dropdown focus, Back behavior, focus restoration, and pointer activation remain centralized and exactly-once.
+- Remote diagnostics are local, administrator-controlled, capability-gated, time-limited, memory-only, bounded, and privacy-sanitized. They are not telemetry and must not gain an external upload destination or continuous inactive collection.
+- The plugin and frontend are now a coupled deployment for remote diagnostics. Deploy the refreshed five-file plugin payload together with the matching frontend bundle.
 
-## What Changed In The Current Worktree
+## Earlier Reading/Browse Work Retained
+
+The following sections preserve the earlier Reading and focused-browse delivery context. The authoritative current worktree checkpoint is the 2026-07-19 section at the end of this document.
 
 ### Shared Reading Identity
 
@@ -98,7 +108,9 @@ Current dev bundle:    HTTP 200 at http://localhost:8080/ with current markers
 Plugin build:          not required; no plugin source or contract changed
 ```
 
-## Validation Already Completed
+## Earlier Validation Baseline
+
+These results describe the earlier Reading/debug delivery and are retained for provenance. Use the 2026-07-19 handoff for the current authoritative validation.
 
 ```text
 Focused Reading/Identify: 6 files, 43 tests passed
@@ -212,11 +224,11 @@ The broad ESLint command may report the eight known nested-render warnings in `b
 ## Final Audit Worktree Guidance
 
 - Do not discard unrelated user changes.
-- The four root project-memory documents are tracked, current, and belong in the intended commit scope.
-- Root `ptv-dev-server*.log` files are generated machine-local output. They are removed from tracking and narrowly ignored; the active server may keep local copies open.
-- Review the focused debug/performance files, project-memory updates, `.gitignore`, and generated-log removals before committing. The Reading frontend/plugin implementation is already present in HEAD history.
-- `src/components/itemidentifier/itemidentifierUtils.test.js` was already modified outside this follow-up; preserve it and decide its commit scope separately.
-- Do not commit generated `dist`, plugin `bin/obj`, Vitest result, or Babel cache output.
+- `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` must be refreshed after every completed project prompt and belong in the intended commit scope when the implementation is committed.
+- `.dotnet-home/`, `node_modules/.vite/**/results.json`, `ptv-split-dev.err.log`, `ptv-split-dev.out.log`, `ptv-split-dev.pid`, and nested plugin project/test `bin`/`obj` output are machine-local or generated. They are intentionally untracked/ignored; do not restore them because an older checkpoint below says to do so.
+- Preserve `src/ptv/plugin/bin`: its DLL, deps JSON, PDB, XML documentation, and `meta.json` are the intentional deployable plugin payload. The current payload was rebuilt after the final plugin source change.
+- Review the media deduplication, TV focus/dropdown, remote-diagnostics frontend/plugin/dashboard, webOS tooling/docs, project-memory updates, `.gitignore`, and generated-file removals together before committing.
+- Do not commit generated `dist`, nested plugin project/test `bin`/`obj`, Vitest result, or Babel cache output.
 - Confirm the plugin DLL and frontend bundle were produced from the same worktree before live testing.
 
 ## Stop Conditions
@@ -248,7 +260,7 @@ git diff --check
 
 The final local results are 165 focused PTV tests, 334 full-suite tests, 26 Chromium tests, and four plugin tests passing. TypeScript, both ESLint gates, Stylelint, plugin contract, privacy scan, and production Webpack pass. The Webpack output retains only the established asset/entrypoint warnings.
 
-Before commit, restore tracked generated changes under `node_modules/.vite`, `node_modules/.package-lock.json`, and plugin `bin/obj`; remove ignored `dist`, `e2e/.harness`, and `test-results`. Keep root project-memory files, CI/workflow files, `.quality`, hardening scripts, e2e sources, contributor docs, and package/root lock changes in scope. Do not remove or untrack the historical dependency trees without a separate approved migration.
+Historical note: this 2026-07-14 checkpoint originally required restoring tracked Vite and nested plugin `bin`/`obj` output. The approved 2026-07-19 hygiene pass supersedes that instruction and intentionally removes those generated paths from tracking while preserving `src/ptv/plugin/bin`. Continue removing ignored `dist`, `e2e/.harness`, and `test-results`, and keep intended project-memory, CI/workflow, quality, hardening, e2e, contributor, and lock-file changes in scope.
 
 Deployment order for the corrected pair: build/test the plugin and frontend from the same revision, deploy plugin `10.11.8.2` and its matching `meta.json`, restart Jellyfin, verify `/Ptv/v1/status` advertises `readingSeriesOverrides`, then deploy the frontend and accept the offered service-worker update. Application caches do not need clearing; a hard refresh/service-worker clear is recovery-only if the old bundle remains controlled.
 
@@ -442,4 +454,29 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 - Automated gates passed: focused 23/23; full Vitest 477/477; TypeScript; scoped new-code ESLint; changed Stylelint; Playwright 43 passed/6 live skipped; production Webpack success with established size warnings.
 - Deployment: publish the complete frontend output atomically. Jellyfin/plugin restart is not required for these frontend-only changes. Accept the service-worker update and fully close/relaunch wrapper apps if they retain the old web bundle.
 - Physical matrix still required: LG webOS at 1080p and 4K; Samsung Tizen; Android TV and Fire TV; Roku; Chromecast receiver; iOS wrapper; PiggieTV Android. Verify Home, Movies, Shows, Details, Music, Reading, Requests, Dashboard, Settings, Login, and video handoff with directional keys, OK, Back, rail scrolling, and focus restoration.
-- Preserve the unrelated existing `webpack.dev.js` working-tree change when preparing a commit.
+
+## 2026-07-19 media identity, TV input, and remote diagnostics handoff
+
+- Repository hygiene is intentional. The worktree removes 1,103 tracked machine-local/generated entries, and `.gitignore` now covers the Vite result cache, split-development logs/PID, `.dotnet-home/`, and nested plugin project/test `bin`/`obj`. The five tracked files in `src/ptv/plugin/bin` remain the deployment payload and were republished after the last C# change.
+- `mediaSourceDeduplication.ts` now treats exact normalized path equality as authoritative, then uses compatible source-ID or strong technical-signature edges without allowing a transitive ID/signature bridge to collapse technically conflicting real files. Diagnostics expose at most 24 comparisons containing only candidate indices, reasons, and signal names; they omit paths, titles, and source IDs.
+- `tvFocus.ts` and `PtvShellPrimaryDropdown.tsx` now cover remote Enter/Select/OK/Accept aliases and key codes 13/23/66, webOS Back 461, Tizen Back 10009, arrow wrapping, first/last dropdown focus, exactly-once activation, Back-to-close with focus restoration, and unchanged pointer behavior. The webOS profile uses 76%/86% static translucent fills while keeping blur and expensive motion disabled.
+- Remote diagnostics are opt-in and local to the Jellyfin/PiggieTV deployment. An administrator can list/filter clients, select a 5- or 10-minute lease, stop it, request a snapshot, and view/download the latest report. The client collects only while leased and reports coarse profile, route/render/playback/input/error/network/long-task/FPS/memory evidence plus a bounded operational log tail.
+- The client retains at most 300 samples and budgets serialized samples to 160 KiB; the plugin rejects reports above 192 KiB and applies independent JSON depth/node/array/property/string limits plus a second sanitizer. Arbitrary error text, raw user agents, credentials, query strings, private origins, media identity, titles, and local paths are omitted or normalized. Plugin-side client/report state is memory-only and expires; the browser persists only an ephemeral client ID and normalized active lease in session storage.
+- Client registration and report upload require authentication. Administrative client/session/report operations require Jellyfin administrator authorization, and the store binds a client to the authenticated Jellyfin identity. Capability detection backs off when the endpoint is unavailable so an older plugin is not polled every 30 seconds, while bounded rechecks allow upgrades to recover.
+- `scripts/ptv-webos.mjs` provides dependency-free `ares` device discovery/info, inspect/logs, install, launch, and close commands with explicit device/app/package inputs, shell-metacharacter rejection, and dry-run support. Read-only discovery and dry runs were verified; no live install, launch, or inspect mutation was performed.
+- Final automated gates: targeted Vitest 9 files/58 tests; plugin tests 20/20; `npm run build:check`; changed-source ESLint; webOS Stylelint; plugin contract; production Webpack; and `git diff --check` all passed. Webpack emitted only the two established aggregate asset/entrypoint size warnings.
+- Deployment now requires both halves: replace all five plugin payload files, restart Jellyfin, verify the `remoteDiagnostics` capability, then atomically publish the matching frontend output and accept its service-worker/cache update before testing the admin panel against an authenticated client.
+- Remaining risks: manual Stop can leave the last server-stored report up to one 15-second client interval behind, so request/view a snapshot before Stop when the final instant matters. Remote keys, focus, and glass appearance still require the supplied physical LG/webOS regression matrix.
+- No commit, push, remote deployment, live package installation, or Jellyfin restart was performed.
+
+Current focused verification and webOS discovery commands:
+
+```powershell
+npx vitest run src/controllers/itemDetails/mediaSourceDeduplication.test.ts src/ptv/core/tvFocus.test.ts src/ptv/shell/PtvShellPrimaryDropdown.test.tsx src/ptv/styles/profiles/tvProfileVisual.test.ts src/ptv/core/remoteDiagnosticsModel.test.ts src/ptv/services/remoteDiagnostics.test.ts src/ptv/services/pluginRemoteDiagnosticsTransport.test.ts src/ptv/core/pluginApiRemoteDiagnostics.test.ts src/ptv/modules/dashboard/RemoteDiagnosticsPanel.test.tsx
+npm run build:check
+npm run test:plugin
+npm run test:plugin-contract
+npm run build:production
+npm run webos:devices
+git diff --check
+```

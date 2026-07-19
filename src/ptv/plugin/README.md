@@ -14,6 +14,12 @@ Primary endpoints include:
 - `POST /Ptv/v1/settings/reset`
 - `GET /Ptv/v1/reading/series-overrides/{routeKind}`
 - `PUT /Ptv/v1/reading/series-overrides/{routeKind}`
+- `POST /Ptv/v1/diagnostics/clients/check-in`
+- `POST /Ptv/v1/diagnostics/clients/report`
+- `GET /Ptv/v1/diagnostics/clients`
+- `POST /Ptv/v1/diagnostics/clients/{clientId}/sessions`
+- `POST /Ptv/v1/diagnostics/clients/{clientId}/snapshot`
+- `GET /Ptv/v1/diagnostics/clients/{clientId}/report`
 
 Temporary compatibility aliases are also available:
 
@@ -28,7 +34,7 @@ Temporary compatibility aliases are also available:
 - `DELETE /Ptv/FeaturedContent`
 - `POST /Ptv/FeaturedContent/Refresh`
 
-All endpoints require an authenticated Jellyfin user. Featured-content reads are available to any authenticated user, while `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, Reading override writes, and all settings endpoints require Jellyfin admin/elevated permissions.
+All endpoints require an authenticated Jellyfin user. Featured-content reads and minimal diagnostic client check-in/report publication are available to authenticated clients. `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, Reading override writes, all settings endpoints, and all diagnostic client listing/command/report reads require Jellyfin admin/elevated permissions. Remote diagnostics state is bounded, memory-only, automatically expires, and is described in [Remote client diagnostics](../docs/remote-diagnostics.md).
 
 Release `10.11.8.2` is the minimum plugin that advertises the `readingSeriesOverrides` capability. Older API-v1/cache-v7 plugins remain connected, but the frontend marks server-persisted Reading corrections as upgrade-required and truthfully identifies browser storage as a local cache fallback.
 
@@ -105,3 +111,4 @@ Architecture docs:
 - [Render profiles](../docs/render-profiles.md)
 - [Static assets](../docs/static-assets.md)
 - [Plugin responsibilities](../docs/plugin-responsibilities.md)
+- [Remote client diagnostics](../docs/remote-diagnostics.md)

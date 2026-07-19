@@ -1,6 +1,13 @@
 import type { PtvClientProfile } from './clientProfile';
 
-type PtvDirection = 'down' | 'left' | 'right' | 'up';
+export type PtvDirection = 'down' | 'left' | 'right' | 'up';
+
+type PtvRemoteKeyEvent = Readonly<{
+    code?: string;
+    key?: string;
+    keyCode?: number;
+    which?: number;
+}>;
 
 type FocusCandidate = {
     element: HTMLElement;
@@ -16,7 +23,12 @@ const FOCUSABLE_SELECTOR = [
     '[tabindex]:not([tabindex="-1"])',
     'summary'
 ].join(',');
-const BACK_KEYS = new Set(['BrowserBack', 'GoBack', 'XF86Back']);
+const BACK_KEYS = new Set(['Back', 'BrowserBack', 'GoBack', 'XF86Back']);
+const REMOTE_SELECT_KEYS = new Set(['Accept', 'Enter', 'OK', 'Select']);
+// LG webOS Back is 461; 10009 keeps the same focus contract on Tizen remotes.
+const LEGACY_REMOTE_BACK_CODES = new Set([461, 10009]);
+// Some TV WebViews leak native Android center/enter codes instead of a DOM Enter key.
+const LEGACY_REMOTE_SELECT_CODES = new Set([13, 23, 66]);
 const focusMemory = new Map<string, string>();
 let uninstallActiveFocusEngine: (() => void) | null = null;
 
@@ -55,12 +67,43 @@ function isVisible(element: HTMLElement) {
         && style.visibility !== 'hidden';
 }
 
-function getDirection(event: KeyboardEvent): PtvDirection | null {
+function getLegacyKeyCode(event: PtvRemoteKeyEvent) {
+    return event.keyCode || event.which || 0;
+}
+
+function allowsLegacyRemoteCode(event: PtvRemoteKeyEvent) {
+    return !event.key || event.key === 'Unidentified' || event.key === 'Process';
+}
+
+export function isPtvRemoteSelectKey(event: PtvRemoteKeyEvent) {
+    if (event.key && REMOTE_SELECT_KEYS.has(event.key)) return true;
+    if (event.code === 'Enter' || event.code === 'NumpadEnter') return true;
+
+    return allowsLegacyRemoteCode(event) && LEGACY_REMOTE_SELECT_CODES.has(getLegacyKeyCode(event));
+}
+
+export function isPtvRemoteBackKey(event: PtvRemoteKeyEvent) {
+    if (event.key && BACK_KEYS.has(event.key)) return true;
+
+    return allowsLegacyRemoteCode(event) && LEGACY_REMOTE_BACK_CODES.has(getLegacyKeyCode(event));
+}
+
+export function getPtvRemoteDirection(event: PtvRemoteKeyEvent): PtvDirection | null {
     switch (event.key) {
         case 'ArrowDown': return 'down';
         case 'ArrowLeft': return 'left';
         case 'ArrowRight': return 'right';
         case 'ArrowUp': return 'up';
+        default: break;
+    }
+
+    if (!allowsLegacyRemoteCode(event)) return null;
+
+    switch (getLegacyKeyCode(event)) {
+        case 38: return 'up';
+        case 40: return 'down';
+        case 37: return 'left';
+        case 39: return 'right';
         default: return null;
     }
 }
@@ -189,15 +232,27 @@ function installFocusEngine() {
     const handleKeyDown = (event: KeyboardEvent) => {
         if (event.defaultPrevented || isEditable(document.activeElement)) return;
 
-        if (BACK_KEYS.has(event.key)) {
+        if (isPtvRemoteBackKey(event)) {
             event.preventDefault();
             if (!closeNearestFocusLayer()) window.history.back();
             return;
         }
 
-        const direction = getDirection(event);
         const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         const scope = current?.closest<HTMLElement>('[role="menu"], [role="dialog"], .ptv-shell-frame, .ptv-settings-page');
+
+        if (isPtvRemoteSelectKey(event) && current?.matches(FOCUSABLE_SELECTOR) && scope) {
+            event.preventDefault();
+            current.click();
+            recordFocusDiagnostic('ptv-tv-focus-selected', {
+                focusedKey: getFocusKey(current),
+                remoteKey: event.key || `legacy-${getLegacyKeyCode(event)}`,
+                route: getRouteKey()
+            });
+            return;
+        }
+
+        const direction = getPtvRemoteDirection(event);
         if (!direction || !current || !scope) return;
 
         const startedAt = performance.now();

@@ -1,5 +1,0 @@
-C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\bin\meta.json
-C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\bin\Jellyfin.Plugin.PiggieTV.dll
-C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\bin\Jellyfin.Plugin.PiggieTV.deps.json
-C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\bin\Jellyfin.Plugin.PiggieTV.pdb
-C:\Users\Piggie\Documents\GitHub\Jellyfin-Web-PiggieTV\src\ptv\plugin\bin\Jellyfin.Plugin.PiggieTV.xml

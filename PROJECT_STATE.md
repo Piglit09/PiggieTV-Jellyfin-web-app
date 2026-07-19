@@ -1,13 +1,15 @@
 # PiggieTV Project State
 
-Current as of 2026-07-14. This is the current-state ledger, not a historical changelog.
+Current as of 2026-07-19. This is the current-state ledger; dated sections retain delivery history.
+
+Maintenance rule: after every completed project prompt, update `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` before reporting completion. Current behavior, verification, deployment requirements, and open risks must agree across all three documents.
 
 ## Repository Snapshot
 
 | Field | Current value |
 | --- | --- |
 | Product | PiggieTV native experience embedded in Jellyfin Web |
-| Current HEAD | `568e7eac3b` (`route fix`); Reading hardening source is in `71666e7d02` (`bookshelf`) |
+| Current HEAD | `6d483399b3` (`TV compatibility and webOS recovery handoff`) plus the current uncommitted worktree |
 | Jellyfin Web package | `10.11.11` |
 | Node requirement | `>=20.0.0` |
 | Frontend stack | React 18.3, TypeScript 5.8, Webpack 5, MUI 6, TanStack Query 5 |
@@ -17,7 +19,7 @@ Current as of 2026-07-14. This is the current-state ledger, not a historical cha
 | Featured cache | Schema/version 7, plugin and browser stale-while-revalidate path |
 | Reading home cache | Schema 4, 5-minute fresh TTL, 24-hour stale window |
 
-The Reading implementation and its focused tests are present in HEAD history. The current worktree contains the frontend-only Movies/Shows focused-loader identity correction, exact-value genre directory presentation, truthful Studios & Networks labeling, shell mount attribution, regression tests, and these project-memory updates. Generated build/test output is removed or restored after verification.
+The current worktree adds conflict-safe media-source deduplication, TV remote activation/dropdown regressions, lighter static webOS glass, an administrator-controlled local remote-diagnostics system across the frontend and companion plugin, optional LG webOS CLI helpers, repository hygiene, and these project-memory updates. Machine-local/generated artifacts are intentionally untracked; the five-file `src/ptv/plugin/bin` deployment payload is intentionally tracked and refreshed.
 
 ## Current Product State
 
@@ -28,6 +30,7 @@ The Reading implementation and its focused tests are present in HEAD history. Th
 - `PTVShell` is the shared shell for native Home, Movies, Shows, Anime/Cartoons, Music, Reading, Requests, Dashboard, and settings surfaces.
 - Primary and contextual navigation are route-backed and centralized in the shell/route controller.
 - Item routing is centralized for PTV Music, Reading, video, and Jellyfin fallbacks.
+- TV activation and directional focus are centralized in `tvFocus.ts`; shell dropdowns share its normalized OK/select and Back semantics and restore focus on close.
 
 ### Home, Browse, And Recommendations
 
@@ -45,6 +48,7 @@ The Reading implementation and its focused tests are present in HEAD history. Th
 - Music Home, Explore, Artists, Albums, Songs, and Playlists routes are present.
 - Queue, player, persistent dock, likes/playlists, recommendations, MusicBrainz, and Discogs integrations are present.
 - Playback state is owned outside page-local route mounts so route changes do not intentionally reset an active queue.
+- Details/video media-version UI consumes conflict-safe normalized media-source clusters, so path aliases collapse without allowing reused IDs or sparse ID/signature bridges to hide technically distinct playable files.
 
 ### Reading
 
@@ -61,7 +65,7 @@ The Reading implementation and its focused tests are present in HEAD history. Th
 
 ### Plugin
 
-- `/Ptv/v1` provides status, settings, featured cache, Row Builder, music metadata, Google Books search, Reading series overrides, integrations, tags, random item, and signup endpoints.
+- `/Ptv/v1` provides status, settings, featured cache, Row Builder, music metadata, Google Books search, Reading series overrides, local remote diagnostics, integrations, tags, random item, and signup endpoints.
 - Featured cache version 7 is the accepted schema.
 - Frontend-only operation remains possible for Jellyfin-backed routes, but plugin-dependent features require the matching DLL and a Jellyfin restart.
 
@@ -72,6 +76,14 @@ The Reading implementation and its focused tests are present in HEAD history. Th
 - Browse section work uses an explicit priority policy and publishes each shelf independently; card-list payloads continue to use the existing lean field profile.
 - Failed images advance through shared candidates and enter capped five-minute negative caches instead of retrying forever or remaining suppressed for the whole session.
 - Shell mount telemetry now records an actual component mount once, rather than recording every backdrop-source change as a duplicate mount.
+
+### Local Remote Diagnostics And webOS Operations
+
+- The plugin advertises `remoteDiagnostics` only when the matching API is present. Authenticated clients check in through a bounded capability-aware transport; administrators list/filter clients, start 5- or 10-minute sessions, stop them, request snapshots, and view/download the latest report from Dashboard.
+- Collection is inactive without a valid lease and tears down on expiry, revocation, agent disposal, or an explicit unsupported-capability command. Plugin-side reports are memory-only, expire automatically, and are bound to the authenticated Jellyfin identity.
+- Client payloads contain coarse profile, route/render/playback/input/error/network/long-task/FPS/memory evidence and a bounded allowlisted operational log tail. They exclude raw user agents, arbitrary errors/log details, credentials, query strings, private origins, local/media paths, titles, and user/item/source identifiers.
+- The client retains at most 300 samples and budgets 160 KiB; the plugin caps presence at 8 KiB and reports at 192 KiB, independently bounds JSON shape/string sizes, and sanitizes again before storage.
+- `scripts/ptv-webos.mjs` wraps supported `ares` discovery, information, inspect/log, install, launch, and close flows with explicit inputs, validation, and dry-run support. No live TV mutation was performed during this implementation.
 
 ## Reading Production-Hardening Scope
 
@@ -90,24 +102,26 @@ Verified implementation areas from the Reading hardening commit:
 
 ## Final Validation Status
 
-The current source state was reverified after completing the guarded `__WEBPACK_SERVE__` access in `src/ptv/core/config.ts`:
+The 2026-07-19 worktree was reverified after the final frontend, plugin, documentation, and payload changes:
 
 | Check | Result |
 | --- | --- |
-| Focused Reading/Identify tests | 6 files, 43 tests passed |
-| Debug/performance focused tests | 3 files, 5 tests passed |
-| Full Vitest suite | 30 files, 243 tests passed |
-| TypeScript | Passed with `--noEmit --incremental false` |
-| Repository ESLint | Fails existing baseline: 298 findings (172 errors, 126 warnings) across broad legacy PTV/Jellyfin files |
-| Scoped ESLint | New standalone files have zero findings; Reading scope has zero errors and eight pre-existing nested-render warnings |
-| Repository Stylelint | Fails existing baseline: 140 errors in `card.scss`, `homesections.scss`, `themes/dark/theme.scss`, and `nativeBrowse.scss`; none are in the Reading hardening diff |
-| Scoped Stylelint | Passed |
-| Companion plugin tests | 4 tests passed |
-| Plugin Release build | Passed with zero warnings/errors |
-| Production Webpack build | Passed in 110.7 seconds; Webpack compilation 97.673 seconds |
+| Targeted frontend tests | 9 files, 58 tests passed |
+| Media-source deduplication | 13 tests passed, including conflict bridges and transitive aliases |
+| TV focus/dropdown/style contracts | 21 tests passed across focus, dropdown, and TV/webOS visual contracts |
+| Remote-diagnostics frontend/API/dashboard | 24 tests passed |
+| Companion plugin tests | 20 tests passed |
+| Type/build check | `npm run build:check` passed |
+| Changed-source ESLint | Passed |
+| webOS Stylelint | Passed |
+| Plugin contract | API 1, cache 7, plugin `10.11.8.2`, target `10.11.8`, web `10.11.11` passed |
+| Production Webpack build | Passed in 90.3 seconds |
 | Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
 | `git diff --check` | Passed |
-| Secret/local-data scan | No real credentials or supplied sensitive export values in added source/tests/docs; fake fixtures only. One private Seerr default URL remains on a pre-existing unchanged dashboard line and is sanitized from exports. |
+| Repository hygiene audit | No tracked `.dotnet-home`, Vite result, split-development log/PID, or nested plugin project/test `bin`/`obj`; no physical nested plugin `bin`/`obj` remained |
+| Deployable plugin payload | Five files preserved and rebuilt after the latest plugin source change |
+
+The older dated validation sections below remain historical evidence; they do not override this table or the current coupled frontend/plugin deployment boundary.
 
 ### 2026-07-14 Movies/Shows Browse Validation
 
@@ -187,25 +201,29 @@ The global lint/style failures are demonstrated pre-existing and non-blocking fo
 
 ## Deployment Verification Still Required
 
-- Deploy the rebuilt frontend. The existing matching PiggieTV plugin remains required for its previously delivered Reading/plugin features, but this browse pass changes no plugin source or contract.
-- A plugin DLL update and Jellyfin plugin restart are not required for this pass.
+- Replace all five files from `src/ptv/plugin/bin` together, restart Jellyfin, and confirm `/Ptv/v1/status?full` advertises `remoteDiagnostics` before publishing the matching frontend.
+- Deploy the complete rebuilt frontend atomically, accept the service-worker update or fully relaunch cached wrapper clients, then verify the Dashboard client list and an administrator-started 5-minute session against an authenticated client.
 - Verify Google Books and ComicVine result selection and field application against a live authenticated server.
 - Verify durable Reading series overrides across browser/device changes and Jellyfin restart.
 - Verify representative 390, 768, 1440, and 2560 pixel viewports with real data.
-- Verify touch shelf scrolling, remote focus, and Fire TV low-power behavior on devices.
+- Verify touch shelf scrolling, Enter/Select/OK/Accept activation, dropdown wrapping/Back restoration, and Fire TV low-power behavior on devices.
+- Retest the supplied LG webOS cases for static glass readability, card/hero geometry, focus visibility, one-action-per-OK press, and Music/video ownership.
 - Monitor the one reported transient legacy Jellyfin header appearance. It cleared after hard refresh and has not been reproduced in local automated validation.
 
 ## Known Constraints And Risks
 
 - The frontend package is `10.11.11`, while the plugin currently targets Jellyfin package `10.11.8`; compatibility must be checked when either side is upgraded.
-- A frontend/plugin version mismatch can make Google Books search or durable series overrides appear unavailable even when the frontend renders normally.
+- A frontend/plugin capability mismatch can make Google Books search, durable series overrides, or remote diagnostics appear unavailable even when the frontend renders normally; verify advertised capabilities rather than version text alone.
 - Automated tests cannot validate third-party provider availability or server metadata-provider behavior.
 - Webpack bundle-size warnings remain a performance debt; no new build error is present.
 - Do not treat localStorage as authoritative for Reading series overrides.
+- A manual remote-diagnostics Stop can leave the server's newest stored report up to one 15-second client interval behind. Request and view a snapshot before Stop when the final instant matters.
+- Browser tests cannot certify firmware-specific LG/Tizen key dispatch or the visual/performance result on physical TVs.
+- Remote diagnostics is deliberately transient and memory-only; it is not a historical observability store and must not be expanded into external telemetry without a separate security/privacy design.
 
 ## Next Delivery Step
 
-Review the focused-loader diff and project-memory updates, then deploy the rebuilt frontend. This pass is web-only and does not require a plugin DLL update or plugin restart. Allow the service worker to update or perform one hard refresh before running the remaining authenticated Movies/Shows matrix in `HANDOFF.md`.
+Review and commit the complete worktree, including generated-file removals and these project-memory updates. Deploy the five-file companion-plugin payload, restart Jellyfin and verify its capability, then atomically publish the matching frontend, accept the frontend update, verify authenticated remote diagnostics, and run the physical LG/webOS and broader TV matrix in `HANDOFF.md`.
 
 ### 2026-07-14 Production Hardening Program
 
@@ -469,3 +487,14 @@ Status: source and automated validation pass; physical TV verification remains o
 - Diagnostics now report TV platform/reason, coarse-pointer and hover flags, CSS capabilities, applied root classes, a clipped user agent, and bounded mounted row/card counts.
 - Verification: focused Vitest 4 files/23 tests; full Vitest 72 files/477 tests; TypeScript passed; scoped new-code ESLint passed; changed Stylelint passed; Playwright 43 passed with 6 opt-in live-server cases skipped; production Webpack compiled successfully with the two established size warnings.
 - Deployment boundary: frontend only. No plugin build, API/cache schema, Jellyfin restart, commit, push, or remote deployment occurred. Deploy the complete frontend bundle atomically, accept the service-worker update or clear the wrapper cache, then physically retest LG webOS, Tizen, Android TV/Fire TV, and the remaining client wrappers.
+
+### 2026-07-19 Media Identity, Remote Input, Diagnostics, And Repository Hygiene
+
+Status: implementation and automated validation pass; coupled deployment and physical TV verification remain open.
+
+- Media-source alias clustering now uses normalized path, compatible source ID, and strong technical signature evidence. Exact path matches always remain authoritative; same-ID records merge only when shared technical fields are compatible; technically conflicting graph clusters cannot be joined by a sparse ID/signature bridge. Privacy-safe comparison evidence is capped at 24 and contains no paths, titles, or source IDs.
+- TV input normalization now includes Enter/Select/OK/Accept names and key codes 13/23/66, plus webOS Back 461 and Tizen Back 10009. Shell dropdown coverage protects exactly-once activation, arrow wrapping, initial focus, Back close/restore, and pointer behavior. webOS static glass alpha is lighter while blur, reflections, and scale-heavy animation remain disabled.
+- Local remote diagnostics adds a schema-1 leased client agent, capability-aware plugin transport, administrator Dashboard panel, authenticated plugin controller, bounded in-memory store, identity binding, request-size/JSON-shape enforcement, expiry/revocation, and privacy regression coverage. The server keeps one latest report per client and accepts the newest final uploads during the short natural-expiry grace period.
+- Repository cleanup removes tracked `.dotnet-home`, Vite result, split-development log/PID, and nested plugin project/test `bin`/`obj` output. The top-level five-file plugin deployment payload remains tracked and was rebuilt after the final C# change.
+- The optional `ares` wrapper and `src/ptv/docs/webos-cli.md` document safe discovery, information, inspect/log, install, launch, and close workflows. Actual device discovery was read-only; state-changing commands were dry-run only.
+- Verification passed as recorded in the current Final Validation Status table. No commit, push, frontend/plugin deployment, package installation, remote state change, or Jellyfin restart occurred.

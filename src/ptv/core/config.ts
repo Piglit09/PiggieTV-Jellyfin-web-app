@@ -256,6 +256,9 @@ export const PTV_PLUGIN_API = {
         tagRows: 'Ptv/v1/tags/rows',
         tmdbTest: 'Ptv/v1/tmdb/test',
         recommendations: 'Ptv/v1/Recommendations',
+        remoteDiagnosticsCheckIn: 'Ptv/v1/diagnostics/clients/check-in',
+        remoteDiagnosticsClients: 'Ptv/v1/diagnostics/clients',
+        remoteDiagnosticsReport: 'Ptv/v1/diagnostics/clients/report',
         settings: 'Ptv/v1/settings',
         settingsReset: 'Ptv/v1/settings/reset',
         status: 'Ptv/v1/status'

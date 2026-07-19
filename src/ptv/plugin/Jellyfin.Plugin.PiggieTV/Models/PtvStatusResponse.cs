@@ -100,7 +100,8 @@ public sealed class PtvStatusResponse
         "integrations",
         "signup",
         "tags",
-        "random"
+        "random",
+        "remoteDiagnostics"
     ];
 
     /// <summary>
@@ -118,7 +119,8 @@ public sealed class PtvStatusResponse
         ["integrations"] = true,
         ["signup"] = true,
         ["tags"] = true,
-        ["random"] = true
+        ["random"] = true,
+        ["remoteDiagnostics"] = true
     };
 
     /// <summary>

@@ -178,7 +178,13 @@
     "test:watch": "vitest --config vite.config.ts",
     "stylelint": "stylelint \"src/**/*.{css,scss}\"",
     "stylelint:ptv": "node scripts/ptv-quality-baseline.mjs stylelint",
-    "stylelint:ptv:update-baseline": "node scripts/ptv-quality-baseline.mjs stylelint --update"
+    "stylelint:ptv:update-baseline": "node scripts/ptv-quality-baseline.mjs stylelint --update",
+    "webos": "node scripts/ptv-webos.mjs",
+    "webos:devices": "node scripts/ptv-webos.mjs devices",
+    "webos:inspect": "node scripts/ptv-webos.mjs inspect",
+    "webos:logs": "node scripts/ptv-webos.mjs logs",
+    "webos:install": "node scripts/ptv-webos.mjs install",
+    "webos:launch": "node scripts/ptv-webos.mjs launch"
   },
   "engines": {
     "node": ">=20.0.0",

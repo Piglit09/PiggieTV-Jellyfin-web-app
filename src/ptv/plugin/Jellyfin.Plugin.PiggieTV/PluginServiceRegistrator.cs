@@ -14,11 +14,12 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
-        var startMessage = $"Registering PiggieTV API controllers and services. BuildTimestampUtc={Plugin.BuildTimestampUtc}. ExpectedRoutes=GET /Ptv/v1/status; GET /Ptv/v1/settings; GET /Ptv/v1/featured; POST /Ptv/v1/featured/refresh; GET /Ptv/v1/music/metadata/search; GET /Ptv/v1/reading/metadata/googlebooks/search; GET /Ptv/v1/integrations/status; GET /Ptv/v1/calendar; GET /Ptv/v1/integrations/arr/calendar; GET /Ptv/v1/tags; GET /Ptv/v1/random/movie.";
+        var startMessage = $"Registering PiggieTV API controllers and services. BuildTimestampUtc={Plugin.BuildTimestampUtc}. ExpectedRoutes=GET /Ptv/v1/status; GET /Ptv/v1/settings; GET /Ptv/v1/featured; POST /Ptv/v1/featured/refresh; GET /Ptv/v1/music/metadata/search; GET /Ptv/v1/reading/metadata/googlebooks/search; GET /Ptv/v1/integrations/status; GET /Ptv/v1/calendar; GET /Ptv/v1/integrations/arr/calendar; GET /Ptv/v1/tags; GET /Ptv/v1/random/movie; POST /Ptv/v1/diagnostics/clients/check-in.";
 
         Console.WriteLine(startMessage);
         Trace.TraceInformation(startMessage);
         serviceCollection.AddSingleton<IPtvFeaturedContentStore, PtvFeaturedContentStore>();
+        serviceCollection.AddSingleton<IPtvRemoteDiagnosticsStore, PtvRemoteDiagnosticsStore>();
         serviceCollection.AddSingleton<IPtvPluginSettingsService, PtvPluginSettingsService>();
         serviceCollection.AddSingleton<IPtvSignupService, PtvSignupService>();
         serviceCollection.AddHostedService<PtvSignupCleanupService>();

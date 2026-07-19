@@ -74,6 +74,11 @@
             Versioned item image diagnostics route.
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1RemoteDiagnostics">
+            <summary>
+            Versioned ephemeral remote client diagnostics route.
+            </summary>
+        </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1MusicMetadataSearch">
             <summary>
             Versioned music metadata lookup route.
@@ -98,6 +103,42 @@
             <summary>
             Legacy unversioned featured-content refresh route.
             </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController">
+            <summary>
+            Local, ephemeral coordination for opt-in PiggieTV client diagnostics.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController},Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore,Microsoft.AspNetCore.Authorization.IAuthorizationService)">
+            <summary>Initializes a new instance of the controller.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.CheckIn(Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence)">
+            <summary>
+            Records minimal client presence and returns a temporary diagnostics command.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.PublishReport(System.Text.Json.JsonElement)">
+            <summary>
+            Publishes a bounded report for the client's active temporary session.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.GetClients(System.String,System.Threading.CancellationToken)">
+            <summary>Lists recently seen PiggieTV clients for an administrator.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.StartSession(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsStartRequest,System.Threading.CancellationToken)">
+            <summary>Starts a five- or ten-minute collection lease for one client.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.StopSession(System.String,System.Threading.CancellationToken)">
+            <summary>Stops collection on one client.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.RequestSnapshot(System.String,System.Threading.CancellationToken)">
+            <summary>Requests one immediate bounded snapshot from a client.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.GetReport(System.String,System.Threading.CancellationToken)">
+            <summary>Views the latest unexpired report for one client.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.DownloadReport(System.String,System.Threading.CancellationToken)">
+            <summary>Downloads the latest unexpired report for one client.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController">
             <summary>
@@ -2974,6 +3015,158 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.VolumeNumber">
             <summary>Gets or sets the corrected volume number.</summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence">
+            <summary>
+            Minimal, privacy-safe client presence sent while PiggieTV is running.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.SchemaVersion">
+            <summary>Gets or sets the diagnostics schema version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.ClientId">
+            <summary>Gets or sets the opaque, client-generated identifier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.SeenAt">
+            <summary>Gets or sets the client timestamp in Unix milliseconds.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.Route">
+            <summary>Gets or sets the normalized route category.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.Profile">
+            <summary>Gets or sets the detected client profile.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.Diagnostics">
+            <summary>Gets or sets the client's current local diagnostics state.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsProfile">
+            <summary>
+            Minimal subset of the client profile used for server-side filtering.
+            Additional browser-side profile fields are intentionally ignored by the server.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsProfile.Kind">
+            <summary>Gets or sets the coarse client kind.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresenceState">
+            <summary>
+            Client-reported diagnostics state included with presence.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresenceState.Active">
+            <summary>Gets or sets a value indicating whether collection is active.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresenceState.ExpiresAt">
+            <summary>Gets or sets the local lease expiry in Unix milliseconds.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresenceState.SessionId">
+            <summary>Gets or sets the current session identifier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresenceState.LastLeaseRejection">
+            <summary>Gets or sets the last coarse lease rejection reason, if any.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsCommand">
+            <summary>
+            Server command returned to a client presence check-in.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsCommand.Disable">
+            <summary>Gets or sets a value indicating whether the client must revoke local collection.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsCommand.Lease">
+            <summary>Gets or sets the current collection lease, if any.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsCommand.RequestSnapshot">
+            <summary>Gets or sets a value indicating whether a one-time snapshot is requested.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsLease">
+            <summary>
+            Temporary remote diagnostics collection lease.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsLease.DurationMs">
+            <summary>Gets or sets the remaining lease duration for clock-skew-safe clients.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsLease.Enabled">
+            <summary>Gets or sets a value indicating whether the lease is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsLease.ExpiresAt">
+            <summary>Gets or sets the lease expiry in Unix milliseconds.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsLease.IssuedAt">
+            <summary>Gets or sets the server issue timestamp in Unix milliseconds.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsLease.SessionId">
+            <summary>Gets or sets the opaque session identifier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsLease.Profiles">
+            <summary>Gets or sets the client profiles allowed to activate this lease.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsStartRequest">
+            <summary>
+            Admin request to start temporary collection on one client.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsStartRequest.DurationMinutes">
+            <summary>Gets or sets the requested duration. Supported values are five and ten minutes.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary">
+            <summary>
+            Admin-facing summary of a recently seen PiggieTV client.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.ClientId">
+            <summary>Gets or sets the opaque client identifier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.Profile">
+            <summary>Gets or sets the detected client profile.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.Route">
+            <summary>Gets or sets the normalized route category.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.LastSeenUtc">
+            <summary>Gets or sets the last presence timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.Online">
+            <summary>Gets or sets a value indicating whether the client was seen recently.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.DiagnosticsActive">
+            <summary>Gets or sets a value indicating whether temporary collection is active.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.LeasePending">
+            <summary>Gets or sets a value indicating whether the server lease awaits client acknowledgement.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.SessionId">
+            <summary>Gets or sets the active session identifier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.ExpiresAtUtc">
+            <summary>Gets or sets the active session expiry.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.HasReport">
+            <summary>Gets or sets a value indicating whether a report is available.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.ReportedAtUtc">
+            <summary>Gets or sets the latest report timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.SnapshotPending">
+            <summary>Gets or sets a value indicating whether a snapshot request is pending.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.LastLeaseRejection">
+            <summary>Gets or sets the last coarse client lease rejection reason.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsStoredReport">
+            <summary>
+            Stored, sanitized diagnostics report.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsStoredReport.ClientId">
+            <summary>Gets or sets the client identifier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsStoredReport.ReceivedAtUtc">
+            <summary>Gets or sets the receipt timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsStoredReport.Report">
+            <summary>Gets or sets the sanitized report document.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRowValidationResult">
             <summary>
             Row-builder validation result.
@@ -4278,6 +4471,32 @@
             <param name="update">Incoming override document.</param>
             <returns>Saved, sanitized Reading series overrides.</returns>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore">
+            <summary>
+            Ephemeral, server-local coordination for client diagnostics.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore.CheckIn(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence)">
+            <summary>Records minimal presence and returns any active command.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore.GetClients(System.String)">
+            <summary>Lists recently seen clients, optionally filtered by profile.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore.StartSession(System.String,System.Int32)">
+            <summary>Starts a temporary collection lease.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore.StopSession(System.String)">
+            <summary>Stops collection and revokes the current lease.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore.RequestSnapshot(System.String)">
+            <summary>Requests a one-time snapshot from a client.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore.PublishReport(System.String,System.String,System.Text.Json.JsonElement)">
+            <summary>Stores a sanitized report for an active client session.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore.GetReport(System.String)">
+            <summary>Gets the latest unexpired report.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService">
             <summary>
             Native PiggieTV signup service.
@@ -4715,6 +4934,39 @@
             <inheritdoc />
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.SaveReadingSeriesOverrides(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesUpdate)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore">
+            <summary>
+            In-memory remote diagnostics coordination. Nothing is written to disk or sent off-server.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.#ctor">
+            <summary>Initializes a store using the system clock.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.#ctor(System.Func{System.DateTimeOffset})">
+            <summary>Initializes a store with a clock, primarily for deterministic tests.</summary>
+            <param name="utcNow">UTC clock callback.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.CheckIn(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.GetClients(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.StartSession(System.String,System.Int32)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.StopSession(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.RequestSnapshot(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.PublishReport(System.String,System.String,System.Text.Json.JsonElement)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.GetReport(System.String)">
             <inheritdoc />
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvSignupCleanupService">

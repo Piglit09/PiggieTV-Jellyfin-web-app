@@ -4,6 +4,9 @@
 /ptv-dev-server.err.log
 /ptv-dev-server.log
 /.ptv-*.log
+/ptv-split-dev.err.log
+/ptv-split-dev.out.log
+/ptv-split-dev.pid
 
 # Local dependency, compiler, and test output. Some of these paths are already
 # present in repository history; these rules prevent new generated files from

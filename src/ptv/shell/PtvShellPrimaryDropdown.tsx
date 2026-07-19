@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import {
+    getPtvRemoteDirection,
+    isPtvRemoteBackKey,
+    isPtvRemoteSelectKey
+} from '../core/tvFocus';
 import { PtvIcon, type PtvIconName } from '../modules/icons';
 import {
     getPtvDropdownOverlayPosition,
@@ -59,6 +64,14 @@ export default function PtvShellPrimaryDropdown({
         if (onClose) onClose();
         else onToggle();
     }, [onClose, onToggle]);
+    const focusMenuItem = useCallback((position: 'first' | 'last' = 'first') => {
+        window.requestAnimationFrame(() => {
+            const items = panelRef.current?.querySelectorAll<HTMLAnchorElement>('[role="menuitem"]');
+            const target = position === 'last' ? items?.[items.length - 1] : items?.[0];
+
+            target?.focus();
+        });
+    }, []);
     const schedulePanelPosition = useCallback(() => {
         if (positionFrameRef.current !== null) return;
 
@@ -86,15 +99,29 @@ export default function PtvShellPrimaryDropdown({
         });
     }, [links.length]);
     const handleTriggerKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
-        if (event.key !== 'ArrowDown') return;
+        if (isPtvRemoteSelectKey(event)) {
+            event.preventDefault();
+            event.stopPropagation();
+            schedulePanelPosition();
+
+            if (isOpen) {
+                requestClose();
+            } else {
+                onOpenFirstItem();
+                focusMenuItem();
+            }
+            return;
+        }
+
+        const direction = getPtvRemoteDirection(event);
+        if (direction !== 'down' && direction !== 'up') return;
 
         event.preventDefault();
+        event.stopPropagation();
         schedulePanelPosition();
         onOpenFirstItem();
-        window.requestAnimationFrame(() => {
-            panelRef.current?.querySelector<HTMLAnchorElement>('a')?.focus();
-        });
-    }, [onOpenFirstItem, schedulePanelPosition]);
+        focusMenuItem(direction === 'up' ? 'last' : 'first');
+    }, [focusMenuItem, isOpen, onOpenFirstItem, requestClose, schedulePanelPosition]);
     const handleTriggerClick = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
         if (suppressNextPointerClickRef.current && event.detail > 0) {
             suppressNextPointerClickRef.current = false;
@@ -140,22 +167,39 @@ export default function PtvShellPrimaryDropdown({
         gestureRef.current = null;
     }, []);
     const handlePanelKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-        if (event.key === 'BrowserBack' || event.key === 'GoBack' || event.key === 'XF86Back') {
+        if (isPtvRemoteBackKey(event)) {
             event.preventDefault();
+            event.stopPropagation();
             requestClose();
             window.requestAnimationFrame(() => triggerRef.current?.focus());
             return;
         }
 
-        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        if (isPtvRemoteSelectKey(event)) {
+            const activeItem = document.activeElement instanceof HTMLAnchorElement
+                && panelRef.current?.contains(document.activeElement) ?
+                document.activeElement :
+                null;
+
+            if (!activeItem) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            activeItem.click();
+            return;
+        }
+
+        const direction = getPtvRemoteDirection(event);
+        if (direction !== 'down' && direction !== 'up') return;
 
         const items = Array.from(panelRef.current?.querySelectorAll<HTMLAnchorElement>('a') || []);
         if (!items.length) return;
 
         event.preventDefault();
+        event.stopPropagation();
         const currentIndex = Math.max(0, items.findIndex(item => item === document.activeElement));
-        const direction = event.key === 'ArrowDown' ? 1 : -1;
-        const nextIndex = (currentIndex + direction + items.length) % items.length;
+        const offset = direction === 'down' ? 1 : -1;
+        const nextIndex = (currentIndex + offset + items.length) % items.length;
 
         items[nextIndex]?.focus();
     }, [requestClose]);
@@ -203,7 +247,7 @@ export default function PtvShellPrimaryDropdown({
             requestClose();
         };
         const handleEscape = (event: KeyboardEvent) => {
-            if (!['Escape', 'BrowserBack', 'GoBack', 'XF86Back'].includes(event.key)) return;
+            if (event.defaultPrevented || (event.key !== 'Escape' && !isPtvRemoteBackKey(event))) return;
 
             event.preventDefault();
             requestClose();

@@ -63,6 +63,7 @@ import { clearPtvIntegrationSettingsCache } from '../integrations/integrationsCo
 import { normalizePtvRecommendationRowSettings } from '../recommendations/recommendationSettings';
 import { serializeSanitizedPtvDebugExport } from './debugExportSanitizer';
 import { getPtvDashboardRuntimeDiagnostics } from './dashboardRuntimeDiagnostics';
+import { RemoteDiagnosticsPanel } from './RemoteDiagnosticsPanel';
 import { getPtvShellFoundationStatus } from '../../shell/foundation';
 
 type PtvPluginFeaturedStatus = {
@@ -3716,6 +3717,13 @@ const PiggieTvDashboardPage = () => {
                                             <DebugReportPreview text={debugReportText} />
                                         ) : (
                                             <Typography color='text.secondary'>Enable PTV_DEBUG to collect detailed event history. Live plugin, cache, profile, and persisted recommendation state is shown above.</Typography>
+                                        )}
+                                        {statusSupportsFeature(pluginStatus, 'remoteDiagnostics') ? (
+                                            <RemoteDiagnosticsPanel />
+                                        ) : (
+                                            <Typography color='text.secondary'>
+                                                Remote client diagnostics require a connected PiggieTV plugin that advertises the remoteDiagnostics capability.
+                                            </Typography>
                                         )}
                                     </Stack>
                                 </CardContent>

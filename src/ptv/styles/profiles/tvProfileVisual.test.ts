@@ -33,6 +33,9 @@ describe('PiggieTV TV compatibility profile', () => {
 
     it('uses a static webOS glass fallback without depending on backdrop-filter', () => {
         expect(webOsStyles).toContain('html.ptv-platform-webos');
+        expect(webOsStyles).toContain('--ptv-webos-glass: rgb(39 21 62 / 76%)');
+        expect(webOsStyles).toContain('--ptv-webos-glass-strong: rgb(48 25 76 / 86%)');
+        expect(webOsStyles).toContain('lowering fill opacity gives the glass more depth');
         expect(webOsStyles).toContain('backdrop-filter: none !important');
         expect(webOsStyles).toContain('-webkit-backdrop-filter: none !important');
         expect(webOsStyles).toContain('animation: none !important');
