@@ -74,13 +74,13 @@ public sealed class PtvRemoteDiagnosticsController : BaseJellyfinApiController
     {
         if (presence is null || presence.SchemaVersion != 1 || string.IsNullOrWhiteSpace(presence.ClientId))
         {
-            return BadRequest(new PtvErrorResponse("PTV_DIAGNOSTICS_INVALID_PRESENCE", "A schema-v1 client presence payload is required."));
+            return BadRequest(new PtvErrorResponse("diagnostics-registration-failed", "A schema-v1 client presence payload is required."));
         }
 
         var ownerKey = GetAuthenticatedOwnerKey();
         if (ownerKey is null)
         {
-            return Unauthorized(new PtvErrorResponse("PTV_DIAGNOSTICS_IDENTITY_REQUIRED", "An authenticated Jellyfin user identity is required."));
+            return Unauthorized(new PtvErrorResponse("diagnostics-registration-auth-required", "An authenticated Jellyfin user identity is required."));
         }
 
         return Ok(_store.CheckIn(ownerKey, presence));

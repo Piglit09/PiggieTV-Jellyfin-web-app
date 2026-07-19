@@ -19,7 +19,7 @@ Maintenance rule: after every completed project prompt, update `HANDOFF.md`, `PR
 | Featured cache | Schema/version 7, plugin and browser stale-while-revalidate path |
 | Reading home cache | Schema 4, 5-minute fresh TTL, 24-hour stale window |
 
-The current worktree adds conflict-safe media-source deduplication, TV remote activation/dropdown regressions, lighter static webOS glass, an administrator-controlled local remote-diagnostics system across the frontend and companion plugin, optional LG webOS CLI helpers, repository hygiene, and these project-memory updates. Machine-local/generated artifacts are intentionally untracked; the five-file `src/ptv/plugin/bin` deployment payload is intentionally tracked and refreshed.
+The current worktree adds conflict-safe media-source deduplication, TV remote activation/dropdown regressions, lighter static webOS glass, an administrator-controlled local remote-diagnostics system across the frontend and companion plugin, a Remote Diagnostics dashboard crash hardening pass, optional LG webOS CLI helpers, repository hygiene, and these project-memory updates. Machine-local/generated artifacts are intentionally untracked; the five-file `src/ptv/plugin/bin` deployment payload is intentionally tracked and refreshed. C# diagnostics tests now build synthetic credential-shaped strings at runtime to keep authorization coverage while avoiding committed secrets that match repository scan rules.
 
 ## Current Product State
 
@@ -79,7 +79,11 @@ The current worktree adds conflict-safe media-source deduplication, TV remote ac
 
 ### Local Remote Diagnostics And webOS Operations
 
-- The plugin advertises `remoteDiagnostics` only when the matching API is present. Authenticated clients check in through a bounded capability-aware transport; administrators list/filter clients, start 5- or 10-minute sessions, stop them, request snapshots, and view/download the latest report from Dashboard.
+- The plugin advertises `remoteDiagnostics` only when the matching API is present. Authenticated PiggieTV web clients check in through a bounded capability-aware transport at `POST /Ptv/v1/diagnostics/clients/check-in`; administrators list/filter clients, start 5- or 10-minute sessions, stop them, request snapshots, and view/download the latest report from Dashboard.
+- Remote Client Diagnostics intentionally does not synthesize entries from Jellyfin's active playback sessions. A native Jellyfin Android TV/Fire TV playback session appears only after that runtime also executes the PTV web bundle or a future native/wrapper bridge sends equivalent safe check-ins. Fire TV web/wrapper clients are normalized from UA plus safe app/device/platform metadata, including `Jellyfin Android TV 0.19.9` on Fire OS/Fire TV signals.
+- Remote diagnostics summaries now include sanitized display/device/app/version/platform labels, first/last seen times, native-runtime hint, explicit heartbeat/command/report/performance/network/playback/memory capability booleans, and a tiny boot marker with platform/runtime/module/check-in/build/registration state. Internal fallback names such as `oldname_dup` are rejected as primary labels, duplicate friendly names keep the opaque suffix secondary, unsupported actions are disabled, and client/report state remains memory-only with 30-minute expiry.
+- The Dashboard now separates Detected Jellyfin sessions from Remote diagnostics clients. Session rows explain LG webOS and Fire TV/Android TV devices as `unsupported`, `server-observed`, `stale-build`, or diagnostics-ready when a real check-in matches; Start diagnostics and Request snapshot remain available only to real full diagnostics clients.
+- The Dashboard treats remote-diagnostics client-list responses as untrusted. It normalizes from `unknown`, rejects missing/non-array responses to the empty state, skips rows without a usable `clientId`, deduplicates keys, safely defaults optional strings/booleans/nullables, and logs only compact debug-mode warnings with route/component/source-row metadata.
 - Collection is inactive without a valid lease and tears down on expiry, revocation, agent disposal, or an explicit unsupported-capability command. Plugin-side reports are memory-only, expire automatically, and are bound to the authenticated Jellyfin identity.
 - Client payloads contain coarse profile, route/render/playback/input/error/network/long-task/FPS/memory evidence and a bounded allowlisted operational log tail. They exclude raw user agents, arbitrary errors/log details, credentials, query strings, private origins, local/media paths, titles, and user/item/source identifiers.
 - The client retains at most 300 samples and budgets 160 KiB; the plugin caps presence at 8 KiB and reports at 192 KiB, independently bounds JSON shape/string sizes, and sanitizes again before storage.
@@ -107,15 +111,19 @@ The 2026-07-19 worktree was reverified after the final frontend, plugin, documen
 | Check | Result |
 | --- | --- |
 | Targeted frontend tests | 9 files, 58 tests passed |
+| Secret scanner | `npm run secret:scan` passed |
+| RemoteDiagnosticsStoreTests | `dotnet test ... --filter "FullyQualifiedName~RemoteDiagnosticsStoreTests"` passed |
 | Media-source deduplication | 13 tests passed, including conflict bridges and transitive aliases |
 | TV focus/dropdown/style contracts | 21 tests passed across focus, dropdown, and TV/webOS visual contracts |
 | Remote-diagnostics frontend/API/dashboard | 24 tests passed |
+| Remote Diagnostics dashboard crash/session/capability regression | `RemoteDiagnosticsPanel.test.tsx` 14/14 passed for undefined client ID, null display fields, missing/non-array response, malformed row, empty response, partial loading, valid response, duplicate names, unsupported capabilities, refresh recovery, detected Fire TV native unsupported state, and LG webOS runtime/cache explanation |
 | Companion plugin tests | 20 tests passed |
 | Type/build check | `npm run build:check` passed |
 | Changed-source ESLint | Passed |
 | webOS Stylelint | Passed |
 | Plugin contract | API 1, cache 7, plugin `10.11.8.2`, target `10.11.8`, web `10.11.11` passed |
 | Production Webpack build | Passed in 90.3 seconds |
+| Follow-up production Webpack build | Passed after the dashboard crash fix |
 | Webpack warnings | Existing aggregate asset-size and entrypoint-size warnings only |
 | `git diff --check` | Passed |
 | Repository hygiene audit | No tracked `.dotnet-home`, Vite result, split-development log/PID, or nested plugin project/test `bin`/`obj`; no physical nested plugin `bin`/`obj` remained |

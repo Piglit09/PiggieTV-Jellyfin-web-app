@@ -25,6 +25,7 @@ type PtvJellyfinApiClient = {
     fetch?: (request: PtvApiRequest, includeAuthorization?: boolean) => Promise<unknown>;
     getCurrentUserId?: () => string | null | undefined;
     getJSON?: (url: string, includeAuthorization?: boolean) => Promise<unknown>;
+    getSessions?: (options?: unknown) => Promise<unknown>;
     getUrl?: (name: string, params?: Record<string, unknown>) => string;
     serverAddress?: () => string;
 };
@@ -1526,6 +1527,9 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
     if (!apiClient?.getUrl) return null;
 
     return {
+        getCurrentUserId() {
+            return typeof apiClient.getCurrentUserId === 'function' ? apiClient.getCurrentUserId() : null;
+        },
         getBackdropPreprocessStatus<T = unknown>(options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
                 apiClient,
@@ -1612,6 +1616,14 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                     method: 'POST'
                 }
             );
+        },
+        getRemoteDiagnosticsCheckInUrl() {
+            return getPluginUrl(apiClient, PTV_PLUGIN_API.endpoints.remoteDiagnosticsCheckIn);
+        },
+        getJellyfinSessions<T = unknown>(options?: unknown) {
+            return typeof apiClient.getSessions === 'function' ?
+                apiClient.getSessions(options) as Promise<T> :
+                Promise.resolve([] as T);
         },
         publishRemoteDiagnosticsReport<TReport = unknown>(report: TReport, options?: PtvPluginRequestOptions) {
             return requestPluginJson<void>(

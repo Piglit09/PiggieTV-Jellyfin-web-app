@@ -305,6 +305,9 @@
 
 .dashboardDocument .content-primary {
     width: min(1500px, calc(100vw - 72px)) !important;
+    box-sizing: border-box;
+    max-width: 100% !important;
+    overflow-x: clip;
     padding:
         0
         clamp(22px, 3vw, 42px)
@@ -312,11 +315,22 @@
 }
 
 .dashboardDocument .content-primary.ptv-admin-shell-spaced {
-    padding-top: var(--ptv-dashboard-shell-top-offset, var(--ptv-admin-shell-top-offset)) !important;
+    padding-top: 0 !important;
+    scroll-margin-top: 0 !important;
 }
 
 .dashboardDocument .content-primary > .MuiGrid-container {
     align-items: flex-start;
+}
+
+.dashboardDocument [data-ptv-remote-diagnostics-admin] {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.dashboardDocument [data-ptv-remote-diagnostics-admin] .Mui-disabled {
+    color: rgba(244, 238, 255, 0.42) !important;
+    -webkit-text-fill-color: rgba(244, 238, 255, 0.42) !important;
 }
 
 .dashboardDocument .ptv-dashboard-overview-page {

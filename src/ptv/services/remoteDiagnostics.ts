@@ -1,3 +1,4 @@
+import { getPtvBuildInfo } from '../core/buildInfo';
 import { getPtvClientProfile } from '../core/clientProfile';
 import {
     createPtvRemoteDiagnosticsPayload,
@@ -15,6 +16,7 @@ import {
     type PtvRemoteDiagnosticsPayload,
     type PtvRemoteDiagnosticsProfileTag
 } from '../core/remoteDiagnosticsModel';
+import { getPtvRuntimeDiagnostics } from '../core/runtime';
 import { ptvLogger } from '../core/logger';
 import {
     subscribeToPtvGlobalPlaybackState,
@@ -22,6 +24,8 @@ import {
 } from './playbackStateService';
 
 export type PtvRemoteDiagnosticsPresence = {
+    boot: PtvRemoteDiagnosticsBootMarker;
+    capabilities: PtvRemoteDiagnosticsClientCapabilities;
     clientId: string;
     diagnostics: {
         active: boolean;
@@ -33,6 +37,40 @@ export type PtvRemoteDiagnosticsPresence = {
     route: string;
     schemaVersion: typeof PTV_REMOTE_DIAGNOSTICS_SCHEMA_VERSION;
     seenAt: number;
+    metadata: PtvRemoteDiagnosticsClientMetadata;
+};
+
+export type PtvRemoteDiagnosticsBootMarker = {
+    checkInAttempted: boolean;
+    checkInStatus: number | null;
+    diagnosticsModuleLoaded: boolean;
+    failureCode: string | null;
+    frontendBuildId: string;
+    loadedClientBuildId: string;
+    platformDetected: string;
+    ptvRuntimeLoaded: boolean;
+    remoteDiagnosticsRegistrationCount: number;
+};
+
+export type PtvRemoteDiagnosticsClientCapabilities = {
+    heartbeat: boolean;
+    memoryMetrics: boolean;
+    navigationTiming: boolean;
+    networkTiming: boolean;
+    performanceMetrics: boolean;
+    playbackTelemetry: boolean;
+    remoteCommands: boolean;
+    reportExport: boolean;
+};
+
+export type PtvRemoteDiagnosticsClientMetadata = {
+    applicationName: string;
+    applicationVersion: string;
+    deviceDisplayName: string;
+    deviceName: string;
+    deviceType: string;
+    nativeRuntime: boolean;
+    platform: string;
 };
 
 export type PtvRemoteDiagnosticsCommand = {
@@ -69,6 +107,11 @@ type PtvRemoteDiagnosticsApi = {
 };
 
 type PtvDiagnosticsWindow = Window & {
+    ApiClient?: {
+        appName?: () => string;
+        appVersion?: () => string;
+        deviceName?: () => string;
+    };
     PTV?: Record<string, unknown> & {
         remoteDiagnostics?: PtvRemoteDiagnosticsApi;
     };
@@ -182,6 +225,9 @@ let lastLeaseRejection: string | null = null;
 let lastSnapshot: PtvRemoteDiagnosticsPayload | null = null;
 let publishInFlight: Promise<void> | null = null;
 let transport: PtvRemoteDiagnosticsTransport | null = null;
+let bootCheckInAttempted = false;
+let bootCheckInStatus: number | null = null;
+let bootFailureCode: string | null = null;
 
 function getSessionStorage() {
     try {
@@ -249,6 +295,95 @@ function getProfileTag() {
     });
 }
 
+function getSafeRuntimeString(value: unknown, maximumLength = 96) {
+    if (typeof value !== 'string') return '';
+
+    return value.trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, maximumLength);
+}
+
+function readApiClientString(reader: (() => string) | undefined, maximumLength = 96) {
+    try {
+        return getSafeRuntimeString(typeof reader === 'function' ? reader() : '', maximumLength);
+    } catch {
+        return '';
+    }
+}
+
+function getFriendlyPlatform(profile: PtvRemoteDiagnosticsProfileTag) {
+    if (profile.tvPlatform === 'fire-tv') return 'Fire TV';
+    if (profile.tvPlatform === 'webos') return 'LG webOS';
+    if (profile.tvPlatform === 'android-tv') return 'Android TV';
+    if (profile.tvPlatform === 'tizen') return 'Samsung Tizen';
+    if (profile.tvPlatform === 'roku') return 'Roku';
+
+    return profile.kind;
+}
+
+function getPtvRemoteDiagnosticsClientMetadata(profile = getProfileTag()): PtvRemoteDiagnosticsClientMetadata {
+    const apiClient = diagnosticsWindow.ApiClient;
+    const applicationName = readApiClientString(apiClient?.appName) || 'Jellyfin Web';
+    const applicationVersion = readApiClientString(apiClient?.appVersion, 48);
+    const rawDeviceName = readApiClientString(apiClient?.deviceName);
+    const friendlyPlatform = getFriendlyPlatform(profile);
+    const deviceName = rawDeviceName || friendlyPlatform;
+
+    return {
+        applicationName,
+        applicationVersion,
+        deviceDisplayName: deviceName,
+        deviceName,
+        deviceType: profile.tvPlatform === 'none' ? profile.kind : profile.tvPlatform,
+        nativeRuntime: applicationName !== 'Jellyfin Web',
+        platform: friendlyPlatform
+    };
+}
+
+function getPtvRemoteDiagnosticsClientCapabilities(): PtvRemoteDiagnosticsClientCapabilities {
+    const hasPerformanceEntries = typeof performance !== 'undefined'
+        && typeof performance['getEntriesByType'] === 'function';
+
+    return {
+        heartbeat: true,
+        memoryMetrics: (typeof navigator !== 'undefined' && 'deviceMemory' in navigator)
+            || (typeof performance !== 'undefined' && Boolean((performance as PerformanceWithMemory).memory)),
+        navigationTiming: hasPerformanceEntries,
+        networkTiming: typeof window.fetch === 'function' || typeof XMLHttpRequest !== 'undefined',
+        performanceMetrics: typeof performance !== 'undefined' && typeof performance.now === 'function',
+        playbackTelemetry: true,
+        remoteCommands: true,
+        reportExport: true
+    };
+}
+
+export function updatePtvRemoteDiagnosticsBootMarker(options: {
+    checkInAttempted?: boolean;
+    checkInStatus?: number | null;
+    failureCode?: string | null;
+}) {
+    if (typeof options.checkInAttempted === 'boolean') bootCheckInAttempted = options.checkInAttempted;
+    if (options.checkInStatus !== undefined) bootCheckInStatus = options.checkInStatus;
+    if (options.failureCode !== undefined) bootFailureCode = options.failureCode;
+}
+
+function getPtvRemoteDiagnosticsBootMarker(profile = getProfileTag()): PtvRemoteDiagnosticsBootMarker {
+    const runtimeDiagnostics = getPtvRuntimeDiagnostics();
+    const buildInfo = getPtvBuildInfo();
+
+    return {
+        checkInAttempted: bootCheckInAttempted,
+        checkInStatus: bootCheckInStatus,
+        diagnosticsModuleLoaded: true,
+        failureCode: bootFailureCode,
+        frontendBuildId: buildInfo.frontendBuildId,
+        loadedClientBuildId: buildInfo.frontendBuildId,
+        platformDetected: profile.tvPlatform === 'none' ? profile.kind : profile.tvPlatform,
+        ptvRuntimeLoaded: runtimeDiagnostics.runtimeCreateCount > 0 || runtimeDiagnostics.ready,
+        remoteDiagnosticsRegistrationCount: runtimeDiagnostics.featureRegistrationCount['remote-diagnostics'] || 0
+    };
+}
+
 function isLeaseActive() {
     if (!activeLease) return false;
     if (activeLease.expiresAt > now()) return true;
@@ -287,7 +422,11 @@ function getCurrentRoute() {
 }
 
 export function getPtvRemoteDiagnosticsPresence(): PtvRemoteDiagnosticsPresence {
+    const profile = getProfileTag();
+
     return {
+        boot: getPtvRemoteDiagnosticsBootMarker(profile),
+        capabilities: getPtvRemoteDiagnosticsClientCapabilities(),
         clientId,
         diagnostics: {
             active: isLeaseActive(),
@@ -295,7 +434,8 @@ export function getPtvRemoteDiagnosticsPresence(): PtvRemoteDiagnosticsPresence 
             lastLeaseRejection,
             sessionId: activeLease?.sessionId || null
         },
-        profile: getProfileTag(),
+        metadata: getPtvRemoteDiagnosticsClientMetadata(profile),
+        profile,
         route: getCurrentRoute(),
         schemaVersion: PTV_REMOTE_DIAGNOSTICS_SCHEMA_VERSION,
         seenAt: now()

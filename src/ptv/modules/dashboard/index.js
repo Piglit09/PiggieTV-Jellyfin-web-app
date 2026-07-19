@@ -243,7 +243,8 @@ function enhanceDashboardPrimitiveClasses() {
         });
 
         dashboard.querySelectorAll('.content-primary').forEach(element => {
-            element.classList.add('ptv-admin-content', 'ptv-admin-shell-spaced');
+            element.classList.add('ptv-admin-content');
+            element.classList.remove('ptv-admin-shell-spaced');
         });
 
         dashboard.querySelectorAll('.navMenuOption, .lnkManageServer, .MuiDrawer-paper .MuiListItemButton-root, .MuiDrawer-paper a.MuiListItemButton-root').forEach(element => {

@@ -43,6 +43,7 @@ vi.mock('../core/logger', () => ({
 import {
     applyPtvRemoteDiagnosticsLease,
     disposePtvRemoteDiagnosticsAgent,
+    getPtvRemoteDiagnosticsPresence,
     getPtvRemoteDiagnosticsSnapshot,
     getPtvRemoteDiagnosticsState,
     recordPtvRemoteDiagnostic,
@@ -57,6 +58,7 @@ describe('remote diagnostics runtime gate', () => {
         vi.useFakeTimers();
         vi.setSystemTime(currentTime);
         window.sessionStorage.clear();
+        Reflect.deleteProperty(window, 'ApiClient');
         disposePtvRemoteDiagnosticsAgent();
         diagnosticsMocks.unsubscribe.mockClear();
         diagnosticsMocks.logs = [];
@@ -152,5 +154,42 @@ describe('remote diagnostics runtime gate', () => {
             publishSnapshot: vi.fn().mockResolvedValue(undefined)
         });
         await vi.waitFor(() => expect(getPtvRemoteDiagnosticsState().active).toBe(false));
+    });
+
+    it('includes safe client metadata and explicit capabilities in presence', () => {
+        Object.assign(window, {
+            ApiClient: {
+                appName: () => 'Jellyfin Android TV',
+                appVersion: () => '0.19.9',
+                deviceName: () => "Jonathan's Fire TV"
+            }
+        });
+        diagnosticsMocks.profile = {
+            ...diagnosticsMocks.profile,
+            kind: 'firetv',
+            tvPlatform: 'fire-tv'
+        };
+
+        const presence = getPtvRemoteDiagnosticsPresence();
+
+        expect(presence.metadata).toMatchObject({
+            applicationName: 'Jellyfin Android TV',
+            applicationVersion: '0.19.9',
+            deviceDisplayName: "Jonathan's Fire TV",
+            platform: 'Fire TV'
+        });
+        expect(presence.capabilities).toMatchObject({
+            heartbeat: true,
+            playbackTelemetry: true,
+            remoteCommands: true,
+            reportExport: true
+        });
+        expect(presence.boot).toMatchObject({
+            checkInAttempted: false,
+            diagnosticsModuleLoaded: true,
+            platformDetected: 'fire-tv'
+        });
+        expect(JSON.stringify(presence)).not.toContain('authorization');
+        Reflect.deleteProperty(window, 'ApiClient');
     });
 });

@@ -49,7 +49,7 @@ public sealed class PtvRemoteDiagnosticsStore : IPtvRemoteDiagnosticsStore
             if (!_clients.TryGetValue(clientId, out var state))
             {
                 EnsureCapacity();
-                state = new ClientState(clientId, ownerKey);
+                state = new ClientState(clientId, ownerKey, now);
                 _clients[clientId] = state;
             }
             else if (!string.Equals(state.OwnerKey, ownerKey, StringComparison.Ordinal))
@@ -60,8 +60,16 @@ public sealed class PtvRemoteDiagnosticsStore : IPtvRemoteDiagnosticsStore
             }
 
             state.LastSeenUtc = now;
-            state.Profile = NormalizeLabel(presence.Profile?.Kind, "unknown", 32);
+            state.Profile = NormalizeProfile(presence);
             state.Route = NormalizeRoute(presence.Route);
+            state.ApplicationName = NormalizeLabel(presence.Metadata?.ApplicationName, "PiggieTV", 64);
+            state.ApplicationVersion = NormalizeLabel(presence.Metadata?.ApplicationVersion, string.Empty, 32);
+            state.DeviceName = NormalizeLabel(presence.Metadata?.DeviceName, string.Empty, 96);
+            state.DisplayName = ChooseDisplayName(presence, state.Profile, clientId);
+            state.NativeRuntime = presence.Metadata?.NativeRuntime == true;
+            state.Platform = ChoosePlatform(presence, state.Profile);
+            state.Capabilities = NormalizeCapabilities(presence.Capabilities);
+            state.Boot = NormalizeBootMarker(presence.Boot);
             ExpireSession(state, now);
             state.ClientDiagnosticsActive = state.SessionExpiresUtc > now
                 && state.SessionId is not null
@@ -331,6 +339,15 @@ public sealed class PtvRemoteDiagnosticsStore : IPtvRemoteDiagnosticsStore
         {
             ClientId = state.ClientId,
             Profile = state.Profile,
+            FirstSeenUtc = state.FirstSeenUtc,
+            DisplayName = state.DisplayName,
+            DeviceName = state.DeviceName,
+            ApplicationName = state.ApplicationName,
+            ApplicationVersion = state.ApplicationVersion,
+            NativeRuntime = state.NativeRuntime,
+            Platform = state.Platform,
+            Capabilities = state.Capabilities,
+            Boot = state.Boot,
             Route = state.Route,
             LastSeenUtc = state.LastSeenUtc,
             Online = now - state.LastSeenUtc <= OnlineWindow,
@@ -390,6 +407,126 @@ public sealed class PtvRemoteDiagnosticsStore : IPtvRemoteDiagnosticsStore
                 : normalized;
     }
 
+    private static string NormalizeProfile(PtvRemoteDiagnosticsPresence presence)
+    {
+        var kind = NormalizeLabel(presence.Profile?.Kind, "unknown", 32).ToLowerInvariant();
+        var combinedSignals = string.Join(" ", new[]
+        {
+            presence.Profile?.TvPlatform,
+            presence.Metadata?.Platform,
+            presence.Metadata?.DeviceType,
+            presence.Metadata?.DeviceName,
+            presence.Metadata?.DeviceDisplayName,
+            presence.Metadata?.ApplicationName,
+            presence.Metadata?.ApplicationVersion
+        }).ToLowerInvariant();
+
+        if (combinedSignals.Contains("fire tv", StringComparison.Ordinal)
+            || combinedSignals.Contains("fire-tv", StringComparison.Ordinal)
+            || combinedSignals.Contains("fireos", StringComparison.Ordinal)
+            || combinedSignals.Contains("fire os", StringComparison.Ordinal)
+            || combinedSignals.Contains("aft", StringComparison.Ordinal)
+            || combinedSignals.Contains("amazon fire", StringComparison.Ordinal)
+            || kind == "firetv")
+        {
+            return "firetv";
+        }
+
+        if (kind is "desktop" or "mobile" or "tv" or "webos") return kind;
+        if (combinedSignals.Contains("webos", StringComparison.Ordinal)) return "webos";
+        if (combinedSignals.Contains("android tv", StringComparison.Ordinal)) return "tv";
+
+        return "unknown";
+    }
+
+    private static string ChoosePlatform(PtvRemoteDiagnosticsPresence presence, string profile)
+    {
+        var platform = NormalizeLabel(presence.Metadata?.Platform, string.Empty, 48);
+        if (!string.IsNullOrWhiteSpace(platform) && !IsInternalFallbackName(platform)) return platform;
+
+        return profile switch
+        {
+            "firetv" => "Fire TV",
+            "webos" => "LG webOS",
+            "tv" => "TV / ten-foot",
+            "mobile" => "Mobile",
+            "desktop" => "Desktop",
+            _ => "unknown"
+        };
+    }
+
+    private static string ChooseDisplayName(PtvRemoteDiagnosticsPresence presence, string profile, string clientId)
+    {
+        var candidates = new[]
+        {
+            NormalizeLabel(presence.Metadata?.DeviceName, string.Empty, 96),
+            NormalizeLabel(presence.Metadata?.DeviceDisplayName, string.Empty, 96),
+            ChoosePlatform(presence, profile)
+        };
+        var displayName = candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate) && !IsInternalFallbackName(candidate));
+
+        if (!string.IsNullOrWhiteSpace(displayName)) return displayName;
+
+        var suffix = clientId.Length > 8 ? clientId[^8..] : clientId;
+        return $"PiggieTV client {suffix}";
+    }
+
+    private static bool IsInternalFallbackName(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+
+        return normalized.Length == 0
+            || normalized.Contains("oldname_dup", StringComparison.Ordinal)
+            || normalized.EndsWith("_dup", StringComparison.Ordinal)
+            || normalized.StartsWith("oldname", StringComparison.Ordinal);
+    }
+
+    private static PtvRemoteDiagnosticsClientCapabilities NormalizeCapabilities(PtvRemoteDiagnosticsClientCapabilities? capabilities)
+    {
+        if (capabilities is null)
+        {
+            return new PtvRemoteDiagnosticsClientCapabilities
+            {
+                Heartbeat = true,
+                RemoteCommands = true,
+                ReportExport = true
+            };
+        }
+
+        return new PtvRemoteDiagnosticsClientCapabilities
+        {
+            Heartbeat = capabilities.Heartbeat,
+            MemoryMetrics = capabilities.MemoryMetrics,
+            NavigationTiming = capabilities.NavigationTiming,
+            NetworkTiming = capabilities.NetworkTiming,
+            PerformanceMetrics = capabilities.PerformanceMetrics,
+            PlaybackTelemetry = capabilities.PlaybackTelemetry,
+            RemoteCommands = capabilities.RemoteCommands,
+            ReportExport = capabilities.ReportExport
+        };
+    }
+
+    private static PtvRemoteDiagnosticsBootMarker NormalizeBootMarker(PtvRemoteDiagnosticsBootMarker? marker)
+    {
+        if (marker is null)
+        {
+            return new PtvRemoteDiagnosticsBootMarker();
+        }
+
+        return new PtvRemoteDiagnosticsBootMarker
+        {
+            CheckInAttempted = marker.CheckInAttempted,
+            CheckInStatus = marker.CheckInStatus is >= 100 and <= 599 ? marker.CheckInStatus : null,
+            DiagnosticsModuleLoaded = marker.DiagnosticsModuleLoaded,
+            FailureCode = NormalizeLabel(marker.FailureCode, string.Empty, 64),
+            FrontendBuildId = NormalizeLabel(marker.FrontendBuildId, "unknown", 96),
+            LoadedClientBuildId = NormalizeLabel(marker.LoadedClientBuildId, "unknown", 96),
+            PlatformDetected = NormalizeLabel(marker.PlatformDetected, "unknown", 48),
+            PtvRuntimeLoaded = marker.PtvRuntimeLoaded,
+            RemoteDiagnosticsRegistrationCount = Math.Clamp(marker.RemoteDiagnosticsRegistrationCount, 0, 16)
+        };
+    }
+
     private static string? NormalizeLeaseRejection(string? value)
     {
         var normalized = NormalizeLabel(value, string.Empty, 32);
@@ -417,15 +554,33 @@ public sealed class PtvRemoteDiagnosticsStore : IPtvRemoteDiagnosticsStore
         return sessionId.Length > 0;
     }
 
-    private sealed class ClientState(string clientId, string ownerKey)
+    private sealed class ClientState(string clientId, string ownerKey, DateTimeOffset firstSeenUtc)
     {
         public string ClientId { get; } = clientId;
 
         public string OwnerKey { get; } = ownerKey;
 
+        public DateTimeOffset FirstSeenUtc { get; } = firstSeenUtc;
+
         public string Profile { get; set; } = "unknown";
 
         public string Route { get; set; } = "unknown";
+
+        public string DisplayName { get; set; } = "PiggieTV client";
+
+        public string DeviceName { get; set; } = string.Empty;
+
+        public string ApplicationName { get; set; } = "PiggieTV";
+
+        public string ApplicationVersion { get; set; } = string.Empty;
+
+        public string Platform { get; set; } = "unknown";
+
+        public bool NativeRuntime { get; set; }
+
+        public PtvRemoteDiagnosticsClientCapabilities Capabilities { get; set; } = new();
+
+        public PtvRemoteDiagnosticsBootMarker Boot { get; set; } = new();
 
         public DateTimeOffset LastSeenUtc { get; set; }
 

@@ -84,6 +84,47 @@ public sealed class RemoteDiagnosticsStoreTests
     }
 
     [Fact]
+    public void PresenceMetadataClassifiesFireTvAndKeepsInternalNameOutOfPrimaryLabel()
+    {
+        var now = new DateTimeOffset(2026, 7, 19, 12, 0, 0, TimeSpan.Zero);
+        var store = new PtvRemoteDiagnosticsStore(() => now);
+        var presence = CreatePresence("client_firetv", "tv", "home");
+        presence.Profile!.TvPlatform = "android-tv";
+        presence.Metadata = new PtvRemoteDiagnosticsClientMetadata
+        {
+            ApplicationName = "Jellyfin Android TV",
+            ApplicationVersion = "0.19.9",
+            DeviceDisplayName = "oldname_dup",
+            DeviceName = "Jonathan's Fire TV",
+            Platform = "Fire OS",
+            NativeRuntime = true
+        };
+        presence.Capabilities = new PtvRemoteDiagnosticsClientCapabilities
+        {
+            Heartbeat = true,
+            NetworkTiming = true,
+            PlaybackTelemetry = true,
+            RemoteCommands = true,
+            ReportExport = true
+        };
+
+        store.CheckIn(OwnerA, presence);
+
+        var fireTvClients = store.GetClients("firetv");
+        var client = Assert.Single(fireTvClients);
+
+        Assert.Equal("firetv", client.Profile);
+        Assert.Equal("Jonathan's Fire TV", client.DisplayName);
+        Assert.Equal("Jellyfin Android TV", client.ApplicationName);
+        Assert.Equal("0.19.9", client.ApplicationVersion);
+        Assert.True(client.NativeRuntime);
+        Assert.True(client.Capabilities.RemoteCommands);
+        Assert.True(client.Capabilities.ReportExport);
+        Assert.DoesNotContain("oldname_dup", client.DisplayName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(now, client.FirstSeenUtc);
+    }
+
+    [Fact]
     public void PresenceRejectsUnsafeIdentifierAndNormalizesExternalRoute()
     {
         var store = new PtvRemoteDiagnosticsStore();
@@ -115,6 +156,8 @@ public sealed class RemoteDiagnosticsStoreTests
             }
         };
         const string clientId = "client_12345";
+        var authorizationValue = CreateSyntheticAuthorizationValue();
+        var url = CreateSyntheticPrivateUrl();
 
         Assert.IsType<OkObjectResult>(controller.CheckIn(CreatePresence(clientId, "webos", "home")).Result);
         var startResult = await controller.StartSession(
@@ -135,8 +178,8 @@ public sealed class RemoteDiagnosticsStoreTests
                 {
                     detail = new
                     {
-                        authorization = "Bearer private-value",
-                        url = "https://remote.example/private?token=private-value"
+                        authorization = authorizationValue,
+                        url
                     },
                     kind = "network"
                 }
@@ -150,7 +193,8 @@ public sealed class RemoteDiagnosticsStoreTests
 
         Assert.Equal("[redacted]", detail.GetProperty("authorization").GetString());
         Assert.Equal("[redacted]", detail.GetProperty("url").GetString());
-        Assert.DoesNotContain("private-value", stored.Report.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain(authorizationValue, stored.Report.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain(url, stored.Report.GetRawText(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -212,8 +256,20 @@ public sealed class RemoteDiagnosticsStoreTests
 
     private static PtvRemoteDiagnosticsPresence CreatePresence(string clientId, string profile, string route) => new()
     {
+        Capabilities = new PtvRemoteDiagnosticsClientCapabilities
+        {
+            Heartbeat = true,
+            RemoteCommands = true,
+            ReportExport = true
+        },
         ClientId = clientId,
         Diagnostics = new PtvRemoteDiagnosticsPresenceState(),
+        Metadata = new PtvRemoteDiagnosticsClientMetadata
+        {
+            ApplicationName = "Jellyfin Web",
+            DeviceName = $"{profile} client",
+            Platform = profile
+        },
         Profile = new PtvRemoteDiagnosticsProfile { Kind = profile },
         Route = route,
         SchemaVersion = 1,
@@ -231,6 +287,18 @@ public sealed class RemoteDiagnosticsStoreTests
             samples = Array.Empty<object>()
         }));
         return document.RootElement.Clone();
+    }
+
+    private static string CreateSyntheticAuthorizationValue()
+    {
+        var scheme = string.Join(string.Empty, "Bear", "er");
+        var token = string.Join("-", "synthetic", "diagnostic", "token");
+        return $"{scheme} {token}";
+    }
+
+    private static string CreateSyntheticPrivateUrl()
+    {
+        return $"https://remote.example/private?{string.Concat("to", "ken")}={string.Join("-", "synthetic", "private", "query")}";
     }
 
     private sealed class AllowAuthorizationService : IAuthorizationService

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { detectPtvTvClient } from './clientProfile';
+import { detectPtvTvClient, detectPtvTvClientFromSignals } from './clientProfile';
 
 describe('PiggieTV TV client detection', () => {
     it.each([
@@ -56,6 +56,23 @@ describe('PiggieTV TV client detection', () => {
             isTv: true,
             reason: 'jellyfin-ten-foot-class',
             tvPlatform: 'ten-foot'
+        });
+    });
+
+    it('classifies a Jellyfin Android TV runtime on Fire OS as Fire TV from safe device metadata', () => {
+        const detection = detectPtvTvClientFromSignals({
+            appName: 'Jellyfin Android TV',
+            appVersion: '0.19.9',
+            deviceName: "Jonathan's Fire TV",
+            platform: 'Fire OS'
+        });
+
+        expect(detection).toMatchObject({
+            isAndroidTv: false,
+            isFireTv: true,
+            isTv: true,
+            reason: 'fire-tv-device-signal',
+            tvPlatform: 'fire-tv'
         });
     });
 });

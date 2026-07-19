@@ -78,6 +78,16 @@ export type PtvTvDetection = {
     tvPlatform: PtvTvPlatform;
 };
 
+export type PtvTvClientSignals = {
+    appName?: string | null;
+    appVersion?: string | null;
+    clientName?: string | null;
+    deviceName?: string | null;
+    deviceType?: string | null;
+    platform?: string | null;
+    userAgent?: string | null;
+};
+
 type MutablePerformanceValue<T> =
     T extends boolean ? boolean :
         T extends number ? number :
@@ -95,9 +105,11 @@ export type PtvPerformanceProfile = PtvPerformanceDefaults & {
     renderProfile: PtvRenderProfileContract;
 };
 
-const FIRE_TV_PATTERN = /(aft[a-z0-9]*|fire\s?tv|amazonwebappplatform)/i;
+const FIRE_TV_PATTERN = /(aft[a-z0-9]*|fire\s?tv|amazonwebappplatform|silk\/)/i;
+const FIRE_OS_SIGNAL_PATTERN = /(aft[a-z0-9]*|amazon\s?fire|fire\s?os|fireos|fire\s?tv|kindle\s?fire|silk\/)/i;
 const WEB_OS_PATTERN = /(web0s|webos|netcast|lg\s?browser|lge)/i;
 const ANDROID_TV_PATTERN = /(android\s?tv|google\s?tv|googletv|shield\s?android|nvidia\s?shield|mi\s?box|bravia.*android)/i;
+const JELLYFIN_ANDROID_TV_PATTERN = /jellyfin\s+android\s+tv/i;
 const ROKU_PATTERN = /(roku|dvp)/i;
 const TIZEN_PATTERN = /(tizen|smart-tv.*samsung|samsung.*smart-tv)/i;
 const TV_CLIENT_PATTERNS = [
@@ -106,6 +118,22 @@ const TV_CLIENT_PATTERNS = [
 ];
 const MOBILE_CLIENT_PATTERN = /(android|iphone|ipad|ipod|mobile)/i;
 const TABLET_CLIENT_PATTERN = /(ipad|tablet|silk(?!.*mobile)|kindle|playbook)/i;
+
+function signalToText(value: string | null | undefined) {
+    return typeof value === 'string' ? value : '';
+}
+
+function combineTvSignals(signals: PtvTvClientSignals) {
+    return [
+        signals.userAgent,
+        signals.clientName,
+        signals.appName,
+        signals.deviceName,
+        signals.deviceType,
+        signals.platform,
+        signals.appVersion
+    ].map(signalToText).join(' ');
+}
 
 function getNavigator(): NavigatorWithHardwareHints | null {
     if (typeof navigator === 'undefined') return null;
@@ -132,13 +160,22 @@ function supportsBackdropFilter() {
         || supportsCssProperty('-webkit-backdrop-filter', 'blur(1px)');
 }
 
-export function detectPtvTvClient(userAgent: string, hasTenFootSignal = false): PtvTvDetection {
-    const isFireTv = FIRE_TV_PATTERN.test(userAgent);
-    const isWebOs = WEB_OS_PATTERN.test(userAgent);
-    const isAndroidTv = ANDROID_TV_PATTERN.test(userAgent);
-    const isRoku = ROKU_PATTERN.test(userAgent);
-    const isTizen = TIZEN_PATTERN.test(userAgent);
-    const hasGenericTvUserAgent = TV_CLIENT_PATTERNS.some(pattern => pattern.test(userAgent));
+export function detectPtvTvClientFromSignals(
+    signals: PtvTvClientSignals,
+    hasTenFootSignal = false
+): PtvTvDetection {
+    const userAgent = signalToText(signals.userAgent);
+    const combinedSignals = combineTvSignals(signals);
+    const nativeAndroidTvSignal = JELLYFIN_ANDROID_TV_PATTERN.test(combinedSignals);
+    const hasFireOsSignal = FIRE_OS_SIGNAL_PATTERN.test(combinedSignals);
+    const isFireTv = FIRE_TV_PATTERN.test(combinedSignals)
+        || (nativeAndroidTvSignal && hasFireOsSignal);
+    const isWebOs = WEB_OS_PATTERN.test(combinedSignals);
+    const isAndroidTv = !isFireTv && (ANDROID_TV_PATTERN.test(combinedSignals) || nativeAndroidTvSignal);
+    const isRoku = ROKU_PATTERN.test(combinedSignals);
+    const isTizen = TIZEN_PATTERN.test(combinedSignals);
+    const hasGenericTvUserAgent = TV_CLIENT_PATTERNS.some(pattern => pattern.test(userAgent))
+        || TV_CLIENT_PATTERNS.some(pattern => pattern.test(combinedSignals));
     const isTv = isFireTv
         || isWebOs
         || isAndroidTv
@@ -151,7 +188,7 @@ export function detectPtvTvClient(userAgent: string, hasTenFootSignal = false): 
 
     if (isFireTv) {
         tvPlatform = 'fire-tv';
-        reason = 'fire-tv-user-agent';
+        reason = FIRE_TV_PATTERN.test(userAgent) ? 'fire-tv-user-agent' : 'fire-tv-device-signal';
     } else if (isWebOs) {
         tvPlatform = 'webos';
         reason = 'webos-user-agent';
@@ -182,6 +219,10 @@ export function detectPtvTvClient(userAgent: string, hasTenFootSignal = false): 
         reason,
         tvPlatform
     };
+}
+
+export function detectPtvTvClient(userAgent: string, hasTenFootSignal = false): PtvTvDetection {
+    return detectPtvTvClientFromSignals({ userAgent }, hasTenFootSignal);
 }
 
 function hasCoarsePointer() {
