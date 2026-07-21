@@ -70,6 +70,18 @@ const ROUTE_MATCHERS = [
         className: 'ptv-route-settings',
         density: 'dense',
         elevation: 1,
+        features: ['settings', 'tv-navigation-debug'],
+        id: 'tv-navigation-debug',
+        layout: 'settings',
+        navigationItemId: 'settings',
+        owner: 'settings',
+        pageType: 'settings',
+        pattern: ({ hash }) => /^#\/tv-navigation-debug(?:[/?]|$)/i.test(hash)
+    },
+    {
+        className: 'ptv-route-settings',
+        density: 'dense',
+        elevation: 1,
         features: ['settings'],
         id: 'settings',
         layout: 'settings',

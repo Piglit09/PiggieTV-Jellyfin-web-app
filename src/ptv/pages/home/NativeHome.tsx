@@ -25,6 +25,7 @@ import {
     type PtvItemRouteResult
 } from '../../core/itemRoutes';
 import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
+import { notifyPtvTvFocusContentReady } from '../../core/tvFocus';
 import { resolvePtvStaticAssetUrl } from '../../core/urlOrigins';
 import PTVShell from '../../shell/PTVShell';
 import { registerPtvNativeRoute } from '../../shell/routeController';
@@ -36,6 +37,8 @@ import {
 import { PtvIcon } from '../../modules/icons';
 import {
     getNativeHomeRowDiagnostics,
+    dedupeNativeHomeItems,
+    getNativeHomeItemVersionKey,
     type NativeHomeRow,
     useNativeHomeData,
     useNativeHomeVirtualRows
@@ -1778,6 +1781,8 @@ function NativeHomeHero({
                         <a
                             aria-label={`${primaryActionLabel} ${getItemTitle(heroItem)}`}
                             className='ptv-native-home-primary-action'
+                            data-ptv-focus-key={`home-hero-primary:${getItemId(heroItem)}`}
+                            data-ptv-initial-focus='home-primary'
                             href={primaryActionHref}
                             onClick={handlePrimaryAction}
                         >
@@ -2051,6 +2056,7 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
                 <a
                     aria-label={`Open ${title}`}
                     className='ptv-native-card-link ptv-native-card-media-link'
+                    data-ptv-focus-key={`home-card:${itemId}`}
                     data-ptv-route-fallback-reason={itemRoute?.fallbackReason || ''}
                     data-ptv-route-source={itemRoute?.routeSource || ''}
                     href={href}
@@ -2108,6 +2114,7 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
                     <button
                         aria-label={`Play ${title}`}
                         className='ptv-native-card-play ptv-card-play-pill'
+                        data-ptv-focus-key={`home-card-play:${itemId}`}
                         onClick={handlePlay}
                         type='button'
                     >
@@ -2129,6 +2136,7 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
             <a
                 aria-label={`Open ${title}`}
                 className='ptv-native-card-copy ptv-native-card-copy-link'
+                data-ptv-focus-key={`home-card-copy:${itemId}`}
                 data-ptv-route-fallback-reason={itemRoute?.fallbackReason || ''}
                 data-ptv-route-source={itemRoute?.routeSource || ''}
                 href={href}
@@ -2242,7 +2250,7 @@ function NativeHomeRowScroller({ onActiveItemChange, row }: NativeHomeRowScrolle
     const scrollerRef = useRef<HTMLDivElement | null>(null);
     const frameRef = useRef<number | null>(null);
     const timeoutRef = useRef<number | null>(null);
-    const displayItems = useMemo(() => getNativeHomeDisplayItems(row), [row]);
+    const displayItems = useMemo(() => dedupeNativeHomeItems(getNativeHomeDisplayItems(row)), [row]);
     const [navState, setNavState] = useState<NativeHomeRowNavState>(() => getNativeHomeRowNavState(null, false));
 
     const updateNavState = useCallback((reason: string) => {
@@ -2374,7 +2382,7 @@ function NativeHomeRowScroller({ onActiveItemChange, row }: NativeHomeRowScrolle
             >
                 {displayItems.map(item => (
                     <div
-                        key={`${row.id}-${item.Id || item.Name}`}
+                        key={`${row.id}-${getNativeHomeItemVersionKey(item) || item.Id || item.Name}`}
                         className='ptv-native-home-card-cell'
                         role='listitem'
                     >
@@ -2681,6 +2689,10 @@ function NativeHomeRowView({
 
     useEffect(() => {
         recordNativeHomeCardPipeline(row, isMounted);
+
+        if (isMounted && getNativeHomeDisplayItems(row).length) {
+            notifyPtvTvFocusContentReady(`home-row:${row.id}`);
+        }
     }, [isMounted, row]);
 
     return (

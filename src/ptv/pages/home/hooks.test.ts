@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { dedupeNativeHomeItems, getNativeHomeItemVersionKey } from './hooks';
 import { resolveNativeHomeDerivedRowSourceValue } from './rowSourceValue';
 
 describe('resolveNativeHomeDerivedRowSourceValue', () => {
@@ -22,5 +23,48 @@ describe('resolveNativeHomeDerivedRowSourceValue', () => {
             sourceType: 'genre',
             title: 'Comedy'
         })).toBe('Supernatural');
+    });
+});
+
+describe('native home item dedupe', () => {
+    it('uses a stable composite version key for equivalent movies', () => {
+        const firstMovie = {
+            Type: 'Movie',
+            Name: 'Sample Movie',
+            ProductionYear: 2024,
+            ProviderIds: {
+                Tmdb: 'tmdb-movie-sample'
+            },
+            Id: 'b045b246f007f0433fe4fea474b57960'
+        };
+        const secondMovie = {
+            Type: 'Movie',
+            Name: 'Sample Movie',
+            ProductionYear: 2024,
+            ProviderIds: {
+                Tmdb: 'tmdb-movie-sample'
+            },
+            Id: 'dd9c3ffb8df43402d88a627695ec5725'
+        };
+
+        expect(getNativeHomeItemVersionKey(firstMovie)).toBe(getNativeHomeItemVersionKey(secondMovie));
+        expect(dedupeNativeHomeItems([firstMovie, secondMovie])).toHaveLength(1);
+    });
+
+    it('keeps distinct movies with different names', () => {
+        const firstMovie = {
+            Type: 'Movie',
+            Name: 'Sample Movie',
+            ProductionYear: 2024,
+            Id: '11111111111111111111111111111111'
+        };
+        const secondMovie = {
+            Type: 'Movie',
+            Name: 'Another Movie',
+            ProductionYear: 2024,
+            Id: '22222222222222222222222222222222'
+        };
+
+        expect(dedupeNativeHomeItems([firstMovie, secondMovie])).toHaveLength(2);
     });
 });

@@ -30,6 +30,7 @@ export type PtvReadingOverridePersistenceState = Readonly<{
 const READING_OVERRIDE_UPGRADE_MESSAGE = 'Upgrade the PiggieTV plugin to 10.11.8.2 or newer to persist Reading corrections on the server. Browser storage is being used only as a local cache fallback.';
 
 const overridePersistenceState = new Map<PtvReadingRouteKind, PtvReadingOverridePersistenceState>();
+const readingOverrideRequests = new Map<string, Promise<Record<string, PtvReadingSeriesOverride>>>();
 
 function setOverridePersistenceState(
     routeKind: PtvReadingRouteKind,
@@ -188,7 +189,7 @@ export function loadPtvReadingSeriesOverrides(routeKind: PtvReadingRouteKind): R
     }
 }
 
-export async function loadPtvReadingSeriesOverridesFromServer(
+async function loadPtvReadingSeriesOverridesFromServerInternal(
     routeKind: PtvReadingRouteKind
 ): Promise<Record<string, PtvReadingSeriesOverride>> {
     const cachedOverrides = loadPtvReadingSeriesOverrides(routeKind);
@@ -262,6 +263,29 @@ export async function loadPtvReadingSeriesOverridesFromServer(
         });
         return cachedOverrides;
     }
+}
+
+export function loadPtvReadingSeriesOverridesFromServer(
+    routeKind: PtvReadingRouteKind
+): Promise<Record<string, PtvReadingSeriesOverride>> {
+    const existingRequest = readingOverrideRequests.get(routeKind);
+
+    if (existingRequest) {
+        recordPtvEvent('api', 'reading-series-overrides-request-deduplicated', { routeKind });
+        return existingRequest;
+    }
+
+    const request = loadPtvReadingSeriesOverridesFromServerInternal(routeKind);
+    readingOverrideRequests.set(routeKind, request);
+    const clearRequest = () => {
+        if (readingOverrideRequests.get(routeKind) === request) {
+            readingOverrideRequests.delete(routeKind);
+        }
+    };
+
+    void request.then(clearRequest, clearRequest);
+
+    return request;
 }
 
 export async function savePtvReadingSeriesOverrides(

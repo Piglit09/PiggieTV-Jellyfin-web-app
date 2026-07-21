@@ -118,9 +118,10 @@ function getBaseProfileOptions(item) {
 function getDeviceProfile(item) {
     return new Promise(function (resolve) {
         let profile;
+        const nativeAppHost = window.NativeShell?.AppHost;
 
-        if (window.NativeShell) {
-            profile = window.NativeShell.AppHost.getDeviceProfile(profileBuilder, __PACKAGE_JSON_VERSION__);
+        if (nativeAppHost && typeof nativeAppHost.getDeviceProfile === 'function') {
+            profile = nativeAppHost.getDeviceProfile(profileBuilder, __PACKAGE_JSON_VERSION__);
         } else {
             const builderOpts = getBaseProfileOptions(item);
             profile = profileBuilder(builderOpts);
@@ -367,8 +368,10 @@ const supportedFeatures = function () {
      */
 function doExit() {
     try {
-        if (window.NativeShell?.AppHost?.exit) {
-            window.NativeShell.AppHost.exit();
+        const nativeAppHost = window.NativeShell?.AppHost;
+
+        if (nativeAppHost && typeof nativeAppHost.exit === 'function') {
+            nativeAppHost.exit();
         } else if (browser.tizen) {
             tizen.application.getCurrentApplication().exit();
         } else if (browser.web0s) {
@@ -426,24 +429,30 @@ export const appHost = {
         }
     },
     supports: function (command) {
-        if (window.NativeShell) {
-            return window.NativeShell.AppHost.supports(command);
+        const nativeAppHost = window.NativeShell?.AppHost;
+
+        if (nativeAppHost && typeof nativeAppHost.supports === 'function') {
+            return nativeAppHost.supports(command);
         }
 
         return supportedFeatures.indexOf(command.toLowerCase()) !== -1;
     },
     preferVisualCards: browser.android || browser.chrome,
     getDefaultLayout: function () {
-        if (window.NativeShell) {
-            return window.NativeShell.AppHost.getDefaultLayout();
+        const nativeAppHost = window.NativeShell?.AppHost;
+
+        if (nativeAppHost && typeof nativeAppHost.getDefaultLayout === 'function') {
+            return nativeAppHost.getDefaultLayout();
         }
 
         return getDefaultLayout();
     },
     getDeviceProfile: getDeviceProfile,
     init: function () {
-        if (window.NativeShell) {
-            return window.NativeShell.AppHost.init();
+        const nativeAppHost = window.NativeShell?.AppHost;
+
+        if (nativeAppHost && typeof nativeAppHost.init === 'function') {
+            return nativeAppHost.init();
         }
 
         return {
@@ -452,20 +461,28 @@ export const appHost = {
         };
     },
     deviceName: function () {
-        return window.NativeShell?.AppHost?.deviceName ?
-            window.NativeShell.AppHost.deviceName() : getDeviceName();
+        const nativeAppHost = window.NativeShell?.AppHost;
+
+        return nativeAppHost && typeof nativeAppHost.deviceName === 'function' ?
+            nativeAppHost.deviceName() : getDeviceName();
     },
     deviceId: function () {
-        return window.NativeShell?.AppHost?.deviceId ?
-            window.NativeShell.AppHost.deviceId() : getDeviceId();
+        const nativeAppHost = window.NativeShell?.AppHost;
+
+        return nativeAppHost && typeof nativeAppHost.deviceId === 'function' ?
+            nativeAppHost.deviceId() : getDeviceId();
     },
     appName: function () {
-        return window.NativeShell?.AppHost?.appName ?
-            window.NativeShell.AppHost.appName() : appName;
+        const nativeAppHost = window.NativeShell?.AppHost;
+
+        return nativeAppHost && typeof nativeAppHost.appName === 'function' ?
+            nativeAppHost.appName() : appName;
     },
     appVersion: function () {
-        return window.NativeShell?.AppHost?.appVersion ?
-            window.NativeShell.AppHost.appVersion() : __PACKAGE_JSON_VERSION__;
+        const nativeAppHost = window.NativeShell?.AppHost;
+
+        return nativeAppHost && typeof nativeAppHost.appVersion === 'function' ?
+            nativeAppHost.appVersion() : __PACKAGE_JSON_VERSION__;
     },
     getPushTokenInfo: function () {
         return {};

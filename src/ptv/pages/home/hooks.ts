@@ -244,6 +244,14 @@ const HOME_CORE_ROW_ORDER = [
     'continue-listening',
     'latest'
 ] as const;
+const NATIVE_HOME_ITEM_PROVIDER_KEYS = [
+    'Imdb',
+    'Tmdb',
+    'Tvdb',
+    'MusicBrainzAlbum',
+    'MusicBrainzReleaseGroup',
+    'MusicBrainzArtist'
+] as const;
 
 function getEmptyRecommendationScoreDistribution(): PtvRecommendationScoreDistribution {
     return {
@@ -385,8 +393,63 @@ function getItems<T>(result: { Items?: T[] } | T[] | null | undefined): T[] {
     return result?.Items || [];
 }
 
+function normalizeNativeHomeTextValue(value: unknown) {
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+
+    return '';
+}
+
+function normalizeVersionText(value: string) {
+    return value
+        .toLowerCase()
+        .replace(/&/g, ' and ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function getNativeHomeItemProviderVersionKey(item: NativeHomeMaybeItem) {
+    const providerIds = item?.ProviderIds;
+
+    if (!providerIds || typeof providerIds !== 'object') return '';
+
+    const providersByLowerKey = new Map(
+        Object.keys(providerIds).map(key => [key.toLowerCase(), normalizeNativeHomeTextValue((providerIds as Record<string, unknown>)[key]).toLowerCase()])
+    );
+
+    for (const providerKey of NATIVE_HOME_ITEM_PROVIDER_KEYS) {
+        const providerValue = providersByLowerKey.get(providerKey.toLowerCase());
+
+        if (providerValue) {
+            return `${providerKey.toLowerCase()}:${providerValue}`;
+        }
+    }
+
+    return '';
+}
+
+export function getNativeHomeItemVersionKey(item: NativeHomeMaybeItem) {
+    const itemType = normalizeNativeHomeTextValue(item?.Type || item?.MediaType || 'item').toLowerCase();
+    const providerKey = getNativeHomeItemProviderVersionKey(item);
+
+    if (providerKey) return `${itemType}:${providerKey}`;
+
+    const title = normalizeVersionText(
+        normalizeNativeHomeTextValue(item?.Name)
+        || normalizeNativeHomeTextValue((item as Record<string, unknown>)?.OriginalTitle)
+    );
+    const rawYear = Number(item?.ProductionYear);
+    const year = Number.isFinite(rawYear) && rawYear > 0 ? String(Math.round(rawYear)) : '';
+
+    if (title && year) return `${itemType}:${title}:${year}`;
+    if (title && itemType !== 'audio') return `${itemType}:${title}`;
+
+    return getNativeHomeItemId(item) || normalizeNativeHomeTextValue((item as Record<string, unknown>)?.ItemId);
+}
+
 function getNativeHomeItemKey(item: NativeHomeMaybeItem) {
-    return String(item?.Id || item?.Name || '').trim();
+    return getNativeHomeItemVersionKey(item);
 }
 
 function getNativeHomeItemId(item: NativeHomeMaybeItem) {
@@ -722,7 +785,8 @@ function getNativeHomeRecommendationExactKeys(item: NativeHomeMaybeItem) {
 
     return [
         item.Id ? `item:${item.Id}` : '',
-        item.Name ? `title:${item.Type || ''}:${item.Name}` : ''
+        item.Name ? `title:${item.Type || ''}:${item.Name}` : '',
+        getNativeHomeItemVersionKey(item)
     ]
         .map(normalizeNativeHomeDedupeKey)
         .filter(Boolean);
@@ -1330,7 +1394,7 @@ function getNativeHomeStudioIncludeItemTypes(row: NativeHomeRow) {
     return 'Movie,Series';
 }
 
-function dedupeNativeHomeItems<TItem extends PtvItem | PtvLibrary>(items: TItem[]) {
+export function dedupeNativeHomeItems<TItem extends PtvItem | PtvLibrary>(items: TItem[]) {
     const seen = new Set<string>();
     const deduped: TItem[] = [];
 
@@ -1883,6 +1947,10 @@ function createRows(
     recentlyAddedItems: PtvItem[],
     rowSettings: PtvRowsEndpointSettings | null = null
 ): NativeHomeRow[] {
+    const dedupedResumeItems = dedupeNativeHomeItems(resumeItems);
+    const dedupedContinueReadingItems = dedupeNativeHomeItems(continueReadingItems);
+    const dedupedContinueListeningItems = dedupeNativeHomeItems(continueListeningItems);
+    const dedupedRecentlyAddedItems = dedupeNativeHomeItems(recentlyAddedItems);
     const settingsHash = getRowsEndpointSettingsHash(rowSettings) || undefined;
     const rows: NativeHomeRow[] = [
         {
@@ -1890,7 +1958,7 @@ function createRows(
             configHash: settingsHash,
             enabled: true,
             id: 'resume',
-            items: resumeItems,
+            items: dedupedResumeItems,
             kind: 'items',
             rowType: 'fallback',
             source: 'resume',
@@ -1903,7 +1971,7 @@ function createRows(
             configHash: settingsHash,
             enabled: true,
             id: 'continue-reading',
-            items: continueReadingItems,
+            items: dedupedContinueReadingItems,
             kind: 'items',
             rowType: 'fallback',
             source: 'continue-reading',
@@ -1916,7 +1984,7 @@ function createRows(
             configHash: settingsHash,
             enabled: true,
             id: 'continue-listening',
-            items: continueListeningItems,
+            items: dedupedContinueListeningItems,
             kind: 'items',
             rowType: 'fallback',
             source: 'continue-listening',
@@ -1929,7 +1997,7 @@ function createRows(
             configHash: settingsHash,
             enabled: true,
             id: 'recently-added',
-            items: recentlyAddedItems,
+            items: dedupedRecentlyAddedItems,
             kind: 'items',
             rowType: 'fallback',
             source: 'recently-added',
@@ -2725,7 +2793,8 @@ function createRowsFromFeaturedPayload(
                 title
             });
             const mediaType = getSectionMediaType(section);
-            const rowItems = recommendationId ? dedupeNativeHomeRecommendationItems(rawItems as PtvItem[]) : rawItems;
+            const rowItems = recommendationId ? dedupeNativeHomeRecommendationItems(rawItems as PtvItem[]) : dedupeNativeHomeItems(rawItems as PtvItem[]);
+            const localDedupeRemovals = rawItems.length - rowItems.length;
             const configuredLimit = recommendationRow ? recommendationRow.items.length : getRuleItemLimit(rule);
             const items = configuredLimit ? rowItems.slice(0, configuredLimit) : rowItems;
             const moreUrl = getNativeHomeFeaturedRowMoreUrl({
@@ -2743,7 +2812,7 @@ function createRowsFromFeaturedPayload(
                 ?? (recommendationId ? rawItems.length : undefined);
             const dedupeRemovals = getSectionNumber(section, 'dedupeRemovals', 'DedupeRemovals')
                 ?? recommendationDiagnostics?.dedupeRemovals
-                ?? (recommendationId ? Math.max(0, rawItems.length - rowItems.length) : undefined);
+                ?? (localDedupeRemovals > 0 ? localDedupeRemovals : undefined);
             const hydrationRemovals = getSectionNumber(section, 'hydrationRemovals', 'HydrationRemovals')
                 ?? recommendationDiagnostics?.hydrationRemovals
                 ?? (recommendationId ? 0 : undefined);
@@ -2762,7 +2831,7 @@ function createRowsFromFeaturedPayload(
                 candidateCount: candidateCount ?? null,
                 configHash: configHash || null,
                 configuredLimit: configuredLimit || null,
-                dedupeRemovals: dedupeRemovals ?? null,
+                dedupeRemovals: dedupeRemovals ?? (localDedupeRemovals > 0 ? localDedupeRemovals : null),
                 enabled: getSectionEnabled(section),
                 finalRenderedCount,
                 hydrationRemovals: hydrationRemovals ?? null,

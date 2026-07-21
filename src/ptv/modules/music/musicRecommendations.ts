@@ -1,29 +1,4 @@
-import { recordPtvEvent, timePtvAsync } from '../../core/observability';
-import type { PtvItemQuery } from '../../api';
-
-import {
-    fetchPtvMusicItem,
-    fetchPtvMusicTracksForGenerator,
-    getPtvMusicArtist,
-    getPtvMusicBitrate,
-    getPtvMusicCodec,
-    getPtvMusicGenres,
-    getPtvMusicTitle,
-    isPtvMusicQualityMatch,
-    uniquePtvMusicItems
-} from './musicApi';
-import {
-    enrichPtvMusicBrainzTrack,
-    getPtvMusicBrainzTerms
-} from './musicBrainz';
-import {
-    enrichPtvMusicDiscogsTrack,
-    getPtvMusicDiscogsTerms
-} from './musicDiscogs';
-import { getPtvLikedMusicItems } from './musicLikes';
 import type {
-    PtvMusicBrainzEnrichment,
-    PtvMusicDiscogsEnrichment,
     PtvMusicItem,
     PtvMusicPlaylistRequest,
     PtvMusicPlaylistResult,
@@ -31,607 +6,258 @@ import type {
     PtvMusicSeed
 } from './musicTypes';
 
-type ParsedPrompt = {
-    codecs: string[];
-    genres: string[];
-    limit: number;
-    title: string;
-};
+const DEFAULT_TRACK_LIMIT = 28;
 
-type PtvMusicMetadataEnrichment = PtvMusicBrainzEnrichment & {
-    discogs?: PtvMusicDiscogsEnrichment | null;
-};
-
-const DEFAULT_PLAYLIST_LIMIT = 50;
-const MAX_PLAYLIST_LIMIT = 100;
-const PROMPT_GENRES = [
-    'acoustic',
-    'ambient',
-    'blues',
-    'classical',
-    'country',
-    'disco',
-    'electronic',
-    'folk',
-    'funk',
-    'hip hop',
-    'horror',
-    'jazz',
-    'metal',
-    'pop',
-    'punk',
-    'r&b',
-    'rap',
-    'rock',
-    'soul',
-    'soundtrack',
-    'synthwave'
-];
-
-function clampLimit(limit?: number) {
-    if (!limit || Number.isNaN(limit)) return DEFAULT_PLAYLIST_LIMIT;
-
-    return Math.max(1, Math.min(MAX_PLAYLIST_LIMIT, Math.round(limit)));
+function getMusicTitle(item: PtvMusicItem) {
+    return String(item.Name || item.SortName || '').trim();
 }
 
-function parsePrompt(prompt = ''): ParsedPrompt {
-    const normalized = prompt.toLowerCase();
-    const limitMatch = /(\d{1,3})\s*(?:song|track)/.exec(normalized);
-    const codecs = ['flac', 'opus', 'mp3'].filter(codec => normalized.includes(codec));
-    const genres = PROMPT_GENRES.filter(genre => normalized.includes(genre));
-    const requestedLimit = limitMatch ? Number(limitMatch[1]) : DEFAULT_PLAYLIST_LIMIT;
-    const title = prompt
-        .replace(/^make\s+/i, '')
-        .replace(/^playlist\s+/i, '')
-        .trim();
-
-    return {
-        codecs,
-        genres,
-        limit: clampLimit(requestedLimit),
-        title: title || 'PiggieTV Smart Mix'
-    };
+function getMusicArtist(item: PtvMusicItem) {
+    return String(item.AlbumArtist || item.Artist || item.ArtistItems?.[0]?.Name || item.Artists?.[0] || '').trim();
 }
 
-function seedToTitle(seed: PtvMusicSeed, promptTitle?: string) {
-    if (promptTitle) return promptTitle;
-    if (seed.label) return `${seed.label} Radio`;
-    if (seed.item) return `${getPtvMusicTitle(seed.item)} Radio`;
-
-    return 'PiggieTV Smart Mix';
+function getMusicGenres(item: PtvMusicItem) {
+    return Array.isArray(item.Genres) ? item.Genres.filter(Boolean) : [];
 }
 
-function normalizeTerm(value?: string) {
-    return String(value || '')
-        .trim()
-        .replace(/\s+/g, ' ')
-        .toLowerCase();
+function getMusicCodec(item: PtvMusicItem) {
+    return String(item.Container || '').toLowerCase();
 }
 
-function uniqueTerms(values: Array<string | undefined>) {
+function getMusicRecommendationItemKey(item: PtvMusicItem) {
+    return String(item.Id || `${getMusicArtist(item)}:${getMusicTitle(item)}`).toLowerCase();
+}
+
+function uniquePtvMusicItems(items: PtvMusicItem[]) {
     const seen = new Set<string>();
-    const terms: string[] = [];
 
-    values.forEach(value => {
-        const normalized = normalizeTerm(value);
-        if (!normalized || seen.has(normalized)) return;
+    return items.filter(item => {
+        const key = getMusicRecommendationItemKey(item);
 
-        seen.add(normalized);
-        terms.push(String(value || '').trim());
+        if (seen.has(key)) return false;
+
+        seen.add(key);
+        return true;
     });
-
-    return terms;
 }
 
-function splitArtistNames(value: string) {
-    return value
-        .split(',')
-        .map(artist => artist.trim())
-        .filter(Boolean);
-}
-
-function getStringTags(item: PtvMusicItem) {
-    return (item.Tags || []).filter((tag): tag is string => typeof tag === 'string');
-}
-
-function getMusicBrainzProviderId(item: PtvMusicItem, keys: string[]) {
-    const providerIds = item.ProviderIds || {};
-
-    for (const key of keys) {
-        const value = providerIds[key];
-
-        if (value) return value;
-    }
-
-    return '';
-}
-
-function getMetadataTerms(enrichment?: PtvMusicMetadataEnrichment | null) {
-    if (!enrichment) return [];
-
-    return uniqueTerms([
-        ...getPtvMusicBrainzTerms(enrichment),
-        ...getPtvMusicDiscogsTerms(enrichment.discogs)
-    ]);
-}
-
-function mergeMetadataEnrichment(
-    musicBrainz: PtvMusicBrainzEnrichment,
-    discogs: PtvMusicDiscogsEnrichment | null
-): PtvMusicMetadataEnrichment {
-    return {
-        ...musicBrainz,
-        artistNames: uniqueTerms([
-            ...musicBrainz.artistNames,
-            ...(discogs?.artistNames || [])
-        ]),
-        discogs,
-        genres: uniqueTerms([
-            ...musicBrainz.genres,
-            ...(discogs?.genres || []),
-            ...(discogs?.styles || [])
-        ]),
-        releaseIds: uniqueTerms([
-            ...musicBrainz.releaseIds,
-            ...(discogs?.releaseIds || [])
-        ]),
-        tags: uniqueTerms([
-            ...musicBrainz.tags,
-            ...(discogs?.tags || []),
-            ...(discogs?.styles || []),
-            ...(discogs?.labels || [])
-        ])
-    };
-}
-
-async function enrichPtvMusicMetadataTrack(item: PtvMusicItem): Promise<PtvMusicMetadataEnrichment> {
-    const [musicBrainz, discogs] = await Promise.all([
-        enrichPtvMusicBrainzTrack(item),
-        enrichPtvMusicDiscogsTrack(item).catch(error => {
-            recordPtvEvent('api', 'discogs-enrichment-skipped', {
-                error: error instanceof Error ? error.message : String(error),
-                itemId: item.Id || null
-            });
-
-            return null;
-        })
-    ]);
-    const enrichment = mergeMetadataEnrichment(musicBrainz, discogs);
-
-    recordPtvEvent('api', 'music-metadata-enrichment-built', {
-        discogsSource: discogs?.source || 'none',
-        genreCount: enrichment.genres.length,
-        itemId: item.Id || null,
-        musicBrainzSource: musicBrainz.source,
-        tagCount: enrichment.tags.length
-    });
-
-    return enrichment;
-}
-
-function getSeedGenres(seed: PtvMusicSeed, parsed: ParsedPrompt, enrichment?: PtvMusicMetadataEnrichment | null) {
-    const genres = new Set<string>(parsed.genres);
-
-    if (seed.kind === 'genre' && seed.value) {
-        genres.add(seed.value);
-    }
-
-    getPtvMusicGenres(seed.item).forEach(genre => {
-        genres.add(genre);
-    });
-
-    enrichment?.genres.forEach(genre => {
-        genres.add(genre);
-    });
-
-    return Array.from(genres);
-}
-
-function getSeedArtists(seed: PtvMusicSeed, enrichment?: PtvMusicMetadataEnrichment | null) {
-    const artists = new Set<string>();
-
-    if (seed.kind === 'artist' && seed.value) {
-        artists.add(seed.value);
-    }
-
-    const artist = getPtvMusicArtist(seed.item);
-    if (artist && artist !== 'Unknown Artist') {
-        artist.split(',')
-            .map(value => value.trim())
-            .filter(Boolean)
-            .forEach(value => {
-                artists.add(value);
-            });
-    }
-
-    enrichment?.artistNames.forEach(artistName => {
-        artists.add(artistName);
-    });
-
-    return Array.from(artists);
-}
-
-function getSeedQuery(seed: PtvMusicSeed, parsed: ParsedPrompt, enrichment?: PtvMusicMetadataEnrichment | null) {
-    const genres = getSeedGenres(seed, parsed, enrichment);
-
-    if (seed.kind === 'album') {
-        const albumId = seed.id || seed.item?.AlbumId || seed.item?.Id;
-
-        return albumId ? { ParentId: albumId } : { SearchTerm: seed.value || seed.label || seed.item?.Album };
-    }
-
-    if (seed.kind === 'artist') {
-        return seed.id ? { ArtistIds: seed.id } : { SearchTerm: seed.value || seed.label };
-    }
-
-    if (genres.length) {
-        return { Genres: genres.join(',') };
-    }
-
-    if (seed.kind === 'favorites') {
-        return { Filters: 'IsFavorite' };
-    }
-
-    if (seed.kind === 'top') {
-        return { SortBy: 'PlayCount,SortName', SortOrder: 'Descending' };
-    }
-
-    if (seed.kind === 'recent') {
-        return { SortBy: 'DatePlayed', SortOrder: 'Descending' };
-    }
-
-    return { SortBy: 'Random' };
-}
-
-function scoreTrack(
-    track: PtvMusicItem,
-    seed: PtvMusicSeed,
-    parsed: ParsedPrompt,
-    enrichment?: PtvMusicMetadataEnrichment | null,
-    likedSeedItems: PtvMusicItem[] = []
+function selectDiverseMusicRecommendationItems(
+    entries: Array<{ item: PtvMusicItem; score: number }>,
+    limit: number,
+    blockedKeys: Set<string>
 ) {
-    const seedGenres = new Set(getSeedGenres(seed, parsed, enrichment).map(normalizeTerm));
-    const seedTags = new Set(getMetadataTerms(enrichment).map(normalizeTerm));
-    const seedArtists = new Set(getSeedArtists(seed, enrichment).map(normalizeTerm));
-    const trackGenres = getPtvMusicGenres(track).map(normalizeTerm);
-    const trackTags = getStringTags(track).map(normalizeTerm);
-    const trackArtist = normalizeTerm(getPtvMusicArtist(track));
-    const playCount = Number(track.UserData?.PlayCount || 0);
-    const favoriteScore = track.UserData?.IsFavorite ? 10 : 0;
-    const genreScore = trackGenres.filter(genre => seedGenres.has(genre)).length * 8;
-    const tagScore = trackTags.filter(tag => seedTags.has(tag)).length * 5;
-    const artistScore = Array.from(seedArtists).some(artist => trackArtist.includes(artist)) ? 6 : 0;
-    const codecScore = parsed.codecs.length && isPtvMusicQualityMatch(track, parsed.codecs) ? 9 : 0;
-    const qualityScore = ['flac', 'opus'].some(codec => getPtvMusicCodec(track).includes(codec)) ? 2 : 0;
-    const bitrateScore = Math.min(5, Math.round(getPtvMusicBitrate(track) / 320000));
-    const likedArtists = new Set(likedSeedItems.map(item => normalizeTerm(getPtvMusicArtist(item))).filter(Boolean));
-    const likedGenres = new Set(likedSeedItems.flatMap(getPtvMusicGenres).map(normalizeTerm).filter(Boolean));
-    const likedSeedIds = new Set(likedSeedItems.map(item => item.Id).filter(Boolean));
-    const likedArtistScore = likedArtists.has(trackArtist) ? 12 : 0;
-    const likedGenreScore = trackGenres.filter(genre => likedGenres.has(genre)).length * 6;
-    const likedNoveltyScore = likedSeedIds.has(track.Id) ? -8 : 0;
-
-    return playCount
-        + favoriteScore
-        + genreScore
-        + tagScore
-        + artistScore
-        + codecScore
-        + qualityScore
-        + bitrateScore
-        + likedArtistScore
-        + likedGenreScore
-        + likedNoveltyScore;
-}
-
-function describePlaylist(seed: PtvMusicSeed, parsed: ParsedPrompt, count: number) {
-    const details = [
-        seed.kind,
-        parsed.genres.length ? parsed.genres.join(', ') : '',
-        parsed.codecs.length ? parsed.codecs.join('/').toUpperCase() : '',
-        `${count} tracks`
-    ].filter(Boolean);
-
-    return details.join(' - ');
-}
-
-function getFallbackQuery(seed: PtvMusicSeed, parsed: ParsedPrompt) {
-    if (parsed.codecs.length) {
-        return { SortBy: 'Random' };
-    }
-
-    if (seed.kind === 'song' && seed.item?.AlbumId) {
-        return { ParentId: seed.item.AlbumId };
-    }
-
-    return { SortBy: 'Random' };
-}
-
-function getRelatedSeedTerms(seedItem: PtvMusicItem, enrichment: PtvMusicMetadataEnrichment) {
-    return {
-        artistIds: uniqueTerms([
-            ...enrichment.artistIds,
-            ...(seedItem.ArtistItems || []).map(artist => artist.Id)
-        ]).map(normalizeTerm),
-        artists: uniqueTerms([
-            ...enrichment.artistNames,
-            ...splitArtistNames(getPtvMusicArtist(seedItem))
-        ]).map(normalizeTerm),
-        genres: uniqueTerms([
-            ...enrichment.genres,
-            ...getPtvMusicGenres(seedItem)
-        ]).map(normalizeTerm),
-        releaseGroupIds: enrichment.releaseGroupIds.map(normalizeTerm),
-        releaseIds: uniqueTerms([
-            ...enrichment.releaseIds,
-            getMusicBrainzProviderId(seedItem, ['MusicBrainzAlbum', 'MusicBrainzRelease', 'MusicBrainzReleaseId'])
-        ]).map(normalizeTerm),
-        tags: getMetadataTerms(enrichment).map(normalizeTerm)
-    };
-}
-
-function scoreRelatedTrack(
-    seedItem: PtvMusicItem,
-    enrichment: PtvMusicMetadataEnrichment,
-    candidate: PtvMusicItem
-) {
-    if (!candidate.Id || candidate.Id === seedItem.Id) return -1;
-
-    const seedTerms = getRelatedSeedTerms(seedItem, enrichment);
-    const candidateArtists = splitArtistNames(getPtvMusicArtist(candidate)).map(normalizeTerm);
-    const candidateArtistIds = (candidate.ArtistItems || []).map(artist => normalizeTerm(artist.Id));
-    const candidateGenres = getPtvMusicGenres(candidate).map(normalizeTerm);
-    const candidateTags = getStringTags(candidate).map(normalizeTerm);
-    const candidateReleaseIds = [
-        getMusicBrainzProviderId(candidate, ['MusicBrainzAlbum', 'MusicBrainzRelease', 'MusicBrainzReleaseId'])
-    ].map(normalizeTerm);
-    const candidateReleaseGroupIds = [
-        getMusicBrainzProviderId(candidate, ['MusicBrainzReleaseGroup', 'MusicBrainzReleaseGroupId'])
-    ].map(normalizeTerm);
-    const artistScore = candidateArtists.some(artist => seedTerms.artists.some(seedArtist => artist === seedArtist || artist.includes(seedArtist))) ? 18 : 0;
-    const artistIdScore = candidateArtistIds.some(artistId => seedTerms.artistIds.includes(artistId)) ? 22 : 0;
-    const genreScore = candidateGenres.filter(genre => seedTerms.genres.includes(genre)).length * 14;
-    const tagScore = candidateTags.filter(tag => seedTerms.tags.includes(tag)).length * 8;
-    const releaseScore = candidateReleaseIds.some(id => id && seedTerms.releaseIds.includes(id)) ? 6 : 0;
-    const releaseGroupScore = candidateReleaseGroupIds.some(id => id && seedTerms.releaseGroupIds.includes(id)) ? 10 : 0;
-    const albumScore = seedItem.AlbumId && candidate.AlbumId === seedItem.AlbumId ? 4 : 0;
-    const favoriteScore = candidate.UserData?.IsFavorite ? 2 : 0;
-    const playScore = Math.min(5, Number(candidate.UserData?.PlayCount || 0));
-
-    return artistScore
-        + artistIdScore
-        + genreScore
-        + tagScore
-        + releaseScore
-        + releaseGroupScore
-        + albumScore
-        + favoriteScore
-        + playScore;
-}
-
-function getRelatedCandidateQueries(seedItem: PtvMusicItem, enrichment: PtvMusicMetadataEnrichment): PtvItemQuery[] {
-    const seedTerms = getRelatedSeedTerms(seedItem, enrichment);
-    const artistId = seedItem.ArtistItems?.[0]?.Id;
-    const genreQuery = uniqueTerms([
-        ...enrichment.genres,
-        ...getPtvMusicGenres(seedItem)
-    ]).slice(0, 4);
-    const queries: PtvItemQuery[] = [];
-
-    if (artistId) {
-        queries.push({ ArtistIds: artistId });
-    } else if (seedTerms.artists[0]) {
-        queries.push({ SearchTerm: seedTerms.artists[0] });
-    }
-
-    if (genreQuery.length) {
-        queries.push({ Genres: genreQuery.join(',') });
-    }
-
-    if (seedItem.AlbumId) {
-        queries.push({ ParentId: seedItem.AlbumId });
-    }
-
-    queries.push({ SortBy: 'PlayCount,SortName', SortOrder: 'Descending' });
-    queries.push({ SortBy: 'DateCreated', SortOrder: 'Descending' });
-
-    return queries;
-}
-
-function capRepeatedArtists(items: PtvMusicItem[], seedItem: PtvMusicItem, limit: number) {
     const artistCounts = new Map<string, number>();
-    const seedArtist = normalizeTerm(getPtvMusicArtist(seedItem));
-    const capped: PtvMusicItem[] = [];
+    const albumCounts = new Map<string, number>();
+    const selected: PtvMusicItem[] = [];
 
-    items.some(item => {
-        const artist = normalizeTerm(getPtvMusicArtist(item));
-        const count = artistCounts.get(artist) || 0;
-        const maxForArtist = artist === seedArtist ? 6 : 4;
+    entries
+        .sort((left, right) => right.score - left.score || getMusicTitle(left.item).localeCompare(getMusicTitle(right.item)))
+        .forEach(entry => {
+            if (selected.length >= limit) return;
 
-        if (count < maxForArtist || capped.length < 6) {
-            artistCounts.set(artist, count + 1);
-            capped.push(item);
-        }
+            const itemKey = getMusicRecommendationItemKey(entry.item);
+            const artistKey = getMusicArtist(entry.item).toLowerCase() || 'unknown-artist';
+            const albumKey = String(entry.item.AlbumId || entry.item.Album || '').toLowerCase();
 
-        return capped.length >= limit;
-    });
+            if (blockedKeys.has(itemKey) || artistCounts.get(artistKey) === 2 || (albumKey && albumCounts.get(albumKey) === 2)) return;
 
-    return capped;
+            blockedKeys.add(itemKey);
+            artistCounts.set(artistKey, (artistCounts.get(artistKey) || 0) + 1);
+            if (albumKey) albumCounts.set(albumKey, (albumCounts.get(albumKey) || 0) + 1);
+            selected.push(entry.item);
+        });
+
+    return selected;
 }
 
-function getLocalMusicEnrichment(): PtvMusicMetadataEnrichment {
-    return {
-        artistIds: [],
-        artistNames: [],
-        genres: [],
-        releaseGroupIds: [],
-        releaseIds: [],
-        source: 'jellyfin',
-        tags: []
-    };
+function buildMusicAffinityItems(seedItems: PtvMusicItem[], pool: PtvMusicItem[], limit = DEFAULT_TRACK_LIMIT) {
+    const favoriteArtists = new Set(seedItems.map(getMusicArtist).filter(Boolean).map(artist => artist.toLowerCase()));
+    const favoriteGenres = new Set(seedItems.reduce<string[]>((genres, item) => genres.concat(getMusicGenres(item)), []).map(genre => genre.toLowerCase()));
+    const blockedKeys = new Set(seedItems.map(getMusicRecommendationItemKey));
+    const entries = uniquePtvMusicItems(pool)
+        .filter(item => !blockedKeys.has(getMusicRecommendationItemKey(item)))
+        .map(item => {
+            const artist = getMusicArtist(item).toLowerCase();
+            const genres = getMusicGenres(item).map(genre => genre.toLowerCase());
+            const playCount = Number(item.UserData?.PlayCount || 0);
+            const score = (favoriteArtists.has(artist) ? 40 : 0)
+                + (genres.filter(genre => favoriteGenres.has(genre)).length * 12)
+                + (item.UserData?.IsFavorite ? 8 : 0)
+                + (playCount * 2)
+                + (['flac', 'opus'].some(codec => getMusicCodec(item).includes(codec)) ? 2 : 0);
+
+            return { item, score };
+        });
+
+    return selectDiverseMusicRecommendationItems(entries, limit, blockedKeys);
 }
 
-function scoreLocalRelatedTracks(seedItem: PtvMusicItem, pool: PtvMusicItem[], limit: number) {
-    const enrichment = getLocalMusicEnrichment();
+function buildMusicDiscoveryItems(pool: PtvMusicItem[], blockedKeys: Set<string>, limit = DEFAULT_TRACK_LIMIT) {
+    const now = Date.now();
+    const entries = uniquePtvMusicItems(pool)
+        .filter(item => !blockedKeys.has(getMusicRecommendationItemKey(item)))
+        .map(item => {
+            const createdAt = Date.parse(String(item.DateCreated || ''));
+            const ageDays = Number.isFinite(createdAt) ? Math.max(0, (now - createdAt) / 86_400_000) : 365;
+            const playCount = Number(item.UserData?.PlayCount || 0);
+            const qualityScore = ['flac', 'opus'].some(codec => getMusicCodec(item).includes(codec)) ? 8 : 0;
 
-    return capRepeatedArtists(
-        uniquePtvMusicItems(pool)
-            .map(item => ({
+            return {
                 item,
-                score: scoreRelatedTrack(seedItem, enrichment, item)
-            }))
-            .filter(entry => entry.score > 0)
-            .sort((left, right) => right.score - left.score || getPtvMusicTitle(left.item).localeCompare(getPtvMusicTitle(right.item)))
-            .map(entry => entry.item),
-        seedItem,
+                score: qualityScore + Math.max(0, 36 - Math.min(36, ageDays)) + Math.max(0, 24 - (playCount * 6))
+            };
+        });
+
+    return selectDiverseMusicRecommendationItems(entries, limit, new Set(blockedKeys));
+}
+
+function getMusicRecommendationOverlapPercentage(sections: Array<{ items: PtvMusicItem[] }>) {
+    const shelfSets = sections.map(section => new Set(section.items.map(getMusicRecommendationItemKey)));
+
+    if (shelfSets.length < 2) return 0;
+
+    let total = 0;
+    let comparisons = 0;
+
+    for (let index = 0; index < shelfSets.length; index++) {
+        for (let nextIndex = index + 1; nextIndex < shelfSets.length; nextIndex++) {
+            const intersection = Array.from(shelfSets[index]).filter(key => shelfSets[nextIndex].has(key)).length;
+            const union = new Set([...shelfSets[index], ...shelfSets[nextIndex]]).size;
+
+            total += union ? (intersection / union) * 100 : 0;
+            comparisons += 1;
+        }
+    }
+
+    return comparisons ? Number((total / comparisons).toFixed(1)) : 0;
+}
+
+export type PtvMusicRecommendationShelves = Readonly<{
+    madeForYou: PtvMusicItem[];
+    overlapPercentage: number;
+    recommended: PtvMusicItem[];
+}>;
+
+export type PtvMusicRecommendationEngine = Readonly<{
+    buildShelves: (
+        seedItems: PtvMusicItem[],
+        affinityPool: PtvMusicItem[],
+        discoveryPool: PtvMusicItem[],
+        continueListening?: PtvMusicItem[],
+        limit?: number
+    ) => PtvMusicRecommendationShelves;
+    initialize: () => void;
+    initialized: boolean;
+}>;
+
+export function buildPtvMusicRecommendationShelves(
+    seedItems: PtvMusicItem[],
+    affinityPool: PtvMusicItem[],
+    discoveryPool: PtvMusicItem[],
+    continueListening: PtvMusicItem[] = [],
+    limit = DEFAULT_TRACK_LIMIT
+): PtvMusicRecommendationShelves {
+    const continueKeys = new Set(continueListening.map(getMusicRecommendationItemKey));
+    const madeForYou = buildMusicAffinityItems(
+        seedItems,
+        affinityPool.filter(item => !continueKeys.has(getMusicRecommendationItemKey(item))),
         limit
     );
+    const blockedKeys = new Set([
+        ...continueListening,
+        ...madeForYou
+    ].map(getMusicRecommendationItemKey));
+    const recommended = buildMusicDiscoveryItems(discoveryPool, blockedKeys, limit);
+
+    return {
+        madeForYou,
+        overlapPercentage: getMusicRecommendationOverlapPercentage([
+            { items: madeForYou },
+            { items: recommended }
+        ]),
+        recommended
+    };
+}
+
+export function createPtvMusicRecommendationEngine(): PtvMusicRecommendationEngine {
+    let initialized = false;
+
+    const initialize = () => {
+        initialized = true;
+    };
+
+    return {
+        buildShelves(seedItems, affinityPool, discoveryPool, continueListening, limit) {
+            if (!initialized) initialize();
+
+            return buildPtvMusicRecommendationShelves(
+                seedItems,
+                affinityPool,
+                discoveryPool,
+                continueListening,
+                limit
+            );
+        },
+        initialize,
+        get initialized() {
+            return initialized;
+        }
+    };
+}
+
+function getRelatedTrackScore(seedItem: PtvMusicItem, item: PtvMusicItem) {
+    const seedArtist = getMusicArtist(seedItem).toLowerCase();
+    const artist = getMusicArtist(item).toLowerCase();
+    const seedAlbum = String(seedItem.AlbumId || seedItem.Album || '').toLowerCase();
+    const album = String(item.AlbumId || item.Album || '').toLowerCase();
+    const seedGenres = new Set(getMusicGenres(seedItem).map(genre => genre.toLowerCase()));
+    const genreMatches = getMusicGenres(item).filter(genre => seedGenres.has(genre.toLowerCase())).length;
+
+    return (artist && artist === seedArtist ? 60 : 0)
+        + (album && album === seedAlbum ? 30 : 0)
+        + (genreMatches * 12)
+        + (item.UserData?.IsFavorite ? 8 : 0)
+        + Number(item.UserData?.PlayCount || 0);
 }
 
 export function buildPtvMusicRelatedTracks(
     seedItem: PtvMusicItem,
     options: PtvMusicRelatedOptions = {}
 ): Promise<PtvMusicItem[]> {
-    const limit = Math.max(1, Math.min(options.limit || 24, 50));
+    const seedKey = getMusicRecommendationItemKey(seedItem);
+    const pool = uniquePtvMusicItems(options.pool || [])
+        .filter(item => getMusicRecommendationItemKey(item) !== seedKey)
+        .map(item => ({ item, score: getRelatedTrackScore(seedItem, item) }))
+        .sort((left, right) => right.score - left.score || getMusicTitle(left.item).localeCompare(getMusicTitle(right.item)))
+        .slice(0, options.limit || 24)
+        .map(entry => entry.item);
 
-    return timePtvAsync('recommendation', 'music-metadata-up-next-built', async () => {
-        const startedAt = performance.now();
-        const localCandidateStartedAt = performance.now();
-        const localCandidates = uniquePtvMusicItems([
-            ...(options.pool || []),
-            ...getPtvLikedMusicItems()
-        ]);
-        const localItems = scoreLocalRelatedTracks(seedItem, localCandidates, limit);
-        const candidateNormalizeMs = Number((performance.now() - localCandidateStartedAt).toFixed(1));
-
-        if (localItems.length >= Math.min(limit, 12)) {
-            recordPtvEvent('recommendation', 'music-metadata-up-next-built', {
-                candidateCount: localCandidates.length,
-                candidateFetchMs: 0,
-                candidateNormalizeMs,
-                count: localItems.length,
-                dedupeMs: 0,
-                enrichmentWaitMs: 0,
-                finalizationMs: Number((performance.now() - startedAt).toFixed(1)),
-                itemId: seedItem.Id || null,
-                musicBrainzSource: 'skipped-cache-pool',
-                scoreMs: candidateNormalizeMs
-            });
-
-            return localItems;
-        }
-
-        const enrichmentStartedAt = performance.now();
-        const enrichment = await enrichPtvMusicMetadataTrack(seedItem);
-        const enrichmentWaitMs = Number((performance.now() - enrichmentStartedAt).toFixed(1));
-        const candidateFetchStartedAt = performance.now();
-        const fetchedCandidates = await Promise.all(getRelatedCandidateQueries(seedItem, enrichment)
-            .map(query => fetchPtvMusicTracksForGenerator(query, 80).catch(() => [])));
-        const candidateFetchMs = Number((performance.now() - candidateFetchStartedAt).toFixed(1));
-        const normalizeStartedAt = performance.now();
-        const sourceItems = uniquePtvMusicItems([
-            ...(options.pool || []),
-            ...fetchedCandidates.reduce<PtvMusicItem[]>((items, candidateItems) => items.concat(candidateItems), [])
-        ]);
-        const networkCandidateNormalizeMs = Number((performance.now() - normalizeStartedAt).toFixed(1));
-        const scoreStartedAt = performance.now();
-        const scoredItems = sourceItems
-            .map(item => ({
-                item,
-                score: scoreRelatedTrack(seedItem, enrichment, item)
-            }))
-            .filter(entry => entry.score > 0)
-            .sort((left, right) => right.score - left.score || getPtvMusicTitle(left.item).localeCompare(getPtvMusicTitle(right.item)))
-            .map(entry => entry.item);
-        const scoreMs = Number((performance.now() - scoreStartedAt).toFixed(1));
-        const dedupeStartedAt = performance.now();
-        const relatedItems = capRepeatedArtists(scoredItems, seedItem, limit);
-        const dedupeMs = Number((performance.now() - dedupeStartedAt).toFixed(1));
-
-        recordPtvEvent('recommendation', 'music-metadata-up-next-built', {
-            candidateFetchMs,
-            candidateNormalizeMs: networkCandidateNormalizeMs,
-            candidateCount: sourceItems.length,
-            count: relatedItems.length,
-            dedupeMs,
-            discogsSource: enrichment.discogs?.source || 'none',
-            enrichmentWaitMs,
-            finalizationMs: Number((performance.now() - startedAt).toFixed(1)),
-            genreCount: enrichment.genres.length,
-            itemId: seedItem.Id || null,
-            musicBrainzSource: enrichment.source,
-            scoreMs,
-            tagCount: enrichment.tags.length
-        });
-
-        return relatedItems;
-    }, {
-        itemId: seedItem.Id || null,
-        limit
-    }).catch(error => {
-        recordPtvEvent('recommendation', 'music-metadata-up-next-failed', {
-            error: error instanceof Error ? error.message : String(error),
-            itemId: seedItem.Id || null
-        });
-
-        return [];
-    });
+    return Promise.resolve(pool);
 }
 
-export function buildPtvMusicRecommendations(request: PtvMusicPlaylistRequest): Promise<PtvMusicPlaylistResult> {
-    const parsed = parsePrompt(request.prompt || '');
-    const limit = clampLimit(request.limit || parsed.limit);
-    const initialSeed = request.seed || {
-        kind: parsed.codecs.length ? 'quality' : 'random',
-        label: parsed.title,
-        value: parsed.codecs.join(',')
-    } as PtvMusicSeed;
+function getDefaultMusicSeed(seed?: PtvMusicSeed): PtvMusicSeed {
+    return seed || {
+        kind: 'random',
+        label: 'Discovery'
+    };
+}
 
-    return timePtvAsync('recommendation', 'music-recommendations-built', async () => {
-        const seed = initialSeed.id && !initialSeed.item && initialSeed.kind === 'song' ?
-            {
-                ...initialSeed,
-                item: await fetchPtvMusicItem(initialSeed.id)
-            } :
-            initialSeed;
-        const enrichment = seed.item ? await enrichPtvMusicMetadataTrack(seed.item) : null;
-        const primaryQuery = getSeedQuery(seed, parsed, enrichment);
-        const likedSeedItems = seed.kind === 'favorites' ? getPtvLikedMusicItems() : [];
-        const primaryItems = await fetchPtvMusicTracksForGenerator(primaryQuery, limit);
-        const fallbackItems = primaryItems.length < limit ?
-            await fetchPtvMusicTracksForGenerator(getFallbackQuery(seed, parsed), limit) :
-            [];
-        const sourceItems = uniquePtvMusicItems([...likedSeedItems, ...primaryItems, ...fallbackItems])
-            .filter(item => {
-                if (seed.item?.Id && item.Id === seed.item.Id) return false;
-                return isPtvMusicQualityMatch(item, parsed.codecs);
-            });
-        const items = sourceItems
-            .map(item => ({
-                item,
-                score: scoreTrack(item, seed, parsed, enrichment, likedSeedItems)
-            }))
-            .sort((left, right) => right.score - left.score || getPtvMusicTitle(left.item).localeCompare(getPtvMusicTitle(right.item)))
-            .map(entry => entry.item)
-            .slice(0, limit);
-        const result = {
-            description: describePlaylist(seed, parsed, items.length),
-            items,
-            name: request.name || seedToTitle(seed, parsed.title),
-            seed
-        };
+export async function buildPtvMusicRecommendations(
+    request: PtvMusicPlaylistRequest
+): Promise<PtvMusicPlaylistResult> {
+    const { getPtvMusicHome } = await import('./musicApi');
+    const homeData = await getPtvMusicHome();
+    const pool = uniquePtvMusicItems(homeData.sections.flatMap(section => section.items));
+    const seed = getDefaultMusicSeed(request.seed);
+    const items = seed.item ?
+        await buildPtvMusicRelatedTracks(seed.item, { limit: request.limit || 50, pool }) :
+        pool.slice(0, request.limit || 50);
+    const name = request.name || (seed.label ? `${seed.label} Mix` : 'PiggieTV Music Mix');
 
-        recordPtvEvent('recommendation', 'music-recommendations-built', {
-            count: items.length,
-            discogsSource: enrichment?.discogs?.source || 'none',
-            musicBrainzSource: enrichment?.source || 'none',
-            name: result.name,
-            seed: seed.kind
-        });
-
-        return result;
-    }, {
-        prompt: request.prompt,
-        seed: initialSeed.kind
-    });
+    return {
+        description: request.prompt || `A PiggieTV music mix built from ${seed.label || seed.kind}.`,
+        items,
+        name,
+        seed
+    };
 }

@@ -3668,7 +3668,14 @@ const PiggieTvDashboardPage = () => {
                                             <Typography>Persisted recommendation rows: {persistedRecommendationRows}</Typography>
                                         </Stack>
                                         <Typography>Render profile: {performanceProfile.renderProfile.id}</Typography>
+                                        <Typography>Render profile reason: {performanceProfile.renderProfile.matchReason || 'n/a'}</Typography>
+                                        <Typography>Render profile selection: {performanceProfile.renderProfile.selectionReason || 'n/a'}</Typography>
                                         <Typography>Client profile: {clientProfile.kind}</Typography>
+                                        <Typography>
+                                            Low-power decision: {performanceProfile.lowPowerProfileDecision}
+                                            {' | '}
+                                            {performanceProfile.lowPowerProfileDecisionReason}
+                                        </Typography>
                                         <Typography>
                                             TV: platform={clientProfile.tvPlatform}, reason={clientProfile.tvDetectionReason}, tv={String(clientProfile.isTv)}, tenFoot={String(clientProfile.isTenFootClient)}
                                         </Typography>

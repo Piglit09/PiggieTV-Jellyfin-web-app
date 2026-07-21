@@ -30,5 +30,6 @@ export const ASYNC_USER_ROUTES: AsyncRoute[] = [
     { path: 'shows/*', page: 'shows' },
     { path: 'tv', page: 'tv' },
     { path: 'tv/*', page: 'tv' },
+    { path: 'tv-navigation-debug', page: 'tv-navigation-debug' },
     { path: 'userprofile', page: 'user/userprofile' }
 ];

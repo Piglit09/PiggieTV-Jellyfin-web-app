@@ -22,7 +22,7 @@ ptv-render-desktop
 
 ### PTV_TV
 
-TV profile is reserved for actual 10-foot clients such as Fire TV, webOS, Android TV, Roku-style clients, and other TV browsers:
+TV profile is reserved for 10-foot TV clients with a desktop-style render budget:
 
 - no animated rows
 - no backdrop filters
@@ -34,6 +34,22 @@ Root class:
 
 ```text
 ptv-render-tv
+```
+
+### PTV_WEBOS
+
+WebOS profile keeps TV visual constraints and disables additional nonessential effects that stress legacy LG Chromium pipelines:
+
+- no animated rows
+- no backdrop filters
+- no blur layers
+- no decorative backdrops
+- no hero auto-rotation
+
+Root class:
+
+```text
+ptv-render-webos
 ```
 
 Coarse pointer is not enough to select this profile. Phones and tablets also use coarse pointers and should resolve to the mobile profile unless they advertise real TV signals.
@@ -73,7 +89,11 @@ Current root attributes:
 
 ```text
 data-ptv-render-profile
+data-ptv-render-profile-selection
 data-ptv-render-tier
+data-ptv-render-match-reason
+data-ptv-low-power-profile-decision
+data-ptv-low-power-profile-decision-reason
 ```
 
 Current CSS classes:
@@ -82,6 +102,7 @@ Current CSS classes:
 ptv-render-desktop
 ptv-render-mobile
 ptv-render-tv
+ptv-render-webos
 ptv-render-lowpower
 ```
 

@@ -98,10 +98,12 @@ public static class PtvPluginSettingsNormalizer
         configuration.DownloadSettings ??= new DownloadSettings();
         configuration.TagSettings ??= new TagSettings();
         configuration.RandomSettings ??= new RandomSettings();
+        configuration.DiagnosticsStorageSettings ??= new PtvDiagnosticsStorageSettings();
         configuration.ArrSettings.Sonarr ??= new ArrServiceSettings();
         configuration.ArrSettings.Radarr ??= new ArrServiceSettings();
         configuration.ArrSettings.Lidarr ??= new ArrServiceSettings();
         configuration.ArrSettings.Prowlarr ??= new ArrServiceSettings();
+        NormalizeDiagnosticsStorageSettings(configuration.DiagnosticsStorageSettings);
 
         configuration.FeatureSettings.PlaybackMode = CleanPlaybackMode(configuration.FeatureSettings.PlaybackMode);
 
@@ -197,6 +199,24 @@ public static class PtvPluginSettingsNormalizer
             600);
 
         return configuration;
+    }
+
+    /// <summary>Normalizes diagnostics storage settings with bounded safe values.</summary>
+    public static PtvDiagnosticsStorageSettings NormalizeDiagnosticsStorageSettings(PtvDiagnosticsStorageSettings settings)
+    {
+        settings.MaximumFileSizeMb = Clamp(settings.MaximumFileSizeMb, 1, 50);
+        settings.MaximumRotatedFiles = Clamp(settings.MaximumRotatedFiles, 1, 5);
+        settings.RetentionDays = Clamp(settings.RetentionDays, 1, 30);
+        settings.MinimumPersistentLogLevel = settings.MinimumPersistentLogLevel?.Trim().ToLowerInvariant() switch
+        {
+            "trace" => "trace",
+            "debug" => "debug",
+            "warning" or "warn" => "warning",
+            "error" => "error",
+            "critical" or "fatal" => "critical",
+            _ => "information"
+        };
+        return settings;
     }
 
     /// <summary>

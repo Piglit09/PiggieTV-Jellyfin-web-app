@@ -9,6 +9,7 @@ import { watchDom } from '../../core/observer';
 import { getPtvClientProfile } from '../../core/clientProfile';
 import { getPtvPlaybackMode, isPtvPlaybackMode } from '../../core/featureSettings';
 import { recordPtvEvent } from '../../core/observability';
+import { notifyPtvTvPlaybackFocus } from '../../core/tvFocus';
 
 import './playbackChrome';
 import './playback.scss';
@@ -1500,6 +1501,7 @@ function onPlaybackStart(_event, player, state) {
     setPlaybackStartupVolume(player, currentItem);
     document.documentElement.classList.add('ptv-playing');
     document.body.classList.add('ptv-playing');
+    notifyPtvTvPlaybackFocus(true);
     updateFromState(player);
     recordPlaybackDiagnostic('ptv-playback-start', 'playbackstart');
     schedulePlaybackStateUpdate(player);
@@ -1514,6 +1516,7 @@ function onPlaybackStop(_event, playbackStopInfo = {}) {
     setPlayerOsdVisible(false);
     document.documentElement.classList.remove('ptv-playing', 'ptv-player-paused');
     document.body.classList.remove('ptv-playing', 'ptv-player-paused');
+    notifyPtvTvPlaybackFocus(false);
     currentItem = null;
     lastStartupVolumeKey = '';
     resetPlaybackDiagnostics();
@@ -1541,6 +1544,7 @@ function onPlaybackError(_event, errorType) {
     setPlayerOsdVisible(false);
     document.documentElement.classList.remove('ptv-playing', 'ptv-player-paused');
     document.body.classList.remove('ptv-playing', 'ptv-player-paused');
+    notifyPtvTvPlaybackFocus(false);
     lastStartupVolumeKey = '';
     resetPlaybackDiagnostics();
     cleanupPlaybackDom();

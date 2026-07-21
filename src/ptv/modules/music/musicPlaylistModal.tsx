@@ -73,22 +73,6 @@ export function PtvMusicPlaylistModal({
         };
     }, [isOpen]);
 
-    useEffect(() => {
-        if (!isOpen) return undefined;
-
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                onClose();
-            }
-        };
-
-        window.addEventListener('keydown', onKeyDown);
-
-        return () => {
-            window.removeEventListener('keydown', onKeyDown);
-        };
-    }, [isOpen, onClose]);
-
     if (!isOpen || !item) return null;
 
     const closeFromBackdrop = (event: MouseEvent<HTMLDivElement>) => {

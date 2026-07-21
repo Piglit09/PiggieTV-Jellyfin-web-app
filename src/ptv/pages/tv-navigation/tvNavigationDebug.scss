@@ -1,0 +1,129 @@
+.ptv-tv-navigation-debug-page {
+    min-height: 100%;
+}
+
+.ptv-tv-navigation-debug {
+    box-sizing: border-box;
+    display: grid;
+    gap: 1.25rem;
+    margin: 0 auto;
+    max-width: 1500px;
+    padding: 8rem clamp(1.25rem, 4vw, 4rem) 5rem;
+    width: 100%;
+}
+
+.ptv-tv-navigation-header {
+    align-items: end;
+    display: flex;
+    gap: 2rem;
+    justify-content: space-between;
+}
+
+.ptv-tv-navigation-header p,
+.ptv-tv-navigation-caption {
+    color: rgb(214 183 255 / 82%);
+    margin: 0;
+}
+
+.ptv-tv-navigation-header h1 {
+    font-size: clamp(2rem, 4vw, 3.7rem);
+    margin: 0.2rem 0 0.4rem;
+}
+
+.ptv-tv-navigation-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.ptv-tv-navigation-actions button {
+    background: linear-gradient(145deg, rgb(169 86 255 / 42%), rgb(61 31 91 / 76%));
+    border: 1px solid rgb(221 186 255 / 48%);
+    border-radius: 999px;
+    color: #fff;
+    min-height: 3rem;
+    padding: 0 1.35rem;
+}
+
+.ptv-tv-navigation-metrics {
+    display: grid;
+    gap: 0.9rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.ptv-tv-navigation-metric,
+.ptv-tv-navigation-panel {
+    background: linear-gradient(145deg, rgb(255 255 255 / 11%), rgb(53 29 78 / 70%));
+    border: 1px solid rgb(218 180 255 / 25%);
+    border-radius: 1.15rem;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 14%), 0 16px 36px rgb(0 0 0 / 24%);
+}
+
+.ptv-tv-navigation-metric {
+    display: grid;
+    gap: 0.4rem;
+    min-height: 5.5rem;
+    padding: 1rem;
+}
+
+.ptv-tv-navigation-metric span {
+    color: rgb(220 199 239 / 72%);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.ptv-tv-navigation-metric strong {
+    overflow-wrap: anywhere;
+}
+
+.ptv-tv-navigation-panel {
+    min-width: 0;
+    padding: 1.25rem;
+}
+
+.ptv-tv-navigation-panel h2 {
+    margin: 0 0 0.8rem;
+}
+
+.ptv-tv-navigation-panel ul {
+    margin: 0;
+    padding-left: 1.3rem;
+}
+
+.ptv-tv-navigation-table-wrap {
+    overflow: auto;
+}
+
+.ptv-tv-navigation-panel table {
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    width: 100%;
+}
+
+.ptv-tv-navigation-panel th,
+.ptv-tv-navigation-panel td {
+    border-bottom: 1px solid rgb(219 186 255 / 14%);
+    max-width: 28rem;
+    padding: 0.7rem;
+    text-align: left;
+    vertical-align: top;
+}
+
+.ptv-tv-navigation-panel code {
+    color: rgb(226 202 255 / 94%);
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.ptv-tv-navigation-empty {
+    color: rgb(206 225 214 / 82%);
+    margin: 0;
+}
+
+@media (max-width: 800px) {
+    .ptv-tv-navigation-header {
+        align-items: start;
+        flex-direction: column;
+    }
+}

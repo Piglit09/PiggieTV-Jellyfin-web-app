@@ -13,6 +13,7 @@ import {
 } from '../../api';
 import type { PtvBrowseMediaKind, PtvBrowseRoute } from './browseRoute';
 import { getPtvFocusedBrowseLoaderKey } from './focusedBrowseLoader';
+import { normalizePtvLibraryItems } from '../../services/libraryRootNormalizer';
 
 export type PtvBrowseScopeStatus = 'error' | 'resolved' | 'unscoped';
 
@@ -364,7 +365,7 @@ async function loadTrendingPool(route: PtvBrowseRoute, scope: PtvBrowseResolvedS
         SortOrder: 'Descending',
         StartIndex: 0
     });
-    const ranked = rankPtvBrowseTrendingItems(result.Items || []);
+    const ranked = rankPtvBrowseTrendingItems(normalizePtvLibraryItems(result.Items || []).items);
 
     trendingCache.set(cacheKey, {
         expiresAt: Date.now() + PTV_BROWSE_TRENDING_CACHE_MS,
@@ -400,9 +401,11 @@ async function fetchPtvFocusedBrowsePage(
         await getPtvResumeItems<PtvItem>(query) :
         await getPtvItems<PtvItem>(query);
 
+    const normalized = normalizePtvLibraryItems(result.Items || []);
+
     return {
-        items: result.Items || [],
-        totalRecordCount: result.TotalRecordCount ?? (result.Items || []).length
+        items: normalized.items,
+        totalRecordCount: Math.max(normalized.items.length, result.TotalRecordCount ?? normalized.items.length)
     };
 }
 
@@ -450,7 +453,7 @@ export async function loadPtvFocusedBrowsePages(
         });
     });
 
-    const items = [...itemsById.values()];
+    const items = normalizePtvLibraryItems([...itemsById.values()]).items;
 
     return {
         items,

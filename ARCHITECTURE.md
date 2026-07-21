@@ -1,10 +1,43 @@
 # PiggieTV Architecture
 
-Current as of 2026-07-19.
+Current as of 2026-07-20.
 
 This document describes the architecture present in the current worktree. It records stable boundaries and ownership. Use `PROJECT_STATE.md` for delivery state, `HANDOFF.md` for continuation instructions, and `DEBUG_LOG.md` for issue history.
 
 Project-memory maintenance is part of project completion: every completed project prompt updates `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` so operational guidance, current state, and architectural boundaries cannot silently diverge.
+
+## Consolidation Program
+
+PiggieTV has reached the point where the remaining work is architectural. The current feature modules remain supported, but they are transitional consumers of shared Jellyfin and PTV primitives, not the desired final platform boundary. Do not respond to cross-module regressions by adding another page-local cache, image loader, recommendation helper, diagnostic format, or direct plugin request.
+
+The target dependency direction is:
+
+```text
+Route/page adapter
+  -> shared platform service or framework
+    -> normalized Jellyfin/PTV API client
+      -> Jellyfin API and optional /Ptv/v1 plugin API
+```
+
+The migration must use adapters and contract tests. Existing Movie, Show, Music, Reading, Live TV, and dashboard behavior cannot be replaced wholesale or allowed to change ownership during a refactor. New shared services become the only place for cross-media policy; modules contribute typed media-specific fields, renderers, and route configuration.
+
+The planned shared platforms are:
+
+| Platform | Target responsibility | Transitional owners to retire |
+| --- | --- | --- |
+| `RecommendationEngine` | Provider lifecycle, profile inputs, scoring, diversity, overlap, rows, and normalized diagnostics | module-local Music/Reading and page-specific recommendation behavior |
+| `MetadataService` | Provider selection, normalized metadata, provider IDs, field-selective apply, and failure state | media-specific lookup/apply paths |
+| `ArtworkService` | Preferred/alternate/fallback selection, tag-aware success/failure cache, request ownership, and image diagnostics | page-local image handlers and URL failure sets |
+| `PTVCache` | Scoped identity, memory/persistent tiers, stale-while-revalidate, TTL, migration, invalidation, and atomic replacement | module-local cache precedence rules |
+| `BrowseFramework` | Hero, filters, search, sort, grid, shelf, pagination, loading/empty states, and diagnostics | independently assembled browse pages |
+| `DetailsFramework` | Shared hero, backdrop, actions, chips, credits, related content, and plug-in media panels | route-specific details layout orchestration |
+| `PlaybackService` | Queue, progress, resume, history, Media Session, up-next, and ownership handoff | feature-local playback orchestration |
+| `PTVApiClient` | Authentication readiness, request ownership, deduplication, retry/backoff, cancellation, and endpoint metrics | direct component/plugin endpoint access |
+| `PTVDiagnostics` | Normalized recommendation, browse, playback, cache, artwork, performance, remote, and plugin evidence | incompatible page-local debug payloads |
+| `PerformanceManager` | Render/network/cache/image/focus/long-task attribution and adaptive client budgets | module-local performance timing decisions |
+| `FocusManager` | TV focus scopes, graph lifecycle, restoration, activation, and modal ownership | duplicate navigation handlers |
+
+Migration order is intentionally foundation-first: API client and diagnostics contracts; cache and artwork services; recommendation providers; browse/details adapters; then metadata/playback/focus consolidation. Each phase must remove or route through a duplicate boundary before the next phase begins. New code may not create a second implementation of any listed platform.
 
 ## System Boundary
 
@@ -78,6 +111,12 @@ Major native route families include:
 
 The PTV shell hides Jellyfin's legacy header and drawer only while the native shell is mounted. Route transitions must remove and reapply ownership classes deterministically; global CSS should not hide Jellyfin chrome on fallback pages.
 
+### TV Focus And Remote Navigation
+
+`src/ptv/core/tvFocus.ts` is the sole PTV spatial-navigation and focus-lifecycle owner. It keeps a cached four-direction graph for the active route or topmost modal layer, remembers stable focus keys per route, restores layer openers and exact playback origins, and uses a temporary sentinel while async pages have no usable control. Pages publish stable `data-ptv-focus-key` values and call `notifyPtvTvFocusContentReady()` when dynamic rows become interactive; they do not implement competing global D-pad movement.
+
+The manager normalizes desktop, Android/Fire TV, LG webOS, and Samsung Tizen key signatures. It traps dialogs/menus, delegates text and native control editing, and prevents Jellyfin's later window-level keyboard handler from applying duplicate navigation while a PTV scope is active. `#/tv-navigation-debug` exposes current focus, history, route/key evidence, candidate counts, the cached graph, and broken paths. The full ownership and release matrix is recorded in `src/ptv/docs/tv-navigation-audit.md`.
+
 ## Feature Ownership
 
 | Area | Primary implementation | Ownership |
@@ -113,7 +152,7 @@ Home and browse card data should be fetched in lightweight list form and hydrate
 Reading has a separate cache boundary:
 
 - memory cache for active data
-- local-storage home cache schema version 4
+- local-storage home cache schema version 5
 - fresh TTL of 5 minutes
 - stale render window of 24 hours
 - per-library, image-profile, and in-flight request caches
@@ -466,6 +505,20 @@ Media-version normalization, TV activation, and remote diagnostics share one rul
 
 Remote diagnostics adds a coupled frontend/plugin contract without changing the persistent plugin configuration schema or writing captured reports to disk. The plugin advertises the capability explicitly, holds only bounded ephemeral coordination state, and applies authentication/administrator checks at the controller boundary. The frontend performs no collection until that capability and a valid bounded lease are both present.
 
+### 2026-07-20 Reading Cache v5 And Consolidation Boundary
+
+Reading home cache schema v5 separates complete home data from summary data. A complete entry is scoped by server, user, route kind, view, and resolved library-set identity; a v5 route-scope pointer permits a cold session to find only that matching complete persistent entry. Summary entries cannot occupy or replace the complete-cache tier.
+
+Cache precedence is strict: fresh complete memory, fresh complete persistent data, stale complete persistent data, summary only when no complete cache is available, then network/background refresh. Stale complete data stays complete in the view model and exposes `cacheDiagnostics.staleHit`; it is retained until a matching refreshed complete result replaces it. Unscoped identities and route/library-set mismatches never render. V4 Reading-home entries are outside the v5 keyspace and are never read.
+
+This correction is a transitional `PTVCache` contract, not a second cache framework. Future Movies, Shows, Music, Reading, Live TV, and dashboard data work must adopt the shared cache identity and precedence contract rather than copy this implementation. The architectural next step is the consolidation program above; it must replace duplicate services through adapters and tests, not through another series of isolated feature fixes.
+
+### 2026-07-20 Library Root Normalization Boundary
+
+`src/ptv/services/libraryRootNormalizer.ts` is the shared in-memory library identity boundary for Search and Browse result sets. It never filters by a physical filesystem root and makes no API requests. Jellyfin item ID is the primary deduplication key, followed by `PresentationUniqueKey`, then a normalized-path hash; item names alone are never used to remove a result.
+
+Logical library roots prefer collection metadata and Jellyfin library identity. When only a path is available, known media-root segments normalize mergerfs, bind-mount, SMB, and Windows forms such as `/media/Movies`, `/media-local/Movies`, `/mnt/L/Movies`, `\\server\\share\\Movies`, and `D:\\Movies` to `Movies`. Diagnostics retain the normalized group, associated library IDs, and observed physical roots for administrators. If Jellyfin itself omits an item from a path-agnostic `Users/{user}/Items` search response, the frontend reports that upstream omission rather than inventing a root-specific fallback request.
+
 The Remote Diagnostics dashboard crash root cause was a malformed client summary reaching render with `clientId` undefined. In the production bundle, `piggietv.12241ad2fb988bb07373.chunk.js:1:8902` was the minified `client.clientId.slice(-8)` formatter call and `:1:14043` was the surrounding `clients.map(...)` callback. No source map file was present in `dist`, so future triage should first check source-map availability and then use exact minified offsets against the built chunk when maps are absent.
 
 Repository outputs now have an explicit ownership split. `src/ptv/plugin/bin` contains exactly the five intentional deployment artifacts and remains tracked. Nested `bin`/`obj` under plugin projects/tests, `.dotnet-home/`, the Vite result cache, and split-development logs/PID are rebuildable machine-local output and remain ignored/untracked. Production `dist` output is still deployment output rather than source. Older handoff instructions to restore those generated files are superseded.
@@ -473,3 +526,31 @@ Repository outputs now have an explicit ownership split. `src/ptv/plugin/bin` co
 Project-memory documents are part of the delivery boundary. `HANDOFF.md` records continuation and live verification, `PROJECT_STATE.md` records the authoritative current ledger, and `ARCHITECTURE.md` records durable ownership and security boundaries. Every completed project prompt reconciles all three before completion is reported.
 
 The final local gate passed 58/58 targeted frontend tests, 20/20 plugin tests, TypeScript/build checking, changed-source ESLint, webOS Stylelint, the plugin contract, production Webpack, and whitespace validation. The remaining evidence boundary is authenticated coupled deployment plus physical LG/webOS and broader TV verification; live state-changing `ares` commands were intentionally not exercised.
+
+### 2026-07-20 Bounded Movie Search Recovery
+
+- Native global Movie search remains an authenticated, path-agnostic `GET Users/{user}/Items` request using `SearchTerm`, `IncludeItemTypes=Movie`, `Recursive=true`, and the normal 14-result limit. It does not send a filesystem root, `ParentId`, or administrator-only parameter.
+- Only when that primary Movie result is underfilled (or normalized diagnostics show divergent physical roots) PTV consults the existing authenticated `GET Users/{user}/Items/Latest` Movie route with a bounded 96-item candidate window. Candidates are cached in memory for two minutes by server, user, media type, and field profile, share concurrent work, and are filtered locally by normalized title, original title, sort title, production year, then path basename.
+- Recovery is deliberately unavailable to every non-Movie group, never bypasses Jellyfin authorization, never queries storage/database state, and is cancelled at the search consumer when the user changes query. The merge deduplicates in ID, provider identity plus media type, presentation key, then normalized logical-relative-path order before applying the visible limit.
+- Search diagnostics expose recovery trigger/reason, candidate and match counts, source cache, primary/supplemental duration, raw `TopParentId` evidence, normalized roots, and abort/timeout state.
+
+### 2026-07-20 Movie Search Primary-Outcome Recovery
+
+- Primary Movie search is now represented as an explicit `success`, `timeout`, `error`, or `aborted` outcome before recovery eligibility is evaluated. A timeout, recoverable request error, or successful zero-item response can use the same bounded authenticated Latest Movies candidate route; aborts and 401/403 authorization failures cannot.
+- Diagnostics retain `primaryStatus`, primary error text and duration, recovery trigger/reason, supplemental status and duration, candidate/match counts, cache source, and final count. A successful recovery renders normal Movie cards while retaining degraded primary evidence for administrators.
+- The initial grouped-search request now carries only card/render fields. Path, provider IDs, presentation key, sort/original title, and raw parent identity are requested only by the bounded Movie recovery route. The existing priority queue remains capped at two active requests, promotes Movies/Shows/Collections first, and commits each completed group independently.
+
+### 2026-07-20 Search Recovery Latest-Response Normalization
+
+- `getPtvRecentlyAddedResult` is now the shared authenticated Latest helper for consumers that need request and response diagnostics. It builds `Users/{user}/Items/Latest` with only cleaned caller parameters, normalizes both raw-array and `{ Items, TotalRecordCount }` responses, and marks malformed shapes as invalid rather than treating a wrapper as a candidate.
+- Movie recovery calls that shared builder in explicit unscoped mode: `IncludeItemTypes=Movie`, `ParentId` omitted, `Limit=96`, `GroupItems=false`, user data enabled, and a Primary image request. Its diagnostics include the sanitized request contract, response shape/keys/raw count/total, up to 20 title/ID/TopParent/year/date/logical-root samples, and matched names.
+# 2026-07-20 Movie Search Catalog Recovery
+
+Movie recovery no longer samples `Items/Latest`. `movieSearchCatalog.ts` owns a server-and-user-scoped, authorized `Users/{user}/Items` catalog with unscoped `Movie`, `Recursive=true`, newest-first 500-item lightweight pages, a five-minute memory TTL, shared in-flight page requests, cached hydrated matches, and bounded foreground advancement. It reuses `libraryRootNormalizer` identity rules so root aliases merge while same-title distinct movies remain distinct.
+
+`searchPtvItems` emits primary Movie results before catalog recovery completes. The native search page retains those cards with a small catalog-search status, then merges only hydrated catalog matches. Catalog diagnostics expose endpoint, ParentId, sort, page, cache, match location, and hydration metrics.
+# 2026-07-20 Rolling Diagnostics Storage
+
+Persistent PTV diagnostics now use one `ptv-diagnostics.log` JSONL stream in the plugin configuration directory. `PtvRollingDiagnosticsWriter` is the only disk diagnostics writer: it owns a bounded queue, one consumer, duplicate suppression, check-in/performance aggregation, five rotating files, 25 MB active-file rotation, 14-day cleanup, and capped total retention. The existing featured-content cache remains a separate single atomic cache document.
+
+Remote check-ins and accepted sanitized reports enter the writer asynchronously. The storage API and dashboard expose status, downloads, rotation, explicit-confirmation clearing, and safe legacy consolidation. Legacy cleanup matches only verified PTV filename patterns and never selects plugin settings, featured cache, Reading overrides, or unknown files.

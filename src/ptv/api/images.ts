@@ -430,8 +430,17 @@ export function getPtvItemImageUrl(
     const imageIndex = options.imageIndex || 0;
     const item = typeof itemOrId === 'string' ? null : itemOrId;
     const itemId = getPtvImageRequestItemId(itemOrId, imageType);
+    const serverId = options.serverId || item?.ServerId || null;
 
-    if (!itemId) return '';
+    if (!itemId || !serverId) {
+        if ((window as Window & Partial<Record<'PTV_DEBUG', boolean>>).PTV_DEBUG === true) {
+            console.debug('[PTV] Deferred item image request until item and server context are available', {
+                hasItemId: Boolean(itemId),
+                hasServerId: Boolean(serverId)
+            });
+        }
+        return '';
+    }
 
     const imagePath = imageType.toLowerCase() === 'backdrop' ?
         `Items/${itemId}/Images/Backdrop/${imageIndex}` :
@@ -447,7 +456,7 @@ export function getPtvItemImageUrl(
         quality: options.quality,
         tag,
         width: options.width
-    }, options.serverId || item?.ServerId || null);
+    }, serverId);
 }
 
 export function getPtvItemImageCandidates(
@@ -458,6 +467,8 @@ export function getPtvItemImageCandidates(
 
     const itemId = getStringValue(item, 'Id', 'id');
     const serverId = getStringValue(item, 'ServerId', 'serverId');
+
+    if (!itemId || !serverId) return [];
     const primaryItemId = getPtvImageRequestItemId(item, 'Primary') || itemId;
     const thumbItemId = getPtvImageRequestItemId(item, 'Thumb') || itemId;
     const backdropItemId = getPtvImageRequestItemId(item, 'Backdrop') || itemId;

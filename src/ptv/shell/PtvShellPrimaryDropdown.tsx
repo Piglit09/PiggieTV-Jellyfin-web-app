@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import {
+    focusPtvTvElement,
     getPtvRemoteDirection,
     isPtvRemoteBackKey,
     isPtvRemoteSelectKey
@@ -69,7 +70,7 @@ export default function PtvShellPrimaryDropdown({
             const items = panelRef.current?.querySelectorAll<HTMLAnchorElement>('[role="menuitem"]');
             const target = position === 'last' ? items?.[items.length - 1] : items?.[0];
 
-            target?.focus();
+            if (target) focusPtvTvElement(target, 'primary-dropdown-open');
         });
     }, []);
     const schedulePanelPosition = useCallback(() => {
@@ -99,6 +100,8 @@ export default function PtvShellPrimaryDropdown({
         });
     }, [links.length]);
     const handleTriggerKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (event.defaultPrevented) return;
+
         if (isPtvRemoteSelectKey(event)) {
             event.preventDefault();
             event.stopPropagation();
@@ -167,11 +170,15 @@ export default function PtvShellPrimaryDropdown({
         gestureRef.current = null;
     }, []);
     const handlePanelKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.defaultPrevented) return;
+
         if (isPtvRemoteBackKey(event)) {
             event.preventDefault();
             event.stopPropagation();
             requestClose();
-            window.requestAnimationFrame(() => triggerRef.current?.focus());
+            window.requestAnimationFrame(() => {
+                if (triggerRef.current) focusPtvTvElement(triggerRef.current, 'primary-dropdown-back');
+            });
             return;
         }
 
@@ -201,7 +208,9 @@ export default function PtvShellPrimaryDropdown({
         const offset = direction === 'down' ? 1 : -1;
         const nextIndex = (currentIndex + offset + items.length) % items.length;
 
-        items[nextIndex]?.focus();
+        const target = items[nextIndex];
+
+        if (target) focusPtvTvElement(target, `primary-dropdown-${direction}`);
     }, [requestClose]);
 
     useEffect(() => {
@@ -210,7 +219,9 @@ export default function PtvShellPrimaryDropdown({
         schedulePanelPosition();
         if (document.activeElement === triggerRef.current) {
             window.requestAnimationFrame(() => {
-                panelRef.current?.querySelector<HTMLAnchorElement>('[role="menuitem"]')?.focus();
+                const target = panelRef.current?.querySelector<HTMLAnchorElement>('[role="menuitem"]');
+
+                if (target) focusPtvTvElement(target, 'primary-dropdown-first-item');
             });
         }
         const visualViewport = window.visualViewport;
@@ -246,20 +257,10 @@ export default function PtvShellPrimaryDropdown({
             if (!target || triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
             requestClose();
         };
-        const handleEscape = (event: KeyboardEvent) => {
-            if (event.defaultPrevented || (event.key !== 'Escape' && !isPtvRemoteBackKey(event))) return;
-
-            event.preventDefault();
-            requestClose();
-            window.requestAnimationFrame(() => triggerRef.current?.focus());
-        };
-
         document.addEventListener('pointerdown', handleOutsidePointer, true);
-        document.addEventListener('keydown', handleEscape);
 
         return () => {
             document.removeEventListener('pointerdown', handleOutsidePointer, true);
-            document.removeEventListener('keydown', handleEscape);
         };
     }, [isOpen, requestClose]);
 

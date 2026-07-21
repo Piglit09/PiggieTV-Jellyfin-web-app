@@ -271,6 +271,25 @@ const UserSettingsPage: FC = () => {
                                 </div>
                             </LinkButton>
                         )}
+
+                        {isLoggedInUser && (
+                            <LinkButton
+                                href='#/tv-navigation-debug'
+                                className='listItem-border ptv-tv-navigation-debug-link'
+                                style={{
+                                    display: 'block',
+                                    margin: 0,
+                                    padding: 0
+                                }}
+                            >
+                                <div className='listItem'>
+                                    <LegacyMaterialIcon icon='keyboard' ptvIcon='controls' />
+                                    <div className='listItemBody'>
+                                        <div className='listItemBodyText'>TV Navigation Debug</div>
+                                    </div>
+                                </div>
+                            </LinkButton>
+                        )}
                     </div>
 
                     {isLoggedInUser && user.Policy?.IsAdministrator && !layoutManager.tv && (

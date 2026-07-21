@@ -26,6 +26,7 @@ const PTV_TV_PLATFORM_CLASSES: Exclude<PtvTvPlatform, 'none'>[] = [
 export type PtvLayoutMode = 'compact-mobile' | 'desktop' | 'mobile' | 'tablet' | 'ten-foot';
 export type PtvPointerType = 'coarse' | 'fine' | 'none' | 'unknown';
 export type PtvHoverCapability = 'hover' | 'none' | 'unknown';
+export type PtvLowPowerProfileDecision = 'applied' | 'disabled-by-setting' | 'not-required';
 
 export type PtvResponsiveSignals = {
     devicePixelRatio: number;
@@ -101,6 +102,8 @@ export type PtvPerformanceProfile = PtvPerformanceDefaults & {
     clientKind: PtvClientKind;
     isFireTv: boolean;
     isLowPower: boolean;
+    lowPowerProfileDecision: PtvLowPowerProfileDecision;
+    lowPowerProfileDecisionReason: string;
     isWebOs: boolean;
     renderProfile: PtvRenderProfileContract;
 };
@@ -430,32 +433,57 @@ export function getPtvClientProfile(): PtvClientProfile {
 export function getPtvPerformanceProfile(): PtvPerformanceProfile {
     const client = getPtvClientProfile();
     const featureSettings = getPtvFeatureSettings();
-    const shouldUseLowPowerProfile = featureSettings.tvLowPowerModeEnabled && client.isLowPower;
-    const lowPowerOverrides = shouldUseLowPowerProfile ? PTV_PERFORMANCE.lowPower : {};
+    const isLowPowerProfileSelection = client.renderProfile.selectionReason === 'low-power';
+    const shouldUseLowPowerProfile = featureSettings.tvLowPowerModeEnabled && isLowPowerProfileSelection;
+    const renderProfile = client.renderProfile;
+    const shouldUseLowPowerProfileSettings = featureSettings.tvLowPowerModeEnabled
+        && (client.isLowPower || isLowPowerProfileSelection);
+    const lowPowerProfileDecision: PtvLowPowerProfileDecision = featureSettings.tvLowPowerModeEnabled
+        ? (shouldUseLowPowerProfile ? 'applied' : 'not-required')
+        : 'disabled-by-setting';
+    const lowPowerProfileDecisionReason = lowPowerProfileDecision === 'applied'
+        ? renderProfile.matchReason || 'low-power-signal'
+        : lowPowerProfileDecision === 'disabled-by-setting'
+            ? 'tvLowPowerModeEnabled is disabled'
+            : `low-power profile not selected (source=${renderProfile.selectionReason || 'unknown'})`;
     const mobileOverrides = client.kind === 'mobile' ? PTV_PERFORMANCE.mobile : {};
     const webOsOverrides = featureSettings.tvLowPowerModeEnabled && client.isWebOs ? PTV_PERFORMANCE.webOs : {};
     const fireTvOverrides = featureSettings.tvLowPowerModeEnabled && client.isFireTv ? PTV_PERFORMANCE.fireTv : {};
+    const lowPowerOverrides = shouldUseLowPowerProfileSettings ? PTV_PERFORMANCE.lowPower : {};
     const performanceProfile = {
         ...PTV_PERFORMANCE.default,
         ...mobileOverrides,
         ...lowPowerOverrides,
         ...webOsOverrides,
-        ...fireTvOverrides
+        ...fireTvOverrides,
+        renderProfile
     };
 
     return {
         ...performanceProfile,
         clientKind: client.kind,
         isFireTv: client.isFireTv,
-        isLowPower: shouldUseLowPowerProfile,
+        isLowPower: client.isTv || shouldUseLowPowerProfile,
+        lowPowerProfileDecision,
+        lowPowerProfileDecisionReason,
         isWebOs: client.isWebOs,
         enableRowBackdrops: featureSettings.dynamicBackdropsEnabled && performanceProfile.enableRowBackdrops,
-        renderProfile: client.renderProfile
+        renderProfile
     };
 }
 
 export function applyPtvClientProfileClasses(profile = getPtvClientProfile()) {
     if (typeof document === 'undefined') return profile;
+
+    const lowPowerDecisionProfile = profile as PtvClientProfile & {
+        lowPowerProfileDecision?: PtvLowPowerProfileDecision;
+        lowPowerProfileDecisionReason?: string;
+    };
+    const lowPowerProfileDecision = lowPowerDecisionProfile.lowPowerProfileDecision || 'not-required';
+    const lowPowerProfileDecisionReason = lowPowerDecisionProfile.lowPowerProfileDecisionReason
+        || (lowPowerProfileDecision === 'applied'
+            ? 'low-power-signal'
+            : `low-power profile not selected (source=${profile.renderProfile.selectionReason || 'unknown'})`);
 
     const root = document.documentElement;
 
@@ -492,6 +520,8 @@ export function applyPtvClientProfileClasses(profile = getPtvClientProfile()) {
     root.dataset.ptvSupportsContainerQueries = String(profile.supportsContainerQueries);
     root.dataset.ptvSupportsAspectRatio = String(profile.supportsAspectRatio);
     root.dataset.ptvSupportsContentVisibility = String(profile.supportsContentVisibility);
+    root.dataset.ptvLowPowerProfileDecision = lowPowerProfileDecision;
+    root.dataset.ptvLowPowerProfileDecisionReason = lowPowerProfileDecisionReason;
     applyPtvRenderProfileClasses(root, profile.renderProfile);
 
     return profile;

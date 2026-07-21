@@ -79,20 +79,22 @@ function parseNumber(value: string) {
 }
 
 function getExplicitSeriesTitle(item: PtvReadingItem) {
-    const explicitValue = String(
-        item.SeriesName
-        || item.Album
-        || item.CollectionName
-        || ''
-    ).trim();
+    const explicitValue = String(item.SeriesName || '').trim();
 
     return cleanSeriesCandidate(explicitValue);
 }
 
 function getExplicitSeriesId(item: PtvReadingItem) {
+    return String(item.SeriesId || '').trim();
+}
+
+function getCollectionSeriesTitle(item: PtvReadingItem) {
+    return cleanSeriesCandidate(String(item.CollectionName || item.Album || '').trim());
+}
+
+function getProviderSeriesId(item: PtvReadingItem) {
     return String(
-        item.SeriesId
-        || item.ProviderIds?.ComicVineSeries
+        item.ProviderIds?.ComicVineSeries
         || item.ProviderIds?.ComicVineVolume
         || item.ProviderIds?.GoogleBooksSeries
         || item.ProviderIds?.OpenLibrarySeries
@@ -123,18 +125,20 @@ function buildExplicitSeriesInfo(
     item: PtvReadingItem,
     parsedFilename: PtvReadingFilenameInfo,
     explicitSeriesTitle: string,
+    explicitSeriesId: string,
     year: number | null
 ) {
     const itemIndexNumber = parseNumber(String(item.IndexNumber || ''));
 
-    if (!explicitSeriesTitle) return null;
+    if (!explicitSeriesTitle && !explicitSeriesId) return null;
+    const seriesTitle = explicitSeriesTitle || parsedFilename.seriesTitle || parsedFilename.cleanTitle;
 
     return {
         confidence: 'explicit',
-        groupKey: getGroupingKey('explicit', explicitSeriesTitle, year),
+        groupKey: getGroupingKey('explicit', seriesTitle, year, explicitSeriesId),
         issueNumber: itemIndexNumber ?? parsedFilename.issueNumber,
         issueText: String(itemIndexNumber ?? parsedFilename.issueNumber ?? ''),
-        seriesTitle: explicitSeriesTitle,
+        seriesTitle,
         sortName: parsedFilename.cleanTitle,
         volumeNumber: getItemVolumeNumber(item) ?? parsedFilename.volumeNumber,
         year
@@ -209,8 +213,10 @@ function parseSeriesFromTitle(item: PtvReadingItem): PtvReadingSeriesItemInfo {
     const parsedFilename = parsePtvReadingFilename(rawTitle);
     const explicitSeriesTitle = getExplicitSeriesTitle(item);
     const explicitSeriesId = getExplicitSeriesId(item);
+    const collectionSeriesTitle = getCollectionSeriesTitle(item);
+    const providerSeriesId = getProviderSeriesId(item);
     const year = parseYear(parsedFilename, item);
-    const providerInfo = buildProviderSeriesInfo(
+    const explicitInfo = buildExplicitSeriesInfo(
         item,
         parsedFilename,
         explicitSeriesTitle,
@@ -218,18 +224,27 @@ function parseSeriesFromTitle(item: PtvReadingItem): PtvReadingSeriesItemInfo {
         year
     );
 
-    if (providerInfo) return providerInfo;
+    if (explicitInfo) return explicitInfo;
 
-    const explicitInfo = buildExplicitSeriesInfo(
+    const collectionInfo = buildExplicitSeriesInfo(
         item,
         parsedFilename,
-        explicitSeriesTitle,
+        collectionSeriesTitle,
+        '',
         year
     );
 
-    if (explicitInfo) {
-        return explicitInfo;
-    }
+    if (collectionInfo) return collectionInfo;
+
+    const providerInfo = buildProviderSeriesInfo(
+        item,
+        parsedFilename,
+        collectionSeriesTitle,
+        providerSeriesId,
+        year
+    );
+
+    if (providerInfo) return providerInfo;
 
     const patternInfo = buildFilenameSeriesInfo(parsedFilename, year);
 

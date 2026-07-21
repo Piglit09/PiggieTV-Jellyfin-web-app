@@ -1,11 +1,14 @@
 export const PTV_RENDER_PROFILES = {
     DESKTOP: 'PTV_DESKTOP',
+    WEBOS: 'PTV_WEBOS',
+    WEBOS_OPTIMIZED: 'PTV_WEBOS_OPTIMIZED',
     LOWPOWER: 'PTV_LOWPOWER',
     MOBILE: 'PTV_MOBILE',
     TV: 'PTV_TV'
 } as const;
 
 export type PtvRenderProfileId = typeof PTV_RENDER_PROFILES[keyof typeof PTV_RENDER_PROFILES];
+export type PtvRenderProfileSelectionReason = 'desktop' | 'low-power' | 'mobile' | 'tv' | 'webos';
 
 export type PtvRenderClientSignals = {
     isAndroidTv?: boolean;
@@ -27,6 +30,7 @@ export type PtvRenderProfileContract = {
     className: string;
     id: PtvRenderProfileId;
     matchReason?: string;
+    selectionReason?: PtvRenderProfileSelectionReason;
     tier: 'desktop' | 'lowpower' | 'mobile' | 'tv';
     allowsAnimatedRows: boolean;
     allowsBackdropFilter: boolean;
@@ -42,9 +46,32 @@ export const PTV_RENDER_PROFILE_CONTRACTS: Record<PtvRenderProfileId, PtvRenderP
         allowsBlurLayers: true,
         allowsDecorativeBackdrops: true,
         allowsHeroAutoRotate: true,
+        selectionReason: 'desktop',
         className: 'ptv-render-desktop',
         id: PTV_RENDER_PROFILES.DESKTOP,
         tier: 'desktop'
+    },
+    [PTV_RENDER_PROFILES.WEBOS]: {
+        allowsAnimatedRows: false,
+        allowsBackdropFilter: false,
+        allowsBlurLayers: false,
+        allowsDecorativeBackdrops: false,
+        allowsHeroAutoRotate: false,
+        selectionReason: 'webos',
+        className: 'ptv-render-webos',
+        id: PTV_RENDER_PROFILES.WEBOS,
+        tier: 'tv'
+    },
+    [PTV_RENDER_PROFILES.WEBOS_OPTIMIZED]: {
+        allowsAnimatedRows: false,
+        allowsBackdropFilter: false,
+        allowsBlurLayers: false,
+        allowsDecorativeBackdrops: false,
+        allowsHeroAutoRotate: false,
+        selectionReason: 'webos',
+        className: 'ptv-render-webos',
+        id: PTV_RENDER_PROFILES.WEBOS_OPTIMIZED,
+        tier: 'tv'
     },
     [PTV_RENDER_PROFILES.MOBILE]: {
         allowsAnimatedRows: true,
@@ -52,6 +79,7 @@ export const PTV_RENDER_PROFILE_CONTRACTS: Record<PtvRenderProfileId, PtvRenderP
         allowsBlurLayers: true,
         allowsDecorativeBackdrops: true,
         allowsHeroAutoRotate: true,
+        selectionReason: 'mobile',
         className: 'ptv-render-mobile',
         id: PTV_RENDER_PROFILES.MOBILE,
         tier: 'mobile'
@@ -62,6 +90,7 @@ export const PTV_RENDER_PROFILE_CONTRACTS: Record<PtvRenderProfileId, PtvRenderP
         allowsBlurLayers: false,
         allowsDecorativeBackdrops: false,
         allowsHeroAutoRotate: false,
+        selectionReason: 'tv',
         className: 'ptv-render-tv',
         id: PTV_RENDER_PROFILES.TV,
         tier: 'tv'
@@ -72,6 +101,7 @@ export const PTV_RENDER_PROFILE_CONTRACTS: Record<PtvRenderProfileId, PtvRenderP
         allowsBlurLayers: false,
         allowsDecorativeBackdrops: false,
         allowsHeroAutoRotate: false,
+        selectionReason: 'low-power',
         className: 'ptv-render-lowpower',
         id: PTV_RENDER_PROFILES.LOWPOWER,
         tier: 'lowpower'
@@ -80,11 +110,13 @@ export const PTV_RENDER_PROFILE_CONTRACTS: Record<PtvRenderProfileId, PtvRenderP
 
 function withMatchReason(
     profile: PtvRenderProfileContract,
-    matchReason: string
+    matchReason: string,
+    selectionReason: PtvRenderProfileSelectionReason
 ): PtvRenderProfileContract {
     return {
         ...profile,
-        matchReason
+        matchReason,
+        selectionReason
     };
 }
 
@@ -99,30 +131,46 @@ export function getPtvRenderProfile(client: PtvRenderClientSignals): PtvRenderPr
         || client.isTenFootClient
     );
 
+    if (client.isWebOs) {
+        return withMatchReason(
+            PTV_RENDER_PROFILE_CONTRACTS[PTV_RENDER_PROFILES.WEBOS_OPTIMIZED],
+            'webos-signal',
+            'webos'
+        );
+    }
+
     if (isTenFootClient) {
         return withMatchReason(
             PTV_RENDER_PROFILE_CONTRACTS[PTV_RENDER_PROFILES.TV],
-            'tv-signal'
+            'tv-signal',
+            'tv'
         );
     }
 
     if (client.isMobile || client.isTablet) {
         return withMatchReason(
             PTV_RENDER_PROFILE_CONTRACTS[PTV_RENDER_PROFILES.MOBILE],
-            'mobile-signal'
+            'mobile-signal',
+            'mobile'
         );
     }
 
     if (client.isLowPower || client.isConstrainedHardware || !client.supportsBackdropFilter) {
         return withMatchReason(
             PTV_RENDER_PROFILE_CONTRACTS[PTV_RENDER_PROFILES.LOWPOWER],
-            client.isLowPower || client.isConstrainedHardware ? 'low-power-signal' : 'no-backdrop-filter'
+            client.supportsBackdropFilter === false
+                ? 'no-backdrop-filter'
+                : client.isConstrainedHardware
+                    ? 'constrained-hardware'
+                    : 'low-power-signal',
+            'low-power'
         );
     }
 
     return withMatchReason(
         PTV_RENDER_PROFILE_CONTRACTS[PTV_RENDER_PROFILES.DESKTOP],
-        'desktop-default'
+        'desktop-default',
+        'desktop'
     );
 }
 
@@ -130,11 +178,17 @@ export function applyPtvRenderProfileClasses(
     root: HTMLElement,
     renderProfile: PtvRenderProfileContract
 ) {
-    Object.values(PTV_RENDER_PROFILE_CONTRACTS).forEach(profile => {
-        root.classList.toggle(profile.className, profile.id === renderProfile.id);
+    const activeClass = renderProfile.className;
+    const profileClasses = new Set(
+        Object.values(PTV_RENDER_PROFILE_CONTRACTS).map(profile => profile.className)
+    );
+
+    profileClasses.forEach(profileClass => {
+        root.classList.toggle(profileClass, profileClass === activeClass);
     });
 
     root.dataset.ptvRenderProfile = renderProfile.id;
+    root.dataset.ptvRenderProfileSelection = renderProfile.selectionReason || 'unknown';
     root.dataset.ptvRenderTier = renderProfile.tier;
     root.dataset.ptvRenderMatchReason = renderProfile.matchReason || '';
 }

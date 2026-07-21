@@ -41,6 +41,10 @@ public sealed class PtvPluginSettingsDto
     [JsonPropertyName("performanceSettings")]
     public PerformanceSettings PerformanceSettings { get; set; } = new();
 
+    /// <summary>Gets or sets bounded diagnostics storage settings.</summary>
+    [JsonPropertyName("diagnosticsStorageSettings")]
+    public PtvDiagnosticsStorageSettings DiagnosticsStorageSettings { get; set; } = new();
+
     /// <summary>Gets or sets TMDb settings.</summary>
     [JsonPropertyName("tmdbSettings")]
     public PtvPublicTmdbSettings TmdbSettings { get; set; } = new();
@@ -89,6 +93,7 @@ public sealed class PtvPluginSettingsDto
             CacheSettings = configuration.CacheSettings,
             HeroSettings = configuration.HeroSettings,
             PerformanceSettings = configuration.PerformanceSettings,
+            DiagnosticsStorageSettings = configuration.DiagnosticsStorageSettings,
             RowSettings = configuration.RowSettings,
             Rows = configuration.Rows,
             Recommendations = configuration.Recommendations,
@@ -140,6 +145,10 @@ public sealed class PtvPluginSettingsPatchDto
     /// <summary>Gets or sets performance setting updates.</summary>
     [JsonPropertyName("performanceSettings")]
     public PtvPerformanceSettingsPatch? PerformanceSettings { get; set; }
+
+    /// <summary>Gets or sets diagnostics storage updates.</summary>
+    [JsonPropertyName("diagnosticsStorageSettings")]
+    public PtvDiagnosticsStorageSettingsPatch? DiagnosticsStorageSettings { get; set; }
 
     /// <summary>Gets or sets TMDb setting updates.</summary>
     [JsonPropertyName("tmdbSettings")]
@@ -298,6 +307,31 @@ public sealed class PtvPerformanceSettingsPatch
     /// <summary>Gets or sets whether low power disables animations.</summary>
     [JsonPropertyName("lowPowerDisableAnimations")]
     public bool? LowPowerDisableAnimations { get; set; }
+}
+
+/// <summary>Partial bounded diagnostics storage settings patch.</summary>
+public sealed class PtvDiagnosticsStorageSettingsPatch
+{
+    /// <summary>Gets or sets whether JSONL file logging is enabled.</summary>
+    [JsonPropertyName("fileLoggingEnabled")] public bool? FileLoggingEnabled { get; set; }
+    /// <summary>Gets or sets the active log size limit in megabytes.</summary>
+    [JsonPropertyName("maximumFileSizeMb")] public int? MaximumFileSizeMb { get; set; }
+    /// <summary>Gets or sets the retained rotation count.</summary>
+    [JsonPropertyName("maximumRotatedFiles")] public int? MaximumRotatedFiles { get; set; }
+    /// <summary>Gets or sets retention in days.</summary>
+    [JsonPropertyName("retentionDays")] public int? RetentionDays { get; set; }
+    /// <summary>Gets or sets the minimum disk log level.</summary>
+    [JsonPropertyName("minimumPersistentLogLevel")] public string? MinimumPersistentLogLevel { get; set; }
+    /// <summary>Gets or sets whether high-frequency performance samples persist.</summary>
+    [JsonPropertyName("includePerformanceSamples")] public bool? IncludePerformanceSamples { get; set; }
+    /// <summary>Gets or sets whether client check-ins are summarized.</summary>
+    [JsonPropertyName("includeClientCheckIns")] public bool? IncludeClientCheckIns { get; set; }
+    /// <summary>Gets or sets whether filesystem paths persist.</summary>
+    [JsonPropertyName("includeFilesystemPaths")] public bool? IncludeFilesystemPaths { get; set; }
+    /// <summary>Gets or sets whether request URLs persist.</summary>
+    [JsonPropertyName("includeRequestUrls")] public bool? IncludeRequestUrls { get; set; }
+    /// <summary>Gets or sets whether item identifiers persist.</summary>
+    [JsonPropertyName("includeItemIds")] public bool? IncludeItemIds { get; set; }
 }
 
 /// <summary>

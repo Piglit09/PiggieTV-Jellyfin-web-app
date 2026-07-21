@@ -1646,6 +1646,24 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 }
             );
         },
+        getRemoteDiagnosticsStorage<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.remoteDiagnosticsStorage, options);
+        },
+        rotateRemoteDiagnosticsStorage<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsStorage}/rotate`, { ...options, body: {}, method: 'POST' });
+        },
+        clearRemoteDiagnosticsStorage<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsStorage}/clear`, { ...options, body: { confirm: true }, method: 'POST' });
+        },
+        consolidateRemoteDiagnosticsStorage<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsStorage}/consolidate`, { ...options, body: { confirm: true, createArchive: true }, method: 'POST' });
+        },
+        getRemoteDiagnosticsStorageDownloadUrl() {
+            return getPluginUrl(apiClient, `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsStorage}/download`);
+        },
+        getRemoteDiagnosticsStorageBundleUrl() {
+            return getPluginUrl(apiClient, `${PTV_PLUGIN_API.endpoints.remoteDiagnosticsStorage}/bundle`);
+        },
         startRemoteDiagnosticsSession<T = unknown>(clientId: string, durationMinutes: 5 | 10, options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
                 apiClient,

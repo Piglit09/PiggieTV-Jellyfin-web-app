@@ -70,6 +70,9 @@ public static class PtvApiRoutes
     /// </summary>
     public const string V1RemoteDiagnostics = $"{V1}/diagnostics/clients";
 
+    /// <summary>Versioned rolling diagnostics storage route.</summary>
+    public const string V1DiagnosticsStorage = $"{V1}/diagnostics/storage";
+
     /// <summary>
     /// Versioned music metadata lookup route.
     /// </summary>

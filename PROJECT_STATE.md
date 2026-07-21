@@ -1,6 +1,6 @@
 # PiggieTV Project State
 
-Current as of 2026-07-19. This is the current-state ledger; dated sections retain delivery history.
+Current as of 2026-07-20. This is the current-state ledger; dated sections retain delivery history.
 
 Maintenance rule: after every completed project prompt, update `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` before reporting completion. Current behavior, verification, deployment requirements, and open risks must agree across all three documents.
 
@@ -17,9 +17,9 @@ Maintenance rule: after every completed project prompt, update `HANDOFF.md`, `PR
 | Plugin root | `src/ptv/plugin/Jellyfin.Plugin.PiggieTV` |
 | Plugin target/version | .NET 9, `10.11.8.2` against Jellyfin packages `10.11.8` |
 | Featured cache | Schema/version 7, plugin and browser stale-while-revalidate path |
-| Reading home cache | Schema 4, 5-minute fresh TTL, 24-hour stale window |
+| Reading home cache | Schema 5, complete/summary separation, 5-minute fresh TTL, 24-hour stale window, route-scoped persistent pointer |
 
-The current worktree adds conflict-safe media-source deduplication, TV remote activation/dropdown regressions, lighter static webOS glass, an administrator-controlled local remote-diagnostics system across the frontend and companion plugin, a Remote Diagnostics dashboard crash hardening pass, optional LG webOS CLI helpers, repository hygiene, and these project-memory updates. Machine-local/generated artifacts are intentionally untracked; the five-file `src/ptv/plugin/bin` deployment payload is intentionally tracked and refreshed. C# diagnostics tests now build synthetic credential-shaped strings at runtime to keep authorization coverage while avoiding committed secrets that match repository scan rules.
+The current worktree adds conflict-safe media-source deduplication, a complete TV navigation corrective audit, lighter static webOS glass, an administrator-controlled local remote-diagnostics system across the frontend and companion plugin, a Remote Diagnostics dashboard crash hardening pass, optional LG webOS CLI helpers, repository hygiene, and these project-memory updates. Machine-local/generated artifacts are intentionally untracked; the five-file `src/ptv/plugin/bin` deployment payload is intentionally tracked and refreshed. C# diagnostics tests now build synthetic credential-shaped strings at runtime to keep authorization coverage while avoiding committed secrets that match repository scan rules.
 
 ## Current Product State
 
@@ -30,7 +30,8 @@ The current worktree adds conflict-safe media-source deduplication, TV remote ac
 - `PTVShell` is the shared shell for native Home, Movies, Shows, Anime/Cartoons, Music, Reading, Requests, Dashboard, and settings surfaces.
 - Primary and contextual navigation are route-backed and centralized in the shell/route controller.
 - Item routing is centralized for PTV Music, Reading, video, and Jellyfin fallbacks.
-- TV activation and directional focus are centralized in `tvFocus.ts`; shell dropdowns share its normalized OK/select and Back semantics and restore focus on close.
+- TV activation and directional focus are centralized in `tvFocus.ts`. The cached four-way graph, per-route memory, initial-page rules, loading sentinel, modal/menu trap, opener return, exact playback return, and desktop/Android/webOS/Tizen key aliases share one lifecycle. Shell dropdowns keep only a non-TV keyboard fallback and skip it when the central TV handler owns an event.
+- `#/tv-navigation-debug` exposes current focus, focus history, last route/key, candidate/missing counts, graph edges, and broken paths. The complete source inventory and physical-device matrix are in `src/ptv/docs/tv-navigation-audit.md`.
 
 ### Home, Browse, And Recommendations
 
@@ -104,9 +105,26 @@ Verified implementation areas from the Reading hardening commit:
 - plugin configuration, controller, service interface/service, and Reading override models
 - focused tests for classification, filename parsing, series grouping/overrides, diagnostics, and Identify normalization/ranking
 
-## Final Validation Status
+## Current TV Navigation Validation
 
-The 2026-07-19 worktree was reverified after the final frontend, plugin, documentation, and payload changes:
+| Check | Result |
+| --- | --- |
+| Focus/route/dropdown/style regression | 6 files, 74 tests passed |
+| Central manager/dropdown focused rerun | 2 files, 37 tests passed, including capture-phase exactly-once integration |
+| Full PTV Vitest | 61 files and 365 tests passed; one unrelated `pages/home/hooks.test.ts` suite cannot resolve the existing `components/apphost` import through its current dependency graph |
+| New manager/debug scoped ESLint | Passed |
+| TV/webOS/debug-page Stylelint | Passed |
+| Isolated browser harness | 17 tests passed for keyboard focus, TV viewport/runtime, Android portal dropdown, Back/Escape restoration, resize, swipe, and route behavior |
+| TypeScript | Blocked by three pre-existing dirty-worktree errors in remote-diagnostics/render-profile code; no TV-navigation error reported |
+| Production Webpack | Asset compilation completed, then the same three unrelated TypeScript errors failed the build gate |
+| `git diff --check` | Passed with line-ending notices only |
+| Physical devices | Required before release; no physical LG, Fire TV, Android TV, or Tizen pass is claimed |
+
+The automated suite covers desktop keyboard semantics and Android/Fire TV, LG webOS, and Tizen event signatures. It cannot prove firmware event delivery or overscan/focus visibility on real hardware.
+
+## Prior 2026-07-19 Worktree Validation Status
+
+Before the later uncommitted render-profile/remote-diagnostics edits and TV navigation corrective audit, the 2026-07-19 worktree had this successful baseline:
 
 | Check | Result |
 | --- | --- |
@@ -129,7 +147,7 @@ The 2026-07-19 worktree was reverified after the final frontend, plugin, documen
 | Repository hygiene audit | No tracked `.dotnet-home`, Vite result, split-development log/PID, or nested plugin project/test `bin`/`obj`; no physical nested plugin `bin`/`obj` remained |
 | Deployable plugin payload | Five files preserved and rebuilt after the latest plugin source change |
 
-The older dated validation sections below remain historical evidence; they do not override this table or the current coupled frontend/plugin deployment boundary.
+The older dated validation sections below remain historical evidence; they do not override the current TV navigation table or the current coupled frontend/plugin deployment boundary.
 
 ### 2026-07-14 Movies/Shows Browse Validation
 
@@ -506,3 +524,57 @@ Status: implementation and automated validation pass; coupled deployment and phy
 - Repository cleanup removes tracked `.dotnet-home`, Vite result, split-development log/PID, and nested plugin project/test `bin`/`obj` output. The top-level five-file plugin deployment payload remains tracked and was rebuilt after the final C# change.
 - The optional `ares` wrapper and `src/ptv/docs/webos-cli.md` document safe discovery, information, inspect/log, install, launch, and close workflows. Actual device discovery was read-only; state-changing commands were dry-run only.
 - Verification passed as recorded in the current Final Validation Status table. No commit, push, frontend/plugin deployment, package installation, remote state change, or Jellyfin restart occurred.
+
+### 2026-07-20 Architecture Consolidation Baseline And Reading Cache v5
+
+Status: current architecture documented; consolidation implementation has not started. The next delivery program is refactor-first and must replace duplicate cross-media systems through shared adapters rather than add more isolated fixes.
+
+- The target platform has one `RecommendationEngine`, `MetadataService`, `ArtworkService`, `PTVCache`, `BrowseFramework`, `DetailsFramework`, `PlaybackService`, `PTVApiClient`, `PTVDiagnostics`, `PerformanceManager`, and `FocusManager`. Existing Movie, Show, Music, Reading, Live TV, Dashboard, dialog, and player implementations remain supported transitional consumers until each is migrated and its duplicate boundary is removed.
+- Reading home cache now uses schema v5. Complete entries and partial summaries use separate tiers. A v5 route-scope pointer is written only after a successful complete persistent write and is keyed by server, user, route, and view; it enables a cold session to locate only the current route's resolved-library complete cache. Stale complete entries retain `isPartial: false` and report `cacheDiagnostics.staleHit` while a matching refresh runs.
+- Strict Reading precedence is: fresh complete memory, fresh complete persistent, stale complete persistent, summary only when complete data is absent, then refresh. Full-cache writes reject partial payloads, and complete-cache reads reject malformed partial entries. V4 Reading-home cache keys are not read by v5.
+- Existing performance protections remain in place: shared Reading library-resolution promises, bounded shelf concurrency, deferred final-only grouping, route-generation stale-response rejection, and route-scoped artwork failure state. The exact real-server Books/Comics/Manga totals and latency targets remain unverified pending authenticated Jellyfin access.
+- Focused Reading validation passed 4 files/25 tests. `npm run build:check` and `npm run build:production` passed; production Webpack emitted only the established asset/entrypoint-size warnings. No deployment, restart, commit, push, or remote state change occurred.
+- Consolidation order: establish shared API-client and diagnostics contracts; migrate cache and artwork; migrate recommendation providers; adapt browse and details; then converge metadata, playback, performance, and focus. Every phase must publish old/new dependency evidence, removed duplicates, compatibility tests, metrics, and open technical debt in all project-memory files.
+
+### 2026-07-20 Library Root Normalization And Search Audit
+
+Status: shared normalization service implemented for native Search and focused Browse aggregation; no physical-root filter was found in the current native Search request.
+
+- `libraryRootNormalizer.ts` groups equivalent mergerfs, bind-mount, SMB, and Windows physical roots into logical media roots without issuing a request. It prefers collection metadata and Jellyfin IDs, uses path normalization only as a fallback, and deduplicates only by item ID, `PresentationUniqueKey`, or path hash.
+- Native Search is already path-agnostic: it queries Jellyfin `Users/{user}/Items` by `IncludeItemTypes` and `SearchTerm` without `ParentId` or filesystem-path parameters. It now normalizes and deduplicates the returned group data and reports normalized roots, physical roots, library IDs, and duplicate suppression in administrator diagnostics. Focused Browse uses the same result aggregation service while retaining correct Jellyfin ID-based scope queries.
+- Therefore, if an item such as `Toy Story 5` is absent from the raw path-agnostic Jellyfin response, that is upstream search/index behavior rather than a PTV physical-root exclusion. The diagnostics now provide the evidence needed to distinguish that case without adding requests or fabricating a `/media-local` exception.
+
+### 2026-07-20 Bounded Movie Search Recovery
+
+Status: implementation and targeted regression coverage added; authenticated live-server reproduction remains pending.
+
+- PTV preserves the standard global Movie search as the primary path and conditionally supplements only a sparse/root-divergent Movie result from the user-authorized Latest Movies endpoint. The recovery pool is bounded to 96, shared and TTL-cached for two minutes by server/user/media/field profile, locally matched, and merged before the result limit.
+- The recovery path has no storage, database, admin, or hard-coded mount dependency. It is unavailable to Shows, Music, Reading, and every other non-Movie category. Existing logical query cancellation prevents stale group state from committing after a new search begins.
+- Diagnostics now retain the primary/supplemental timing, cache source, trigger/reason, candidate/match/final counts, raw parent IDs, normalized roots, and timeout/abort status. The remaining release gate is a signed-in browser verification that `Toy Story` displays all five expected Movies, including `Toy Story 5`, under the actual Jellyfin server and its artwork permissions.
+
+### 2026-07-20 Movie Search Timeout Recovery
+
+Status: implementation and targeted automated validation complete; authenticated live-server validation is required before release.
+
+- Movie recovery is now based on an explicit primary outcome, so `timeout`, recoverable `error`, and successful empty results no longer fall through to `complete-primary-result`. Aborted requests and authorization failures intentionally do not use recovery.
+- The Movie group can render user-authorized Latest results after primary timeout/error and exposes the retained primary status/error/duration through administrator diagnostics. The supplemental candidate window remains bounded to 96 and shares the existing two-minute scoped cache.
+- Grouped search continues to use two queued workers, not one request per category. The priority order is Movies/Shows/Collections, then Episodes/Reading, then Music/Albums/Artists; each completed group commits immediately.
+- Validation: 11 focused tests passed. Pending live evidence: signed-in `toy story` search showing `primaryStatus`, triggered recovery reason when applicable, nonzero candidates/matches, and Toy Story 1-5 including correct details navigation/artwork.
+
+### 2026-07-20 Search Recovery Latest Candidate Audit
+
+Status: parser/request diagnostics and automated coverage complete; live server population evidence remains pending.
+
+- The shared Latest helper now supports both Jellyfin response shapes and reports invalid payloads safely. Movie recovery remains user-authorized and unscoped across accessible Movie roots, with an explicit `ParentId` omission and a bounded 96-item request.
+- Administrator Search diagnostics now retain the exact sanitized Latest contract plus response shape, raw/total count, response keys, candidate sample, logical roots, and matched names. This will establish whether a low candidate count originates in Jellyfin's actual Latest response or client parsing.
+- Focused tests: 13 passed. Release remains blocked on an authenticated live `toy story` result proving Toy Story 5 appears in the supplemental candidate sample and final Movie cards.
+# 2026-07-20 Movie Search Catalog Recovery
+
+Implemented bounded, cached global Movie catalog recovery in `movieSearchCatalog.ts`; it replaces the newest-96 `Items/Latest` pool. The catalog is server/user scoped, parent-unscoped, paged, deduplicated with logical-root identities, and only hydrates discovered matches. Native Movie search renders primary results before catalog completion.
+
+Pending production evidence: an authenticated live `toy story` search must report Toy Story 5 from a catalog page and `finalCount=5` without duplicates.
+# 2026-07-20 Rolling Diagnostics Storage
+
+Implemented centralized bounded JSONL diagnostics persistence with rolling logs, retention, privacy sanitizer reuse, storage status/actions, and legacy cleanup safeguards. Existing remote diagnostics remains in-memory for active sessions; only sanitized summaries/reports are persisted asynchronously through the rolling writer.
+
+Pending live verification: repeated check-ins and searches must append to one `ptv-diagnostics.log`, never create per-event files, rotate at the configured size, and report bounded retention in the dashboard.

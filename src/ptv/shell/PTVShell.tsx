@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 
 import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES } from '../core/config';
 import { recordPtvEvent } from '../core/observability';
+import { focusPtvTvElement } from '../core/tvFocus';
 import { getPtvQueryStringValue, parsePtvQueryString } from '../core/queryString';
 import { resolvePtvStaticAssetUrl } from '../core/urlOrigins';
 import { PtvIcon, type PtvIconName } from '../modules/icons';
@@ -457,7 +458,7 @@ function PtvShellSearch({
 
         const frame = window.requestAnimationFrame(() => {
             shouldFocusInputRef.current = false;
-            inputRef.current?.focus();
+            if (inputRef.current) focusPtvTvElement(inputRef.current, 'shell-search-open');
         });
 
         return () => window.cancelAnimationFrame(frame);
@@ -522,7 +523,7 @@ function PtvShellSearch({
         if (!query.trim()) {
             skipNextTriggerFocusRef.current = true;
             onClose();
-            triggerRef.current?.focus();
+            if (triggerRef.current) focusPtvTvElement(triggerRef.current, 'shell-search-close');
             return;
         }
 
@@ -531,7 +532,7 @@ function PtvShellSearch({
     }, [closeSearchIfEmpty, onClose, query]);
     const handleClear = useCallback(() => {
         setQuery('');
-        inputRef.current?.focus();
+        if (inputRef.current) focusPtvTvElement(inputRef.current, 'shell-search-clear');
     }, [setQuery]);
 
     return (
@@ -653,7 +654,13 @@ function PtvShellNotificationPanel({
     }, []);
 
     return (
-        <div className='ptv-shell-notification-panel' id='ptv-shell-notifications-panel' role='dialog' aria-label='PiggieTV notifications'>
+        <div
+            aria-label='PiggieTV notifications'
+            aria-labelledby='ptv-shell-notifications-trigger'
+            className='ptv-shell-notification-panel'
+            id='ptv-shell-notifications-panel'
+            role='dialog'
+        >
             <header className='ptv-shell-notification-panel-header'>
                 <div>
                     <span>Notifications</span>
@@ -784,6 +791,7 @@ function PtvShellActions({
                 aria-expanded={notificationsOpen}
                 aria-label='Notifications'
                 className='ptv-shell-icon-button ptv-shell-notification-trigger'
+                id='ptv-shell-notifications-trigger'
                 onClick={() => onPanelToggle('notifications')}
                 title='Notifications'
                 type='button'
@@ -826,13 +834,19 @@ function PtvShellActions({
                     aria-expanded={userOpen}
                     aria-label='User menu'
                     className='ptv-shell-icon-button'
+                    id='ptv-shell-user-trigger'
                     onClick={() => onPanelToggle('user')}
                     type='button'
                 >
                     <PtvIcon name='user' />
                 </button>
                 {userOpen ? (
-                    <div className='ptv-shell-user-panel' id='ptv-shell-user-panel' role='menu'>
+                    <div
+                        aria-labelledby='ptv-shell-user-trigger'
+                        className='ptv-shell-user-panel'
+                        id='ptv-shell-user-panel'
+                        role='menu'
+                    >
                         <a href={PTV_ROUTES.profilePreferences} onClick={() => onPanelToggle(null)} role='menuitem'>
                             <PtvIcon name='profile' />
                             <span>Profile</span>

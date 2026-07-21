@@ -259,6 +259,7 @@ export const PTV_PLUGIN_API = {
         remoteDiagnosticsCheckIn: 'Ptv/v1/diagnostics/clients/check-in',
         remoteDiagnosticsClients: 'Ptv/v1/diagnostics/clients',
         remoteDiagnosticsReport: 'Ptv/v1/diagnostics/clients/report',
+        remoteDiagnosticsStorage: 'Ptv/v1/diagnostics/storage',
         settings: 'Ptv/v1/settings',
         settingsReset: 'Ptv/v1/settings/reset',
         status: 'Ptv/v1/status'

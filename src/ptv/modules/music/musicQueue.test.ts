@@ -31,6 +31,7 @@ import {
     openPtvMusicPlayer,
     pausePtvMusicPlayback,
     playPtvMusicTracks,
+    movePtvMusicQueueItem,
     stopPtvMusicPlayback,
     subscribeToPtvMusicQueue
 } from './musicQueue';
@@ -149,5 +150,108 @@ describe('native Music queue subscriptions', () => {
 
         openPtvMusicPlayer('test-explicit-player-button');
         expect(window.location.hash).toBe('#/music/player');
+    });
+
+    it('continues queue playback after ownership pause then ended', async () => {
+        let paused = true;
+        const loadSpy = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+            paused = false;
+            Object.defineProperty(this, 'paused', {
+                configurable: true,
+                get: () => paused
+            });
+            this.dispatchEvent(new Event('play'));
+            return Promise.resolve();
+        });
+        const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+            paused = true;
+            Object.defineProperty(this, 'paused', {
+                configurable: true,
+                get: () => paused
+            });
+            this.dispatchEvent(new Event('pause'));
+        });
+        const tracks = [
+            { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' },
+            { Id: 'track-two', MediaType: 'Audio', Name: 'Track Two', Type: 'Audio' }
+        ];
+
+        await playPtvMusicTracks(tracks, 0);
+        expect(playSpy).toHaveBeenCalledTimes(1);
+        expect(getPtvMusicQueueSnapshot().currentItem?.Id).toBe('track-one');
+
+        await pausePtvMusicPlayback('jellyfin-video-start');
+        expect(getPtvMusicQueueSnapshot().currentItem?.Id).toBe('track-one');
+
+        const audio = document.querySelector<HTMLAudioElement>('[data-ptv-music-native-player="true"]');
+
+        expect(audio).not.toBeNull();
+
+        audio!.dispatchEvent(new Event('ended'));
+
+        await Promise.resolve();
+
+        expect(getPtvMusicQueueSnapshot()).toMatchObject({
+            currentIndex: 1,
+            isPlaying: true,
+            currentItem: { Id: 'track-two' }
+        });
+        expect(playSpy).toHaveBeenCalledTimes(2);
+        expect(loadSpy).toHaveBeenCalledTimes(2);
+        expect(pauseSpy).toHaveBeenCalled();
+    });
+
+    it('advances when queue is reordered without reloading playback', async () => {
+        let paused = true;
+        const loadSpy = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+            paused = false;
+            Object.defineProperty(this, 'paused', {
+                configurable: true,
+                get: () => paused
+            });
+            return Promise.resolve();
+        });
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+            paused = true;
+            Object.defineProperty(this, 'paused', {
+                configurable: true,
+                get: () => paused
+            });
+        });
+
+        await playPtvMusicTracks([
+            { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' },
+            { Id: 'track-two', MediaType: 'Audio', Name: 'Track Two', Type: 'Audio' },
+            { Id: 'track-three', MediaType: 'Audio', Name: 'Track Three', Type: 'Audio' }
+        ], 1);
+
+        const snapshot = getPtvMusicQueueSnapshot();
+        const currentPlaylistItemId = snapshot.playlist[snapshot.currentIndex]?.PlaylistItemId;
+
+        expect(snapshot.currentItem?.Id).toBe('track-two');
+        expect(currentPlaylistItemId).toBeTruthy();
+
+        if (!currentPlaylistItemId) {
+            throw new Error('Expected a current playlist item id.');
+        }
+
+        movePtvMusicQueueItem(currentPlaylistItemId, 0);
+
+        const audio = document.querySelector<HTMLAudioElement>('[data-ptv-music-native-player=\"true\"]');
+        expect(audio).not.toBeNull();
+
+        audio!.dispatchEvent(new Event('ended'));
+
+        await Promise.resolve();
+
+        expect(getPtvMusicQueueSnapshot()).toMatchObject({
+            currentIndex: 1,
+            isPlaying: true,
+            currentItem: { Id: 'track-one' }
+        });
+        expect(loadSpy).toHaveBeenCalledTimes(2);
+        expect(playSpy).toHaveBeenCalledTimes(2);
     });
 });

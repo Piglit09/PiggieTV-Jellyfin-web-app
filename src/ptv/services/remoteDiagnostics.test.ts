@@ -6,7 +6,9 @@ const diagnosticsMocks = vi.hoisted(() => ({
         kind: 'desktop',
         layoutMode: 'desktop',
         renderProfile: {
+            className: 'ptv-render-desktop',
             id: 'balanced',
+            matchReason: 'desktop-default',
             tier: 'balanced'
         },
         supportsAspectRatio: true,
@@ -14,6 +16,8 @@ const diagnosticsMocks = vi.hoisted(() => ({
         supportsContainerQueries: true,
         supportsContentVisibility: true,
         tvPlatform: 'none',
+        lowPowerProfileDecision: 'not-required',
+        lowPowerProfileDecisionReason: 'low-power signals not detected',
         userAgent: 'Mozilla/5.0 Chrome/126.0 Safari/537.36'
     },
     logs: [] as Array<{
@@ -27,7 +31,8 @@ const diagnosticsMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../core/clientProfile', () => ({
-    getPtvClientProfile: () => diagnosticsMocks.profile
+    getPtvClientProfile: () => diagnosticsMocks.profile,
+    getPtvPerformanceProfile: () => diagnosticsMocks.profile
 }));
 
 vi.mock('./playbackStateService', () => ({
@@ -189,6 +194,8 @@ describe('remote diagnostics runtime gate', () => {
             diagnosticsModuleLoaded: true,
             platformDetected: 'fire-tv'
         });
+        expect(presence.profile.lowPowerProfileDecision).toBe('not-required');
+        expect(presence.profile.renderProfile.matchReason).toBe('desktop-default');
         expect(JSON.stringify(presence)).not.toContain('authorization');
         Reflect.deleteProperty(window, 'ApiClient');
     });

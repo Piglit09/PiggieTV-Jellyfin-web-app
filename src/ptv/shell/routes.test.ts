@@ -88,6 +88,17 @@ describe('PTV shell details route ownership', () => {
     });
 });
 
+describe('PTV TV navigation diagnostics route', () => {
+    it('classifies the on-device navigation debugger as a settings page', () => {
+        const route = getRoute('#/tv-navigation-debug');
+
+        expect(route.id).toBe('tv-navigation-debug');
+        expect(route.owner).toBe('settings');
+        expect(route.pageType).toBe('settings');
+        expect(route.features).toContain('tv-navigation-debug');
+    });
+});
+
 describe('PTV shell authentication routes', () => {
     it.each([
         '#/login',

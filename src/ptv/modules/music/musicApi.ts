@@ -19,6 +19,7 @@ import {
 } from '../../api';
 import { recordPtvEvent, timePtvAsync } from '../../core/observability';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
+import { logPtvRecommendationStage } from '../recommendations/debug/recommendationRuntimeDebug';
 import {
     readPtvLocalStorageJson,
     removePtvLocalStorageKey,
@@ -47,6 +48,7 @@ import type {
     PtvMusicSection,
     PtvMusicSectionTiming
 } from './musicTypes';
+import { createPtvMusicRecommendationEngine } from './musicRecommendations';
 import {
     getPtvLikedMusicItems,
     mergePtvLikedMusicItems
@@ -2009,30 +2011,6 @@ function getGenreCounts(items: PtvMusicItem[]) {
         .map(([genre]) => genre);
 }
 
-function buildRecommendedItems(seedItems: PtvMusicItem[], pool: PtvMusicItem[], limit = DEFAULT_TRACK_LIMIT) {
-    const favoriteArtists = new Set(seedItems.map(getPtvMusicArtist).filter(Boolean));
-    const favoriteGenres = new Set(seedItems.reduce<string[]>((genres, item) => genres.concat(getPtvMusicGenres(item)), []));
-    const seedIds = new Set(seedItems.map(item => item.Id).filter(Boolean));
-
-    return uniquePtvMusicItems(pool)
-        .filter(item => !seedIds.has(item.Id))
-        .map(item => {
-            const playCount = Number(item.UserData?.PlayCount || 0);
-            const isFavorite = item.UserData?.IsFavorite ? 8 : 0;
-            const artistScore = favoriteArtists.has(getPtvMusicArtist(item)) ? 5 : 0;
-            const genreScore = getPtvMusicGenres(item).filter(genre => favoriteGenres.has(genre)).length * 3;
-            const qualityScore = ['flac', 'opus'].some(codec => getPtvMusicCodec(item).includes(codec)) ? 2 : 0;
-
-            return {
-                item,
-                score: playCount + isFavorite + artistScore + genreScore + qualityScore
-            };
-        })
-        .sort((left, right) => right.score - left.score || getPtvMusicTitle(left.item).localeCompare(getPtvMusicTitle(right.item)))
-        .map(entry => entry.item)
-        .slice(0, limit);
-}
-
 function buildGenreMixSections(items: PtvMusicItem[]) {
     return getGenreCounts(items)
         .slice(0, 4)
@@ -2365,12 +2343,52 @@ export function getPtvMusicHome(options: {
             ...recentlyAdded,
             ...newMusic
         ]);
-        const recommended = buildRecommendedItems([
+        const recommendationEngine = createPtvMusicRecommendationEngine();
+        logPtvRecommendationStage('Engine created', {
+            candidateCount: recommendationPool.length,
+            initialized: recommendationEngine.initialized,
+            surface: 'music-home'
+        });
+        recommendationEngine.initialize();
+        logPtvRecommendationStage('Provider created', {
+            candidateCount: recommendationPool.length,
+            provider: 'jellyfin-music-library',
+            surface: 'music-home'
+        });
+        logPtvRecommendationStage('Provider initialized', {
+            engineInitialized: recommendationEngine.initialized,
+            provider: 'jellyfin-music-library',
+            surface: 'music-home'
+        });
+        const recommendationSeeds = [
             ...likedSongs.slice(0, 24),
             ...favorites.slice(0, 16),
             ...recentlyPlayed.slice(0, 16),
             ...highestPlayed.slice(0, 12)
-        ], recommendationPool, DEFAULT_TRACK_LIMIT);
+        ];
+        logPtvRecommendationStage('Profile loaded', {
+            favoriteCount: likedSongs.length,
+            profileSignalCount: new Set(recommendationSeeds.flatMap(item => [getPtvMusicArtist(item), ...getPtvMusicGenres(item)].filter(Boolean))).size,
+            profileSource: 'music-library-signals',
+            surface: 'music-home'
+        });
+        logPtvRecommendationStage('Provider loaded', {
+            candidateCount: recommendationPool.length,
+            surface: 'music-home'
+        });
+        const recommendationShelves = recommendationEngine.buildShelves(
+            recommendationSeeds,
+            recommendationPool,
+            [
+                ...newMusic,
+                ...recentlyAdded,
+                ...highestPlayed,
+                ...recommendationPool
+            ],
+            continueListening,
+            DEFAULT_TRACK_LIMIT
+        );
+        const { madeForYou, recommended } = recommendationShelves;
         const sections = [
             getSection('recently-played', 'Recently Played', recentlyPlayed, {
                 seed: { kind: 'recent', label: 'Recently Played' }
@@ -2382,9 +2400,13 @@ export function getPtvMusicHome(options: {
                 seed: { kind: 'favorites', label: 'Liked Songs' },
                 subtitle: 'Favorites'
             }),
-            getSection('recommended-for-you', 'Recommended For You', recommended, {
-                seed: { kind: 'favorites', label: 'Recommended For You' },
+            getSection('made-for-you', 'Made For You', madeForYou, {
+                seed: { kind: 'favorites', label: 'Made For You' },
                 subtitle: 'Smart Picks'
+            }),
+            getSection('recommended', 'Recommended', recommended, {
+                seed: { kind: 'random', label: 'Recommended' },
+                subtitle: 'Discovery'
             }),
             getSection('new-music', 'New Music', newMusic, {
                 seed: { kind: 'random', label: 'New Music' }
@@ -2407,6 +2429,23 @@ export function getPtvMusicHome(options: {
                 subtitle: 'High Quality'
             })
         ].filter(section => section.items.length > 0);
+        const recommendationSections = sections.filter(section => section.id === 'continue-listening' || section.id === 'made-for-you' || section.id === 'recommended');
+        const recommendationDetail = {
+            algorithmByShelf: {
+                'continue-listening': 'resume-history',
+                'made-for-you': 'artist-genre-affinity',
+                recommended: 'fresh-quality-discovery'
+            },
+            engineInitialized: recommendationEngine.initialized,
+            recommendationRowsRendered: recommendationSections.length,
+            rowCount: recommendationSections.length,
+            rowOverlapPercentage: recommendationShelves.overlapPercentage,
+            shelfItemCounts: Object.fromEntries(recommendationSections.map(section => [section.id, section.items.length])),
+            shelfIds: recommendationSections.map(section => section.id),
+            surface: 'music-home'
+        };
+        recordPtvEvent('recommendation', 'recommendation-rows-generated', recommendationDetail);
+        recordPtvEvent('recommendation', 'music-recommendation-rows-loaded', recommendationDetail);
         const data: PtvMusicHomeData = {
             completeness: hasFailedMusicSections(sectionTimings) ? 'degraded' : 'complete',
             generatedAt: Date.now(),

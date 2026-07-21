@@ -20,7 +20,8 @@ import { queryClient } from './query/queryClient';
 import { PTV_CONFIG } from 'ptv/core/config';
 import {
     buildPtvServerOriginCandidates,
-    getRequestedPtvServerId
+    getRequestedPtvServerId,
+    getRequestedPtvServerUrl
 } from 'ptv/core/serverOriginSelection';
 import { isPtvWebpackDevServerOrigin } from 'ptv/core/urlOrigins';
 
@@ -35,9 +36,14 @@ export async function serverAddress() {
     // Use servers specified in config.json
     const configuredUrls = await webSettings.getServers();
     const requestedServerId = getRequestedPtvServerId(getLocationSearch());
+    const requestedServerUrl = getRequestedPtvServerUrl(getLocationSearch());
     const requestedServer = requestedServerId ?
         ServerConnections.getServerInfo(requestedServerId) :
         null;
+
+    if (requestedServerUrl) {
+        console.info('[PTV] Using explicit server override from shell query:', requestedServerUrl);
+    }
     const apiClient = ServerConnections.currentApiClient() || window.ApiClient;
     const development = PTV_CONFIG.runtime.mode === 'development';
     const urls = buildPtvServerOriginCandidates({
@@ -45,6 +51,7 @@ export async function serverAddress() {
         configuredUrls,
         development,
         explicitDevelopmentUrl: PTV_CONFIG.runtime.devJellyfinServerUrl,
+        requestedServerUrl,
         fallbackOrigin: window.location.origin,
         fallbackServer: requestedServer ? null : ServerConnections.getLastUsedServer(),
         requestedServer,

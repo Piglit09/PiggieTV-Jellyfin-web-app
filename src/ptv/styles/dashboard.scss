@@ -303,20 +303,33 @@
     pointer-events: none;
 }
 
+@media all and (min-width: 900px) {
+    .dashboardDocument .mainAnimatedPage:not(.metadataEditorPage) {
+        box-sizing: border-box;
+        left: var(--ptv-admin-sidebar-width, 240px) !important;
+        right: 0;
+        width: auto;
+    }
+}
+
 .dashboardDocument .content-primary {
-    width: min(1500px, calc(100vw - 72px)) !important;
+    width: min(1500px, calc(100% - 72px)) !important;
     box-sizing: border-box;
     max-width: 100% !important;
     overflow-x: clip;
     padding:
-        0
+        var(--ptv-dashboard-shell-top-offset)
         clamp(22px, 3vw, 42px)
         var(--ptv-density-page-padding-bottom, 48px) !important;
 }
 
 .dashboardDocument .content-primary.ptv-admin-shell-spaced {
-    padding-top: 0 !important;
-    scroll-margin-top: 0 !important;
+    padding-top: var(--ptv-dashboard-shell-top-offset) !important;
+    scroll-margin-top: var(--ptv-dashboard-shell-top-offset) !important;
+}
+
+.dashboardDocument #mediaLibraryPage .content-primary {
+    padding-top: var(--ptv-dashboard-shell-top-offset) !important;
 }
 
 .dashboardDocument .content-primary > .MuiGrid-container {
@@ -965,6 +978,10 @@
 }
 
 .dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge[data-ptv-render-profile='PTV_TV'] {
+    --ptv-render-badge-rgb: var(--ptv-color-accent-secondary-rgb);
+}
+
+.dashboardDocument .ptv-dashboard-control-page .ptv-render-profile-badge[data-ptv-render-profile='PTV_WEBOS'] {
     --ptv-render-badge-rgb: var(--ptv-color-accent-secondary-rgb);
 }
 

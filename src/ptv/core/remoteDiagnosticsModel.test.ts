@@ -149,12 +149,44 @@ describe('remote diagnostics privacy and payload contract', () => {
             browserFamily: 'webos',
             deviceMemoryGb: 1.5,
             hardwareConcurrency: 4,
+            lowPowerProfileDecision: 'applied',
+            lowPowerProfileDecisionReason: 'desktop-default',
             isLowPower: true,
             kind: 'webos',
             tvPlatform: 'webos',
             viewport: 'large'
         });
+        expect(tag.renderProfile).toMatchObject({
+            id: 'balanced',
+            selectionReason: 'unknown',
+            matchReason: 'desktop-default',
+            tier: 'balanced'
+        });
         expect(tag).not.toHaveProperty('userAgent');
+    });
+
+    it('derives low-power decision metadata from legacy client profiles', () => {
+        const legacyProfile = createProfile({
+            isLowPower: true,
+            kind: 'firetv',
+            renderProfile: {
+                ...createProfile().renderProfile,
+                id: 'PTV_LOWPOWER',
+                matchReason: 'low-power-signal',
+                tier: 'lowpower'
+            }
+        });
+
+        const tag = createPtvRemoteDiagnosticsProfileTag(legacyProfile);
+
+        expect(tag.lowPowerProfileDecision).toBe('applied');
+        expect(tag.lowPowerProfileDecisionReason).toBe('low-power-signal');
+        expect(tag.renderProfile).toMatchObject({
+            id: 'PTV_LOWPOWER',
+            selectionReason: 'unknown',
+            matchReason: 'low-power-signal',
+            tier: 'lowpower'
+        });
     });
 
     it('removes credentials, query strings, external hosts, and likely item identifiers', () => {

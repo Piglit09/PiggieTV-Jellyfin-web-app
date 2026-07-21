@@ -90,6 +90,14 @@ function getFilename(item, source) {
 function normalizeDetailButtons(page) {
     page.querySelectorAll('.detailButton').forEach((button) => {
         button.classList.add('ptv-detail-action');
+        const actionName = Array.from(button.classList)
+            .find(className => className.startsWith('btn') && className !== 'button-flat') || 'detail-action';
+
+        button.dataset.ptvFocusKey = `details:${actionName}`;
+
+        if (button.matches('.btnPlay, .btnReplay')) {
+            button.dataset.ptvInitialFocus = 'details-play';
+        }
     });
 
     page.querySelectorAll('.detailButton[title]').forEach((button) => {

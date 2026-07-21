@@ -21,6 +21,7 @@ type PtvServerOriginCandidatesOptions = {
     explicitDevelopmentUrl?: string | null;
     fallbackOrigin?: string | null;
     fallbackServer?: PtvSavedServer | null;
+    requestedServerUrl?: string | null;
     requestedServer?: PtvSavedServer | null;
     runtimeUrls?: readonly string[];
 };
@@ -38,6 +39,33 @@ export function getRequestedPtvServerId(search: string) {
         // URLSearchParams is already required by the Jellyfin browser runtime.
         // eslint-disable-next-line compat/compat
         return new URLSearchParams(String(search || '')).get('serverid') || '';
+    } catch {
+        return '';
+    }
+}
+
+export function getRequestedPtvServerUrl(search: string) {
+    try {
+        // URLSearchParams is already required by the Jellyfin browser runtime.
+        // eslint-disable-next-line compat/compat
+        const params = new URLSearchParams(String(search || ''));
+        const possibleKeys = [
+            'jellyfinUrl',
+            'serverUrl',
+            'serverurl',
+            'server',
+            'serverAddress'
+        ];
+
+        for (const key of possibleKeys) {
+            const value = params.get(key);
+
+            if (value) {
+                return value;
+            }
+        }
+
+        return '';
     } catch {
         return '';
     }
@@ -82,12 +110,15 @@ export function buildPtvServerOriginCandidates({
     configuredUrls = [],
     development,
     explicitDevelopmentUrl,
+    requestedServerUrl,
     fallbackOrigin,
     fallbackServer,
     requestedServer,
     runtimeUrls = []
 }: PtvServerOriginCandidatesOptions) {
     const candidates: string[] = [];
+
+    addCandidate(candidates, requestedServerUrl);
 
     if (development) {
         addCandidate(candidates, explicitDevelopmentUrl);

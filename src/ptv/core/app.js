@@ -22,6 +22,7 @@ import { startPtvShellFoundation } from '../shell/foundation';
 import { startPtvRuntimeRoot } from '../shell/PTVRuntimeRoot';
 import { startPtvPerformanceMonitor } from '../services/performanceMonitor';
 import { startPtvPluginRemoteDiagnosticsTransport } from '../services/pluginRemoteDiagnosticsTransport';
+import { startPtvStartupReadiness } from './startupReadiness';
 import '../instrumentation';
 import '../primitives/stockPatterns';
 import '../shell/overlays';
@@ -31,6 +32,21 @@ initPtvLogging();
 initPtvObservability();
 
 function startPtvRuntimeServices() {
+    const runtimeState = window.__PTV_RUNTIME_APP_STATE__ ||= {
+        createCount: 0,
+        duplicateInitializationSuppressed: 0,
+        reuseCount: 0,
+        started: false
+    };
+
+    if (runtimeState.started) {
+        runtimeState.reuseCount += 1;
+        runtimeState.duplicateInitializationSuppressed += 1;
+        return;
+    }
+
+    runtimeState.started = true;
+    runtimeState.createCount += 1;
     createPtvRuntime('core-app');
     registerPtvRuntimeFeature('router', startRouter);
     registerPtvRuntimeFeature('performance-monitor', startPtvPerformanceMonitor);
@@ -38,6 +54,7 @@ function startPtvRuntimeServices() {
     registerPtvRuntimeFeature('route-controller', startPtvRouteController);
     registerPtvRuntimeFeature('shell-foundation', startPtvShellFoundation);
     registerPtvRuntimeFeature('runtime-root', startPtvRuntimeRoot);
+    registerPtvRuntimeFeature('startup-readiness', startPtvStartupReadiness);
     markPtvRuntimeReady();
 }
 

@@ -14,6 +14,10 @@ import { PTV_RUNTIME } from '../../core/config';
 import { isPtvDebugEnabled } from '../../core/observability';
 import { getCurrentPtvPluginApiClient, normalizePtvApiError } from '../../core/pluginApi';
 
+let remoteDiagnosticsRefreshInFlight: Promise<[unknown, unknown, DiagnosticsStorageStatus | null]> | null = null;
+let remoteDiagnosticsRefreshProfile = '';
+let remoteDiagnosticsExportInFlight = false;
+
 type RemoteDiagnosticsClient = {
     boot: RemoteDiagnosticsBootMarker;
     capabilityMode: DiagnosticsCapabilityMode;
@@ -84,10 +88,28 @@ type StoredRemoteDiagnosticsReport = {
     report: unknown;
 };
 
-type BusyAction = 'download' | 'refresh' | 'report' | 'snapshot' | 'start' | 'stop' | null;
+type BusyAction = 'clear-storage' | 'consolidate-storage' | 'download' | 'refresh' | 'refresh-storage' | 'report' | 'rotate-storage' | 'snapshot' | 'start' | 'stop' | null;
 type ClientLoadState = 'empty' | 'error' | 'loading' | 'success';
 type SessionsLoadState = 'empty' | 'error' | 'loading' | 'success';
 type RemoteDiagnosticsSource = 'jellyfin' | 'local-cache' | 'plugin-cache' | 'recommendation';
+
+type DiagnosticsStorageStatus = {
+    activeFileSizeBytes: number;
+    activeLogPath: string;
+    duplicateEventsSuppressed: number;
+    eventsAggregated: number;
+    eventsDropped: number;
+    eventsQueued: number;
+    eventsWritten: number;
+    lastRotationUtc: string | null;
+    legacyFileCount: number;
+    legacyFileSizeBytes: number;
+    oldestRetainedAtUtc: string | null;
+    retentionDays: number;
+    rotatedFileCount: number;
+    totalRetainedBytes: number;
+    writeFailures: number;
+};
 
 const REMOTE_DIAGNOSTICS_COMPONENT = 'RemoteDiagnosticsPanel';
 const REMOTE_DIAGNOSTICS_SOURCE: RemoteDiagnosticsSource = 'plugin-cache';
@@ -107,6 +129,13 @@ function formatTimestamp(value: string | null | undefined) {
 
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function formatBytes(value: number) {
+    if (!Number.isFinite(value) || value <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const exponent = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
+    return `${(value / (1024 ** exponent)).toFixed(exponent ? 1 : 0)} ${units[exponent]}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -608,6 +637,7 @@ export function RemoteDiagnosticsPanel() {
     const [selectedClientId, setSelectedClientId] = useState('');
     const [sessionsLoadState, setSessionsLoadState] = useState<SessionsLoadState>('loading');
     const [statusMessage, setStatusMessage] = useState('');
+    const [storage, setStorage] = useState<DiagnosticsStorageStatus | null>(null);
 
     const selectedClient = useMemo(
         () => clients.find(client => client.clientId === selectedClientId) || null,
@@ -624,15 +654,27 @@ export function RemoteDiagnosticsPanel() {
 
         try {
             const pluginApi = getPluginApi();
-            const [rawClients, rawSessions] = await Promise.all([
-                pluginApi.getRemoteDiagnosticsClients<unknown>(profileFilter || undefined, {
-                    bypassCache: true
-                }),
-                pluginApi.getJellyfinSessions<unknown>({
-                    activeWithinSeconds: 300,
-                    controllableByUserId: pluginApi.getCurrentUserId?.()
-                })
-            ]);
+            const refreshProfile = profileFilter || '';
+
+            if (!remoteDiagnosticsRefreshInFlight || remoteDiagnosticsRefreshProfile !== refreshProfile) {
+                remoteDiagnosticsRefreshProfile = refreshProfile;
+                remoteDiagnosticsRefreshInFlight = Promise.all([
+                    pluginApi.getRemoteDiagnosticsClients<unknown>(profileFilter || undefined, {
+                        bypassCache: true
+                    }),
+                    pluginApi.getJellyfinSessions<unknown>({
+                        activeWithinSeconds: 300,
+                        controllableByUserId: pluginApi.getCurrentUserId?.()
+                    }),
+                    typeof pluginApi.getRemoteDiagnosticsStorage === 'function'
+                        ? pluginApi.getRemoteDiagnosticsStorage<DiagnosticsStorageStatus>({ bypassCache: true }).catch(() => null)
+                        : Promise.resolve(null)
+                ]).finally(() => {
+                    remoteDiagnosticsRefreshInFlight = null;
+                });
+            }
+
+            const [rawClients, rawSessions, rawStorage] = await remoteDiagnosticsRefreshInFlight;
             const nextClients = normalizeRemoteDiagnosticsClients(rawClients);
             const nextSessions = normalizeDetectedJellyfinSessions(rawSessions, nextClients);
 
@@ -640,6 +682,7 @@ export function RemoteDiagnosticsPanel() {
             setSessionsLoadState(nextSessions.length ? 'success' : 'empty');
             setClients(nextClients);
             setClientLoadState(nextClients.length ? 'success' : 'empty');
+            setStorage(rawStorage);
             setSelectedClientId(previousId => {
                 if (nextClients.some(client => client.clientId === previousId)) return previousId;
 
@@ -658,8 +701,9 @@ export function RemoteDiagnosticsPanel() {
     useEffect(() => {
         refreshClients().catch(() => undefined);
         const timer = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
             refreshClients(true).catch(() => undefined);
-        }, 15_000);
+        }, 30_000);
 
         return () => window.clearInterval(timer);
     }, [refreshClients]);
@@ -709,6 +753,9 @@ export function RemoteDiagnosticsPanel() {
 
     const loadReport = useCallback(async (download = false) => {
         if (!selectedClientId) return;
+        if (download && remoteDiagnosticsExportInFlight) return;
+
+        if (download) remoteDiagnosticsExportInFlight = true;
 
         setBusyAction(download ? 'download' : 'report');
         setErrorMessage('');
@@ -726,6 +773,7 @@ export function RemoteDiagnosticsPanel() {
         } catch (error) {
             setErrorMessage(getApiErrorMessage(error));
         } finally {
+            if (download) remoteDiagnosticsExportInFlight = false;
             setBusyAction(null);
         }
     }, [selectedClientId]);
@@ -749,6 +797,20 @@ export function RemoteDiagnosticsPanel() {
     const handleDownloadReport = useCallback(() => {
         loadReport(true).catch(() => undefined);
     }, [loadReport]);
+    const runStorageAction = useCallback(async (action: Exclude<BusyAction, 'download' | 'refresh' | 'report' | 'snapshot' | 'start' | 'stop' | null>, request: () => Promise<unknown>, message: string, confirmation?: string) => {
+        if (confirmation && !window.confirm(confirmation)) return;
+        setBusyAction(action);
+        setErrorMessage('');
+        try {
+            await request();
+            setStatusMessage(message);
+            await refreshClients(true);
+        } catch (error) {
+            setErrorMessage(getApiErrorMessage(error));
+        } finally {
+            setBusyAction(null);
+        }
+    }, [refreshClients]);
 
     return (
         <Stack spacing={1.25} data-ptv-remote-diagnostics-admin>
@@ -832,6 +894,24 @@ export function RemoteDiagnosticsPanel() {
                 <Button disabled={!selectedClient || !selectedClientSupportsCommands || busyAction !== null} onClick={requestSnapshot} variant='outlined'>Request snapshot</Button>
                 <Button disabled={!selectedClient?.hasReport || !selectedClientSupportsReportExport || busyAction !== null} onClick={handleViewReport} variant='outlined'>View report</Button>
                 <Button disabled={!selectedClient?.hasReport || !selectedClientSupportsReportExport || busyAction !== null} onClick={handleDownloadReport} variant='outlined'>Download report</Button>
+            </Stack>
+            <Divider />
+            <Typography variant='h4'>Diagnostics storage</Typography>
+            {storage ? (
+                <Stack className='ptv-dashboard-status-list' spacing={0.5}>
+                    <Typography>Active log: {storage.activeLogPath || 'unavailable'} ({formatBytes(storage.activeFileSizeBytes)})</Typography>
+                    <Typography>Retained: {storage.rotatedFileCount} rotation(s), {formatBytes(storage.totalRetainedBytes)}, oldest {formatTimestamp(storage.oldestRetainedAtUtc)}, {storage.retentionDays} day retention</Typography>
+                    <Typography>Events: {storage.eventsWritten} written, {storage.eventsAggregated} aggregated, {storage.duplicateEventsSuppressed} duplicates suppressed, {storage.eventsDropped} dropped, {storage.eventsQueued} queued</Typography>
+                    <Typography>Health: {storage.writeFailures} write failure(s), last rotation {formatTimestamp(storage.lastRotationUtc)}, legacy files {storage.legacyFileCount} ({formatBytes(storage.legacyFileSizeBytes)})</Typography>
+                </Stack>
+            ) : <Typography color='text.secondary'>Rolling diagnostics storage is unavailable on this plugin build.</Typography>}
+            <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
+                <Button disabled={busyAction !== null} onClick={() => runStorageAction('refresh-storage', async () => undefined, 'Diagnostics storage refreshed.') } variant='outlined'>Refresh storage</Button>
+                <Button disabled={!storage || busyAction !== null} onClick={() => runStorageAction('rotate-storage', () => getPluginApi().rotateRemoteDiagnosticsStorage(), 'Diagnostics log rotated.') } variant='outlined'>Rotate now</Button>
+                <Button disabled={!storage || busyAction !== null} onClick={() => window.open(getPluginApi().getRemoteDiagnosticsStorageDownloadUrl(), '_blank', 'noopener') } variant='outlined'>Download current log</Button>
+                <Button disabled={!storage || busyAction !== null} onClick={() => window.open(getPluginApi().getRemoteDiagnosticsStorageBundleUrl(), '_blank', 'noopener') } variant='outlined'>Download bundle</Button>
+                <Button color='warning' disabled={!storage || busyAction !== null} onClick={() => runStorageAction('consolidate-storage', () => getPluginApi().consolidateRemoteDiagnosticsStorage(), 'Legacy PTV diagnostics consolidated.', 'Archive and remove only recognized legacy PTV diagnostic files?') } variant='outlined'>Consolidate legacy logs</Button>
+                <Button color='error' disabled={!storage || busyAction !== null} onClick={() => runStorageAction('clear-storage', () => getPluginApi().clearRemoteDiagnosticsStorage(), 'Rolling diagnostics logs cleared.', 'Delete all current PTV rolling diagnostic logs?') } variant='outlined'>Clear diagnostic logs</Button>
             </Stack>
             {report ? (
                 <Box

@@ -73,9 +73,35 @@ class LayoutManager {
 
 const layoutManager = new LayoutManager();
 
-if (appHost.getDefaultLayout) {
-    layoutManager.defaultLayout = appHost.getDefaultLayout();
+function isDevelopmentMode() {
+    return process.env.NODE_ENV !== 'production';
 }
+
+function getAppHostDefaultLayout() {
+    if (!appHost) {
+        if (isDevelopmentMode()) {
+            throw new Error('PTV_LAYOUT_HOST_MISSING: appHost is unavailable during layout bootstrap.');
+        }
+
+        return getDefaultLayout();
+    }
+
+    if (typeof appHost.getDefaultLayout !== 'function') {
+        if (isDevelopmentMode()) {
+            console.error('[PTV Layout] appHost.getDefaultLayout is not a function. Falling back to Jellyfin default layout.', {
+                appHostKeys: Object.keys(appHost)
+            });
+
+            throw new Error('PTV_LAYOUT_HOST_MISSING: appHost.getDefaultLayout is not available during layout bootstrap.');
+        }
+
+        return getDefaultLayout();
+    }
+
+    return appHost.getDefaultLayout();
+}
+
+layoutManager.defaultLayout = getAppHostDefaultLayout();
 
 layoutManager.init();
 

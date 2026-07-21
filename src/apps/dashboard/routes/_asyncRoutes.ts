@@ -1,25 +1,11 @@
 import type { AsyncRoute } from 'components/router/AsyncRoute';
 import { AppType } from 'constants/appType';
-import { recordPtvEvent } from 'ptv/core/observability';
+import { registerPtvRecommendationRouteOnce } from 'ptv/modules/recommendations/recommendationRouteRegistration';
 
 const PTV_ROW_BUILDER_ROUTE: AsyncRoute = { path: 'piggietv/rows', type: AppType.Dashboard };
 const PTV_RECOMMENDATIONS_ROUTE: AsyncRoute = { path: 'piggietv/recommendations', type: AppType.Dashboard };
 
-console.info('[PTV Recommendations] Route registered', {
-    currentHash: window.location.hash,
-    currentPageType: '',
-    currentRouteId: '',
-    path: PTV_RECOMMENDATIONS_ROUTE.path,
-    source: 'dashboard-async-route-registry'
-});
-recordPtvEvent('recommendation', 'recommendation-route-registered', {
-    currentHash: window.location.hash,
-    currentPageType: '',
-    currentRouteId: '',
-    lazyImportPath: 'apps/dashboard/routes/piggietv/recommendations',
-    path: PTV_RECOMMENDATIONS_ROUTE.path,
-    source: 'dashboard-async-route-registry'
-});
+registerPtvRecommendationRouteOnce(PTV_RECOMMENDATIONS_ROUTE.path);
 
 export const ASYNC_ADMIN_ROUTES: AsyncRoute[] = [
     { path: '', type: AppType.Dashboard },

@@ -42,6 +42,7 @@
 }
 
 .ptv-render-tv,
+.ptv-render-webos,
 .ptv-render-lowpower {
     --ptv-blur: 0;
     --ptv-blur-panel: 0;
@@ -99,6 +100,7 @@
 }
 
 .ptv-render-tv .ptv-hero-bg,
+.ptv-render-webos .ptv-hero-bg,
 .ptv-render-lowpower .ptv-hero-bg {
     animation: none !important;
     transform: none !important;
@@ -113,9 +115,13 @@
 }
 
 .ptv-render-tv .ptv-hero-ambient,
+.ptv-render-webos .ptv-hero-ambient,
 .ptv-render-tv .ptv-row-backdrop,
+.ptv-render-webos .ptv-row-backdrop,
 .ptv-render-tv .homeSectionsContainer.ptv-home-has-backdrop::before,
+.ptv-render-webos .homeSectionsContainer.ptv-home-has-backdrop::before,
 .ptv-render-tv .homeSectionsContainer.ptv-home-has-backdrop::after,
+.ptv-render-webos .homeSectionsContainer.ptv-home-has-backdrop::after,
 .ptv-render-lowpower .ptv-hero-ambient,
 .ptv-render-lowpower .ptv-row-backdrop,
 .ptv-render-lowpower .homeSectionsContainer.ptv-home-has-backdrop::before,
@@ -152,15 +158,25 @@
 }
 
 .ptv-render-tv .ptv-legacy-skinHeader,
+.ptv-render-webos .ptv-legacy-skinHeader,
 .ptv-render-tv .ptv-sidebar,
+.ptv-render-webos .ptv-sidebar,
 .ptv-render-tv .ptv-panel,
+.ptv-render-webos .ptv-panel,
 .ptv-render-tv .ptv-glass-card,
+.ptv-render-webos .ptv-glass-card,
 .ptv-render-tv .ptv-shell-dialog,
+.ptv-render-webos .ptv-shell-dialog,
 .ptv-render-tv .ptv-shell-overlay-surface,
+.ptv-render-webos .ptv-shell-overlay-surface,
 .ptv-render-tv .ptv-hero-btn-secondary,
+.ptv-render-webos .ptv-hero-btn-secondary,
 .ptv-render-tv .homeSectionsContainer .emby-scrollbuttons-button,
+.ptv-render-webos .homeSectionsContainer .emby-scrollbuttons-button,
 .ptv-render-tv .homeSectionsContainer .ptv-dynamic-row,
+.ptv-render-webos .homeSectionsContainer .ptv-dynamic-row,
 .ptv-render-tv .homeSectionsContainer .cardBox,
+.ptv-render-webos .homeSectionsContainer .cardBox,
 .ptv-render-lowpower .ptv-legacy-skinHeader,
 .ptv-render-lowpower .ptv-sidebar,
 .ptv-render-lowpower .ptv-panel,
@@ -220,8 +236,11 @@
 }
 
 .ptv-render-tv .homeSectionsContainer .card,
+.ptv-render-webos .homeSectionsContainer .card,
 .ptv-render-tv .homeSectionsContainer .cardBox,
+.ptv-render-webos .homeSectionsContainer .cardBox,
 .ptv-render-tv .ptv-card,
+.ptv-render-webos .ptv-card,
 .ptv-render-lowpower .homeSectionsContainer .card,
 .ptv-render-lowpower .homeSectionsContainer .cardBox,
 .ptv-render-lowpower .ptv-card,
@@ -230,6 +249,8 @@
 .ptv-client-low-power .ptv-card,
 .ptv-render-tv .homeSectionsContainer .card:hover,
 .ptv-render-tv .ptv-card:hover,
+.ptv-render-webos .homeSectionsContainer .card:hover,
+.ptv-render-webos .ptv-card:hover,
 .ptv-render-lowpower .homeSectionsContainer .card:hover,
 .ptv-render-lowpower .ptv-card:hover,
 .ptv-client-low-power .homeSectionsContainer .card:hover,
@@ -243,6 +264,7 @@
 }
 
 .ptv-render-tv .ptv-home-low-power .ptv-dynamic-row,
+.ptv-render-webos .ptv-home-low-power .ptv-dynamic-row,
 .ptv-render-lowpower .ptv-home-low-power .ptv-dynamic-row {
     contain: layout paint;
 }

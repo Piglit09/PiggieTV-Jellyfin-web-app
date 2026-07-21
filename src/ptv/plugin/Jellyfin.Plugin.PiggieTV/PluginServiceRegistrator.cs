@@ -20,6 +20,9 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         Trace.TraceInformation(startMessage);
         serviceCollection.AddSingleton<IPtvFeaturedContentStore, PtvFeaturedContentStore>();
         serviceCollection.AddSingleton<IPtvRemoteDiagnosticsStore, PtvRemoteDiagnosticsStore>();
+        serviceCollection.AddSingleton<PtvRollingDiagnosticsWriter>();
+        serviceCollection.AddSingleton<IPtvRollingDiagnosticsWriter>(serviceProvider => serviceProvider.GetRequiredService<PtvRollingDiagnosticsWriter>());
+        serviceCollection.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<PtvRollingDiagnosticsWriter>());
         serviceCollection.AddSingleton<IPtvPluginSettingsService, PtvPluginSettingsService>();
         serviceCollection.AddSingleton<IPtvSignupService, PtvSignupService>();
         serviceCollection.AddHostedService<PtvSignupCleanupService>();

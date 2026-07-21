@@ -1,4 +1,4 @@
-import type { PtvClientKind, PtvClientProfile } from './clientProfile';
+import type { PtvClientKind, PtvClientProfile, PtvLowPowerProfileDecision } from './clientProfile';
 
 export const PTV_REMOTE_DIAGNOSTICS_SCHEMA_VERSION = 1 as const;
 export const PTV_REMOTE_DIAGNOSTICS_MAX_LEASE_MS = 10 * 60 * 1000;
@@ -58,6 +58,8 @@ export type PtvRemoteDiagnosticsProfileTag = {
         containerQueries: boolean;
         contentVisibility: boolean;
     };
+    lowPowerProfileDecision: PtvLowPowerProfileDecision;
+    lowPowerProfileDecisionReason: string;
     deviceMemoryGb: number | null;
     hardwareConcurrency: number | null;
     isLowPower: boolean;
@@ -65,6 +67,8 @@ export type PtvRemoteDiagnosticsProfileTag = {
     layoutMode: PtvClientProfile['layoutMode'];
     renderProfile: {
         id: string;
+        matchReason: string;
+        selectionReason: string;
         tier: string;
     };
     tvPlatform: PtvClientProfile['tvPlatform'];
@@ -98,6 +102,11 @@ export type PtvRemoteDiagnosticsPayload = {
     };
     summary: {
         countsByKind: Partial<Record<PtvRemoteDiagnosticKind, number>>;
+        eventsAggregated: number;
+        eventsIncluded: number;
+        eventsOmitted: number;
+        eventsReceived: number;
+        topRepeatedSignatures: Array<{ count: number; signature: string }>;
     };
 };
 
@@ -113,6 +122,7 @@ const SESSION_ID_PATTERN = /^[a-z0-9_-]{8,96}$/i;
 const MAX_ARRAY_ITEMS = 16;
 const MAX_DETAIL_DEPTH = 4;
 const MAX_DETAIL_KEYS = 24;
+const MAX_REPRESENTATIVE_SAMPLES_PER_KIND = 20;
 const MAX_STRING_LENGTH = 320;
 // Leave headroom below the plugin's 192 KiB request limit for profile/session metadata.
 const MAX_SERIALIZED_SAMPLE_BYTES = 160 * 1024;
@@ -396,6 +406,28 @@ function normalizeHardwareNumber(value: number | undefined, max: number, decimal
     return Math.min(max, Math.round(value * multiplier) / multiplier);
 }
 
+function getPtvRemoteDiagnosticsLowPowerDecision(profile: PtvClientProfile): PtvRemoteDiagnosticsProfileTag['lowPowerProfileDecision'] {
+    const decision = (profile as PtvClientProfile & {
+        lowPowerProfileDecision?: PtvLowPowerProfileDecision;
+    }).lowPowerProfileDecision;
+
+    if (decision) return decision;
+
+    return profile.isLowPower ? 'applied' : 'not-required';
+}
+
+function getPtvRemoteDiagnosticsLowPowerDecisionReason(profile: PtvClientProfile): string {
+    const reason = (profile as PtvClientProfile & {
+        lowPowerProfileDecisionReason?: string;
+    }).lowPowerProfileDecisionReason;
+
+    if (typeof reason === 'string' && reason.trim()) return reason;
+
+    if (profile.isLowPower) return profile.renderProfile.matchReason || 'low-power-signal';
+
+    return 'low-power signals not detected';
+}
+
 export function createPtvRemoteDiagnosticsProfileTag(
     profile: PtvClientProfile,
     environment: PtvRemoteDiagnosticsProfileEnvironment = {}
@@ -408,6 +440,8 @@ export function createPtvRemoteDiagnosticsProfileTag(
             containerQueries: profile.supportsContainerQueries,
             contentVisibility: profile.supportsContentVisibility
         },
+        lowPowerProfileDecision: getPtvRemoteDiagnosticsLowPowerDecision(profile),
+        lowPowerProfileDecisionReason: getPtvRemoteDiagnosticsLowPowerDecisionReason(profile),
         deviceMemoryGb: normalizeHardwareNumber(environment.deviceMemory, 64, 1),
         hardwareConcurrency: normalizeHardwareNumber(environment.hardwareConcurrency, 64),
         isLowPower: profile.isLowPower,
@@ -415,6 +449,8 @@ export function createPtvRemoteDiagnosticsProfileTag(
         layoutMode: profile.layoutMode,
         renderProfile: {
             id: profile.renderProfile.id,
+            matchReason: profile.renderProfile.matchReason || 'unspecified',
+            selectionReason: profile.renderProfile.selectionReason || 'unknown',
             tier: profile.renderProfile.tier
         },
         tvPlatform: profile.tvPlatform,
@@ -449,15 +485,18 @@ function getPayloadSamples(buffer: PtvDiagnosticsRingBuffer<PtvRemoteDiagnosticE
         name: sanitizeString(sample.name)
     }));
     const newestSamples: PtvRemoteDiagnosticEntry[] = [];
+    const includedByKind: Partial<Record<PtvRemoteDiagnosticKind, number>> = {};
     let serializedBytes = 2;
 
     for (let index = sanitizedSamples.length - 1; index >= 0; index -= 1) {
         const sample = sanitizedSamples[index];
         const sampleBytes = getUtf8ByteLength(JSON.stringify(sample)) + 1;
 
+        if ((includedByKind[sample.kind] || 0) >= MAX_REPRESENTATIVE_SAMPLES_PER_KIND) continue;
         if (serializedBytes + sampleBytes > MAX_SERIALIZED_SAMPLE_BYTES) continue;
 
         newestSamples.push(sample);
+        includedByKind[sample.kind] = (includedByKind[sample.kind] || 0) + 1;
         serializedBytes += sampleBytes;
     }
 
@@ -475,10 +514,19 @@ export function createPtvRemoteDiagnosticsPayload(options: {
     const samples = getPayloadSamples(options.buffer);
     const payloadOmissions = options.buffer.count - samples.length;
     const countsByKind: Partial<Record<PtvRemoteDiagnosticKind, number>> = {};
+    const signatureCounts = new Map<string, number>();
 
-    samples.forEach(sample => {
+    options.buffer.toArray().forEach(sample => {
         countsByKind[sample.kind] = (countsByKind[sample.kind] || 0) + 1;
+        const signature = `${sample.kind}:${sanitizeString(sample.name)}`;
+
+        signatureCounts.set(signature, (signatureCounts.get(signature) || 0) + 1);
     });
+    const topRepeatedSignatures = Array.from(signatureCounts.entries())
+        .filter(([, count]) => count > 1)
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, 10)
+        .map(([signature, count]) => ({ count, signature }));
 
     return {
         buffer: {
@@ -506,7 +554,12 @@ export function createPtvRemoteDiagnosticsPayload(options: {
             startedAt: options.lease.startedAt
         },
         summary: {
-            countsByKind
+            countsByKind,
+            eventsAggregated: payloadOmissions,
+            eventsIncluded: samples.length,
+            eventsOmitted: options.buffer.dropped + payloadOmissions,
+            eventsReceived: options.buffer.count + options.buffer.dropped,
+            topRepeatedSignatures
         }
     };
 }

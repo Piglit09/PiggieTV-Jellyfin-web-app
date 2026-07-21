@@ -56,7 +56,25 @@ let currentReject;
 let hasChanges = false;
 let currentSearchResult;
 let currentSearchRequestId = 0;
+let currentIdentifyApplyRequestId = 0;
 let currentReadingMetadataPreview = [];
+
+function isIdentifyPageConnected(page) {
+    if (!page) return false;
+    if (typeof page.isConnected === 'boolean') return page.isConnected;
+
+    return typeof document === 'undefined' || !document.body || document.body.contains(page);
+}
+
+function isCurrentIdentifyApplyRequest(requestId) {
+    return currentIdentifyApplyRequestId === requestId;
+}
+
+function canUpdateIdentifyApply(page, requestId) {
+    return isCurrentIdentifyApplyRequest(requestId)
+        && page?.dataset.identifyApplyLoading === 'true'
+        && isIdentifyPageConnected(page);
+}
 
 function getApiClient() {
     return ServerConnections.getApiClient(currentServerId);
@@ -1621,7 +1639,7 @@ function getSelectedReadingMetadataFields(page) {
         .filter(Boolean);
 }
 
-function submitReadingIdentificationResult(page, applyResult) {
+function submitReadingIdentificationResult(page, applyResult, applyRequestId) {
     const selectedFields = getSelectedReadingMetadataFields(page);
     const selectedMetadataFields = selectedFields.filter(field => field !== 'PrimaryImage');
     const replaceImages = selectedFields.includes('PrimaryImage');
@@ -1653,7 +1671,9 @@ function submitReadingIdentificationResult(page, applyResult) {
             .then(item => {
                 metadataStatus = 'saved';
                 savedItem = item || savedItem;
-                showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, artworkStatus === 'saving' ? 'loading' : 'info');
+                if (canUpdateIdentifyApply(page, applyRequestId)) {
+                    showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, artworkStatus === 'saving' ? 'loading' : 'info');
+                }
 
                 return item;
             }, error => {
@@ -1669,7 +1689,9 @@ function submitReadingIdentificationResult(page, applyResult) {
     const artworkPromise = replaceImages ?
         persistAppliedResultImage(apiClient, currentItem.Id, applyResult, true).then(saved => {
             artworkStatus = saved ? 'saved' : 'failed';
-            showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, metadataStatus === 'saving' ? 'loading' : 'info');
+            if (canUpdateIdentifyApply(page, applyRequestId)) {
+                showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, metadataStatus === 'saving' ? 'loading' : 'info');
+            }
 
             return saved;
         }) :
@@ -1682,6 +1704,11 @@ function submitReadingIdentificationResult(page, applyResult) {
             Promise.resolve(savedItem);
 
         return refreshPromise.then(refreshedItem => {
+            if (!canUpdateIdentifyApply(page, applyRequestId)) {
+                loading.hide();
+                return;
+            }
+
             if (refreshedItem) currentItem = refreshedItem;
 
             const metadataSucceeded = metadataStatus === 'saved' || metadataStatus === 'skipped';
@@ -1731,6 +1758,8 @@ function submitReadingIdentificationResult(page, applyResult) {
         });
     }).catch(error => {
         loading.hide();
+        if (!isCurrentIdentifyApplyRequest(applyRequestId) || !isIdentifyPageConnected(page)) return;
+
         page.dataset.identifyApplyLoading = 'false';
         setApplySubmitDisabled(page, false);
         showApplyStatus(page, getIdentificationApplyErrorMessage(error), 'error');
@@ -1749,7 +1778,9 @@ function submitIdentficationResult(page) {
 
     if (page.dataset.identifyApplyLoading === 'true') return;
 
-    let applyResult = getRemoteSearchApplyPayload(currentSearchResult);
+    const applyRequestId = ++currentIdentifyApplyRequestId;
+    const selectedSearchResult = currentSearchResult;
+    let applyResult = getRemoteSearchApplyPayload(selectedSearchResult);
 
     if (isBookIdentifyLookup()) {
         applyResult = normalizeReadingMetadataCandidate(applyResult, getReadingLookupInfo(currentItem));
@@ -1766,7 +1797,7 @@ function submitIdentficationResult(page) {
     }
 
     if (isBookIdentifyLookup()) {
-        submitReadingIdentificationResult(page, applyResult);
+        submitReadingIdentificationResult(page, applyResult, applyRequestId);
         return;
     }
 
@@ -1775,7 +1806,7 @@ function submitIdentficationResult(page) {
     setApplySubmitDisabled(page, true);
     showApplyStatus(page, 'Sending selected remote result...', 'loading');
 
-    const replaceImages = page.querySelector('#chkIdentifyReplaceImages').checked;
+    const replaceImages = Boolean(page.querySelector('#chkIdentifyReplaceImages')?.checked);
     const options = {
         ReplaceAllImages: replaceImages
     };
@@ -1786,6 +1817,8 @@ function submitIdentficationResult(page) {
     const beforeImageTags = { ...(currentItem.ImageTags || {}) };
 
     resolveDetailedRemoteSearchResult(apiClient, currentItem.Id, applyResult).then(detailedApplyResult => {
+        if (!isCurrentIdentifyApplyRequest(applyRequestId)) return;
+
         applyResult = detailedApplyResult;
 
         recordIdentificationDiagnostic('ptv-reading-identify-apply-started', {
@@ -1797,7 +1830,9 @@ function submitIdentficationResult(page) {
             resultName: applyResult.Name || '',
             resultYear: applyResult.ProductionYear || null
         });
-        showApplyStatus(page, 'Sending selected remote result...', 'loading');
+        if (canUpdateIdentifyApply(page, applyRequestId)) {
+            showApplyStatus(page, 'Sending selected remote result...', 'loading');
+        }
 
         return apiClient.ajax({
             type: 'POST',
@@ -1817,13 +1852,21 @@ function submitIdentficationResult(page) {
                 providerIds: applyResult.ProviderIds || {},
                 status: error?.status || error?.StatusCode || 'error'
             });
-            showApplyStatus(page, 'Jellyfin provider apply is unavailable. Saving selected metadata directly...', 'loading');
+            if (canUpdateIdentifyApply(page, applyRequestId)) {
+                showApplyStatus(page, 'Jellyfin provider apply is unavailable. Saving selected metadata directly...', 'loading');
+            }
 
             return {
                 ptvNativeFallback: true
             };
         });
     }).then(() => {
+        if (!isCurrentIdentifyApplyRequest(applyRequestId)) return;
+        if (!isIdentifyPageConnected(page)) {
+            loading.hide();
+            return;
+        }
+
         showApplyStatus(page, 'Server accepted metadata request. Refreshing metadata...', 'loading');
         const refreshPromise = queueAppliedMetadataRefresh(apiClient, currentItem.Id, replaceImages)
             .then(() => {
@@ -1840,6 +1883,11 @@ function submitIdentficationResult(page) {
             .then(refreshedItem => persistAppliedResultFields(apiClient, refreshedItem || currentItem, applyResult));
 
         return refreshPromise.then(refreshedItem => {
+            if (!canUpdateIdentifyApply(page, applyRequestId)) {
+                loading.hide();
+                return;
+            }
+
             hasChanges = true;
             currentSearchResult = applyResult;
 
@@ -1901,6 +1949,8 @@ function submitIdentficationResult(page) {
         });
     }, error => {
         loading.hide();
+        if (!isCurrentIdentifyApplyRequest(applyRequestId) || !isIdentifyPageConnected(page)) return;
+
         page.dataset.identifyApplyLoading = 'false';
         setApplySubmitDisabled(page, false);
         showApplyStatus(page, getIdentificationApplyErrorMessage(error), 'error');
@@ -2043,6 +2093,7 @@ function showEditor(itemId) {
 
 function onDialogClosed() {
     loading.hide();
+    currentIdentifyApplyRequestId += 1;
     currentReadingMetadataPreview = [];
     currentSearchResult = null;
     if (hasChanges) {

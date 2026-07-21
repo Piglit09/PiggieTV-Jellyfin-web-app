@@ -501,7 +501,6 @@ function getLayoutThrashLabel(report) {
 function renderPerformanceOverlay() {
     if (!performanceOverlayRoot) return;
 
-    const shouldRestoreCloseFocus = document.activeElement?.classList.contains('ptv-performance-overlay-close');
     const report = getPerformanceReport();
     const dom = report.dom || {};
     const memory = getPerformanceMemoryLabel(report.memory);
@@ -612,10 +611,6 @@ function renderPerformanceOverlay() {
     } else {
         appendTextElement(list, 'ptv-performance-overlay-list-item', 'No heavy candidates in current sample');
     }
-
-    if (shouldRestoreCloseFocus) {
-        closeButton.focus();
-    }
 }
 
 function createPerformanceOverlay() {
@@ -626,12 +621,8 @@ function createPerformanceOverlay() {
     overlay.id = PERFORMANCE_OVERLAY_ID;
     overlay.className = 'ptv-performance-overlay';
     overlay.setAttribute('aria-label', 'PiggieTV performance overlay');
-    overlay.setAttribute('role', 'status');
-    overlay.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-            togglePerformanceOverlay(false);
-        }
-    });
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('role', 'dialog');
 
     document.body.appendChild(overlay);
 

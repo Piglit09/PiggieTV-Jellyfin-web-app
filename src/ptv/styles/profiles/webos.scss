@@ -66,3 +66,18 @@ html.ptv-platform-webos .ptv-shell-nav-button,
 html.ptv-platform-webos .ptv-shell-icon-button {
     transition: none !important;
 }
+
+html.ptv-platform-webos .ptv-tv-focus-visible,
+html.ptv-platform-webos .ptv-shell-frame .ptv-tv-focus-visible {
+    box-shadow:
+        0 0 0 var(--ptv-tv-focus-ring) var(--ptv-tv-focus-ring-core),
+        0 0 28px var(--ptv-tv-focus-ring-glow),
+        inset 0 1px 0 rgb(255 255 255 / 48%),
+        inset 0 0 16px rgb(215 172 255 / 18%) !important;
+    transition: box-shadow 90ms linear, filter 90ms linear, transform 90ms linear !important;
+}
+
+html.ptv-platform-webos .ptv-native-card:focus-within,
+html.ptv-platform-webos .ptv-browse-card.ptv-tv-focus-visible {
+    transition: filter 90ms linear, transform 90ms linear !important;
+}

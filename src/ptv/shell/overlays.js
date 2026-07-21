@@ -1,6 +1,7 @@
 import { on } from '../core/events';
 import { watchDom } from '../core/observer';
 import { resetRuntimeScope } from '../core/scope';
+import { notifyPtvTvFocusContentReady } from '../core/tvFocus';
 
 const SHELL_DIALOG_SELECTOR = [
     'dialog',
@@ -37,16 +38,6 @@ const SHELL_TOAST_SELECTOR = [
     '.MuiSnackbar-root'
 ].join(',');
 
-const FOCUSABLE_SELECTOR = [
-    'a[href]',
-    'button:not([disabled])',
-    'input:not([disabled]):not([type="hidden"])',
-    'select:not([disabled])',
-    'textarea:not([disabled])',
-    '[tabindex]:not([tabindex="-1"])',
-    '[contenteditable="true"]'
-].join(',');
-
 let overlayRunScheduled = false;
 let shellOverlayInstalled = false;
 const shellOverlayScope = resetRuntimeScope('shell-overlays');
@@ -61,11 +52,6 @@ function isVisible(element) {
         && style.visibility !== 'hidden'
         && element.getClientRects().length
     );
-}
-
-function getFocusableElements(root) {
-    return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR))
-        .filter(element => element instanceof HTMLElement && isVisible(element));
 }
 
 function normalizeElements(root, selector, classes, role, layerIndex) {
@@ -92,20 +78,6 @@ function getActiveDialog() {
     return dialogs[dialogs.length - 1] || null;
 }
 
-function focusDialog(dialog) {
-    if (!dialog || dialog.contains(document.activeElement)) return;
-
-    const focusable = getFocusableElements(dialog);
-
-    if (focusable[0]) {
-        focusable[0].focus();
-        return;
-    }
-
-    dialog.setAttribute('tabindex', '-1');
-    dialog.focus();
-}
-
 function updateOverlayState() {
     const activeDialog = getActiveDialog();
     const activeSurfaces = Array.from(document.querySelectorAll('.ptv-shell-overlay-surface, .ptv-shell-toast'))
@@ -114,10 +86,6 @@ function updateOverlayState() {
 
     document.documentElement.classList.toggle('ptv-shell-overlay-open', isOverlayOpen);
     document.documentElement.classList.toggle('ptv-shell-dialog-open', Boolean(activeDialog));
-
-    if (activeDialog) {
-        focusDialog(activeDialog);
-    }
 }
 
 function applyShellOverlays(root = document) {
@@ -127,6 +95,7 @@ function applyShellOverlays(root = document) {
     normalizeElements(root, SHELL_OVERLAY_SURFACE_SELECTOR, ['ptv-shell-overlay-surface'], 'overlay-surface', 30);
     normalizeElements(root, SHELL_TOAST_SELECTOR, ['ptv-shell-toast'], 'toast', 40);
     updateOverlayState();
+    notifyPtvTvFocusContentReady('shell-overlays-updated');
 }
 
 function scheduleShellOverlays() {
@@ -138,33 +107,6 @@ function scheduleShellOverlays() {
         overlayRunScheduled = false;
         applyShellOverlays(document);
     });
-}
-
-function trapFocus(event) {
-    if (event.key !== 'Tab') return;
-
-    const dialog = getActiveDialog();
-
-    if (!dialog) return;
-
-    const focusable = getFocusableElements(dialog);
-
-    if (!focusable.length) {
-        event.preventDefault();
-        focusDialog(dialog);
-        return;
-    }
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-
-    if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-    }
 }
 
 function installOverlayApi() {
@@ -182,7 +124,6 @@ export function installShellOverlayOwnership() {
 
     shellOverlayInstalled = true;
     installOverlayApi();
-    shellOverlayScope.listen(document, 'keydown', trapFocus, true);
     shellOverlayScope.add(watchDom(scheduleShellOverlays), {
         label: 'overlay dom watcher',
         type: 'observer'

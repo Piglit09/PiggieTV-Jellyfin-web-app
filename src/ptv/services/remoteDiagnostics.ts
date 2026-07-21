@@ -150,6 +150,7 @@ const REMOTE_KEYS: Record<number, string> = {
     13: 'select',
     19: 'media-pause',
     27: 'back',
+    23: 'select',
     37: 'left',
     38: 'up',
     39: 'right',
@@ -160,6 +161,9 @@ const REMOTE_KEYS: Record<number, string> = {
     406: 'blue',
     412: 'media-rewind',
     413: 'media-stop',
+    10009: 'back',
+    32: 'select',
+    66: 'select',
     415: 'media-play',
     417: 'media-fast-forward',
     461: 'back'
@@ -220,6 +224,8 @@ const capturedClientLogKeys = new Set<string>();
 let activeLease: PtvRemoteDiagnosticsLease | null = null;
 let checkInInFlight: Promise<void> | null = null;
 let checkInTimer: number | null = null;
+let lastCheckInFingerprint = '';
+let lastCheckInStartedAt = 0;
 let expirationTimer: number | null = null;
 let lastLeaseRejection: string | null = null;
 let lastSnapshot: PtvRemoteDiagnosticsPayload | null = null;
@@ -287,8 +293,9 @@ function performanceNow() {
 
 function getProfileTag() {
     const nav = navigator as NavigatorWithHardwareHints;
+    const profile = getPtvClientProfile();
 
-    return createPtvRemoteDiagnosticsProfileTag(getPtvClientProfile(), {
+    return createPtvRemoteDiagnosticsProfileTag(profile, {
         deviceMemory: nav.deviceMemory,
         hardwareConcurrency: nav.hardwareConcurrency,
         viewportWidth: window.innerWidth
@@ -1015,8 +1022,23 @@ async function checkIn() {
     if (!transport || checkInInFlight) return checkInInFlight || Promise.resolve();
 
     const activeTransport = transport;
+    const presence = getPtvRemoteDiagnosticsPresence();
+    const fingerprint = JSON.stringify({
+        active: presence.diagnostics.active,
+        profile: presence.profile.kind,
+        route: presence.route,
+        sessionId: presence.diagnostics.sessionId
+    });
+    const startedAt = Date.now();
 
-    checkInInFlight = activeTransport.checkIn(getPtvRemoteDiagnosticsPresence())
+    if (fingerprint === lastCheckInFingerprint && startedAt - lastCheckInStartedAt < 60_000) {
+        return Promise.resolve();
+    }
+
+    lastCheckInFingerprint = fingerprint;
+    lastCheckInStartedAt = startedAt;
+
+    checkInInFlight = activeTransport.checkIn(presence)
         .then(command => {
             if (!command) return;
             if (command.disable === true || command.lease === null) disablePtvRemoteDiagnostics();

@@ -51,17 +51,20 @@ public sealed class PtvRemoteDiagnosticsController : BaseJellyfinApiController
 
     private readonly IAuthorizationService _authorizationService;
     private readonly ILogger<PtvRemoteDiagnosticsController> _logger;
+    private readonly IPtvRollingDiagnosticsWriter? _rollingDiagnosticsWriter;
     private readonly IPtvRemoteDiagnosticsStore _store;
 
     /// <summary>Initializes a new instance of the controller.</summary>
     public PtvRemoteDiagnosticsController(
         ILogger<PtvRemoteDiagnosticsController> logger,
         IPtvRemoteDiagnosticsStore store,
-        IAuthorizationService authorizationService)
+        IAuthorizationService authorizationService,
+        IPtvRollingDiagnosticsWriter? rollingDiagnosticsWriter = null)
     {
         _logger = logger;
         _store = store;
         _authorizationService = authorizationService;
+        _rollingDiagnosticsWriter = rollingDiagnosticsWriter;
     }
 
     /// <summary>
@@ -83,7 +86,16 @@ public sealed class PtvRemoteDiagnosticsController : BaseJellyfinApiController
             return Unauthorized(new PtvErrorResponse("diagnostics-registration-auth-required", "An authenticated Jellyfin user identity is required."));
         }
 
-        return Ok(_store.CheckIn(ownerKey, presence));
+        var command = _store.CheckIn(ownerKey, presence);
+        _rollingDiagnosticsWriter?.Enqueue(new PtvRollingDiagnosticEvent
+        {
+            Category = "remote",
+            ClientId = presence.ClientId,
+            Detail = new { profile = presence.Profile?.Kind, route = presence.Route },
+            EventName = "client-check-in",
+            Level = "information"
+        });
+        return Ok(command);
     }
 
     /// <summary>
@@ -113,13 +125,22 @@ public sealed class PtvRemoteDiagnosticsController : BaseJellyfinApiController
             return Unauthorized(new PtvErrorResponse("PTV_DIAGNOSTICS_IDENTITY_REQUIRED", "An authenticated Jellyfin user identity is required."));
         }
 
-        var sanitized = SanitizeReport(report);
+        var sanitized = PtvDiagnosticsSanitizer.Sanitize(report);
         if (!_store.PublishReport(ownerKey, clientId, sanitized))
         {
             return Conflict(new PtvErrorResponse(
                 "PTV_DIAGNOSTICS_SESSION_INACTIVE",
                 "The diagnostics lease is missing or expired. Start a new temporary session and retry."));
         }
+
+        _rollingDiagnosticsWriter?.Enqueue(new PtvRollingDiagnosticEvent
+        {
+            Category = "remote",
+            ClientId = clientId,
+            Detail = sanitized,
+            EventName = "client-report",
+            Level = "information"
+        });
 
         return NoContent();
     }
@@ -234,6 +255,60 @@ public sealed class PtvRemoteDiagnosticsController : BaseJellyfinApiController
 
         var fileName = $"piggie-tv-diagnostics-{report.ClientId}-{report.ReceivedAtUtc:yyyyMMdd-HHmmss}.json";
         return File(Encoding.UTF8.GetBytes(report.Report.GetRawText()), "application/json", fileName);
+    }
+
+    /// <summary>Returns bounded rolling diagnostics storage status.</summary>
+    [HttpGet("~/Ptv/v1/diagnostics/storage")]
+    [ProducesResponseType(typeof(PtvDiagnosticsStorageStatus), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PtvDiagnosticsStorageStatus>> GetStorage(CancellationToken cancellationToken)
+    {
+        if (!await IsAdministratorAsync(cancellationToken).ConfigureAwait(false)) return Forbid();
+        return Ok(_rollingDiagnosticsWriter?.GetStatus() ?? new PtvDiagnosticsStorageStatus());
+    }
+
+    /// <summary>Downloads the active rolling JSONL log.</summary>
+    [HttpGet("~/Ptv/v1/diagnostics/storage/download")]
+    public async Task<ActionResult> DownloadStorageLog(CancellationToken cancellationToken)
+    {
+        if (!await IsAdministratorAsync(cancellationToken).ConfigureAwait(false)) return Forbid();
+        var payload = _rollingDiagnosticsWriter is null ? [] : await _rollingDiagnosticsWriter.ReadActiveLogAsync(cancellationToken).ConfigureAwait(false);
+        return File(payload, "application/x-ndjson", "ptv-diagnostics.log");
+    }
+
+    /// <summary>Downloads a temporary in-memory ZIP of retained rolling diagnostics.</summary>
+    [HttpGet("~/Ptv/v1/diagnostics/storage/bundle")]
+    public async Task<ActionResult> DownloadStorageBundle(CancellationToken cancellationToken)
+    {
+        if (!await IsAdministratorAsync(cancellationToken).ConfigureAwait(false)) return Forbid();
+        var payload = _rollingDiagnosticsWriter is null ? [] : await _rollingDiagnosticsWriter.CreateBundleAsync(cancellationToken).ConfigureAwait(false);
+        return File(payload, "application/zip", "ptv-diagnostics-bundle.zip");
+    }
+
+    /// <summary>Forces a safe rolling-log rotation.</summary>
+    [HttpPost("~/Ptv/v1/diagnostics/storage/rotate")]
+    public async Task<ActionResult<PtvDiagnosticsStorageActionResult>> RotateStorage(CancellationToken cancellationToken)
+    {
+        if (!await IsAdministratorAsync(cancellationToken).ConfigureAwait(false)) return Forbid();
+        if (_rollingDiagnosticsWriter is not null) await _rollingDiagnosticsWriter.RotateAsync(cancellationToken).ConfigureAwait(false);
+        return Ok(new PtvDiagnosticsStorageActionResult { Message = "Diagnostics log rotated." });
+    }
+
+    /// <summary>Deletes only recognized rolling diagnostics logs after explicit confirmation.</summary>
+    [HttpPost("~/Ptv/v1/diagnostics/storage/clear")]
+    public async Task<ActionResult<PtvDiagnosticsStorageActionResult>> ClearStorage([FromBody] PtvDiagnosticsStorageActionRequest? request, CancellationToken cancellationToken)
+    {
+        if (!await IsAdministratorAsync(cancellationToken).ConfigureAwait(false)) return Forbid();
+        if (request?.Confirm != true) return BadRequest(new PtvErrorResponse("PTV_DIAGNOSTICS_CONFIRM_REQUIRED", "Clear diagnostics logs requires explicit confirmation."));
+        return Ok(_rollingDiagnosticsWriter is null ? new PtvDiagnosticsStorageActionResult { Message = "Diagnostics storage is unavailable." } : await _rollingDiagnosticsWriter.ClearAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Archives and removes only verified legacy PTV diagnostics files after confirmation.</summary>
+    [HttpPost("~/Ptv/v1/diagnostics/storage/consolidate")]
+    public async Task<ActionResult<PtvDiagnosticsStorageActionResult>> ConsolidateLegacyStorage([FromBody] PtvDiagnosticsStorageActionRequest? request, CancellationToken cancellationToken)
+    {
+        if (!await IsAdministratorAsync(cancellationToken).ConfigureAwait(false)) return Forbid();
+        if (request?.Confirm != true) return BadRequest(new PtvErrorResponse("PTV_DIAGNOSTICS_CONFIRM_REQUIRED", "Consolidating legacy diagnostics requires explicit confirmation."));
+        return Ok(_rollingDiagnosticsWriter is null ? new PtvDiagnosticsStorageActionResult { Message = "Diagnostics storage is unavailable." } : await _rollingDiagnosticsWriter.ConsolidateLegacyAsync(request.CreateArchive, cancellationToken).ConfigureAwait(false));
     }
 
     private async Task<bool> IsAdministratorAsync(CancellationToken cancellationToken)

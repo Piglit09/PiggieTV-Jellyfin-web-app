@@ -42,6 +42,10 @@ import {
     shouldPreservePtvReadingIndex,
     yieldPtvReadingIndexWork
 } from './readingProgressiveIndex';
+import {
+    canUsePtvReadingHomeCache,
+    isPtvReadingFullHomeCache
+} from './readingCachePolicy';
 import type {
     PtvReadingCacheDiagnostic,
     PtvReadingHomeData,
@@ -109,7 +113,8 @@ const READING_SHELF_TIMEOUT_MS = 6500;
 const READING_OPTIONAL_SHELF_TIMEOUT_MS = 2500;
 const READING_CONTINUE_LIMIT = 12;
 const READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 4;
-const READING_HOME_STORAGE_SCHEMA_VERSION = 4;
+const READING_HOME_STORAGE_SCHEMA_VERSION = 5;
+const READING_HOME_SCOPE_STORAGE_SCHEMA_VERSION = 1;
 const BOOKS_KEYWORDS = /\b(?:book|books|ebook|ebooks|novel|novels|light novel|reader)\b/i;
 const READING_PLACEHOLDER_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent([
     '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="640" viewBox="0 0 420 640">',
@@ -130,6 +135,14 @@ type ReadingHomeCacheEntry = {
 type ReadingHomeStorageEntry = ReadingHomeCacheEntry & {
     key: string;
     schemaVersion: number;
+};
+
+type ReadingHomeStorageScope = {
+    cacheKey: string;
+    kind: PtvReadingRouteKind;
+    librarySetIdentity: string;
+    schemaVersion: number;
+    view: string;
 };
 
 type ScopedReadingItem = {
@@ -154,6 +167,7 @@ type ReadingItemsRequestOptions = {
 const readingHomeCache = new Map<string, ReadingHomeCacheEntry>();
 const readingHomeSummaryCache = new Map<string, ReadingHomeCacheEntry>();
 const readingLibraryCache = new Map<string, PtvReadingLibraryScope[]>();
+const readingLibraryResolutionRequests = new Map<string, Promise<PtvReadingLibraryScope[]>>();
 const readingRecentlyAddedRequestCache = new Map<string, Promise<PtvReadingItem[]>>();
 const readingImageUrlCache = new Map<string, string>();
 const readingLibraryIndexGenerations = new Map<string, number>();
@@ -163,6 +177,21 @@ function getCacheKey(kind: PtvReadingRouteKind | 'all' = 'all') {
         getPtvServerId() || 'server',
         getPtvCurrentUserId() || 'user',
         kind
+    ].join(':');
+}
+
+function getReadingHomeCacheKey(
+    kind: PtvReadingRouteKind,
+    librarySetIdentity = 'unscoped',
+    view = 'home'
+) {
+    return [
+        getPtvServerId() || 'server',
+        getPtvCurrentUserId() || 'user',
+        kind,
+        librarySetIdentity || 'unscoped',
+        view,
+        `v${READING_HOME_STORAGE_SCHEMA_VERSION}`
     ].join(':');
 }
 
@@ -190,8 +219,45 @@ function getReadingLibrarySetIdentity(
     return libraryIds.length ? libraryIds.join('|') : 'unscoped';
 }
 
-function getReadingHomeStorageKey(kind: PtvReadingRouteKind, initialOnly = false) {
-    return `ptv:reading-home:v${READING_HOME_STORAGE_SCHEMA_VERSION}:${getCacheKey(kind)}:${initialOnly ? 'summary' : 'full'}`;
+function getReadingHomeStorageKey(
+    kind: PtvReadingRouteKind,
+    initialOnly = false,
+    librarySetIdentity = 'unscoped',
+    view = 'home'
+) {
+    return `ptv:reading-home:${getReadingHomeCacheKey(kind, librarySetIdentity, view)}:${initialOnly ? 'summary' : 'full'}`;
+}
+
+function getReadingHomeScopeStorageKey(kind: PtvReadingRouteKind, view = 'home') {
+    return `ptv:reading-home:scope:${getCacheKey(kind)}:${view}:v${READING_HOME_STORAGE_SCHEMA_VERSION}`;
+}
+
+function readStoredReadingHomeScope(kind: PtvReadingRouteKind, view = 'home') {
+    const storageKey = getReadingHomeScopeStorageKey(kind, view);
+
+    try {
+        const scope = readPtvLocalStorageJson<Partial<ReadingHomeStorageScope> | null>(storageKey, null);
+        const librarySetIdentity = String(scope?.librarySetIdentity || '').trim();
+        const expectedCacheKey = librarySetIdentity ?
+            getReadingHomeStorageKey(kind, false, librarySetIdentity, view) : '';
+
+        if (
+            !scope
+            || scope.schemaVersion !== READING_HOME_SCOPE_STORAGE_SCHEMA_VERSION
+            || scope.kind !== kind
+            || scope.view !== view
+            || !librarySetIdentity
+            || librarySetIdentity === 'unscoped'
+            || scope.cacheKey !== expectedCacheKey
+        ) {
+            if (scope) removePtvLocalStorageKey(storageKey);
+            return 'unscoped';
+        }
+
+        return librarySetIdentity;
+    } catch {
+        return 'unscoped';
+    }
 }
 
 function getPayloadSize(value: unknown) {
@@ -259,9 +325,27 @@ function withCacheDiagnostic(
 
 function readStoredReadingHome(
     routeKind: PtvReadingRouteKind,
-    initialOnly: boolean
+    initialOnly: boolean,
+    librarySetIdentity = 'unscoped',
+    view = 'home'
 ): PtvReadingHomeData | null {
-    const storageKey = getReadingHomeStorageKey(routeKind, initialOnly);
+    if (!canUsePtvReadingHomeCache({
+        cachedLibrarySetIdentity: librarySetIdentity,
+        cachedRouteKind: routeKind,
+        librarySetIdentity,
+        routeKind
+    })) {
+        recordPtvEvent('cache', 'reading-home-storage-cache-rejected', {
+            initialOnly,
+            kind: routeKind,
+            librarySetIdentity,
+            reason: librarySetIdentity === 'unscoped' ? 'awaiting-library-discovery' : 'cache-identity-mismatch',
+            view
+        });
+        return null;
+    }
+
+    const storageKey = getReadingHomeStorageKey(routeKind, initialOnly, librarySetIdentity, view);
 
     try {
         const entry = readPtvLocalStorageJson<Partial<ReadingHomeStorageEntry> | null>(storageKey, null);
@@ -275,7 +359,16 @@ function readStoredReadingHome(
             return null;
         }
 
-        if (entry.schemaVersion !== READING_HOME_STORAGE_SCHEMA_VERSION || entry.key !== storageKey || !entry.data) {
+        const storedLibrarySetIdentity = getReadingLibrarySetIdentity(entry.data?.libraries || [], routeKind);
+
+        if (
+            entry.schemaVersion !== READING_HOME_STORAGE_SCHEMA_VERSION
+            || entry.key !== storageKey
+            || !entry.data
+            || entry.data.kind !== routeKind
+            || (!initialOnly && !isPtvReadingFullHomeCache(entry.data))
+            || (librarySetIdentity !== 'unscoped' && storedLibrarySetIdentity !== librarySetIdentity)
+        ) {
             removePtvLocalStorageKey(storageKey);
             return null;
         }
@@ -321,7 +414,7 @@ function readStoredReadingHome(
 
         return withCacheDiagnostic({
             ...entry.data,
-            isPartial: entry.data.isPartial || !isFresh
+            isPartial: Boolean(entry.data.isPartial)
         }, cacheDiagnostics);
     } catch (error) {
         recordPtvEvent('cache', 'reading-home-storage-cache-read-failed', {
@@ -338,9 +431,21 @@ function readStoredReadingHome(
 function writeStoredReadingHome(
     routeKind: PtvReadingRouteKind,
     initialOnly: boolean,
-    data: PtvReadingHomeData
+    data: PtvReadingHomeData,
+    librarySetIdentity = 'unscoped',
+    view = 'home'
 ) {
-    const storageKey = getReadingHomeStorageKey(routeKind, initialOnly);
+    const storageKey = getReadingHomeStorageKey(routeKind, initialOnly, librarySetIdentity, view);
+
+    if (!initialOnly && !isPtvReadingFullHomeCache(data)) {
+        recordPtvEvent('cache', 'reading-home-storage-cache-write-skipped', {
+            initialOnly,
+            kind: routeKind,
+            reason: 'full-cache-requires-complete-data',
+            storageKey
+        });
+        return;
+    }
 
     try {
         const createdAt = Date.now();
@@ -366,6 +471,19 @@ function writeStoredReadingHome(
             sectionCount: data.sections.length,
             storageKey
         });
+
+        if (stored && !initialOnly && librarySetIdentity !== 'unscoped') {
+            writePtvLocalStorageJson(getReadingHomeScopeStorageKey(routeKind, view), {
+                cacheKey: storageKey,
+                kind: routeKind,
+                librarySetIdentity,
+                schemaVersion: READING_HOME_SCOPE_STORAGE_SCHEMA_VERSION,
+                view
+            } satisfies ReadingHomeStorageScope, {
+                maxBytes: 2_000,
+                namespace: 'reading-home'
+            });
+        }
     } catch (error) {
         recordPtvEvent('cache', 'reading-home-storage-cache-write-failed', {
             error: error instanceof Error ? error.message : String(error),
@@ -378,7 +496,10 @@ function writeStoredReadingHome(
 
 function clearStoredReadingHomeCache() {
     try {
-        const count = clearPtvLocalStorageByPrefix([`ptv:reading-home:v${READING_HOME_STORAGE_SCHEMA_VERSION}:`]);
+        const count = clearPtvLocalStorageByPrefix([
+            `ptv:reading-home:`,
+            `ptv:reading-home:v${READING_HOME_STORAGE_SCHEMA_VERSION}:`
+        ]);
 
         recordPtvEvent('cache', 'reading-home-storage-cache-cleared', {
             count
@@ -1001,6 +1122,7 @@ export function invalidatePtvReadingHomeCache() {
     readingHomeCache.clear();
     readingHomeSummaryCache.clear();
     readingLibraryCache.clear();
+    readingLibraryResolutionRequests.clear();
     readingRecentlyAddedRequestCache.clear();
     clearStoredReadingHomeCache();
     void deletePtvLibraryIndexCacheByPrefix(getReadingLibraryIndexCachePrefix());
@@ -1020,31 +1142,44 @@ export async function getPtvReadingLibraries(): Promise<PtvReadingLibraryScope[]
         return readingLibraryCache.get(cacheKey) || [];
     }
 
-    const requestStartedAt = performance.now();
-    const result = await getPtvUserViews();
-    const libraryDiscoveryRequestMs = Number((performance.now() - requestStartedAt).toFixed(1));
-    const libraries = (result.Items || [])
-        .filter(isReadingLibrary)
-        .map((library): PtvReadingLibraryScope => ({
-            collectionType: cleanText(library.CollectionType),
-            id: library.Id || '',
-            kind: getLibraryKind(library),
-            itemCount: typeof library.ChildCount === 'number' ? library.ChildCount : undefined,
-            name: library.Name || 'Books'
-        }))
-        .filter(library => Boolean(library.id));
+    const existingRequest = readingLibraryResolutionRequests.get(cacheKey);
 
-    readingLibraryCache.set(cacheKey, libraries);
-    recordPtvEvent('api', 'reading-libraries-resolved', {
-        cachedLibraryResolutionMs: null,
-        libraryCount: libraries.length,
-        libraryDiscoveryRequestMs,
-        libraryNames: libraries.map(library => library.name),
-        readingLibraryDiscoveryMs: Number((performance.now() - startedAt).toFixed(1)),
-        source: 'user-views'
+    if (existingRequest) return existingRequest;
+
+    const request = (async () => {
+        const requestStartedAt = performance.now();
+        const result = await getPtvUserViews();
+        const libraryDiscoveryRequestMs = Number((performance.now() - requestStartedAt).toFixed(1));
+        const libraries = (result.Items || [])
+            .filter(isReadingLibrary)
+            .map((library): PtvReadingLibraryScope => ({
+                collectionType: cleanText(library.CollectionType),
+                id: library.Id || '',
+                kind: getLibraryKind(library),
+                itemCount: typeof library.ChildCount === 'number' ? library.ChildCount : undefined,
+                name: library.Name || 'Books'
+            }))
+            .filter(library => Boolean(library.id));
+
+        readingLibraryCache.set(cacheKey, libraries);
+        recordPtvEvent('api', 'reading-libraries-resolved', {
+            cachedLibraryResolutionMs: null,
+            coalesced: false,
+            libraryCount: libraries.length,
+            libraryDiscoveryRequestMs,
+            libraryNames: libraries.map(library => library.name),
+            readingLibraryDiscoveryMs: Number((performance.now() - startedAt).toFixed(1)),
+            source: 'user-views'
+        });
+
+        return libraries;
+    })();
+
+    readingLibraryResolutionRequests.set(cacheKey, request);
+
+    return request.finally(() => {
+        if (readingLibraryResolutionRequests.get(cacheKey) === request) readingLibraryResolutionRequests.delete(cacheKey);
     });
-
-    return libraries;
 }
 
 function getLibraryDiagnosticFromError(
@@ -1997,14 +2132,40 @@ export function getPtvReadingHome(
     options: {
         initialOnly?: boolean;
         forceRefresh?: boolean;
+        view?: string;
     } = {}
 ): Promise<PtvReadingHomeData> {
-    const cacheKey = getCacheKey(routeKind);
+    const view = options.view || 'home';
+    const memoryLibrarySetIdentity = getReadingLibrarySetIdentity(readingLibraryCache.get(getCacheKey('all')) || [], routeKind);
+    const knownLibrarySetIdentity = memoryLibrarySetIdentity !== 'unscoped' ?
+        memoryLibrarySetIdentity : readStoredReadingHomeScope(routeKind, view);
+    const canUseKnownCache = canUsePtvReadingHomeCache({
+        cachedLibrarySetIdentity: knownLibrarySetIdentity,
+        cachedRouteKind: routeKind,
+        forceRefresh: options.forceRefresh,
+        librarySetIdentity: knownLibrarySetIdentity,
+        routeKind
+    });
+    let cacheKey = getReadingHomeCacheKey(routeKind, knownLibrarySetIdentity, view);
     const activeCache = options.initialOnly ? readingHomeSummaryCache : readingHomeCache;
     const cached = activeCache.get(cacheKey);
     const fullCached = readingHomeCache.get(cacheKey);
 
-    if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) {
+    if (canUseKnownCache && options.initialOnly && fullCached && fullCached.expiresAt > Date.now() && isPtvReadingFullHomeCache(fullCached.data)) {
+        const cacheDiagnostics = getCacheDiagnostic('hit', 'reading-memory-full', fullCached.data, {
+            cacheKey
+        });
+
+        recordPtvTiming('cache', 'readingCacheRenderMs', 0, {
+            itemCount: cacheDiagnostics.itemCount,
+            kind: routeKind,
+            source: 'reading-memory-full'
+        });
+
+        return Promise.resolve(withCacheDiagnostic(fullCached.data, cacheDiagnostics));
+    }
+
+    if (canUseKnownCache && cached && cached.expiresAt > Date.now() && (options.initialOnly || isPtvReadingFullHomeCache(cached.data))) {
         const cacheDiagnostics = getCacheDiagnostic('hit', 'reading-memory', cached.data, {
             cacheKey
         });
@@ -2024,30 +2185,12 @@ export function getPtvReadingHome(
         return Promise.resolve(withCacheDiagnostic(cached.data, cacheDiagnostics));
     }
 
-    if (!options.forceRefresh && options.initialOnly && fullCached && fullCached.expiresAt > Date.now()) {
-        const cacheDiagnostics = getCacheDiagnostic('hit', 'reading-memory-full', fullCached.data, {
-            cacheKey
-        });
-
-        recordPtvTiming('cache', 'readingCacheRenderMs', 0, {
-            itemCount: cacheDiagnostics.itemCount,
-            kind: routeKind,
-            source: 'reading-memory-full'
-        });
-        recordPtvEvent('cache', 'reading-home-cache-hit', {
-            isPartial: Boolean(fullCached.data.isPartial),
-            itemCount: cacheDiagnostics.itemCount,
-            kind: routeKind,
-            sectionCount: fullCached.data.sections.length
-        });
-
-        return Promise.resolve(withCacheDiagnostic(fullCached.data, cacheDiagnostics));
-    }
-
-    if (!options.forceRefresh) {
+    if (canUseKnownCache) {
         const storageStartedAt = performance.now();
-        const storedData = readStoredReadingHome(routeKind, Boolean(options.initialOnly))
-            || (options.initialOnly ? readStoredReadingHome(routeKind, false) : null);
+        const storedData = options.initialOnly ?
+            readStoredReadingHome(routeKind, false, knownLibrarySetIdentity, view)
+            || readStoredReadingHome(routeKind, true, knownLibrarySetIdentity, view) :
+            readStoredReadingHome(routeKind, false, knownLibrarySetIdentity, view);
 
         if (storedData) {
             const durationMs = Number((performance.now() - storageStartedAt).toFixed(1));
@@ -2072,6 +2215,8 @@ export function getPtvReadingHome(
         const startedAt = performance.now();
         const discovery = await fetchPtvReadingLibraryDiscovery(routeKind);
         const { diagnostics: libraryDiagnostics, libraries } = discovery;
+        const resolvedLibrarySetIdentity = getReadingLibrarySetIdentity(libraries, routeKind);
+        cacheKey = getReadingHomeCacheKey(routeKind, resolvedLibrarySetIdentity, view);
 
         if (options.initialOnly) {
             const recentlyAddedSection = await fetchPtvReadingHomeSection(routeKind, 'recently-added', READING_INITIAL_LIMIT);
@@ -2111,7 +2256,7 @@ export function getPtvReadingHome(
                 data: cachedData,
                 expiresAt: createdAt + READING_HOME_CACHE_TTL_MS
             });
-            writeStoredReadingHome(routeKind, true, cachedData);
+            writeStoredReadingHome(routeKind, true, cachedData, resolvedLibrarySetIdentity, view);
             recordPtvEvent('api', 'reading-api-loaded', {
                 isPartial: true,
                 kind: routeKind,
@@ -2199,7 +2344,7 @@ export function getPtvReadingHome(
             data: cachedData,
             expiresAt: createdAt + READING_HOME_CACHE_TTL_MS
         });
-        writeStoredReadingHome(routeKind, false, cachedData);
+        writeStoredReadingHome(routeKind, false, cachedData, resolvedLibrarySetIdentity, view);
         recordPtvEvent('api', 'reading-api-loaded', {
             isPartial: false,
             kind: routeKind,

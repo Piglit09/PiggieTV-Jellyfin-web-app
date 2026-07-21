@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
     buildPtvServerOriginCandidates,
     getRequestedPtvServerId,
+    getRequestedPtvServerUrl,
     getSavedPtvServerAddresses
 } from './serverOriginSelection';
 
@@ -32,6 +33,24 @@ describe('PiggieTV server origin selection', () => {
             requestedServer,
             runtimeUrls: [ 'http://localhost:8096' ]
         })[0]).toBe('http://192.0.2.60:8096');
+    });
+
+    it('reads an explicit backend URL from wrapper query parameters', () => {
+        expect(getRequestedPtvServerUrl('?jellyfinUrl=http%3A%2F%2F10.16.0.50%3A8096')).toBe(
+            'http://10.16.0.50:8096'
+        );
+        expect(getRequestedPtvServerUrl('?server=http%3A%2F%2F10.16.0.50%3A8096&serverid=legacy')).toBe(
+            'http://10.16.0.50:8096'
+        );
+    });
+
+    it('places explicit server overrides ahead of other discovery candidates', () => {
+        expect(buildPtvServerOriginCandidates({
+            development: true,
+            requestedServerUrl: 'http://10.16.0.50:8096',
+            explicitDevelopmentUrl: 'http://192.0.2.50:8096',
+            runtimeUrls: [ 'http://localhost:8096' ]
+        })[0]).toBe('http://10.16.0.50:8096');
     });
 
     it('uses an authenticated API client ahead of controlled fallback candidates', () => {

@@ -48,6 +48,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         configuration.Recommendations ??= RecommendationRowSettings.CreateDefault();
         configuration.CacheSettings ??= new CacheSettings();
         configuration.PerformanceSettings ??= new PerformanceSettings();
+        configuration.DiagnosticsStorageSettings ??= new PtvDiagnosticsStorageSettings();
         configuration.TmdbSettings ??= new TmdbSettings();
         configuration.MusicMetadataSettings ??= new MusicMetadataSettings();
         configuration.GoogleBooksSettings ??= new GoogleBooksSettings();
@@ -68,6 +69,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         ApplyRecommendationsPatch(configuration, settings.Recommendations);
         ApplyCacheSettingsPatch(configuration.CacheSettings, settings.CacheSettings ?? settings.Cache);
         ApplyPerformanceSettingsPatch(configuration.PerformanceSettings, settings.PerformanceSettings);
+        ApplyDiagnosticsStorageSettingsPatch(configuration.DiagnosticsStorageSettings, settings.DiagnosticsStorageSettings);
         ApplyTmdbSettingsPatch(configuration, settings.TmdbSettings);
         ApplyMusicMetadataSettingsPatch(configuration.MusicMetadataSettings, settings.MusicMetadataSettings);
         ApplyGoogleBooksSettingsPatch(configuration.GoogleBooksSettings, settings.GoogleBooksSettings);
@@ -338,6 +340,21 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         target.LowPowerDisableAnimations = patch.LowPowerDisableAnimations ?? target.LowPowerDisableAnimations;
     }
 
+    private static void ApplyDiagnosticsStorageSettingsPatch(PtvDiagnosticsStorageSettings target, PtvDiagnosticsStorageSettingsPatch? patch)
+    {
+        if (patch is null) return;
+        target.FileLoggingEnabled = patch.FileLoggingEnabled ?? target.FileLoggingEnabled;
+        target.MaximumFileSizeMb = patch.MaximumFileSizeMb ?? target.MaximumFileSizeMb;
+        target.MaximumRotatedFiles = patch.MaximumRotatedFiles ?? target.MaximumRotatedFiles;
+        target.RetentionDays = patch.RetentionDays ?? target.RetentionDays;
+        target.MinimumPersistentLogLevel = patch.MinimumPersistentLogLevel ?? target.MinimumPersistentLogLevel;
+        target.IncludePerformanceSamples = patch.IncludePerformanceSamples ?? target.IncludePerformanceSamples;
+        target.IncludeClientCheckIns = patch.IncludeClientCheckIns ?? target.IncludeClientCheckIns;
+        target.IncludeFilesystemPaths = patch.IncludeFilesystemPaths ?? target.IncludeFilesystemPaths;
+        target.IncludeRequestUrls = patch.IncludeRequestUrls ?? target.IncludeRequestUrls;
+        target.IncludeItemIds = patch.IncludeItemIds ?? target.IncludeItemIds;
+    }
+
     private static void ApplyTmdbSettingsPatch(PluginConfiguration configuration, PtvTmdbSettingsPatch? patch)
     {
         if (patch is null) return;
@@ -516,6 +533,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         if (settings.CacheSettings is not null) sections.Add("cacheSettings");
         if (settings.Cache is not null) sections.Add("cache");
         if (settings.PerformanceSettings is not null) sections.Add("performanceSettings");
+        if (settings.DiagnosticsStorageSettings is not null) sections.Add("diagnosticsStorageSettings");
         if (settings.TmdbSettings is not null) sections.Add("tmdbSettings");
         if (settings.MusicMetadataSettings is not null) sections.Add("musicMetadataSettings");
         if (settings.GoogleBooksSettings is not null) sections.Add("googleBooksSettings");

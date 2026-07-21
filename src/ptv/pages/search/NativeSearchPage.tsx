@@ -8,6 +8,8 @@ import {
     getPtvApiUrl,
     getPtvItemImageUrl,
     getPtvServerId,
+    PtvSearchAbortedError,
+    PtvSearchPrimaryTimeoutError,
     searchPtvItems,
     type PtvItem,
     type PtvItemQuery
@@ -26,6 +28,8 @@ import { PtvIcon } from '../../modules/icons';
 import PTVShell from '../../shell/PTVShell';
 import { registerPtvNativeRoute } from '../../shell/routeController';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
+import { type PtvLibraryRootDiagnostics } from '../../services/libraryRootNormalizer';
+import { createPtvSearchRecoveryDiagnostics, type PtvSearchRecoveryDiagnostics } from '../../services/searchRecovery';
 
 import './nativeSearch.scss';
 
@@ -50,10 +54,13 @@ type PtvSearchGroupConfig = Readonly<{
 type PtvSearchGroupStatus = 'cancelled' | 'empty' | 'error' | 'idle' | 'loading' | 'queued' | 'success' | 'timeout';
 
 type PtvSearchGroupState = Readonly<{
+    deduplicatedCount: number;
     durationMs: number;
     endpointPath: string;
     error: string;
     items: PtvItem[];
+    libraryRoots: PtvLibraryRootDiagnostics['groups'];
+    searchRecovery: PtvSearchRecoveryDiagnostics;
     requestUrl: string;
     status: PtvSearchGroupStatus;
     timeoutReason: string;
@@ -75,8 +82,6 @@ const PTV_SEARCH_BACKGROUND_TIMEOUT_MS = 8000;
 const PTV_SEARCH_RECENT_KEY = 'ptv:search:recent:v1';
 const PTV_SEARCH_FIELDS = [
     'Container',
-    'DateCreated',
-    'Genres',
     'ImageTags',
     'MediaType',
     'OfficialRating',
@@ -87,23 +92,30 @@ const PTV_SEARCH_FIELDS = [
     'ParentPrimaryImageItemId',
     'ParentPrimaryImageTag',
     'ParentThumbItemId',
-    'Path',
     'PremiereDate',
     'PrimaryImageAspectRatio',
     'ProductionYear',
     'RunTimeTicks',
-    'SeriesName',
-    'SortName'
+    'SeriesName'
+].join(',');
+const PTV_MOVIE_SEARCH_RECOVERY_FIELDS = [
+    PTV_SEARCH_FIELDS,
+    'OriginalTitle',
+    'Path',
+    'PresentationUniqueKey',
+    'ProviderIds',
+    'SortName',
+    'TopParentId'
 ].join(',');
 const PTV_SEARCH_GROUPS: readonly PtvSearchGroupConfig[] = [
     { id: 'movies', title: 'Movies', kicker: 'Film results', includeItemTypes: 'Movie', priority: 1 },
     { id: 'shows', title: 'Shows', kicker: 'Series results', includeItemTypes: 'Series', priority: 1 },
+    { id: 'collections', title: 'Collections', kicker: 'Collections', includeItemTypes: 'BoxSet', priority: 1 },
     { id: 'episodes', title: 'Episodes', kicker: 'Episode results', includeItemTypes: 'Episode', priority: 2 },
-    { id: 'music', title: 'Songs', kicker: 'Music results', includeItemTypes: 'Audio', priority: 2 },
+    { id: 'reading', title: 'Reading', kicker: 'Books, comics, manga', includeItemTypes: 'Book', priority: 2 },
+    { id: 'music', title: 'Songs', kicker: 'Music results', includeItemTypes: 'Audio', priority: 3 },
     { id: 'albums', title: 'Albums', kicker: 'Music albums', includeItemTypes: 'MusicAlbum', priority: 3 },
     { id: 'artists', title: 'Artists', kicker: 'Music artists', includeItemTypes: 'MusicArtist', priority: 3 },
-    { id: 'reading', title: 'Reading', kicker: 'Books, comics, manga', includeItemTypes: 'Book', priority: 3 },
-    { id: 'collections', title: 'Collections', kicker: 'Collections', includeItemTypes: 'BoxSet', priority: 3 }
 ];
 const PTV_SEARCH_SKELETON_KEYS = [
     'search-skeleton-1',
@@ -116,22 +128,15 @@ const PTV_SEARCH_SKELETON_KEYS = [
 
 const searchCache = new Map<string, PtvSearchCacheEntry>();
 
-class PtvSearchTimeoutError extends Error {
-    timeoutMs: number;
-
-    constructor(groupTitle: string, timeoutMs: number) {
-        super(`${groupTitle} timed out after ${timeoutMs}ms`);
-        this.name = 'PtvSearchTimeoutError';
-        this.timeoutMs = timeoutMs;
-    }
-}
-
 function getEmptyGroupState(status: PtvSearchGroupStatus = 'idle'): PtvSearchGroupState {
     return {
+        deduplicatedCount: 0,
         durationMs: 0,
         endpointPath: '',
         error: '',
         items: [],
+        libraryRoots: [],
+        searchRecovery: createPtvSearchRecoveryDiagnostics(),
         requestUrl: '',
         status,
         timeoutReason: ''
@@ -207,35 +212,6 @@ function getSearchGroupRequestDetail(group: PtvSearchGroupConfig, searchTerm: st
         requestUrl,
         userId
     };
-}
-
-function withSearchTimeout<T>(promise: Promise<T>, groupTitle: string, timeoutMs: number): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        let settled = false;
-        const timeout = window.setTimeout(() => {
-            if (settled) return;
-
-            settled = true;
-            reject(new PtvSearchTimeoutError(groupTitle, timeoutMs));
-        }, timeoutMs);
-
-        promise.then(
-            value => {
-                if (settled) return;
-
-                settled = true;
-                window.clearTimeout(timeout);
-                resolve(value);
-            },
-            error => {
-                if (settled) return;
-
-                settled = true;
-                window.clearTimeout(timeout);
-                reject(error);
-            }
-        );
-    });
 }
 
 function isSearchCacheable(groups: Record<PtvSearchGroupId, PtvSearchGroupState>) {
@@ -410,11 +386,13 @@ function NativeSearchGroup({
                     <span>{config.kicker}</span>
                     <h2>{config.title}</h2>
                 </div>
-                {state.durationMs ? <small>{state.durationMs}ms</small> : null}
+                {state.status === 'loading' && state.items.length
+                    ? <small>Searching your movie catalog...</small>
+                    : state.durationMs ? <small>{state.durationMs}ms</small> : null}
             </header>
             {state.status === 'queued' ? (
                 <p>Queued...</p>
-            ) : state.status === 'loading' ? (
+            ) : state.status === 'loading' && !state.items.length ? (
                 <div className='ptv-search-card-rail ptv-search-card-rail-skeleton' aria-hidden='true'>
                     {PTV_SEARCH_SKELETON_KEYS.map(key => (
                         <span key={key} className='ptv-search-card ptv-search-card-skeleton'>
@@ -468,9 +446,12 @@ function NativeSearchDebug({
                     return (
                         <span key={group.id}>
                             {group.title}: {state.status}, {state.items.length} item(s), {state.durationMs || 'n/a'}ms
+                            {state.deduplicatedCount ? `, ${state.deduplicatedCount} duplicate(s) suppressed` : ''}
                             {state.timeoutReason ? `, ${state.timeoutReason}` : ''}
                             {state.error && state.status !== 'timeout' ? `, ${state.error}` : ''}
                             {state.requestUrl ? `, ${state.requestUrl}` : ''}
+                            {state.libraryRoots.length ? `, roots: ${state.libraryRoots.map(root => `${root.logicalRoot} [${root.physicalRoots.join(', ') || 'metadata only'}]`).join(' | ')}` : ''}
+                            {`, primaryStatus=${state.searchRecovery.primaryStatus}, primary=${state.searchRecovery.primaryDurationMs || 'n/a'}ms, primaryError=${state.searchRecovery.primaryError || 'none'}, recovery=${state.searchRecovery.recoveryAttempted ? 'triggered' : 'not triggered'} (${state.searchRecovery.recoveryReason}), catalog={status=${state.searchRecovery.catalogStatus}; endpoint=${state.searchRecovery.catalogRequestEndpoint || 'none'}; parent=${state.searchRecovery.catalogRequestParentId}; start=${state.searchRecovery.catalogRequestStartIndex}; limit=${state.searchRecovery.catalogPageSize}; sort=${state.searchRecovery.catalogRequestSortBy || 'none'}:${state.searchRecovery.catalogRequestSortOrder || 'none'}; fields=${state.searchRecovery.catalogRequestFields || 'none'}; cached=${state.searchRecovery.catalogCachedItemCount}; total=${state.searchRecovery.catalogTotalRecordCount}; pages=${state.searchRecovery.catalogPagesLoaded}; requests=${state.searchRecovery.catalogRequestsThisSearch}; exhausted=${state.searchRecovery.catalogExhausted}; age=${state.searchRecovery.catalogCacheAgeMs}ms; duration=${state.searchRecovery.catalogSearchDurationMs}ms; matches=${state.searchRecovery.catalogMatchCount}; matched=${state.searchRecovery.catalogMatchedNames.join('|') || 'none'}; locations=${state.searchRecovery.catalogMatchedLocations.join('|') || 'none'}; hydrated=${state.searchRecovery.catalogHydrationCount}/${state.searchRecovery.catalogHydrationDurationMs}ms}, finalCount=${state.searchRecovery.finalItemCount}, cache=${state.searchRecovery.cacheSource}, rawTopParentIds=${state.searchRecovery.rawTopParentIds.join('|') || 'none'}, abort=${state.searchRecovery.timeoutOrAbort}`}
                         </span>
                     );
                 })}
@@ -532,6 +513,7 @@ export default function NativeSearchPage() {
         const requestQueue = [...PTV_SEARCH_GROUPS].sort((left, right) => left.priority - right.priority);
         const startedAt = performance.now();
         let cancelled = false;
+        const abortController = new AbortController();
         let firstResultRecorded = false;
         let nextGroupIndex = 0;
         let requestStartCount = 0;
@@ -587,22 +569,51 @@ export default function NativeSearchPage() {
             });
 
             try {
-                const result = await withSearchTimeout(
-                    searchPtvItems<PtvItem>({
-                        fields: PTV_SEARCH_FIELDS,
-                        includeItemTypes: group.includeItemTypes,
-                        limit: PTV_SEARCH_RESULT_LIMIT,
-                        searchTerm: query
-                    }),
-                    group.title,
-                    timeoutMs
-                );
+                const result = await searchPtvItems<PtvItem>({
+                    fields: PTV_SEARCH_FIELDS,
+                    includeItemTypes: group.includeItemTypes,
+                    limit: PTV_SEARCH_RESULT_LIMIT,
+                    primaryTimeoutMs: timeoutMs,
+                    recoveryFields: group.id === 'movies' ? PTV_MOVIE_SEARCH_RECOVERY_FIELDS : undefined,
+                    searchTerm: query,
+                    signal: abortController.signal,
+                    serverId: getPtvServerId(),
+                    userId: requestDetail.userId,
+                    onPrimaryResult: group.id === 'movies' ? partialResult => {
+                        const partialItems = partialResult.Items || [];
+                        const partialGroup: PtvSearchGroupState = {
+                            deduplicatedCount: partialResult.ptvLibraryRootDiagnostics.deduplicatedCount,
+                            durationMs: Number((performance.now() - groupStartedAt).toFixed(1)),
+                            endpointPath: requestDetail.endpointPath,
+                            error: '',
+                            items: partialItems,
+                            libraryRoots: partialResult.ptvLibraryRootDiagnostics.groups,
+                            searchRecovery: partialResult.ptvSearchRecoveryDiagnostics,
+                            requestUrl: requestDetail.requestUrl,
+                            status: 'loading',
+                            timeoutReason: ''
+                        };
+
+                        setGroupState(group, partialGroup);
+
+                        if (!firstResultRecorded && partialItems.length && !cancelled && requestIdRef.current === requestId) {
+                            firstResultRecorded = true;
+                            recordPtvEvent('route', 'ptv-search-first-result', {
+                                groupId: group.id,
+                                searchFirstResultMs: Number((performance.now() - startedAt).toFixed(1))
+                            });
+                        }
+                    } : undefined
+                });
                 const items = result.Items || [];
                 const nextGroup: PtvSearchGroupState = {
+                    deduplicatedCount: result.ptvLibraryRootDiagnostics.deduplicatedCount,
                     durationMs: Number((performance.now() - groupStartedAt).toFixed(1)),
                     endpointPath: requestDetail.endpointPath,
                     error: '',
                     items,
+                    libraryRoots: result.ptvLibraryRootDiagnostics.groups,
+                    searchRecovery: result.ptvSearchRecoveryDiagnostics,
                     requestUrl: requestDetail.requestUrl,
                     status: items.length ? 'success' : 'empty',
                     timeoutReason: ''
@@ -610,10 +621,13 @@ export default function NativeSearchPage() {
 
                 setGroupState(group, nextGroup);
                 recordPtvEvent('api', 'ptv-search-group-request-complete', {
+                    deduplicatedCount: nextGroup.deduplicatedCount,
                     durationMs: nextGroup.durationMs,
                     groupId: group.id,
                     itemCount: items.length,
+                    normalizedLibraryRoots: nextGroup.libraryRoots,
                     requestUrl: requestDetail.requestUrl,
+                    searchRecovery: nextGroup.searchRecovery,
                     status: nextGroup.status,
                     totalRecordCount: result.TotalRecordCount ?? items.length
                 });
@@ -626,18 +640,27 @@ export default function NativeSearchPage() {
                     });
                 }
             } catch (error) {
-                const isTimeout = error instanceof PtvSearchTimeoutError;
+                const isTimeout = error instanceof PtvSearchPrimaryTimeoutError;
+                const isAborted = error instanceof PtvSearchAbortedError;
                 const message = error instanceof Error ? error.message : 'Search failed';
 
                 if (isTimeout) timeoutCount += 1;
 
                 const nextGroup: PtvSearchGroupState = {
+                    deduplicatedCount: 0,
                     durationMs: Number((performance.now() - groupStartedAt).toFixed(1)),
                     endpointPath: requestDetail.endpointPath,
                     error: cancelled ? 'Cancelled' : message,
                     items: [],
+                    libraryRoots: [],
+                    searchRecovery: createPtvSearchRecoveryDiagnostics({
+                        primaryError: message,
+                        primaryStatus: isAborted ? 'aborted' : isTimeout ? 'timeout' : 'error',
+                        recoveryReason: isAborted ? 'aborted-primary-request' : isTimeout ? 'primary-timeout' : 'primary-error',
+                        timeoutOrAbort: isAborted ? 'aborted' : isTimeout ? 'timeout' : 'none'
+                    }),
                     requestUrl: requestDetail.requestUrl,
-                    status: cancelled ? 'cancelled' : isTimeout ? 'timeout' : 'error',
+                    status: cancelled || isAborted ? 'cancelled' : isTimeout ? 'timeout' : 'error',
                     timeoutReason: isTimeout ? message : ''
                 };
 
@@ -691,6 +714,7 @@ export default function NativeSearchPage() {
 
         return () => {
             cancelled = true;
+            abortController.abort();
             recordPtvEvent('route', 'ptv-search-cancelled', {
                 requestStartCount,
                 queryLength: query.length,
@@ -732,6 +756,8 @@ export default function NativeSearchPage() {
                             <input
                                 aria-label='Search PiggieTV'
                                 autoComplete='off'
+                                data-ptv-focus-key='search-input'
+                                data-ptv-initial-focus='search'
                                 inputMode='search'
                                 onChange={event => setInputQuery(event.currentTarget.value)}
                                 placeholder='Search movies, shows, music, reading'

@@ -17,6 +17,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import Page from 'components/Page';
 
+import { focusPtvTvElement } from '../../core/tvFocus';
+
 import { getPtvMediaFolders } from '../../api';
 import { getPtvDebugReport, registerPtvDebugSignupStatusProvider } from '../../core/observability';
 import {
@@ -146,7 +148,7 @@ async function copyTextToClipboard(text: string) {
     textarea.style.position = 'fixed';
     textarea.style.opacity = '0';
     document.body.appendChild(textarea);
-    textarea.focus();
+    focusPtvTvElement(textarea, 'invite-link-selected');
     textarea.select();
     document.execCommand('copy');
     textarea.remove();

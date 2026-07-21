@@ -15,16 +15,12 @@ import { playbackManager } from 'components/playback/playbackmanager';
 
 import './books.scss';
 
-import {
-    clearPtvImageFailuresForItem,
-    hasPtvImageUrlFailed,
-    markPtvImageUrlFailed,
-    setPtvFavorite
-} from '../../api';
+import { setPtvFavorite } from '../../api';
 import { PTV_ASSETS, PTV_ROUTES } from '../../core/config';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { recordPtvEvent } from '../../core/observability';
 import { scheduleRouteCheck } from '../../core/router';
+import { notifyPtvTvFocusContentReady } from '../../core/tvFocus';
 import { resolvePtvStaticAssetUrl } from '../../core/urlOrigins';
 import PTVShell, { type PtvShellNavLink } from '../../shell/PTVShell';
 import {
@@ -81,6 +77,10 @@ import {
     getReadingPageRenderIdentity,
     shouldPublishReadingIndexProgress
 } from './readingIndexPublishing';
+import {
+    createPtvReadingImageFailureRegistry,
+    normalizePtvReadingImageRoute
+} from './readingImageFailures';
 import { shouldPreservePtvReadingIndex } from './readingProgressiveIndex';
 import type {
     PtvReadingHomeData,
@@ -352,38 +352,29 @@ const PTV_READING_SKELETON_KEYS = [
     'reading-skeleton-7',
     'reading-skeleton-8'
 ];
-const failedReadingImageUrls = new Set<string>();
-const failedReadingCoverItemIds = new Set<string>();
-const failedReadingBackdropItemIds = new Set<string>();
-const reportedReadingCachedFailureUrls = new Set<string>();
-let readingAlternateImageUsedCount = 0;
-let readingCachedFailureHitCount = 0;
-let readingFallbackPosterRenderedCount = 0;
-let readingMissingPrimaryImageCount = 0;
+const readingImageFailures = createPtvReadingImageFailureRegistry();
 
-function clearReadingImageFailuresForItem(itemId: string | null | undefined) {
-    const normalizedItemId = String(itemId || '').trim().toLowerCase();
-
-    if (!normalizedItemId) return;
-
-    failedReadingCoverItemIds.delete(itemId || '');
-    failedReadingBackdropItemIds.delete(itemId || '');
-
-    for (const url of Array.from(failedReadingImageUrls)) {
-        if (url.toLowerCase().includes(`/items/${normalizedItemId}/images/`)) {
-            failedReadingImageUrls.delete(url);
-            reportedReadingCachedFailureUrls.delete(url);
-        }
-    }
-
-    clearPtvImageFailuresForItem(itemId);
+function getReadingImageRoute(route?: string | null) {
+    return normalizePtvReadingImageRoute(route
+        || (typeof document !== 'undefined' ? document.body?.dataset.ptvReadingRoute : ''));
 }
 
-function applyReadingImageFallbackToItem(itemId: string | undefined, fallbackUrl: string) {
+function getReadingImageFailureState(route?: string | null) {
+    return readingImageFailures.get(getReadingImageRoute(route));
+}
+
+function clearReadingImageFailuresForItem(itemId: string | null | undefined, route?: string | null) {
+    readingImageFailures.clearForItem(getReadingImageRoute(route), itemId);
+}
+
+function applyReadingImageFallbackToItem(itemId: string | undefined, fallbackUrl: string, route?: string | null) {
     if (!itemId || typeof document === 'undefined') return;
+
+    const routeKey = getReadingImageRoute(route);
 
     document.querySelectorAll<HTMLImageElement>('img[data-ptv-reading-item-id]').forEach(image => {
         if (image.dataset.ptvReadingItemId !== itemId) return;
+        if (getReadingImageRoute(image.dataset.ptvReadingRoute) !== routeKey) return;
         if (image.dataset.ptvFallbackApplied === 'true') return;
 
         image.dataset.ptvFallbackApplied = 'true';
@@ -391,14 +382,18 @@ function applyReadingImageFallbackToItem(itemId: string | undefined, fallbackUrl
     });
 }
 
-function recordReadingCachedFailureHit(url: string, itemId?: string) {
-    if (reportedReadingCachedFailureUrls.has(url)) return;
+function recordReadingCachedFailureHit(url: string, itemId?: string, route?: string | null) {
+    const routeKey = getReadingImageRoute(route);
+    const imageFailures = getReadingImageFailureState(routeKey);
 
-    reportedReadingCachedFailureUrls.add(url);
-    readingCachedFailureHitCount += 1;
+    if (imageFailures.reportedCachedFailureUrls.has(url)) return;
+
+    imageFailures.reportedCachedFailureUrls.add(url);
+    imageFailures.cachedFailureHitCount += 1;
     recordPtvEvent('image', 'reading-image-cached-failure-hit', {
         cachedFailureHit: true,
         itemId: itemId || null,
+        route: routeKey,
         url
     });
 }
@@ -1030,10 +1025,13 @@ function getReadingImageErrorHandler() {
         const failedUrl = event.currentTarget.currentSrc || event.currentTarget.src;
         const failedItemId = event.currentTarget.dataset.ptvReadingItemId;
         const alternateUrl = event.currentTarget.dataset.ptvReadingAlternateUrl || '';
+        const route = event.currentTarget.dataset.ptvReadingRoute
+            || (typeof document !== 'undefined' ? document.body?.dataset.ptvReadingRoute : '')
+            || 'unknown';
+        const imageFailures = getReadingImageFailureState(route);
 
         if (failedUrl && failedUrl !== getPtvReadingImagePlaceholder()) {
-            failedReadingImageUrls.add(failedUrl);
-            markPtvImageUrlFailed(failedUrl);
+            imageFailures.failedUrls.add(failedUrl);
         }
 
         if (
@@ -1041,22 +1039,22 @@ function getReadingImageErrorHandler() {
             && alternateUrl !== failedUrl
             && alternateUrl !== getPtvReadingImagePlaceholder()
             && event.currentTarget.dataset.ptvAlternateApplied !== 'true'
-            && !failedReadingImageUrls.has(alternateUrl)
-            && !hasPtvImageUrlFailed(alternateUrl)
+            && !imageFailures.failedUrls.has(alternateUrl)
         ) {
             event.currentTarget.dataset.ptvAlternateApplied = 'true';
-            readingAlternateImageUsedCount += 1;
+            imageFailures.alternateImageUsedCount += 1;
             recordPtvEvent('image', 'reading-alternate-image-used', {
                 alternateImageUsed: true,
                 failedUrl,
                 itemId: failedItemId || null,
-                nextUrl: alternateUrl
+                nextUrl: alternateUrl,
+                route
             });
             event.currentTarget.src = alternateUrl;
             return;
         }
 
-        if (failedItemId) failedReadingCoverItemIds.add(failedItemId);
+        if (failedItemId) imageFailures.failedCoverItemIds.add(failedItemId);
 
         if (event.currentTarget.dataset.ptvFallbackApplied === 'true') {
             event.currentTarget.hidden = true;
@@ -1064,15 +1062,16 @@ function getReadingImageErrorHandler() {
         }
 
         event.currentTarget.dataset.ptvFallbackApplied = 'true';
-        readingFallbackPosterRenderedCount += 1;
-        readingMissingPrimaryImageCount += 1;
+        imageFailures.fallbackPosterRenderedCount += 1;
+        imageFailures.missingPrimaryImageCount += 1;
         recordPtvEvent('image', 'reading-fallback-poster-rendered', {
             fallbackPosterRendered: true,
             failedUrl,
             itemId: failedItemId || null,
-            missingPrimaryImage: true
+            missingPrimaryImage: true,
+            route
         });
-        applyReadingImageFallbackToItem(failedItemId, getPtvReadingImagePlaceholder());
+        applyReadingImageFallbackToItem(failedItemId, getPtvReadingImagePlaceholder(), route);
         event.currentTarget.src = getPtvReadingImagePlaceholder();
     };
 }
@@ -1081,15 +1080,18 @@ function getReadingBackdropErrorHandler() {
     return (event: React.SyntheticEvent<HTMLImageElement>) => {
         const failedUrl = event.currentTarget.currentSrc || event.currentTarget.src;
         const failedItemId = event.currentTarget.dataset.ptvReadingItemId;
+        const route = event.currentTarget.dataset.ptvReadingRoute
+            || (typeof document !== 'undefined' ? document.body?.dataset.ptvReadingRoute : '')
+            || 'unknown';
+        const imageFailures = getReadingImageFailureState(route);
 
         if (failedUrl && failedUrl !== PTV_READING_FALLBACK_BACKGROUND_URL) {
-            failedReadingImageUrls.add(failedUrl);
-            markPtvImageUrlFailed(failedUrl);
+            imageFailures.failedUrls.add(failedUrl);
         }
 
-        if (failedItemId) failedReadingBackdropItemIds.add(failedItemId);
+        if (failedItemId) imageFailures.failedBackdropItemIds.add(failedItemId);
 
-        applyReadingImageFallbackToItem(failedItemId, PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder());
+        applyReadingImageFallbackToItem(failedItemId, PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder(), route);
 
         if (event.currentTarget.dataset.ptvFallbackApplied === 'true') {
             event.currentTarget.hidden = true;
@@ -1097,6 +1099,12 @@ function getReadingBackdropErrorHandler() {
         }
 
         event.currentTarget.dataset.ptvFallbackApplied = 'true';
+        recordPtvEvent('image', 'reading-backdrop-fallback-rendered', {
+            failedUrl,
+            itemId: failedItemId || null,
+            missingBackdropImage: true,
+            route
+        });
         event.currentTarget.src = PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder();
     };
 }
@@ -1116,16 +1124,18 @@ function getCachedReadingImageUrl(
     size = 360,
     preferredImageType: 'Backdrop' | 'Primary' | 'Thumb' = 'Primary'
 ) {
-    if (item?.Id && failedReadingCoverItemIds.has(item.Id)) return getPtvReadingImagePlaceholder();
+    const imageFailures = getReadingImageFailureState();
+
+    if (item?.Id && imageFailures.failedCoverItemIds.has(item.Id)) return getPtvReadingImagePlaceholder();
 
     const imageUrl = getPtvReadingImageUrl(item, getReadingProfileImageSize(size), preferredImageType);
 
     if (!imageUrl) {
-        readingMissingPrimaryImageCount += 1;
+        imageFailures.missingPrimaryImageCount += 1;
         return getPtvReadingImagePlaceholder();
     }
 
-    if (failedReadingImageUrls.has(imageUrl) || hasPtvImageUrlFailed(imageUrl)) {
+    if (imageFailures.failedUrls.has(imageUrl)) {
         recordReadingCachedFailureHit(imageUrl, item?.Id);
         return getPtvReadingImagePlaceholder();
     }
@@ -1138,21 +1148,24 @@ function getReadingAlternateImageUrl(
     size = 360,
     preferredImageType: 'Primary' | 'Thumb' = 'Thumb'
 ) {
+    const imageFailures = getReadingImageFailureState();
     const imageUrl = getPtvReadingImageUrl(item, getReadingProfileImageSize(size), preferredImageType);
 
-    if (!imageUrl || failedReadingImageUrls.has(imageUrl) || hasPtvImageUrlFailed(imageUrl)) return '';
+    if (!imageUrl || imageFailures.failedUrls.has(imageUrl)) return '';
 
     return imageUrl;
 }
 
 function getCachedReadingBackdropUrl(item: PtvReadingItem | null | undefined, size = 1200) {
-    if (item?.Id && failedReadingBackdropItemIds.has(item.Id)) {
+    const imageFailures = getReadingImageFailureState();
+
+    if (item?.Id && imageFailures.failedBackdropItemIds.has(item.Id)) {
         return PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder();
     }
 
     const imageUrl = getPtvReadingImageUrl(item, getReadingProfileImageSize(size, 640), 'Backdrop');
 
-    if (!imageUrl || failedReadingImageUrls.has(imageUrl) || hasPtvImageUrlFailed(imageUrl)) {
+    if (!imageUrl || imageFailures.failedUrls.has(imageUrl)) {
         return PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder();
     }
 
@@ -1360,7 +1373,13 @@ function ReadingCard({ item, routeKind }: Readonly<{
 
     return (
         <article className={`ptv-books-card ptv-books-card-${getPtvReadingItemKind(item)}`}>
-            <button type='button' className='ptv-books-card-cover' onClick={() => void readPtvItem(item)} aria-label={`Read ${title}`}>
+            <button
+                type='button'
+                className='ptv-books-card-cover'
+                data-ptv-focus-key={`reading-card:${item.Id || title}`}
+                onClick={() => void readPtvItem(item)}
+                aria-label={`Read ${title}`}
+            >
                 <img
                     alt=''
                     data-ptv-reading-alternate-url={getReadingAlternateImageUrl(item, 320, 'Thumb') || undefined}
@@ -1471,6 +1490,10 @@ function ReadingRow({ eager = false, error, isLoading = false, items, onRetry, r
     const [isHydrated, setHydrated] = useState(eager);
     const rowRef = useRef<HTMLDivElement>(null);
     const rowItems = uniquePtvReadingItems(items).slice(0, 24);
+
+    useEffect(() => {
+        if (isHydrated && rowItems.length) notifyPtvTvFocusContentReady(`reading-row:${sectionId || title}`);
+    }, [isHydrated, rowItems.length, sectionId, title]);
 
     useEffect(() => {
         if (eager || isHydrated) return undefined;
@@ -1633,7 +1656,12 @@ function ReadingSeriesCard({ onSeriesOverrideChange, routeKind, series }: Readon
 
     return (
         <article className='ptv-books-card ptv-books-series-card'>
-            <a className='ptv-books-card-cover' href={href} aria-label={`Open ${series.title}`}>
+            <a
+                className='ptv-books-card-cover'
+                data-ptv-focus-key={`reading-series:${series.id || series.title}`}
+                href={href}
+                aria-label={`Open ${series.title}`}
+            >
                 <img
                     alt=''
                     data-ptv-reading-alternate-url={getReadingAlternateImageUrl(series.coverItem, 320, 'Thumb') || undefined}
@@ -1897,15 +1925,16 @@ function ReadingLibraryDebugPanel({ cacheDiagnostics, debug, seriesDiagnostics }
     if (!canShowReadingDiagnostics(isAdmin, debugEnabled)) return null;
     if (!debug) return null;
 
+    const imageFailures = getReadingImageFailureState();
     const diagnosticSections = buildReadingDiagnosticSections({
         cacheDiagnostics,
         debug,
         runtime: {
-            alternateImageUsed: readingAlternateImageUsedCount,
-            cachedFailureHit: readingCachedFailureHitCount,
-            failedCoverUrls: Array.from(failedReadingImageUrls).slice(-8),
-            fallbackPosterRendered: readingFallbackPosterRenderedCount,
-            missingPrimaryImage: readingMissingPrimaryImageCount
+            alternateImageUsed: imageFailures.alternateImageUsedCount,
+            cachedFailureHit: imageFailures.cachedFailureHitCount,
+            failedCoverUrls: Array.from(imageFailures.failedUrls).slice(-8),
+            fallbackPosterRendered: imageFailures.fallbackPosterRenderedCount,
+            missingPrimaryImage: imageFailures.missingPrimaryImageCount
         },
         seriesDiagnostics
     });
@@ -2058,7 +2087,23 @@ function ReadingLibraryView({ homeData, onSeriesOverrideChange, routeKind, serie
         browseFormatFilter,
         browseSort
     ), [browseFilter, browseFormatFilter, browseQuery, browseSort, sourceItems]);
-    const groupedSeries = useMemo(() => buildReadingSeriesForRoute(browseItems, routeKind, seriesOverrides), [browseItems, routeKind, seriesOverrides]);
+    const groupingReady = homeData.libraryDebug?.indexIsComplete ?? !homeData.isPartial;
+    const groupedSeries = useMemo(() => {
+        if (!groupingReady) return [];
+
+        const startedAt = performance.now();
+        const result = buildReadingSeriesForRoute(browseItems, routeKind, seriesOverrides);
+
+        recordPtvEvent('render', 'reading-series-grouping-completed', {
+            durationMs: Number((performance.now() - startedAt).toFixed(1)),
+            final: true,
+            itemCount: browseItems.length,
+            routeKind,
+            seriesCount: result.length
+        });
+
+        return result;
+    }, [browseItems, groupingReady, routeKind, seriesOverrides]);
     const seriesDiagnostics = useMemo(() => getReadingSeriesDiagnostics(groupedSeries, seriesOverrides), [groupedSeries, seriesOverrides]);
 
     useEffect(() => {
@@ -2071,6 +2116,7 @@ function ReadingLibraryView({ homeData, onSeriesOverrideChange, routeKind, serie
         recordPtvEvent('render', 'reading-series-grouping-ready', {
             accumulatedItemCount: homeData.libraryDebug?.indexAccumulatedCount || browseItems.length,
             final: homeData.libraryDebug?.indexIsComplete ?? !homeData.isPartial,
+            groupingDeferred: !groupingReady,
             itemCount: browseItems.length,
             page: homeData.libraryDebug?.pageCount || 0,
             routeKind,
@@ -2266,7 +2312,23 @@ function ReadingSeriesDetailView({ homeData, onSeriesOverrideChange, onSeriesOve
     seriesOverrides: Record<string, PtvReadingSeriesOverride>;
 }>) {
     const allItems = useMemo(() => getAllReadingItems(homeData), [homeData]);
-    const groupedSeries = useMemo(() => buildReadingSeriesForRoute(allItems, routeKind, seriesOverrides), [allItems, routeKind, seriesOverrides]);
+    const groupingReady = homeData.libraryDebug?.indexIsComplete ?? !homeData.isPartial;
+    const groupedSeries = useMemo(() => {
+        if (!groupingReady) return [];
+
+        const startedAt = performance.now();
+        const result = buildReadingSeriesForRoute(allItems, routeKind, seriesOverrides);
+
+        recordPtvEvent('render', 'reading-series-grouping-completed', {
+            durationMs: Number((performance.now() - startedAt).toFixed(1)),
+            final: true,
+            itemCount: allItems.length,
+            routeKind,
+            seriesCount: result.length
+        });
+
+        return result;
+    }, [allItems, groupingReady, routeKind, seriesOverrides]);
     const series = findPtvReadingSeriesById(groupedSeries, seriesId);
     const progress = Math.round(series?.progressPercent || 0);
 
@@ -2763,7 +2825,7 @@ export default function PiggieTvBooksPage() {
                 } : previous.cacheDiagnostics
             } : previous);
 
-            void getPtvReadingHome(route.kind, { forceRefresh: forceRefresh || bypassCacheForRefresh })
+            void getPtvReadingHome(route.kind, { forceRefresh: forceRefresh || bypassCacheForRefresh, view: route.view })
                 .then(nextHomeData => {
                     if (!isCurrentRequest()) return;
 
@@ -2819,7 +2881,7 @@ export default function PiggieTvBooksPage() {
                 });
         };
 
-        return getPtvReadingHome(route.kind, { forceRefresh, initialOnly: true })
+        return getPtvReadingHome(route.kind, { forceRefresh, initialOnly: true, view: route.view })
             .then(nextHomeData => {
                 if (!isCurrentRequest()) return;
 
@@ -3039,6 +3101,7 @@ export default function PiggieTvBooksPage() {
         readingMountedRef.current = true;
         document.documentElement.classList.add('ptv-route-reading-mounted');
         document.body.classList.add('ptv-route-reading-mounted');
+        document.body.dataset.ptvReadingRoute = route.kind;
         document.documentElement.dataset.ptvReadingRouteMounted = 'true';
         document.body.dataset.ptvReadingRouteMounted = 'true';
         recordPtvRouteGenerationLifecycle('page-mount', {
@@ -3057,6 +3120,9 @@ export default function PiggieTvBooksPage() {
 
         return () => {
             readingMountedRef.current = false;
+            if (document.body.dataset.ptvReadingRoute === route.kind) {
+                delete document.body.dataset.ptvReadingRoute;
+            }
             readingRequestIdRef.current += 1;
             cleanupReadingRouteState();
             recordPtvRouteGenerationLifecycle('page-unmount', {

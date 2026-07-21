@@ -26,6 +26,7 @@ import { PTV_ASSETS } from '../../core/config';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { recordPtvEvent } from '../../core/observability';
 import { scheduleRouteCheck } from '../../core/router';
+import { notifyPtvTvFocusContentReady } from '../../core/tvFocus';
 import { resolvePtvStaticAssetUrl } from '../../core/urlOrigins';
 import PTVShell, { type PtvShellNavLink } from '../../shell/PTVShell';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
@@ -176,6 +177,8 @@ const EMPTY_QUEUE_SNAPSHOT: PtvMusicQueueSnapshot = {
 
 const PTV_MUSIC_FALLBACK_BACKGROUND_URL = resolvePtvStaticAssetUrl(PTV_ASSETS.backgrounds.page);
 const PTV_MUSIC_LIBRARY_UI_RENDER_LIMIT = 96;
+const PTV_RELATED_ARTIST_ROW_LIMIT = 16;
+const PTV_RELATED_ARTIST_TRACK_LIMIT = 40;
 const PTV_MUSIC_SKELETON_KEYS = [
     'music-skeleton-1',
     'music-skeleton-2',
@@ -719,7 +722,8 @@ function getAllHomeTracks(homeData: PtvMusicHomeData) {
 
 function getQuickPicks(homeData: PtvMusicHomeData) {
     return uniquePtvMusicItems([
-        ...getSectionItems(homeData, 'recommended-for-you'),
+        ...getSectionItems(homeData, 'made-for-you'),
+        ...getSectionItems(homeData, 'recommended'),
         ...getSectionItems(homeData, 'recently-played'),
         ...getSectionItems(homeData, 'high-quality'),
         ...getAllHomeTracks(homeData)
@@ -729,8 +733,7 @@ function getQuickPicks(homeData: PtvMusicHomeData) {
 function getListenAgainItems(homeData: PtvMusicHomeData) {
     return uniquePtvMusicItems([
         ...getSectionItems(homeData, 'recently-played'),
-        ...getSectionItems(homeData, 'continue-listening'),
-        ...getSectionItems(homeData, 'recommended-for-you')
+        ...getSectionItems(homeData, 'continue-listening')
     ]).slice(0, 18);
 }
 
@@ -791,6 +794,102 @@ function getHomeArtistItems(homeData: PtvMusicHomeData, artists: PtvMusicItem[])
             .filter(section => section.kind === 'artist')
             .flatMap(section => section.items)
     ]);
+}
+
+function splitArtistNames(value: unknown) {
+    return String(value || '')
+        .split(',')
+        .map(artist => artist.trim())
+        .filter(Boolean);
+}
+
+function buildRelatedArtistsFromTracks(
+    seedItem: PtvMusicItem | null | undefined,
+    relatedTracks: PtvMusicItem[],
+    artistPool: PtvMusicItem[],
+    limit = PTV_RELATED_ARTIST_ROW_LIMIT
+) {
+    if (!seedItem) return [];
+
+    const byId = new Map<string, PtvMusicItem>();
+    const byName = new Map<string, PtvMusicItem>();
+    const seedArtistId = normalizeMusicLookupName(seedItem.Id);
+    const seedArtistName = normalizeMusicLookupName(getPtvMusicTitle(seedItem));
+    const seen = new Set<string>();
+    const result: PtvMusicItem[] = [];
+
+    uniquePtvMusicItems(artistPool).forEach(artist => {
+        const id = normalizeMusicLookupName(artist.Id);
+        const name = normalizeMusicLookupName(getPtvMusicTitle(artist));
+
+        if (id) {
+            byId.set(id, artist);
+        }
+
+        if (name) {
+            byName.set(name, artist);
+        }
+    });
+
+    const addArtist = (artist: PtvMusicItem) => {
+        if (!artist) return;
+        const artistId = normalizeMusicLookupName(artist.Id);
+        const artistName = normalizeMusicLookupName(getPtvMusicTitle(artist));
+        const dedupeKey = artistId || artistName;
+
+        if (artistId && artistId === seedArtistId) return;
+        if (artistName && artistName === seedArtistName) return;
+        if (!dedupeKey || seen.has(dedupeKey)) return;
+
+        seen.add(dedupeKey);
+        result.push(artist);
+    };
+
+    for (const track of relatedTracks) {
+        if (result.length >= limit) break;
+
+        (track.ArtistItems || []).forEach(artistRef => {
+            if (result.length >= limit) return;
+
+            const artistId = normalizeMusicLookupName(artistRef.Id);
+            const artistName = normalizeMusicLookupName(artistRef.Name);
+
+            if (artistId && byId.has(artistId)) {
+                addArtist(byId.get(artistId)!);
+                return;
+            }
+
+            if (artistName && byName.has(artistName)) {
+                addArtist(byName.get(artistName)!);
+                return;
+            }
+
+            if (artistRef.Id && artistRef.Name) {
+                addArtist({
+                    Id: artistRef.Id,
+                    Name: artistRef.Name,
+                    Type: 'MusicArtist'
+                });
+            }
+        });
+
+        splitArtistNames(getPtvMusicArtist(track)).forEach(artistName => {
+            if (result.length >= limit) return;
+
+            const normalizedName = normalizeMusicLookupName(artistName);
+
+            if (!normalizedName) return;
+            if (byName.has(normalizedName)) {
+                const artist = byName.get(normalizedName);
+
+                if (artist) {
+                    addArtist(artist);
+                }
+            }
+        });
+    }
+
+    return result.slice(0, limit);
 }
 
 function getPlayerArtistBackdropItem(item: PtvMusicItem | null, homeData: PtvMusicHomeData, artists: PtvMusicItem[] = []) {
@@ -1597,7 +1696,12 @@ function MusicCard({
             title={recommendationReasonText || undefined}
         >
             {href ? (
-                <a className='ptv-music-card-art' href={href} aria-label={`Open ${title}`}>
+                <a
+                    className='ptv-music-card-art'
+                    data-ptv-focus-key={`music-card:${item.Id || title}`}
+                    href={href}
+                    aria-label={`Open ${title}`}
+                >
                     <img
                         alt=''
                         decoding='async'
@@ -1608,7 +1712,14 @@ function MusicCard({
                     {isTrack ? <MusicQualityTags item={item} /> : null}
                 </a>
             ) : (
-                <button type='button' className='ptv-music-card-art' disabled={playbackActions.isBusy} onClick={playItem} aria-label={`Play ${title}`}>
+                <button
+                    type='button'
+                    className='ptv-music-card-art'
+                    data-ptv-focus-key={`music-card:${item.Id || title}`}
+                    disabled={playbackActions.isBusy}
+                    onClick={playItem}
+                    aria-label={`Play ${title}`}
+                >
                     <img
                         alt=''
                         decoding='async'
@@ -1652,6 +1763,10 @@ function MusicRow({
 }: MusicRowProps) {
     const rowRef = useRef<HTMLDivElement>(null);
     const rowItems = uniquePtvMusicItems(items).slice(0, 24);
+
+    useEffect(() => {
+        if (rowItems.length) notifyPtvTvFocusContentReady(`music-row:${title}`);
+    }, [rowItems.length, title]);
 
     if (!rowItems.length) return null;
 
@@ -2271,13 +2386,8 @@ function MusicHomeView({ generated, homeData, libraryIndexLoadState, onGenerated
     const listenAgain = getListenAgainItems(homeData);
     const quickPicks = getQuickPicks(homeData);
     const continueListening = getSectionItems(homeData, 'continue-listening');
-    const madeForYou = getSectionItems(homeData, 'recommended-for-you');
-    const recommended = uniquePtvMusicItems([
-        ...getSectionItems(homeData, 'high-quality'),
-        ...homeData.sections
-            .filter(section => section.id === 'similar-artists')
-            .flatMap(section => section.items)
-    ]);
+    const madeForYou = getSectionItems(homeData, 'made-for-you');
+    const recommended = getSectionItems(homeData, 'recommended');
     const recentlyPlayed = getSectionItems(homeData, 'recently-played');
     const genreSections = homeData.sections.filter(section => section.id.startsWith('genre-'));
     const newReleases = uniquePtvMusicItems([
@@ -2977,9 +3087,73 @@ function ArtistView({ detail, homeData, onGenerated }: ArtistViewProps) {
     const artist = detail.artist;
     const artistName = getPtvMusicTitle(artist);
     const singles = detail.topSongs.filter(item => !detail.albums.some(album => album.Id === item.AlbumId)).slice(0, 12);
-    const similarArtists = getSectionItems(homeData, 'top-artists')
-        .filter(item => item.Id !== artist?.Id && getPtvMusicTitle(item) !== artistName)
-        .slice(0, 16);
+    const [isRelatedArtistsLoading, setIsRelatedArtistsLoading] = useState(false);
+    const [relatedArtists, setRelatedArtists] = useState<PtvMusicItem[]>([]);
+    const relatedArtistSeed = detail.topSongs[0] || artist;
+    const relatedTrackPool = useMemo(() => uniquePtvMusicItems([
+        ...detail.topSongs,
+        ...getAllHomeTracks(homeData)
+    ]), [
+        detail.topSongs,
+        homeData
+    ]);
+    const artistPool = useMemo(() => getHomeArtistItems(homeData, getSectionItems(homeData, 'top-artists')), [homeData]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        if (!artist) {
+            setRelatedArtists([]);
+            setIsRelatedArtistsLoading(false);
+
+            return;
+        }
+
+        if (!relatedArtistSeed) {
+            setRelatedArtists([]);
+            setIsRelatedArtistsLoading(false);
+
+            return;
+        }
+
+        setIsRelatedArtistsLoading(true);
+
+        void buildPtvMusicRelatedTracks(relatedArtistSeed, {
+            limit: PTV_RELATED_ARTIST_TRACK_LIMIT,
+            pool: relatedTrackPool
+        }).then(relatedTracks => {
+            if (!isMounted) return;
+
+            const items = buildRelatedArtistsFromTracks(
+                relatedArtistSeed,
+                relatedTracks,
+                artistPool
+            );
+            setRelatedArtists(items);
+        }).catch(error => {
+            if (!isMounted) return;
+
+            recordPtvEvent('render', 'music-related-artists-failed', {
+                artistId: relatedArtistSeed.Id || null,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            setRelatedArtists([]);
+        }).finally(() => {
+            if (isMounted) {
+                setIsRelatedArtistsLoading(false);
+            }
+        });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [
+        artist,
+        artist?.Id,
+        artistPool,
+        relatedArtistSeed,
+        relatedTrackPool
+    ]);
 
     if (detail.isLoading) return <MusicLoading label='Loading artist' />;
     if (detail.error) return <MusicError message={detail.error} />;
@@ -3067,14 +3241,19 @@ function ArtistView({ detail, homeData, onGenerated }: ArtistViewProps) {
                 subtitle='Artist releases'
                 title='Singles & EPs'
             />
-            <MusicRow
-                items={similarArtists}
-                kind='artist'
-                onGenerated={onGenerated}
-                shape='artist'
-                subtitle='Related'
-                title='Fans might also like'
-            />
+            {isRelatedArtistsLoading ? (
+                <p className='ptv-music-empty'>Finding related artists...</p>
+            ) : null}
+            {!isRelatedArtistsLoading && relatedArtists.length ? (
+                <MusicRow
+                    items={relatedArtists}
+                    kind='artist'
+                    onGenerated={onGenerated}
+                    shape='artist'
+                    subtitle='Related'
+                    title='Fans might also like'
+                />
+            ) : null}
         </div>
     );
 }

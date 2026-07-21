@@ -18,6 +18,8 @@ import StorageTypeIcon from './StorageTypeIcon';
 interface StorageListItemProps {
     label: string
     folder?: FolderStorageDto
+    pathLabel?: string
+    showUsage?: boolean
 }
 
 const getStatusColor = (percent: number) => {
@@ -38,7 +40,9 @@ const getStorageTypeText = (type?: string | null) => {
 
 const StorageListItem: FC<StorageListItemProps> = ({
     label,
-    folder
+    folder,
+    pathLabel,
+    showUsage = true
 }) => {
     const readableUsedSpace = (typeof folder?.UsedSpace === 'undefined' || folder.UsedSpace < 0) ?
         '?' : getReadableSize(folder.UsedSpace);
@@ -70,24 +74,28 @@ const StorageListItem: FC<StorageListItemProps> = ({
                                 lineBreak: 'anywhere'
                             }}
                         >
-                            {folder ? folder.Path : (
-                                <Skeleton />
-                            )}
-                        </Typography>
-                        <LinearProgress
-                            variant={folder ? 'determinate' : 'indeterminate'}
-                            color={statusColor}
-                            value={usedPercentage}
-                        />
-                        <Typography
-                            variant='body2'
-                            color='textSecondary'
-                            sx={{
-                                textAlign: 'end'
-                            }}
-                        >
-                            {`${readableUsedSpace} / ${readableTotalSpace}`}
-                        </Typography>
+                        {folder ? pathLabel || folder.Path : (
+                            <Skeleton />
+                        )}
+                    </Typography>
+                        {showUsage ? (
+                            <>
+                                <LinearProgress
+                                    variant={folder ? 'determinate' : 'indeterminate'}
+                                    color={statusColor}
+                                    value={usedPercentage}
+                                />
+                                <Typography
+                                    variant='body2'
+                                    color='textSecondary'
+                                    sx={{
+                                        textAlign: 'end'
+                                    }}
+                                >
+                                    {`${readableUsedSpace} / ${readableTotalSpace}`}
+                                </Typography>
+                            </>
+                        ) : null}
                     </>
                 }
                 slots={{

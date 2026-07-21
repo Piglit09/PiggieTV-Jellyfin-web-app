@@ -224,7 +224,29 @@ function debugLog(message: string, detail?: unknown) {
 }
 
 function getCurrentApiClient() {
-    return ServerConnections.currentApiClient?.();
+    const connections = ServerConnections as unknown as {
+        getApiClient?: (serverId: string) => ReturnType<typeof ServerConnections.currentApiClient>;
+        getLastUsedServer?: () => { Id?: unknown } | null;
+        getLocalApiClient?: () => ReturnType<typeof ServerConnections.currentApiClient>;
+    };
+
+    try {
+        const localApiClient = connections.getLocalApiClient?.();
+
+        if (localApiClient) return localApiClient;
+
+        const serverId = connections.getLastUsedServer?.()?.Id;
+
+        if (typeof serverId !== 'string' || !serverId.trim()) {
+            debugLog('startup cache probe deferred: selected server is not ready');
+            return null;
+        }
+
+        return connections.getApiClient?.(serverId) || null;
+    } catch (error) {
+        debugLog('startup cache probe deferred: server context is unstable', error);
+        return null;
+    }
 }
 
 function clampTtlMs(ttlMs: number) {

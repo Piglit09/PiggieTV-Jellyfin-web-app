@@ -94,6 +94,9 @@ public class PiggieTVPluginConfiguration : BasePluginConfiguration
     /// </summary>
     public RandomSettings RandomSettings { get; set; } = new();
 
+    /// <summary>Gets or sets bounded persistent diagnostics storage settings.</summary>
+    public PtvDiagnosticsStorageSettings DiagnosticsStorageSettings { get; set; } = new();
+
     /// <summary>
     /// Gets or sets a legacy TMDb enable flag from older plugin builds.
     /// </summary>

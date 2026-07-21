@@ -3,6 +3,8 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { syncPtvTvFocusEngine } from '../core/tvFocus';
+
 vi.mock('../modules/icons', () => ({
     PtvIcon: ({ name }: { name: string }) => <span data-icon={name} />
 }));
@@ -112,6 +114,7 @@ describe('PtvShellPrimaryDropdown', () => {
     };
 
     beforeEach(() => {
+        syncPtvTvFocusEngine({ isTv: false });
         container = document.createElement('div');
         document.body.appendChild(container);
         root = createRoot(container);
@@ -132,6 +135,7 @@ describe('PtvShellPrimaryDropdown', () => {
     });
 
     afterEach(() => {
+        syncPtvTvFocusEngine({ isTv: false });
         flushSync(() => root.unmount());
         container.remove();
         document.querySelectorAll('[data-ptv-shell-primary-menu]').forEach(element => {
@@ -226,6 +230,20 @@ describe('PtvShellPrimaryDropdown', () => {
         expect(trigger.getAttribute('aria-expanded')).toBe('false');
     });
 
+    it('defers to the capture-phase TV manager without double toggling', () => {
+        container.className = 'ptv-shell-frame';
+        syncPtvTvFocusEngine({ isTv: true });
+        const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+
+        trigger.focus();
+        flushSync(() => dispatchRemoteKey(trigger, 'Select'));
+        flushAnimationFrames();
+        flushAnimationFrames();
+
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        expect(document.querySelectorAll('[data-ptv-shell-primary-menu="movies"]')).toHaveLength(1);
+    });
+
     it('navigates with legacy D-pad codes and closes with the webOS Back code', () => {
         const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
 
@@ -250,7 +268,9 @@ describe('PtvShellPrimaryDropdown', () => {
         const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
 
         flushSync(() => dispatchActivation(trigger, 0));
-        flushSync(() => document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })));
+        const item = document.querySelector<HTMLAnchorElement>('[data-ptv-shell-primary-menu="movies"] a')!;
+        item.focus();
+        flushSync(() => item.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })));
         flushAnimationFrames();
 
         expect(trigger.getAttribute('aria-expanded')).toBe('false');

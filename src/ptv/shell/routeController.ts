@@ -122,7 +122,8 @@ function seedPtvNativeRoute(path: string, mode: PtvRouteTakeoverMode = 'native')
     '/requests',
     '/request',
     '/ptv/request',
-    '/calendar'
+    '/calendar',
+    '/tv-navigation-debug'
 ].forEach(path => {
     seedPtvNativeRoute(path);
 });

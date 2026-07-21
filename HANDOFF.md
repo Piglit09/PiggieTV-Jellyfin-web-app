@@ -2,6 +2,19 @@
 
 Updated 2026-07-19 for HEAD `6d483399b3` plus the current uncommitted worktree.
 
+## Critical TV Navigation Worktree (2026-07-19)
+
+- `src/ptv/core/tvFocus.ts` now centrally owns PTV D-pad/OK/Back behavior, per-route focus memory, async initial focus, modal/menu trapping, opener restoration, and exact playback return.
+- The corrected route event is `ptv:routecontrollerchange`. Dynamic Home/Browse/Music/Reading rows explicitly publish readiness, and important controls carry stable focus keys.
+- Directional candidates and four-way edges are cached and rebuilt only for route/layer/content changes; arrow presses do not query the DOM.
+- Android key codes 19-23/4, webOS Back 461, and Tizen Back 10009 are normalized with browser key names/codes.
+- Dropdowns open/navigate/select/close from the remote and return to their opener. Overlay, playlist-modal, and performance-overlay focus ownership was consolidated into the manager.
+- TV focus styling is a fast purple glow/scale/glass treatment, with a reduced-cost webOS profile.
+- Settings links to `#/tv-navigation-debug`, which reports current focus, history, last route/key, candidate/missing counts, the navigation graph, and broken paths.
+- The complete source audit and hardware acceptance matrix are in `src/ptv/docs/tv-navigation-audit.md`. Automated key-signature coverage does not replace physical LG/Fire/Android hardware verification.
+- Current verification: the focus/route/dropdown/style set passes 74/74, the latest manager/dropdown rerun passes 37/37, scoped ESLint and changed Stylelint pass, the isolated browser harness passes 17/17, and `git diff --check` passes. Full PTV Vitest has 365 passing tests plus one unrelated Home-hook import-resolution suite failure.
+- TypeScript and production Webpack are blocked only by three pre-existing dirty-worktree render-profile/remote-diagnostics type errors (`remoteDiagnosticsModel.test.ts:174`, `remoteDiagnostics.ts:295`, and `remoteDiagnostics.ts:937`); Webpack reported no TV-navigation compile error. Do not claim a clean release build until those separate changes are repaired.
+
 Project-memory rule: after every completed project prompt, update `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` before reporting completion. Record the resulting behavior, validation, deployment boundary, and remaining risks; do not leave the top-level current-state text pointing at an older task.
 
 ## Where The Project Is
@@ -509,3 +522,53 @@ npm run build:production
 npm run webos:devices
 git diff --check
 ```
+
+## 2026-07-20 architecture consolidation handoff
+
+Status: planning and contract baseline recorded. Do not begin another page-local corrective pass for recommendations, metadata, artwork, caches, browse/details, plugin requests, diagnostics, performance, or focus.
+
+- The next program is a refactor-first consolidation. Establish one shared `PTVApiClient` and `PTVDiagnostics` contract, then `PTVCache` and `ArtworkService`, then provider-based `RecommendationEngine`, followed by browse/details adapters and metadata/playback/focus convergence. Preserve the premium glass visual language and existing route/playback ownership while replacing internals behind adapters.
+- Every shared-platform migration needs a compatibility matrix for Movies, Shows, Music, Reading, Live TV, Dashboard, dialogs, player, and TV clients. A module may supply typed provider fields, card renderers, detail panels, and route configuration, but it may not own a parallel cache policy, image failure cache, endpoint fetcher, recommendation engine, or focus handler.
+- Reading cache is now v5. Complete and summary home entries are distinct; fresh complete memory and persistent entries win, stale complete persistent data displays with `cacheDiagnostics.staleHit`, and summaries are used only when no complete cache exists. A v5 route-scope pointer is keyed by server/user/route/view and resolves the library-set identity safely after a cold reload. Never regress this to an unscoped cache read or mark stale complete data as partial.
+- Existing transitional safeguards to preserve: route-generation stale-response rejection, coalesced Reading library discovery, bounded concurrent Reading shelves, deferred final-only series grouping, route-scoped Reading artwork failures, request-deduplicated plugin endpoints, and `tvFocus.ts` as the single PTV focus owner.
+- The completed Music shelf change is an initialization boundary and telemetry correction, not the final unified engine. Future work must replace module-local scoring with shared providers and emit one normalized row diagnostic: source, algorithm, candidate count, selected count, overlap, generation duration, cache source, engine state, and precise fallback reason.
+- Do not claim real-library count/timing, image-request reduction, bundle-size reduction, or physical webOS results without authenticated server/device evidence. Current automated evidence is focused tests, TypeScript, and production Webpack only; Webpack retains the two established aggregate size warnings.
+- Before reporting any consolidation phase, update all three project-memory files with the retired boundary, new shared contract, migration adapters still present, test matrix, performance evidence, and remaining technical debt.
+
+## 2026-07-20 library-root normalization handoff
+
+- `libraryRootNormalizer.ts` is now the only PTV service for normalizing physical library-root evidence and stable result identity. Use it for any new Search, Browse, Latest, recommendation, or collection result aggregation; do not add `/media`, `/media-local`, `/mnt`, SMB, or Windows-path conditionals.
+- Current native Search sends no `ParentId`, `TopParentId`, path, or collection-folder filter. It requests Jellyfin `Users/{user}/Items` by item type and search term, then normalizes/deduplicates in memory. Browse remains scoped by Jellyfin library IDs (`ParentId`/`AncestorIds`), not paths, and now shares item aggregation normalization.
+- An absent item in the raw path-agnostic Jellyfin response cannot be recovered by frontend root normalization without an additional query. Diagnose that as an upstream Jellyfin search/index issue with the normalized-root evidence; do not mask it with a one-off `/media-local` fallback.
+- Search diagnostics now include per-group deduplicated count and normalized logical roots with observed physical roots. The normalizer test matrix covers mergerfs, bind mounts, SMB, Windows paths, stable-ID deduplication, presentation-key fallback, and no name-only deduplication.
+
+### 2026-07-20 Bounded Movie Search Recovery
+
+- The raw global Movie search and the Latest Movies route have materially different contracts: primary search is `Users/{user}/Items` with `SearchTerm=Toy Story`, `IncludeItemTypes=Movie`, `Recursive=true`, and `Limit=14`; recovery is `Users/{user}/Items/Latest` with `IncludeItemTypes=Movie` and `Limit=96`, then local matching. Neither request has `ParentId`, a physical path filter, or elevated authorization.
+- Recovery runs only for an underfilled or root-divergent Movie result. Its two-minute memory cache is scoped by server/user/media/field profile, its promise is shared, and non-Movie search groups cannot invoke it. A query-generation `AbortController` rejects stale consumers before a supplemental merge can commit.
+- Identity merging now recognizes equivalent `/media/Movies/...` and `/media-local/Movies/...` paths through their logical `Movies/...` relative path. It also uses provider ID plus media type before `PresentationUniqueKey`, preventing an alternate-root alias from taking a result slot.
+- Regression coverage demonstrates a primary Toy Story 1-4 response combined with the bounded supplemental Toy Story 5 candidate, alias suppression before the 14-item limit, zero recovery for complete/non-Movie groups, title/year/path matching, and no recovery from an empty candidate set. An authenticated browser session is still required to confirm the physical Jellyfin instance returns `Toy Story 5` and its expected image in the live UI.
+
+### 2026-07-20 Movie Search Timeout Recovery
+
+- Root cause: the page-level five-second timeout rejected before `searchPtvItems` could classify the primary request, so the Movie recovery branch never ran and diagnostics incorrectly reported `complete-primary-result` with no primary duration.
+- Correction: timeout ownership moved into the API search state machine. Movie outcomes now choose in order: abort -> no recovery; success-empty/sparse/root-divergent -> recovery; timeout -> recovery; recoverable error -> recovery; 401/403 -> preserve the primary error with no recovery. Recovery can therefore execute without a primary result object.
+- Search diagnostics now report `primaryStatus`, `primaryError`, actual primary duration, trigger/reason, supplemental status/duration/candidate/match counts, and final count. Recovered Movies are rendered as normal cards, not an all-error row, while administrator diagnostics retain the degraded primary state.
+- The first-pass field profile was minimized to image/card/year/quality/navigation fields. The supplemental Latest Movie request alone receives original/sort title, path, provider IDs, presentation key, and `TopParentId` needed for matching and alias deduplication. The existing two-worker queue was retained and re-prioritized to Movies, Shows, Collections; Episodes/Reading; then Music/Albums/Artists.
+- Focused API/service regressions pass 11/11, covering complete, sparse, timeout, error, empty, abort, authorization, recovery failure, and non-Movie behavior. A signed-in Jellyfin verification remains required: collect the real `toy story` diagnostic output and confirm recovered cards include Toy Story 1-5 before release.
+
+### 2026-07-20 Search Recovery Latest Candidate Audit
+
+- The previous live result of one supplemental candidate cannot yet be attributed to a parent scope: the source code has no `ParentId` in its recovery query, but it did assume an array response and did not expose the exact request or raw response shape. Recovery now uses `getPtvRecentlyAddedResult`, the same shared Latest request builder used by native home Recent Added consumers.
+- The helper normalizes raw `Items/Latest` arrays and wrapped `{ Items }` responses, records raw count and `TotalRecordCount`, and returns zero candidates with `responseShape=invalid` for malformed data. Movie recovery explicitly omits `ParentId`, sets `GroupItems=false`, and records its sanitized request, result shape, keys, first 20 candidate identities, logical roots, and matched names in the existing admin-only Search diagnostics.
+- Focused regressions pass 13/13: raw 96-item arrays, wrapped lists, invalid response handling, no-ParentId request construction, sparse Toy Story merge, stale-root candidate retention, duplicate handling, timeout/error/empty/authorization/abort behavior. The required next step is authenticated live evidence, not another speculative frontend change: `toy story` must show the request contract, array/wrapped shape, raw candidate count, sampled Toy Story 5, one match, and final count five.
+# 2026-07-20 Movie Search Catalog Recovery
+
+The fixed 96-item `Items/Latest` Movie fallback was replaced by `src/ptv/services/movieSearchCatalog.ts`. Recovery uses unscoped `Users/{user}/Items` Movie pages (`Recursive=true`, 500 items, DateCreated descending), caches by server and user, resumes partial catalogs, and hydrates only matching IDs. Movie primary results are visible while catalog recovery runs.
+
+Live verification is still required: search `toy story` and confirm the debug block reports `catalogMatchCount=1`, `catalogMatchedNames=Toy Story 5`, a page/index location, `finalCount=5`, `catalogRequestEndpoint=Users/{user}/Items`, and `catalogRequestParentId=none`.
+# 2026-07-20 Rolling Diagnostics Storage
+
+Added `PtvRollingDiagnosticsWriter`: all persistent diagnostics append JSON Lines to `ptv-diagnostics.log`, rotate to bounded numbered files, and retain at most five rotations by default. It does not create request-, session-, device-, timestamp-, or GUID-named diagnostic files. Check-ins aggregate and repeated events suppress before disk writes; logging failures do not affect diagnostics, search, or playback.
+
+The Remote Diagnostics dashboard now includes Diagnostics Storage health and protected rotate/download/clear/consolidate actions. The live server still needs deployment verification for before/after file counts and disk usage.

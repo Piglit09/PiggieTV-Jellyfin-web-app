@@ -23,12 +23,14 @@ import {
     resolvePtvItemRoute
 } from '../../core/itemRoutes';
 import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
+import { focusPtvTvElement, notifyPtvTvFocusContentReady } from '../../core/tvFocus';
 import PTVShell, { type PtvShellSection } from '../../shell/PTVShell';
 import {
     getPtvRouteControllerState,
     navigatePtvRoute,
     registerPtvNativeRoute
 } from '../../shell/routeController';
+import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import {
     getPtvQualityPillClass,
@@ -140,7 +142,6 @@ type PtvBrowseMemory = Readonly<{
 }>;
 
 const PTV_BROWSE_MEMORY_PREFIX = 'ptv:browse:memory:v1:';
-const PTV_BROWSE_CONCURRENCY = 2;
 const PTV_BROWSE_SOFT_TIMEOUT_MS = 5000;
 const PTV_BROWSE_FEATURED_HARD_TIMEOUT_MS = 22000;
 const PTV_BROWSE_ROW_HARD_TIMEOUT_MS = 26000;
@@ -416,6 +417,7 @@ function getBaseQuery(
     scope?: PtvBrowseResolvedScope
 ): PtvItemQuery {
     const query: PtvItemQuery = {
+        EnableTotalRecordCount: false,
         EnableImages: true,
         EnableImageTypes: getBrowseImageTypesForSection(section),
         Fields: getBrowseFieldsForSection(section),
@@ -941,6 +943,7 @@ function PtvBrowseCard({
         <a
             className='ptv-browse-card'
             data-ptv-browse-item-id={getText(item.Id)}
+            data-ptv-focus-key={`browse-card:${getText(item.Id)}`}
             data-ptv-browse-section-id={sectionId}
             href={route.href}
             onClick={() => recordPtvItemRouteClick(item, route, {
@@ -982,6 +985,10 @@ function PtvBrowseReadyRail({
     onFocusItem: (sectionId: string, item: PtvItem) => void;
     section: PtvBrowseSection;
 }>) {
+    useEffect(() => {
+        notifyPtvTvFocusContentReady(`browse-row:${section.id}`);
+    }, [section.id, section.items.length]);
+
     const rowRef = useRef<HTMLDivElement | null>(null);
     const frameRef = useRef<number | null>(null);
     const settleTimeoutRef = useRef<number | null>(null);
@@ -1652,7 +1659,10 @@ function PtvBrowseLandingPage({ config, location, route, scope }: Readonly<{
                 }
             };
 
-            await Promise.all(Array.from({ length: PTV_BROWSE_CONCURRENCY }, () => runSectionWorker()));
+            const performanceProfile = getPtvPerformanceProfile();
+            const browseConcurrency = performanceProfile.isLowPower || performanceProfile.clientKind === 'mobile' ? 2 : 4;
+
+            await Promise.all(Array.from({ length: browseConcurrency }, () => runSectionWorker()));
 
             if (shouldCollectDiagnostics()) {
                 if (!firstInteractiveRecorded) {
@@ -1679,7 +1689,22 @@ function PtvBrowseLandingPage({ config, location, route, scope }: Readonly<{
             }
         }
 
-        void loadBrowsePage();
+        void loadBrowsePage().catch(error => {
+            if (!isMounted) return;
+
+            const message = error instanceof Error ? error.message : 'Browse page failed to load.';
+            recordPtvEvent('route', 'browse-page-load-failed', {
+                error: message,
+                kind: config.kind,
+                routeGeneration,
+                title: config.title
+            });
+            setState(previous => ({
+                ...previous,
+                error: message,
+                isLoading: false
+            }));
+        });
 
         return () => {
             isMounted = false;
@@ -1708,7 +1733,7 @@ function PtvBrowseLandingPage({ config, location, route, scope }: Readonly<{
                 const focusedNode = Array.from(document.querySelectorAll<HTMLElement>('[data-ptv-browse-item-id]'))
                     .find(node => node.dataset.ptvBrowseItemId === memory.focusedItemId);
 
-                focusedNode?.focus({ preventScroll: true });
+                if (focusedNode) focusPtvTvElement(focusedNode, 'browse-back-forward-restore');
             }
 
             if (shouldCollectDiagnostics()) {
