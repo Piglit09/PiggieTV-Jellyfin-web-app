@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
 import process from 'node:process';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const ROOT = process.argv[2] ? resolve(process.argv[2]) : resolve(import.meta.dirname, '..');
 const INCLUDED_EXTENSIONS = new Set([
     '.cs', '.css', '.html', '.js', '.json', '.jsx', '.md', '.mjs', '.scss',
     '.ts', '.tsx', '.yaml', '.yml'

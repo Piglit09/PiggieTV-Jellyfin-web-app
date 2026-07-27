@@ -36,6 +36,9 @@ import Events from 'utils/events';
 import { getItemBackdropImageUrl } from 'utils/jellyfin-apiclient/backdropImage';
 
 import { emit as emitPtvEvent } from '../../ptv/core/events';
+import { getPtvSeasonEpisodes } from '../../ptv/api/seasonEpisodes';
+import { getPtvSeriesSeasons } from '../../ptv/api/seriesSeasons';
+import { getCoordinatedLegacyItemDetail } from '../../ptv/services/coordinatedLegacyItemDetail';
 import { DetailRequestGate } from './detailRequestGate';
 import { normalizeItemMediaSources } from './mediaSourceDeduplication';
 
@@ -67,7 +70,7 @@ function getPromise(apiClient, params) {
     const id = params.id;
 
     if (id) {
-        return apiClient.getItem(apiClient.getCurrentUserId(), id);
+        return getCoordinatedLegacyItemDetail(apiClient, id);
     }
 
     if (params.seriesTimerId) {
@@ -1500,13 +1503,13 @@ function renderChildren(page, item) {
     const userId = apiClient.getCurrentUserId();
 
     if (item.Type == 'Series') {
-        promise = apiClient.getSeasons(item.Id, {
+        promise = getPtvSeriesSeasons(apiClient, item.Id, {
             userId: userId,
             Fields: fields
         });
     } else if (item.Type == 'Season') {
         fields += ',Overview,MediaSources';
-        promise = apiClient.getEpisodes(item.SeriesId, {
+        promise = getPtvSeasonEpisodes(apiClient, item.SeriesId, item.Id, {
             seasonId: item.Id,
             userId: userId,
             Fields: fields

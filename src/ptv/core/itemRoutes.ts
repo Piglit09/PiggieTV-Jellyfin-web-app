@@ -17,6 +17,7 @@ export type PtvItemRouteContext = {
     enablePtvReading?: boolean;
     fallbackHref?: string;
     mediaType?: string;
+    privacySafeDiagnostics?: boolean;
     source?: string;
 };
 
@@ -200,17 +201,22 @@ export function recordPtvItemRouteClick(
 ) {
     if (!shouldCollectDiagnostics()) return;
 
-    recordPtvEvent('route', 'ptv-item-route-click', {
+    const safeDetail = {
         action: context.action || 'open',
         fallbackReason: route.fallbackReason || null,
-        itemId: getItemId(item) || null,
-        itemName: getRecordString(item, 'Name', 'name', 'Title', 'title') || null,
+        hasItemId: Boolean(getItemId(item)),
         itemType: getRecordString(item, 'Type', 'type') || null,
         mediaType: getRecordString(item, 'MediaType', 'mediaType') || context.mediaType || null,
-        resolvedRoute: route.href,
         routeSource: route.routeSource,
-        rowId: context.rowId || null,
-        rowTitle: context.rowTitle || null,
         source: context.source || null
+    };
+
+    recordPtvEvent('route', 'ptv-item-route-click', context.privacySafeDiagnostics ? safeDetail : {
+        ...safeDetail,
+        itemId: getItemId(item) || null,
+        itemName: getRecordString(item, 'Name', 'name', 'Title', 'title') || null,
+        resolvedRoute: route.href,
+        rowId: context.rowId || null,
+        rowTitle: context.rowTitle || null
     });
 }

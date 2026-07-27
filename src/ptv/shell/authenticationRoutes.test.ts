@@ -99,4 +99,17 @@ describe('PTV authentication route ownership', () => {
         expect(isPtvAuthenticationRoute(location('/home', '?url=%2Flogin'))).toBe(false);
         expect(shouldMountPtvAuthenticatedHeader(location('/home', '?url=%2Flogin'))).toBe(true);
     });
+
+    it('does not recognize the obsolete logout hash as a route or retain authenticated shell state', () => {
+        expect(isPtvAuthenticationRoute('#/logout')).toBe(false);
+        expect(isPtvLoginRoute('#/logout')).toBe(false);
+        expect(isPtvAuthenticationRoute('#/selectserver')).toBe(true);
+        expect(isPtvAuthenticationRoute('#/login')).toBe(true);
+        expect([
+            '#/home',
+            '#/selectserver',
+            '#/login',
+            '#/home'
+        ].map(shouldMountPtvAuthenticatedHeader)).toEqual([true, false, false, true]);
+    });
 });

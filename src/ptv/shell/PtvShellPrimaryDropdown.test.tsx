@@ -3,6 +3,13 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('lib/jellyfin-apiclient', () => ({
+    ServerConnections: {
+        currentApiClient: () => null,
+        getApiClient: () => null
+    }
+}));
+
 import { syncPtvTvFocusEngine } from '../core/tvFocus';
 
 vi.mock('../modules/icons', () => ({

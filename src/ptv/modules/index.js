@@ -6,15 +6,17 @@ import './settings';
 import './login';
 import './details';
 import './integrations/arrActions';
-import './request';
 import './signup';
-import './reader';
 import './music';
-import './books';
 import './theme-songs';
 import './playback';
+import {
+    getPtvPlatformFeaturePolicy,
+    installPtvWebOsRouteGuard
+} from '../core/platformFeatures';
 
 let dashboardEnhancementLoadPromise = null;
+let extendedWebFeatureLoadPromise = null;
 
 function isDashboardRoute() {
     return `${window.location.pathname} ${window.location.hash}`.toLowerCase().includes('/dashboard');
@@ -31,6 +33,27 @@ function loadDashboardEnhancements() {
     });
 }
 
+function loadExtendedWebFeatures() {
+    const featurePolicy = getPtvPlatformFeaturePolicy();
+
+    if (!featurePolicy.reading && !featurePolicy.request) {
+        installPtvWebOsRouteGuard();
+        return;
+    }
+
+    if (extendedWebFeatureLoadPromise) return;
+
+    extendedWebFeatureLoadPromise = Promise.all([
+        import(/* webpackChunkName: "ptv-request" */ './request'),
+        import(/* webpackChunkName: "ptv-reading" */ './reader'),
+        import(/* webpackChunkName: "ptv-reading" */ './books')
+    ]).catch(error => {
+        extendedWebFeatureLoadPromise = null;
+        console.warn('[PiggieTV] Extended web features failed to load', error);
+    });
+}
+
+loadExtendedWebFeatures();
 loadDashboardEnhancements();
 window.addEventListener('hashchange', loadDashboardEnhancements);
 window.addEventListener('popstate', loadDashboardEnhancements);

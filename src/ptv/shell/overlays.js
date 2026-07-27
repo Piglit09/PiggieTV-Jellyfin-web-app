@@ -56,19 +56,46 @@ function isVisible(element) {
 
 function normalizeElements(root, selector, classes, role, layerIndex) {
     let count = 0;
+    let changed = false;
 
     root.querySelectorAll(selector).forEach((element) => {
         if (!(element instanceof HTMLElement) || element.closest('.ptv-ignore-shell-overlay')) return;
 
-        element.classList.add(...classes);
-        element.dataset.ptvOverlayOwner = 'shell';
-        element.dataset.ptvOverlayRole = role;
-        element.style.setProperty('--ptv-shell-overlay-index', String(layerIndex + count));
+        classes.forEach(className => {
+            if (element.classList.contains(className)) return;
+
+            element.classList.add(className);
+            changed = true;
+        });
+        if (element.dataset.ptvOverlayOwner !== 'shell') {
+            element.dataset.ptvOverlayOwner = 'shell';
+            changed = true;
+        }
+        const overlayIndex = String(layerIndex + count);
+        const currentOverlayIndex = Number.parseInt(
+            element.style.getPropertyValue('--ptv-shell-overlay-index'),
+            10
+        );
+        const canReplaceRole = !element.dataset.ptvOverlayRole
+            || element.dataset.ptvOverlayRole === role
+            || !Number.isFinite(currentOverlayIndex)
+            || currentOverlayIndex <= layerIndex;
+
+        if (canReplaceRole) {
+            if (element.dataset.ptvOverlayRole !== role) {
+                element.dataset.ptvOverlayRole = role;
+                changed = true;
+            }
+            if (element.style.getPropertyValue('--ptv-shell-overlay-index') !== overlayIndex) {
+                element.style.setProperty('--ptv-shell-overlay-index', overlayIndex);
+                changed = true;
+            }
+        }
 
         count += 1;
     });
 
-    return count;
+    return changed;
 }
 
 function getActiveDialog() {
@@ -83,19 +110,30 @@ function updateOverlayState() {
     const activeSurfaces = Array.from(document.querySelectorAll('.ptv-shell-overlay-surface, .ptv-shell-toast'))
         .filter(isVisible);
     const isOverlayOpen = Boolean(activeDialog || activeSurfaces.length);
+    const wasOverlayOpen = document.documentElement.classList.contains('ptv-shell-overlay-open');
+    const wasDialogOpen = document.documentElement.classList.contains('ptv-shell-dialog-open');
 
     document.documentElement.classList.toggle('ptv-shell-overlay-open', isOverlayOpen);
     document.documentElement.classList.toggle('ptv-shell-dialog-open', Boolean(activeDialog));
+
+    return wasOverlayOpen !== isOverlayOpen || wasDialogOpen !== Boolean(activeDialog);
 }
 
-function applyShellOverlays(root = document) {
-    normalizeElements(root, SHELL_BACKDROP_SELECTOR, ['ptv-shell-overlay-backdrop'], 'backdrop', 0);
-    normalizeElements(root, SHELL_OVERLAY_SELECTOR, ['ptv-shell-overlay'], 'overlay', 10);
-    normalizeElements(root, SHELL_DIALOG_SELECTOR, ['ptv-shell-dialog'], 'dialog', 20);
-    normalizeElements(root, SHELL_OVERLAY_SURFACE_SELECTOR, ['ptv-shell-overlay-surface'], 'overlay-surface', 30);
-    normalizeElements(root, SHELL_TOAST_SELECTOR, ['ptv-shell-toast'], 'toast', 40);
-    updateOverlayState();
-    notifyPtvTvFocusContentReady('shell-overlays-updated');
+export function applyShellOverlays(root = document) {
+    const ownershipChanged = [
+        normalizeElements(root, SHELL_BACKDROP_SELECTOR, ['ptv-shell-overlay-backdrop'], 'backdrop', 0),
+        normalizeElements(root, SHELL_OVERLAY_SELECTOR, ['ptv-shell-overlay'], 'overlay', 10),
+        normalizeElements(root, SHELL_DIALOG_SELECTOR, ['ptv-shell-dialog'], 'dialog', 20),
+        normalizeElements(root, SHELL_OVERLAY_SURFACE_SELECTOR, ['ptv-shell-overlay-surface'], 'overlay-surface', 30),
+        normalizeElements(root, SHELL_TOAST_SELECTOR, ['ptv-shell-toast'], 'toast', 40)
+    ].some(Boolean);
+    const stateChanged = updateOverlayState();
+
+    if (ownershipChanged || stateChanged) {
+        notifyPtvTvFocusContentReady('shell-overlays-updated');
+    }
+
+    return ownershipChanged || stateChanged;
 }
 
 function scheduleShellOverlays() {

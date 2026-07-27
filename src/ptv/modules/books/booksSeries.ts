@@ -226,16 +226,6 @@ function parseSeriesFromTitle(item: PtvReadingItem): PtvReadingSeriesItemInfo {
 
     if (explicitInfo) return explicitInfo;
 
-    const collectionInfo = buildExplicitSeriesInfo(
-        item,
-        parsedFilename,
-        collectionSeriesTitle,
-        '',
-        year
-    );
-
-    if (collectionInfo) return collectionInfo;
-
     const providerInfo = buildProviderSeriesInfo(
         item,
         parsedFilename,
@@ -245,6 +235,16 @@ function parseSeriesFromTitle(item: PtvReadingItem): PtvReadingSeriesItemInfo {
     );
 
     if (providerInfo) return providerInfo;
+
+    const collectionInfo = buildExplicitSeriesInfo(
+        item,
+        parsedFilename,
+        collectionSeriesTitle,
+        '',
+        year
+    );
+
+    if (collectionInfo) return collectionInfo;
 
     const patternInfo = buildFilenameSeriesInfo(parsedFilename, year);
 

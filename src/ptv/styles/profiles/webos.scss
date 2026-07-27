@@ -44,6 +44,66 @@ html.ptv-platform-webos .ptv-shell-header {
     box-shadow: none !important;
 }
 
+/*
+ * Chrome 68 can let an intrinsic image's min-content contribution size a grid track even when
+ * max-* constraints are present. These literals intentionally avoid clamp(), content sizing, and
+ * variable-only geometry at the physical 1080p boundary.
+ */
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-header {
+    align-items: center;
+    box-sizing: border-box;
+    grid-template-columns: minmax(220px, 1fr) max-content minmax(220px, 1fr);
+    grid-template-rows: 80px;
+    height: 80px;
+    left: 66px;
+    max-height: 80px;
+    min-height: 80px;
+    overflow: visible;
+    right: 66px;
+    top: 36px;
+}
+
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-left,
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-primary,
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-right {
+    align-self: center;
+    max-height: 80px;
+    min-height: 0;
+    min-width: 0;
+}
+
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-brand {
+    align-self: center;
+    flex: 0 0 220px;
+    height: 64px;
+    justify-self: start;
+    max-height: 64px;
+    max-width: 220px;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    width: 220px;
+}
+
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-brand img {
+    display: block;
+    height: 64px;
+    max-height: 64px;
+    max-width: 220px;
+    min-height: 0;
+    min-width: 0;
+    object-fit: contain;
+    width: 220px;
+}
+
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-primary {
+    justify-self: center;
+}
+
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-right {
+    justify-self: end;
+}
+
 html.ptv-platform-webos .ptv-native-home-hero-backdrop,
 html.ptv-platform-webos .ptv-browse-hero-backdrop,
 html.ptv-platform-webos .ptv-details-backdrop__image {
@@ -67,17 +127,125 @@ html.ptv-platform-webos .ptv-shell-icon-button {
     transition: none !important;
 }
 
+/*
+ * The WebOS 5 Chromium compositor spends several minutes processing the Music
+ * route when its large card tree starts individual transitions. Focus remains
+ * visible through the static TV focus ring, so animation is not required for
+ * input feedback on this constrained profile.
+ */
+html.ptv-platform-webos .ptv-music-page *,
+html.ptv-platform-webos [data-ptv-music-player-root='true'] * {
+    animation: none !important;
+    transition: none !important;
+}
+
 html.ptv-platform-webos .ptv-tv-focus-visible,
 html.ptv-platform-webos .ptv-shell-frame .ptv-tv-focus-visible {
+    border-color: rgb(232 204 255 / 94%) !important;
     box-shadow:
         0 0 0 var(--ptv-tv-focus-ring) var(--ptv-tv-focus-ring-core),
         0 0 28px var(--ptv-tv-focus-ring-glow),
         inset 0 1px 0 rgb(255 255 255 / 48%),
         inset 0 0 16px rgb(215 172 255 / 18%) !important;
+    filter: brightness(1.16) saturate(1.08) !important;
+    outline: 3px solid rgb(244 228 255 / 98%) !important;
+    outline-offset: 5px !important;
     transition: box-shadow 90ms linear, filter 90ms linear, transform 90ms linear !important;
+    transform: none !important;
 }
 
 html.ptv-platform-webos .ptv-native-card:focus-within,
 html.ptv-platform-webos .ptv-browse-card.ptv-tv-focus-visible {
     transition: filter 90ms linear, transform 90ms linear !important;
+    transform: none !important;
+}
+
+html.ptv-render-tv.ptv-platform-webos .ptv-native-home,
+html.ptv-render-tv.ptv-platform-webos .ptv-native-home-rows,
+html.ptv-render-tv.ptv-platform-webos .ptv-native-home-row,
+html.ptv-render-tv.ptv-platform-webos .ptv-native-home-scroller {
+    content-visibility: visible !important;
+}
+
+// Chrome 68 drops clamp()/min() positioning declarations. Keep the persistent
+// audio surface inside the same literal WebOS safe area used by the header.
+html.ptv-platform-webos .ptv-media-dock {
+    bottom: 36px;
+    max-width: 560px;
+    right: 66px;
+    width: 560px;
+}
+
+@media (max-width: 1500px), (max-height: 820px) {
+    html.ptv-platform-webos .ptv-media-dock {
+        bottom: 20px;
+        max-width: 460px;
+        right: 34px;
+        width: 460px;
+    }
+
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-header {
+        grid-template-columns: minmax(196px, 1fr) max-content minmax(196px, 1fr);
+        grid-template-rows: 64px;
+        height: 64px;
+        left: 34px;
+        max-height: 64px;
+        min-height: 64px;
+        right: 34px;
+        top: 20px;
+    }
+
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-left,
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-primary,
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-right {
+        max-height: 64px;
+    }
+
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-brand,
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-brand img {
+        height: 56px;
+        max-height: 56px;
+        max-width: 196px;
+        width: 196px;
+    }
+
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-brand {
+        flex-basis: 196px;
+    }
+}
+
+@media (min-width: 3000px) and (min-height: 1700px) {
+    html.ptv-platform-webos .ptv-media-dock {
+        bottom: 62px;
+        right: 116px;
+    }
+
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-header {
+        grid-template-columns: minmax(240px, 1fr) max-content minmax(240px, 1fr);
+        grid-template-rows: 120px;
+        height: 120px;
+        left: 116px;
+        max-height: 120px;
+        min-height: 120px;
+        right: 116px;
+        top: 62px;
+    }
+
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-left,
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-primary,
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-right {
+        max-height: 120px;
+    }
+
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-brand,
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-brand img {
+        height: 72px;
+        max-height: 72px;
+        max-width: 240px;
+        width: 240px;
+    }
+
+    html.ptv-render-tv.ptv-platform-webos .ptv-shell-brand {
+        flex-basis: 240px;
+    }
 }

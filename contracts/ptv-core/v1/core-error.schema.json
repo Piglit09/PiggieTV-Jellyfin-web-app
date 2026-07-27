@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v1/core-error.schema.json",
+  "title": "PTV Core Error v1",
+  "type": "object",
+  "required": ["contractVersion", "kind", "code", "message", "retryable", "timestamp"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "kind": {
+      "enum": [
+        "network",
+        "authentication",
+        "authorization",
+        "server",
+        "validation",
+        "parsing",
+        "cache",
+        "playback",
+        "unsupported-platform",
+        "cancelled",
+        "unknown"
+      ]
+    },
+    "code": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 96,
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "developerDetail": { "type": "string", "maxLength": 2000 },
+    "cause": { "type": "string", "maxLength": 200 },
+    "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
+    "operation": { "type": "string", "maxLength": 500 },
+    "correlationId": { "type": "string", "maxLength": 200 },
+    "retryable": { "type": "boolean" },
+    "timestamp": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": true
+}

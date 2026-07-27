@@ -279,6 +279,22 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 configuration.CacheSettings.RefreshIntervalHours,
                 refreshIntervalMs);
             var payload = await BuildFeaturedPayloadAsync(configuration, refreshToken).ConfigureAwait(false);
+            var semanticStatus = PtvFeaturedContentValidator.GetSemanticStatus(payload);
+
+            _logger.LogInformation(
+                "PiggieTV featured-content generation classified. Classification={Classification}. HeroCount={HeroCount}. SectionCount={SectionCount}. PopulatedSectionCount={PopulatedSectionCount}. ItemCount={ItemCount}.",
+                semanticStatus.Classification,
+                semanticStatus.HeroCount,
+                semanticStatus.SectionCount,
+                semanticStatus.PopulatedSectionCount,
+                semanticStatus.ItemCount);
+
+            if (!semanticStatus.UsableForPersistence)
+            {
+                _lastRefreshWarning = $"Generated featured content was {semanticStatus.Classification}; the prior cache was retained.";
+                throw new InvalidOperationException(_lastRefreshWarning);
+            }
+
             var document = CreateFeaturedContentDocument(payload, startedAt, refreshIntervalMs);
 
             document = TrimDocumentToMaxSize(document);
@@ -732,7 +748,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 tmdbFacts,
                 peopleByItemId,
                 rowLimit,
-                includeEmptyRows: true,
+                includeEmptyRows: false,
                 cancellationToken: cancellationToken)
             : [];
         var sectionItems = rowConfigApplied
@@ -754,9 +770,11 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
         LogFinalSections(sectionDefinitions);
         _logger.LogInformation(
-            "PiggieTV featured-content heroes selected: {HeroCount}/{HeroMaxItems}. Sections built: {SectionCount}. RecommendationRows={RecommendationRows}.",
+            "PiggieTV featured-content heroes selected: {HeroCount}/{HeroMaxItems}. RowBuilderEnabled={RowBuilderEnabled}. GeneratedRowCount={GeneratedRowCount}. Sections built: {SectionCount}. RecommendationRows={RecommendationRows}.",
             heroItems.Length,
             heroMaxItems,
+            includeConfiguredRows,
+            generatedRows.Count,
             sectionItems.Count,
             appendedRecommendationRows);
 

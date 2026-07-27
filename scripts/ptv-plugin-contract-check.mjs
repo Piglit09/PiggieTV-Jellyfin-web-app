@@ -62,11 +62,18 @@ for (const [label, sourceText] of requiredRoutes) {
 const backendContracts = [
     ['reading override GET route', /\[HttpGet\("reading\/series-overrides\/\{routeKind\}"\)\]/],
     ['reading override PUT route', /\[HttpPut\("reading\/series-overrides\/\{routeKind\}"\)\]/],
-    ['reading override status feature', /"readingSeriesOverrides"/]
+    ['reading override status feature', /"readingSeriesOverrides"/],
+    ['PTV Core contract version', /\[JsonPropertyName\("contractVersion"\)\][\s\S]*?=\s*"1\.0"/],
+    ['PTV Core cache version', /\[JsonPropertyName\("cacheVersion"\)\]/],
+    ['recommendation schema version', /\[JsonPropertyName\("recommendationSchemaVersion"\)\]/],
+    ['diagnostics capability', /\[JsonPropertyName\("diagnosticsCapable"\)\]/],
+    ['server capabilities', /\[JsonPropertyName\("serverCapabilities"\)\]/],
+    ['supported feature flags', /\[JsonPropertyName\("supportedFeatureFlags"\)\]/],
+    ['client compatibility warnings', /\[JsonPropertyName\("clientCompatibilityWarnings"\)\]/]
 ];
 
 for (const [label, pattern] of backendContracts) {
-    const source = label.includes('status') ? statusResponse : statusController;
+    const source = label.includes('route') && !label.includes('status') ? statusController : statusResponse;
     if (!pattern.test(source)) failures.push(`Missing plugin ${label}.`);
 }
 

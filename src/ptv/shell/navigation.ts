@@ -1,11 +1,14 @@
 import type { PtvIconName } from '../modules/icons';
 import { getRegisteredNavigationSections } from '../core/lifecycle';
 import { PTV_ROUTES } from '../core/config';
+import { isPtvPlatformNavigationEntryAvailable } from '../core/platformFeatures';
 
 export type PtvNavigationPermission = 'admin' | 'authenticated' | 'guest';
+export type PtvNavigationAction = 'logout';
 
 export type PtvNavigationItem = {
-    href: string;
+    action?: PtvNavigationAction;
+    href?: string;
     icon: PtvIconName;
     id: string;
     isExternal?: boolean;
@@ -62,7 +65,7 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
         items: [
             { id: 'select-server', label: 'Select Server', href: '#/selectserver', icon: 'server' },
             { id: 'settings', label: 'Settings', href: '#/settings', icon: 'settings' },
-            { id: 'signout', label: 'Sign Out', href: '#/logout', icon: 'signout' }
+            { id: 'signout', label: 'Sign Out', action: 'logout', icon: 'signout' }
         ]
     },
     {
@@ -125,5 +128,8 @@ export function getPtvNavigationSections() {
     return mergeNavigationSections(
         PTV_NAVIGATION_SECTIONS,
         getRegisteredNavigationSections() as PtvNavigationSection[]
-    );
+    ).map(section => ({
+        ...section,
+        items: section.items.filter(item => isPtvPlatformNavigationEntryAvailable(item))
+    })).filter(section => section.items.length > 0);
 }

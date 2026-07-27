@@ -19,6 +19,12 @@ import {
 import { getPtvRuntimeDiagnostics } from '../core/runtime';
 import { ptvLogger } from '../core/logger';
 import {
+    canCollectPtvPhysicalLayoutSnapshot,
+    collectPtvPhysicalLayoutMilestone,
+    getPtvPhysicalLayoutSnapshot,
+    resetPtvPhysicalLayoutSnapshotSession
+} from './physicalLayoutSnapshot';
+import {
     subscribeToPtvGlobalPlaybackState,
     type PtvGlobalPlaybackState
 } from './playbackStateService';
@@ -58,6 +64,7 @@ export type PtvRemoteDiagnosticsClientCapabilities = {
     navigationTiming: boolean;
     networkTiming: boolean;
     performanceMetrics: boolean;
+    physicalLayoutSnapshot: boolean;
     playbackTelemetry: boolean;
     remoteCommands: boolean;
     reportExport: boolean;
@@ -358,6 +365,7 @@ function getPtvRemoteDiagnosticsClientCapabilities(): PtvRemoteDiagnosticsClient
         navigationTiming: hasPerformanceEntries,
         networkTiming: typeof window.fetch === 'function' || typeof XMLHttpRequest !== 'undefined',
         performanceMetrics: typeof performance !== 'undefined' && typeof performance.now === 'function',
+        physicalLayoutSnapshot: canCollectPtvPhysicalLayoutSnapshot(),
         playbackTelemetry: true,
         remoteCommands: true,
         reportExport: true
@@ -466,10 +474,13 @@ export function getPtvRemoteDiagnosticsSnapshot() {
 
     syncRecentPtvLogs();
 
+    collectPtvPhysicalLayoutMilestone('report-generated');
+
     return createPtvRemoteDiagnosticsPayload({
         buffer,
         clientId,
         lease: activeLease,
+        physicalLayoutSnapshot: getPtvPhysicalLayoutSnapshot(),
         profile: getProfileTag(),
         route: getCurrentRoute()
     });
@@ -541,6 +552,7 @@ function installRouteCollector() {
                         durationMs: Number((performanceNow() - startedAt).toFixed(1)),
                         route: nextRoute
                     });
+                    collectPtvPhysicalLayoutMilestone('route-committed');
                 });
                 pendingFrames.add(secondFrame);
             });
@@ -888,7 +900,24 @@ function syncRecentPtvLogs() {
 
 function startCollectors() {
     stopCollectors();
+    resetPtvPhysicalLayoutSnapshotSession();
     syncRecentPtvLogs();
+
+    collectPtvPhysicalLayoutMilestone('lease-started');
+
+    const layoutMilestones: Array<[number, Parameters<typeof collectPtvPhysicalLayoutMilestone>[0]]> = [
+        [0, 'runtime-ready'],
+        [400, 'shell-observed'],
+        [1_400, 'hero-observed'],
+        [3_500, 'first-shelf-observed']
+    ];
+    const layoutTimers = layoutMilestones.map(([delay, milestone]) => window.setTimeout(() => {
+        collectPtvPhysicalLayoutMilestone(milestone);
+    }, delay));
+
+    addCollectorCleanup(() => layoutTimers.forEach(timer => {
+        window.clearTimeout(timer);
+    }));
 
     installRouteCollector();
     installKeyCollector();
@@ -1122,6 +1151,7 @@ export function disposePtvRemoteDiagnosticsAgent() {
     capturedClientLogKeys.clear();
     lastSnapshot = null;
     lastLeaseRejection = null;
+    resetPtvPhysicalLayoutSnapshotSession();
     diagnosticsWindow.__ptvRemoteDiagnosticsStarted = false;
     if (diagnosticsWindow.PTV) delete diagnosticsWindow.PTV.remoteDiagnostics;
 }

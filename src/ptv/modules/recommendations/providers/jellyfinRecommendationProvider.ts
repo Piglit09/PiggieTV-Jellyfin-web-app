@@ -52,8 +52,7 @@ const RECOMMENDATION_FIELDS = [
     'RunTimeTicks',
     'SeriesName',
     'Studios',
-    'Tags',
-    'UserData'
+    'Tags'
 ].join(',');
 
 const CANDIDATE_ITEM_TYPES = 'Movie,Series,Episode,Audio,MusicAlbum,Book';

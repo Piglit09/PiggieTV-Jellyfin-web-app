@@ -17,6 +17,7 @@ describe('browseRoute', () => {
 
         expect(firstPage.scopeAlias).toBe('anime');
         expect(firstPage.view).toBe('latest');
+        expect(firstPage.canonicalHref).toContain('#/shows/latest');
         expect(firstPage.canonicalRouteKey).not.toBe(secondPage.canonicalRouteKey);
         expect(secondPage.canonicalHref).toContain('page=2');
     });
@@ -34,11 +35,22 @@ describe('browseRoute', () => {
         const showRoute = parsePtvBrowseRoute('/shows', '?topParentId=cartoons');
 
         expect(buildPtvBrowseHref(movieRoute, { genre: 'Science Fiction', view: 'genre' }))
-            .toBe('#/movies?view=genre&genre=Science%20Fiction');
+            .toBe('#/movies/genre?genre=Science%20Fiction');
         expect(buildPtvBrowseHref(movieRoute, { studio: 'A24', view: 'studio' }))
-            .toBe('#/movies?view=studio&studio=A24');
+            .toBe('#/movies/studio?studio=A24');
         expect(buildPtvBrowseHref(showRoute, { network: 'HBO', view: 'network' }))
-            .toBe('#/shows?topParentId=cartoons&view=network&network=HBO');
+            .toBe('#/shows/network?topParentId=cartoons&network=HBO');
+    });
+
+    it('parses path-based views while preserving query-form deep links', () => {
+        const pathRoute = parsePtvBrowseRoute('/movies/latest');
+        const legacyQueryRoute = parsePtvBrowseRoute('/movies', '?view=latest');
+
+        expect(pathRoute.view).toBe('latest');
+        expect(pathRoute.canonicalHref).toBe('#/movies/latest');
+        expect(legacyQueryRoute.view).toBe('latest');
+        expect(legacyQueryRoute.canonicalHref).toBe('#/movies/latest');
+        expect(pathRoute.canonicalRouteKey).toBe(legacyQueryRoute.canonicalRouteKey);
     });
 
     it('rejects unsupported and incomplete focused routes explicitly', () => {

@@ -1,4 +1,5 @@
 import { playbackManager } from '../../components/playback/playbackmanager';
+import { registerPlaybackCommandHandler } from '../../scripts/inputManager';
 import Events from '../../utils/events';
 
 import {
@@ -83,6 +84,7 @@ let currentState: PtvGlobalPlaybackState = EMPTY_PLAYBACK_STATE;
 let initialized = false;
 let lastMusicSnapshot: PtvMusicQueueSnapshot | null = null;
 let musicUnsubscribe: (() => void) | null = null;
+let playbackCommandUnregister: (() => void) | null = null;
 let pollTimer: number | null = null;
 let reconcileTimer: number | null = null;
 let routeChangeHandler: (() => void) | null = null;
@@ -175,7 +177,10 @@ function getMusicPlaybackState(snapshot: PtvMusicQueueSnapshot | null): PtvGloba
         itemId,
         itemType: item.Type || 'Audio',
         lastUpdatedAt: Date.now(),
-        mediaType: item.MediaType || 'Audio',
+        // The PTV music queue owns only native audio. Jellyfin items reached through
+        // album/artist recommendation boundaries are not guaranteed to retain a
+        // MediaType field, so the authoritative queue source supplies this type.
+        mediaType: 'Audio',
         name: item.Name || 'Now Playing',
         paused: !snapshot.isPlaying,
         positionTicks: snapshot.positionTicks || 0,
@@ -411,6 +416,40 @@ function publishPlaybackState(lastEvent = 'reconcile') {
     });
 }
 
+function getTransportActionCategory(command: string) {
+    if (command === 'pause') return 'pause';
+    if (command === 'play') return 'play';
+
+    return 'play-pause';
+}
+
+function handlePtvMusicTransportCommand(command: string) {
+    const state = getPtvGlobalPlaybackState();
+
+    if (!state.active || state.source !== 'ptv-music') return false;
+    if (!['pause', 'play', 'playpause'].includes(command)) return false;
+
+    recordPtvEvent('playback', 'global-playback-transport-requested', {
+        action: getTransportActionCategory(command),
+        source: 'input-manager-adapter',
+        target: 'audio'
+    });
+
+    if (command === 'play' && !state.paused) return true;
+    if (command === 'pause' && state.paused) return true;
+
+    void togglePtvMusicPlayPause().catch(error => {
+        recordPtvEvent('playback', 'global-playback-transport-failed', {
+            action: getTransportActionCategory(command),
+            error: error instanceof Error ? error.message : String(error),
+            source: 'input-manager-adapter',
+            target: 'audio'
+        });
+    });
+
+    return true;
+}
+
 function scheduleReconcile(lastEvent: string) {
     if (reconcileTimer !== null) {
         window.clearTimeout(reconcileTimer);
@@ -456,6 +495,10 @@ export function startPtvPlaybackStateService() {
     if (initialized) return;
 
     initialized = true;
+    playbackCommandUnregister = registerPlaybackCommandHandler(
+        'ptv-global-playback',
+        handlePtvMusicTransportCommand
+    );
     incrementPtvPerformanceCounter('playbackProviderMountCount', {
         route: window.location.hash || window.location.pathname,
         source: 'global-playback-state-service'
@@ -608,6 +651,8 @@ export function previousPtvGlobalPlaybackTrack(state = getPtvGlobalPlaybackState
 }
 
 export function disposePtvPlaybackStateServiceForTests() {
+    playbackCommandUnregister?.();
+    playbackCommandUnregister = null;
     musicUnsubscribe?.();
     musicUnsubscribe = null;
     boundPlaybackManagerEvents.splice(0).forEach(({ handler, name, target }) => {

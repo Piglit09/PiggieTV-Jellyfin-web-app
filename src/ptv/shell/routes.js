@@ -335,7 +335,7 @@ function findNavigationItem(route) {
             return {
                 activeItemId: item.id,
                 activeSectionId: section.id,
-                href: item.href
+                href: item.href || ''
             };
         }
     }

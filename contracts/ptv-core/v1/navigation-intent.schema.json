@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v1/navigation-intent.schema.json",
+  "title": "PTV Navigation Intent v1",
+  "type": "object",
+  "required": ["contractVersion", "destination", "query", "backBehavior", "requiredCapabilities"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "destination": {
+      "enum": [
+        "home",
+        "movies",
+        "shows",
+        "music",
+        "reading",
+        "live-tv",
+        "search",
+        "requests",
+        "library",
+        "details",
+        "player",
+        "settings",
+        "profile",
+        "diagnostics"
+      ]
+    },
+    "mediaId": { "type": "string", "minLength": 1 },
+    "libraryId": { "type": "string", "minLength": 1 },
+    "query": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "backBehavior": { "enum": ["default", "preserve", "replace", "modal"] },
+    "deepLink": { "type": "string", "maxLength": 2000 },
+    "requiredCapabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 64,
+      "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "destination": { "enum": ["details", "player"] }
+        },
+        "required": ["destination"]
+      },
+      "then": {
+        "properties": {
+          "mediaId": { "type": "string", "minLength": 1 }
+        },
+        "required": ["mediaId"]
+      }
+    }
+  ],
+  "additionalProperties": true
+}

@@ -1,4 +1,4 @@
-/* eslint-disable compat/compat -- This deterministic test harness targets Playwright Chromium only. */
+/* eslint-disable @stylistic/operator-linebreak, compat/compat, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional -- The deterministic harness keeps explicit stage-to-contract mappings visible and targets Playwright Chromium only. */
 
 import {
     isPtvAuthenticationRoute,
@@ -18,6 +18,24 @@ import {
     hasPtvDropdownPointerMoved
 } from '../src/ptv/shell/primaryNavigationDropdown';
 import { preparePtvDetailsLayout } from '../src/ptv/modules/details/detailsLayout';
+import {
+    createPtvDiagnosticHealth,
+    type PtvFocusGraphDiagnostic,
+    type PtvFocusScopeDiagnostic,
+    type PtvRemoteInputSource,
+    type PtvRemoteInputStage,
+    type PtvSafeRemoteAction
+} from '../src/ptv/core/diagnostics/diagnosticContracts';
+import { detectPtvTvClientFromSignals } from '../src/ptv/core/clientProfile';
+import {
+    classifyPtvTvFocusElement,
+    getPtvTvNavigationSnapshot,
+    getPtvSafeFocusFingerprint,
+    notifyPtvTvFocusContentReady,
+    subscribePtvTvNavigation,
+    syncPtvTvFocusEngine
+} from '../src/ptv/core/tvFocus';
+import { getPtvDiagnosticStore } from '../src/ptv/services/diagnostics/diagnosticStore';
 import '../src/ptv/modules/details/details.scss';
 import '../src/ptv/shell/ptvShell.scss';
 
@@ -74,6 +92,8 @@ const scrollPositions = new Map<string, number>();
 let activeHash = '';
 let renderedIds: string[] = [];
 let cleanupPrimaryNavigation = () => undefined;
+let cleanupDiagnosticsDashboard = () => undefined;
+const diagnosticStore = getPtvDiagnosticStore();
 
 function addElement<K extends keyof HTMLElementTagNameMap>(
     parent: HTMLElement,
@@ -525,10 +545,392 @@ function renderDiagnostics() {
     root.dataset.diagnosticsVisible = String(allowed);
 }
 
+function renderDiagnosticsDashboard() {
+    const profile = detectPtvTvClientFromSignals({
+        userAgent: navigator.userAgent
+    });
+    const routeSessionId = diagnosticStore.startRoute(window.location.hash);
+
+    diagnosticStore.markRoutePhase(routeSessionId, 'initialized');
+    diagnosticStore.markRoutePhase(routeSessionId, 'first-content');
+    diagnosticStore.markRoutePhase(routeSessionId, 'first-focusable');
+    diagnosticStore.markRoutePhase(routeSessionId, 'settled');
+    diagnosticStore.setFocus({
+        candidateCount: profile.isTv ? 4 : 0,
+        currentCandidatePresent: profile.isTv,
+        currentCategory: profile.isTv ? 'nav-item' : 'unknown',
+        currentFingerprint: profile.isTv ? 'element-tv-fixture' : 'none',
+        currentRoute: 'dashboard/piggietv/diagnostics',
+        currentScope: profile.isTv ? 'main-content' : 'unknown',
+        currentVisible: profile.isTv,
+        disabledReason: profile.isTv ? '' : 'non-tv-profile',
+        disposalCount: 0,
+        duplicateListenerCount: 0,
+        engineEnabled: profile.isTv,
+        engineRequested: profile.isTv,
+        enableReason: profile.reason,
+        graphRebuildCount: profile.isTv ? 1 : 0,
+        health: createPtvDiagnosticHealth(
+            profile.isTv ? 'healthy' : 'unsupported',
+            profile.isTv ? 'The TV focus collector is active.' : 'TV focus is unsupported for this non-TV browser.',
+            { collectorAvailable: profile.isTv }
+        ),
+        initializationCount: profile.isTv ? 1 : 0,
+        initializationReason: profile.reason,
+        isTv: profile.isTv,
+        lastRebuildReason: profile.isTv ? 'initialization' : 'none',
+        listenerInstallCount: profile.isTv ? 1 : 0
+    });
+    diagnosticStore.recordFrame({
+        approximateFps: 60,
+        collectorOverheadMs: 0.1,
+        frameCount: 60,
+        jankyFrameCount: 1,
+        jankyFramePercentage: 1.7,
+        longestFrameMs: 34,
+        longTaskCount: 0,
+        p50FrameMs: 16.7,
+        p90FrameMs: 17,
+        p95FrameMs: 18,
+        p99FrameMs: 34,
+        reducedMotion: false,
+        routeFamily: 'dashboard/piggietv/diagnostics',
+        sampledAt: new Date().toISOString(),
+        visibilityState: 'visible'
+    });
+
+    const page = addElement(root, 'main', {
+        className: 'browse-page',
+        id: 'diagnostics-dashboard'
+    });
+    addElement(page, 'h1', { text: 'PiggieTV Diagnostics' });
+    const overview = addElement(page, 'section', { id: 'diagnostics-overview' });
+    addElement(overview, 'h2', { text: 'Overview' });
+    const health = addElement(overview, 'p', { id: 'diagnostics-health' });
+    const requestCount = addElement(overview, 'p', { id: 'diagnostics-request-count' });
+    const routeCount = addElement(overview, 'p', { id: 'diagnostics-route-count' });
+    const focus = addElement(overview, 'p', { id: 'diagnostics-focus-status' });
+    const lastInput = addElement(overview, 'p', { id: 'diagnostics-last-input' });
+    const graphState = addElement(overview, 'p', { id: 'diagnostics-graph-state' });
+    const createRequest = addElement(page, 'button', { text: 'Generate request metric' });
+    const toggleOverlay = addElement(page, 'button', { text: 'Toggle diagnostics overlay' });
+    const exportButton = addElement(page, 'button', { text: 'Export diagnostics' });
+    const resetButton = addElement(page, 'button', { text: 'Reset diagnostic session' });
+    const exportPreview = addElement(page, 'pre', { id: 'diagnostics-export' });
+    const focusFixture = addElement(page, 'section', { id: 'diagnostics-focus-fixture' });
+    const focusOrigin = addElement(focusFixture, 'button', { text: 'TV focus origin' });
+    const focusRight = addElement(focusFixture, 'button', { text: 'TV focus right target' });
+    const focusNoTarget = addElement(focusFixture, 'button', { text: 'TV focus isolated target' });
+    const openModal = addElement(focusFixture, 'button', { text: 'Open TV focus modal' });
+    const offscreenFocus = addElement(focusFixture, 'button', { text: 'Off-screen TV focus target' });
+
+    focusOrigin.dataset.ptvFocusKey = 'diagnostic-origin';
+    focusRight.dataset.ptvFocusKey = 'diagnostic-right';
+    focusNoTarget.dataset.ptvFocusKey = 'diagnostic-isolated';
+    openModal.dataset.ptvFocusKey = 'diagnostic-modal-trigger';
+    offscreenFocus.dataset.ptvFocusKey = 'diagnostic-offscreen';
+    focusFixture.style.display = 'grid';
+    focusFixture.style.gridTemplateColumns = 'repeat(2, 12rem)';
+    focusFixture.style.gap = '1rem';
+    focusNoTarget.style.gridColumn = '1';
+    focusNoTarget.style.marginTop = '8rem';
+    offscreenFocus.style.position = 'absolute';
+    offscreenFocus.style.top = '180vh';
+    offscreenFocus.style.left = '1rem';
+
+    openModal.addEventListener('click', () => {
+        const existing = document.getElementById('diagnostics-focus-modal');
+
+        if (existing) {
+            existing.remove();
+            notifyPtvTvFocusContentReady('content-ready');
+            return;
+        }
+        const dialog = addElement(document.body, 'section', { id: 'diagnostics-focus-modal' });
+        const only = addElement(dialog, 'button', { text: 'Only modal focus target' });
+
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('role', 'dialog');
+        dialog.dataset.ptvFocusReturnId = 'diagnostics-focus-modal-trigger';
+        openModal.id = 'diagnostics-focus-modal-trigger';
+        only.dataset.ptvFocusKey = 'diagnostic-modal-only';
+        only.addEventListener('click', () => dialog.remove());
+        notifyPtvTvFocusContentReady('content-ready');
+    });
+
+    [createRequest, toggleOverlay, exportButton, resetButton].forEach(button => {
+        button.type = 'button';
+    });
+
+    const platformSnapshot = diagnosticStore.getSnapshot().platform;
+
+    diagnosticStore.updateContext({
+        platform: {
+            ...platformSnapshot,
+            eligibilitySource: profile.reason,
+            eligibilityTimestamp: new Date().toISOString(),
+            isAndroidTv: profile.isAndroidTv,
+            isFireTv: profile.isFireTv,
+            isTv: profile.isTv,
+            isWebOs: profile.isWebOs,
+            layoutMode: profile.isTv ? 'ten-foot' : 'desktop',
+            profile: profile.isWebOs ? 'webos' : profile.isFireTv ? 'firetv' : profile.isTv ? 'tv' : 'desktop',
+            userAgentClassification: profile.isWebOs ? 'webos'
+                : profile.isFireTv ? 'fire-tv'
+                    : profile.isAndroidTv ? 'android-tv'
+                        : profile.isTv ? 'generic-tv'
+                            : 'desktop'
+        }
+    });
+    document.documentElement.dataset.ptvRouteOwner = 'native';
+    document.documentElement.dataset.ptvRoutePageType = 'diagnostics';
+    const applyFocusSnapshot = (navigation: ReturnType<typeof getPtvTvNavigationSnapshot>) => {
+        const active = document.activeElement;
+        const focusHealth = !profile.isTv ? 'unsupported'
+            : navigation.focusManagerReady && navigation.focusTargetCount > 0 ? 'healthy'
+                : navigation.focusManagerReady ? 'degraded'
+                    : 'failing';
+
+        diagnosticStore.setFocus({
+            candidateCount: navigation.focusTargetCount,
+            currentCandidatePresent: navigation.focusGraphSummary.currentCandidatePresent,
+            currentCategory: classifyPtvTvFocusElement(active),
+            currentFingerprint: getPtvSafeFocusFingerprint(active),
+            currentRoute: 'dashboard/piggietv/diagnostics',
+            currentScope: navigation.focusGraphSummary.activeScope,
+            currentVisible: navigation.focusGraphSummary.currentRegion === 'overlapping',
+            disabledReason: profile.isTv ? navigation.focusManagerReady ? '' : 'not-initialized' : 'non-tv-profile',
+            disposalCount: navigation.focusEngineDisposalCount,
+            duplicateListenerCount: navigation.focusEngineDuplicateListenerCount,
+            engineEnabled: profile.isTv && navigation.focusManagerReady,
+            engineRequested: navigation.focusEngineRequested,
+            enableReason: navigation.focusEngineEnableReason,
+            graphRebuildCount: navigation.focusGraphRebuildCount,
+            health: createPtvDiagnosticHealth(
+                focusHealth,
+                !profile.isTv ? 'TV focus is unsupported for this non-TV browser.'
+                    : navigation.focusTargetCount > 0 ? 'The TV focus collector is active.'
+                        : 'The TV focus engine is active without candidates.',
+                { collectorAvailable: profile.isTv }
+            ),
+            initializationCount: navigation.focusEngineInitializationCount,
+            initializationReason: profile.reason,
+            isTv: profile.isTv,
+            lastRebuildReason: navigation.focusGraphSummary.lastRebuildReason,
+            listenerInstallCount: navigation.focusEngineListenerInstallCount
+        });
+    };
+    const focusDiagnosticListener = (event: Event) => {
+        const payload = (event as CustomEvent<{
+            detail?: Record<string, unknown>;
+            name?: string;
+        }>).detail;
+        const detail = payload?.detail || {};
+        const name = payload?.name || '';
+        const occurredAt = new Date().toISOString();
+
+        if (name === 'ptv-tv-input-pipeline') {
+            const stage = String(detail.inputStage || 'completed') as PtvRemoteInputStage;
+            const safeAction = String(detail.keyCategory || 'unknown') as PtvSafeRemoteAction;
+            const source = String(detail.inputSource || 'keyboard') as PtvRemoteInputSource;
+            const elapsedMs = Number(detail.elapsedMs) || 0;
+            const movementAttempted = detail.movementAttempted === true
+                || ['focus-movement-requested', 'focus-event-observed', 'movement-confirmed', 'movement-timed-out'].includes(stage);
+            const movementSucceeded = stage === 'movement-confirmed' || detail.movementConfirmed === true;
+
+            diagnosticStore.recordInput({
+                activeRequests: diagnosticStore.getRequestSummary().active,
+                currentCandidateResolved: detail.currentCandidateResolved === true,
+                defaultPreventedAfter: detail.defaultPreventedAfter === true,
+                defaultPreventedBefore: detail.defaultPreventedBefore === true,
+                delayClassification: stage === 'target-rejected' ? 'target-search'
+                    : stage === 'movement-timed-out' ? 'browser-focus-application'
+                        : 'unknown',
+                direction: ['up', 'down', 'left', 'right'].includes(safeAction)
+                    ? safeAction as 'down' | 'left' | 'right' | 'up' : 'unknown',
+                elapsedMs,
+                eventPhase: detail.eventPhase === 'capture' || detail.eventPhase === 'target'
+                    ? detail.eventPhase : 'unknown',
+                eventType: detail.eventType === 'keyup' ? 'keyup' : 'keydown',
+                failureReason: String(detail.failureReason || 'none'),
+                frameP95Ms: diagnosticStore.getSnapshot().frames.at(-1)?.p95FrameMs || 0,
+                handlerReached: detail.handlerReached === true,
+                inputId: String(detail.inputId || ''),
+                movementAttempted,
+                movementResult: movementSucceeded ? 'confirmed'
+                    : stage === 'movement-timed-out' ? 'timed-out'
+                        : stage === 'target-rejected' ? 'failed'
+                            : movementAttempted ? 'pending'
+                                : 'not-attempted',
+                movementSucceeded,
+                nextFocusFingerprint: String(detail.focusedFingerprint || detail.targetFingerprint || 'none'),
+                occurredAt,
+                pendingImages: 0,
+                pendingShelves: 0,
+                previousFocusFingerprint: getPtvSafeFocusFingerprint(document.activeElement),
+                propagationStopped: detail.propagationStopped === true,
+                repeat: detail.repeat === true,
+                repeatCount: Number(detail.repeatCount) || 0,
+                routeFamily: 'dashboard/piggietv/diagnostics',
+                routeSettled: true,
+                safeAction,
+                source,
+                stage,
+                stageSequence: Number(detail.stageSequence) || 0,
+                targetCandidateFound: detail.targetFound === true || stage === 'target-found' || movementSucceeded,
+                targetCategory: classifyPtvTvFocusElement(document.activeElement)
+            });
+            if (movementSucceeded) diagnosticStore.markRouteFocusPhase('first-directional-movement');
+            return;
+        }
+
+        if (name === 'ptv-tv-focus-graph' && detail.graphSummary && typeof detail.graphSummary === 'object') {
+            diagnosticStore.recordFocusGraph({
+                ...(detail.graphSummary as Omit<PtvFocusGraphDiagnostic, 'routeFamily'>),
+                generatedAt: occurredAt,
+                routeFamily: 'dashboard/piggietv/diagnostics'
+            });
+            diagnosticStore.markRouteFocusPhase('focus-graph-ready');
+            return;
+        }
+
+        if (name === 'ptv-tv-focus-change') {
+            const active = document.activeElement;
+            const category = classifyPtvTvFocusElement(active);
+            const visible = detail.visible === true;
+
+            diagnosticStore.recordFocusChange({
+                candidatePresent: detail.candidatePresent === true,
+                category,
+                fingerprint: getPtvSafeFocusFingerprint(active),
+                inputId: String(detail.inputId || ''),
+                occurredAt,
+                previousCategory: String(detail.previousCategory || 'unknown') as typeof category,
+                reason: String(detail.reason || 'focus-observed'),
+                routeFamily: 'dashboard/piggietv/diagnostics',
+                scope: String(detail.scope || 'unknown') as PtvFocusScopeDiagnostic['scope'],
+                visible
+            });
+            diagnosticStore.recordFocusVisibility({
+                detachedDuringAnimation: false,
+                focusMovedBeforeScrollSettled: false,
+                focusToVisibleDurationMs: visible ? 0 : null,
+                focusedCategory: category,
+                inputId: String(detail.inputId || ''),
+                obscuredBy: 'unobscured',
+                occurredAt,
+                routeFamily: 'dashboard/piggietv/diagnostics',
+                scrollContainer: String(detail.scope || 'unknown') as PtvFocusScopeDiagnostic['scope'],
+                status: 'focus-observed',
+                visible,
+                virtualizedNodeReplaced: false
+            });
+            diagnosticStore.markRouteFocusPhase('initial-focus');
+            return;
+        }
+
+        if (name === 'ptv-tv-focus-scope') {
+            diagnosticStore.recordFocusScope({
+                candidateCount: Number(detail.candidateCount) || 0,
+                initialFocusedCategory: String(detail.initialFocusedCategory || 'unknown') as PtvFocusScopeDiagnostic['initialFocusedCategory'],
+                leakedFocusOutsideScope: detail.leakedFocusOutsideScope === true,
+                occurredAt,
+                orphanedAfterRouteChange: detail.orphanedAfterRouteChange === true,
+                previousFocusRestored: typeof detail.previousFocusRestored === 'boolean'
+                    ? detail.previousFocusRestored : null,
+                routeFamily: 'dashboard/piggietv/diagnostics',
+                scope: String(detail.scope || 'unknown') as PtvFocusScopeDiagnostic['scope'],
+                status: String(detail.scopeStatus || 'activated') as PtvFocusScopeDiagnostic['status'],
+                trapActive: detail.trapActive === true
+            });
+        }
+    };
+
+    window.addEventListener('ptv:focus-diagnostic', focusDiagnosticListener);
+    const unsubscribeFocus = subscribePtvTvNavigation(applyFocusSnapshot);
+
+    syncPtvTvFocusEngine({
+        isAndroidTv: profile.isAndroidTv,
+        isFireTv: profile.isFireTv,
+        isTv: profile.isTv,
+        isWebOs: profile.isWebOs,
+        tvDetectionReason: profile.reason
+    });
+    applyFocusSnapshot(getPtvTvNavigationSnapshot());
+
+    const update = () => {
+        const snapshot = diagnosticStore.getSnapshot('2026-07-25T12:00:00.000Z');
+        const recentInput = [...snapshot.inputs].reverse().find(input => input.stage === 'completed')
+            || snapshot.inputs.at(-1);
+        const latestGraph = snapshot.focusGraphs.at(-1);
+
+        health.textContent = `Overall health: ${snapshot.health.status}`;
+        requestCount.textContent = `Requests: ${snapshot.requests.length}`;
+        routeCount.textContent = `Routes: ${snapshot.routes.length}`;
+        focus.textContent = `TV focus: ${snapshot.latestFocus.health.status}; isTv=${snapshot.latestFocus.isTv}`;
+        lastInput.textContent = `Remote input: ${recentInput?.safeAction || 'none'}; stage=${recentInput?.stage || 'none'}; handler=${recentInput?.handlerReached || false}`;
+        graphState.textContent = `Focus graph: ${latestGraph?.generation || 0}; candidates=${latestGraph?.totalCandidateCount || snapshot.latestFocus.candidateCount}; scope=${latestGraph?.activeScope || snapshot.latestFocus.currentScope}`;
+        root.dataset.diagnosticsSubscribers = String(snapshot.self.subscriberCount);
+    };
+
+    createRequest.addEventListener('click', () => {
+        const requestId = diagnosticStore.beginRequest({
+            // eslint-disable-next-line sonarjs/no-clear-text-protocols -- Redaction coverage requires a deliberately private absolute URL sentinel.
+            endpoint: 'http://192.168.1.50:8096/Users/private-user/Items/private-item?api_key=secret',
+            route: window.location.hash
+        });
+
+        diagnosticStore.completeRequest(requestId, {
+            responseByteEstimate: 128,
+            status: 200,
+            success: true
+        });
+    });
+    toggleOverlay.addEventListener('click', () => {
+        const existing = document.querySelector('[data-ptv-diagnostics-overlay="true"]');
+
+        if (existing) {
+            existing.remove();
+            return;
+        }
+
+        const overlay = addElement(document.body, 'aside', {
+            className: 'ptv-diagnostics-overlay',
+            text: 'FPS 60 · requests 0 · focus nav-item'
+        });
+
+        overlay.dataset.ptvDiagnosticsOverlay = 'true';
+        overlay.setAttribute('aria-hidden', 'true');
+    });
+    exportButton.addEventListener('click', () => {
+        exportPreview.textContent = JSON.stringify(diagnosticStore.createExport({
+            generatedAt: '2026-07-25T12:00:00.000Z'
+        }));
+    });
+    resetButton.addEventListener('click', () => diagnosticStore.resetSession());
+
+    const unsubscribe = diagnosticStore.subscribe(update);
+
+    update();
+    cleanupDiagnosticsDashboard = () => {
+        unsubscribe();
+        unsubscribeFocus();
+        window.removeEventListener('ptv:focus-diagnostic', focusDiagnosticListener);
+        syncPtvTvFocusEngine({ isTv: false });
+        delete document.documentElement.dataset.ptvRouteOwner;
+        delete document.documentElement.dataset.ptvRoutePageType;
+        document.querySelector('[data-ptv-diagnostics-overlay="true"]')?.remove();
+        document.getElementById('diagnostics-focus-modal')?.remove();
+        root.dataset.diagnosticsSubscribers = String(diagnosticStore.getSnapshot().self.subscriberCount);
+        cleanupDiagnosticsDashboard = () => undefined;
+    };
+}
+
 function renderRoute() {
     if (activeHash) scrollPositions.set(activeHash, window.scrollY);
     activeHash = window.location.hash || '#/home';
     cleanupPrimaryNavigation();
+    cleanupDiagnosticsDashboard();
     document.body.classList.remove('ptv-e2e-details');
     root.replaceChildren();
     root.dataset.authenticationRoute = String(isPtvAuthenticationRoute(getLocationState()));
@@ -545,7 +947,9 @@ function renderRoute() {
     renderHeader();
     const { path, search } = getHashRoute();
 
-    if (path === '/movies' || path === '/shows') {
+    if (path === '/dashboard/piggietv/diagnostics') {
+        renderDiagnosticsDashboard();
+    } else if (path === '/movies' || path === '/shows') {
         renderBrowse(path, search);
     } else if (path === '/details' || path.startsWith('/item/')) {
         renderDetails();
@@ -606,4 +1010,4 @@ window.addEventListener('popstate', renderRoute);
 renderRoute();
 void startUpdateScenario();
 
-/* eslint-enable compat/compat */
+/* eslint-enable @stylistic/operator-linebreak, compat/compat, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional */

@@ -39,6 +39,7 @@ const capabilities = {
     navigationTiming: true,
     networkTiming: true,
     performanceMetrics: true,
+    physicalLayoutSnapshot: true,
     playbackTelemetry: true,
     remoteCommands: true,
     reportExport: true
@@ -184,7 +185,22 @@ describe('RemoteDiagnosticsPanel', () => {
         pluginApiMocks.getRemoteDiagnosticsReport.mockResolvedValue({
             clientId: clients[0].clientId,
             receivedAtUtc: '2026-07-19T15:03:00.000Z',
-            report: { marker: 'webos-report-loaded' }
+            report: {
+                marker: 'webos-report-loaded',
+                physicalLayoutSnapshot: {
+                    capability: 'physicalLayoutSnapshot',
+                    issueCodes: ['shell-brand-oversized'],
+                    latestMilestone: 'report-generated',
+                    milestones: [{
+                        key: 'report-generated',
+                        nodes: [{ key: 'shellBrand', rect: { height: 620, width: 800 } }, {
+                            key: 'firstShelf', rect: { top: 880 }
+                        }],
+                        viewport: { height: 1080, width: 1920 }
+                    }],
+                    status: 'regression'
+                }
+            }
         });
         pluginApiMocks.requestRemoteDiagnosticsSnapshot.mockResolvedValue(undefined);
         pluginApiMocks.startRemoteDiagnosticsSession.mockResolvedValue(undefined);
@@ -221,6 +237,76 @@ describe('RemoteDiagnosticsPanel', () => {
         expect(container.textContent).toContain('2 recent clients');
         expect(getButton(container, 'Start diagnostics').disabled).toBe(false);
         expect(getButton(container, 'Stop').disabled).toBe(false);
+    });
+
+    it('normalizes PascalCase Jellyfin plugin client and report responses', async () => {
+        pluginApiMocks.getRemoteDiagnosticsClients.mockResolvedValue([{
+            ApplicationName: 'Jellyfin Web',
+            ApplicationVersion: '10.11.0',
+            Boot: {
+                CheckInAttempted: true,
+                CheckInStatus: 200,
+                DiagnosticsModuleLoaded: true,
+                FailureCode: null,
+                FrontendBuildId: 'test-build',
+                LoadedClientBuildId: 'test-build',
+                PlatformDetected: 'webos',
+                PtvRuntimeLoaded: true,
+                RemoteDiagnosticsRegistrationCount: 1
+            },
+            Capabilities: {
+                Heartbeat: true,
+                MemoryMetrics: true,
+                NavigationTiming: true,
+                NetworkTiming: true,
+                PerformanceMetrics: true,
+                PhysicalLayoutSnapshot: true,
+                PlaybackTelemetry: true,
+                RemoteCommands: true,
+                ReportExport: true
+            },
+            ClientId: 'client-pascal-webos',
+            DeviceName: 'Living Room LG',
+            DiagnosticsActive: false,
+            DisplayName: 'Living Room LG',
+            ExpiresAtUtc: null,
+            FirstSeenUtc: '2026-07-19T14:55:00.000Z',
+            HasReport: true,
+            LastLeaseRejection: null,
+            LastSeenUtc: '2026-07-19T15:00:00.000Z',
+            LeasePending: false,
+            Online: true,
+            Platform: 'LG webOS',
+            Profile: 'webos',
+            ReportedAtUtc: '2026-07-19T15:01:00.000Z',
+            Route: '/home',
+            SessionId: null,
+            SnapshotPending: false
+        }]);
+        pluginApiMocks.getRemoteDiagnosticsReport.mockResolvedValue({
+            ClientId: 'client-pascal-webos',
+            ReceivedAtUtc: '2026-07-19T15:03:00.000Z',
+            Report: {
+                physicalLayoutSnapshot: {
+                    capability: 'physicalLayoutSnapshot',
+                    issueCodes: [],
+                    latestMilestone: 'report-generated',
+                    milestones: [],
+                    status: 'healthy'
+                }
+            }
+        });
+
+        await renderPanel();
+
+        expect(container.textContent).toContain('Profile / route: webos / /home');
+        expect(container.textContent).toContain('physical layout');
+        expect(getButton(container, 'Start diagnostics').disabled).toBe(false);
+
+        await clickButton(container, 'View report');
+
+        expect(container.textContent).toContain('Physical TV Layout Snapshot');
+        expect(container.textContent).toContain('Layout invariants passed.');
     });
 
     it('starts temporary diagnostics for both supported durations', async () => {
@@ -260,6 +346,9 @@ describe('RemoteDiagnosticsPanel', () => {
             bypassCache: true
         });
         expect(container.textContent).toContain('webos-report-loaded');
+        expect(container.textContent).toContain('Physical TV Layout Snapshot');
+        expect(container.textContent).toContain('Layout regression detected.');
+        expect(container.textContent).toContain('shell branding is oversized');
 
         await selectOption(
             container,

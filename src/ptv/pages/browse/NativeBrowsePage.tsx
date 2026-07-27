@@ -1377,9 +1377,10 @@ function PtvBrowseDebugPanel({ diagnostics, state }: Readonly<{ diagnostics: Ptv
     );
 }
 
-function PtvBrowseLandingPage({ config, location, route, scope }: Readonly<{
+function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope }: Readonly<{
     config: PtvBrowseConfig;
     location: { pathname: string; search: string };
+    onBackdropChange: (url: string) => void;
     route: PtvBrowseRoute;
     scope: PtvBrowseResolvedScope;
 }>) {
@@ -1750,24 +1751,15 @@ function PtvBrowseLandingPage({ config, location, route, scope }: Readonly<{
         return () => window.cancelAnimationFrame(frame);
     }, [config.kind, state.sections.length]);
 
+    const backdropUrl = getBrowseBackdropImage(state.heroItem);
+
+    useEffect(() => {
+        onBackdropChange(backdropUrl);
+    }, [backdropUrl, onBackdropChange]);
+
     return (
-        <Page
-            id='ptv-native-browse-page'
-            title={`${PTV_BRANDING.appName} ${config.title}`}
-            className='ptv-native-browse-page'
-            isBackButtonEnabled={false}
-            isMenuButtonEnabled={false}
-            isNowPlayingBarEnabled={false}
-            isThemeMediaSupported={false}
-        >
-            <PTVShell
-                backdropSource={`${config.kind}-hero`}
-                backdropUrl={getBrowseBackdropImage(state.heroItem)}
-                className='ptv-browse-shell'
-                section={getPtvBrowseShellSection(config)}
-                title={config.title}
-            >
-                <PtvBrowseHero config={config} item={state.heroItem} />
+        <>
+            <PtvBrowseHero config={config} item={state.heroItem} />
                 <main className='ptv-browse-content' aria-busy={state.isLoading}>
                     {state.error && canShowDebug ? <div className='ptv-browse-error'>{state.error}</div> : null}
                     {state.sections.map((section, rowIndex) => (
@@ -1788,8 +1780,7 @@ function PtvBrowseLandingPage({ config, location, route, scope }: Readonly<{
                     />
                     <PtvBrowseDebugPanel diagnostics={state.diagnostics} state={state} />
                 </main>
-            </PTVShell>
-        </Page>
+        </>
     );
 }
 
@@ -2123,8 +2114,9 @@ function PtvFocusedBrowseBody({ onRetry, route, state, title }: Readonly<{
     return <PtvFocusedBrowseItems route={route} state={state} />;
 }
 
-function PtvFocusedBrowsePage({ config, route, scope }: Readonly<{
+function PtvFocusedBrowsePage({ config, onBackdropChange, route, scope }: Readonly<{
     config: PtvBrowseConfig;
+    onBackdropChange: (url: string) => void;
     route: PtvBrowseRoute;
     scope: PtvBrowseResolvedScope;
 }>) {
@@ -2206,25 +2198,14 @@ function PtvFocusedBrowsePage({ config, route, scope }: Readonly<{
         setRetryNonce(value => value + 1);
     }, []);
     const showToolbar = !isPtvBrowseDirectoryView(route) && route.view !== 'season';
+    const backdropUrl = getBrowseBackdropImage(state.items[0] || null);
+
+    useEffect(() => {
+        onBackdropChange(backdropUrl);
+    }, [backdropUrl, onBackdropChange]);
 
     return (
-        <Page
-            id='ptv-native-browse-page'
-            title={`${PTV_BRANDING.appName} ${title}`}
-            className='ptv-native-browse-page'
-            isBackButtonEnabled={false}
-            isMenuButtonEnabled={false}
-            isNowPlayingBarEnabled={false}
-            isThemeMediaSupported={false}
-        >
-            <PTVShell
-                backdropSource={`${route.kind}-${route.view}`}
-                backdropUrl={getBrowseBackdropImage(state.items[0] || null)}
-                className='ptv-browse-shell'
-                section={getPtvBrowseShellSection(config)}
-                title={title}
-            >
-                <main className='ptv-browse-focused-content' aria-busy={state.status === 'loading'}>
+        <main className='ptv-browse-focused-content' aria-busy={state.status === 'loading'}>
                     <header className='ptv-browse-focused-header'>
                         <div>
                             <span className='ptv-browse-section-kicker'>{getFocusedBrowseKicker(route)}</span>
@@ -2240,9 +2221,7 @@ function PtvFocusedBrowsePage({ config, route, scope }: Readonly<{
                     <PtvFocusedBrowseBody onRetry={handleRetry} route={route} state={state} title={title} />
 
                     <PtvFocusedBrowseDebug route={route} scope={scope} state={state} title={title} />
-                </main>
-            </PTVShell>
-        </Page>
+        </main>
     );
 }
 
@@ -2256,51 +2235,73 @@ function NativeBrowsePage() {
         () => getPtvBrowseConfig(location.pathname, route.scopeAlias),
         [location.pathname, route.scopeAlias]
     );
+    const scopeResolutionKey = `${route.kind}:${route.scopeAlias || ''}`;
     const [resolvedScope, setResolvedScope] = useState<Readonly<{
         key: string;
         scope: PtvBrowseResolvedScope | null;
     }>>({ key: '', scope: null });
+    const [backdropUrl, setBackdropUrl] = useState('');
 
     useEffect(() => {
         let cancelled = false;
 
-        setResolvedScope({ key: route.canonicalRouteKey, scope: null });
+        setResolvedScope(current => current.key === scopeResolutionKey && current.scope ? current : {
+            key: scopeResolutionKey,
+            scope: null
+        });
         void resolvePtvBrowseScope(route).then(scope => {
-            if (!cancelled) setResolvedScope({ key: route.canonicalRouteKey, scope });
+            if (!cancelled) setResolvedScope({ key: scopeResolutionKey, scope });
         });
 
         return () => {
             cancelled = true;
         };
-    }, [route]);
+    }, [route.kind, route.scopeAlias, scopeResolutionKey]);
 
-    const scope = resolvedScope.key === route.canonicalRouteKey ? resolvedScope.scope : null;
+    const scope = resolvedScope.key === scopeResolutionKey ? resolvedScope.scope : null;
+    const title = route.view === 'landing' ? config.title : getFocusedBrowseTitle(route, config);
+    const backdropSource = route.view === 'landing' ? `${config.kind}-hero` : `${route.kind}-${route.view}`;
 
-    if (!scope) {
-        return (
-            <Page
-                id='ptv-native-browse-page'
-                title={`${PTV_BRANDING.appName} ${config.title}`}
-                className='ptv-native-browse-page'
-                isBackButtonEnabled={false}
-                isMenuButtonEnabled={false}
-                isNowPlayingBarEnabled={false}
-                isThemeMediaSupported={false}
+    return (
+        <Page
+            id='ptv-native-browse-page'
+            title={`${PTV_BRANDING.appName} ${title}`}
+            className='ptv-native-browse-page'
+            isBackButtonEnabled={false}
+            isMenuButtonEnabled={false}
+            isNowPlayingBarEnabled={false}
+            isThemeMediaSupported={false}
+        >
+            <PTVShell
+                backdropSource={backdropSource}
+                backdropUrl={backdropUrl}
+                className='ptv-browse-shell'
+                section={getPtvBrowseShellSection(config)}
+                title={title}
             >
-                <PTVShell className='ptv-browse-shell' section={getPtvBrowseShellSection(config)} title={config.title}>
+                {!scope ? (
                     <main className='ptv-browse-focused-content' aria-busy='true'>
                         <div className='ptv-browse-focused-status'>Resolving your {config.title} library...</div>
                     </main>
-                </PTVShell>
-            </Page>
-        );
-    }
-
-    if (route.view === 'landing') {
-        return <PtvBrowseLandingPage config={config} location={location} route={route} scope={scope} />;
-    }
-
-    return <PtvFocusedBrowsePage config={config} route={route} scope={scope} />;
+                ) : route.view === 'landing' ? (
+                    <PtvBrowseLandingPage
+                        config={config}
+                        location={location}
+                        onBackdropChange={setBackdropUrl}
+                        route={route}
+                        scope={scope}
+                    />
+                ) : (
+                    <PtvFocusedBrowsePage
+                        config={config}
+                        onBackdropChange={setBackdropUrl}
+                        route={route}
+                        scope={scope}
+                    />
+                )}
+            </PTVShell>
+        </Page>
+    );
 }
 
 registerPtvNativeRoute('/movies', NativeBrowsePage, 'native');

@@ -6,6 +6,37 @@ import { AppFeature } from 'constants/appFeature';
 import dom from 'utils/dom';
 
 let lastInputTime = new Date().getTime();
+let playbackCommandHandler = null;
+let playbackCommandOwner = '';
+const noop = () => undefined;
+
+export function registerPlaybackCommandHandler(owner, handler) {
+    if (!owner || typeof handler !== 'function') return noop;
+
+    if (playbackCommandHandler && playbackCommandOwner !== owner) {
+        console.warn(`inputManager: playback command owner "${playbackCommandOwner}" is already registered`);
+        return noop;
+    }
+
+    playbackCommandHandler = handler;
+    playbackCommandOwner = owner;
+
+    return () => {
+        if (playbackCommandHandler !== handler || playbackCommandOwner !== owner) return;
+
+        playbackCommandHandler = null;
+        playbackCommandOwner = '';
+    };
+}
+
+function handleRegisteredPlaybackCommand(command) {
+    try {
+        return Boolean(playbackCommandHandler?.(command));
+    } catch (error) {
+        console.error(`inputManager: playback command owner "${playbackCommandOwner}" failed`, error);
+        return false;
+    }
+}
 
 export function notify() {
     lastInputTime = new Date().getTime();
@@ -168,13 +199,13 @@ export function handleCommand(commandName, options) {
             playbackManager.volumeUp();
         },
         'play': () => {
-            playbackManager.unpause();
+            if (!handleRegisteredPlaybackCommand('play')) playbackManager.unpause();
         },
         'pause': () => {
-            playbackManager.pause();
+            if (!handleRegisteredPlaybackCommand('pause')) playbackManager.pause();
         },
         'playpause': () => {
-            playbackManager.playPause();
+            if (!handleRegisteredPlaybackCommand('playpause')) playbackManager.playPause();
         },
         'stop': () => {
             if (checkCommandTime('stop')) {

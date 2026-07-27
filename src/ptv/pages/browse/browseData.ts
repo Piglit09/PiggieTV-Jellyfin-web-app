@@ -1,5 +1,6 @@
 import {
     getCurrentPtvApiClient,
+    getPtvApiUrl,
     getPtvCurrentUserId,
     getPtvItems,
     getPtvResumeItems,
@@ -14,6 +15,10 @@ import {
 import type { PtvBrowseMediaKind, PtvBrowseRoute } from './browseRoute';
 import { getPtvFocusedBrowseLoaderKey } from './focusedBrowseLoader';
 import { normalizePtvLibraryItems } from '../../services/libraryRootNormalizer';
+import {
+    coordinatePtvJsonRequest,
+    getPtvRequestCoordinatorKey
+} from '../../services/requestCoordinator';
 
 export type PtvBrowseScopeStatus = 'error' | 'resolved' | 'unscoped';
 
@@ -305,7 +310,26 @@ export async function loadPtvBrowseDirectory(
     const scopedQueries = scope.status === 'resolved' && scope.libraryIds.length ?
         scope.libraryIds.map(libraryId => ({ ...baseQuery, ParentId: libraryId })) :
         [baseQuery];
-    const results = await Promise.all(scopedQueries.map(query => method.call(apiClient, userId, query)));
+    const endpoint = type === 'genre' ? 'Genres' : 'Studios';
+    const results = await Promise.all(scopedQueries.map(query => {
+        const requestKey = getPtvRequestCoordinatorKey(
+            'GET',
+            getPtvApiUrl(endpoint, query),
+            true
+        );
+
+        return coordinatePtvJsonRequest(
+            requestKey,
+            () => method.call(apiClient, userId, query),
+            {
+                diagnosticKey: `GET auth jellyfin:${type}-directory`,
+                endpoint,
+                includeAuthorization: true,
+                method: 'GET',
+                source: 'browse-directory'
+            }
+        );
+    }));
 
     return mergeDirectoryEntries(results);
 }

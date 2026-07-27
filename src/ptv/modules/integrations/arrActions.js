@@ -1,6 +1,7 @@
 import { ServerConnections } from '../../../lib/jellyfin-apiclient';
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
+import { getCoordinatedLegacyItemDetail } from '../../services/coordinatedLegacyItemDetail';
 import { openRequestPortal } from '../request';
 import { getPtvIntegrationActions } from './arrLinks';
 import { getPtvIntegrationSettings } from './integrationsConfig';
@@ -69,7 +70,7 @@ async function loadItem(serverId, itemId) {
 
     if (!apiClient || !userId || !itemId) return null;
 
-    const item = await apiClient.getItem(userId, itemId).catch(() => null);
+    const item = await getCoordinatedLegacyItemDetail(apiClient, itemId).catch(() => null);
 
     if (item) {
         itemCache.set(cacheKey, {

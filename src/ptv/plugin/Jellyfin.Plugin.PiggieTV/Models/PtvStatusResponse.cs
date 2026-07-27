@@ -69,6 +69,68 @@ public sealed class PtvStatusResponse
     public string ApiPath { get; set; } = $"/{Api.PtvApiRoutes.Root}/{Api.PtvApiRoutes.V1}";
 
     /// <summary>
+    /// Gets or sets the cross-platform PTV Core contract version.
+    /// </summary>
+    [JsonPropertyName("contractVersion")]
+    public string ContractVersion { get; set; } = "1.0";
+
+    /// <summary>
+    /// Gets or sets the featured-content cache schema accepted by this plugin.
+    /// </summary>
+    [JsonPropertyName("cacheVersion")]
+    public int CacheVersion { get; set; } = Services.PtvFeaturedContentValidator.FeaturedCacheVersion;
+
+    /// <summary>
+    /// Gets or sets the recommendation response schema version.
+    /// </summary>
+    [JsonPropertyName("recommendationSchemaVersion")]
+    public int RecommendationSchemaVersion { get; set; } = 1;
+
+    /// <summary>
+    /// Gets or sets the safe diagnostics event/report schema version.
+    /// </summary>
+    [JsonPropertyName("diagnosticsSchemaVersion")]
+    public int DiagnosticsSchemaVersion { get; set; } = 1;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether safe remote diagnostics are supported.
+    /// </summary>
+    [JsonPropertyName("diagnosticsCapable")]
+    public bool DiagnosticsCapable { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets server capabilities relevant to PTV Core clients.
+    /// </summary>
+    [JsonPropertyName("serverCapabilities")]
+    public Dictionary<string, bool> ServerCapabilities { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["pluginApi"] = true,
+        ["featuredContentCache"] = true,
+        ["recommendations"] = true,
+        ["remoteDiagnostics"] = true
+    };
+
+    /// <summary>
+    /// Gets or sets feature-flag names supported by this plugin build.
+    /// </summary>
+    [JsonPropertyName("supportedFeatureFlags")]
+    public string[] SupportedFeatureFlags { get; set; } = [
+        "featuredContent",
+        "featuredContentRefresh",
+        "physicalLayoutSnapshot",
+        "readingSeriesOverrides",
+        "remoteDiagnostics",
+        "rows",
+        "settings"
+    ];
+
+    /// <summary>
+    /// Gets or sets optional non-fatal compatibility warnings for clients.
+    /// </summary>
+    [JsonPropertyName("clientCompatibilityWarnings")]
+    public string[] ClientCompatibilityWarnings { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets the server timestamp as Unix epoch milliseconds.
     /// </summary>
     [JsonPropertyName("serverTime")]
@@ -101,7 +163,8 @@ public sealed class PtvStatusResponse
         "signup",
         "tags",
         "random",
-        "remoteDiagnostics"
+        "remoteDiagnostics",
+        "physicalLayoutSnapshot"
     ];
 
     /// <summary>
@@ -120,7 +183,8 @@ public sealed class PtvStatusResponse
         ["signup"] = true,
         ["tags"] = true,
         ["random"] = true,
-        ["remoteDiagnostics"] = true
+        ["remoteDiagnostics"] = true,
+        ["physicalLayoutSnapshot"] = true
     };
 
     /// <summary>

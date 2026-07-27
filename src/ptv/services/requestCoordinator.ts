@@ -5,8 +5,13 @@ import {
     recordPtvPerformanceEntry
 } from './performanceMonitor';
 import { normalizePtvRouteLocation } from './runtimeStability';
+import {
+    classifyPtvDiagnosticError,
+    getPtvDiagnosticStore
+} from './diagnostics/diagnosticStore';
 
 type PtvCoordinatedRequestOptions = {
+    diagnosticKey?: string;
     endpoint?: string;
     includeAuthorization?: boolean;
     method?: string;
@@ -14,7 +19,9 @@ type PtvCoordinatedRequestOptions = {
 };
 
 type PtvInFlightRequest<T> = {
+    diagnosticRequestId: string;
     promise: Promise<T>;
+    reportKey: string;
     startedAt: number;
 };
 
@@ -58,12 +65,18 @@ export function coordinatePtvJsonRequest<T>(
 ): Promise<T> {
     const existing = inFlightRequests.get(key) as PtvInFlightRequest<T> | undefined;
     const route = normalizePtvRouteLocation().routeKey;
+    const diagnosticKey = options.diagnosticKey || key;
 
     if (existing) {
         deduplicatedRequests += 1;
+        getPtvDiagnosticStore().recordCoordinatorHit({
+            endpoint: options.endpoint,
+            method: options.method,
+            route
+        });
         incrementPtvPerformanceCounter('deduplicatedRequestCount', {
             endpoint: options.endpoint || '',
-            key,
+            key: diagnosticKey,
             route,
             source: options.source || 'ptv-api'
         });
@@ -72,10 +85,16 @@ export function coordinatePtvJsonRequest<T>(
 
     const requestId = requestSequence += 1;
     const startedAt = now();
+    const diagnosticRequestId = getPtvDiagnosticStore().beginRequest({
+        cacheClassification: 'coordinated-network',
+        endpoint: options.endpoint,
+        method: options.method,
+        route
+    });
 
     incrementPtvPerformanceCounter('requestCount', {
         endpoint: options.endpoint || '',
-        key,
+        key: diagnosticKey,
         route,
         source: options.source || 'ptv-api'
     });
@@ -89,12 +108,17 @@ export function coordinatePtvJsonRequest<T>(
 
             recordPtvPerformanceEntry('request', 'ptv-api-request-complete', {
                 endpoint: options.endpoint || '',
-                key,
+                key: diagnosticKey,
                 payloadBytes: getPayloadSize(value),
                 requestId,
                 route,
                 source: options.source || 'ptv-api'
             }, durationMs);
+            getPtvDiagnosticStore().completeRequest(diagnosticRequestId, {
+                responseByteEstimate: getPayloadSize(value),
+                status: null,
+                success: true
+            });
 
             return value;
         })
@@ -105,7 +129,7 @@ export function coordinatePtvJsonRequest<T>(
             if (/abort|cancel/i.test(message)) {
                 incrementPtvPerformanceCounter('abortedRequestCount', {
                     endpoint: options.endpoint || '',
-                    key,
+                    key: diagnosticKey,
                     requestId,
                     route
                 });
@@ -113,7 +137,7 @@ export function coordinatePtvJsonRequest<T>(
             if (/timeout|timed out/i.test(message)) {
                 incrementPtvPerformanceCounter('timeoutCount', {
                     endpoint: options.endpoint || '',
-                    key,
+                    key: diagnosticKey,
                     requestId,
                     route
                 });
@@ -122,11 +146,25 @@ export function coordinatePtvJsonRequest<T>(
             recordPtvPerformanceEntry('request', 'ptv-api-request-failed', {
                 endpoint: options.endpoint || '',
                 error: message,
-                key,
+                key: diagnosticKey,
                 requestId,
                 route,
                 source: options.source || 'ptv-api'
             }, durationMs);
+            const category = classifyPtvDiagnosticError(error);
+            const errorRecord = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+            const coreError = errorRecord.coreError && typeof errorRecord.coreError === 'object' ?
+                errorRecord.coreError as Record<string, unknown> :
+                {};
+            const status = Number(errorRecord.status || errorRecord.statusCode || coreError.httpStatus) || null;
+
+            getPtvDiagnosticStore().completeRequest(diagnosticRequestId, {
+                cancellation: category === 'cancelled',
+                errorCategory: category,
+                status,
+                success: false,
+                timeout: category === 'timeout'
+            });
             throw error;
         })
         .finally(() => {
@@ -138,7 +176,9 @@ export function coordinatePtvJsonRequest<T>(
         });
 
     inFlightRequests.set(key, {
+        diagnosticRequestId,
         promise,
+        reportKey: diagnosticKey,
         startedAt
     });
 
@@ -152,7 +192,7 @@ export function getPtvRequestCoordinatorReport() {
     return {
         deduplicatedRequests,
         inFlightCount: inFlightRequests.size,
-        inFlightKeys: Array.from(inFlightRequests.keys()).slice(0, 25),
+        inFlightKeys: Array.from(inFlightRequests.values()).map(request => request.reportKey).slice(0, 25),
         p95DurationMs: sortedDurations[p95Index] || 0,
         requestSequence
     };

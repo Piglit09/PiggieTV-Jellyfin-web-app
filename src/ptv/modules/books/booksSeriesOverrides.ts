@@ -4,6 +4,7 @@ import type {
 import type {
     PtvReadingRouteKind
 } from './booksTypes';
+import { getPtvCurrentUser, isPtvAdminUser } from '../../api';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
 import { classifyPtvPluginCapability, type PtvPluginBuildStatus } from '../../core/buildInfo';
 import { recordPtvEvent } from '../../core/observability';
@@ -20,7 +21,7 @@ type ReadingSeriesOverridesResponse = {
 export type PtvReadingOverridePersistenceState = Readonly<{
     authority: 'browser-cache' | 'server';
     endpointAvailable: boolean;
-    lastCategory: 'endpoint-missing' | 'plugin-unavailable' | 'request-failed' | 'server-confirmed' | 'upgrade-required';
+    lastCategory: 'administrator-required' | 'endpoint-missing' | 'plugin-unavailable' | 'request-failed' | 'server-confirmed' | 'upgrade-required';
     message: string;
     routeKind: PtvReadingRouteKind;
     serverPersistenceConfirmed: boolean;
@@ -193,6 +194,21 @@ async function loadPtvReadingSeriesOverridesFromServerInternal(
     routeKind: PtvReadingRouteKind
 ): Promise<Record<string, PtvReadingSeriesOverride>> {
     const cachedOverrides = loadPtvReadingSeriesOverrides(routeKind);
+    const currentUser = await getPtvCurrentUser().catch(() => null);
+
+    if (!isPtvAdminUser(currentUser)) {
+        setOverridePersistenceState(routeKind, {
+            authority: 'browser-cache',
+            endpointAvailable: false,
+            lastCategory: 'administrator-required',
+            message: 'Reading corrections are managed by Jellyfin administrators. Cached corrections are active for this account.',
+            serverPersistenceConfirmed: false,
+            upgradeRequired: false
+        });
+
+        return cachedOverrides;
+    }
+
     const pluginApi = getCurrentPtvPluginApiClient();
 
     if (!pluginApi) {

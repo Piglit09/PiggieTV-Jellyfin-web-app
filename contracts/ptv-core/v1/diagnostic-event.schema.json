@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v1/diagnostic-event.schema.json",
+  "title": "PTV Diagnostic Event v1",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "category",
+    "name",
+    "appVersion",
+    "platform",
+    "deviceClass",
+    "sessionId",
+    "timestamp",
+    "success",
+    "metadata"
+  ],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "category": {
+      "enum": [
+        "startup",
+        "navigation",
+        "api",
+        "image",
+        "cache",
+        "playback",
+        "recommendation",
+        "performance",
+        "focus",
+        "reader",
+        "crash"
+      ]
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "appVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "platform": {
+      "enum": ["web", "webos", "android", "android-tv", "fire-tv", "plugin", "unknown"]
+    },
+    "deviceClass": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "serverIdHash": { "type": "string", "maxLength": 128 },
+    "userIdHash": { "type": "string", "maxLength": 128 },
+    "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "success": { "type": "boolean" },
+    "errorCode": { "type": "string", "maxLength": 96 },
+    "metadata": {
+      "type": "object",
+      "maxProperties": 64,
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null", "array", "object"]
+      }
+    }
+  },
+  "additionalProperties": true
+}

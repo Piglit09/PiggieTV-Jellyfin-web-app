@@ -6,6 +6,16 @@ const pluginState = vi.hoisted(() => ({
     status: vi.fn()
 }));
 
+const userState = vi.hoisted(() => ({
+    getCurrent: vi.fn(),
+    isAdmin: vi.fn()
+}));
+
+vi.mock('../../api', () => ({
+    getPtvCurrentUser: userState.getCurrent,
+    isPtvAdminUser: userState.isAdmin
+}));
+
 vi.mock('../../core/pluginApi', () => ({
     getCurrentPtvPluginApiClient: vi.fn(() => ({
         getReadingSeriesOverrides: pluginState.get,
@@ -29,11 +39,39 @@ describe('Reading series override persistence', () => {
         pluginState.get.mockReset();
         pluginState.save.mockReset();
         pluginState.status.mockReset();
+        userState.getCurrent.mockReset();
+        userState.isAdmin.mockReset();
+        userState.getCurrent.mockResolvedValue({});
+        userState.isAdmin.mockReturnValue(true);
         pluginState.status.mockResolvedValue({
             apiVersion: 1,
             cacheVersion: 7,
             featureFlags: { readingSeriesOverrides: true },
             pluginVersion: CURRENT_PLUGIN_VERSION
+        });
+    });
+
+    it('uses browser cache without probing administrator-only endpoints for non-admin users', async () => {
+        window.localStorage.setItem('ptv:reading:series-overrides:v1:books', JSON.stringify({
+            volume2: {
+                itemId: 'volume2',
+                seriesTitle: 'A Cached Series',
+                volumeNumber: 2
+            }
+        }));
+        userState.isAdmin.mockReturnValue(false);
+
+        const overrides = await loadPtvReadingSeriesOverridesFromServer('books');
+
+        expect(overrides.volume2?.seriesTitle).toBe('A Cached Series');
+        expect(pluginState.status).not.toHaveBeenCalled();
+        expect(pluginState.get).not.toHaveBeenCalled();
+        expect(getPtvReadingOverridePersistenceState('books')).toMatchObject({
+            authority: 'browser-cache',
+            endpointAvailable: false,
+            lastCategory: 'administrator-required',
+            serverPersistenceConfirmed: false,
+            upgradeRequired: false
         });
     });
 

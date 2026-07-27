@@ -5,11 +5,13 @@ import type { PtvSidebarSection } from './sidebar.types';
 type SidebarSectionProps = {
     section: PtvSidebarSection;
     activeRoute: string;
+    onAction?: () => void;
 };
 
 const SidebarSection: FC<SidebarSectionProps> = ({
     section,
-    activeRoute
+    activeRoute,
+    onAction
 }) => {
     return (
         <section className='ptv-sidebar-section'>
@@ -24,13 +26,14 @@ const SidebarSection: FC<SidebarSectionProps> = ({
                     const isRequestItem = item.id === 'request';
                     const isActive = isRequestItem ?
                         document.documentElement.classList.contains('ptv-request-active') :
-                        activeRoute.startsWith(item.href);
+                        Boolean(item.href && activeRoute.startsWith(item.href));
 
                     return (
                         <SidebarItem
                             key={item.id}
                             item={item}
                             isActive={isActive}
+                            onAction={onAction}
                         />
                     );
                 })}

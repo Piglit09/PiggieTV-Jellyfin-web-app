@@ -1,10 +1,243 @@
 # PiggieTV Architecture
 
-Current as of 2026-07-20.
+## WebOS playback presentation and resource policy (Phase 3A)
+
+Playback engine authority is unchanged: Jellyfin owns video and PTV
+`musicQueue` owns native Music audio. `playbackStateService` adapts those
+engines, while `playbackPresentationService` derives the one visible surface:
+mini-player, full-screen Music, stock video controls/video surface, or none.
+Presentation state is not persisted.
+
+The existing TV focus manager remains the only PTV directional/Back owner and
+the existing `inputManager` remains the transport normalization owner. PTV
+Music registers an adapter with that path; it does not install a second key
+listener. The stock video bubble path yields capture-owned input.
+
+The persistent runtime root is viewport-fixed and its media slot is
+viewport-sized. WebOS uses literal Chrome 68-safe mini-player placement.
+Loaded PTV audio outside full-screen/video therefore retains one reachable
+mini-player through route changes.
+
+WebOS platform policy excludes Reading and Request navigation/routes/chunks and
+uses bounded Music rendering with deferred lyrics/backdrops. This is a client
+resource policy, not a server, playback, route-stack, or content-contract
+migration. Non-WebOS clients keep both features and their existing rendering.
+
+Diagnostics remains passive and records category-only presentation changes.
+See `docs/diagnostics/phase3a-playback-correction-report.md`.
+
+Current as of 2026-07-23.
 
 This document describes the architecture present in the current worktree. It records stable boundaries and ownership. Use `PROJECT_STATE.md` for delivery state, `HANDOFF.md` for continuation instructions, and `DEBUG_LOG.md` for issue history.
 
 Project-memory maintenance is part of project completion: every completed project prompt updates `HANDOFF.md`, `PROJECT_STATE.md`, and `ARCHITECTURE.md` so operational guidance, current state, and architectural boundaries cannot silently diverge.
+
+## Logout Action Boundary
+
+Logout is owned by Jellyfin Web and is never represented as a PTV route. The
+authoritative owner is `Dashboard.logout()`, which delegates remote/session
+work to `ServerConnections.logout()`, receives the established
+`localusersignedout` lifecycle, clears Jellyfin query/view state, and lets the
+current multi-server capability select Login or Select Server.
+
+PTV-visible controls may do only two things: retire their transient menu state
+and request that stock action. A Web-local in-flight adapter shares one promise
+across overlapping pointer, keyboard, and remote activation and clears on
+settlement. It does not inspect or mutate credentials, emit auth events, choose
+routes, or translate errors. The adapter is a UI safety boundary, not a PTV
+Core auth service.
+
+`#/logout` is intentionally unregistered and must not appear in PTV navigation
+or auth-route classification. A compatibility logout page would create a
+second ownership path and is prohibited. Jellyfin's stock toolbar/legacy drawer
+remain direct callers of the same `Dashboard.logout()` function.
+
+## PTV Core v1 Shared Boundary
+
+PTV Core v1 is a contract-first, platform-native boundary. The canonical wire
+definitions live in `contracts/ptv-core/v1`, the behavioral specification lives
+in `docs/architecture/PTV_CORE_CONTRACTS.md`, and TypeScript, Kotlin, and C#
+map to those definitions without introducing a shared runtime or generated
+universal media model.
+
+The portable TypeScript API is `src/ptv/core/index.ts`. It exposes focused
+contracts/services for results and errors, API policy, authentication,
+settings, feature flags, cache envelopes, media, recommendations, diagnostics,
+navigation, playback, capabilities, and controlled initialization. Browser
+profile mapping stays in the explicit `webCapabilityAdapter` module and is not
+re-exported from the portable barrel, so a core import cannot trigger browser
+profile or feature-setting side effects.
+
+Android TV and Android mobile retain exact-byte-identical, dependency-free
+`com.piggietv.core` source plus app-local capability adapters. A physical
+shared Gradle module is intentionally deferred: the apps are separate
+repositories with incompatible AGP/Kotlin/JVM conventions and independent
+release lifecycles. UI, Activities, Fragments, Compose, Android Auto, TV focus,
+Media3, notifications, permissions, and storage remain platform-owned.
+
+The plugin status DTO adds camelCase v1 version/capability metadata while
+retaining every active field, endpoint, and current casing behavior. Existing
+web API, authentication, cache v7, Row Builder, routing, playback, diagnostics,
+and device-detection implementations remain authoritative compatibility paths.
+They may adopt core interfaces incrementally; none may be removed until the
+migration and rollback gates in `PTV_CORE_MIGRATION.md` are satisfied.
+
+Phases 2A and 2B add narrow active seams without moving those owners. The public
+`getPtvItem` facade coordinates one in-flight Jellyfin `ApiClient.getItem`
+transport, passes its response/error through the focused Core details boundary,
+then returns the original item or rethrows the original platform error. One
+native Home details-card action creates a v1 navigation intent; the web adapter
+reconstructs the exact existing hash and delegates once to `appRouter`.
+
+Phase 2B adds one separate metadata seam at Series details. A compatibility
+facade calls the existing `ApiClient.getSeasons` transport once with the
+unchanged series/user/Fields options and returns its raw query-result object.
+The Core-only view validates parent scope and mixed children and projects
+season identity/title/index/count/artwork without owning the renderer, request
+transport, paging, cancellation, or error UI. Native Search Movie, Series,
+Season, Episode, and BoxSet cards reuse the Phase 2A details adapter for
+unmodified primary activation. Their anchors continue to own deep links,
+modifier/middle-click behavior, and specialized Reading/Music destinations.
+Immediate duplicate activation shares one in-flight route operation.
+
+Phase 2C adds the adjacent Season-details episode-list seam only. The facade
+delegates once to `ApiClient.getEpisodes(item.SeriesId, options)`, passing the
+original lowercase `seasonId`, user ID, and Fields options by reference. It
+returns the raw response or original transport error, so Jellyfin remains the
+owner of authentication, URL/query construction, automatic networking/
+failover, timeout, local-ID compatibility, and parsing. No coordinator, retry,
+page, sort, `EnableUserData`, recursive option, or cancellation layer is added.
+
+The Core episode projection is deliberately not a universal item or playback
+model. It contains raw-item identity plus optional title, season/episode
+indexes, runtime milliseconds, premiere date, overview, present Primary
+artwork, and present played/position/percentage. Requested series and season
+scope are authoritative when child DTOs omit scope. Conflicting scope or
+missing IDs drop children with bounded counts; invalid envelopes and requested
+or envelope scope fail. The raw response and ticks remain untouched.
+
+Phase 2D adds no application-runtime ownership. Its authenticated validation
+boundary is an external current-Chrome CDP harness. The repository helper binds
+CDP only to loopback port 9223 and creates an OS-temporary profile; Jellyfin's
+normal UI remains the sole authentication owner. The runner refuses wrong
+origins, backend mismatch, unauthenticated or duplicate frontend pages, stale
+PTV/Core runtime, missing appRouter/route controller, mismatched service
+worker, and unavailable Home before any acceptance action.
+
+The harness observes only sanitized operation/route categories and bounded
+method/status/duration/count/pass-fail fields. It does not retain IDs, media
+titles, URLs, query values, bodies, headers, cookies, tokens, account identity,
+or auth state. It does not mutate favorite/played state, invoke playback,
+change focus/UI, or close an externally owned browser. Helper-owned browser
+state is identified by an OS-temporary marker and removed after the run.
+
+Authenticated acceptance is staged against semantic ownership rather than one
+page-wide timeout. Native Home exposes media type on its existing media anchor
+through a layout-neutral, non-identifying diagnostic attribute. The harness
+separately observes real pointer/keyboard activation, capture-phase default
+prevention, `appRouter`, History route-category changes, route ownership,
+usable details content, Back/Forward/refresh, populated Home authority, and
+approximate shelf/card restoration. History transition is authoritative;
+native `hashchange` may remain zero when the router commits through
+`pushState`.
+
+Browser instrumentation is idempotent and reversible. Installation restores a
+previous harness installation before wrapping `appRouter` and History once;
+scenario reset clears only harness-owned counters; cleanup restores every
+function, event listener, debug observer, and session marker. Search, Series,
+Season, and error scenarios establish independent route state and cannot
+consume a prior scenario's observations. The Jellyfin all-zero GUID is a
+root-folder sentinel, not a missing-item fixture; error compatibility uses a
+nonempty unallocated GUID and asserts the external HTTP 404/client-rejection
+contract without serializing the identifier or response.
+
+Phase 2E establishes a durable admission rule without adding a runtime
+boundary: a new focused Core read must have a distinct portable consumer or
+policy that is not already supplied by `getPtvItem` or a list projection.
+Removing one direct method call, achieving model symmetry, or labeling a rare
+fallback is insufficient when the normal path already reuses the
+authoritative raw DTO.
+
+The audited PTV details enhancement fallback remains legacy-owned. Jellyfin's
+details controller normally emits its already-loaded raw item; PTV uses that
+object for shell classification and artwork. Its guarded route-item fallback
+is Web-specific, normally bypassed, and has no distinct Episode metadata
+consumer. Adopting the coordinated generic item facade would change its
+request-sharing behavior, while a new Episode projection would duplicate
+Phase 2C. The decision is HOLD until a portable consumer or diagnostic
+requirement demonstrates otherwise.
+
+Single-item validation also differs from list normalization. If a future
+focused item boundary is approved, wrong/missing requested identity, wrong
+required type, or conflicting supplied parent scope must fail the whole Core
+result rather than drop an item. Missing optional parent scope and additive
+unknown fields remain compatible; public compatibility must preserve the raw
+object and original platform error, with no implicit retry, timeout,
+coordinator, auth, route, or UI change.
+
+Portable normalization never recases the complete Jellyfin payload, and bounded
+diagnostics never contain raw IDs, hosts/query values, headers, bodies, or media
+paths. More From Season, episode details, playback/Next Up/autoplay, Search
+APIs/rendering, all other API calls, and all other navigation actions remain
+legacy-owned.
+
+The enforced dependency direction is UI to feature services to PTV Core to
+platform adapters/external APIs. Core modules do not import UI, React,
+Activities, Media3, controllers, or transport-specific DTO owners.
+
+## Physical Production Acceptance Boundary
+
+Physical acceptance must prove loaded provenance before interpreting layout or data behavior. The authoritative evidence is the child document origin, compile-time build ID/commit/date/mode from the LG-loaded asset, loaded runtime/main/Home asset identities, service-worker controller/scope/script state, API/plugin origins, render profile, TV platform, and root geometry classes. A server deployment claim or local `dist` match is insufficient by itself.
+
+Home acceptance has two independent stability phases. A continuously mounted Home must retain hero/actions/shelves/cards through the fixed observation window, and a route generation that leaves and returns must restore an equally usable populated model. Passing the first phase cannot close Home P1 when the second phase returns hero-only or section-only content. Route-return evidence must use the same account, unchanged application timeouts, and exact shelf/scroller/card markers.
+
+Lease-bound physical diagnostics are captured on the target Home route and preserved locally plus server-side before opening Dashboard or stopping collection. A later shutdown snapshot may replace the server's latest report, so the downloaded target-route artifact is the acceptance authority. Collection is revoked after preservation and must become inactive on the next heartbeat.
+
+Correct shell geometry and Home data restoration remain separate ownership boundaries. `ptv-render-webos` plus `ptv-render-tv` own the former; route generation, cache/model authority, and Home loaders own the latter. A physical `first-shelf-missing` report with correct header/brand/focus geometry is not a reason to change CSS or add a page-local TV layout workaround.
+
+## Home Cache Semantics and Atomic Model Authority
+
+Featured cache v7 has one semantic usability contract across browser memory, browser persistence, plugin validation, and plugin refresh. A payload is classified as complete, partial, degraded, configuration-only, empty, or intentional-empty from hero, generated-row, section, and generation-state evidence. Only a populated complete payload or an explicitly confirmed intentional-empty library may replace persisted state. Freshness alone never makes an empty or configuration-only payload authoritative.
+
+Plugin refresh builds only populated configured rows. A Row Builder definition with zero selected candidates is configuration, not Home content, and must not become a section shell merely because the rule is enabled. Semantic validation happens before trimming and again before persistence; validation failure retains the previous cache and does not affect request/playback behavior. This contract does not change cache schema v7.
+
+Native Home owns a second, render-level atomicity boundary. A candidate model may commit only when its route generation and route hash still match and its completeness is not weaker than the populated model already displayed. Empty late aggregates, partial refreshes, and section-only shells are observable degraded outcomes, not replacement models. Explicit intentional-empty state may settle only when there is no populated model to preserve.
+
+Home diagnostics emit bounded count-only lifecycle evidence for route entry, memory/plugin reads, cache adoption or rejection, first hero/shelf, live request start, recommendation receipt, final commit, and route retirement. Diagnostics may contain source/classification/count/timing/replacement reason fields, but never media identity, titles, raw responses, request URLs, credentials, or server/user/item IDs. External physical harness snapshots remain valid evidence when an embedded build does not expose the named events.
+
+## LG Hosted Split-Origin Contract
+
+The tracked hosted-development wrapper targets the frontend document literally at `http://10.16.0.125:8082/`. Development startup supplies `PTV_DEV_JELLYFIN_URL=http://10.16.0.50:8096`, so authenticated Jellyfin, Items, and `/Ptv/v1` traffic remain on the backend while scripts, styles, HMR, and the document remain on the development origin. Hostname-derived `:8096` wrapper redirects are prohibited because they can pin the TV to the wrong server before saved-server selection or `ApiClient` readiness.
+
+The webOS hosted app remains a local `file://` container with one full-viewport child frame. Runtime provenance must report the wrapper container, child document origin, API/plugin origin, resource-origin counts, build/mode, and service-worker control separately. Cross-origin comparison may navigate only that child frame and must not mutate the remote Jellyfin web root, plugin, database, or server configuration.
+
+## TV-tier Geometry and webOS Compatibility Contract
+
+Render profiles have two simultaneous class identities. The exact profile class, such as `ptv-render-webos`, owns platform-specific cost and compatibility decisions. Every profile whose tier is `tv` also receives `ptv-render-tv`, which owns shared ten-foot geometry. Reconciliation must never make those classes mutually exclusive.
+
+The shared shell is the sole header geometry owner. Its grid tracks and children use explicit min-size containment so intrinsic image dimensions cannot enlarge a row. Brand containers clip overflow and their images have explicit width, height, max dimensions, block layout, and `object-fit`. TV and webOS profiles may refine those values, but pages must not create competing header transforms or sizing rules.
+
+LG webOS Chrome 68 compatibility cannot depend exclusively on `clamp()` or modern intrinsic sizing behavior. The webOS profile supplies literal 720p, 1080p, and 4K header heights, brand dimensions, side columns, and top/side offsets before any optional modern enhancement. Its focus treatment is static and bounded: border/outline/glow are allowed, while focus transforms remain disabled.
+
+Stable `data-ptv-layout-node` markers identify shell main, Home root, hero, row container, shelf, and shelf scroller nodes. They are diagnostic selectors only and must not become route, data-loading, cache, or focus ownership boundaries. `physicalLayoutSnapshot.ts` may fall back to legacy selectors while deployed generations converge, and its report schema remains backward compatible.
+
+Physical LG evidence confirms the contract: `ptv-render-webos` and `ptv-render-tv` coexist; the 1920x1080 shell is 1788x80 at `(66,36)`; the brand is 220x64; navigation is centered; utilities are bounded; overflow is zero; and one ArrowRight transition retained visible focus. A later authenticated persistence run rendered 25 semantic rows and held them for 100 seconds, superseding the earlier zero-row capture; complete user-operated remote navigation remains unverified.
+
+## Embedded Physical Layout Diagnostics Contract
+
+Physical LG/webOS layout evidence is part of the existing local Remote Diagnostics system, not a second telemetry or transport stack. Collection is administrator-initiated, capability-gated, lease-bound, bounded, memory-limited, privacy-sanitized, and delivered through the existing check-in, command, report, and Dashboard endpoints.
+
+The collector owns a fixed semantic selector registry for the shell header, shell brand/image, primary navigation, utilities, shell main, Home root/hero/content/logo/actions, first shelf/scroller, media dock, and legacy header. It captures only geometry, visibility, bounded computed-style categories, intrinsic image dimensions, allowlisted root/body PTV state, build/runtime/profile evidence, and fixed issue codes. It never captures page text, HTML, media titles or IDs, URLs beyond a path-only service-worker value, arbitrary attributes, raw CSS rules, or screenshots.
+
+Seven fixed milestones cover lease start, runtime readiness, shell readiness, hero readiness, shelf readiness, route settlement, and report generation. Only the latest sample for each milestone is retained. The physical snapshot shares the report's existing serialized-size budget and is trimmed before transport rather than creating an unbounded secondary payload.
+
+`PTVShell` exposes stable `data-ptv-owner` markers for the shell brand and brand image. These markers identify component ownership without changing geometry or introducing page-local TV rules. Browser-side winning-cascade attribution is deliberately reported as unsupported because reliable source-rule ownership cannot be guaranteed from this webOS runtime; diagnostics must not guess a stylesheet or selector.
+
+Plugin DTO responses may be serialized as PascalCase even though TypeScript contracts are camelCase. The frontend response boundary therefore normalizes either casing for client rows, capabilities, boot markers, command leases, and stored report wrappers. Malformed rows are still rejected, and absent optional command values remain absent.
+
+The latest server report is replaceable by a subsequent route or shutdown snapshot. Acceptance workflow must capture and view/download the target-route report before navigation or Stop. This is provenance behavior, not permission to merge evidence from different routes.
+
+The 2026-07-22 Home capture proves the shell brand image rendered at 1077x500 inside a 1920x500 header and obscured Home content, but it does not prove the exact winning CSS rule. The corrective architecture remains centralized in the shared shell/webOS profile; do not add a page-local transform or global scale workaround.
 
 ## Consolidation Program
 
@@ -534,6 +767,69 @@ The final local gate passed 58/58 targeted frontend tests, 20/20 plugin tests, T
 - Recovery is deliberately unavailable to every non-Movie group, never bypasses Jellyfin authorization, never queries storage/database state, and is cancelled at the search consumer when the user changes query. The merge deduplicates in ID, provider identity plus media type, presentation key, then normalized logical-relative-path order before applying the visible limit.
 - Search diagnostics expose recovery trigger/reason, candidate and match counts, source cache, primary/supplemental duration, raw `TopParentId` evidence, normalized roots, and abort/timeout state.
 
+## Store webOS wrapper inspection boundary
+
+LG Developer Mode device connectivity does not imply inspectability of store-installed applications. On the connected 70UN7070PUA, ares can read system information, but the tv profile cannot enumerate the store Jellyfin package, use shell/log commands, or attach Web Inspector to org.jellyfin.webos.
+
+Physical provenance must therefore come from one of two explicit boundaries: an inspectable developer-signed wrapper loading the same frontend, or embedded privacy-safe production diagnostics that report build, service worker, profile/classes, shell/route ownership, bounded node geometry, and focus state. Neither path should silently replace the actual store-wrapper acceptance test.
+
+Installing or launching a development wrapper changes the device test boundary and requires deliberate approval. Until then, source-supported asset attribution is not enough to select a CSS fix.
+
+## Shell banner asset ownership on physical webOS
+
+The native shared shell currently uses the complete banner-light artwork as its brand image. That asset contains the emblem, PiggieTV wordmark, and Powered by Jellyfin text; it is not media hero title art. PTVShell renders it under ptv-shell-brand, while presentation profiles are responsible for bounding the image independently of Home hero geometry.
+
+The 2026-07-22 physical photo proves the banner escaped its intended shell-safe bounds. This narrows component ownership but not the runtime root cause. A missing or stale TV stylesheet, absent profile marker, unsupported base clamp sizing, or a later winning declaration remain materially different fixes. The physical runtime build, classes, computed styles, and source order must decide among them before changing CSS.
+
+Shell branding should eventually use a compact header-appropriate asset or robust literal fallback dimensions, but that architectural choice must not be committed as a physical fix until the loaded bundle and winning rules are known.
+
+## Physical webOS provenance before layout correction
+
+Physical TV layout failures require bundle and ownership provenance before source changes. The inspection order is: loaded frontend build and service worker; runtime/profile classes over lifecycle; shell, hero, branding, shelf, and legacy DOM ownership; final production CSS source order and winning declarations; geometry; then focus graph behavior. Viewport or coarse-pointer emulation cannot establish these facts.
+
+The webOS performance profile may simplify effects but must not own or collapse Home geometry. Shell branding, media hero title art, login branding, and legacy Jellyfin branding are separate owners and must remain distinguishable in markup and bounds. Do not add viewport-only TV classification or repeated important rules to compensate for an unidentified old bundle, mixed chunks, stale service worker, or leaked component.
+
+The 2026-07-21 physical failure remains unmodified because no physical ares target was available. A source correction is permitted only after the same LG runtime proves its build, profile, DOM owner, and winning CSS.
+
+## ItemFields boundary automated validation
+
+The generated ItemFields request boundary has direct regression coverage for unsupported-token removal, case-insensitive canonicalization, deduplication, all-invalid omission, and preservation of unrelated query parameters. Coordinated Items coverage runs beside it to protect the shared request path. TypeScript and production Webpack validate that the deep generated SDK model import is compatible with both compile-time and production bundle resolution.
+
+The completed automated gate establishes code and bundle correctness only. Server binder logs under representative traffic remain the operational contract proof, while database locks, endpoint latency, authentication persistence, and hardware focus remain separate release dimensions.
+
+## ItemFields boundary verification scope
+
+Post-deployment server evidence must distinguish contract validation from backend health. The generated-enum ItemFields boundary is considered observed when representative request URLs contain only valid enum members and the server records no comma-delimited field conversion failures. The 2026-07-21 restart sample satisfies that condition for three Latest/Resume requests.
+
+A clean short sample cannot retire an earlier database-lock failure unless it exercises the same write path under representative concurrency. Playback progress, user-data commits, broad browse routes, and sustained load remain separate acceptance dimensions. Static-file WebRootPath warnings are deployment evidence and must not be conflated with API/database latency without a demonstrated causal path.
+
+## Generated ItemFields Request Boundary
+
+src/ptv/api/client.ts is the enforcement boundary for Jellyfin Fields query parameters. It derives the accepted values from @jellyfin/sdk/lib/generated-client/models/item-fields, accepts comma-delimited or array input, maps case-insensitively to canonical enum spelling, removes duplicates, drops unsupported tokens, and omits Fields when none remain. Response DTO properties such as ImageTags, ProductionYear, Container, SeriesId, and UserData must not be treated as requestable ItemFields merely because Jellyfin may return them.
+
+Module field profiles remain presentation and payload-intent adapters; they are not compatibility authorities. New API paths must use getPtvApiUrl, requestPtvJson, or sendPtvJson rather than constructing unsanitized PTV Jellyfin URLs. The boundary deliberately leaves all non-Fields query parameters unchanged.
+
+Server latency remains outside this boundary. The 2026-07-21 log proves a SQLite playback user-data commit lock and broad slow endpoint responses. Frontend coordination can reduce amplification, but it must not hide backend lock failures by increasing scenario or request timeouts.
+
+## Items latency and request-ownership rule
+
+Exact concurrent read identity is a transport-lifecycle concern, not a reason
+to create a response cache or another Core API boundary. Legacy consumers that
+need the same authenticated GET must use the shared request coordinator with a
+server/user/operation identity, preserve the original promise value/error, and
+allow a fresh request after settlement. DOM observers, route refresh, and
+Back/Forward must not create page-local in-flight maps or independently ignore
+an already-running shared promise.
+
+Latency ownership is separated from amplification. If equivalent PTV shared,
+Jellyfin ApiClient, direct browser, and direct-listener requests have aligned
+completion/header timing and transfer is negligible, pre-header delay belongs
+upstream of frontend transport. That proves the layer boundary, not the exact
+database, plugin, filesystem, or host component. Assigning a deeper owner
+requires timestamp-correlated server logs and bounded host/database evidence.
+Absent that access, record the component as not observed and retain the
+production HOLD; never compensate by raising timeouts or adding stale success.
+
 ### 2026-07-20 Movie Search Primary-Outcome Recovery
 
 - Primary Movie search is now represented as an explicit `success`, `timeout`, `error`, or `aborted` outcome before recovery eligibility is evaluated. A timeout, recoverable request error, or successful zero-item response can use the same bounded authenticated Latest Movies candidate route; aborts and 401/403 authorization failures cannot.
@@ -554,3 +850,138 @@ Movie recovery no longer samples `Items/Latest`. `movieSearchCatalog.ts` owns a 
 Persistent PTV diagnostics now use one `ptv-diagnostics.log` JSONL stream in the plugin configuration directory. `PtvRollingDiagnosticsWriter` is the only disk diagnostics writer: it owns a bounded queue, one consumer, duplicate suppression, check-in/performance aggregation, five rotating files, 25 MB active-file rotation, 14-day cleanup, and capped total retention. The existing featured-content cache remains a separate single atomic cache document.
 
 Remote check-ins and accepted sanitized reports enter the writer asynchronously. The storage API and dashboard expose status, downloads, rotation, explicit-confirmation clearing, and safe legacy consolidation. Legacy cleanup matches only verified PTV filename patterns and never selects plugin settings, featured cache, Reading overrides, or unknown files.
+
+## Authenticated validation architecture update (2026-07-21)
+
+### Artwork boundary
+
+`src/ptv/api/images.ts` is the shared artwork request boundary. Candidate image types are derived from advertised Jellyfin `ImageTags`; PTV does not probe image types that Jellyfin did not claim exist. Failed source identity is independent of dimensions and request variants, preventing repeated requests for the same failed image. A missing advertised image is classified as stale server artwork metadata when the fallback renders, not as a route failure.
+
+The validation model records four separate outcomes:
+
+- functional route or behavior failure
+- expected or stale missing artwork
+- exhausted fallback chain with a broken visible image
+- duplicate or unnecessary artwork request
+
+### Browse and shell ownership
+
+Browse route identity is path-based, with legacy query compatibility retained. Scope resolution is keyed by media kind and scope alias, so focused sibling routes reuse the mounted native shell. Movies and Shows may replace their landing layout once when entering focused browse mode; sibling focused routes do not remount it. Music and Reading keep their shell across all module subroutes. Preferences owns a single compatible shell and no longer creates horizontal overflow.
+
+### Authorization ownership
+
+Non-administrator consumers do not issue speculative requests to administrator-only plugin settings, row configuration, or Reading correction endpoints. Browser-safe cached data remains available where appropriate. Server authorization remains authoritative: non-admin Dashboard navigation redirects to Home and protected endpoints return forbidden responses.
+
+### Recommendation and accessibility boundaries
+
+Music recommendation construction includes a shared de-overlap step so independently named shelves do not present the same ordered item set. Music track-art play controls and search controls expose stable accessible names without changing visual presentation.
+
+### Validation harnesses
+
+`scripts/ptv-authenticated-discovery.cjs` owns broad route, responsive, network, shell, accessibility, and performance discovery. `scripts/ptv-authenticated-interactions.cjs` owns stateful behavior validation. Reports contain item identifiers only and do not persist credentials, cookies, authorization headers, playback URLs, or access tokens.
+
+The after discovery result is 23 of 23 desktop routes and four of four responsive profiles passing. The interaction result is 13 of 13 scenarios passing. Physical-device behavior and administrator-only Dashboard profiling remain separate validation responsibilities.
+
+## Authenticated stabilization decisions (2026-07-21)
+
+- Movies and Shows browse subroutes have one wildcard route owner. Duplicate
+  exact-route ownership is intentionally avoided.
+- `NativeBrowsePage` keeps its `Page` and `PTVShell` mounted across loading,
+  empty, error, and populated content states. Module transitions may replace a
+  shell; query/view transitions within a module must not.
+- Reading series identity uses provider identifiers before collection metadata.
+  Collection names remain descriptive grouping data, not canonical identity.
+- Reading index queries remain image-free. Queries that render visible cards
+  explicitly request image tags and required display fields. Items without
+  advertised images render placeholders rather than triggering speculative
+  Primary/Thumb chains.
+- Authenticated non-admin access to admin routes is an authorization redirect to
+  Home, not a connection failure and not a second-shell render.
+- TV focus changes are applied synchronously during focus events. Browser D-pad
+  validation uses the authenticated browser identity and must not mutate the
+  user agent mid-session.
+- Discovery treats optional missing artwork separately from functional route
+  failures. Exact duplicate URLs, intentional transform variants, fallback
+  attempts, and broken visible images are separate metrics.
+- Warm-cache route discovery is not sufficient for release. A production gate
+  also requires the authenticated interaction suite and representative cold-path
+  item latency to pass.
+
+## Authenticated Items request ownership (2026-07-21)
+
+`src/ptv/api/items.ts` is the list-request ownership boundary. Both
+`Users/{user}/Items` and `Users/{user}/Items/Resume` must use
+`requestPtvJson`; consumers must not prefer raw `ApiClient.getItems` or
+`getResumableItems`, because that bypasses shared in-flight coordination.
+
+The coordinator coalesces exact concurrent requests. It is not a response cache,
+does not broaden authorization, does not alter query parameters, and does not
+claim network cancellation. Route-generation/load-owner checks remain
+responsible for suppressing stale commits and for avoiding new background work
+after ownership is retired.
+
+Home recommendation quality hydration is a background consumer of the Items
+boundary. It must check its load owner immediately before dispatch so an old Home
+generation cannot compete with Movies, Shows, Search, Music, or Reading after
+navigation. Mounted Home behavior and quality fields remain unchanged.
+
+This boundary fixes frontend amplification but does not define a Jellyfin
+latency SLO. Browser, direct, and `ApiClient` benchmarks show time-before-headers
+dominance and severe remote variance even after duplicate elimination. Do not
+add larger UI timeouts, a second response cache, mount-specific queries, or a
+frontend database workaround. Server/database/plugin/proxy changes require
+read-only evidence first, explicit approval, and a rollback plan.
+## 2026-07-21 Jellyfin ItemFields compatibility boundary
+
+`UserData` is a response object, not a portable Jellyfin `ItemFields` enum
+member. PTV request builders must never place `UserData` in the comma-separated
+`Fields` parameter. Routes that need favorite, played, or resume state obtain it
+through Jellyfin's normal user-scoped response and `EnableUserData` behavior.
+
+This boundary applies to shared item field profiles and module-local Books,
+Music, search/recommendation, browse, cache-refresh, and hydration queries. It
+does not prohibit preserving `item.UserData` in typed models or bounded caches.
+Keeping the response object and requesting it as an `ItemFields` value are
+separate concerns.
+
+The server-side model-binding exception is proven evidence for this contract
+correction. It is not evidence that all remaining successful-request latency is
+fixed; prior high time-to-first-byte samples still require server/host evidence
+and clean authenticated reruns.
+## 2026-07-21 ItemFields boundary validation
+
+Live browser evidence confirms the `ItemFields` boundary is active: 44 recent
+`Items` requests contained no `UserData` field token. This validates request
+serialization, not endpoint latency or backend health. Eighteen Resource Timing
+entries exposed HTTP 200 and the remaining entries did not expose status data;
+none exposed an error status.
+
+Cold-route validation on the shared development browser has an independent
+authentication-restoration limitation. Webpack Dev Server's overlay iframe must
+be excluded from geometry evidence because it is not a production surface and
+alone widens the document by the scrollbar width. Even with that contaminant
+prevented, a cache-disabled reload did not restore the same authenticated API
+client within 30 seconds. Do not relabel a warm in-memory navigation pass as a
+cold pass, and do not replace the required identity to manufacture evidence.
+## PTV Core Phase 1.5 Runtime Adoption
+
+Web, Android mobile, and Android TV now enter the shared ten-step PTV Core
+initializer from their production composition roots. Runtime adapters snapshot
+existing settings/session/API state, report capabilities and diagnostics, and
+acknowledge existing navigation/playback owners without replacing them.
+Initialization is shared across concurrent/repeated entry and keyed listener
+registries prevent hot-reload or Activity recreation duplication.
+
+The first envelope migration is the Reading/Music library-index IndexedDB
+boundary. Its database/store/keys and legacy record reader remain; v1 writes
+add scope/version/expiry/stale metadata and reads handle current, legacy,
+corrupt, mismatched, expired, and opt-in stale records. The plugin
+recommendations response boundary now uses the v1 casing/default/score
+normalizer without replacing Row Builder or its engine.
+
+Android contract parity is enforced by generated normalized manifests compared
+across both repositories and against `contracts/ptv-core/v1`, with required
+schema-field validation. Raw source equality is supplementary. This is partial
+adoption: credential/login, route/focus execution, playback engines, Android
+Auto, notifications, lock-screen controls, featured cache v7, and other cache
+or recommendation boundaries remain legacy.

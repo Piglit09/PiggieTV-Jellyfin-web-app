@@ -3,6 +3,10 @@ import Events from '../../utils/events';
 
 import { PTV_PLUGIN_API, PTV_RUNTIME } from './config';
 import {
+    type PtvCoreRecommendationResponse
+} from './recommendations/recommendationContracts';
+import { normalizePtvPluginRecommendationResponse } from './recommendations/pluginRecommendationBoundary';
+import {
     classifyPtvRequestUrl,
     isPtvWebpackDevServerOrigin,
     resolvePtvServerUrlForPage,
@@ -1555,15 +1559,19 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
         getImageProxyUrl(params?: Record<string, unknown>) {
             return getPluginUrl(apiClient, PTV_PLUGIN_API.endpoints.imageProxy, params);
         },
-        getRecommendations<T = unknown>(options?: PtvPluginPayloadRequestOptions) {
-            return requestPluginJson<T>(
+        getRecommendations<T = PtvCoreRecommendationResponse>(options?: PtvPluginPayloadRequestOptions) {
+            return requestPluginJson<unknown>(
                 apiClient,
                 PTV_PLUGIN_API.endpoints.recommendations,
                 {
                     ...options,
                     method: options?.body === undefined ? 'GET' : 'POST'
                 }
-            );
+            ).then(value => normalizePtvPluginRecommendationResponse(value, {
+                cacheVersion: 1,
+                serverId: apiClient.serverAddress?.() || 'current-server',
+                userId: apiClient.getCurrentUserId?.() || 'current-user'
+            }) as T);
         },
         searchMusicMetadata<T = unknown>(params: Record<string, unknown>, options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(

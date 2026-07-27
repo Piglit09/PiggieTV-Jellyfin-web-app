@@ -4,9 +4,11 @@ import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES } from '../core/config';
 import { recordPtvEvent } from '../core/observability';
 import { focusPtvTvElement } from '../core/tvFocus';
 import { getPtvQueryStringValue, parsePtvQueryString } from '../core/queryString';
+import { isPtvPlatformNavigationEntryAvailable } from '../core/platformFeatures';
 import { resolvePtvStaticAssetUrl } from '../core/urlOrigins';
 import { PtvIcon, type PtvIconName } from '../modules/icons';
 import { incrementPtvPerformanceCounter } from '../services/performanceMonitor';
+import { requestJellyfinLogout } from '../services/jellyfinLogoutAction';
 import {
     registerPtvNativeShellInstance,
     runPtvClientCacheMigration
@@ -76,7 +78,6 @@ export type PTVShellProps = Readonly<{
 
 const PTV_SHELL_DASHBOARD_HREF = '#/dashboard/piggietv';
 const PTV_SHELL_SERVER_HREF = '#/selectserver';
-const PTV_SHELL_SIGNOUT_HREF = '#/logout';
 const PTV_SHELL_SEARCH_DRAFT_KEY = 'ptv:shell:search-draft';
 
 type PtvShellDebugStatus = {
@@ -166,11 +167,11 @@ const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[
     ],
     home: [],
     movies: [
-        { id: 'movies-latest', label: 'Latest', href: `${PTV_ROUTES.movies}?view=latest`, icon: 'activity' },
-        { id: 'movies-genres', label: 'Genres', href: `${PTV_ROUTES.movies}?view=genres`, icon: 'filter' },
-        { id: 'movies-studios', label: 'Studios', href: `${PTV_ROUTES.movies}?view=studios`, icon: 'libraries' },
+        { id: 'movies-latest', label: 'Latest', href: `${PTV_ROUTES.movies}/latest`, icon: 'activity' },
+        { id: 'movies-genres', label: 'Genres', href: `${PTV_ROUTES.movies}/genres`, icon: 'filter' },
+        { id: 'movies-studios', label: 'Studios', href: `${PTV_ROUTES.movies}/studios`, icon: 'libraries' },
         { id: 'movies-collections', label: 'Collections', href: PTV_ROUTES.collections, icon: 'collections' },
-        { id: 'movies-trending', label: 'Trending', href: `${PTV_ROUTES.movies}?view=trending`, icon: 'activity' }
+        { id: 'movies-trending', label: 'Trending', href: `${PTV_ROUTES.movies}/trending`, icon: 'activity' }
     ],
     music: [
         { id: 'music-home', label: 'Home', href: PTV_ROUTES.music, icon: 'home' },
@@ -198,10 +199,10 @@ const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[
         { id: 'settings-display', label: 'Display', href: PTV_ROUTES.displayPreferences, icon: 'display' }
     ],
     shows: [
-        { id: 'shows-continue', label: 'Continue', href: `${PTV_ROUTES.shows}?view=continue`, icon: 'resume' },
-        { id: 'shows-latest', label: 'Latest', href: `${PTV_ROUTES.shows}?view=latest`, icon: 'activity' },
-        { id: 'shows-genres', label: 'Genres', href: `${PTV_ROUTES.shows}?view=genres`, icon: 'filter' },
-        { id: 'shows-networks', label: 'Studios & Networks', href: `${PTV_ROUTES.shows}?view=networks`, icon: 'libraries' }
+        { id: 'shows-continue', label: 'Continue', href: `${PTV_ROUTES.shows}/continue`, icon: 'resume' },
+        { id: 'shows-latest', label: 'Latest', href: `${PTV_ROUTES.shows}/latest`, icon: 'activity' },
+        { id: 'shows-genres', label: 'Genres', href: `${PTV_ROUTES.shows}/genres`, icon: 'filter' },
+        { id: 'shows-networks', label: 'Studios & Networks', href: `${PTV_ROUTES.shows}/networks`, icon: 'libraries' }
     ]
 };
 
@@ -262,8 +263,7 @@ function isPtvShellRouteAllowed(route?: string) {
         '#/calendar',
         '#/dashboard',
         '#/mypreferences',
-        '#/selectserver',
-        '#/logout'
+        '#/selectserver'
     ].some(prefix => path.startsWith(prefix));
 }
 
@@ -751,7 +751,7 @@ function PtvShellNotificationPanel({
     );
 }
 
-function PtvShellActions({
+export function PtvShellActions({
     isAdmin,
     onPanelToggle,
     openPanel,
@@ -765,6 +765,10 @@ function PtvShellActions({
     const notificationSnapshot = usePtvNotificationSnapshot();
     const notificationsOpen = openPanel === 'notifications';
     const userOpen = openPanel === 'user';
+    const handleLogout = useCallback(() => {
+        onPanelToggle(null);
+        void requestJellyfinLogout();
+    }, [onPanelToggle]);
 
     useEffect(() => {
         updatePtvShellDebugStatus({
@@ -855,10 +859,10 @@ function PtvShellActions({
                             <PtvIcon name='server' />
                             <span>Select Server</span>
                         </a>
-                        <a href={PTV_SHELL_SIGNOUT_HREF} onClick={() => onPanelToggle(null)} role='menuitem'>
+                        <button data-ptv-action='logout' onClick={handleLogout} role='menuitem' type='button'>
                             <PtvIcon name='signout' />
                             <span>Sign Out</span>
-                        </a>
+                        </button>
                     </div>
                 ) : null}
             </div>
@@ -914,6 +918,10 @@ export default function PTVShell({
     const [isSearchExpanded, setSearchExpanded] = useState(false);
     const [searchQuery, setSearchQuery] = useState(() => getPtvShellSearchRouteQuery() || readPtvShellSearchDraft());
     const navGroups = useMemo(() => getPtvShellNavGroups(section, hash), [hash, section]);
+    const primaryLinks = useMemo(
+        () => PTV_SHELL_PRIMARY_LINKS.filter(link => isPtvPlatformNavigationEntryAvailable(link)),
+        []
+    );
     const contextLinks = contextualLinks || PTV_SHELL_CONTEXT_LINKS[section] || [];
     const activeSecondaryNav = contextLinks.find(link => link.active || isPtvShellHrefActive(link.href, hash))?.id || '';
     const closeHeaderTransientState = useCallback((options: { collapseSearch?: boolean } = {}) => {
@@ -1045,8 +1053,8 @@ export default function PTVShell({
 
             <header ref={headerRef} className='ptv-shell-header' aria-label='PiggieTV application shell'>
                 <div className='ptv-shell-header-left'>
-                    <a className='ptv-shell-brand' href={PTV_ROUTES.home} aria-label='PiggieTV Home' onClick={() => closeHeaderTransientState()}>
-                        <img alt={PTV_BRANDING.appName} decoding='async' loading='eager' src={appLogoUrl} />
+                    <a className='ptv-shell-brand' data-ptv-owner='shell-brand' href={PTV_ROUTES.home} aria-label='PiggieTV Home' onClick={() => closeHeaderTransientState()}>
+                        <img alt={PTV_BRANDING.appName} data-ptv-owner='shell-brand-image' decoding='async' loading='eager' src={appLogoUrl} />
                     </a>
                 </div>
 
@@ -1068,7 +1076,7 @@ export default function PTVShell({
                                 onToggle={() => handlePanelToggle(group.id as PtvShellOpenPanel)}
                             />
                         ))}
-                        {PTV_SHELL_PRIMARY_LINKS.map(link => (
+                        {primaryLinks.map(link => (
                             <PtvShellDirectLink key={link.id} {...link} onClick={() => closeHeaderTransientState()} />
                         ))}
                     </div>
@@ -1094,7 +1102,7 @@ export default function PTVShell({
             {headerOnly ? null : <PtvShellContextNav links={contextLinks} title={title} />}
 
             {headerOnly ? null : (
-                <div className='ptv-shell-page-content'>
+                <div className='ptv-shell-main ptv-shell-page-content' data-ptv-layout-node='shell-main'>
                     {children}
                 </div>
             )}

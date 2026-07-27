@@ -34,6 +34,10 @@ module.exports = {
         })
     ],
     resolve: {
+        alias: {
+            [path.resolve(__dirname, '../src/ptv/shell/routeController')]:
+                path.resolve(__dirname, 'tvFocusRouteControllerStub.ts')
+        },
         extensions: ['.ts', '.js']
     }
 };

@@ -6,6 +6,7 @@ import {
     getPtvItems,
     getPtvRecentlyAdded,
     getPtvResumeItems,
+    isPtvAdminUser,
     type PtvApiClientLike,
     type PtvItem,
     type PtvLibrary,
@@ -15,9 +16,11 @@ import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { getCurrentPtvPluginApiClient, normalizePtvApiError } from '../../core/pluginApi';
 import {
     getCachedFeaturedContentPayload,
+    getFeaturedContentCacheStatus,
     getPtvFeaturedRowConfigHash,
     type FeaturedPayload
 } from '../../modules/cache/featuredContentCache';
+import { summarizeFeaturedContentPayload } from '../../modules/cache/featuredContentSemantics';
 import { getPtvQualityTags } from '../../modules/cards/qualityTags';
 import type {
     PtvRecommendationScoreDistribution,
@@ -44,6 +47,11 @@ import {
     setPtvShellLoading
 } from '../../shell/foundation';
 import { buildNativeHomeProfile } from './services/homeProfileService';
+import {
+    decideNativeHomeModelReplacement,
+    summarizeNativeHomeModel,
+    type NativeHomeModelLike
+} from './homeModelAuthority';
 import {
     applyNativeHomeAdaptiveLayout,
     getEmptyNativeHomeAdaptiveDebug,
@@ -368,6 +376,7 @@ const NATIVE_HOME_ROW_MOUNT_ROOT_MARGIN_PX = 1200;
 const NATIVE_HOME_ROW_INITIAL_BUFFER = 4;
 const NATIVE_HOME_ROW_VIRTUALIZATION_DISABLED = false;
 const NATIVE_HOME_ROW_FALLBACK_MOUNT_COUNT = 8;
+let nativeHomeRouteGeneration = 0;
 
 function getNativeHomeRootMarginPx(rootMargin: string | undefined, fallback: number) {
     const firstValue = String(rootMargin || '').trim().split(/\s+/)[0] || '';
@@ -591,6 +600,7 @@ function mergeNativeHomeHydratedItem(compactItem: PtvItem, hydratedItem: PtvItem
 async function hydrateNativeHomeRecommendationItems(
     rows: NativeHomeRow[],
     options: {
+        shouldContinue?: () => boolean;
         source: string;
     }
 ): Promise<NativeHomeRow[]> {
@@ -602,7 +612,14 @@ async function hydrateNativeHomeRecommendationItems(
             .filter(Boolean)
     ))));
 
-    if (!ids.length) {
+    if (!ids.length || options.shouldContinue?.() === false) {
+        if (ids.length) {
+            recordPtvEvent('render', 'native-home-recommendation-quality-hydration-skipped', {
+                reason: 'route-retired',
+                source: options.source
+            });
+        }
+
         return rows.map(row => ({
             ...row,
             ...getNativeHomeQualityDiagnostics(row.items)
@@ -1520,13 +1537,7 @@ function getMatchingRowRule(
 }
 
 function hasUsableFeaturedPayload(payload: FeaturedPayload | null) {
-    return Boolean(
-        payload
-        && Array.isArray(payload.heroItems)
-        && payload.heroItems.length > 0
-        && getFeaturedSectionCount(payload) > 0
-        && getFeaturedPayloadItemCount(payload) > 0
-    );
+    return Boolean(payload && summarizeFeaturedContentPayload(payload).usableForDisplay);
 }
 
 function mergeSkippedRows(...groups: NativeHomeSkippedRow[][]) {
@@ -1803,10 +1814,20 @@ function finalizeNativeHomeRows(stage: string, rows: NativeHomeRow[]) {
     return rowsWithReasons.filter(row => !row.filteredReason);
 }
 
-function fetchRowsEndpointSettings(): Promise<PtvRowsEndpointSettings | null> {
+async function fetchRowsEndpointSettings(): Promise<PtvRowsEndpointSettings | null> {
+    const currentUser = await getPtvCurrentUser().catch(() => null);
+
+    if (!isPtvAdminUser(currentUser)) {
+        recordPtvEvent('row-fetch', 'native-home-rows-endpoint-skipped', {
+            reason: 'administrator-required'
+        });
+
+        return null;
+    }
+
     const pluginApi = getCurrentPtvPluginApiClient();
 
-    if (!pluginApi?.getRows) return Promise.resolve(null);
+    if (!pluginApi?.getRows) return null;
 
     const normalizeHomeSettings = (settings: unknown): PtvRowsEndpointSettings | null => {
         if (!isRecord(settings)) return null;
@@ -3372,11 +3393,39 @@ export function useNativeHomeData(): NativeHomeState {
     });
 
     useEffect(() => {
+        const generation = ++nativeHomeRouteGeneration;
         let disposed = false;
         let backgroundRefreshStartedAt: number | null = null;
         let cacheRowsForSupplemental: NativeHomeRow[] = [];
         let renderedFromCache = false;
         const startedAt = performance.now();
+        const recordTimeline = (
+            milestone: string,
+            source: string,
+            model: NativeHomeModelLike = {},
+            detail: Record<string, unknown> = {}
+        ) => {
+            const summary = summarizeNativeHomeModel(model);
+            const cacheStatus = getFeaturedContentCacheStatus();
+
+            recordPtvEvent('render', 'native-home-state-timeline', {
+                cacheFresh: cacheStatus.isFresh,
+                cachePayloadClassification: cacheStatus.payloadClassification,
+                cacheVersion: cacheStatus.cacheVersion,
+                completeness: summary.completeness,
+                emptySectionCount: summary.emptySectionCount,
+                generation,
+                heroItemCount: summary.heroCount,
+                milestone,
+                populatedSectionCount: summary.populatedSectionCount,
+                replacesPopulatedModel: Boolean(detail.replacesPopulatedModel),
+                rowItemCount: summary.totalRowItemCount,
+                sectionCount: summary.sectionCount,
+                source,
+                timestampMs: Math.round(performance.now() - startedAt),
+                ...detail
+            });
+        };
         const performanceProfile = getPtvPerformanceProfile();
         const skipNonCriticalBackgroundFetches = performanceProfile.isFireTv || performanceProfile.isLowPower;
         const markBackgroundRefreshStarted = (reason: string) => {
@@ -3441,6 +3490,7 @@ export function useNativeHomeData(): NativeHomeState {
         recordPtvEvent('render', 'home-route-entered', {
             route: window.location.hash || window.location.pathname
         });
+        recordTimeline('home-route-entered', 'route');
         recordPtvEvent('row-fetch', 'native-home-data-fetch-start', {
             route: window.location.hash || window.location.pathname
         });
@@ -3758,7 +3808,7 @@ export function useNativeHomeData(): NativeHomeState {
                 fallbackHeroCount: fallbackHeroItems.length,
                 finalHeroCount: heroItems.length,
                 preferredHeroCount: preferredHeroItems.length,
-                selectedHeroId: heroItem?.Id || null,
+                selectedHeroAvailable: Boolean(heroItem),
                 source: 'featured-cache'
             });
             recordPtvEvent('render', 'native-home-interactive', performanceDebug);
@@ -3794,6 +3844,12 @@ export function useNativeHomeData(): NativeHomeState {
             };
 
             rememberUsableNativeHomeState(nextState, 'featured-cache');
+            recordTimeline('home-cache-model-committed', 'plugin-file', nextState, {
+                adoptionReason: 'populated-cache-accepted',
+                adopted: true
+            });
+            if (heroItems.length) recordTimeline('first-hero-committed', 'plugin-file', nextState);
+            if (adaptiveCacheRows.length) recordTimeline('first-shelf-committed', 'plugin-file', nextState);
             setState(nextState);
             return true;
         };
@@ -3806,6 +3862,11 @@ export function useNativeHomeData(): NativeHomeState {
             () => getCachedFeaturedContentPayload({ allowStale: false }),
             null
         );
+        recordTimeline('memory-cache-read-started', 'memory-cache');
+        recordTimeline('browser-cache-read-skipped', 'browser-cache', {}, {
+            reason: 'browser-featured-cache-retired'
+        });
+        recordTimeline('plugin-cache-read-started', 'plugin-file');
         const rowSettingsPromise = createNativeRowFetch(
             'native-home-rows-endpoint',
             fetchRowsEndpointSettings,
@@ -3819,7 +3880,29 @@ export function useNativeHomeData(): NativeHomeState {
         );
 
         void featuredPayloadPromise
-            .then(featuredPayload => renderFromFeaturedCache(featuredPayload, null, { mode: 'cache-only' }))
+            .then(featuredPayload => {
+                const semanticSummary = summarizeFeaturedContentPayload(featuredPayload);
+                const cacheStatus = getFeaturedContentCacheStatus();
+
+                recordTimeline('plugin-cache-response-received', 'plugin-file', {
+                    completeness: semanticSummary.completeness,
+                    sectionCount: semanticSummary.sectionCount
+                }, {
+                    adoptionReason: cacheStatus.lastRejectionReason || cacheStatus.adoptionResult,
+                    heroItemCount: semanticSummary.heroCount,
+                    payloadClassification: semanticSummary.payloadClassification,
+                    populatedSectionCount: semanticSummary.populatedSectionCount,
+                    totalRowItemCount: semanticSummary.totalRowItemCount
+                });
+                recordTimeline(
+                    semanticSummary.usableForDisplay ? 'plugin-cache-adopted' : 'plugin-cache-rejected',
+                    'plugin-file',
+                    {},
+                    { reason: semanticSummary.reason }
+                );
+
+                return renderFromFeaturedCache(featuredPayload, null, { mode: 'cache-only' });
+            })
             .catch(() => undefined);
 
         void Promise.all([
@@ -3829,6 +3912,7 @@ export function useNativeHomeData(): NativeHomeState {
             .then(([featuredPayload, rowSettings]) => renderFromFeaturedCache(featuredPayload, rowSettings, { mode: 'settings-validated' }))
             .catch(() => undefined);
 
+        recordTimeline('live-jellyfin-requests-started', 'jellyfin-live');
         currentUserPromise
             .then(async user => {
                 if (!user?.Id) {
@@ -3936,9 +4020,17 @@ export function useNativeHomeData(): NativeHomeState {
                 );
                 const userRecommendationRows = await hydrateNativeHomeRecommendationItems(
                     createUserSpecificRecommendationRows(rowSettings),
-                    { source: 'recommendation-settings-background' }
+                    {
+                        shouldContinue: () => !disposed,
+                        source: 'recommendation-settings-background'
+                    }
                 );
                 const recommendationDebug = createUserSpecificRecommendationDebug(rowSettings, userRecommendationRows);
+                recordTimeline('recommendation-rows-received', 'recommendation-settings', {
+                    rows: userRecommendationRows
+                }, {
+                    recommendationRowCount: userRecommendationRows.length
+                });
 
                 return {
                     cacheUsedForHero: Boolean(featuredPayload?.heroItems?.length),
@@ -4111,7 +4203,7 @@ export function useNativeHomeData(): NativeHomeState {
                     fallbackHeroCount: fallbackHeroItems.length,
                     finalHeroCount: heroItems.length,
                     preferredHeroCount: preferredHeroItems.length,
-                    selectedHeroId: heroItem?.Id || null
+                    selectedHeroAvailable: Boolean(heroItem)
                 });
 
                 clearPtvShellStatus();
@@ -4144,8 +4236,35 @@ export function useNativeHomeData(): NativeHomeState {
                     user: payload.user
                 };
 
-                rememberUsableNativeHomeState(nextState, 'fresh-home');
-                setState(nextState);
+                setState(previous => {
+                    const decision = decideNativeHomeModelReplacement({
+                        current: previous,
+                        currentGeneration: generation,
+                        incoming: nextState,
+                        incomingGeneration: generation
+                    });
+
+                    recordTimeline('final-home-model-commit', 'jellyfin-live', nextState, {
+                        adoptionReason: decision.reason,
+                        adopted: decision.allow,
+                        replacesPopulatedModel: decision.replacesPopulatedModel
+                    });
+
+                    if (!decision.allow) {
+                        return {
+                            ...previous,
+                            error: null,
+                            isLoading: false,
+                            user: payload.user
+                        };
+                    }
+
+                    if (heroItems.length) recordTimeline('first-hero-committed', 'jellyfin-live', nextState);
+                    if (adaptiveRows.length) recordTimeline('first-shelf-committed', 'jellyfin-live', nextState);
+                    rememberUsableNativeHomeState(nextState, 'fresh-home');
+
+                    return nextState;
+                });
                 if (payload.shouldLoadSupplementalRows) {
                     scheduleSupplementalRows(payload.user, payload.rowSettings, payload.cachedRows);
                 }
@@ -4221,6 +4340,7 @@ export function useNativeHomeData(): NativeHomeState {
 
         return () => {
             disposed = true;
+            recordTimeline('home-route-retired', 'route');
             setPtvShellLoading(false);
         };
     }, []);

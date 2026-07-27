@@ -51,6 +51,7 @@ import {
     toggleNativeHomePinnedRow,
     type NativeHomeAdaptiveDebug
 } from './services/homeLayoutService';
+import { openNativeHomeDetails } from './nativeHomeDetailsNavigation';
 
 const POSTER_IMAGE_OPTIONS = {
     fillHeight: 480,
@@ -1708,6 +1709,7 @@ function NativeHomeHero({
         <section
             className='ptv-cinematic-hero ptv-cinematic-hero--home ptv-native-home-hero'
             aria-label='Featured PiggieTV title'
+            data-ptv-layout-node='home-hero'
             data-ptv-smart-hero-source={heroSource}
         >
             {backdropUrl ? (
@@ -1918,17 +1920,28 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
         recordNativeHomeImageAttempt(item, currentImageCandidate);
     }, [currentImageCandidate, item]);
 
-    const handleRouteClick = useCallback(() => {
+    const handleRouteClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
         if (!itemRoute) return;
 
         recordPtvItemRouteClick(item as Record<string, unknown>, itemRoute, {
             action: 'open-card',
             mediaType: row.mediaType,
+            privacySafeDiagnostics: itemRoute.routeSource === 'jellyfin-fallback',
             rowId: row.id,
             rowTitle: row.title,
             source: 'native-home-card'
         });
-    }, [item, itemRoute, row.id, row.mediaType, row.title]);
+
+        if (itemRoute.routeSource !== 'jellyfin-fallback' || !itemRoute.href.startsWith('#/details?')) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation?.();
+        void openNativeHomeDetails({
+            href: itemRoute.href,
+            mediaId: itemId
+        });
+    }, [item, itemId, itemRoute, row.id, row.mediaType, row.title]);
 
     const handlePlay = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
         if (!itemId || !isPlayableItem(item)) return;
@@ -2057,6 +2070,7 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
                     aria-label={`Open ${title}`}
                     className='ptv-native-card-link ptv-native-card-media-link'
                     data-ptv-focus-key={`home-card:${itemId}`}
+                    data-ptv-item-type={getItemString(item, 'Type', 'type')}
                     data-ptv-route-fallback-reason={itemRoute?.fallbackReason || ''}
                     data-ptv-route-source={itemRoute?.routeSource || ''}
                     href={href}
@@ -2377,6 +2391,7 @@ function NativeHomeRowScroller({ onActiveItemChange, row }: NativeHomeRowScrolle
             <div
                 ref={scrollerRef}
                 className='ptv-native-home-scroller'
+                data-ptv-layout-node='home-shelf-scroller'
                 onScroll={handleScroll}
                 role='list'
             >
@@ -2699,6 +2714,7 @@ function NativeHomeRowView({
         <section
             aria-label={row.title}
             className={`ptv-native-home-row ptv-native-home-row-${row.id}`}
+            data-ptv-layout-node='home-shelf'
             onBlurCapture={handleRowBlur}
             onFocusCapture={activateRowBackdrop}
             onMouseEnter={activateRowBackdrop}
@@ -3100,6 +3116,7 @@ function NativeHome() {
         >
             <main
                 className='ptv-native-home'
+                data-ptv-layout-node='home-root'
                 data-ptv-mounted-rows={mountedRowCount}
                 style={pageAccentStyle}
             >
@@ -3128,7 +3145,7 @@ function NativeHome() {
                                     <p>Loading PiggieTV Home</p>
                                 </section>
                             ) : (
-                                <div className='ptv-native-home-rows'>
+                                <div className='ptv-native-home-rows' data-ptv-layout-node='home-rows'>
                                     {canShowDebug ? (
                                         <>
                                             <NativeHomeIntelligenceDebugPanel

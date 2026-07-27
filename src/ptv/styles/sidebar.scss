@@ -290,6 +290,8 @@ body.ptv-sidebar-is-open .ptv-app-header-root > .mainDrawer {
     box-sizing: border-box;
     padding: 0 var(--ptv-sidebar-row-padding-x) !important;
     margin: 0 !important;
+    font-family: inherit;
+    text-align: left;
 }
 
 .ptv-sidebar-item-icon,

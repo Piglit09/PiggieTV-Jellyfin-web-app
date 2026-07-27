@@ -41,6 +41,18 @@ function uniquePtvMusicItems(items: PtvMusicItem[]) {
     });
 }
 
+export function buildPtvDistinctMusicRecommendationRow(
+    items: PtvMusicItem[],
+    excludedItems: PtvMusicItem[],
+    limit = 24
+) {
+    const excludedKeys = new Set(excludedItems.map(getMusicRecommendationItemKey));
+
+    return uniquePtvMusicItems(items)
+        .filter(item => !excludedKeys.has(getMusicRecommendationItemKey(item)))
+        .slice(0, limit);
+}
+
 function selectDiverseMusicRecommendationItems(
     entries: Array<{ item: PtvMusicItem; score: number }>,
     limit: number,

@@ -4,6 +4,18 @@ import {
     getPtvCurrentUserId,
     requestPtvJson
 } from './client';
+import {
+    executePtvItemDetailsApiBoundary,
+    PTV_ITEM_DETAILS_ROUTE_IDENTIFIER,
+    type PtvCoreItemDetails
+} from '../core/api/itemDetailsBoundary';
+import { type PtvCoreApiResponse } from '../core/api/apiContracts';
+import { type PtvCoreResult } from '../core/errors/coreError';
+import { recordPtvEvent } from '../core/observability';
+import {
+    coordinatePtvJsonRequest,
+    getPtvRequestCoordinatorKey
+} from '../services/requestCoordinator';
 import type {
     PtvApiQuery,
     PtvItem,
@@ -36,6 +48,82 @@ export type PtvItemsRequestDiagnostic = Readonly<{
     params: PtvApiQuery;
     userId: string;
 }>;
+
+type PtvItemDetailsExecution<TItem> = Readonly<{
+    legacyError?: unknown;
+    result: PtvCoreResult<PtvCoreApiResponse<PtvCoreItemDetails<TItem>>>;
+}>;
+
+let itemDetailsRequestSequence = 0;
+
+function createPtvItemDetailsRequestId() {
+    itemDetailsRequestSequence += 1;
+
+    return `ptv-item-details-${itemDetailsRequestSequence}`;
+}
+
+function recordPtvItemDetailsDiagnostic(detail: Record<string, unknown>) {
+    try {
+        recordPtvEvent('api', 'ptv-core-item-details-request', detail);
+    } catch {
+        // Existing API behavior must not depend on diagnostics.
+    }
+}
+
+function executePtvItemDetailsRequest<TItem>(
+    itemId: string,
+    options: {
+        serverId?: string | null;
+        userId?: string | null;
+    }
+): Promise<PtvItemDetailsExecution<TItem>> {
+    const userId = options.userId || getPtvCurrentUserId(options.serverId);
+    const apiClient = getPtvApiClient(options.serverId);
+    const requestId = createPtvItemDetailsRequestId();
+    const requestIdentity = [
+        PTV_ITEM_DETAILS_ROUTE_IDENTIFIER,
+        options.serverId || apiClient?.serverId?.() || '',
+        userId,
+        itemId
+    ].join(':');
+    const requestKey = getPtvRequestCoordinatorKey('GET', requestIdentity, true);
+
+    return coordinatePtvJsonRequest<PtvItemDetailsExecution<TItem>>(requestKey, async () => {
+        let legacyError: unknown;
+        const result = await executePtvItemDetailsApiBoundary<TItem>({
+            diagnostic: recordPtvItemDetailsDiagnostic,
+            requestId,
+            serverId: options.serverId || apiClient?.serverId?.() || undefined,
+            transport: async () => {
+                try {
+                    if (userId && typeof apiClient?.getItem === 'function') {
+                        return await apiClient.getItem<TItem>(userId, itemId);
+                    }
+
+                    return await requestPtvJson<TItem>(
+                        userId ? `Users/${userId}/Items/${itemId}` : `Items/${itemId}`,
+                        { serverId: options.serverId }
+                    );
+                } catch (error) {
+                    legacyError = error;
+                    throw error;
+                }
+            },
+            userId
+        });
+
+        return {
+            legacyError,
+            result
+        };
+    }, {
+        diagnosticKey: 'GET auth jellyfin:item-details',
+        endpoint: PTV_ITEM_DETAILS_ROUTE_IDENTIFIER,
+        includeAuthorization: true,
+        method: 'GET',
+        source: 'getPtvItem'
+    });
+}
 
 function emptyItemsResult<TItem = PtvItem>(): PtvItemsResult<TItem> {
     return {
@@ -73,7 +161,7 @@ export function normalizeJellyfinItemListResponse<TItem = PtvItem>(response: unk
         return {
             items: items as TItem[],
             rawItemCount: items.length,
-            responseKeys: Object.keys(record || {}).sort().slice(0, 20),
+            responseKeys: Object.keys(record || {}).sort((left, right) => left.localeCompare(right)).slice(0, 20),
             responseShape: 'wrapped-items',
             totalRecordCount: getPtvResponseTotalCount(record, items.length)
         };
@@ -82,7 +170,7 @@ export function normalizeJellyfinItemListResponse<TItem = PtvItem>(response: unk
     return {
         items: [],
         rawItemCount: 0,
-        responseKeys: record ? Object.keys(record).sort().slice(0, 20) : [],
+        responseKeys: record ? Object.keys(record).sort((left, right) => left.localeCompare(right)).slice(0, 20) : [],
         responseShape: 'invalid',
         totalRecordCount: 0
     };
@@ -111,16 +199,27 @@ export function getPtvItem<TItem = PtvItem>(
         userId?: string | null;
     } = {}
 ): Promise<TItem> {
-    const userId = options.userId || getPtvCurrentUserId(options.serverId);
-    const apiClient = getPtvApiClient(options.serverId);
+    return executePtvItemDetailsRequest<TItem>(itemId, options).then(execution => {
+        if (execution.result.success) return execution.result.value.value.item;
+        if (execution.legacyError !== undefined) throw execution.legacyError;
 
-    if (userId && typeof apiClient?.getItem === 'function') {
-        return apiClient.getItem<TItem>(userId, itemId);
-    }
-
-    return requestPtvJson<TItem>(userId ? `Users/${userId}/Items/${itemId}` : `Items/${itemId}`, {
-        serverId: options.serverId
+        const error = new Error(execution.result.error.message) as Error & {
+            coreError: typeof execution.result.error;
+        };
+        error.name = 'PtvApiError';
+        error.coreError = execution.result.error;
+        throw error;
     });
+}
+
+export function getPtvItemCoreResult<TItem = PtvItem>(
+    itemId: string,
+    options: {
+        serverId?: string | null;
+        userId?: string | null;
+    } = {}
+): Promise<PtvCoreResult<PtvCoreApiResponse<PtvCoreItemDetails<TItem>>>> {
+    return executePtvItemDetailsRequest<TItem>(itemId, options).then(execution => execution.result);
 }
 
 export function getPtvItems<TItem = PtvItem>(
@@ -132,7 +231,6 @@ export function getPtvItems<TItem = PtvItem>(
     } = {}
 ): Promise<PtvItemsResult<TItem>> {
     const userId = options.userId || getPtvCurrentUserId(options.serverId);
-    const apiClient = getPtvApiClient(options.serverId);
     const cleanedQuery = cleanPtvQuery(query);
 
     if (!userId) {
@@ -146,10 +244,6 @@ export function getPtvItems<TItem = PtvItem>(
         params: { ...(cleanedQuery || {}) },
         userId
     });
-
-    if (typeof apiClient?.getItems === 'function') {
-        return apiClient.getItems<TItem>(userId, cleanedQuery);
-    }
 
     return requestPtvJson<PtvItemsResult<TItem>>(endpoint, {
         params: cleanedQuery,
@@ -165,23 +259,16 @@ export function getPtvResumeItems<TItem = PtvItem>(
     } = {}
 ): Promise<PtvItemsResult<TItem>> {
     const userId = options.userId || getPtvCurrentUserId(options.serverId);
-    const apiClient = getPtvApiClient(options.serverId);
     const cleanedQuery = cleanPtvQuery(query);
 
     if (!userId) {
         return Promise.resolve(emptyItemsResult<TItem>());
     }
 
-    if (typeof apiClient?.getResumableItems === 'function') {
-        return apiClient.getResumableItems<TItem>(userId, cleanedQuery);
-    }
-
-    return getPtvItems<TItem>({
-        ...query,
-        Filters: query.Filters || 'IsResumable',
-        SortBy: query.SortBy || 'DatePlayed',
-        SortOrder: query.SortOrder || 'Descending'
-    }, options);
+    return requestPtvJson<PtvItemsResult<TItem>>(`Users/${userId}/Items/Resume`, {
+        params: cleanedQuery,
+        serverId: options.serverId
+    });
 }
 
 export function getPtvNextUp<TItem = PtvItem>(

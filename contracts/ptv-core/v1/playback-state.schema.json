@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v1/playback-state.schema.json",
+  "title": "PTV Playback State v1",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "status",
+    "positionMs",
+    "repeatMode",
+    "shuffled",
+    "completed",
+    "queue",
+    "queueIndex"
+  ],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "status": { "enum": ["idle", "loading", "playing", "paused", "buffering", "ended", "error"] },
+    "mediaId": { "type": "string", "minLength": 1 },
+    "mediaKind": { "enum": ["audio", "video"] },
+    "positionMs": { "type": "integer", "minimum": 0 },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "queue": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "queueIndex": { "type": "integer", "minimum": -1 },
+    "repeatMode": { "enum": ["off", "one", "all"] },
+    "shuffled": { "type": "boolean" },
+    "completed": { "type": "boolean" },
+    "audioTrackId": { "type": "string" },
+    "subtitleTrackId": { "type": "string" },
+    "error": {
+      "$ref": "https://piggietv.com/contracts/ptv-core/v1/core-error.schema.json"
+    }
+  },
+  "additionalProperties": true
+}

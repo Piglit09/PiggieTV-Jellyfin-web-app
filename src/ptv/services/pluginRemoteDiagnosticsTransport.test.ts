@@ -97,6 +97,36 @@ describe('plugin remote diagnostics capability gate', () => {
         });
     });
 
+    it('normalizes PascalCase Jellyfin lease commands at the transport boundary', async () => {
+        transportMocks.api!.getStatus.mockResolvedValue({ featureFlags: { remoteDiagnostics: true } });
+        transportMocks.api!.checkInRemoteDiagnostics.mockResolvedValue({
+            Disable: false,
+            Lease: {
+                DurationMs: 300_000,
+                Enabled: true,
+                ExpiresAt: 1_700_000_300_000,
+                IssuedAt: 1_700_000_000_000,
+                Profiles: ['webos'],
+                SessionId: 'session-pascal'
+            },
+            RequestSnapshot: true
+        });
+        startPtvPluginRemoteDiagnosticsTransport();
+
+        await expect(transportMocks.installedTransport!.checkIn({ clientId: 'client' })).resolves.toEqual({
+            disable: false,
+            lease: {
+                durationMs: 300_000,
+                enabled: true,
+                expiresAt: 1_700_000_300_000,
+                issuedAt: 1_700_000_000_000,
+                profiles: ['webos'],
+                sessionId: 'session-pascal'
+            },
+            requestSnapshot: true
+        });
+    });
+
     it('records sanitized check-in failure diagnostics without payload details', async () => {
         transportMocks.api!.getStatus.mockResolvedValue({ featureFlags: { remoteDiagnostics: true } });
         transportMocks.api!.checkInRemoteDiagnostics.mockRejectedValue({ status: 401, secret: 'private-token' });

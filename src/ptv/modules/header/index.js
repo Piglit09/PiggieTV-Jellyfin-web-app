@@ -7,7 +7,7 @@ import { appRouter } from '../../../components/router/appRouter';
 import { create } from '../../utils/dom';
 import { createIcon, iconNameFromText, runIconEngine } from '../../utils/icons';
 import { startPtvIconEngine } from '../icons';
-import { closeRequestPortal, openRequestPortal } from '../request';
+import { getPtvPlatformFeaturePolicy } from '../../core/platformFeatures';
 
 const HEADER_ICON_TARGET_SELECTOR = [
     '.ptv-skinHeader button',
@@ -111,8 +111,10 @@ function openRequestTab(event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
     event?.stopImmediatePropagation?.();
-    openRequestPortal();
-    dispatchPtvCustomEvent(PTV_EVENTS.requestOpen);
+    void import('../request').then(({ openRequestPortal }) => {
+        openRequestPortal();
+        dispatchPtvCustomEvent(PTV_EVENTS.requestOpen);
+    });
 }
 
 function openMusicTab() {
@@ -138,8 +140,10 @@ function openReadingTab() {
 function closeRequestForHomeTab() {
     if (!isRequestRoute()) return;
 
-    closeRequestPortal({
-        useHistory: false
+    void import('../request').then(({ closeRequestPortal }) => {
+        closeRequestPortal({
+            useHistory: false
+        });
     });
 }
 
@@ -317,7 +321,12 @@ function ensureOwnedTopTabs(header) {
         }
     });
 
-    TOP_TABS.forEach(tabConfig => {
+    const featurePolicy = getPtvPlatformFeaturePolicy();
+
+    TOP_TABS.filter(tabConfig => (
+        (tabConfig.id !== 'reading' || featurePolicy.reading)
+        && (tabConfig.id !== 'request' || featurePolicy.request)
+    )).forEach(tabConfig => {
         tabs.append(createOwnedTopTab(tabConfig));
     });
 

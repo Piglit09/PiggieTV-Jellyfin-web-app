@@ -90,8 +90,7 @@ const MUSIC_FIELDS = [
     'ProductionYear',
     'ProviderIds',
     'SortName',
-    'Tags',
-    'UserData'
+    'Tags'
 ].join(',');
 
 const MUSIC_HOME_CACHE_TTL_MS = 5 * 60 * 1000;

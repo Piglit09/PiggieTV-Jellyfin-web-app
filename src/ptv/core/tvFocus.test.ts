@@ -1,10 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../shell/routeController', () => ({
+    getPtvRouteControllerState: () => ({
+        owner: 'native',
+        pageType: 'test',
+        routeKey: 'test-route'
+    })
+}));
+
 import {
     findPtvTvDirectionalTarget,
     getPtvTvNavigationSnapshot,
+    normalizePtvRemoteDiagnosticAction,
     notifyPtvTvFocusContentReady,
     notifyPtvTvPlaybackFocus,
+    notifyPtvTvPlaybackSurfaceDisposed,
+    notifyPtvTvPlaybackSurfaceReady,
+    registerPtvTvPlaybackBackHandler,
     syncPtvTvFocusEngine
 } from './tvFocus';
 
@@ -43,6 +55,7 @@ function dispatchRemoteKey(target: EventTarget, key: string, keyCode = 0) {
 describe('PiggieTV TV focus engine', () => {
     beforeEach(() => {
         document.body.innerHTML = '';
+        window.location.hash = '#/home';
         syncPtvTvFocusEngine({ isTv: false });
     });
 
@@ -376,10 +389,22 @@ describe('PiggieTV TV focus engine', () => {
     });
 
     it('traps dialog navigation, wraps Tab, closes with Back, and restores the opener', () => {
+        const frameCallbacks: FrameRequestCallback[] = [];
         vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
-            callback(performance.now());
-            return 1;
+            frameCallbacks.push(callback);
+            return frameCallbacks.length;
         });
+        const flushFrames = () => {
+            let flushCount = 0;
+
+            while (frameCallbacks.length && flushCount < 20) {
+                const callbacks = frameCallbacks.splice(0);
+                callbacks.forEach(callback => {
+                    callback(performance.now());
+                });
+                flushCount += 1;
+            }
+        };
         const shell = document.createElement('main');
         const opener = document.createElement('button');
         const dialog = document.createElement('section');
@@ -393,6 +418,10 @@ describe('PiggieTV TV focus engine', () => {
         dialog.setAttribute('role', 'dialog');
         dialog.setAttribute('aria-modal', 'true');
         dialog.setAttribute('aria-labelledby', opener.id);
+        first.setAttribute('aria-label', 'First dialog action');
+        first.dataset.ptvFocusKey = 'dialog-first';
+        second.setAttribute('aria-label', 'Second dialog action');
+        second.dataset.ptvFocusKey = 'dialog-second';
         setRect(opener, 0, 0);
         setRect(first, 0, 100);
         setRect(second, 140, 100);
@@ -404,13 +433,17 @@ describe('PiggieTV TV focus engine', () => {
         opener.addEventListener('click', () => dialog.remove());
         document.body.append(dialog);
         notifyPtvTvFocusContentReady('dialog-open');
+        flushFrames();
 
         expect(document.activeElement).toBe(first);
         dispatchRemoteKey(document, 'ArrowRight');
         expect(document.activeElement).toBe(second);
+        flushFrames();
         dispatchRemoteKey(document, 'Tab');
         expect(document.activeElement).toBe(first);
+        flushFrames();
         dispatchRemoteKey(document, 'Unidentified', 461);
+        flushFrames();
         expect(dialog.isConnected).toBe(false);
         expect(document.activeElement).toBe(opener);
     });
@@ -484,6 +517,248 @@ describe('PiggieTV TV focus engine', () => {
         expect(document.activeElement).toBe(selectedPoster);
     });
 
+    it('activates one mini-player scope and keeps horizontal focus inside its controls', () => {
+        const shell = document.createElement('main');
+        const returnTarget = document.createElement('button');
+        const dock = document.createElement('aside');
+        const primary = document.createElement('button');
+        const next = document.createElement('button');
+        const player = document.createElement('button');
+        shell.className = 'ptv-shell-frame';
+        dock.className = 'ptv-media-dock';
+        dock.dataset.ptvPlaybackSurface = 'mini-player';
+        primary.dataset.ptvFocusKey = 'mini-player:primary';
+        primary.dataset.ptvInitialFocus = 'mini-player-primary';
+        next.dataset.ptvFocusKey = 'mini-player:next';
+        player.dataset.ptvFocusKey = 'mini-player:player';
+        setRect(returnTarget, 100, 300);
+        setRect(primary, 100, 100);
+        setRect(next, 240, 100);
+        setRect(player, 380, 100);
+        shell.append(returnTarget);
+        dock.append(primary, next, player);
+        document.body.append(shell, dock);
+        syncPtvTvFocusEngine({ isTv: true });
+        returnTarget.focus();
+
+        expect(notifyPtvTvPlaybackSurfaceReady(dock, 'mini-player')).toBe(true);
+        expect(document.activeElement).toBe(primary);
+
+        dispatchRemoteKey(primary, 'ArrowRight');
+        expect(document.activeElement).toBe(next);
+        dispatchRemoteKey(next, 'ArrowRight');
+        expect(document.activeElement).toBe(player);
+
+        notifyPtvTvPlaybackSurfaceDisposed(dock, 'mini-player');
+    });
+
+    it('gives full-screen music initial focus and owns one Back decision', () => {
+        const player = document.createElement('section');
+        const primary = document.createElement('button');
+        const downstreamBack = vi.fn();
+        const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+        player.className = 'ptv-music-now-playing-view ptv-music-fullscreen-player';
+        player.dataset.ptvPlaybackSurface = 'full-screen-player';
+        primary.dataset.ptvFocusKey = 'full-screen-player:primary';
+        primary.dataset.ptvInitialFocus = 'full-screen-player-primary';
+        setRect(primary, 100, 100);
+        player.append(primary);
+        document.body.append(player);
+        window.location.hash = '#/music/player';
+        syncPtvTvFocusEngine({ isTv: true });
+        document.addEventListener('keydown', downstreamBack);
+
+        expect(notifyPtvTvPlaybackSurfaceReady(player, 'full-screen-player')).toBe(true);
+        expect(document.activeElement).toBe(primary);
+        const event = dispatchRemoteKey(primary, 'Escape');
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(historyBack).toHaveBeenCalledTimes(1);
+        expect(downstreamBack).not.toHaveBeenCalled();
+
+        document.removeEventListener('keydown', downstreamBack);
+        notifyPtvTvPlaybackSurfaceDisposed(player, 'full-screen-player');
+    });
+
+    it('restores the mini-player Player control after closing full-screen music', () => {
+        const firstDock = document.createElement('aside');
+        const firstPrimary = document.createElement('button');
+        const firstPlayer = document.createElement('button');
+        firstDock.className = 'ptv-media-dock';
+        firstDock.dataset.ptvPlaybackSurface = 'mini-player';
+        firstPrimary.dataset.ptvFocusKey = 'mini-player:primary';
+        firstPrimary.dataset.ptvInitialFocus = 'mini-player-primary';
+        firstPlayer.dataset.ptvFocusKey = 'mini-player:player';
+        setRect(firstPrimary, 100, 100);
+        setRect(firstPlayer, 240, 100);
+        firstDock.append(firstPrimary, firstPlayer);
+        document.body.append(firstDock);
+        syncPtvTvFocusEngine({ isTv: true });
+        notifyPtvTvPlaybackSurfaceReady(firstDock, 'mini-player');
+        firstPlayer.focus();
+
+        window.dispatchEvent(new CustomEvent('ptv:routecontrollerchange', {
+            detail: { owner: 'music', pageType: 'music', routeKey: 'full-screen-route' }
+        }));
+        notifyPtvTvPlaybackSurfaceDisposed(firstDock, 'mini-player');
+        firstDock.remove();
+
+        const fullScreen = document.createElement('section');
+        const fullScreenPrimary = document.createElement('button');
+        fullScreen.className = 'ptv-music-fullscreen-player';
+        fullScreen.dataset.ptvPlaybackSurface = 'full-screen-player';
+        fullScreenPrimary.dataset.ptvInitialFocus = 'full-screen-player-primary';
+        setRect(fullScreenPrimary, 100, 100);
+        fullScreen.append(fullScreenPrimary);
+        document.body.append(fullScreen);
+        notifyPtvTvPlaybackSurfaceReady(fullScreen, 'full-screen-player');
+
+        window.dispatchEvent(new CustomEvent('ptv:routecontrollerchange', {
+            detail: { owner: 'native', pageType: 'test', routeKey: 'test-route' }
+        }));
+        notifyPtvTvPlaybackSurfaceDisposed(fullScreen, 'full-screen-player');
+        fullScreen.remove();
+
+        const restoredDock = document.createElement('aside');
+        const restoredPrimary = document.createElement('button');
+        const restoredPlayer = document.createElement('button');
+        restoredDock.className = 'ptv-media-dock';
+        restoredDock.dataset.ptvPlaybackSurface = 'mini-player';
+        restoredPrimary.dataset.ptvFocusKey = 'mini-player:primary';
+        restoredPrimary.dataset.ptvInitialFocus = 'mini-player-primary';
+        restoredPlayer.dataset.ptvFocusKey = 'mini-player:player';
+        setRect(restoredPrimary, 100, 100);
+        setRect(restoredPlayer, 240, 100);
+        restoredDock.append(restoredPrimary, restoredPlayer);
+        document.body.append(restoredDock);
+
+        expect(notifyPtvTvPlaybackSurfaceReady(restoredDock, 'mini-player')).toBe(true);
+        expect(document.activeElement).toBe(restoredPlayer);
+
+        notifyPtvTvPlaybackSurfaceDisposed(restoredDock, 'mini-player');
+    });
+
+    it('uses visible video controls as the only active scope and yields handled keys once', () => {
+        const page = document.createElement('section');
+        const controls = document.createElement('div');
+        const first = document.createElement('button');
+        const second = document.createElement('button');
+        const legacyListener = vi.fn();
+        page.id = 'videoOsdPage';
+        page.className = 'videoOsdPage';
+        controls.className = 'videoOsdBottom';
+        setRect(first, 100, 100);
+        setRect(second, 240, 100);
+        controls.append(first, second);
+        page.append(controls);
+        document.body.append(page);
+        document.documentElement.classList.add('ptv-player-osd-visible');
+        syncPtvTvFocusEngine({ isTv: true });
+        notifyPtvTvPlaybackFocus(true);
+        first.focus();
+        document.addEventListener('keydown', legacyListener);
+
+        const event = dispatchRemoteKey(first, 'ArrowRight');
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(second);
+        expect(legacyListener).toHaveBeenCalledTimes(1);
+        expect((legacyListener.mock.calls[0][0] as KeyboardEvent).defaultPrevented).toBe(true);
+        expect(getPtvTvNavigationSnapshot().focusGraphSummary.activeScope).toBe('player-controls');
+
+        document.removeEventListener('keydown', legacyListener);
+        document.documentElement.classList.remove('ptv-player-osd-visible');
+        notifyPtvTvPlaybackFocus(false);
+    });
+
+    it('leaves hidden video directional input to the established video controller', () => {
+        const page = document.createElement('section');
+        const first = document.createElement('button');
+        const second = document.createElement('button');
+        const legacyListener = vi.fn();
+        page.id = 'videoOsdPage';
+        setRect(first, 100, 100);
+        setRect(second, 240, 100);
+        page.append(first, second);
+        document.body.append(page);
+        syncPtvTvFocusEngine({ isTv: true });
+        notifyPtvTvPlaybackFocus(true);
+        first.focus();
+        document.addEventListener('keydown', legacyListener);
+
+        const event = dispatchRemoteKey(first, 'ArrowRight');
+
+        expect(event.defaultPrevented).toBe(false);
+        expect(document.activeElement).toBe(first);
+        expect(legacyListener).toHaveBeenCalledTimes(1);
+
+        document.removeEventListener('keydown', legacyListener);
+        notifyPtvTvPlaybackFocus(false);
+    });
+
+    it('closes visible video controls before exiting playback and stops later Back listeners', () => {
+        const page = document.createElement('section');
+        const controls = document.createElement('div');
+        const back = document.createElement('button');
+        const handler = vi.fn(() => true);
+        const downstreamBack = vi.fn();
+        const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+        page.id = 'videoOsdPage';
+        controls.className = 'videoOsdBottom';
+        setRect(back, 100, 100);
+        controls.append(back);
+        page.append(controls);
+        document.body.append(page);
+        document.documentElement.classList.add('ptv-player-osd-visible');
+        syncPtvTvFocusEngine({ isTv: true });
+        notifyPtvTvPlaybackFocus(true);
+        const unregister = registerPtvTvPlaybackBackHandler(handler);
+        back.focus();
+        document.addEventListener('keydown', downstreamBack);
+
+        const event = dispatchRemoteKey(back, 'Escape');
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(handler).toHaveBeenCalledWith('controls');
+        expect(historyBack).not.toHaveBeenCalled();
+        expect(downstreamBack).not.toHaveBeenCalled();
+
+        document.removeEventListener('keydown', downstreamBack);
+        unregister();
+        document.documentElement.classList.remove('ptv-player-osd-visible');
+        notifyPtvTvPlaybackFocus(false);
+    });
+
+    it('exits video through the registered Back owner only after controls are hidden', () => {
+        const page = document.createElement('section');
+        const surface = document.createElement('button');
+        const handler = vi.fn(() => true);
+        const downstreamBack = vi.fn();
+        const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+        page.id = 'videoOsdPage';
+        setRect(surface, 100, 100);
+        page.append(surface);
+        document.body.append(page);
+        syncPtvTvFocusEngine({ isTv: true });
+        notifyPtvTvPlaybackFocus(true);
+        const unregister = registerPtvTvPlaybackBackHandler(handler);
+        surface.focus();
+        document.addEventListener('keydown', downstreamBack);
+
+        const event = dispatchRemoteKey(surface, 'Escape');
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(handler).toHaveBeenCalledWith('video');
+        expect(historyBack).not.toHaveBeenCalled();
+        expect(downstreamBack).not.toHaveBeenCalled();
+
+        document.removeEventListener('keydown', downstreamBack);
+        unregister();
+        notifyPtvTvPlaybackFocus(false);
+    });
+
     it('reports focus history, graph edges, counts, and missing focus semantics', () => {
         const shell = document.createElement('main');
         const first = document.createElement('button');
@@ -547,5 +822,134 @@ describe('PiggieTV TV focus engine', () => {
         document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' }));
 
         expect(document.activeElement).toBe(first);
+    });
+
+    it('normalizes remote keys into privacy-safe action categories', () => {
+        expect(normalizePtvRemoteDiagnosticAction({ key: 'ArrowUp' })).toBe('up');
+        expect(normalizePtvRemoteDiagnosticAction({ key: 'Enter' })).toBe('enter');
+        expect(normalizePtvRemoteDiagnosticAction({ key: 'Unidentified', keyCode: 461 })).toBe('back');
+        expect(normalizePtvRemoteDiagnosticAction({ key: 'MediaPlayPause' })).toBe('play-pause');
+        expect(normalizePtvRemoteDiagnosticAction({ key: 'ColorF0Red' })).toBe('color-key');
+        expect(normalizePtvRemoteDiagnosticAction({ key: 'private-device-button-9384' })).toBe('unknown');
+    });
+
+    it('emits the ordered passive input pipeline and safe graph summary without changing movement', () => {
+        const shell = document.createElement('main');
+        const first = document.createElement('button');
+        const second = document.createElement('button');
+        const events: Array<{ detail: Record<string, unknown>; name: string }> = [];
+        const listener = (event: Event) => {
+            events.push((event as CustomEvent).detail);
+        };
+
+        shell.className = 'ptv-shell-frame';
+        first.id = 'private-dom-id';
+        first.textContent = 'Private media title';
+        first.dataset.ptvFocusKey = 'private-media-id';
+        second.dataset.ptvFocusKey = 'private-next-id';
+        setRect(first, 0, 0);
+        setRect(second, 140, 0);
+        shell.append(first, second);
+        document.body.append(shell);
+        window.addEventListener('ptv:focus-diagnostic', listener);
+        syncPtvTvFocusEngine({
+            isAndroidTv: true,
+            isFireTv: false,
+            isTv: true,
+            isWebOs: false,
+            tvDetectionReason: 'android-tv-user-agent'
+        });
+        first.focus();
+        dispatchRemoteKey(document, 'ArrowRight');
+
+        const pipeline = events
+            .filter(event => event.name === 'ptv-tv-input-pipeline')
+            .map(event => String(event.detail.inputStage));
+        const graph = getPtvTvNavigationSnapshot().focusGraphSummary;
+        const serializedGraph = JSON.stringify(graph);
+
+        expect(document.activeElement).toBe(second);
+        expect(pipeline).toEqual(expect.arrayContaining([
+            'browser-event-received',
+            'key-normalized',
+            'focus-handler-reached',
+            'target-search-started',
+            'target-found',
+            'focus-movement-requested',
+            'focus-event-observed',
+            'movement-confirmed',
+            'completed'
+        ]));
+        expect(pipeline.indexOf('browser-event-received')).toBeLessThan(pipeline.indexOf('movement-confirmed'));
+        expect(graph.generation).toBeGreaterThan(0);
+        expect(graph.candidateCountByCategory.button).toBe(2);
+        expect(graph.nearestCandidateFingerprints.left).toMatch(/^focus-[a-z0-9]+$/);
+        expect(serializedGraph).not.toContain('private-dom-id');
+        expect(serializedGraph).not.toContain('Private media title');
+        expect(serializedGraph).not.toContain('private-media-id');
+        window.removeEventListener('ptv:focus-diagnostic', listener);
+    });
+
+    it('localizes a missing directional target and prevents duplicate listener installation', () => {
+        const shell = document.createElement('main');
+        const only = document.createElement('button');
+        const events: Array<{ detail: Record<string, unknown>; name: string }> = [];
+        const listener = (event: Event) => {
+            events.push((event as CustomEvent).detail);
+        };
+
+        shell.className = 'ptv-shell-frame';
+        setRect(only, 0, 0);
+        shell.append(only);
+        document.body.append(shell);
+        window.addEventListener('ptv:focus-diagnostic', listener);
+        syncPtvTvFocusEngine({ isTv: true });
+        const initialized = getPtvTvNavigationSnapshot();
+
+        syncPtvTvFocusEngine({ isTv: true });
+        only.focus();
+        dispatchRemoteKey(document, 'ArrowRight');
+        const after = getPtvTvNavigationSnapshot();
+        const rejected = events.find(event => (
+            event.name === 'ptv-tv-input-pipeline'
+            && event.detail.inputStage === 'target-rejected'
+        ));
+
+        expect(rejected?.detail.failureReason).toBe('no-directional-target');
+        expect(after.focusEngineListenerInstallCount).toBe(initialized.focusEngineListenerInstallCount);
+        expect(after.focusEngineDuplicateListenerCount).toBe(0);
+        window.removeEventListener('ptv:focus-diagnostic', listener);
+    });
+
+    it('reports a browser focus confirmation timeout without repairing focus', () => {
+        vi.useFakeTimers();
+        const shell = document.createElement('main');
+        const first = document.createElement('button');
+        const second = document.createElement('button');
+        const events: Array<{ detail: Record<string, unknown>; name: string }> = [];
+        const listener = (event: Event) => {
+            events.push((event as CustomEvent).detail);
+        };
+
+        shell.className = 'ptv-shell-frame';
+        setRect(first, 0, 0);
+        setRect(second, 140, 0);
+        second.focus = vi.fn();
+        shell.append(first, second);
+        document.body.append(shell);
+        window.addEventListener('ptv:focus-diagnostic', listener);
+        syncPtvTvFocusEngine({ isTv: true });
+        first.focus();
+        dispatchRemoteKey(document, 'ArrowRight');
+        vi.advanceTimersByTime(200);
+
+        expect(document.activeElement).toBe(first);
+        expect(events.some(event => (
+            event.name === 'ptv-tv-input-pipeline'
+            && event.detail.inputStage === 'movement-timed-out'
+            && event.detail.failureReason === 'browser-focus-confirmation-timeout'
+        ))).toBe(true);
+        window.removeEventListener('ptv:focus-diagnostic', listener);
+        vi.useRealTimers();
     });
 });

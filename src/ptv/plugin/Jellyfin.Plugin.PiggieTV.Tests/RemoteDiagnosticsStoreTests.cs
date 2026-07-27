@@ -103,6 +103,7 @@ public sealed class RemoteDiagnosticsStoreTests
         {
             Heartbeat = true,
             NetworkTiming = true,
+            PhysicalLayoutSnapshot = true,
             PlaybackTelemetry = true,
             RemoteCommands = true,
             ReportExport = true
@@ -120,6 +121,7 @@ public sealed class RemoteDiagnosticsStoreTests
         Assert.True(client.NativeRuntime);
         Assert.True(client.Capabilities.RemoteCommands);
         Assert.True(client.Capabilities.ReportExport);
+        Assert.True(client.Capabilities.PhysicalLayoutSnapshot);
         Assert.DoesNotContain("oldname_dup", client.DisplayName, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(now, client.FirstSeenUtc);
     }
@@ -259,6 +261,7 @@ public sealed class RemoteDiagnosticsStoreTests
         Capabilities = new PtvRemoteDiagnosticsClientCapabilities
         {
             Heartbeat = true,
+            PhysicalLayoutSnapshot = true,
             RemoteCommands = true,
             ReportExport = true
         },

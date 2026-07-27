@@ -8,6 +8,7 @@ import { loadReaderProgress } from '../reader/readerProgressStore';
 import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
 import { getPtvItemImageCandidates } from '../../api';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
+import { getCoordinatedLegacyItemDetail } from '../../services/coordinatedLegacyItemDetail';
 import {
     getPtvDetailsShellSection,
     mountPtvDetailsShell,
@@ -461,7 +462,7 @@ function enhanceDetailItem(page, renderedItem) {
 
     page.dataset.ptvDetailsPendingItemId = id;
 
-    apiClient.getItem(apiClient.getCurrentUserId(), id)
+    getCoordinatedLegacyItemDetail(apiClient, id)
         .then(item => {
             if (!isCurrentDetailItem(page, id)) return;
 

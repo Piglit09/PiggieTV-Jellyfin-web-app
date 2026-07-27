@@ -1,0 +1,1168 @@
+/* eslint-disable @stylistic/operator-linebreak, array-callback-return, compat/compat, curly, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-alphabetical-sort, sonarjs/no-nested-conditional -- Collector mapping favors explicit, privacy-safe state classification and guarded legacy-browser fallbacks. */
+import { getCurrentPtvApiClient, getPtvCurrentUserId } from '../../api/client';
+import { getPtvBuildInfo } from '../../core/buildInfo';
+import { getPtvWebCapabilityReport } from '../../core/capabilities/webCapabilityAdapter';
+import { getPtvClientProfile } from '../../core/clientProfile';
+import {
+    createPtvDiagnosticHealth,
+    getPtvDiagnosticPercentile,
+    type PtvFocusGraphDiagnostic,
+    type PtvFocusElementCategory,
+    type PtvFocusScopeCategory,
+    type PtvFocusVisibilityDiagnostic,
+    type PtvImageRole,
+    type PtvInputDiagnostic,
+    type PtvRemoteInputSource,
+    type PtvRemoteInputStage,
+    type PtvSafeRemoteAction
+} from '../../core/diagnostics/diagnosticContracts';
+import type { PtvCoreInitializationEvent } from '../../core/initialization/coreInitialization';
+import {
+    subscribePtvObservability,
+    type PtvObservabilityEvent
+} from '../../core/observability';
+import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
+import {
+    classifyPtvTvFocusElement,
+    classifyPtvTvFocusScope,
+    getPtvSafeFocusFingerprint,
+    subscribePtvTvNavigation,
+    type PtvTvNavigationSnapshot
+} from '../../core/tvFocus';
+import {
+    FEATURED_CACHE_UPDATED_EVENT,
+    getFeaturedContentCacheStatus
+} from '../../modules/cache/featuredContentCache';
+import {
+    getPtvDiagnosticPreferences,
+    subscribePtvDiagnosticPreferences
+} from './diagnosticPreferences';
+import {
+    getPtvDiagnosticStore,
+    normalizePtvDiagnosticRouteFamily
+} from './diagnosticStore';
+
+type DisposableCollector = {
+    dispose: () => void;
+    refreshExternalStatus: () => Promise<void>;
+};
+
+type RouteControllerDetail = {
+    full?: string;
+    hash?: string;
+    normalizedPath?: string;
+    path?: string;
+    routeId?: string;
+};
+
+const FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[role="button"]:not([aria-disabled="true"])',
+    '[role="link"]:not([aria-disabled="true"])',
+    '[role="menuitem"]:not([aria-disabled="true"])',
+    '[tabindex]:not([tabindex="-1"])',
+    '[data-ptv-focusable="true"]'
+].join(',');
+
+let platform: DisposableCollector | null = null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function numberField(detail: unknown, names: string[], fallback = 0) {
+    if (!isRecord(detail)) return fallback;
+
+    for (const name of names) {
+        const value = Number(detail[name]);
+
+        if (Number.isFinite(value)) return value;
+    }
+
+    return fallback;
+}
+
+function booleanField(detail: unknown, name: string) {
+    return isRecord(detail) && detail[name] === true;
+}
+
+function safeEnum(value: unknown, allowed: readonly string[], fallback: string) {
+    const normalized = typeof value === 'string' ? value.toLowerCase().trim() : '';
+
+    return allowed.includes(normalized) ? normalized : fallback;
+}
+
+function safeVersion(value: unknown) {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+
+    return /^v?\d+(?:\.\d+){1,4}(?:[-+][0-9a-z.-]+)?$/i.test(normalized) ? normalized : 'unknown';
+}
+
+function safeHash(value: string) {
+    let hash = 5381;
+
+    for (let index = 0; index < value.length; index += 1) {
+        hash = (Math.imul(hash, 33) ^ value.charCodeAt(index)) >>> 0;
+    }
+
+    return `element-${hash.toString(36)}`;
+}
+
+export function classifyPtvDiagnosticFocusElement(
+    element: Element | null
+): PtvFocusElementCategory {
+    return classifyPtvTvFocusElement(element);
+}
+
+function getFocusFingerprint(element: Element | null) {
+    return getPtvSafeFocusFingerprint(element);
+}
+
+function classifyImageRole(element: HTMLImageElement): PtvImageRole {
+    const value = [
+        element.dataset.imageType,
+        element.getAttribute('fetchpriority'),
+        element.className
+    ].join(' ').toLowerCase();
+
+    if (/backdrop|background|hero/.test(value)) return 'backdrop';
+    if (/logo/.test(value)) return 'logo';
+    if (/avatar|profile/.test(value)) return 'avatar';
+    if (/thumb/.test(value)) return 'thumbnail';
+    if (/poster|card|cover/.test(value)) return 'poster';
+
+    return 'unknown';
+}
+
+function currentRouteFamily() {
+    return normalizePtvDiagnosticRouteFamily(window.location.hash || window.location.pathname);
+}
+
+export function isPtvDiagnosticFocusVisible(element: Element | null) {
+    if (!(element instanceof HTMLElement) || !element.isConnected) return false;
+
+    const rect = element.getBoundingClientRect();
+    const width = window.innerWidth || document.documentElement.clientWidth || 0;
+    const height = window.innerHeight || document.documentElement.clientHeight || 0;
+
+    return rect.width > 0
+        && rect.height > 0
+        && rect.right >= 0
+        && rect.bottom >= 0
+        && rect.left <= width
+        && rect.top <= height;
+}
+
+function getFocusDiagnostic(snapshot: PtvTvNavigationSnapshot) {
+    const profile = getPtvClientProfile();
+    const activeElement = document.activeElement;
+    const status = !profile.isTv ? 'unsupported' : snapshot.focusManagerReady
+        ? snapshot.focusTargetCount > 0 ? 'healthy' : 'degraded'
+        : 'failing';
+    const reason = !profile.isTv
+        ? 'TV focus diagnostics are unsupported for the active non-TV profile.'
+        : snapshot.focusManagerReady
+            ? snapshot.focusTargetCount > 0
+                ? 'The TV focus engine is active with eligible candidates.'
+                : 'The TV focus engine is active, but no focus candidates were found.'
+            : 'The TV focus engine has not initialized.';
+
+    return {
+        candidateCount: snapshot.focusTargetCount,
+        currentCandidatePresent: snapshot.focusGraphSummary.currentCandidatePresent,
+        currentCategory: classifyPtvDiagnosticFocusElement(activeElement),
+        currentFingerprint: getFocusFingerprint(activeElement),
+        currentRoute: currentRouteFamily(),
+        currentScope: snapshot.focusGraphSummary.activeScope,
+        currentVisible: isPtvDiagnosticFocusVisible(activeElement),
+        disabledReason: profile.isTv ? snapshot.focusManagerReady ? '' : 'not-initialized' : 'non-tv-profile',
+        disposalCount: snapshot.focusEngineDisposalCount,
+        duplicateListenerCount: snapshot.focusEngineDuplicateListenerCount,
+        engineEnabled: profile.isTv && snapshot.focusManagerReady,
+        engineRequested: snapshot.focusEngineRequested,
+        enableReason: snapshot.focusEngineEnableReason,
+        graphRebuildCount: snapshot.focusGraphRebuildCount,
+        health: createPtvDiagnosticHealth(status, reason, {
+            collectorAvailable: profile.isTv,
+            metrics: {
+                candidates: snapshot.focusTargetCount,
+                navigationMoves: snapshot.navigationMoves
+            }
+        }),
+        initializationCount: snapshot.focusEngineInitializationCount,
+        initializationReason: profile.isTv ? profile.tvDetectionReason : 'non-tv-profile',
+        isTv: profile.isTv,
+        lastRebuildReason: snapshot.focusGraphSummary.lastRebuildReason,
+        listenerInstallCount: snapshot.focusEngineListenerInstallCount
+    } as const;
+}
+
+const SAFE_INPUT_STAGES: readonly PtvRemoteInputStage[] = [
+    'browser-event-received',
+    'event-classified',
+    'key-normalized',
+    'platform-mapping-applied',
+    'action-resolved',
+    'focus-handler-reached',
+    'handler-rejected',
+    'current-candidate-resolved',
+    'target-search-started',
+    'target-found',
+    'target-rejected',
+    'focus-movement-requested',
+    'focus-event-observed',
+    'movement-confirmed',
+    'movement-timed-out',
+    'completed'
+];
+const SAFE_INPUT_ACTIONS: readonly PtvSafeRemoteAction[] = [
+    'up', 'down', 'left', 'right', 'enter', 'back', 'play-pause', 'menu', 'color-key', 'unknown'
+];
+const SAFE_INPUT_SOURCES: readonly PtvRemoteInputSource[] = [
+    'keyboard', 'webos-remote', 'android-tv-profile', 'fire-tv-profile', 'synthetic-test'
+];
+const SAFE_FOCUS_CATEGORIES: readonly PtvFocusElementCategory[] = [
+    'nav-item', 'media-card', 'hero-action', 'button', 'menu-item', 'dialog-control', 'player-control', 'unknown'
+];
+const SAFE_SCOPE_CATEGORIES: readonly PtvFocusScopeCategory[] = [
+    'main-content', 'navigation', 'dropdown-menu', 'context-menu', 'modal-dialog',
+    'settings-panel', 'player-controls', 'full-screen-music-player', 'unknown'
+];
+const SAFE_DIAGNOSTIC_REASONS = new Set([
+    'none',
+    'unknown',
+    'focus-observed',
+    'focus-lost',
+    'focus-graph-refresh',
+    'manager-start',
+    'startup-ready',
+    'content-ready',
+    'runtime-content-ready',
+    'dynamic-content',
+    'dom-mutation',
+    'route-change',
+    'scope-changed',
+    'visibility-resume',
+    'pageshow',
+    'playback-start',
+    'playback-stop',
+    'back-navigation',
+    'route-owned-by-jellyfin',
+    'duplicate-suppressed-by-existing-owner',
+    'default-prevented-before-focus-owner',
+    'modified-key',
+    'reader-owned-key',
+    'no-current-focus',
+    'current-outside-active-scope',
+    'current-not-in-focus-graph',
+    'direction-unresolved',
+    'no-directional-target',
+    'browser-focus-confirmation-timeout',
+    'focus-apply-failed'
+]);
+
+function safeFocusCategory(value: unknown): PtvFocusElementCategory {
+    return safeEnum(value, SAFE_FOCUS_CATEGORIES, 'unknown') as PtvFocusElementCategory;
+}
+
+function safeScopeCategory(value: unknown): PtvFocusScopeCategory {
+    return safeEnum(value, SAFE_SCOPE_CATEGORIES, 'unknown') as PtvFocusScopeCategory;
+}
+
+function safeFingerprint(value: unknown) {
+    const normalized = typeof value === 'string' ? value : '';
+
+    return /^(?:focus|element)-[a-z0-9]+$/.test(normalized) ? normalized : 'none';
+}
+
+function safeDiagnosticReason(value: unknown, fallback = 'none') {
+    const normalized = typeof value === 'string'
+        ? value.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').slice(0, 80)
+        : '';
+
+    return SAFE_DIAGNOSTIC_REASONS.has(normalized) ? normalized : fallback;
+}
+
+function getPendingRenderCounts(snapshot: ReturnType<ReturnType<typeof getPtvDiagnosticStore>['getSnapshot']>) {
+    const pendingImages = Math.max(
+        0,
+        snapshot.images.filter(image => image.status === 'requested').length
+        - snapshot.images.filter(image => image.status === 'loaded' || image.status === 'errored').length
+    );
+    const pendingShelves = Math.max(
+        0,
+        snapshot.shelves.filter(shelf => shelf.status === 'request-started').length
+        - snapshot.shelves.filter(shelf => ['disposed', 'empty', 'failed', 'settled'].includes(shelf.status)).length
+    );
+
+    return { pendingImages, pendingShelves };
+}
+
+function classifyInputDelay(
+    stage: PtvRemoteInputStage,
+    failureReason: string,
+    elapsedMs: number,
+    frameP95Ms: number,
+    routeSettled: boolean
+): PtvInputDiagnostic['delayClassification'] {
+    if (/target|candidate|graph/.test(failureReason) || stage === 'target-rejected') return 'target-search';
+    if (/focus-confirmation|focus-apply/.test(failureReason) || stage === 'movement-timed-out') return 'browser-focus-application';
+    if (!routeSettled) return 'route-instability';
+    if (frameP95Ms > 50 && elapsedMs > 32) return 'render-frame-delay';
+    if (elapsedMs > 32) return 'input-handling';
+
+    return 'unknown';
+}
+
+function getFocusObscuredBy(element: Element | null): PtvFocusVisibilityDiagnostic['obscuredBy'] {
+    if (!(element instanceof HTMLElement) || !element.isConnected || !isPtvDiagnosticFocusVisible(element)) return 'unknown';
+    if (typeof document.elementsFromPoint !== 'function') return 'unobscured';
+
+    const rect = element.getBoundingClientRect();
+    const atCenter = document.elementsFromPoint(
+        Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2)),
+        Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2))
+    );
+    const covering = atCenter.find(candidate => candidate !== element && !element.contains(candidate));
+
+    if (!covering) return 'unobscured';
+    if (covering.closest('[role="dialog"], dialog, [aria-modal="true"]')) return 'modal';
+    if (covering.closest('#videoOsdPage, .videoOsdPage, .ptv-player-chrome-root')) return 'player';
+    if (covering.closest('.ptv-diagnostics-overlay, .ptv-performance-overlay')) return 'overlay';
+    if (covering.closest('header, .skinHeader, .ptv-header')) return 'fixed-header';
+
+    return 'unknown';
+}
+
+export function bridgePtvFocusDiagnosticEvent(event: Event) {
+    const payload = (event as CustomEvent<{ detail?: unknown; name?: string }>).detail;
+    const detail = isRecord(payload?.detail) ? payload.detail : {};
+    const name = payload?.name || 'unknown';
+    const store = getPtvDiagnosticStore();
+    const snapshot = store.getSnapshot();
+    const routeFamily = normalizePtvDiagnosticRouteFamily(String(detail.route || window.location.hash));
+    const occurredAt = new Date().toISOString();
+
+    if (name === 'ptv-tv-input-pipeline') {
+        const stage = safeEnum(detail.inputStage, SAFE_INPUT_STAGES, 'completed') as PtvRemoteInputStage;
+        const safeAction = safeEnum(detail.keyCategory, SAFE_INPUT_ACTIONS, 'unknown') as PtvSafeRemoteAction;
+        const source = safeEnum(detail.inputSource, SAFE_INPUT_SOURCES, 'keyboard') as PtvRemoteInputSource;
+        const failureReason = safeDiagnosticReason(detail.failureReason);
+        const elapsedMs = Math.max(0, numberField(detail, ['elapsedMs']));
+        const frameP95Ms = snapshot.frames.at(-1)?.p95FrameMs || 0;
+        const routeSettled = snapshot.routes.at(-1)?.status === 'settled';
+        const { pendingImages, pendingShelves } = getPendingRenderCounts(snapshot);
+        const movementAttempted = booleanField(detail, 'movementAttempted')
+            || ['focus-movement-requested', 'focus-event-observed', 'movement-confirmed', 'movement-timed-out'].includes(stage);
+        const movementSucceeded = stage === 'movement-confirmed' || booleanField(detail, 'movementConfirmed');
+        const movementResult = stage === 'movement-confirmed' ? 'confirmed'
+            : stage === 'movement-timed-out' ? 'timed-out'
+                : stage === 'target-rejected' ? 'failed'
+                    : movementAttempted ? 'pending'
+                        : safeAction === 'enter' || safeAction === 'back' ? 'not-applicable'
+                            : 'not-attempted';
+
+        store.recordInput({
+            activeRequests: store.getRequestSummary().active,
+            currentCandidateResolved: booleanField(detail, 'currentCandidateResolved'),
+            defaultPreventedAfter: booleanField(detail, 'defaultPreventedAfter'),
+            defaultPreventedBefore: booleanField(detail, 'defaultPreventedBefore'),
+            delayClassification: classifyInputDelay(stage, failureReason, elapsedMs, frameP95Ms, routeSettled),
+            direction: ['up', 'down', 'left', 'right'].includes(safeAction)
+                ? safeAction as 'down' | 'left' | 'right' | 'up' : 'unknown',
+            elapsedMs,
+            eventPhase: safeEnum(detail.eventPhase, ['capture', 'target'], 'unknown') as 'capture' | 'target' | 'unknown',
+            eventType: safeEnum(detail.eventType, ['keydown', 'keyup'], 'keydown') as 'keydown' | 'keyup',
+            failureReason,
+            frameP95Ms,
+            handlerReached: booleanField(detail, 'handlerReached'),
+            inputId: /^remote-input-\d+$/.test(String(detail.inputId || ''))
+                ? String(detail.inputId) : `remote-input-${safeHash(String(detail.inputId || occurredAt))}`,
+            movementAttempted,
+            movementResult,
+            movementSucceeded,
+            nextFocusFingerprint: safeFingerprint(detail.focusedFingerprint || detail.targetFingerprint),
+            occurredAt,
+            pendingImages,
+            pendingShelves,
+            previousFocusFingerprint: getFocusFingerprint(document.activeElement),
+            propagationStopped: booleanField(detail, 'propagationStopped'),
+            repeat: booleanField(detail, 'repeat'),
+            repeatCount: Math.max(0, numberField(detail, ['repeatCount'])),
+            routeFamily,
+            routeSettled,
+            safeAction,
+            source,
+            stage,
+            stageSequence: Math.max(0, numberField(detail, ['stageSequence'])),
+            targetCandidateFound: booleanField(detail, 'targetFound') || stage === 'target-found' || movementSucceeded,
+            targetCategory: safeFocusCategory(detail.targetCategory || detail.focusedCategory)
+        });
+        if (movementSucceeded && ['up', 'down', 'left', 'right'].includes(safeAction)) {
+            store.markRouteFocusPhase('first-directional-movement');
+        }
+        return;
+    }
+
+    if (name === 'ptv-tv-focus-graph' && isRecord(detail.graphSummary)) {
+        const graph = detail.graphSummary;
+        const categoryCounts = isRecord(graph.candidateCountByCategory) ? graph.candidateCountByCategory : {};
+        const nearest = isRecord(graph.nearestCandidateCategories) ? graph.nearestCandidateCategories : {};
+        const nearestFingerprints = isRecord(graph.nearestCandidateFingerprints)
+            ? graph.nearestCandidateFingerprints
+            : {};
+        const rejected = isRecord(graph.rejectedByReason) ? graph.rejectedByReason : {};
+        const graphDiagnostic: PtvFocusGraphDiagnostic = {
+            activeScope: safeScopeCategory(graph.activeScope),
+            buildDurationMs: Math.max(0, numberField(graph, ['buildDurationMs'])),
+            candidateCountByCategory: Object.fromEntries(SAFE_FOCUS_CATEGORIES.map(category => [
+                category,
+                Math.max(0, numberField(categoryCounts, [category]))
+            ])) as Record<PtvFocusElementCategory, number>,
+            containerCount: Math.max(0, numberField(graph, ['containerCount'])),
+            currentCandidatePresent: booleanField(graph, 'currentCandidatePresent'),
+            currentRegion: safeEnum(
+                graph.currentRegion,
+                ['above', 'below', 'left', 'right', 'overlapping', 'offscreen', 'unknown'],
+                'unknown'
+            ) as PtvFocusGraphDiagnostic['currentRegion'],
+            enabledCount: Math.max(0, numberField(graph, ['enabledCount'])),
+            generatedAt: occurredAt,
+            generation: Math.max(0, numberField(graph, ['generation'])),
+            lastRebuildReason: safeDiagnosticReason(graph.lastRebuildReason, 'focus-graph-refresh'),
+            nearestCandidateCategories: {
+                down: safeFocusCategory(nearest.down),
+                left: safeFocusCategory(nearest.left),
+                right: safeFocusCategory(nearest.right),
+                up: safeFocusCategory(nearest.up)
+            },
+            nearestCandidateFingerprints: {
+                down: safeFingerprint(nearestFingerprints.down),
+                left: safeFingerprint(nearestFingerprints.left),
+                right: safeFingerprint(nearestFingerprints.right),
+                up: safeFingerprint(nearestFingerprints.up)
+            },
+            offscreenCount: Math.max(0, numberField(graph, ['offscreenCount'])),
+            rejectedByReason: {
+                blockedByModal: Math.max(0, numberField(rejected, ['blockedByModal'])),
+                detached: Math.max(0, numberField(rejected, ['detached'])),
+                disabled: Math.max(0, numberField(rejected, ['disabled'])),
+                hidden: Math.max(0, numberField(rejected, ['hidden'])),
+                outsideActiveScope: Math.max(0, numberField(rejected, ['outsideActiveScope'])),
+                zeroSize: Math.max(0, numberField(rejected, ['zeroSize']))
+            },
+            routeFamily,
+            totalCandidateCount: Math.max(0, numberField(graph, ['totalCandidateCount'])),
+            visibleCount: Math.max(0, numberField(graph, ['visibleCount']))
+        };
+
+        store.recordFocusGraph(graphDiagnostic);
+        store.markRouteFocusPhase('focus-graph-ready');
+        return;
+    }
+
+    if (name === 'ptv-tv-focus-change') {
+        const category = safeFocusCategory(detail.category);
+        const visible = booleanField(detail, 'visible');
+
+        store.recordFocusChange({
+            candidatePresent: booleanField(detail, 'candidatePresent'),
+            category,
+            fingerprint: safeFingerprint(detail.fingerprint),
+            inputId: /^remote-input-\d+$/.test(String(detail.inputId || '')) ? String(detail.inputId) : '',
+            occurredAt,
+            previousCategory: safeFocusCategory(detail.previousCategory),
+            reason: safeDiagnosticReason(detail.reason, 'focus-observed'),
+            routeFamily,
+            scope: safeScopeCategory(detail.scope),
+            visible
+        });
+        store.recordFocusVisibility({
+            detachedDuringAnimation: false,
+            focusMovedBeforeScrollSettled: false,
+            focusToVisibleDurationMs: visible ? 0 : null,
+            focusedCategory: category,
+            inputId: /^remote-input-\d+$/.test(String(detail.inputId || '')) ? String(detail.inputId) : '',
+            obscuredBy: getFocusObscuredBy(document.activeElement),
+            occurredAt,
+            routeFamily,
+            scrollContainer: safeScopeCategory(detail.scope),
+            status: 'focus-observed',
+            visible,
+            virtualizedNodeReplaced: false
+        });
+        store.markRouteFocusPhase('initial-focus');
+        return;
+    }
+
+    if (name === 'ptv-tv-focus-scope') {
+        store.recordFocusScope({
+            candidateCount: Math.max(0, numberField(detail, ['candidateCount'])),
+            initialFocusedCategory: safeFocusCategory(detail.initialFocusedCategory),
+            leakedFocusOutsideScope: booleanField(detail, 'leakedFocusOutsideScope'),
+            occurredAt,
+            orphanedAfterRouteChange: booleanField(detail, 'orphanedAfterRouteChange'),
+            previousFocusRestored: typeof detail.previousFocusRestored === 'boolean'
+                ? detail.previousFocusRestored : null,
+            routeFamily,
+            scope: safeScopeCategory(detail.scope),
+            status: safeEnum(
+                detail.scopeStatus,
+                ['opened', 'activated', 'back-or-close', 'closed', 'orphaned'],
+                'activated'
+            ) as 'activated' | 'back-or-close' | 'closed' | 'opened' | 'orphaned',
+            trapActive: booleanField(detail, 'trapActive')
+        });
+        return;
+    }
+
+    if (name === 'ptv-tv-focus-lost') {
+        store.markRouteFocusPhase('focus-lost');
+        store.recordFocusVisibility({
+            detachedDuringAnimation: booleanField(detail, 'detachedDuringAnimation'),
+            focusMovedBeforeScrollSettled: false,
+            focusToVisibleDurationMs: null,
+            focusedCategory: safeFocusCategory(detail.previousCategory),
+            inputId: '',
+            obscuredBy: 'unknown',
+            occurredAt,
+            routeFamily,
+            scrollContainer: 'unknown',
+            status: 'focus-observed',
+            visible: false,
+            virtualizedNodeReplaced: booleanField(detail, 'detachedDuringAnimation')
+        });
+        return;
+    }
+
+    if (name === 'ptv-tv-focus-restoration-started' || name === 'ptv-tv-focus-back') {
+        store.markRouteFocusPhase('restoration-started');
+    } else if (name === 'ptv-tv-focus-restored') {
+        store.markRouteFocusPhase(booleanField(detail, 'focusRestoreSuccess') ? 'restored' : 'restoration-failed');
+    } else if (name === 'ptv-tv-focus-restore-retry-stopped') {
+        store.markRouteFocusPhase('restoration-failed');
+    }
+}
+
+function bridgeObservability(event: PtvObservabilityEvent) {
+    const store = getPtvDiagnosticStore();
+
+    if (event.type === 'cache') {
+        updateCacheSummary();
+        return;
+    }
+
+    if (event.type === 'recommendation') {
+        const snapshot = store.getSnapshot();
+        const previous = snapshot.recommendations;
+        const failed = /fail|error/.test(event.name);
+        const completed = /complete|generated|success/.test(event.name);
+
+        store.updateContext({
+            recommendations: {
+                ...previous,
+                active: /start|loading|request/.test(event.name) && !completed,
+                configuredRows: Math.max(previous.configuredRows, numberField(event.detail, ['configuredRows', 'configuredRowCount'])),
+                duplicateSuppressionCount: previous.duplicateSuppressionCount
+                    + numberField(event.detail, ['duplicateItemsRemoved', 'duplicateSuppressionCount']),
+                generatedRows: Math.max(previous.generatedRows, numberField(event.detail, ['generatedRows', 'rowCount', 'recommendationRowsGenerated'])),
+                health: createPtvDiagnosticHealth(
+                    failed ? 'degraded' : completed ? 'healthy' : 'unknown',
+                    failed ? 'The latest observed recommendation event failed.' : completed
+                        ? 'Recommendation generation completed successfully.'
+                        : 'Recommendation activity has been observed.'
+                ),
+                itemCount: Math.max(previous.itemCount, numberField(event.detail, ['itemCount', 'totalItems'])),
+                lastErrorCategory: failed ? 'generation' : previous.lastErrorCategory,
+                lastGenerationAt: completed ? new Date(event.at).toISOString() : previous.lastGenerationAt,
+                runDurationMs: event.durationMs ?? previous.runDurationMs,
+                sourceCount: Math.max(previous.sourceCount, numberField(event.detail, ['sourceCount']))
+            }
+        });
+        return;
+    }
+
+    if (event.type === 'row-fetch' || (event.type === 'render' && /row|shelf/i.test(event.name))) {
+        const failed = /fail|error|abort/.test(event.name);
+        const status = failed ? 'failed'
+            : /empty/.test(event.name) ? 'empty'
+                : /dispose|unmount/.test(event.name) ? 'disposed'
+                    : /settled|complete|mounted|visible/.test(event.name) ? 'settled'
+                        : /render/.test(event.name) ? 'render-started'
+                            : /return|success/.test(event.name) ? 'data-returned'
+                                : 'request-started';
+
+        store.recordShelf({
+            durationMs: event.durationMs ?? null,
+            itemCount: numberField(event.detail, ['itemCount', 'items', 'renderedItems'], 0),
+            occurredAt: new Date(event.at).toISOString(),
+            routeFamily: currentRouteFamily(),
+            shelfFamily: /reading/i.test(event.name) ? 'reading'
+                : /music/i.test(event.name) ? 'music'
+                    : /recommend/i.test(event.name) ? 'recommendations'
+                        : 'content',
+            status
+        });
+    }
+}
+
+function updateCacheSummary() {
+    const status = getFeaturedContentCacheStatus({ prime: false });
+    const now = Date.now();
+    const ageMs = status.createdAt ? Math.max(0, now - status.createdAt) : null;
+    const failing = Boolean(status.readError || status.writeError || status.lastRefreshError);
+    const cacheState = status.isFresh ? 'fresh' : status.createdAt ? 'stale' : 'unknown';
+
+    getPtvDiagnosticStore().updateContext({
+        cache: {
+            ageMs,
+            health: createPtvDiagnosticHealth(
+                failing ? 'degraded' : status.isFresh ? 'healthy' : status.createdAt ? 'degraded' : 'unknown',
+                failing ? 'The featured-content cache reported a read, write, or refresh error.'
+                    : status.isFresh ? 'The featured-content cache is fresh.'
+                        : status.createdAt ? 'The featured-content cache is stale.'
+                            : 'No featured-content cache entry is currently available.',
+                {
+                    metrics: {
+                        itemCount: status.itemCount,
+                        sectionCount: status.sectionCount
+                    }
+                }
+            ),
+            itemCount: status.itemCount,
+            lastErrorCategory: status.readError ? 'read' : status.writeError ? 'write'
+                : status.lastRefreshError ? 'refresh' : 'none',
+            lastReadStatus: status.readInProgress ? 'in-progress' : status.readError ? 'failed'
+                : status.createdAt ? 'available' : 'not-read',
+            lastWriteStatus: status.writeError ? 'failed' : status.isStored ? 'stored' : 'not-observed',
+            owner: 'featured-content',
+            sectionCount: status.sectionCount,
+            state: cacheState,
+            storageType: safeEnum(status.storage, ['memory', 'plugin-file', 'none'], 'unknown'),
+            ttlMs: status.ttlMs,
+            version: status.cacheVersion
+        }
+    });
+}
+
+function getPluginCapabilities(status: Record<string, unknown>) {
+    const source = isRecord(status.capabilities) ? status.capabilities
+        : isRecord(status.features) ? status.features
+            : isRecord(status.featureFlags) ? status.featureFlags
+                : {};
+
+    return Object.entries(source)
+        .filter(([name, value]) => /^[a-z0-9._-]{1,80}$/i.test(name) && value === true)
+        .map(([name]) => name)
+        .sort()
+        .slice(0, 100);
+}
+
+async function refreshExternalStatus() {
+    const store = getPtvDiagnosticStore();
+    const apiClient = getCurrentPtvApiClient() as (ReturnType<typeof getCurrentPtvApiClient> & {
+        serverAddress?: () => string;
+        serverInfo?: () => Record<string, unknown>;
+    }) | null;
+    const pluginClient = getCurrentPtvPluginApiClient();
+    const authenticatedSessionPresent = Boolean(getPtvCurrentUserId());
+    const serverInfo = apiClient?.serverInfo?.() || {};
+    const serverVersion = safeVersion(serverInfo.Version || serverInfo.version);
+    let originClassification: 'remote-server' | 'same-origin' | 'unknown' = 'unknown';
+
+    try {
+        const address = apiClient?.serverAddress?.();
+
+        if (address) originClassification = new URL(address, window.location.href).origin === window.location.origin
+            ? 'same-origin' : 'remote-server';
+    } catch {
+        originClassification = 'unknown';
+    }
+
+    store.updateContext({
+        server: {
+            authenticatedSessionPresent,
+            health: createPtvDiagnosticHealth(
+                apiClient ? 'healthy' : 'unavailable',
+                apiClient ? 'The existing Jellyfin API client is available.' : 'The Jellyfin API client is unavailable.',
+                { collectorAvailable: Boolean(apiClient) }
+            ),
+            lastResponseDurationMs: null,
+            originClassification,
+            reachable: apiClient ? true : null,
+            version: serverVersion
+        }
+    });
+
+    if (!pluginClient) {
+        store.updateContext({
+            plugin: {
+                ...store.getSnapshot().plugin,
+                health: createPtvDiagnosticHealth('unavailable', 'The PiggieTV plugin API client is unavailable.', {
+                    collectorAvailable: false
+                }),
+                reachable: null,
+                status: 'unavailable'
+            }
+        });
+        return;
+    }
+
+    const startedAt = performance.now();
+
+    try {
+        const rawStatus = await pluginClient.getStatus<unknown>();
+        const status = isRecord(rawStatus) ? rawStatus : {};
+        const capabilityIdentifiers = getPluginCapabilities(status);
+        const version = safeVersion(status.pluginVersion || status.version);
+        const apiVersion = Number(status.apiVersion);
+        const durationMs = Number((performance.now() - startedAt).toFixed(1));
+        const currentServerVersion = safeVersion(status.serverVersion || serverVersion);
+
+        store.updateContext({
+            plugin: {
+                apiVersion: Number.isFinite(apiVersion) ? apiVersion : null,
+                capabilityFingerprint: safeHash(`${version}:${capabilityIdentifiers.join(':')}`),
+                capabilityIdentifiers,
+                health: createPtvDiagnosticHealth('healthy', 'The PiggieTV plugin status endpoint responded.', {
+                    metrics: {
+                        capabilityCount: capabilityIdentifiers.length,
+                        responseDurationMs: durationMs
+                    }
+                }),
+                reachable: true,
+                status: 'active',
+                version
+            },
+            server: {
+                ...store.getSnapshot().server,
+                health: createPtvDiagnosticHealth('healthy', 'The authenticated plugin request reached Jellyfin.', {
+                    metrics: { responseDurationMs: durationMs }
+                }),
+                lastResponseDurationMs: durationMs,
+                reachable: true,
+                version: currentServerVersion
+            }
+        });
+    } catch {
+        const durationMs = Number((performance.now() - startedAt).toFixed(1));
+
+        store.updateContext({
+            plugin: {
+                ...store.getSnapshot().plugin,
+                health: createPtvDiagnosticHealth('degraded', 'The plugin status endpoint did not respond successfully.', {
+                    metrics: { responseDurationMs: durationMs }
+                }),
+                reachable: false,
+                status: 'unreachable'
+            }
+        });
+    }
+}
+
+function initializeContext() {
+    const store = getPtvDiagnosticStore();
+    const profile = getPtvClientProfile();
+    const capabilities = getPtvWebCapabilityReport(profile);
+    const build = getPtvBuildInfo();
+    const capabilityIdentifiers = Object.entries(capabilities.capabilities)
+        .filter(([, available]) => available)
+        .map(([name]) => name)
+        .sort();
+    const unsupportedCapabilities = Object.entries(capabilities.capabilities)
+        .filter(([, available]) => !available)
+        .map(([name]) => name)
+        .sort();
+
+    store.updateContext({
+        build: {
+            buildId: build.frontendBuildId,
+            buildTimestamp: build.frontendBuildDate,
+            commitSha: build.frontendCommitSha,
+            environment: build.environment,
+            packageVersion: build.jellyfinWebVersion
+        },
+        core: {
+            ...store.getSnapshot().core,
+            capabilityIdentifiers,
+            unsupportedCapabilities
+        },
+        platform: {
+            deviceClass: capabilities.deviceClass,
+            eligibilitySource: profile.tvDetectionReason,
+            eligibilityTimestamp: new Date().toISOString(),
+            isAndroidTv: profile.isAndroidTv,
+            isFireTv: profile.isFireTv,
+            isTv: profile.isTv,
+            isWebOs: profile.isWebOs,
+            layoutMode: profile.layoutMode,
+            platform: capabilities.platform,
+            profile: profile.kind,
+            reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false,
+            userAgentClassification: profile.isWebOs ? 'webos'
+                : profile.isFireTv ? 'fire-tv'
+                    : profile.isAndroidTv ? 'android-tv'
+                        : profile.isTv ? 'generic-tv'
+                            : profile.isMobile || profile.isTablet ? 'mobile'
+                                : profile.kind === 'desktop' ? 'desktop'
+                                    : 'unknown',
+            visibilityState: document.hidden ? 'hidden' : 'visible'
+        }
+    });
+}
+
+function createCollector(): DisposableCollector {
+    const store = getPtvDiagnosticStore();
+    let disposed = false;
+    let animationFrame = 0;
+    let frameFlushTimer = 0;
+    let routeSettleTimer = 0;
+    let scrollSettleTimer = 0;
+    let scrollStartedAt = 0;
+    let scrollFocus: HTMLElement | null = null;
+    let scrollFocusFingerprint = 'none';
+    let scrollInputId = '';
+    let scrollScope: PtvFocusScopeCategory = 'unknown';
+    let currentRouteSessionId = '';
+    let lastFrameAt = 0;
+    let frameIntervals: number[] = [];
+    let longTaskCount = 0;
+    let collectorOverheadMs = 0;
+    const disposers: Array<() => void> = [];
+    const imageStartedAt = new WeakMap<HTMLImageElement, number>();
+    const handleDiagnosticScroll = (event: Event) => {
+        if (!scrollStartedAt) {
+            const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            const target = event.target instanceof HTMLElement ? event.target : active;
+
+            scrollStartedAt = performance.now();
+            scrollFocus = active;
+            scrollFocusFingerprint = getFocusFingerprint(active);
+            scrollInputId = store.getSnapshot().inputs.at(-1)?.inputId || '';
+            scrollScope = classifyPtvTvFocusScope(target);
+            store.recordFocusVisibility({
+                detachedDuringAnimation: false,
+                focusMovedBeforeScrollSettled: false,
+                focusToVisibleDurationMs: null,
+                focusedCategory: classifyPtvDiagnosticFocusElement(active),
+                inputId: scrollInputId,
+                obscuredBy: getFocusObscuredBy(active),
+                occurredAt: new Date().toISOString(),
+                routeFamily: currentRouteFamily(),
+                scrollContainer: scrollScope,
+                status: 'scroll-started',
+                visible: isPtvDiagnosticFocusVisible(active),
+                virtualizedNodeReplaced: false
+            });
+        }
+
+        window.clearTimeout(scrollSettleTimer);
+        scrollSettleTimer = window.setTimeout(() => {
+            const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            const detached = Boolean(scrollFocus && !scrollFocus.isConnected);
+            const visible = isPtvDiagnosticFocusVisible(current);
+
+            store.recordFocusVisibility({
+                detachedDuringAnimation: detached,
+                focusMovedBeforeScrollSettled: scrollFocusFingerprint !== getFocusFingerprint(current),
+                focusToVisibleDurationMs: visible
+                    ? Number(Math.max(0, performance.now() - scrollStartedAt).toFixed(2)) : null,
+                focusedCategory: classifyPtvDiagnosticFocusElement(current),
+                inputId: scrollInputId,
+                obscuredBy: getFocusObscuredBy(current),
+                occurredAt: new Date().toISOString(),
+                routeFamily: currentRouteFamily(),
+                scrollContainer: scrollScope,
+                status: 'scroll-settled',
+                visible,
+                virtualizedNodeReplaced: detached
+            });
+            scrollStartedAt = 0;
+            scrollFocus = null;
+            scrollFocusFingerprint = 'none';
+            scrollInputId = '';
+            scrollScope = 'unknown';
+        }, 120);
+    };
+
+    const startRoute = (detail?: RouteControllerDetail) => {
+        window.clearTimeout(routeSettleTimer);
+        const route = detail?.normalizedPath || detail?.hash || detail?.path || detail?.full || window.location.hash;
+
+        currentRouteSessionId = store.startRoute(route);
+        window.requestAnimationFrame(() => {
+            if (disposed || !currentRouteSessionId) return;
+            store.markRoutePhase(currentRouteSessionId, 'initialized');
+
+            if (document.querySelector('main, [role="main"], .mainAnimatedPage:not(.hide), [data-ptv-route-content]')) {
+                store.markRoutePhase(currentRouteSessionId, 'first-content');
+            }
+            if (document.querySelector(FOCUSABLE_SELECTOR)) {
+                store.markRoutePhase(currentRouteSessionId, 'first-focusable');
+            }
+        });
+        routeSettleTimer = window.setTimeout(() => {
+            if (currentRouteSessionId) store.markRoutePhase(currentRouteSessionId, 'settled');
+        }, 500);
+    };
+    const handleRoute = (event: Event) => {
+        startRoute((event as CustomEvent<RouteControllerDetail>).detail);
+    };
+
+    const recordImageRequest = (image: HTMLImageElement) => {
+        if (!image.getAttribute('src') && !image.getAttribute('data-src')) return;
+
+        imageStartedAt.set(image, performance.now());
+        store.recordImage({
+            cacheClassification: 'browser-managed',
+            decodeDurationMs: null,
+            durationMs: null,
+            fallbackUsed: image.dataset.ptvFallback === 'true',
+            occurredAt: new Date().toISOString(),
+            role: classifyImageRole(image),
+            routeFamily: currentRouteFamily(),
+            status: 'requested'
+        });
+    };
+    const recordImageCompletion = (event: Event) => {
+        const image = event.target instanceof HTMLImageElement ? event.target : null;
+
+        if (!image) return;
+
+        const startedAt = imageStartedAt.get(image);
+        store.recordImage({
+            cacheClassification: 'browser-managed',
+            decodeDurationMs: null,
+            durationMs: startedAt === undefined ? null : Number((performance.now() - startedAt).toFixed(1)),
+            fallbackUsed: image.dataset.ptvFallback === 'true',
+            occurredAt: new Date().toISOString(),
+            role: classifyImageRole(image),
+            routeFamily: currentRouteFamily(),
+            status: event.type === 'load' ? 'loaded' : 'errored'
+        });
+    };
+
+    const mutationObserver = new MutationObserver(records => {
+        const startedAt = performance.now();
+
+        records.forEach(record => {
+            if (record.type === 'attributes' && record.target instanceof HTMLImageElement) {
+                recordImageRequest(record.target);
+            }
+            record.addedNodes.forEach(node => {
+                if (!(node instanceof Element)) return;
+                if (node instanceof HTMLImageElement) recordImageRequest(node);
+                node.querySelectorAll<HTMLImageElement>('img[src], img[data-src]').forEach(recordImageRequest);
+            });
+        });
+
+        if (currentRouteSessionId) {
+            if (!store.getSnapshot().routes.find(route => route.routeSessionId === currentRouteSessionId)?.firstContentAt
+                && document.querySelector('main, [role="main"], .mainAnimatedPage:not(.hide), [data-ptv-route-content]')) {
+                store.markRoutePhase(currentRouteSessionId, 'first-content');
+            }
+            if (!store.getSnapshot().routes.find(route => route.routeSessionId === currentRouteSessionId)?.firstFocusableAt
+                && document.querySelector(FOCUSABLE_SELECTOR)) {
+                store.markRoutePhase(currentRouteSessionId, 'first-focusable');
+            }
+        }
+        collectorOverheadMs += performance.now() - startedAt;
+    });
+
+    const flushFrames = () => {
+        if (!frameIntervals.length && !document.hidden) return;
+
+        const visibleIntervals = document.hidden ? [] : frameIntervals.filter(interval => interval > 0 && interval < 1000);
+        const durationMs = visibleIntervals.reduce((sum, interval) => sum + interval, 0);
+        const jankyFrames = visibleIntervals.filter(interval => interval > 50).length;
+        const fps = durationMs > 0 ? Math.min(120, (visibleIntervals.length / durationMs) * 1000) : 0;
+
+        store.recordFrame({
+            approximateFps: Number(fps.toFixed(1)),
+            collectorOverheadMs: Number(collectorOverheadMs.toFixed(2)),
+            frameCount: visibleIntervals.length,
+            jankyFrameCount: jankyFrames,
+            jankyFramePercentage: visibleIntervals.length
+                ? Number(((jankyFrames / visibleIntervals.length) * 100).toFixed(1)) : 0,
+            longestFrameMs: Number(Math.max(0, ...visibleIntervals).toFixed(1)),
+            longTaskCount,
+            p50FrameMs: getPtvDiagnosticPercentile(visibleIntervals, 0.5),
+            p90FrameMs: getPtvDiagnosticPercentile(visibleIntervals, 0.9),
+            p95FrameMs: getPtvDiagnosticPercentile(visibleIntervals, 0.95),
+            p99FrameMs: getPtvDiagnosticPercentile(visibleIntervals, 0.99),
+            reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false,
+            routeFamily: currentRouteFamily(),
+            sampledAt: new Date().toISOString(),
+            visibilityState: document.hidden ? 'hidden' : 'visible'
+        });
+        frameIntervals = [];
+        longTaskCount = 0;
+        collectorOverheadMs = 0;
+    };
+    const frameTick = (at: number) => {
+        if (lastFrameAt > 0) frameIntervals.push(at - lastFrameAt);
+        lastFrameAt = at;
+        animationFrame = window.requestAnimationFrame(frameTick);
+    };
+
+    let longTaskObserver: PerformanceObserver | null = null;
+
+    try {
+        if (typeof PerformanceObserver !== 'undefined'
+            && PerformanceObserver.supportedEntryTypes?.includes('longtask')) {
+            longTaskObserver = new PerformanceObserver(list => {
+                longTaskCount += list.getEntries().length;
+            });
+            longTaskObserver.observe({ entryTypes: ['longtask'] });
+            store.setCollectorCapability('longTasks', true);
+        } else {
+            store.setCollectorCapability('longTasks', false);
+        }
+    } catch {
+        store.setCollectorCapability('longTasks', false);
+    }
+
+    const handleCacheUpdate = () => updateCacheSummary();
+    window.addEventListener('ptv:routecontrollerchange', handleRoute);
+    window.addEventListener('hashchange', handleRoute);
+    window.addEventListener('popstate', handleRoute);
+    window.addEventListener('ptv:focus-diagnostic', bridgePtvFocusDiagnosticEvent);
+    window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, handleCacheUpdate);
+    document.addEventListener('load', recordImageCompletion, true);
+    document.addEventListener('error', recordImageCompletion, true);
+    document.addEventListener('scroll', handleDiagnosticScroll, true);
+    mutationObserver.observe(document.documentElement, {
+        attributeFilter: ['src'],
+        attributes: true,
+        childList: true,
+        subtree: true
+    });
+    document.querySelectorAll<HTMLImageElement>('img[src], img[data-src]').forEach(recordImageRequest);
+    animationFrame = window.requestAnimationFrame(frameTick);
+    frameFlushTimer = window.setInterval(flushFrames, 1000);
+
+    disposers.push(
+        subscribePtvObservability(bridgeObservability),
+        subscribePtvTvNavigation(snapshot => store.setFocus(getFocusDiagnostic(snapshot))),
+        subscribePtvDiagnosticPreferences(preferences => {
+            store.setCollectorEnabled(preferences.collectionEnabled);
+        })
+    );
+
+    store.setCollectorEnabled(getPtvDiagnosticPreferences().collectionEnabled);
+    [
+        'cacheSummary',
+        'frameTiming',
+        'focusGraph',
+        'focusScopes',
+        'focusVisibility',
+        'imageLifecycle',
+        'pluginStatus',
+        'requestCoordinator',
+        'remoteInputPipeline',
+        'routeLifecycle',
+        'routeRestoration',
+        'shelfLifecycle',
+        'tvFocus'
+    ].forEach(name => store.setCollectorCapability(name, true));
+    initializeContext();
+    updateCacheSummary();
+    startRoute();
+    void refreshExternalStatus();
+
+    return {
+        dispose() {
+            if (disposed) return;
+
+            disposed = true;
+            window.cancelAnimationFrame(animationFrame);
+            window.clearInterval(frameFlushTimer);
+            window.clearTimeout(routeSettleTimer);
+            window.clearTimeout(scrollSettleTimer);
+            mutationObserver.disconnect();
+            longTaskObserver?.disconnect();
+            window.removeEventListener('ptv:routecontrollerchange', handleRoute);
+            window.removeEventListener('hashchange', handleRoute);
+            window.removeEventListener('popstate', handleRoute);
+            window.removeEventListener('ptv:focus-diagnostic', bridgePtvFocusDiagnosticEvent);
+            window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleCacheUpdate);
+            document.removeEventListener('load', recordImageCompletion, true);
+            document.removeEventListener('error', recordImageCompletion, true);
+            document.removeEventListener('scroll', handleDiagnosticScroll, true);
+            disposers.splice(0).forEach(dispose => dispose());
+        },
+        refreshExternalStatus
+    };
+}
+
+export function recordPtvCoreInitializationDiagnostic(event: PtvCoreInitializationEvent) {
+    const store = getPtvDiagnosticStore();
+    const snapshot = store.getSnapshot();
+
+    if (event.type === 'step-started') {
+        store.updateContext({
+            core: {
+                ...snapshot.core,
+                health: createPtvDiagnosticHealth('unknown', `Core initialization is running: ${event.name}.`),
+                initializationState: 'initializing'
+            }
+        });
+        return;
+    }
+
+    if (event.type === 'step-completed') {
+        const failing = event.result.status === 'failed';
+        const degraded = event.result.status === 'degraded';
+
+        if (failing || degraded) {
+            store.addWarning(`core step ${event.result.name} ${event.result.status}`);
+        }
+        return;
+    }
+
+    store.updateContext({
+        core: {
+            ...snapshot.core,
+            activeAdapters: event.result.steps
+                .filter(step => step.status !== 'skipped')
+                .map(step => step.name),
+            health: createPtvDiagnosticHealth(
+                event.result.ready ? event.result.degraded ? 'degraded' : 'healthy' : 'failing',
+                event.result.ready
+                    ? event.result.degraded
+                        ? 'PTV Core initialized with noncritical degradation.'
+                        : 'PTV Core initialized successfully.'
+                    : 'PTV Core initialization did not reach ready.',
+                {
+                    metrics: {
+                        completedSteps: event.result.steps.filter(step => step.status === 'success').length,
+                        degradedSteps: event.result.steps.filter(step => step.status === 'degraded').length
+                    }
+                }
+            ),
+            initializationOrder: event.result.steps.map(step => step.name),
+            initializationState: event.result.ready ? event.result.degraded ? 'degraded' : 'ready' : 'failed'
+        }
+    });
+}
+
+export function initializePtvWebDiagnosticPlatform() {
+    platform ||= createCollector();
+
+    return platform;
+}
+
+export function refreshPtvWebDiagnosticExternalStatus() {
+    return initializePtvWebDiagnosticPlatform().refreshExternalStatus();
+}
+
+export function disposePtvWebDiagnosticPlatformForTests() {
+    platform?.dispose();
+    platform = null;
+}
+
+/* eslint-enable @stylistic/operator-linebreak, array-callback-return, compat/compat, curly, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-alphabetical-sort, sonarjs/no-nested-conditional */

@@ -38,6 +38,7 @@ const LegacyMaterialIcon = ({
 
 const UserSettingsPage: FC = () => {
     const { user: currentUser } = useApi();
+    const [ fallbackCurrentUser, setFallbackCurrentUser ] = useState<UserDto>();
     const [ searchParams ] = useSearchParams();
     const {
         data: isQuickConnectEnabled,
@@ -45,20 +46,42 @@ const UserSettingsPage: FC = () => {
     } = useQuickConnectEnabled();
     const { data: users } = useUsers();
     const [ user, setUser ] = useState<UserDto>();
+    const activeCurrentUser = currentUser || fallbackCurrentUser;
+
+    useEffect(() => {
+        if (currentUser) {
+            setFallbackCurrentUser(undefined);
+            return;
+        }
+
+        let cancelled = false;
+
+        void Dashboard.getCurrentUser()
+            .then(resolvedUser => {
+                if (!cancelled) setFallbackCurrentUser(resolvedUser);
+            })
+            .catch(error => {
+                console.info('[UserSettingsPage] Could not resolve the current user', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [ currentUser ]);
 
     const userId = useMemo(() => (
-        searchParams.get('userId') || currentUser?.Id
-    ), [ currentUser, searchParams ]);
+        searchParams.get('userId') || activeCurrentUser?.Id
+    ), [ activeCurrentUser, searchParams ]);
     const isLoggedInUser = useMemo(() => (
-        userId && userId === currentUser?.Id
-    ), [ currentUser, userId ]);
+        userId && userId === activeCurrentUser?.Id
+    ), [ activeCurrentUser, userId ]);
 
     useEffect(() => {
         if (userId) {
-            if (userId === currentUser?.Id) setUser(currentUser);
+            if (userId === activeCurrentUser?.Id) setUser(activeCurrentUser);
             else setUser(users?.find(({ Id }) => userId === Id));
         }
-    }, [ currentUser, userId, users ]);
+    }, [ activeCurrentUser, userId, users ]);
 
     if (!userId || !user || isQuickConnectEnabledPending) {
         return (
@@ -318,6 +341,23 @@ const UserSettingsPage: FC = () => {
                                         <div className='listItemBodyText'>
                                             {globalize.translate('TabDashboard')}
                                         </div>
+                                    </div>
+                                </div>
+                            </LinkButton>
+
+                            <LinkButton
+                                href='#/dashboard/piggietv/diagnostics'
+                                className='listItem-border'
+                                style={{
+                                    display: 'block',
+                                    margin: 0,
+                                    padding: 0
+                                }}
+                            >
+                                <div className='listItem'>
+                                    <LegacyMaterialIcon icon='monitor_heart' ptvIcon='dashboard' />
+                                    <div className='listItemBody'>
+                                        <div className='listItemBodyText'>PiggieTV Diagnostics</div>
                                     </div>
                                 </div>
                             </LinkButton>

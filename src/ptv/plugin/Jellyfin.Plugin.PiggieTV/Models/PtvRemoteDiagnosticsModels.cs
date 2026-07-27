@@ -128,6 +128,9 @@ public sealed class PtvRemoteDiagnosticsClientCapabilities
     /// <summary>Gets or sets a value indicating whether render/performance samples can be collected.</summary>
     public bool PerformanceMetrics { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether bounded physical layout snapshots can be collected.</summary>
+    public bool PhysicalLayoutSnapshot { get; set; }
+
     /// <summary>Gets or sets a value indicating whether playback transitions can be collected.</summary>
     public bool PlaybackTelemetry { get; set; }
 

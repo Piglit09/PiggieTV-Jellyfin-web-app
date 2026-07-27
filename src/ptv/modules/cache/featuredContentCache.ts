@@ -6,6 +6,10 @@ import { ptvLogger } from '../../core/logger';
 import { recordPtvEvent, registerPtvDebugCacheStatusProvider, timePtvAsync } from '../../core/observability';
 import { getCurrentPtvPluginApiClient, normalizePtvApiError, recordPtvPluginApiRetryState } from '../../core/pluginApi';
 import { getRuntimeScope } from '../../core/scope';
+import {
+    summarizeFeaturedContentPayload,
+    type FeaturedContentSemanticSummary
+} from './featuredContentSemantics';
 
 export const FEATURED_CACHE_VERSION = PTV_CACHE.featuredContentVersion;
 export const FEATURED_CACHE_UPDATED_EVENT = PTV_EVENTS.featuredCacheUpdated;
@@ -17,7 +21,10 @@ const SERVER_CACHE_DOCUMENT_VERSION = 1;
 const SUPPORTED_FEATURED_CACHE_VERSIONS: number[] = [FEATURED_CACHE_VERSION];
 
 export type FeaturedPayload = {
+    emptyLibraryConfirmed?: boolean;
+    generationState?: string;
     heroItems: unknown[];
+    payloadClassification?: string;
     recommendationConfigHash?: string;
     rowConfigApplied?: boolean;
     rowConfigHash?: string;
@@ -98,6 +105,7 @@ let lastServerCacheRawTopLevelKeys: string[] = [];
 let lastServerCacheNormalizedTopLevelKeys: string[] = [];
 let lastServerCacheRenderSource = 'none';
 let lastServerCacheDetectedVersion: number | null = null;
+let lastServerCachePayloadSummary: FeaturedContentSemanticSummary | null = null;
 let initialCachePrimeScheduled = false;
 let serverReadRetryBackoffMs = 0;
 let serverReadRetryCount = 0;
@@ -325,7 +333,10 @@ function getPayloadField(payload: unknown, ...keys: string[]) {
 }
 
 function normalizePayload(payload: FeaturedPayload | Record<string, unknown>): FeaturedPayload {
+    const emptyLibraryConfirmed = getPayloadField(payload, 'emptyLibraryConfirmed', 'EmptyLibraryConfirmed');
+    const generationState = getPayloadField(payload, 'generationState', 'GenerationState');
     const heroItems = getPayloadField(payload, 'heroItems', 'HeroItems');
+    const payloadClassification = getPayloadField(payload, 'payloadClassification', 'PayloadClassification');
     const recommendationConfigHash = getPayloadField(payload, 'recommendationConfigHash', 'RecommendationConfigHash');
     const rowConfigApplied = getPayloadField(payload, 'rowConfigApplied', 'RowConfigApplied');
     const rowConfigHash = getPayloadField(payload, 'rowConfigHash', 'RowConfigHash');
@@ -335,7 +346,10 @@ function normalizePayload(payload: FeaturedPayload | Record<string, unknown>): F
     const sectionItems = getPayloadField(payload, 'sectionItems', 'SectionItems');
 
     return {
+        emptyLibraryConfirmed: emptyLibraryConfirmed === true ? true : undefined,
+        generationState: typeof generationState === 'string' && generationState.trim() ? generationState.trim() : undefined,
         heroItems: Array.isArray(heroItems) ? heroItems : [],
+        payloadClassification: typeof payloadClassification === 'string' && payloadClassification.trim() ? payloadClassification.trim() : undefined,
         recommendationConfigHash: typeof recommendationConfigHash === 'string' && recommendationConfigHash.trim() ? recommendationConfigHash.trim() : undefined,
         rowConfigApplied: typeof rowConfigApplied === 'boolean' ? rowConfigApplied : undefined,
         rowConfigHash: typeof rowConfigHash === 'string' && rowConfigHash.trim() ? rowConfigHash.trim() : undefined,
@@ -398,7 +412,10 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
     const normalizedPayload = normalizePayload(payload);
 
     return {
+        emptyLibraryConfirmed: normalizedPayload.emptyLibraryConfirmed,
+        generationState: normalizedPayload.generationState,
         heroItems: normalizedPayload.heroItems.map(compactCacheItem),
+        payloadClassification: normalizedPayload.payloadClassification,
         recommendationConfigHash: normalizedPayload.recommendationConfigHash,
         rowConfigApplied: normalizedPayload.rowConfigApplied,
         rowConfigHash: normalizedPayload.rowConfigHash,
@@ -530,8 +547,10 @@ function getPayloadRowSourceSummary(payload: FeaturedPayload | null | undefined)
 
 function getPayloadSummary(payload: FeaturedPayload | null | undefined) {
     const rowSourceSummary = getPayloadRowSourceSummary(payload);
+    const semanticSummary = summarizeFeaturedContentPayload(payload);
 
     return {
+        ...semanticSummary,
         configuredRowCount: rowSourceSummary.configuredRowCount,
         fallbackRowCount: rowSourceSummary.fallbackRowCount,
         heroCount: payload?.heroItems.length || 0,
@@ -975,6 +994,26 @@ function canReadServerCacheNow() {
     return Date.now() >= nextServerReadAllowedAt;
 }
 
+function getServerCacheReplacementRejection(
+    nextEntry: FeaturedCacheEntry | null,
+    previousEntry: FeaturedCacheEntry | null
+) {
+    if (!nextEntry) return null;
+
+    const nextSummary = summarizeFeaturedContentPayload(nextEntry.payload);
+
+    if (!nextSummary.usableForPersistence) return nextSummary.reason;
+    if (!previousEntry) return null;
+
+    const previousSummary = summarizeFeaturedContentPayload(previousEntry.payload);
+
+    if (previousSummary.totalItemCount > 0 && nextSummary.totalItemCount === 0) {
+        return 'semantic-empty-cannot-replace-populated';
+    }
+
+    return nextEntry.createdAt < previousEntry.createdAt ? 'older-than-memory-cache' : null;
+}
+
 function noteServerReadSuccess(hasCache: boolean) {
     serverReadRetryBackoffMs = 0;
     serverReadRetryCount = 0;
@@ -989,7 +1028,9 @@ function applyServerCacheDocument(document: unknown, source: string) {
     const rawFeaturedContent = rawDocumentSource ? getRecordField(rawDocumentSource, 'featuredContent', 'FeaturedContent') : undefined;
     const detectedVersion = getCacheEntryVersion(rawFeaturedContent);
     const nextEntry = parseCacheEntryValue(normalizedDocument.featuredContent);
-    const rejectionReason = nextEntry ? null : explainServerDocumentRejection(document, normalizedDocument);
+    const nextPayloadSummary = nextEntry ? summarizeFeaturedContentPayload(nextEntry.payload) : null;
+    const rejectionReason = getServerCacheReplacementRejection(nextEntry, previousEntry)
+        || (nextEntry ? null : explainServerDocumentRejection(document, normalizedDocument));
 
     memoryCacheSettings = parseCacheSettings(normalizedDocument.featuredContentSettings);
     lastServerCacheRawByteSize = getSerializedByteSize(document);
@@ -998,8 +1039,9 @@ function applyServerCacheDocument(document: unknown, source: string) {
     lastServerCacheRejectionReason = rejectionReason;
     lastServerCacheRenderSource = source;
     lastServerCacheDetectedVersion = detectedVersion;
+    lastServerCachePayloadSummary = nextPayloadSummary;
 
-    if (nextEntry) {
+    if (nextEntry && !rejectionReason) {
         memoryCacheEntry = nextEntry;
         lastCacheStorage = getSuccessfulServerStorage();
         lastCacheReadError = null;
@@ -1270,11 +1312,26 @@ export function setFeaturedContentCacheTtlMs(ttlMs: number, options: { persist?:
 
 function writeCacheEntry(payload: FeaturedPayload) {
     const createdAt = Date.now();
+    const compactPayloadValue = compactPayload(payload);
+    const semanticSummary = summarizeFeaturedContentPayload(compactPayloadValue);
+
+    if (!semanticSummary.usableForPersistence) {
+        const error = `Featured content refresh rejected: ${semanticSummary.reason}.`;
+
+        lastRefreshError = error;
+        recordPtvEvent('cache', 'featured-cache-entry-write-rejected', {
+            ...semanticSummary,
+            reason: semanticSummary.reason
+        });
+
+        return Promise.reject(new Error(error));
+    }
+
     const entry: FeaturedCacheEntry = {
         version: FEATURED_CACHE_VERSION,
         createdAt,
         expiresAt: createdAt + getFeaturedContentCacheTtlMs(),
-        payload: compactPayload(payload)
+        payload: compactPayloadValue
     };
     const payloadSummary = getPayloadSummary(entry.payload);
     const payloadSize = getSerializedByteSize(entry);
@@ -1355,6 +1412,16 @@ function refreshFeaturedContent(
 
     inflightFeaturedContent = timePtvAsync('cache', 'refresh-featured-content', fetcher)
         .then(payload => {
+            const refreshSummary = summarizeFeaturedContentPayload(payload);
+
+            if (!refreshSummary.usableForPersistence) {
+                recordPtvEvent('cache', 'featured-cache-refresh-degraded', {
+                    ...refreshSummary,
+                    reason: refreshSummary.reason
+                });
+                throw new Error(`Featured content refresh is not persistable: ${refreshSummary.reason}.`);
+            }
+
             const normalizedPayload = mergePayload(payload, fallbackPayload);
 
             return writeCacheEntry(normalizedPayload)
@@ -1461,12 +1528,13 @@ export function invalidateFeaturedContentMemoryCache(reason = 'manual') {
     dispatchCacheUpdated();
 }
 
-export function getFeaturedContentCacheStatus() {
+export function getFeaturedContentCacheStatus(options: { prime?: boolean } = {}) {
     const cached = memoryCacheEntry;
     const now = Date.now();
     const rowSourceSummary = getPayloadRowSourceSummary(cached?.payload);
+    const semanticSummary = cached ? summarizeFeaturedContentPayload(cached.payload) : lastServerCachePayloadSummary;
 
-    if (!cached && !inflightServerRead && canReadServerCacheNow()) {
+    if (options.prime !== false && !cached && !inflightServerRead && canReadServerCacheNow()) {
         void primeFeaturedContentCacheStatus();
     }
 
@@ -1474,15 +1542,21 @@ export function getFeaturedContentCacheStatus() {
         createdAt: cached?.createdAt || null,
         expiresAt: cached?.expiresAt || null,
         adoptionResult: lastServerCacheAdoptionResult,
+        completeness: semanticSummary?.completeness || 'empty',
         cacheVersion: cached?.version ?? null,
         configuredRowCount: rowSourceSummary.configuredRowCount,
         fallbackRowCount: rowSourceSummary.fallbackRowCount,
-        heroCount: cached?.payload.heroItems.length || 0,
+        emptySectionCount: semanticSummary?.emptySectionCount || 0,
+        heroCount: semanticSummary?.heroCount || 0,
         isStored: lastCacheStorage === 'plugin-file',
         isFresh: Boolean(cached && now < cached.expiresAt),
-        itemCount: cached ? getPayloadItemCount(cached.payload) : 0,
+        itemCount: semanticSummary?.totalRowItemCount || 0,
+        observedStorage: lastServerCachePayloadSummary ? 'plugin-file' : lastCacheStorage || 'none',
+        payloadClassification: semanticSummary?.payloadClassification || 'empty',
+        populatedSectionCount: semanticSummary?.populatedSectionCount || 0,
         recommendationRowCount: rowSourceSummary.recommendationRowCount,
-        sectionCount: cached ? Object.keys(cached.payload.sectionItems).length : 0,
+        sectionCount: semanticSummary?.sectionCount || 0,
+        semanticUsable: semanticSummary?.usableForPersistence || false,
         skippedRows: rowSourceSummary.skippedRows,
         storage: lastCacheStorage || 'none',
         totalRenderedRowCount: rowSourceSummary.totalRenderedRowCount,

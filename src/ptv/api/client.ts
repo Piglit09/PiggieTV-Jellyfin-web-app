@@ -1,6 +1,13 @@
+import { ItemFields } from '@jellyfin/sdk/lib/generated-client/models/item-fields';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 
+import {
+    createPtvCoreError,
+    getPtvCoreErrorKindForHttpStatus,
+    type PtvCoreError
+} from '../core/errors/coreError';
 import { recordPtvEvent } from '../core/observability';
+import { redactPtvCoreText } from '../core/diagnostics/redaction';
 import {
     coordinatePtvJsonRequest,
     getPtvRequestCoordinatorKey
@@ -13,8 +20,12 @@ import type {
 } from './types';
 
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
+const PTV_ITEM_FIELDS_BY_NORMALIZED_NAME = new Map<string, string>(
+    Object.values(ItemFields).map(field => [field.toLowerCase(), field])
+);
 
 export class PtvApiError extends Error {
+    coreError: PtvCoreError;
     endpoint: string;
     statusCode: number | null;
     responseBody: string;
@@ -25,6 +36,15 @@ export class PtvApiError extends Error {
         this.endpoint = endpoint;
         this.statusCode = statusCode;
         this.responseBody = responseBody;
+        this.coreError = createPtvCoreError({
+            code: statusCode ? `API_HTTP_${statusCode}` : 'API_REQUEST_FAILED',
+            developerDetail: responseBody || undefined,
+            httpStatus: statusCode || undefined,
+            kind: statusCode ? getPtvCoreErrorKindForHttpStatus(statusCode) : 'unknown',
+            message,
+            operation: endpoint,
+            retryable: statusCode === null || statusCode === 408 || statusCode === 429 || statusCode >= 500
+        });
     }
 }
 
@@ -77,6 +97,18 @@ function hasQueryValue(value: PtvApiQueryValue): boolean {
     return true;
 }
 
+export function normalizePtvItemFields(value: PtvApiQueryValue): string | undefined {
+    const candidates = (Array.isArray(value) ? value : [value])
+        .flatMap(entry => typeof entry === 'string' ? entry.split(',') : [])
+        .map(field => field.trim())
+        .filter(Boolean);
+    const normalized = candidates
+        .map(field => PTV_ITEM_FIELDS_BY_NORMALIZED_NAME.get(field.toLowerCase()))
+        .filter((field): field is string => Boolean(field));
+
+    return normalized.length ? [...new Set(normalized)].join(',') : undefined;
+}
+
 export function cleanPtvQuery(query?: PtvApiQuery | null): PtvApiQuery | undefined {
     if (!query) return undefined;
 
@@ -84,6 +116,14 @@ export function cleanPtvQuery(query?: PtvApiQuery | null): PtvApiQuery | undefin
 
     Object.keys(query).forEach(key => {
         const value = query[key];
+
+        if (key === 'Fields') {
+            const fields = normalizePtvItemFields(value);
+            if (fields) {
+                cleaned[key] = fields;
+            }
+            return;
+        }
 
         if (hasQueryValue(value)) {
             cleaned[key] = value;
@@ -121,29 +161,30 @@ function getErrorStatus(error: unknown): number | null {
     return typeof statusCode === 'number' ? statusCode : null;
 }
 
+function getRecordErrorMessage(error: Record<string, unknown>): string {
+    if (typeof error.message === 'string') return error.message;
+    const response = isRecord(error.response) ? error.response : null;
+    const status = typeof error.status === 'number' ? error.status : response?.status;
+    const statusText = typeof error.statusText === 'string' ? error.statusText : response?.statusText;
+    if (typeof status !== 'number') return '';
+    const statusSuffix = statusText ? ` ${statusText}` : '';
+
+    return `Jellyfin API request failed with HTTP ${status}${statusSuffix}.`;
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === 'string' && error) return error;
-    if (isRecord(error) && typeof error.message === 'string') return error.message;
     if (isRecord(error)) {
-        const response = isRecord(error.response) ? error.response : null;
-        const status = typeof error.status === 'number' ? error.status : response?.status;
-        const statusText = typeof error.statusText === 'string' ? error.statusText : response?.statusText;
-
-        if (typeof status === 'number') {
-            return `Jellyfin API request failed with HTTP ${status}${statusText ? ` ${statusText}` : ''}.`;
-        }
+        const recordMessage = getRecordErrorMessage(error);
+        if (recordMessage) return recordMessage;
     }
 
     return fallback;
 }
 
 function redactDiagnosticText(value: string) {
-    return value
-        .replace(/(authorization\s*[:=]\s*)(bearer\s+)?[^\s"',;]+/gi, '$1[redacted]')
-        .replace(/(api[-_ ]?key\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]')
-        .replace(/(token\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]')
-        .replace(/(password\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]');
+    return redactPtvCoreText(value, 2000);
 }
 
 function getErrorResponseBody(error: unknown): string {

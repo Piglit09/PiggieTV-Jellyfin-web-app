@@ -8,6 +8,8 @@ export * from './search';
 export * from './playback';
 export * from './admin';
 export * from './itemFieldProfiles';
+export * from './seriesSeasons';
+export * from './seasonEpisodes';
 
 import {
     cleanPtvQuery,

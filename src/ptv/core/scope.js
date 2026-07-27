@@ -254,12 +254,15 @@ export function createRuntimeScope(name) {
 
         timeout(callback, delay) {
             let release = noop;
-            const timer = window.setTimeout(() => {
+            const scheduler = window;
+            const clearScheduledTimeout = scheduler.clearTimeout.bind(scheduler);
+            const timer = scheduler.setTimeout(() => {
                 release();
+                if (typeof window === 'undefined') return;
                 callback();
             }, delay);
 
-            release = scope.add(() => window.clearTimeout(timer), {
+            release = scope.add(() => clearScheduledTimeout(timer), {
                 label: `${delay}ms timeout`,
                 type: 'timeout'
             });

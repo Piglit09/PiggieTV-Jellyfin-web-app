@@ -5,6 +5,7 @@ import React, {
     useCallback,
     useContext,
     useEffect,
+    useId,
     useMemo,
     useRef,
     useState
@@ -24,10 +25,16 @@ import {
 } from '../../api';
 import { PTV_ASSETS } from '../../core/config';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
+import { getPtvMusicPlayerResourcePolicy } from './musicPlayerResourcePolicy';
 import { recordPtvEvent } from '../../core/observability';
 import { scheduleRouteCheck } from '../../core/router';
-import { notifyPtvTvFocusContentReady } from '../../core/tvFocus';
+import {
+    notifyPtvTvFocusContentReady,
+    notifyPtvTvPlaybackSurfaceDisposed,
+    notifyPtvTvPlaybackSurfaceReady
+} from '../../core/tvFocus';
 import { resolvePtvStaticAssetUrl } from '../../core/urlOrigins';
+import { setPtvFullScreenMusicPresentationAvailable } from '../../services/playbackPresentationService';
 import PTVShell, { type PtvShellNavLink } from '../../shell/PTVShell';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import { PtvIcon } from '../icons';
@@ -92,7 +99,7 @@ import {
     getMusicHeroTrackCountLabel,
     type MusicLibraryIndexLoadState
 } from './musicLoadState';
-import { buildPtvMusicRelatedTracks } from './musicRecommendations';
+import { buildPtvDistinctMusicRecommendationRow, buildPtvMusicRelatedTracks } from './musicRecommendations';
 import type {
     PtvRecommendationScoreDistribution
 } from '../recommendations/types/recommendationTypes';
@@ -1133,16 +1140,18 @@ function MusicPageBackdrop({ item, route }: Readonly<{
 }>) {
     const imageUrl = item ? getItemBackdropUrl(item, 1800) : PTV_MUSIC_FALLBACK_BACKGROUND_URL;
     const label = item ? `${getPtvMusicTitle(item)} - ${getPtvMusicArtist(item)}` : 'PiggieTV Music';
+    const resourcePolicy = getPtvMusicPlayerResourcePolicy();
+    const shouldRenderImage = resourcePolicy.renderPageBackdropImage;
 
     return (
         <div className={`ptv-music-page-backdrop ptv-music-page-backdrop-${route}`} aria-hidden='true' data-ptv-music-backdrop-title={label}>
-            <img
+            {shouldRenderImage ? <img
                 alt=''
                 decoding='async'
                 loading='eager'
                 src={imageUrl || PTV_MUSIC_FALLBACK_BACKGROUND_URL || getMusicImagePlaceholder()}
                 onError={getMusicPageBackdropErrorHandler()}
-            />
+            /> : null}
         </div>
     );
 }
@@ -1161,7 +1170,7 @@ function MusicQualityTags({ item }: Readonly<{ item: PtvMusicItem }>) {
     );
 }
 
-function useMusicLyrics(item: PtvMusicItem | null) {
+function useMusicLyrics(item: PtvMusicItem | null, enabled = true) {
     const [lyrics, setLyrics] = useState<PtvMusicLyricLine[]>([]);
 
     useEffect(() => {
@@ -1169,7 +1178,7 @@ function useMusicLyrics(item: PtvMusicItem | null) {
 
         setLyrics([]);
 
-        if (!item?.Id || !item.HasLyrics) {
+        if (!enabled || !item?.Id || !item.HasLyrics) {
             return () => {
                 isMounted = false;
             };
@@ -1184,7 +1193,7 @@ function useMusicLyrics(item: PtvMusicItem | null) {
         return () => {
             isMounted = false;
         };
-    }, [item]);
+    }, [enabled, item]);
 
     return lyrics;
 }
@@ -1192,7 +1201,9 @@ function useMusicLyrics(item: PtvMusicItem | null) {
 type MusicActionButtonProps = Readonly<{
     children?: React.ReactNode;
     className?: string;
+    focusKey?: string;
     icon?: string;
+    initialFocus?: string;
     isActive?: boolean;
     label: string;
     onClick: () => void;
@@ -1201,7 +1212,9 @@ type MusicActionButtonProps = Readonly<{
 function MusicActionButton({
     children,
     className = '',
+    focusKey,
     icon,
+    initialFocus,
     isActive = false,
     label,
     onClick
@@ -1210,6 +1223,8 @@ function MusicActionButton({
         <button
             type='button'
             className={`ptv-music-action ${isActive ? 'ptv-music-action-active' : ''} ${className}`.trim()}
+            data-ptv-focus-key={focusKey}
+            data-ptv-initial-focus={initialFocus}
             aria-label={label}
             title={label}
             onClick={onClick}
@@ -1323,6 +1338,8 @@ function MusicItemMenu({ item }: Readonly<{
     const playbackActions = useMusicPlaybackActions();
     const title = getPtvMusicTitle(item);
     const [isOpen, setOpen] = useState(false);
+    const menuId = useId();
+    const triggerId = useId();
     const artistHref = getPrimaryArtistHref(item);
     const downloadUrl = getMusicDownloadUrl(item);
     const canAddToQueue = Boolean(item.Id && item.Type === 'Audio');
@@ -1392,8 +1409,10 @@ function MusicItemMenu({ item }: Readonly<{
     return (
         <div className='ptv-music-item-menu'>
             <button
+                id={triggerId}
                 type='button'
                 className='ptv-music-item-menu-button'
+                aria-controls={menuId}
                 aria-expanded={isOpen}
                 aria-haspopup='menu'
                 aria-label={`Open actions for ${title}`}
@@ -1403,7 +1422,12 @@ function MusicItemMenu({ item }: Readonly<{
                 <PtvIcon name='moreVertical' />
             </button>
             {isOpen ? (
-                <div className='ptv-music-item-menu-popover' role='menu'>
+                <div
+                    id={menuId}
+                    className='ptv-music-item-menu-popover'
+                    role='menu'
+                    aria-labelledby={triggerId}
+                >
                     <button type='button' role='menuitem' disabled={playbackActions.isBusy} onClick={startMix}>
                         <PtvIcon name='shuffle' />
                         <MusicActionSpinner active={isMusicActionActive(playbackActions, `music-item-menu-mix-${item.Id || title}`)} />
@@ -1763,6 +1787,7 @@ function MusicRow({
 }: MusicRowProps) {
     const rowRef = useRef<HTMLDivElement>(null);
     const rowItems = uniquePtvMusicItems(items).slice(0, 24);
+    const visibleItems = rowItems.slice(0, getPtvMusicPlayerResourcePolicy().visibleRowItemLimit);
 
     useEffect(() => {
         if (rowItems.length) notifyPtvTvFocusContentReady(`music-row:${title}`);
@@ -1794,7 +1819,7 @@ function MusicRow({
                 </div>
             </div>
             <div ref={rowRef} className={`ptv-music-row ptv-music-row-${shape}`}>
-                {rowItems.map((item, index) => (
+                {visibleItems.map((item, index) => (
                     <MusicCard
                         key={getMusicItemDomKey(item, title)}
                         contextIndex={index}
@@ -1819,6 +1844,7 @@ type QuickPicksProps = Readonly<{
 function QuickPicks({ items, subtitle = 'Library radio', title = 'Quick picks' }: QuickPicksProps) {
     const playbackActions = useMusicPlaybackActions();
     const tracks = uniquePtvMusicItems(items).slice(0, 12);
+    const visibleTracks = tracks.slice(0, getPtvMusicPlayerResourcePolicy().visibleQuickPickLimit);
 
     if (!tracks.length) return null;
 
@@ -1846,7 +1872,7 @@ function QuickPicks({ items, subtitle = 'Library radio', title = 'Quick picks' }
                 </button>
             </div>
             <div className='ptv-music-quick-grid'>
-                {tracks.map((item, index) => (
+                {visibleTracks.map((item, index) => (
                     <TrackCompactRow
                         key={getMusicItemDomKey(item, 'quick-picks')}
                         contextIndex={index}
@@ -1868,6 +1894,7 @@ type MusicHomeHeroProps = Readonly<{
 
 function MusicHomeHero({ homeData, items, libraryIndexLoadState, onGenerated }: MusicHomeHeroProps) {
     const playbackActions = useMusicPlaybackActions();
+    const resourcePolicy = getPtvMusicPlayerResourcePolicy();
     const heroItem = items[0] || getAllHomeTracks(homeData)[0] || null;
     const heroTracks = heroItem ? uniquePtvMusicItems([
         heroItem,
@@ -1926,20 +1953,20 @@ function MusicHomeHero({ homeData, items, libraryIndexLoadState, onGenerated }: 
     return (
         <section className='ptv-music-home-hero'>
             <div className='ptv-music-home-hero-backdrop' aria-hidden='true'>
-                <img
+                {resourcePolicy.renderHomeHeroBackdropImage ? <img
                     alt=''
                     decoding='async'
                     loading='eager'
                     src={getCachedMusicImageUrl(heroItem, 900, 'Backdrop')}
                     onError={getMusicImageErrorHandler()}
-                />
+                /> : null}
             </div>
             <div className='ptv-music-home-hero-art'>
                 <img
                     alt=''
                     decoding='async'
                     loading='eager'
-                    src={getCachedMusicImageUrl(heroItem, 380)}
+                    src={getCachedMusicImageUrl(heroItem, resourcePolicy.homeArtworkWidth)}
                     onError={getMusicImageErrorHandler()}
                 />
             </div>
@@ -2026,7 +2053,13 @@ function TrackCompactRow({
 
     return (
         <article className='ptv-music-track-compact'>
-            <button type='button' className='ptv-music-track-art' disabled={playbackActions.isBusy} onClick={playItem}>
+            <button
+                type='button'
+                className='ptv-music-track-art'
+                aria-label={`Play ${getPtvMusicTitle(item)}`}
+                disabled={playbackActions.isBusy}
+                onClick={playItem}
+            >
                 <img
                     alt=''
                     decoding='async'
@@ -2183,7 +2216,13 @@ function TrackTable({ items, limit = 12, title = 'Top songs' }: TrackTableProps)
                 </div>
                 {tracks.map((item, index) => (
                     <article key={getMusicItemDomKey(item, title)} className='ptv-music-track-row'>
-                        <button type='button' className='ptv-music-track-art' disabled={playbackActions.isBusy} onClick={() => playTrack(index)}>
+                        <button
+                            type='button'
+                            className='ptv-music-track-art'
+                            aria-label={`Play ${getPtvMusicTitle(item)}`}
+                            disabled={playbackActions.isBusy}
+                            onClick={() => playTrack(index)}
+                        >
                             <img
                                 alt=''
                                 decoding='async'
@@ -2386,14 +2425,24 @@ function MusicHomeView({ generated, homeData, libraryIndexLoadState, onGenerated
     const listenAgain = getListenAgainItems(homeData);
     const quickPicks = getQuickPicks(homeData);
     const continueListening = getSectionItems(homeData, 'continue-listening');
-    const madeForYou = getSectionItems(homeData, 'made-for-you');
-    const recommended = getSectionItems(homeData, 'recommended');
+    const madeForYouSource = getSectionItems(homeData, 'made-for-you');
+    const recommendedSource = getSectionItems(homeData, 'recommended');
     const recentlyPlayed = getSectionItems(homeData, 'recently-played');
-    const genreSections = homeData.sections.filter(section => section.id.startsWith('genre-'));
+    const resourcePolicy = getPtvMusicPlayerResourcePolicy();
+    const genreSections = homeData.sections
+        .filter(section => section.id.startsWith('genre-'))
+        .slice(0, resourcePolicy.visibleGenreSectionLimit);
     const newReleases = uniquePtvMusicItems([
         ...getSectionItems(homeData, 'new-music'),
         ...getSectionItems(homeData, 'recently-added-music')
     ]);
+    const madeForYou = madeForYouSource.length ? madeForYouSource : quickPicks;
+    const recommended = buildPtvDistinctMusicRecommendationRow([
+        ...recommendedSource,
+        ...newReleases,
+        ...getSectionItems(homeData, 'high-quality'),
+        ...getAllHomeTracks(homeData)
+    ], madeForYou);
     const likedSongs = getSectionItems(homeData, 'liked-songs');
     const topArtists = getSectionItems(homeData, 'top-artists');
     const topAlbums = getSectionItems(homeData, 'top-albums');
@@ -2414,13 +2463,13 @@ function MusicHomeView({ generated, homeData, libraryIndexLoadState, onGenerated
                 title='Continue Listening'
             />
             <MusicRow
-                items={madeForYou.length ? madeForYou : quickPicks}
+                items={madeForYou}
                 onGenerated={onGenerated}
                 subtitle='Personalized from your library'
                 title='Made For You'
             />
             <MusicRow
-                items={recommended.length ? recommended : quickPicks}
+                items={recommended}
                 onGenerated={onGenerated}
                 subtitle='Smart picks'
                 title='Recommended'
@@ -2489,7 +2538,10 @@ function MusicExploreView({
     search,
     searchResults
 }: MusicExploreViewProps) {
-    const genreSections = homeData.sections.filter(section => section.id.startsWith('genre-'));
+    const resourcePolicy = getPtvMusicPlayerResourcePolicy();
+    const genreSections = homeData.sections
+        .filter(section => section.id.startsWith('genre-'))
+        .slice(0, resourcePolicy.visibleGenreSectionLimit);
     const qualityItems = getSectionItems(homeData, 'high-quality');
 
     return (
@@ -2750,6 +2802,7 @@ function MusicCatalogHeader({
                     <input
                         type='search'
                         value={search}
+                        aria-label={`Search ${title}`}
                         placeholder={`Search ${title.toLowerCase()}`}
                         onChange={event => onSearchChange(event.currentTarget.value)}
                     />
@@ -3359,7 +3412,6 @@ type PlayerViewProps = Readonly<{
 type PlayerSidePanelProps = Readonly<{
     isRelatedLoading: boolean;
     item: PtvMusicItem;
-    lyrics: PtvMusicLyricLine[];
     queueItems: PtvMusicItem[];
     relatedItems: PtvMusicItem[];
 }>;
@@ -3397,12 +3449,16 @@ function PlayerTrackList({
 function PlayerSidePanel({
     isRelatedLoading,
     item,
-    lyrics,
     queueItems,
     relatedItems
 }: PlayerSidePanelProps) {
     const [activeTab, setActiveTab] = useState<typeof PLAYER_TABS[number]>('Up Next');
     const [saveStatus, setSaveStatus] = useState('');
+    const resourcePolicy = getPtvMusicPlayerResourcePolicy();
+    const lyrics = useMusicLyrics(
+        item,
+        !resourcePolicy.deferLyricsUntilSelected || activeTab === 'Lyrics'
+    );
     const panelTitle = activeTab === 'Up Next' ? 'Playing from' : activeTab;
 
     const saveQueue = () => {
@@ -3476,8 +3532,10 @@ function PlayerSidePanel({
 function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
     const snapshot = useMusicQueueSnapshot();
     const item = snapshot.currentItem;
+    const hasLoadedItem = Boolean(item);
+    const playerRef = useRef<HTMLDivElement>(null);
     const autoQueueSeedItem = snapshot.autoQueueSeedItem || item;
-    const lyrics = useMusicLyrics(item);
+    const resourcePolicy = getPtvMusicPlayerResourcePolicy();
     const progress = getProgressPercent(snapshot);
     const [relatedItems, setRelatedItems] = useState<PtvMusicItem[]>([]);
     const [isRelatedLoading, setIsRelatedLoading] = useState(false);
@@ -3498,6 +3556,23 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
             route: 'page'
         });
     }, [item?.Id]);
+
+    useEffect(() => {
+        const player = playerRef.current;
+
+        if (!hasLoadedItem || !player) {
+            setPtvFullScreenMusicPresentationAvailable(false);
+            return;
+        }
+
+        setPtvFullScreenMusicPresentationAvailable(true);
+        notifyPtvTvPlaybackSurfaceReady(player, 'full-screen-player');
+
+        return () => {
+            setPtvFullScreenMusicPresentationAvailable(false);
+            notifyPtvTvPlaybackSurfaceDisposed(player, 'full-screen-player');
+        };
+    }, [hasLoadedItem]);
 
     useEffect(() => {
         let disposed = false;
@@ -3544,15 +3619,20 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
     }
 
     return (
-        <div className='ptv-music-view ptv-music-now-playing-view'>
+        <div
+            ref={playerRef}
+            className='ptv-music-view ptv-music-now-playing-view ptv-music-fullscreen-player'
+            data-ptv-focus-scope='full-screen-player'
+            data-ptv-playback-surface='full-screen-player'
+        >
             <div className='ptv-music-now-playing-backdrop' aria-hidden='true'>
-                <img
+                {resourcePolicy.renderPlayerBackdropImage ? <img
                     alt=''
                     decoding='async'
                     loading='eager'
                     src={getItemBackdropUrl(playerBackdropItem || item, 1200)}
                     onError={getMusicPageBackdropErrorHandler()}
-                />
+                /> : null}
             </div>
             <section className='ptv-music-now-playing-main'>
                 <div className='ptv-music-song-video-toggle'>
@@ -3564,7 +3644,7 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
                     alt=''
                     decoding='async'
                     loading='eager'
-                    src={getCachedMusicImageUrl(item, 520)}
+                    src={getCachedMusicImageUrl(item, resourcePolicy.artworkWidth)}
                     onError={getMusicImageErrorHandler()}
                 />
                 <div className='ptv-music-now-playing-meta'>
@@ -3605,7 +3685,9 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
                     />
                     <MusicActionButton
                         className='ptv-music-action-primary'
+                        focusKey='full-screen-player:primary'
                         icon={snapshot.isPlaying ? 'pause' : 'play'}
+                        initialFocus='full-screen-player-primary'
                         label={snapshot.isPlaying ? 'Pause' : 'Play'}
                         onClick={() => void togglePtvMusicPlayPause()}
                     />
@@ -3644,7 +3726,6 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
             <PlayerSidePanel
                 isRelatedLoading={isRelatedLoading}
                 item={item}
-                lyrics={lyrics}
                 queueItems={queueItems}
                 relatedItems={relatedItems}
             />

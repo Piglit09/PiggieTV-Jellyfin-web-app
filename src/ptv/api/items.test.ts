@@ -1,5 +1,4 @@
-import { describe, expect, it } from 'vitest';
-import { vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./client', () => ({
     cleanPtvQuery: (query: Record<string, unknown> | undefined) => {
@@ -14,10 +13,51 @@ vi.mock('./client', () => ({
     requestPtvJson: vi.fn()
 }));
 
+vi.mock('../core/observability', () => ({
+    recordPtvEvent: vi.fn()
+}));
+
+vi.mock('../services/requestCoordinator', () => {
+    const inFlight = new Map<string, Promise<unknown>>();
+
+    return {
+        coordinatePtvJsonRequest: <T>(key: string, task: () => Promise<T>) => {
+            const existing = inFlight.get(key) as Promise<T> | undefined;
+            if (existing) return existing;
+
+            const promise = task().finally(() => {
+                if (inFlight.get(key) === promise) inFlight.delete(key);
+            });
+            inFlight.set(key, promise);
+
+            return promise;
+        },
+        getPtvRequestCoordinatorKey: (method: string, url: string, includeAuthorization = true) => [
+            method.toUpperCase(),
+            includeAuthorization ? 'auth' : 'anon',
+            url
+        ].join(' ')
+    };
+});
+
 import {
     buildPtvRecentlyAddedRequest,
+    getPtvItem,
+    getPtvItemCoreResult,
+    getPtvItems,
+    getPtvResumeItems,
     normalizeJellyfinItemListResponse
 } from './items';
+import {
+    getPtvApiClient,
+    getPtvCurrentUserId,
+    requestPtvJson
+} from './client';
+
+beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getPtvCurrentUserId).mockReturnValue('user-1');
+});
 
 describe('Jellyfin Latest item response normalization', () => {
     it('retains every item from a raw Items/Latest array', () => {
@@ -59,5 +99,128 @@ describe('Jellyfin Latest item response normalization', () => {
         expect(request.endpoint).toBe('Users/user-1/Items/Latest');
         expect(request.params).toEqual({ IncludeItemTypes: 'Movie', Limit: 96 });
         expect(request.params.ParentId).toBeUndefined();
+    });
+});
+
+describe('coordinated Jellyfin item requests', () => {
+    it('routes one item details lookup through Core while preserving the legacy facade value', async () => {
+        const response = {
+            Id: 'movie-1',
+            Name: 'Movie One',
+            RunTimeTicks: 10_000_000,
+            Type: 'Movie'
+        };
+        const getItem = vi.fn().mockResolvedValue(response);
+
+        vi.mocked(getPtvApiClient).mockReturnValue({
+            getItem,
+            serverId: () => 'server-1'
+        });
+
+        await expect(getPtvItem('movie-1')).resolves.toBe(response);
+        expect(getItem).toHaveBeenCalledTimes(1);
+        expect(getItem).toHaveBeenCalledWith('user-1', 'movie-1');
+
+        const coreResult = await getPtvItemCoreResult('movie-2');
+        expect(coreResult).toMatchObject({
+            success: true,
+            value: {
+                status: 200,
+                value: {
+                    media: {
+                        id: 'movie-1',
+                        mediaType: 'movie'
+                    },
+                    runtimeMs: 1000
+                }
+            }
+        });
+    });
+
+    it('shares one in-flight item lookup without creating a duplicate request', async () => {
+        let resolveRequest: ((value: { Id: string }) => void) | undefined;
+        const pending = new Promise<{ Id: string }>(resolve => {
+            resolveRequest = resolve;
+        });
+        const getItem = vi.fn().mockReturnValue(pending);
+
+        vi.mocked(getPtvApiClient).mockReturnValue({
+            getItem,
+            serverId: () => 'server-1'
+        });
+
+        const first = getPtvItem('movie-deduplicated');
+        const second = getPtvItem('movie-deduplicated');
+
+        expect(getItem).toHaveBeenCalledTimes(1);
+        resolveRequest?.({ Id: 'movie-deduplicated' });
+
+        await expect(Promise.all([first, second])).resolves.toEqual([
+            { Id: 'movie-deduplicated' },
+            { Id: 'movie-deduplicated' }
+        ]);
+        expect(getItem).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves the existing facade error object while exposing a mapped CoreError', async () => {
+        const legacyError = Object.assign(new Error('Not authorized'), { status: 401 });
+        const getItem = vi.fn().mockRejectedValue(legacyError);
+
+        vi.mocked(getPtvApiClient).mockReturnValue({
+            getItem,
+            serverId: () => 'server-1'
+        });
+
+        await expect(getPtvItem('private-movie')).rejects.toBe(legacyError);
+        await expect(getPtvItemCoreResult('private-movie')).resolves.toMatchObject({
+            error: {
+                code: 'API_HTTP_401',
+                kind: 'authentication'
+            },
+            success: false
+        });
+        expect(getItem).toHaveBeenCalledTimes(2);
+    });
+
+    it('sends list reads through the shared JSON request boundary', async () => {
+        const response = { Items: [{ Id: 'movie-1' }], TotalRecordCount: 1 };
+
+        vi.mocked(requestPtvJson).mockResolvedValue(response);
+
+        await expect(getPtvItems({
+            EnableTotalRecordCount: false,
+            IncludeItemTypes: 'Movie',
+            Limit: 20
+        })).resolves.toBe(response);
+        expect(requestPtvJson).toHaveBeenCalledWith('Users/user-1/Items', {
+            params: {
+                EnableTotalRecordCount: false,
+                IncludeItemTypes: 'Movie',
+                Limit: 20
+            },
+            serverId: undefined
+        });
+    });
+
+    it('preserves the Jellyfin resume endpoint while using the shared boundary', async () => {
+        const response = { Items: [{ Id: 'resume-1' }], TotalRecordCount: 1 };
+
+        vi.mocked(requestPtvJson).mockResolvedValue(response);
+
+        await expect(getPtvResumeItems({
+            IncludeItemTypes: 'Movie',
+            Limit: 20,
+            SortBy: 'DatePlayed',
+            SortOrder: 'Descending'
+        })).resolves.toBe(response);
+        expect(requestPtvJson).toHaveBeenCalledWith('Users/user-1/Items/Resume', {
+            params: {
+                IncludeItemTypes: 'Movie',
+                Limit: 20,
+                SortBy: 'DatePlayed',
+                SortOrder: 'Descending'
+            },
+            serverId: undefined
+        });
     });
 });

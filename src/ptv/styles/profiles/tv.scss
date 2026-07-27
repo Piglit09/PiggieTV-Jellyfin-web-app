@@ -40,21 +40,48 @@ html.ptv-render-tv.ptv-native-shell-mounted .appfooter {
 }
 
 html.ptv-render-tv .ptv-shell-header {
+    box-sizing: border-box;
     gap: 16px;
     grid-template-columns: minmax(168px, 1fr) max-content minmax(240px, 1fr);
+    grid-template-rows: minmax(0, var(--ptv-tv-header-height));
+    height: var(--ptv-tv-header-height);
     left: var(--ptv-tv-safe-x);
+    max-height: var(--ptv-tv-header-height);
     min-height: var(--ptv-tv-header-height);
     right: var(--ptv-tv-safe-x);
     top: var(--ptv-tv-safe-y);
 }
 
+html.ptv-render-tv .ptv-shell-header-left,
+html.ptv-render-tv .ptv-shell-header-primary,
+html.ptv-render-tv .ptv-shell-header-right {
+    max-height: 100%;
+    min-height: 0;
+    min-width: 0;
+}
+
 html.ptv-render-tv .ptv-shell-brand {
-    min-height: 64px;
+    align-self: center;
+    flex: 0 0 196px;
+    height: 64px;
+    justify-self: start;
+    max-height: 64px;
+    max-width: 196px;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    width: 196px;
 }
 
 html.ptv-render-tv .ptv-shell-brand img {
+    display: block;
+    height: 100%;
     max-height: 64px;
     max-width: 196px;
+    min-height: 0;
+    min-width: 0;
+    object-fit: contain;
+    width: 100%;
 }
 
 html.ptv-render-tv .ptv-shell-nav-primary {

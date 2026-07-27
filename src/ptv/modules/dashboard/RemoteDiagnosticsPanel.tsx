@@ -63,6 +63,7 @@ type RemoteDiagnosticsClientCapabilities = {
     navigationTiming: boolean;
     networkTiming: boolean;
     performanceMetrics: boolean;
+    physicalLayoutSnapshot: boolean;
     playbackTelemetry: boolean;
     remoteCommands: boolean;
     reportExport: boolean;
@@ -86,6 +87,19 @@ type StoredRemoteDiagnosticsReport = {
     clientId: string;
     receivedAtUtc: string;
     report: unknown;
+};
+
+type PhysicalLayoutSnapshotSummary = {
+    cssOwnershipStatus: 'unsupported';
+    firstShelfTop: number | null;
+    issueCodes: string[];
+    latestMilestone: string;
+    milestoneCount: number;
+    shellBrandHeight: number | null;
+    shellBrandWidth: number | null;
+    status: 'healthy' | 'regression' | 'unavailable' | 'warning';
+    viewportHeight: number | null;
+    viewportWidth: number | null;
 };
 
 type BusyAction = 'clear-storage' | 'consolidate-storage' | 'download' | 'refresh' | 'refresh-storage' | 'report' | 'rotate-storage' | 'snapshot' | 'start' | 'stop' | null;
@@ -114,6 +128,29 @@ type DiagnosticsStorageStatus = {
 const REMOTE_DIAGNOSTICS_COMPONENT = 'RemoteDiagnosticsPanel';
 const REMOTE_DIAGNOSTICS_SOURCE: RemoteDiagnosticsSource = 'plugin-cache';
 const REMOTE_DIAGNOSTICS_ITEM_TYPE = 'remote-diagnostics-client';
+const PHYSICAL_LAYOUT_ISSUE_LABELS: Record<string, string> = {
+    'duplicate-shell': 'multiple shell headers',
+    'first-shelf-after-viewport': 'first shelf starts below the TV viewport',
+    'first-shelf-missing': 'first shelf was not present',
+    'focus-not-visible': 'focused control has no detected focus indicator',
+    'focus-outside-viewport': 'focused control is outside the viewport',
+    'hero-content-obscured-by-shell-brand': 'shell branding overlaps hero content',
+    'legacy-header-visible': 'legacy Jellyfin header is visible',
+    'shell-brand-outside-header': 'shell branding escapes the header bounds',
+    'shell-brand-oversized': 'shell branding is oversized'
+};
+const PHYSICAL_LAYOUT_STATUS_LABELS = {
+    healthy: 'Layout invariants passed.',
+    regression: 'Layout regression detected.',
+    unavailable: 'Layout evidence is unavailable.',
+    warning: 'Layout evidence needs review.'
+} as const;
+const PHYSICAL_LAYOUT_STATUS_SEVERITIES = {
+    healthy: 'success',
+    regression: 'error',
+    unavailable: 'warning',
+    warning: 'warning'
+} as const;
 
 const PROFILE_FILTERS: Array<{ label: string; value: '' | PtvClientKind }> = [
     { label: 'All profiles', value: '' },
@@ -184,18 +221,83 @@ function getSafeNumber(value: unknown, fallback = 0) {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function getOptionalSafeNumber(value: unknown) {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function getRemoteDiagnosticsResponseValue(record: Record<string, unknown>, field: string) {
+    if (record[field] !== undefined) return record[field];
+
+    const pascalField = `${field.charAt(0).toUpperCase()}${field.slice(1)}`;
+
+    return record[pascalField];
+}
+
+function normalizeStoredRemoteDiagnosticsReport(value: unknown): StoredRemoteDiagnosticsReport | null {
+    if (!isRecord(value)) return null;
+
+    const clientId = getSafeString(getRemoteDiagnosticsResponseValue(value, 'clientId')).trim();
+    const receivedAtUtc = getSafeString(getRemoteDiagnosticsResponseValue(value, 'receivedAtUtc')).trim();
+    const report = getRemoteDiagnosticsResponseValue(value, 'report');
+
+    if (!clientId || !receivedAtUtc || report === undefined) return null;
+
+    return { clientId, receivedAtUtc, report };
+}
+
+function normalizePhysicalLayoutSnapshot(report: unknown): PhysicalLayoutSnapshotSummary | null {
+    if (!isRecord(report) || !isRecord(report.physicalLayoutSnapshot)) return null;
+
+    const snapshot = report.physicalLayoutSnapshot;
+    if (snapshot.capability !== 'physicalLayoutSnapshot') return null;
+
+    const status = snapshot.status === 'healthy'
+        || snapshot.status === 'regression'
+        || snapshot.status === 'warning'
+        || snapshot.status === 'unavailable' ? snapshot.status : 'unavailable';
+    const milestones = Array.isArray(snapshot.milestones) ? snapshot.milestones.slice(0, 8) : [];
+    const latestMilestone = milestones.find(entry => isRecord(entry) && entry.key === snapshot.latestMilestone)
+        || milestones[milestones.length - 1];
+    const milestoneRecord = isRecord(latestMilestone) ? latestMilestone : {};
+    const viewport = isRecord(milestoneRecord.viewport) ? milestoneRecord.viewport : {};
+    const nodes = Array.isArray(milestoneRecord.nodes) ? milestoneRecord.nodes : [];
+    const getNodeRect = (key: string) => {
+        const node = nodes.find(entry => isRecord(entry) && entry.key === key);
+        return isRecord(node) && isRecord(node.rect) ? node.rect : {};
+    };
+    const shellBrandRect = getNodeRect('shellBrand');
+    const firstShelfRect = getNodeRect('firstShelf');
+    const issueCodes = Array.isArray(snapshot.issueCodes) ? snapshot.issueCodes
+        .filter((issue): issue is string => typeof issue === 'string' && issue in PHYSICAL_LAYOUT_ISSUE_LABELS)
+        .slice(0, 12) : [];
+
+    return {
+        cssOwnershipStatus: 'unsupported',
+        firstShelfTop: getOptionalSafeNumber(firstShelfRect.top),
+        issueCodes,
+        latestMilestone: typeof snapshot.latestMilestone === 'string' ? snapshot.latestMilestone : 'none',
+        milestoneCount: milestones.length,
+        shellBrandHeight: getOptionalSafeNumber(shellBrandRect.height),
+        shellBrandWidth: getOptionalSafeNumber(shellBrandRect.width),
+        status,
+        viewportHeight: getOptionalSafeNumber(viewport.height),
+        viewportWidth: getOptionalSafeNumber(viewport.width)
+    };
+}
+
 function normalizeClientCapabilities(value: unknown): RemoteDiagnosticsClientCapabilities {
     const record = isRecord(value) ? value : {};
 
     return {
-        heartbeat: getSafeBoolean(record.heartbeat),
-        memoryMetrics: getSafeBoolean(record.memoryMetrics),
-        navigationTiming: getSafeBoolean(record.navigationTiming),
-        networkTiming: getSafeBoolean(record.networkTiming),
-        performanceMetrics: getSafeBoolean(record.performanceMetrics),
-        playbackTelemetry: getSafeBoolean(record.playbackTelemetry),
-        remoteCommands: getSafeBoolean(record.remoteCommands),
-        reportExport: getSafeBoolean(record.reportExport)
+        heartbeat: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'heartbeat')),
+        memoryMetrics: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'memoryMetrics')),
+        navigationTiming: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'navigationTiming')),
+        networkTiming: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'networkTiming')),
+        performanceMetrics: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'performanceMetrics')),
+        physicalLayoutSnapshot: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'physicalLayoutSnapshot')),
+        playbackTelemetry: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'playbackTelemetry')),
+        remoteCommands: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'remoteCommands')),
+        reportExport: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'reportExport'))
     };
 }
 
@@ -203,15 +305,15 @@ function normalizeBootMarker(value: unknown): RemoteDiagnosticsBootMarker {
     const record = isRecord(value) ? value : {};
 
     return {
-        checkInAttempted: getSafeBoolean(record.checkInAttempted),
-        checkInStatus: typeof record.checkInStatus === 'number' ? record.checkInStatus : null,
-        diagnosticsModuleLoaded: getSafeBoolean(record.diagnosticsModuleLoaded),
-        failureCode: getSafeNullableString(record.failureCode),
-        frontendBuildId: getSafeString(record.frontendBuildId, 'unknown'),
-        loadedClientBuildId: getSafeString(record.loadedClientBuildId, 'unknown'),
-        platformDetected: getSafeString(record.platformDetected, 'unknown'),
-        ptvRuntimeLoaded: getSafeBoolean(record.ptvRuntimeLoaded),
-        remoteDiagnosticsRegistrationCount: getSafeNumber(record.remoteDiagnosticsRegistrationCount)
+        checkInAttempted: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'checkInAttempted')),
+        checkInStatus: getOptionalSafeNumber(getRemoteDiagnosticsResponseValue(record, 'checkInStatus')),
+        diagnosticsModuleLoaded: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'diagnosticsModuleLoaded')),
+        failureCode: getSafeNullableString(getRemoteDiagnosticsResponseValue(record, 'failureCode')),
+        frontendBuildId: getSafeString(getRemoteDiagnosticsResponseValue(record, 'frontendBuildId'), 'unknown'),
+        loadedClientBuildId: getSafeString(getRemoteDiagnosticsResponseValue(record, 'loadedClientBuildId'), 'unknown'),
+        platformDetected: getSafeString(getRemoteDiagnosticsResponseValue(record, 'platformDetected'), 'unknown'),
+        ptvRuntimeLoaded: getSafeBoolean(getRemoteDiagnosticsResponseValue(record, 'ptvRuntimeLoaded')),
+        remoteDiagnosticsRegistrationCount: getSafeNumber(getRemoteDiagnosticsResponseValue(record, 'remoteDiagnosticsRegistrationCount'))
     };
 }
 
@@ -234,7 +336,8 @@ function getSafeCapabilityMode(value: unknown): DiagnosticsCapabilityMode {
 }
 
 function warnMissingDisplayField(record: Record<string, unknown>, field: string, itemId: string, sourceRow: string) {
-    if (record[field] !== undefined && record[field] !== null) return;
+    const value = getRemoteDiagnosticsResponseValue(record, field);
+    if (value !== undefined && value !== null) return;
 
     warnMalformedRemoteDiagnosticsItem({
         itemId,
@@ -267,7 +370,7 @@ function normalizeRemoteDiagnosticsClients(value: unknown) {
             return;
         }
 
-        const clientId = getSafeString(entry.clientId).trim();
+        const clientId = getSafeString(getRemoteDiagnosticsResponseValue(entry, 'clientId')).trim();
         if (!clientId) {
             warnMalformedRemoteDiagnosticsItem({
                 missingProperty: 'clientId',
@@ -291,28 +394,28 @@ function normalizeRemoteDiagnosticsClients(value: unknown) {
         warnMissingDisplayField(entry, 'route', clientId, sourceRow);
 
         clients.push({
-            applicationName: getSafeString(entry.applicationName, 'PiggieTV'),
-            applicationVersion: getSafeString(entry.applicationVersion),
-            boot: normalizeBootMarker(entry.boot),
-            capabilityMode: getSafeCapabilityMode(entry.capabilityMode),
-            capabilities: normalizeClientCapabilities(entry.capabilities),
+            applicationName: getSafeString(getRemoteDiagnosticsResponseValue(entry, 'applicationName'), 'PiggieTV'),
+            applicationVersion: getSafeString(getRemoteDiagnosticsResponseValue(entry, 'applicationVersion')),
+            boot: normalizeBootMarker(getRemoteDiagnosticsResponseValue(entry, 'boot')),
+            capabilityMode: getSafeCapabilityMode(getRemoteDiagnosticsResponseValue(entry, 'capabilityMode')),
+            capabilities: normalizeClientCapabilities(getRemoteDiagnosticsResponseValue(entry, 'capabilities')),
             clientId,
-            deviceName: getSafeString(entry.deviceName),
-            diagnosticsActive: getSafeBoolean(entry.diagnosticsActive),
-            displayName: getSafeString(entry.displayName, `PiggieTV client ${clientId.slice(-8)}`),
-            expiresAtUtc: getSafeNullableString(entry.expiresAtUtc),
-            firstSeenUtc: getSafeString(entry.firstSeenUtc),
-            hasReport: getSafeBoolean(entry.hasReport),
-            lastLeaseRejection: getSafeNullableString(entry.lastLeaseRejection),
-            lastSeenUtc: getSafeString(entry.lastSeenUtc),
-            leasePending: getSafeBoolean(entry.leasePending),
-            online: getSafeBoolean(entry.online),
-            platform: getSafeString(entry.platform, 'unknown'),
-            profile: getSafeProfile(entry.profile),
-            reportedAtUtc: getSafeNullableString(entry.reportedAtUtc),
-            route: getSafeString(entry.route, '/unknown'),
-            sessionId: getSafeNullableString(entry.sessionId),
-            snapshotPending: getSafeBoolean(entry.snapshotPending)
+            deviceName: getSafeString(getRemoteDiagnosticsResponseValue(entry, 'deviceName')),
+            diagnosticsActive: getSafeBoolean(getRemoteDiagnosticsResponseValue(entry, 'diagnosticsActive')),
+            displayName: getSafeString(getRemoteDiagnosticsResponseValue(entry, 'displayName'), `PiggieTV client ${clientId.slice(-8)}`),
+            expiresAtUtc: getSafeNullableString(getRemoteDiagnosticsResponseValue(entry, 'expiresAtUtc')),
+            firstSeenUtc: getSafeString(getRemoteDiagnosticsResponseValue(entry, 'firstSeenUtc')),
+            hasReport: getSafeBoolean(getRemoteDiagnosticsResponseValue(entry, 'hasReport')),
+            lastLeaseRejection: getSafeNullableString(getRemoteDiagnosticsResponseValue(entry, 'lastLeaseRejection')),
+            lastSeenUtc: getSafeString(getRemoteDiagnosticsResponseValue(entry, 'lastSeenUtc')),
+            leasePending: getSafeBoolean(getRemoteDiagnosticsResponseValue(entry, 'leasePending')),
+            online: getSafeBoolean(getRemoteDiagnosticsResponseValue(entry, 'online')),
+            platform: getSafeString(getRemoteDiagnosticsResponseValue(entry, 'platform'), 'unknown'),
+            profile: getSafeProfile(getRemoteDiagnosticsResponseValue(entry, 'profile')),
+            reportedAtUtc: getSafeNullableString(getRemoteDiagnosticsResponseValue(entry, 'reportedAtUtc')),
+            route: getSafeString(getRemoteDiagnosticsResponseValue(entry, 'route'), '/unknown'),
+            sessionId: getSafeNullableString(getRemoteDiagnosticsResponseValue(entry, 'sessionId')),
+            snapshotPending: getSafeBoolean(getRemoteDiagnosticsResponseValue(entry, 'snapshotPending'))
         });
     });
 
@@ -346,6 +449,7 @@ function getCapabilityLabels(client: RemoteDiagnosticsClient) {
         ['remoteCommands', 'commands'],
         ['reportExport', 'reports'],
         ['performanceMetrics', 'performance'],
+        ['physicalLayoutSnapshot', 'physical layout'],
         ['networkTiming', 'network'],
         ['playbackTelemetry', 'playback'],
         ['memoryMetrics', 'memory']
@@ -625,6 +729,58 @@ function RemoteDiagnosticsClientStatus({ selectedClient }: Readonly<{ selectedCl
     );
 }
 
+function PhysicalTvLayoutSnapshotSection({
+    report,
+    supported
+}: Readonly<{
+    report: StoredRemoteDiagnosticsReport | null;
+    supported: boolean;
+}>) {
+    const snapshot = normalizePhysicalLayoutSnapshot(report?.report);
+
+    if (!supported) {
+        return (
+            <Stack spacing={0.5} data-ptv-physical-layout-snapshot>
+                <Typography variant='h4'>Physical TV Layout Snapshot</Typography>
+                <Alert severity='info'>The selected client does not advertise physical layout collection.</Alert>
+            </Stack>
+        );
+    }
+    if (!report) {
+        return (
+            <Stack spacing={0.5} data-ptv-physical-layout-snapshot>
+                <Typography variant='h4'>Physical TV Layout Snapshot</Typography>
+                <Typography color='text.secondary'>Request a snapshot, then view the latest report to evaluate TV layout invariants.</Typography>
+            </Stack>
+        );
+    }
+    if (!snapshot) {
+        return (
+            <Stack spacing={0.5} data-ptv-physical-layout-snapshot>
+                <Typography variant='h4'>Physical TV Layout Snapshot</Typography>
+                <Alert severity='warning'>The uploaded report has no compatible physical layout snapshot. The client build may be stale.</Alert>
+            </Stack>
+        );
+    }
+
+    const statusLabel = PHYSICAL_LAYOUT_STATUS_LABELS[snapshot.status];
+    const severity = PHYSICAL_LAYOUT_STATUS_SEVERITIES[snapshot.status];
+    const issues = snapshot.issueCodes.map(issue => PHYSICAL_LAYOUT_ISSUE_LABELS[issue]);
+
+    return (
+        <Stack spacing={0.5} data-ptv-physical-layout-snapshot>
+            <Typography variant='h4'>Physical TV Layout Snapshot</Typography>
+            <Alert severity={severity}>{statusLabel}{issues.length ? ` ${issues.join('; ')}.` : ''}</Alert>
+            <Typography color='text.secondary' variant='body2'>
+                Latest milestone: {snapshot.latestMilestone}; retained milestones: {snapshot.milestoneCount}; viewport: {snapshot.viewportWidth ?? 'n/a'} x {snapshot.viewportHeight ?? 'n/a'}.
+            </Typography>
+            <Typography color='text.secondary' variant='body2'>
+                Shell brand: {snapshot.shellBrandWidth ?? 'n/a'} x {snapshot.shellBrandHeight ?? 'n/a'}; first shelf top: {snapshot.firstShelfTop ?? 'n/a'}; CSS source attribution: {snapshot.cssOwnershipStatus}.
+            </Typography>
+        </Stack>
+    );
+}
+
 export function RemoteDiagnosticsPanel() {
     const [busyAction, setBusyAction] = useState<BusyAction>(null);
     const [clientLoadState, setClientLoadState] = useState<ClientLoadState>('loading');
@@ -760,9 +916,12 @@ export function RemoteDiagnosticsPanel() {
         setBusyAction(download ? 'download' : 'report');
         setErrorMessage('');
         try {
-            const nextReport = await getPluginApi().getRemoteDiagnosticsReport<StoredRemoteDiagnosticsReport>(selectedClientId, {
+            const rawReport = await getPluginApi().getRemoteDiagnosticsReport<unknown>(selectedClientId, {
                 bypassCache: true
             });
+            const nextReport = normalizeStoredRemoteDiagnosticsReport(rawReport);
+
+            if (!nextReport) throw new Error('Remote diagnostics report response is invalid.');
 
             setReport(nextReport);
             if (download) {
@@ -895,6 +1054,10 @@ export function RemoteDiagnosticsPanel() {
                 <Button disabled={!selectedClient?.hasReport || !selectedClientSupportsReportExport || busyAction !== null} onClick={handleViewReport} variant='outlined'>View report</Button>
                 <Button disabled={!selectedClient?.hasReport || !selectedClientSupportsReportExport || busyAction !== null} onClick={handleDownloadReport} variant='outlined'>Download report</Button>
             </Stack>
+            <PhysicalTvLayoutSnapshotSection
+                report={report}
+                supported={selectedClient?.capabilities.physicalLayoutSnapshot === true}
+            />
             <Divider />
             <Typography variant='h4'>Diagnostics storage</Typography>
             {storage ? (

@@ -1,7 +1,7 @@
 import { ready, emit } from './events';
 import { once } from '../utils/guards';
 import './compatibility';
-import { initPtvObservability, recordPtvStartupEvent } from './observability';
+import { initPtvObservability, recordPtvEvent, recordPtvStartupEvent } from './observability';
 import { initPtvLogging, ptvLogger } from './logger';
 import './lifecycle';
 import { scheduleRouteCheck, startRouter } from './router';
@@ -10,6 +10,7 @@ import {
     markPtvRuntimeReady,
     registerPtvRuntimeFeature
 } from './runtime';
+import { initializePtvWebCoreRuntime } from './initialization/webCoreRuntime';
 
 import './observer';
 import './lifecycleSafety';
@@ -17,7 +18,6 @@ import './jellyfin-hooks';
 import './theme';
 import './shell';
 import '../api';
-import { startPtvRouteController } from '../shell/routeController';
 import { startPtvShellFoundation } from '../shell/foundation';
 import { startPtvRuntimeRoot } from '../shell/PTVRuntimeRoot';
 import { startPtvPerformanceMonitor } from '../services/performanceMonitor';
@@ -51,11 +51,28 @@ function startPtvRuntimeServices() {
     registerPtvRuntimeFeature('router', startRouter);
     registerPtvRuntimeFeature('performance-monitor', startPtvPerformanceMonitor);
     registerPtvRuntimeFeature('remote-diagnostics', startPtvPluginRemoteDiagnosticsTransport);
-    registerPtvRuntimeFeature('route-controller', startPtvRouteController);
     registerPtvRuntimeFeature('shell-foundation', startPtvShellFoundation);
     registerPtvRuntimeFeature('runtime-root', startPtvRuntimeRoot);
     registerPtvRuntimeFeature('startup-readiness', startPtvStartupReadiness);
-    markPtvRuntimeReady();
+    void initializePtvWebCoreRuntime()
+        .then(result => {
+            recordPtvEvent('profile', result.degraded ? 'core-app-ready-degraded' : 'core-app-ready', {
+                action: result.action,
+                steps: result.steps.map(step => ({
+                    name: step.name,
+                    status: step.status
+                }))
+            });
+            if (result.ready || result.action === 'route-to-login') {
+                // Login remains a valid authoritative application destination.
+                markPtvRuntimeReady();
+            }
+        })
+        .catch(error => {
+            recordPtvEvent('profile', 'core-app-initialization-failed', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        });
 }
 
 ready(() => {

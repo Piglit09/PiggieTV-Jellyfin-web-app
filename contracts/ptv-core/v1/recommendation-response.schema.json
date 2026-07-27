@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v1/recommendation-response.schema.json",
+  "title": "PTV Recommendation Response v1",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "cacheVersion",
+    "generatedAt",
+    "serverId",
+    "userId",
+    "rows"
+  ],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "cacheVersion": { "type": "integer", "minimum": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "serverId": { "type": "string", "minLength": 1 },
+    "userId": { "type": "string", "minLength": 1 },
+    "rows": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "https://piggietv.com/contracts/ptv-core/v1/recommendation-row.schema.json"
+      }
+    },
+    "debug": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": true
+}

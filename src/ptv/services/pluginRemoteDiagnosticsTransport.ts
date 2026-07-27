@@ -75,6 +75,46 @@ function getErrorStatus(error: unknown) {
     return null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getCommandValue(record: Record<string, unknown>, field: string) {
+    if (record[field] !== undefined) return record[field];
+
+    return record[`${field.charAt(0).toUpperCase()}${field.slice(1)}`];
+}
+
+function normalizeRemoteDiagnosticsCommand(value: unknown): PtvRemoteDiagnosticsCommand {
+    if (!isRecord(value)) return {};
+
+    const rawLease = getCommandValue(value, 'lease');
+    const leaseRecord = isRecord(rawLease) ? rawLease : null;
+    const profiles = leaseRecord ? getCommandValue(leaseRecord, 'profiles') : null;
+    const command: PtvRemoteDiagnosticsCommand = {};
+    const disable = getCommandValue(value, 'disable');
+    const requestSnapshot = getCommandValue(value, 'requestSnapshot');
+
+    if (typeof disable === 'boolean') command.disable = disable;
+    if (rawLease === null) command.lease = null;
+    if (leaseRecord) {
+        command.lease = {
+            durationMs: Number(getCommandValue(leaseRecord, 'durationMs')) || 0,
+            enabled: getCommandValue(leaseRecord, 'enabled') === true,
+            expiresAt: Number(getCommandValue(leaseRecord, 'expiresAt')) || 0,
+            issuedAt: Number(getCommandValue(leaseRecord, 'issuedAt')) || 0,
+            profiles: (Array.isArray(profiles) ?
+                profiles.filter((entry): entry is string => typeof entry === 'string') : []) as
+                NonNullable<PtvRemoteDiagnosticsCommand['lease']>['profiles'],
+            sessionId: typeof getCommandValue(leaseRecord, 'sessionId') === 'string' ?
+                getCommandValue(leaseRecord, 'sessionId') as string : ''
+        };
+    }
+    if (typeof requestSnapshot === 'boolean') command.requestSnapshot = requestSnapshot;
+
+    return command;
+}
+
 function statusSupportsRemoteDiagnostics(status: RemoteDiagnosticsCapabilityStatus) {
     if (typeof status.featureFlags?.remoteDiagnostics === 'boolean') {
         return status.featureFlags.remoteDiagnostics;
@@ -147,9 +187,10 @@ export function startPtvPluginRemoteDiagnosticsTransport() {
             }
 
             try {
-                const command = await pluginApi.checkInRemoteDiagnostics<PtvRemoteDiagnosticsCommand, PtvRemoteDiagnosticsPresence>(presence, {
+                const rawCommand = await pluginApi.checkInRemoteDiagnostics<unknown, PtvRemoteDiagnosticsPresence>(presence, {
                     bypassCache: true
                 });
+                const command = normalizeRemoteDiagnosticsCommand(rawCommand);
 
                 transportDebug.lastFailureReason = null;
                 transportDebug.lastHeartbeatAt = new Date().toISOString();

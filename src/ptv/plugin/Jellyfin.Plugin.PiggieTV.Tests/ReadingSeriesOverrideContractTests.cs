@@ -27,6 +27,15 @@ public sealed class ReadingSeriesOverrideContractTests
         Assert.True(status.FeatureFlags["readingSeriesOverrides"]);
     }
 
+    [Fact]
+    public void StatusAdvertisesPhysicalLayoutSnapshot()
+    {
+        var status = new PtvStatusResponse();
+
+        Assert.Contains("physicalLayoutSnapshot", status.Features);
+        Assert.True(status.FeatureFlags["physicalLayoutSnapshot"]);
+    }
+
     [Theory]
     [InlineData(nameof(PtvStatusController.GetReadingSeriesOverrides), "reading/series-overrides/{routeKind}", typeof(HttpGetAttribute))]
     [InlineData(nameof(PtvStatusController.SaveReadingSeriesOverrides), "reading/series-overrides/{routeKind}", typeof(HttpPutAttribute))]

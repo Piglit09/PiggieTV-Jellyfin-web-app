@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v1/feature-flags.schema.json",
+  "title": "PTV Feature Flags v1",
+  "type": "object",
+  "required": ["contractVersion", "schemaVersion", "scope", "values"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "scope": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["global", "user", "server", "device"] },
+        "serverId": { "type": "string", "minLength": 1 },
+        "userId": { "type": "string", "minLength": 1 },
+        "deviceId": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "values": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": true
+}

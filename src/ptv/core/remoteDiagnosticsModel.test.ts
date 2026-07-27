@@ -251,6 +251,23 @@ describe('remote diagnostics privacy and payload contract', () => {
                 sessionId: 'admin-session-123',
                 startedAt: 100
             },
+            physicalLayoutSnapshot: {
+                build: null,
+                capability: 'physicalLayoutSnapshot',
+                cssOwnership: {
+                    reason: 'dom-computed-style-unavailable',
+                    status: 'unsupported'
+                },
+                environment: null,
+                generatedAt: 200,
+                issueCodes: [],
+                latestMilestone: null,
+                milestones: [],
+                runtime: null,
+                schemaVersion: 1,
+                serviceWorker: null,
+                status: 'unavailable'
+            },
             profile,
             route: '#/music/player?access_token=secret'
         });
@@ -267,6 +284,10 @@ describe('remote diagnostics privacy and payload contract', () => {
                 externalHosts: 'omitted',
                 persistence: 'memory-only',
                 queryStrings: 'omitted'
+            },
+            physicalLayoutSnapshot: {
+                capability: 'physicalLayoutSnapshot',
+                status: 'unavailable'
             },
             route: '/music/player',
             schemaVersion: 1,

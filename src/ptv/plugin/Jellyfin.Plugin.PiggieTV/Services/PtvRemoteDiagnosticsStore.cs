@@ -500,6 +500,7 @@ public sealed class PtvRemoteDiagnosticsStore : IPtvRemoteDiagnosticsStore
             NavigationTiming = capabilities.NavigationTiming,
             NetworkTiming = capabilities.NetworkTiming,
             PerformanceMetrics = capabilities.PerformanceMetrics,
+            PhysicalLayoutSnapshot = capabilities.PhysicalLayoutSnapshot,
             PlaybackTelemetry = capabilities.PlaybackTelemetry,
             RemoteCommands = capabilities.RemoteCommands,
             ReportExport = capabilities.ReportExport

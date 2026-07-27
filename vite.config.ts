@@ -8,7 +8,15 @@ export default defineConfig({
         alias: {
             // URL is a Node build-time API here, not a browser compatibility requirement.
             // eslint-disable-next-line compat/compat
-            lib: fileURLToPath(new URL('./src/lib', import.meta.url))
+            components: fileURLToPath(new URL('./src/components', import.meta.url)),
+            // eslint-disable-next-line compat/compat
+            constants: fileURLToPath(new URL('./src/constants', import.meta.url)),
+            // eslint-disable-next-line compat/compat
+            lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
+            // eslint-disable-next-line compat/compat
+            ptv: fileURLToPath(new URL('./src/ptv', import.meta.url)),
+            // eslint-disable-next-line compat/compat
+            utils: fileURLToPath(new URL('./src/utils', import.meta.url))
         }
     },
     test: {

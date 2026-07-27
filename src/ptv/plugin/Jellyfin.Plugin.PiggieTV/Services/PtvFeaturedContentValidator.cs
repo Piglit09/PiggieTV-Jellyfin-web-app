@@ -141,6 +141,15 @@ public static class PtvFeaturedContentValidator
             }
         }
 
+        var semanticStatus = GetSemanticStatus(payload);
+
+        if (!semanticStatus.UsableForPersistence)
+        {
+            throw Invalid(
+                "PTV_CACHE_INCOMPLETE_PAYLOAD",
+                $"Featured-content payload is {semanticStatus.Classification}; heroCount={semanticStatus.HeroCount}, itemCount={semanticStatus.ItemCount}, sectionCount={semanticStatus.SectionCount}.");
+        }
+
         EnsureNoUnsafeClientValues(document.FeaturedContent);
         EnsureNoUnsafeClientValues(document.FeaturedContentSettings);
 
@@ -159,7 +168,74 @@ public static class PtvFeaturedContentValidator
 
         EnsureSafeSize(document, jsonOptions);
 
+        semanticStatus = GetSemanticStatus(payload);
+
+        if (!semanticStatus.UsableForPersistence)
+        {
+            throw Invalid("PTV_CACHE_TRIMMED_TO_INCOMPLETE", "Featured-content payload became incomplete while enforcing the cache size limit.");
+        }
+
         return document;
+    }
+
+    /// <summary>Classifies whether a generated payload contains semantic Home content.</summary>
+    /// <param name="payload">Featured payload object.</param>
+    /// <returns>Count-only semantic status.</returns>
+    public static PtvFeaturedContentSemanticStatus GetSemanticStatus(JsonObject payload)
+    {
+        var heroCount = payload["heroItems"] is JsonArray heroItems ? heroItems.Count : 0;
+        var sectionItems = payload["sectionItems"] as JsonObject;
+        var sectionDefinitions = payload["sections"] as JsonArray;
+        var itemCount = 0;
+        var populatedSectionCount = 0;
+
+        if (sectionItems is not null)
+        {
+            foreach (var section in sectionItems)
+            {
+                var count = section.Value is JsonArray items ? items.Count : 0;
+                itemCount += count;
+                if (count > 0) populatedSectionCount++;
+            }
+        }
+
+        var sectionCount = Math.Max(sectionItems?.Count ?? 0, sectionDefinitions?.Count ?? 0);
+        var generationState = GetString(payload["generationState"]);
+        var explicitlyEmpty = GetBool(payload["emptyLibraryConfirmed"])
+            || string.Equals(generationState, "intentional-empty", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(generationState, "valid-empty-library", StringComparison.OrdinalIgnoreCase);
+        var degraded = IsDegradedGenerationState(generationState);
+        var classification = heroCount + itemCount > 0
+            ? degraded ? "partial" : "complete"
+            : explicitlyEmpty ? "intentional-empty"
+            : sectionCount > 0 ? "configuration-only"
+            : degraded ? "degraded"
+            : "empty";
+
+        return new PtvFeaturedContentSemanticStatus(
+            classification,
+            heroCount,
+            itemCount,
+            sectionCount,
+            populatedSectionCount,
+            classification is "complete" or "intentional-empty");
+    }
+
+    private static bool IsDegradedGenerationState(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() is
+            "authentication-lost" or "cancelled" or "canceled" or "degraded" or "incomplete" or
+            "malformed" or "partial" or "timed-out" or "timeout";
+    }
+
+    private static string? GetString(JsonNode? node)
+    {
+        return node is JsonValue value && value.TryGetValue<string>(out var result) ? result : null;
+    }
+
+    private static bool GetBool(JsonNode? node)
+    {
+        return node is JsonValue value && value.TryGetValue<bool>(out var result) && result;
     }
 
     private static JsonNode? NormalizeSettings(JsonNode? settingsNode)
@@ -471,3 +547,12 @@ public static class PtvFeaturedContentValidator
             || normalizedName.EndsWith("filename", StringComparison.Ordinal);
     }
 }
+
+/// <summary>Count-only semantic classification for a featured-content payload.</summary>
+public sealed record PtvFeaturedContentSemanticStatus(
+    string Classification,
+    int HeroCount,
+    int ItemCount,
+    int SectionCount,
+    int PopulatedSectionCount,
+    bool UsableForPersistence);

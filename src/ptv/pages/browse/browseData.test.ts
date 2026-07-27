@@ -1,18 +1,46 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
+    apiClient: null as null | {
+        getGenres?: ReturnType<typeof vi.fn>;
+        getStudios?: ReturnType<typeof vi.fn>;
+    },
     getPtvItems: vi.fn(),
     getPtvUserViews: vi.fn()
 }));
+const coordinatorState = vi.hoisted(() => ({
+    inFlight: new Map<string, Promise<unknown>>()
+}));
 
 vi.mock('../../api', () => ({
-    getCurrentPtvApiClient: vi.fn(() => null),
+    getCurrentPtvApiClient: vi.fn(() => apiMocks.apiClient),
+    getPtvApiUrl: vi.fn((endpoint: string, query: Record<string, unknown>) => (
+        `${endpoint}:${JSON.stringify(query)}`
+    )),
     getPtvCurrentUserId: vi.fn(() => 'user'),
     getPtvItems: apiMocks.getPtvItems,
     getPtvResumeItems: vi.fn(),
     getPtvServerId: vi.fn(() => 'server'),
     getPtvUserViews: apiMocks.getPtvUserViews,
     serializePtvItemFieldProfile: vi.fn((profile: string) => profile)
+}));
+vi.mock('../../services/requestCoordinator', () => ({
+    coordinatePtvJsonRequest<T>(key: string, task: () => Promise<T>): Promise<T> {
+        const existing = coordinatorState.inFlight.get(key) as Promise<T> | undefined;
+        if (existing) return existing;
+
+        const promise = task().finally(() => {
+            if (coordinatorState.inFlight.get(key) === promise) {
+                coordinatorState.inFlight.delete(key);
+            }
+        });
+        coordinatorState.inFlight.set(key, promise);
+
+        return promise;
+    },
+    getPtvRequestCoordinatorKey(method: string, identity: string, includeAuthorization: boolean) {
+        return `${method} ${includeAuthorization ? 'auth' : 'anon'} ${identity}`;
+    }
 }));
 
 import {
@@ -21,6 +49,7 @@ import {
     findExactPtvBrowseDirectoryEntry,
     getPtvBrowseTrendingScore,
     getPtvFocusedBrowseCacheKey,
+    loadPtvBrowseDirectory,
     loadPtvFocusedBrowsePage,
     loadPtvFocusedBrowsePages,
     rankPtvBrowseTrendingItems,
@@ -41,8 +70,10 @@ const scopedAnime: PtvBrowseResolvedScope = {
 describe('browseData', () => {
     beforeEach(() => {
         resetPtvBrowseDataCachesForTests();
+        apiMocks.apiClient = null;
         apiMocks.getPtvItems.mockReset();
         apiMocks.getPtvUserViews.mockReset();
+        coordinatorState.inFlight.clear();
     });
 
     it('resolves aliases to exact Jellyfin user-view IDs and rejects unknown scopes', async () => {
@@ -135,6 +166,37 @@ describe('browseData', () => {
 
         expect(findExactPtvBrowseDirectoryEntry(entries, 'warner bros.')).toEqual(entries[0]);
         expect(findExactPtvBrowseDirectoryEntry(entries, 'Warner')).toBeNull();
+    });
+
+    it('shares an exact in-flight metadata-directory request', async () => {
+        let resolve!: (value: { Items: Array<{ ChildCount: number; Id: string; Name: string }> }) => void;
+        const response = new Promise<{ Items: Array<{ ChildCount: number; Id: string; Name: string }> }>(
+            complete => {
+                resolve = complete;
+            }
+        );
+        const getGenres = vi.fn(() => response);
+        apiMocks.apiClient = { getGenres };
+        const route = parsePtvBrowseRoute('/movies', '?view=genres');
+        const scope: PtvBrowseResolvedScope = {
+            alias: '',
+            error: '',
+            libraryIds: [],
+            libraryNames: [],
+            status: 'unscoped'
+        };
+
+        const first = loadPtvBrowseDirectory(route, scope, 'genre');
+        const second = loadPtvBrowseDirectory(route, scope, 'genre');
+
+        expect(getGenres).toHaveBeenCalledTimes(1);
+
+        resolve({
+            Items: [{ ChildCount: 1, Id: 'genre-id', Name: 'Genre' }]
+        });
+
+        await expect(first).resolves.toEqual([{ count: 1, id: 'genre-id', name: 'Genre' }]);
+        await expect(second).resolves.toEqual([{ count: 1, id: 'genre-id', name: 'Genre' }]);
     });
 
     it('keys focused results by resolved scope, filters, sort, and page', () => {

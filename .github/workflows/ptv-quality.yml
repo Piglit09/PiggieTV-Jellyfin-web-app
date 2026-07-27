@@ -33,6 +33,28 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --no-audit
 
+      - name: Checkout Android mobile contracts
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          repository: ${{ github.repository_owner }}/PiggieTV-Jellyfin-Android
+          path: .contract-repositories/mobile
+          token: ${{ secrets.PTV_CROSS_REPO_TOKEN || github.token }}
+
+      - name: Checkout Android TV contracts
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          repository: ${{ github.repository_owner }}/PiggieTV-AndoidTV
+          path: .contract-repositories/tv
+          token: ${{ secrets.PTV_CROSS_REPO_TOKEN || github.token }}
+
+      - name: PTV Core schema and Android parity
+        env:
+          PTV_ANDROID_MOBILE_REPO: ${{ github.workspace }}/.contract-repositories/mobile
+          PTV_ANDROID_TV_REPO: ${{ github.workspace }}/.contract-repositories/tv
+        run: |
+          npm run contracts:validate
+          npm run contracts:android-parity
+
       - name: Focused PiggieTV tests
         run: npm run test:ptv -- --run
 

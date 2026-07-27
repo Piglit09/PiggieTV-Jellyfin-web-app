@@ -3,7 +3,6 @@ import {
     getPtvCurrentUserId,
     getPtvItem,
     getPtvItemImageCandidates,
-    getPtvItemImageUrl,
     getPtvApiUrl,
     getPtvItems,
     getPtvServerId,
@@ -80,8 +79,7 @@ const READING_SHELF_FIELDS = [
     'ProviderIds',
     'SeriesId',
     'SortName',
-    'Tags',
-    'UserData'
+    'Tags'
 ].join(',');
 
 const READING_PROBE_FIELDS = [
@@ -753,8 +751,8 @@ async function getLibraryReadingItems(
             SortOrder: query.SortOrder || 'Ascending',
             StartIndex: query.StartIndex
         }, {
-            enableImages: false,
-            fields: READING_PROBE_FIELDS,
+            enableImages: options.enableImages ?? false,
+            fields: options.fields || READING_PROBE_FIELDS,
             stage: `${library.name} direct reading items`,
             timeoutMs: Math.max(2500, Math.round((options.timeoutMs ?? READING_SHELF_TIMEOUT_MS) / 2))
         });
@@ -774,8 +772,8 @@ async function getScopedReadingEntries(
 
     if (query.ParentId || !libraries.length) {
         const result = await getItems<PtvReadingItem>(query, {
-            enableImages: false,
-            fields: READING_PROBE_FIELDS,
+            enableImages: true,
+            fields: READING_SHELF_FIELDS,
             stage: `${routeKind} scoped items`,
             timeoutMs: READING_SHELF_TIMEOUT_MS
         });
@@ -792,6 +790,8 @@ async function getScopedReadingEntries(
             ...query,
             Limit: pageLimit
         }, {
+            enableImages: true,
+            fields: READING_SHELF_FIELDS,
             stage: `${library.name} scoped ${routeKind} items`,
             timeoutMs: READING_SHELF_TIMEOUT_MS
         });
@@ -1478,26 +1478,7 @@ export function getPtvReadingImageUrl(
         return taggedCandidate.url;
     }
 
-    if (item.Id) {
-        const imageUrl = getPtvItemImageUrl(item, {
-            fillHeight: Math.round(canonicalSize * 1.5),
-            fillWidth: canonicalSize,
-            imageType: 'Primary',
-            quality: 84
-        });
-
-        readingImageUrlCache.set(cacheKey, imageUrl);
-        recordPtvEvent('image', 'reading-image-profile-requested', {
-            duplicateImageTransformPrevented: false,
-            imageProfile: semanticProfile,
-            itemId: item.Id,
-            largestRequestedDimension: Math.round(canonicalSize * 1.5),
-            preferredImageType
-        });
-
-        return imageUrl;
-    }
-
+    readingImageUrlCache.set(cacheKey, READING_PLACEHOLDER_IMAGE);
     return READING_PLACEHOLDER_IMAGE;
 }
 
@@ -1791,6 +1772,8 @@ async function fetchPtvReadingRecentlyAddedUncached(
             ...recentQuery,
             Limit: pageLimit
         }, {
+            enableImages: true,
+            fields: READING_SHELF_FIELDS,
             stage: `${library.name} recently added`,
             timeoutMs: READING_SHELF_TIMEOUT_MS
         });

@@ -166,10 +166,12 @@ body.ptv-native-shell-mounted .appFooter {
     align-items: center;
     background: transparent;
     border: 0;
+    box-sizing: border-box;
     box-shadow: none;
     display: grid;
     gap: clamp(12px, 1.2vw, 22px);
     grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
+    grid-template-rows: minmax(0, auto);
     left: clamp(20px, 2.4vw, 52px);
     min-height: 60px;
     pointer-events: none;
@@ -196,6 +198,7 @@ body.ptv-native-shell-mounted .appFooter {
     display: flex;
     grid-column: 1;
     justify-content: flex-start;
+    min-height: 0;
     min-width: 0;
 }
 
@@ -203,6 +206,7 @@ body.ptv-native-shell-mounted .appFooter {
     grid-column: 2;
     justify-self: center;
     max-width: 100%;
+    min-height: 0;
     min-width: 0;
     overflow: visible;
     position: relative;
@@ -216,6 +220,7 @@ body.ptv-native-shell-mounted .appFooter {
     justify-content: flex-end;
     justify-self: end;
     max-width: min(42vw, 640px);
+    min-height: 0;
     min-width: 0;
     position: relative;
     z-index: 9300;
@@ -223,16 +228,30 @@ body.ptv-native-shell-mounted .appFooter {
 
 .ptv-shell-brand {
     align-items: center;
+    align-self: center;
+    box-sizing: border-box;
     display: inline-flex;
-    min-height: 54px;
-    width: max-content;
+    flex: 0 0 auto;
+    height: clamp(34px, 4vw, 58px);
+    justify-self: start;
+    max-height: 58px;
+    max-width: 176px;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    width: clamp(112px, 10vw, 176px);
 }
 
 .ptv-shell-brand img {
+    display: block;
     filter: drop-shadow(0 10px 26px rgba(162, 74, 255, 0.38));
-    max-height: clamp(34px, 4vw, 58px);
-    max-width: clamp(112px, 10vw, 176px);
+    height: 100%;
+    max-height: 58px;
+    max-width: 176px;
+    min-height: 0;
+    min-width: 0;
     object-fit: contain;
+    width: 100%;
 }
 
 .ptv-shell-search {
@@ -532,13 +551,17 @@ html.ptv-layout-mobile .ptv-shell-dropdown-panel {
 }
 
 .ptv-shell-dropdown-link,
-.ptv-shell-user-panel a {
+.ptv-shell-user-panel a,
+.ptv-shell-user-panel button {
     align-items: center;
+    background: transparent;
+    border: 0;
     border-radius: 12px;
     color: rgba(255, 255, 255, 0.9);
     display: flex;
     font-size: 14px;
     font-weight: 800;
+    font-family: inherit;
     gap: 12px;
     min-height: 40px;
     padding: 0 12px;
@@ -549,7 +572,9 @@ html.ptv-layout-mobile .ptv-shell-dropdown-panel {
 .ptv-shell-dropdown-link:hover,
 .ptv-shell-dropdown-link:focus-visible,
 .ptv-shell-user-panel a:hover,
-.ptv-shell-user-panel a:focus-visible {
+.ptv-shell-user-panel a:focus-visible,
+.ptv-shell-user-panel button:hover,
+.ptv-shell-user-panel button:focus-visible {
     background: rgba(179, 116, 255, 0.18);
     color: #fff;
     outline: 0;
@@ -833,13 +858,22 @@ html.ptv-layout-mobile .ptv-shell-dropdown-panel {
     transform: translateY(-1px);
 }
 
+[data-ptv-runtime-root-host='true'] {
+    inset: 0;
+    pointer-events: none;
+    position: fixed;
+}
+
 .ptv-runtime-root,
 .ptv-runtime-media-dock-slot {
+    inset: 0;
     pointer-events: none;
+    position: absolute;
 }
 
 .ptv-runtime-media-dock-slot .ptv-media-dock {
     pointer-events: auto;
+    position: absolute;
 }
 
 html[data-ptv-route-mode='native'].ptv-playback-presentation-owned .nowPlayingBar {

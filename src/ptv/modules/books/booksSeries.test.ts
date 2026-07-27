@@ -115,6 +115,21 @@ describe('PTV reading series grouping', () => {
         expect(series[0].confidence).toBe('explicit');
     });
 
+    it('uses provider identity ahead of collection metadata', () => {
+        const series = buildPtvReadingSeries([
+            readingItem('Batman 001', 'provider-a', {
+                CollectionName: 'Batman',
+                ProviderIds: { ComicVineSeries: 'batman-2011' }
+            }),
+            readingItem('Batman 001', 'provider-b', {
+                CollectionName: 'Batman',
+                ProviderIds: { ComicVineSeries: 'batman-2016' }
+            })
+        ], 'comics');
+
+        expect(series).toHaveLength(2);
+    });
+
     it('uses provider series IDs ahead of similar title text', () => {
         const series = buildPtvReadingSeries([
             readingItem('Batman 001', '1', { ProviderIds: { ComicVineSeries: 'batman-2011' } }),

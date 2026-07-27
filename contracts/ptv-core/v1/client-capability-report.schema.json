@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v1/client-capability-report.schema.json",
+  "title": "PTV Client Capability Report v1",
+  "type": "object",
+  "required": ["contractVersion", "platform", "deviceClass", "capabilities"],
+  "properties": {
+    "contractVersion": { "const": "1.0" },
+    "platform": {
+      "enum": ["web", "webos", "android", "android-tv", "fire-tv", "plugin", "unknown"]
+    },
+    "deviceClass": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "videoPlayback": { "type": "boolean" },
+        "audioPlayback": { "type": "boolean" },
+        "backgroundAudio": { "type": "boolean" },
+        "downloads": { "type": "boolean" },
+        "androidAuto": { "type": "boolean" },
+        "tvFocusNavigation": { "type": "boolean" },
+        "pointerInput": { "type": "boolean" },
+        "touchInput": { "type": "boolean" },
+        "keyboardInput": { "type": "boolean" },
+        "remoteInput": { "type": "boolean" },
+        "reader": { "type": "boolean" },
+        "comicPaging": { "type": "boolean" },
+        "nativeNotifications": { "type": "boolean" },
+        "lockScreenControls": { "type": "boolean" },
+        "hardwareDecoding": { "type": "boolean" },
+        "telemetry": { "type": "boolean" },
+        "offlineCache": { "type": "boolean" },
+        "quickConnect": { "type": "boolean" },
+        "deepLinks": { "type": "boolean" }
+      },
+      "additionalProperties": { "type": "boolean" }
+    }
+  },
+  "additionalProperties": true
+}

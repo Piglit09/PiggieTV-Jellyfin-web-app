@@ -1,5 +1,9 @@
-import React, { useCallback, useEffect, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 
+import {
+    notifyPtvTvPlaybackSurfaceDisposed,
+    notifyPtvTvPlaybackSurfaceReady
+} from '../core/tvFocus';
 import { PtvIcon } from '../modules/icons';
 import {
     getPtvGlobalPlaybackState,
@@ -11,6 +15,10 @@ import {
     subscribeToPtvGlobalPlaybackState,
     type PtvGlobalPlaybackState
 } from '../services/playbackStateService';
+import {
+    getPtvPlaybackPresentationSnapshot,
+    subscribeToPtvPlaybackPresentation
+} from '../services/playbackPresentationService';
 import { incrementPtvPerformanceCounter, recordPtvPerformanceEntry } from '../services/performanceMonitor';
 
 function ticksToPercent(positionTicks = 0, durationTicks = 0) {
@@ -39,16 +47,6 @@ function stopEvent(event: React.MouseEvent<HTMLElement>) {
     event.stopPropagation();
 }
 
-function subscribeToPlaybackRoute(listener: () => void) {
-    window.addEventListener('hashchange', listener);
-    window.addEventListener('popstate', listener);
-
-    return () => {
-        window.removeEventListener('hashchange', listener);
-        window.removeEventListener('popstate', listener);
-    };
-}
-
 function getPlaybackRouteHash() {
     return window.location.hash || '';
 }
@@ -61,24 +59,26 @@ export function isPtvMusicDockPlayback(
     if (/^#\/music\/player(?:[/?]|$)/i.test(routeHash)) return false;
     if (!state.active || !state.itemId || state.source !== 'ptv-music') return false;
 
-    const itemType = String(state.itemType || '').trim().toLowerCase();
     const mediaType = String(state.mediaType || '').trim().toLowerCase();
 
-    return mediaType === 'audio' && (!itemType || itemType === 'audio');
+    return mediaType === 'audio';
 }
 
 export default function PTVMediaDock() {
+    const dockRef = useRef<HTMLElement>(null);
     const state = useSyncExternalStore(
         subscribeToPtvGlobalPlaybackState,
         getPtvGlobalPlaybackState,
         getPtvGlobalPlaybackState
     );
-    const routeHash = useSyncExternalStore(
-        subscribeToPlaybackRoute,
-        getPlaybackRouteHash,
-        getPlaybackRouteHash
+    const presentation = useSyncExternalStore(
+        subscribeToPtvPlaybackPresentation,
+        getPtvPlaybackPresentationSnapshot,
+        getPtvPlaybackPresentationSnapshot
     );
-    const ownsPlaybackPresentation = isPtvMusicDockPlayback(state, routeHash);
+    const ownsPlaybackPresentation = presentation.surface === 'mini-player'
+        && presentation.audioLoaded
+        && isPtvMusicDockPlayback(state, '#/presentation/mini');
     const progressPercent = ticksToPercent(state.positionTicks, state.durationTicks);
     const title = state.name || 'Now Playing';
     const kicker = getPlaybackKicker(state);
@@ -91,6 +91,18 @@ export default function PTVMediaDock() {
         return () => {
             document.documentElement.classList.remove('ptv-playback-presentation-owned');
             document.body.classList.remove('ptv-playback-presentation-owned');
+        };
+    }, [ownsPlaybackPresentation]);
+
+    useEffect(() => {
+        const dock = dockRef.current;
+
+        if (!ownsPlaybackPresentation || !dock) return;
+
+        notifyPtvTvPlaybackSurfaceReady(dock, 'mini-player');
+
+        return () => {
+            notifyPtvTvPlaybackSurfaceDisposed(dock, 'mini-player');
         };
     }, [ownsPlaybackPresentation]);
 
@@ -141,15 +153,19 @@ export default function PTVMediaDock() {
 
     return (
         <aside
+            ref={dockRef}
             className={`ptv-media-dock ptv-media-dock-${state.source}`}
             aria-label='Current playback'
             data-ptv-dock-item-id={state.itemId}
             data-ptv-dock-route={state.routeHref || ''}
             data-ptv-dock-source={state.source}
+            data-ptv-focus-scope='mini-player'
+            data-ptv-playback-surface='mini-player'
         >
             <button
                 aria-label={`Open ${title}`}
                 className='ptv-media-dock-art'
+                data-ptv-focus-key='mini-player:art'
                 onClick={handleDetails}
                 type='button'
             >
@@ -161,7 +177,12 @@ export default function PTVMediaDock() {
             </button>
             <div className='ptv-media-dock-copy'>
                 <span>{kicker}</span>
-                <button type='button' onClick={handleDetails} aria-label={`Open ${title} player`}>
+                <button
+                    type='button'
+                    data-ptv-focus-key='mini-player:track'
+                    onClick={handleDetails}
+                    aria-label={`Open ${title} player`}
+                >
                     <strong>{title}</strong>
                     {state.artist && state.artist !== kicker ? <em>{state.artist}</em> : null}
                 </button>
@@ -177,23 +198,48 @@ export default function PTVMediaDock() {
             </div>
             <div className='ptv-media-dock-actions'>
                 {state.source === 'ptv-music' ? (
-                    <button aria-label='Previous track' type='button' onClick={handlePrevious}>
+                    <button
+                        aria-label='Previous track'
+                        data-ptv-focus-key='mini-player:previous'
+                        type='button'
+                        onClick={handlePrevious}
+                    >
                         <PtvIcon name='skipPrevious' />
                     </button>
                 ) : null}
-                <button className='ptv-media-dock-primary' type='button' onClick={handlePrimary}>
+                <button
+                    className='ptv-media-dock-primary'
+                    data-ptv-focus-key='mini-player:primary'
+                    data-ptv-initial-focus='mini-player-primary'
+                    type='button'
+                    onClick={handlePrimary}
+                >
                     <PtvIcon name={state.paused ? 'playback' : 'pause'} />
                     <span>{getPrimaryLabel(state)}</span>
                 </button>
                 {state.source === 'ptv-music' ? (
-                    <button aria-label='Next track' type='button' onClick={handleNext}>
+                    <button
+                        aria-label='Next track'
+                        data-ptv-focus-key='mini-player:next'
+                        type='button'
+                        onClick={handleNext}
+                    >
                         <PtvIcon name='skipNext' />
                     </button>
                 ) : null}
-                <button type='button' onClick={handleDetails}>
+                <button
+                    type='button'
+                    data-ptv-focus-key='mini-player:player'
+                    onClick={handleDetails}
+                >
                     {state.source === 'ptv-music' ? 'Player' : 'Details'}
                 </button>
-                <button aria-label='Stop playback' type='button' onClick={handleStop}>
+                <button
+                    aria-label='Stop playback'
+                    data-ptv-focus-key='mini-player:stop'
+                    type='button'
+                    onClick={handleStop}
+                >
                     Stop
                 </button>
             </div>

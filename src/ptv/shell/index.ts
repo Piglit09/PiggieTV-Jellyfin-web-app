@@ -24,6 +24,7 @@ export {
     startPtvShellFoundation
 } from './foundation';
 export type {
+    PtvNavigationAction,
     PtvNavigationItem,
     PtvNavigationPermission,
     PtvNavigationSection

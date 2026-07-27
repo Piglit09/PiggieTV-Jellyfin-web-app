@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildPtvDistinctMusicRecommendationRow,
     buildPtvMusicRecommendationShelves,
     createPtvMusicRecommendationEngine
 } from './musicRecommendations';
@@ -32,6 +33,21 @@ function musicItem(
 }
 
 describe('buildPtvMusicRecommendationShelves()', () => {
+    it('repairs stale cached discovery rows without repeating affinity items', () => {
+        const madeForYou = [
+            musicItem('made-1', 'Alpha', 'Affinity One'),
+            musicItem('made-2', 'Beta', 'Affinity Two')
+        ];
+        const repaired = buildPtvDistinctMusicRecommendationRow([
+            ...madeForYou,
+            musicItem('discover-1', 'Gamma', 'Discovery One'),
+            musicItem('discover-1', 'Gamma', 'Discovery One'),
+            musicItem('discover-2', 'Delta', 'Discovery Two')
+        ], madeForYou);
+
+        expect(repaired.map(item => item.Id)).toEqual(['discover-1', 'discover-2']);
+    });
+
     it('initializes the engine before it generates shelf data', () => {
         const engine = createPtvMusicRecommendationEngine();
 

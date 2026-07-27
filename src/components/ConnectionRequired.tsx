@@ -167,10 +167,7 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
                 const user = await client?.getCurrentUser();
                 if (!user?.Policy?.IsAdministrator) {
                     console.warn('[ConnectionRequired] normal user attempted to access admin route');
-                    bounce(await ServerConnections.connect())
-                        .catch(err => {
-                            console.error('[ConnectionRequired] failed to bounce', err);
-                        });
+                    navigate(BounceRoutes.Home, { replace: true });
                     return;
                 }
             } catch (ex) {
@@ -180,7 +177,7 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
         }
 
         setIsLoading(false);
-    }, [bounce, level]);
+    }, [bounce, level, navigate]);
 
     useEffect(() => {
         // Check connection status on initial page load

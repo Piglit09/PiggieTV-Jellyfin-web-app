@@ -2,9 +2,11 @@ import React, { useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { startPtvPlaybackStateService } from '../services/playbackStateService';
+import { startPtvPlaybackPresentationService } from '../services/playbackPresentationService';
 import { registerPtvPersistentRuntimeRoot } from '../services/runtimeStability';
 import PTVMediaDock from './PTVMediaDock';
 import PTVUpdateNotice from './PTVUpdateNotice';
+import PtvDiagnosticsOverlay from '../modules/diagnostics/PtvDiagnosticsOverlay';
 
 import './ptvShell.scss';
 
@@ -19,6 +21,7 @@ function PTVRuntimeRoot() {
         const unregisterRuntimeRoot = registerPtvPersistentRuntimeRoot('ptv-runtime-root');
 
         startPtvPlaybackStateService();
+        startPtvPlaybackPresentationService();
 
         return unregisterRuntimeRoot;
     }, []);
@@ -29,6 +32,7 @@ function PTVRuntimeRoot() {
                 <PTVMediaDock />
             </div>
             <PTVUpdateNotice />
+            <PtvDiagnosticsOverlay />
         </div>
     );
 }

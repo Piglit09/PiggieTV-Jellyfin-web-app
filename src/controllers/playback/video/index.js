@@ -34,6 +34,12 @@ import { setBackdropTransparency, TRANSPARENCY_LEVEL } from '../../../components
 import { pluginManager } from '../../../components/pluginManager';
 import { PluginType } from '../../../types/plugin.ts';
 import { getEpisodePlaybackTitle } from './videoDisplayTitle';
+import {
+    executePtvVideoSeekKey,
+    isPtvVideoPlayerControlFocused,
+    registerPtvVideoControlsVisibilityHandler,
+    shouldYieldVideoKeyToPtvFocusOwner
+} from '../../../ptv/modules/playback/videoInputOwnership';
 
 function getOpenedDialog() {
     return document.querySelector('.dialogContainer .dialog.opened');
@@ -296,9 +302,30 @@ export default function (view) {
         }
     }
 
+    const unregisterPtvVideoControlsVisibilityHandler =
+        registerPtvVideoControlsVisibilityHandler('jellyfin-video-controller', visible => {
+            if (visible) showOsd();
+            else hideOsd();
+        });
+
     function startOsdHideTimer() {
         stopOsdHideTimer();
-        osdHideTimeout = setTimeout(hideOsd, 3e3);
+        osdHideTimeout = setTimeout(() => {
+            osdHideTimeout = null;
+
+            const activeElement = document.activeElement;
+            const playerControlFocused = isPtvVideoPlayerControlFocused(activeElement) || activeElement instanceof HTMLElement && (
+                osdBottomElement.contains(activeElement)
+                || headerElement.contains(activeElement)
+            );
+
+            if (playerControlFocused) {
+                startOsdHideTimer();
+                return;
+            }
+
+            hideOsd();
+        }, 3e3);
     }
 
     function stopOsdHideTimer() {
@@ -1220,6 +1247,8 @@ export default function (view) {
     function onKeyDown(e) {
         clickedElement = e.target;
 
+        if (shouldYieldVideoKeyToPtvFocusOwner(e.defaultPrevented)) return;
+
         const isKeyModified = e.ctrlKey || e.altKey || e.metaKey;
 
         // Skip modified keys
@@ -1249,9 +1278,14 @@ export default function (view) {
                 case 'ArrowLeft':
                 case 'ArrowRight':
                     if (!e.shiftKey) {
+                        const seekHandled = executePtvVideoSeekKey(key, {
+                            seekBack: () => playbackManager.rewind(currentPlayer),
+                            seekForward: () => playbackManager.fastForward(currentPlayer)
+                        });
+
                         e.preventDefault();
                         showOsd(nowPlayingPositionSlider);
-                        nowPlayingPositionSlider.dispatchEvent(new KeyboardEvent(e.type, e));
+                        if (seekHandled) e.stopImmediatePropagation();
                     }
                     return;
                 case 'Enter':
@@ -1783,6 +1817,7 @@ export default function (view) {
         headerElement.classList.remove('hide');
     });
     view.addEventListener('viewdestroy', function () {
+        unregisterPtvVideoControlsVisibilityHandler();
         if (self.touchHelper) {
             self.touchHelper.destroy();
             self.touchHelper = null;
@@ -1874,8 +1909,22 @@ export default function (view) {
         if (e.defaultPrevented) return;
 
         const key = keyboardnavigation.getKeyName(e);
+        const seekHandled = executePtvVideoSeekKey(key, {
+            seekBack: () => playbackManager.rewind(currentPlayer),
+            seekForward: () => playbackManager.fastForward(currentPlayer)
+        });
+
+        if (seekHandled) {
+            e.preventDefault();
+            e.stopPropagation();
+            showOsd(this);
+            return;
+        }
         if (key === 'Enter') {
-            playbackManager.playPause(currentPlayer);
+            e.preventDefault();
+            e.stopPropagation();
+            playbackManager.seekPercent(parseFloat(this.value), currentPlayer);
+            showOsd(this);
         }
     });
 

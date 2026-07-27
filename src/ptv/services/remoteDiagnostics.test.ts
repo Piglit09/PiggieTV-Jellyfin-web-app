@@ -186,8 +186,19 @@ describe('remote diagnostics runtime gate', () => {
         expect(presence.capabilities).toMatchObject({
             heartbeat: true,
             playbackTelemetry: true,
+            physicalLayoutSnapshot: true,
             remoteCommands: true,
             reportExport: true
+        });
+        applyPtvRemoteDiagnosticsLease({
+            enabled: true,
+            expiresAt: currentTime + 60_000,
+            profiles: ['firetv'],
+            sessionId: 'firetv-layout-session'
+        });
+        expect(getPtvRemoteDiagnosticsSnapshot()?.physicalLayoutSnapshot).toMatchObject({
+            capability: 'physicalLayoutSnapshot',
+            schemaVersion: 1
         });
         expect(presence.boot).toMatchObject({
             checkInAttempted: false,

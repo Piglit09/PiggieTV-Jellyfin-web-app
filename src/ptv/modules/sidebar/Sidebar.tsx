@@ -78,6 +78,7 @@ const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
                             key={section.id}
                             section={section}
                             activeRoute={activeRoute}
+                            onAction={onClose}
                         />
                     ))}
                 </nav>

@@ -166,4 +166,74 @@ describe('featuredContentCache server document adoption', () => {
             sectionCount: 25
         });
     });
+
+    it('preserves populated memory when a fresh section-shell plugin cache arrives', async () => {
+        const cache = await loadFeaturedCache();
+        const emptyEntry = createCacheEntry(7);
+
+        emptyEntry.payload = {
+            heroItems: [],
+            sections: Array.from({ length: 6 }, (_value, index) => ({ id: `empty-${index}` })),
+            sectionItems: Object.fromEntries(Array.from({ length: 6 }, (_value, index) => [ `empty-${index}`, [] ]))
+        };
+        emptyEntry.createdAt = Date.now();
+        cache.invalidateFeaturedContentMemoryCache('test');
+        cache.hydrateFeaturedContentCacheFromDocument({ version: 1, featuredContent: createCacheEntry(7) }, 'populated');
+        cache.hydrateFeaturedContentCacheFromDocument({ version: 1, featuredContent: emptyEntry }, 'empty-plugin');
+
+        expect(cache.getFeaturedContentCacheStatus()).toMatchObject({
+            adoptionResult: 'preserved-memory',
+            heroCount: 15,
+            itemCount: 340,
+            lastRejectionReason: 'semantic-configuration-only'
+        });
+    });
+
+    it('rejects a section-shell plugin cache when no populated cache exists', async () => {
+        const cache = await loadFeaturedCache();
+        const emptyEntry = createCacheEntry(7);
+
+        emptyEntry.payload = {
+            heroItems: [],
+            sections: Array.from({ length: 6 }, (_value, index) => ({ id: `empty-${index}` })),
+            sectionItems: Object.fromEntries(Array.from({ length: 6 }, (_value, index) => [ `empty-${index}`, [] ]))
+        };
+        cache.invalidateFeaturedContentMemoryCache('test');
+        cache.hydrateFeaturedContentCacheFromDocument({ version: 1, featuredContent: emptyEntry }, 'empty-plugin');
+
+        expect(cache.getFeaturedContentCacheStatus()).toMatchObject({
+            adoptionResult: 'rejected',
+            lastRejectionReason: 'semantic-configuration-only',
+            observedStorage: 'plugin-file',
+            payloadClassification: 'configuration-only',
+            sectionCount: 6,
+            semanticUsable: false
+        });
+    });
+
+    it('keeps stale populated content when refresh returns an empty partial payload', async () => {
+        const cache = await loadFeaturedCache();
+        const staleEntry = createCacheEntry(7);
+
+        staleEntry.expiresAt = Date.now() - 1;
+        cache.invalidateFeaturedContentMemoryCache('test');
+        cache.hydrateFeaturedContentCacheFromDocument({ version: 1, featuredContent: staleEntry }, 'stale-populated');
+
+        const payload = await cache.getFeaturedContent(async () => ({
+            generationState: 'timed-out',
+            heroItems: [],
+            sections: Array.from({ length: 6 }, (_value, index) => ({ id: `empty-${index}` })),
+            sectionItems: Object.fromEntries(Array.from({ length: 6 }, (_value, index) => [ `empty-${index}`, [] ]))
+        }));
+
+        expect(payload.heroItems).toHaveLength(15);
+        await vi.waitFor(() => {
+            expect(cache.getFeaturedContentCacheStatus()).toMatchObject({
+                heroCount: 15,
+                itemCount: 340,
+                payloadClassification: 'complete'
+            });
+            expect(cache.getFeaturedContentCacheStatus().lastRefreshError).toContain('semantic-configuration-only');
+        });
+    });
 });

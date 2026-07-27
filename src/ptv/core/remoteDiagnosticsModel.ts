@@ -75,6 +75,149 @@ export type PtvRemoteDiagnosticsProfileTag = {
     viewport: 'compact' | 'large' | 'medium' | 'small' | 'unknown' | 'xlarge';
 };
 
+export type PtvPhysicalLayoutMilestoneKey =
+    | 'first-shelf-observed'
+    | 'hero-observed'
+    | 'lease-started'
+    | 'report-generated'
+    | 'route-committed'
+    | 'runtime-ready'
+    | 'shell-observed';
+
+export type PtvPhysicalLayoutNodeKey =
+    | 'firstShelf'
+    | 'firstShelfScroller'
+    | 'globalMediaDock'
+    | 'heroActions'
+    | 'heroContent'
+    | 'heroLogo'
+    | 'heroRoot'
+    | 'homeRoot'
+    | 'legacyHeader'
+    | 'primaryNavigation'
+    | 'shellBrand'
+    | 'shellBrandImage'
+    | 'shellHeader'
+    | 'shellMain'
+    | 'utilityControls';
+
+export type PtvPhysicalLayoutIssueCode =
+    | 'duplicate-shell'
+    | 'first-shelf-after-viewport'
+    | 'first-shelf-missing'
+    | 'focus-not-visible'
+    | 'focus-outside-viewport'
+    | 'hero-content-obscured-by-shell-brand'
+    | 'legacy-header-visible'
+    | 'shell-brand-outside-header'
+    | 'shell-brand-oversized';
+
+export type PtvPhysicalLayoutRect = {
+    bottom: number;
+    height: number;
+    left: number;
+    right: number;
+    top: number;
+    width: number;
+};
+
+export type PtvPhysicalLayoutNodeSnapshot = {
+    computed: null | {
+        display: 'block' | 'contents' | 'flex' | 'grid' | 'inline' | 'inline-block' | 'none' | 'other';
+        maxHeightPx: number | null;
+        maxWidthPx: number | null;
+        objectFit: 'contain' | 'cover' | 'fill' | 'none' | 'other' | 'scale-down';
+        opacity: number | null;
+        overflowX: 'auto' | 'clip' | 'hidden' | 'other' | 'scroll' | 'visible';
+        overflowY: 'auto' | 'clip' | 'hidden' | 'other' | 'scroll' | 'visible';
+        position: 'absolute' | 'fixed' | 'other' | 'relative' | 'static' | 'sticky';
+        transformApplied: boolean;
+        visibility: 'collapse' | 'hidden' | 'other' | 'visible';
+        zIndex: number | null;
+    };
+    count: number;
+    intrinsic: null | { height: number; width: number };
+    intersectionRatio: number;
+    key: PtvPhysicalLayoutNodeKey;
+    ownerMarker: 'shell-brand' | 'shell-brand-image' | null;
+    present: boolean;
+    rect: PtvPhysicalLayoutRect | null;
+    sourceCategory: 'home' | 'home-hero' | 'home-shelf' | 'legacy' | 'playback' | 'shell';
+    visible: boolean;
+};
+
+export type PtvPhysicalLayoutMilestone = {
+    capturedAt: number;
+    focus: {
+        nodeKey: PtvPhysicalLayoutNodeKey | null;
+        outsideViewport: boolean | null;
+        visibleIndicator: boolean | null;
+    };
+    issueCodes: PtvPhysicalLayoutIssueCode[];
+    key: PtvPhysicalLayoutMilestoneKey;
+    metrics: {
+        brandHeaderOverlapRatio: number | null;
+        brandHeroOverlapRatio: number | null;
+        heroToFirstShelfGapPx: number | null;
+        shellBrandHeightRatio: number | null;
+        shellBrandWidthRatio: number | null;
+    };
+    nodes: PtvPhysicalLayoutNodeSnapshot[];
+    route: string;
+    status: 'healthy' | 'regression' | 'warning';
+    viewport: {
+        devicePixelRatio: number;
+        height: number;
+        screenHeight: number;
+        screenWidth: number;
+        width: number;
+    };
+};
+
+export type PtvPhysicalLayoutSnapshot = {
+    build: null | {
+        environment: 'development' | 'production' | 'unknown';
+        frontendBuildDate: string;
+        frontendBuildId: string;
+        frontendCommitSha: string;
+        jellyfinWebVersion: string;
+    };
+    capability: 'physicalLayoutSnapshot';
+    cssOwnership: {
+        reason: 'dom-computed-style-unavailable' | 'reliable-cascade-source-attribution-unavailable';
+        status: 'unsupported';
+    };
+    environment: null | {
+        body: { attributes: Record<string, string>; classes: string[] };
+        documentElement: { attributes: Record<string, string>; classes: string[] };
+        profile: {
+            isLowPower: boolean;
+            kind: PtvClientKind;
+            layoutMode: PtvClientProfile['layoutMode'];
+            renderProfileId: string;
+            tvPlatform: PtvClientProfile['tvPlatform'];
+        };
+    };
+    generatedAt: number;
+    issueCodes: PtvPhysicalLayoutIssueCode[];
+    latestMilestone: PtvPhysicalLayoutMilestoneKey | null;
+    milestones: PtvPhysicalLayoutMilestone[];
+    runtime: null | {
+        duplicateFeatureRegistrationSuppressedCount: number;
+        duplicateListenerSuppressedCount: number;
+        ready: boolean;
+        remoteDiagnosticsRegistrationCount: number;
+        runtimeCreateCount: number;
+        runtimeSource: 'window.__PTV_RUNTIME_STATE__';
+    };
+    schemaVersion: 1;
+    serviceWorker: null | {
+        controlled: boolean;
+        scriptPath: string | null;
+    };
+    status: 'healthy' | 'regression' | 'unavailable' | 'warning';
+};
+
 export type PtvRemoteDiagnosticsPayload = {
     buffer: {
         capacity: number;
@@ -92,6 +235,7 @@ export type PtvRemoteDiagnosticsPayload = {
         persistence: 'memory-only';
         queryStrings: 'omitted';
     };
+    physicalLayoutSnapshot?: PtvPhysicalLayoutSnapshot;
     route: string;
     samples: PtvRemoteDiagnosticEntry[];
     schemaVersion: typeof PTV_REMOTE_DIAGNOSTICS_SCHEMA_VERSION;
@@ -126,6 +270,7 @@ const MAX_REPRESENTATIVE_SAMPLES_PER_KIND = 20;
 const MAX_STRING_LENGTH = 320;
 // Leave headroom below the plugin's 192 KiB request limit for profile/session metadata.
 const MAX_SERIALIZED_SAMPLE_BYTES = 160 * 1024;
+const MAX_SERIALIZED_REPORT_BYTES = 184 * 1024;
 const IDENTIFIER_PARENT_SEGMENT_PATTERN = /^(?:album|albums|artist|artists|book|collection|comic|details|episode|item|items|manga|person|playlist|season|series|user|users|video)$/i;
 const CONTENT_FILE_EXTENSIONS = new Set([
     '3gp', 'aac', 'avi', 'cb7', 'cbr', 'cbt', 'cbz', 'epub', 'flac', 'flv',
@@ -508,6 +653,7 @@ export function createPtvRemoteDiagnosticsPayload(options: {
     clientId: string;
     generatedAt?: number;
     lease: PtvRemoteDiagnosticsLease;
+    physicalLayoutSnapshot?: PtvPhysicalLayoutSnapshot;
     profile: PtvRemoteDiagnosticsProfileTag;
     route: string;
 }): PtvRemoteDiagnosticsPayload {
@@ -528,7 +674,7 @@ export function createPtvRemoteDiagnosticsPayload(options: {
         .slice(0, 10)
         .map(([signature, count]) => ({ count, signature }));
 
-    return {
+    const payload: PtvRemoteDiagnosticsPayload = {
         buffer: {
             capacity: options.buffer.capacity,
             count: samples.length,
@@ -545,6 +691,9 @@ export function createPtvRemoteDiagnosticsPayload(options: {
             persistence: 'memory-only',
             queryStrings: 'omitted'
         },
+        ...(options.physicalLayoutSnapshot ? {
+            physicalLayoutSnapshot: options.physicalLayoutSnapshot
+        } : {}),
         route: sanitizePtvDiagnosticRoute(options.route),
         samples,
         schemaVersion: PTV_REMOTE_DIAGNOSTICS_SCHEMA_VERSION,
@@ -562,4 +711,18 @@ export function createPtvRemoteDiagnosticsPayload(options: {
             topRepeatedSignatures
         }
     };
+
+    while (payload.samples.length > 0 && getUtf8ByteLength(JSON.stringify(payload)) > MAX_SERIALIZED_REPORT_BYTES) {
+        payload.samples.shift();
+    }
+
+    const finalPayloadOmissions = options.buffer.count - payload.samples.length;
+
+    payload.buffer.count = payload.samples.length;
+    payload.buffer.dropped = options.buffer.dropped + finalPayloadOmissions;
+    payload.summary.eventsAggregated = finalPayloadOmissions;
+    payload.summary.eventsIncluded = payload.samples.length;
+    payload.summary.eventsOmitted = options.buffer.dropped + finalPayloadOmissions;
+
+    return payload;
 }

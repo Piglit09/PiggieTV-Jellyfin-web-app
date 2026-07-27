@@ -9,7 +9,17 @@ import { watchDom } from '../../core/observer';
 import { getPtvClientProfile } from '../../core/clientProfile';
 import { getPtvPlaybackMode, isPtvPlaybackMode } from '../../core/featureSettings';
 import { recordPtvEvent } from '../../core/observability';
-import { notifyPtvTvPlaybackFocus } from '../../core/tvFocus';
+import {
+    notifyPtvTvFocusContentReady,
+    notifyPtvTvPlaybackFocus,
+    notifyPtvTvPlaybackSurfaceReady,
+    registerPtvTvPlaybackBackHandler
+} from '../../core/tvFocus';
+import { setPtvVideoPlaybackPresentation } from '../../services/playbackPresentationService';
+import {
+    isPtvVideoPlayerControlFocused,
+    requestPtvVideoControlsVisibility
+} from './videoInputOwnership';
 
 import './playbackChrome';
 import './playback.scss';
@@ -68,6 +78,7 @@ let lastVideoTime = 0;
 let lastVideoError = null;
 let lastPlaybackDiagnosticAt = 0;
 let reconnectingReason = '';
+let unregisterPlaybackBackHandler = null;
 
 const relatedItemCache = new Map();
 const activePauseImageLoads = new Set();
@@ -742,6 +753,43 @@ function goBackFromPlayback() {
     }
 }
 
+function handlePlaybackBackAction(action) {
+    if (!isPlaybackUiActive()) return false;
+
+    if (action === 'controls') {
+        if (!isPlayerOsdVisible() && !document.documentElement.classList.contains(PLAYER_CHROME_VISIBLE_CLASS)) {
+            return false;
+        }
+
+        const active = document.activeElement;
+
+        clearPlayerChromeTimer();
+        if (!requestPtvVideoControlsVisibility(false)) setPlayerOsdVisible(false);
+        if (active instanceof HTMLElement && hasFocusedPlayerControl()) active.blur();
+        const videoSurface = getActiveVideoElement();
+
+        if (videoSurface instanceof HTMLElement) {
+            notifyPtvTvPlaybackSurfaceReady(videoSurface, 'video-surface');
+        } else {
+            notifyPtvTvFocusContentReady('video-controls-hidden');
+        }
+        recordPtvEvent('playback', 'ptv-playback-back-owned', {
+            backOwner: 'video-controls'
+        });
+        return true;
+    }
+
+    if (action === 'video') {
+        recordPtvEvent('playback', 'ptv-playback-back-owned', {
+            backOwner: 'video-playback'
+        });
+        goBackFromPlayback();
+        return true;
+    }
+
+    return false;
+}
+
 function copyShareUrl(url) {
     const input = document.createElement('input');
 
@@ -918,6 +966,14 @@ function setPlayerChromeVisible(visible) {
     document.documentElement.classList.toggle(PLAYER_CHROME_VISIBLE_CLASS, shouldShow);
     document.body.classList.toggle(PLAYER_CHROME_VISIBLE_CLASS, shouldShow);
     syncNativePlayerControlsVisibility(shouldShow);
+    setPtvVideoPlaybackPresentation({
+        available: isPlaybackUiActive(),
+        controlsVisible: shouldShow
+    });
+}
+
+function hasFocusedPlayerControl() {
+    return isPtvVideoPlayerControlFocused();
 }
 
 function showPlayerChrome(autoHide = true) {
@@ -933,6 +989,10 @@ function showPlayerChrome(autoHide = true) {
 
     playerChromeTimer = window.setTimeout(() => {
         playerChromeTimer = null;
+        if (hasFocusedPlayerControl()) {
+            showPlayerChrome(true);
+            return;
+        }
         setPlayerChromeVisible(false);
         setPlayerOsdVisible(false);
     }, PLAYER_CHROME_HIDE_MS);
@@ -950,6 +1010,7 @@ function setPlayerOsdVisible(visible) {
         return;
     }
 
+    clearPlayerChromeTimer();
     setPlayerChromeVisible(false);
 }
 
@@ -1215,6 +1276,11 @@ function setPauseState(isPaused) {
     if (isPaused) {
         showPlayerChrome(false);
     }
+    setPtvVideoPlaybackPresentation({
+        available: isPlaybackUiActive(),
+        controlsVisible: isPaused || document.documentElement.classList.contains(PLAYER_CHROME_VISIBLE_CLASS),
+        paused: Boolean(isPaused)
+    });
 
     document.querySelectorAll(`.${PAUSE_STAGE_CLASS}`).forEach(stage => {
         stage.setAttribute('aria-hidden', isPaused ? 'false' : 'true');
@@ -1441,6 +1507,10 @@ function enhancePlaybackDom() {
 
     document.documentElement.classList.add(PLAYER_PAGE_CLASS);
     document.body.classList.add(PLAYER_PAGE_CLASS);
+    setPtvVideoPlaybackPresentation({
+        available: true,
+        controlsVisible: document.documentElement.classList.contains(PLAYER_CHROME_VISIBLE_CLASS)
+    });
     pages.forEach(playbackPage => {
         playbackPage.classList.add(PLAYER_PAGE_CLASS);
     });
@@ -1491,6 +1561,11 @@ function cleanupPlaybackDom() {
         page.querySelectorAll('.ptv-player-chrome').forEach(element => {
             element.classList.remove('ptv-player-chrome');
         });
+    });
+    setPtvVideoPlaybackPresentation({
+        available: false,
+        controlsVisible: false,
+        paused: null
     });
 }
 
@@ -1691,6 +1766,7 @@ function init({ scope } = {}) {
     }
 
     moduleInitialized = true;
+    unregisterPlaybackBackHandler = registerPtvTvPlaybackBackHandler(handlePlaybackBackAction);
     Events.on(playbackManager, 'playbackstart', onPlaybackStart);
     Events.on(playbackManager, 'playbackstop', onPlaybackStop);
     Events.on(playbackManager, 'playbackautoplaydecision', onPlaybackAutoplayDecision);
@@ -1698,7 +1774,6 @@ function init({ scope } = {}) {
     Events.on(document, EventType.SHOW_VIDEO_OSD, onShowVideoOsd);
     Events.on(document, 'mousemove', onPlayerActivity);
     Events.on(document, 'touchstart', onPlayerActivity);
-    Events.on(document, 'keydown', onPlayerActivity);
     Events.on(window, 'hashchange', onPlaybackRouteChanged);
     Events.on(window, 'popstate', onPlaybackRouteChanged);
     scope?.add(() => Events.off(playbackManager, 'playbackstart', onPlaybackStart), {
@@ -1729,16 +1804,19 @@ function init({ scope } = {}) {
         label: 'player-touchstart',
         type: 'listener'
     });
-    scope?.add(() => Events.off(document, 'keydown', onPlayerActivity), {
-        label: 'player-keydown',
-        type: 'listener'
-    });
     scope?.add(() => Events.off(window, 'hashchange', onPlaybackRouteChanged), {
         label: 'player-hashchange',
         type: 'listener'
     });
     scope?.add(() => Events.off(window, 'popstate', onPlaybackRouteChanged), {
         label: 'player-popstate',
+        type: 'listener'
+    });
+    scope?.add(() => {
+        unregisterPlaybackBackHandler?.();
+        unregisterPlaybackBackHandler = null;
+    }, {
+        label: 'player-back-handler',
         type: 'listener'
     });
     stopWatchingDom = scope?.watchDom ? scope.watchDom(enhancePlaybackDom) : watchDom(enhancePlaybackDom);
@@ -1755,6 +1833,8 @@ function refresh() {
 
 function destroy() {
     moduleInitialized = false;
+    unregisterPlaybackBackHandler?.();
+    unregisterPlaybackBackHandler = null;
     Events.off(playbackManager, 'playbackstart', onPlaybackStart);
     Events.off(playbackManager, 'playbackstop', onPlaybackStop);
     Events.off(playbackManager, 'playbackautoplaydecision', onPlaybackAutoplayDecision);
@@ -1762,7 +1842,6 @@ function destroy() {
     Events.off(document, EventType.SHOW_VIDEO_OSD, onShowVideoOsd);
     Events.off(document, 'mousemove', onPlayerActivity);
     Events.off(document, 'touchstart', onPlayerActivity);
-    Events.off(document, 'keydown', onPlayerActivity);
     Events.off(window, 'hashchange', onPlaybackRouteChanged);
     Events.off(window, 'popstate', onPlaybackRouteChanged);
     setPlayerOsdVisible(false);

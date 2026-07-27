@@ -15,10 +15,7 @@ import {
     type PtvItemQuery
 } from '../../api';
 import { PTV_BRANDING, PTV_ROUTES } from '../../core/config';
-import {
-    recordPtvItemRouteClick,
-    resolvePtvItemRoute
-} from '../../core/itemRoutes';
+import { resolvePtvItemRoute } from '../../core/itemRoutes';
 import { recordPtvEvent } from '../../core/observability';
 import {
     getPtvQualityPillClass,
@@ -30,6 +27,7 @@ import { registerPtvNativeRoute } from '../../shell/routeController';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import { type PtvLibraryRootDiagnostics } from '../../services/libraryRootNormalizer';
 import { createPtvSearchRecoveryDiagnostics, type PtvSearchRecoveryDiagnostics } from '../../services/searchRecovery';
+import { activateNativeSearchCard } from './nativeSearchDetailsNavigation';
 
 import './nativeSearch.scss';
 
@@ -327,6 +325,14 @@ function NativeSearchCard({ item, sourceGroup }: Readonly<{ item: PtvItem; sourc
     const imageUrl = getSearchItemImage(item);
     const tags = useMemo(() => getPtvQualityTags(item, { maxTags: 3 }), [item]);
     const title = getSearchItemTitle(item);
+    const onCardClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
+        activateNativeSearchCard({
+            event,
+            item,
+            route,
+            sourceGroup
+        });
+    }, [item, route, sourceGroup]);
 
     return (
         <a
@@ -335,10 +341,7 @@ function NativeSearchCard({ item, sourceGroup }: Readonly<{ item: PtvItem; sourc
             data-ptv-search-item-type={getText(item.Type)}
             data-ptv-search-source-group={sourceGroup}
             href={route.href}
-            onClick={() => recordPtvItemRouteClick(item, route, {
-                action: 'search-card',
-                source: 'ptv-search'
-            })}
+            onClick={onCardClick}
         >
             <span className='ptv-search-card-art'>
                 {imageUrl ? <img alt='' loading='lazy' src={imageUrl} /> : <span>{title.slice(0, 1)}</span>}

@@ -107,9 +107,7 @@ function getPtvImageCandidateFailureKey(candidate: PtvItemImageCandidate | null 
     return [
         candidate.imageItemId,
         candidate.imageType.toLowerCase(),
-        candidate.requestedType.toLowerCase(),
-        candidate.tag || 'untagged',
-        candidate.tagMode || 'unknown'
+        candidate.tag || 'untagged'
     ].join(':');
 }
 
@@ -330,7 +328,7 @@ function addTaggedAndUntaggedCandidate(
         untaggedMode: string;
     }
 ) {
-    if (!imageItemId) return;
+    if (!imageItemId || !options.tag) return;
 
     const imageOptions = {
         ...baseOptions,
@@ -338,17 +336,10 @@ function addTaggedAndUntaggedCandidate(
         imageType: options.imageType
     };
 
-    if (options.tag) {
-        addPtvImageCandidate(candidates, seenUrls, imageItemId, {
-            ...imageOptions,
-            tag: options.tag
-        }, options.taggedMode, options.requestedType);
-        return;
-    }
-
-    addPtvImageCandidate(candidates, seenUrls, imageItemId, imageOptions,
-        options.fallbackMode,
-        options.requestedType);
+    addPtvImageCandidate(candidates, seenUrls, imageItemId, {
+        ...imageOptions,
+        tag: options.tag
+    }, options.taggedMode, options.requestedType);
 }
 
 function getPrimaryImageTag(item?: PtvItem | null): string | null {

@@ -1,12 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('./observability', () => ({
+const observabilityMocks = vi.hoisted(() => ({
     recordPtvEvent: vi.fn(),
-    shouldCollectDiagnostics: () => false
+    shouldCollectDiagnostics: vi.fn(() => false)
+}));
+
+vi.mock('./observability', () => ({
+    recordPtvEvent: observabilityMocks.recordPtvEvent,
+    shouldCollectDiagnostics: observabilityMocks.shouldCollectDiagnostics
 }));
 
 import { PTV_ROUTES } from './config';
-import { resolvePtvItemRoute } from './itemRoutes';
+import {
+    recordPtvItemRouteClick,
+    resolvePtvItemRoute
+} from './itemRoutes';
 
 describe('resolvePtvItemRoute', () => {
     const cases = [
@@ -86,5 +94,40 @@ describe('resolvePtvItemRoute', () => {
         const routeValues = Object.keys(PTV_ROUTES).map(key => PTV_ROUTES[key as keyof typeof PTV_ROUTES]);
 
         expect(routeValues).not.toContain('#/playback');
+    });
+
+    it('retains one privacy-safe legacy route event for the migrated details action', () => {
+        observabilityMocks.shouldCollectDiagnostics.mockReturnValueOnce(true);
+        const item = {
+            Id: 'private-media-id',
+            Name: 'Private Media Title',
+            Type: 'Movie'
+        };
+        const route = resolvePtvItemRoute(item);
+
+        recordPtvItemRouteClick(item, route, {
+            action: 'open-card',
+            privacySafeDiagnostics: true,
+            rowId: 'private-row-id',
+            rowTitle: 'Private Row Title',
+            source: 'native-home-card'
+        });
+
+        expect(observabilityMocks.recordPtvEvent).toHaveBeenCalledTimes(1);
+        expect(observabilityMocks.recordPtvEvent).toHaveBeenCalledWith(
+            'route',
+            'ptv-item-route-click',
+            expect.objectContaining({
+                action: 'open-card',
+                hasItemId: true,
+                routeSource: 'jellyfin-fallback',
+                source: 'native-home-card'
+            })
+        );
+        const serializedEvent = JSON.stringify(observabilityMocks.recordPtvEvent.mock.calls);
+        expect(serializedEvent).not.toContain('private-media-id');
+        expect(serializedEvent).not.toContain('Private Media Title');
+        expect(serializedEvent).not.toContain('private-row-id');
+        expect(serializedEvent).not.toContain('Private Row Title');
     });
 });

@@ -187,6 +187,11 @@ export function applyPtvRenderProfileClasses(
         root.classList.toggle(profileClass, profileClass === activeClass);
     });
 
+    // TV-tier profiles keep their specific visual/performance class and also inherit the
+    // authoritative ten-foot geometry contract. In particular, webOS must not lose
+    // `ptv-render-tv` merely because its active optimization class is `ptv-render-webos`.
+    root.classList.toggle('ptv-render-tv', renderProfile.tier === 'tv');
+
     root.dataset.ptvRenderProfile = renderProfile.id;
     root.dataset.ptvRenderProfileSelection = renderProfile.selectionReason || 'unknown';
     root.dataset.ptvRenderTier = renderProfile.tier;

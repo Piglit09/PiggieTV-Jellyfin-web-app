@@ -4,8 +4,8 @@ import { PtvIcon } from '../icons';
 import { PTV_ASSETS, PTV_BRANDING, PTV_EVENTS, PTV_ROUTES } from '../../core/config';
 import { dispatchPtvCustomEvent } from '../../core/events';
 import { applyPtvResponsiveImage } from '../../core/images';
+import { getPtvPlatformFeaturePolicy } from '../../core/platformFeatures';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
-import { openRequestPortal } from '../request';
 import { playPtvItem } from '../../api';
 
 interface AppHeaderParams {
@@ -68,8 +68,10 @@ function navigateToRequest(event: React.MouseEvent<HTMLAnchorElement>): void {
     event.preventDefault();
     event.stopPropagation();
     event.nativeEvent.stopImmediatePropagation?.();
-    openRequestPortal();
-    dispatchPtvCustomEvent(PTV_EVENTS.requestOpen);
+    void import('../request').then(({ openRequestPortal }) => {
+        openRequestPortal();
+        dispatchPtvCustomEvent(PTV_EVENTS.requestOpen);
+    });
 }
 
 function isActiveRoute(route: string): boolean {
@@ -86,9 +88,75 @@ function isReadingRoute(): boolean {
     return /^#\/(?:reading|books|comics|manga|maga)(?:[/?]|$)/i.test(window.location.hash || '');
 }
 
+function AppHeaderPrimaryNavigation({
+    isRequestActive,
+    readingAvailable,
+    requestAvailable
+}: Readonly<{
+    isRequestActive: boolean;
+    readingAvailable: boolean;
+    requestAvailable: boolean;
+}>) {
+    return (
+        <nav className='ptv-header-nav' aria-label='Primary navigation'>
+            <a
+                href={PTV_ROUTES.home}
+                className={`ptv-nav-link ${
+                    !isRequestActive && isActiveRoute(PTV_ROUTES.home) ? 'ptv-nav-link-active' : ''
+                }`}
+            >
+                Home
+            </a>
+
+            <a
+                href={PTV_ROUTES.music}
+                className={`ptv-nav-link ${
+                    !isRequestActive && isActiveRoute(PTV_ROUTES.music) ? 'ptv-nav-link-active' : ''
+                }`}
+            >
+                Music
+            </a>
+
+            {readingAvailable ? (
+                <a
+                    href={PTV_ROUTES.reading}
+                    className={`ptv-nav-link ${
+                        !isRequestActive && isReadingRoute() ? 'ptv-nav-link-active' : ''
+                    }`}
+                >
+                    PTV Reading
+                </a>
+            ) : null}
+
+            <a
+                href={PTV_ROUTES.favorites}
+                className={`ptv-nav-link ${
+                    !isRequestActive && isFavoritesRoute() ? 'ptv-nav-link-active' : ''
+                }`}
+            >
+                Favorites
+            </a>
+
+            {requestAvailable ? (
+                <a
+                    href={PTV_ROUTES.requestSafe}
+                    className={`ptv-nav-link ptv-top-tab ptv-top-tab-request ${
+                        isRequestActive ? 'ptv-nav-link-active' : ''
+                    }`}
+                    data-ptv-request-trigger='true'
+                    onClick={navigateToRequest}
+                >
+                    Request
+                </a>
+            ) : null}
+        </nav>
+    );
+}
+
 const AppHeader: FC<AppHeaderParams> = ({
     isHidden = false
 }) => {
+    const platformFeatures = getPtvPlatformFeaturePolicy();
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isRequestActive, setIsRequestActive] = useState(
         document.documentElement.classList.contains('ptv-request-active')
@@ -190,54 +258,11 @@ const AppHeader: FC<AppHeaderParams> = ({
                         </a>
                     </div>
 
-                    <nav className='ptv-header-nav' aria-label='Primary navigation'>
-                        <a
-                            href={PTV_ROUTES.home}
-                            className={`ptv-nav-link ${
-                                !isRequestActive && isActiveRoute(PTV_ROUTES.home) ? 'ptv-nav-link-active' : ''
-                            }`}
-                        >
-                            Home
-                        </a>
-
-                        <a
-                            href={PTV_ROUTES.music}
-                            className={`ptv-nav-link ${
-                                !isRequestActive && isActiveRoute(PTV_ROUTES.music) ? 'ptv-nav-link-active' : ''
-                            }`}
-                        >
-                            Music
-                        </a>
-
-                        <a
-                            href={PTV_ROUTES.reading}
-                            className={`ptv-nav-link ${
-                                !isRequestActive && isReadingRoute() ? 'ptv-nav-link-active' : ''
-                            }`}
-                        >
-                            PTV Reading
-                        </a>
-
-                        <a
-                            href={PTV_ROUTES.favorites}
-                            className={`ptv-nav-link ${
-                                !isRequestActive && isFavoritesRoute() ? 'ptv-nav-link-active' : ''
-                            }`}
-                        >
-                            Favorites
-                        </a>
-
-                        <a
-                            href={PTV_ROUTES.requestSafe}
-                            className={`ptv-nav-link ptv-top-tab ptv-top-tab-request ${
-                                isRequestActive ? 'ptv-nav-link-active' : ''
-                            }`}
-                            data-ptv-request-trigger='true'
-                            onClick={navigateToRequest}
-                        >
-                            Request
-                        </a>
-                    </nav>
+                    <AppHeaderPrimaryNavigation
+                        isRequestActive={isRequestActive}
+                        readingAvailable={platformFeatures.reading}
+                        requestAvailable={platformFeatures.request}
+                    />
 
                     <div className='ptv-header-actions'>
                         <a

@@ -1,0 +1,1480 @@
+{
+  "capabilityIdentifiers": [
+    "androidAuto",
+    "audioPlayback",
+    "backgroundAudio",
+    "comicPaging",
+    "deepLinks",
+    "downloads",
+    "hardwareDecoding",
+    "keyboardInput",
+    "lockScreenControls",
+    "nativeNotifications",
+    "offlineCache",
+    "pointerInput",
+    "quickConnect",
+    "reader",
+    "remoteInput",
+    "telemetry",
+    "touchInput",
+    "tvFocusNavigation",
+    "videoPlayback"
+  ],
+  "contractVersion": "1.0",
+  "enums": {
+    "PtvAuthenticationState": [
+      {
+        "name": "AUTHENTICATED",
+        "serializedName": "AUTHENTICATED",
+        "value": "AUTHENTICATED"
+      },
+      {
+        "name": "ERROR",
+        "serializedName": "ERROR",
+        "value": "ERROR"
+      },
+      {
+        "name": "EXPIRED",
+        "serializedName": "EXPIRED",
+        "value": "EXPIRED"
+      },
+      {
+        "name": "RESTORING",
+        "serializedName": "RESTORING",
+        "value": "RESTORING"
+      },
+      {
+        "name": "SIGNED_OUT",
+        "serializedName": "SIGNED_OUT",
+        "value": "SIGNED_OUT"
+      }
+    ],
+    "PtvCacheOutcome": [
+      {
+        "name": "CORRUPT",
+        "serializedName": "CORRUPT",
+        "value": "CORRUPT"
+      },
+      {
+        "name": "ERROR",
+        "serializedName": "ERROR",
+        "value": "ERROR"
+      },
+      {
+        "name": "EXPIRED",
+        "serializedName": "EXPIRED",
+        "value": "EXPIRED"
+      },
+      {
+        "name": "HIT",
+        "serializedName": "HIT",
+        "value": "HIT"
+      },
+      {
+        "name": "MISS",
+        "serializedName": "MISS",
+        "value": "MISS"
+      },
+      {
+        "name": "STALE",
+        "serializedName": "STALE",
+        "value": "STALE"
+      },
+      {
+        "name": "VERSION_MISMATCH",
+        "serializedName": "VERSION_MISMATCH",
+        "value": "VERSION_MISMATCH"
+      }
+    ],
+    "PtvClientCapability": [
+      {
+        "name": "ANDROID_AUTO",
+        "serializedName": "androidAuto",
+        "value": "androidAuto"
+      },
+      {
+        "name": "AUDIO_PLAYBACK",
+        "serializedName": "audioPlayback",
+        "value": "audioPlayback"
+      },
+      {
+        "name": "BACKGROUND_AUDIO",
+        "serializedName": "backgroundAudio",
+        "value": "backgroundAudio"
+      },
+      {
+        "name": "COMIC_PAGING",
+        "serializedName": "comicPaging",
+        "value": "comicPaging"
+      },
+      {
+        "name": "DEEP_LINKS",
+        "serializedName": "deepLinks",
+        "value": "deepLinks"
+      },
+      {
+        "name": "DOWNLOADS",
+        "serializedName": "downloads",
+        "value": "downloads"
+      },
+      {
+        "name": "HARDWARE_DECODING",
+        "serializedName": "hardwareDecoding",
+        "value": "hardwareDecoding"
+      },
+      {
+        "name": "KEYBOARD_INPUT",
+        "serializedName": "keyboardInput",
+        "value": "keyboardInput"
+      },
+      {
+        "name": "LOCK_SCREEN_CONTROLS",
+        "serializedName": "lockScreenControls",
+        "value": "lockScreenControls"
+      },
+      {
+        "name": "NATIVE_NOTIFICATIONS",
+        "serializedName": "nativeNotifications",
+        "value": "nativeNotifications"
+      },
+      {
+        "name": "OFFLINE_CACHE",
+        "serializedName": "offlineCache",
+        "value": "offlineCache"
+      },
+      {
+        "name": "POINTER_INPUT",
+        "serializedName": "pointerInput",
+        "value": "pointerInput"
+      },
+      {
+        "name": "QUICK_CONNECT",
+        "serializedName": "quickConnect",
+        "value": "quickConnect"
+      },
+      {
+        "name": "READER",
+        "serializedName": "reader",
+        "value": "reader"
+      },
+      {
+        "name": "REMOTE_INPUT",
+        "serializedName": "remoteInput",
+        "value": "remoteInput"
+      },
+      {
+        "name": "TELEMETRY",
+        "serializedName": "telemetry",
+        "value": "telemetry"
+      },
+      {
+        "name": "TOUCH_INPUT",
+        "serializedName": "touchInput",
+        "value": "touchInput"
+      },
+      {
+        "name": "TV_FOCUS_NAVIGATION",
+        "serializedName": "tvFocusNavigation",
+        "value": "tvFocusNavigation"
+      },
+      {
+        "name": "VIDEO_PLAYBACK",
+        "serializedName": "videoPlayback",
+        "value": "videoPlayback"
+      }
+    ],
+    "PtvCoreErrorKind": [
+      {
+        "name": "AUTHENTICATION",
+        "serializedName": "authentication",
+        "value": "authentication"
+      },
+      {
+        "name": "AUTHORIZATION",
+        "serializedName": "authorization",
+        "value": "authorization"
+      },
+      {
+        "name": "CACHE",
+        "serializedName": "cache",
+        "value": "cache"
+      },
+      {
+        "name": "CANCELLED",
+        "serializedName": "cancelled",
+        "value": "cancelled"
+      },
+      {
+        "name": "NETWORK",
+        "serializedName": "network",
+        "value": "network"
+      },
+      {
+        "name": "PARSING",
+        "serializedName": "parsing",
+        "value": "parsing"
+      },
+      {
+        "name": "PLAYBACK",
+        "serializedName": "playback",
+        "value": "playback"
+      },
+      {
+        "name": "SERVER",
+        "serializedName": "server",
+        "value": "server"
+      },
+      {
+        "name": "UNKNOWN",
+        "serializedName": "unknown",
+        "value": "unknown"
+      },
+      {
+        "name": "UNSUPPORTED_PLATFORM",
+        "serializedName": "unsupported-platform",
+        "value": "unsupported-platform"
+      },
+      {
+        "name": "VALIDATION",
+        "serializedName": "validation",
+        "value": "validation"
+      }
+    ],
+    "PtvCoreHttpMethod": [
+      {
+        "name": "DELETE",
+        "serializedName": "DELETE",
+        "value": "DELETE"
+      },
+      {
+        "name": "GET",
+        "serializedName": "GET",
+        "value": "GET"
+      },
+      {
+        "name": "HEAD",
+        "serializedName": "HEAD",
+        "value": "HEAD"
+      },
+      {
+        "name": "OPTIONS",
+        "serializedName": "OPTIONS",
+        "value": "OPTIONS"
+      },
+      {
+        "name": "PATCH",
+        "serializedName": "PATCH",
+        "value": "PATCH"
+      },
+      {
+        "name": "POST",
+        "serializedName": "POST",
+        "value": "POST"
+      },
+      {
+        "name": "PUT",
+        "serializedName": "PUT",
+        "value": "PUT"
+      }
+    ],
+    "PtvCoreInitializationStatus": [
+      {
+        "name": "DEGRADED",
+        "serializedName": "DEGRADED",
+        "value": "DEGRADED"
+      },
+      {
+        "name": "FAILED",
+        "serializedName": "FAILED",
+        "value": "FAILED"
+      },
+      {
+        "name": "SKIPPED",
+        "serializedName": "SKIPPED",
+        "value": "SKIPPED"
+      },
+      {
+        "name": "SUCCESS",
+        "serializedName": "SUCCESS",
+        "value": "SUCCESS"
+      }
+    ],
+    "PtvCoreInitializationStep": [
+      {
+        "name": "API",
+        "serializedName": "api",
+        "value": "api"
+      },
+      {
+        "name": "CACHE",
+        "serializedName": "cache",
+        "value": "cache"
+      },
+      {
+        "name": "DEVICE_IDENTITY",
+        "serializedName": "device-identity",
+        "value": "device-identity"
+      },
+      {
+        "name": "DIAGNOSTICS",
+        "serializedName": "diagnostics",
+        "value": "diagnostics"
+      },
+      {
+        "name": "ENVIRONMENT",
+        "serializedName": "environment",
+        "value": "environment"
+      },
+      {
+        "name": "NAVIGATION",
+        "serializedName": "navigation",
+        "value": "navigation"
+      },
+      {
+        "name": "PLAYBACK",
+        "serializedName": "playback",
+        "value": "playback"
+      },
+      {
+        "name": "READY",
+        "serializedName": "ready",
+        "value": "ready"
+      },
+      {
+        "name": "SESSION",
+        "serializedName": "session",
+        "value": "session"
+      },
+      {
+        "name": "SETTINGS",
+        "serializedName": "settings",
+        "value": "settings"
+      }
+    ],
+    "PtvCoreMediaType": [
+      {
+        "name": "ALBUM",
+        "serializedName": "album",
+        "value": "album"
+      },
+      {
+        "name": "ARTIST",
+        "serializedName": "artist",
+        "value": "artist"
+      },
+      {
+        "name": "AUDIOBOOK",
+        "serializedName": "audiobook",
+        "value": "audiobook"
+      },
+      {
+        "name": "BOOK",
+        "serializedName": "book",
+        "value": "book"
+      },
+      {
+        "name": "COMIC",
+        "serializedName": "comic",
+        "value": "comic"
+      },
+      {
+        "name": "EPISODE",
+        "serializedName": "episode",
+        "value": "episode"
+      },
+      {
+        "name": "GAME",
+        "serializedName": "game",
+        "value": "game"
+      },
+      {
+        "name": "LIVE_TV",
+        "serializedName": "live-tv",
+        "value": "live-tv"
+      },
+      {
+        "name": "MANGA",
+        "serializedName": "manga",
+        "value": "manga"
+      },
+      {
+        "name": "MOVIE",
+        "serializedName": "movie",
+        "value": "movie"
+      },
+      {
+        "name": "MUSIC",
+        "serializedName": "music",
+        "value": "music"
+      },
+      {
+        "name": "PLAYLIST",
+        "serializedName": "playlist",
+        "value": "playlist"
+      },
+      {
+        "name": "SEASON",
+        "serializedName": "season",
+        "value": "season"
+      },
+      {
+        "name": "SHOW",
+        "serializedName": "show",
+        "value": "show"
+      },
+      {
+        "name": "UNKNOWN",
+        "serializedName": "unknown",
+        "value": "unknown"
+      }
+    ],
+    "PtvCoreScopeKind": [
+      {
+        "name": "DEVICE",
+        "serializedName": "device",
+        "value": "device"
+      },
+      {
+        "name": "GLOBAL",
+        "serializedName": "global",
+        "value": "global"
+      },
+      {
+        "name": "SERVER",
+        "serializedName": "server",
+        "value": "server"
+      },
+      {
+        "name": "USER",
+        "serializedName": "user",
+        "value": "user"
+      }
+    ],
+    "PtvNavigationBackBehavior": [
+      {
+        "name": "DEFAULT",
+        "serializedName": "default",
+        "value": "default"
+      },
+      {
+        "name": "MODAL",
+        "serializedName": "modal",
+        "value": "modal"
+      },
+      {
+        "name": "PRESERVE",
+        "serializedName": "preserve",
+        "value": "preserve"
+      },
+      {
+        "name": "REPLACE",
+        "serializedName": "replace",
+        "value": "replace"
+      }
+    ],
+    "PtvNavigationDestination": [
+      {
+        "name": "DETAILS",
+        "serializedName": "details",
+        "value": "details"
+      },
+      {
+        "name": "DIAGNOSTICS",
+        "serializedName": "diagnostics",
+        "value": "diagnostics"
+      },
+      {
+        "name": "HOME",
+        "serializedName": "home",
+        "value": "home"
+      },
+      {
+        "name": "LIBRARY",
+        "serializedName": "library",
+        "value": "library"
+      },
+      {
+        "name": "LIVE_TV",
+        "serializedName": "live-tv",
+        "value": "live-tv"
+      },
+      {
+        "name": "MOVIES",
+        "serializedName": "movies",
+        "value": "movies"
+      },
+      {
+        "name": "MUSIC",
+        "serializedName": "music",
+        "value": "music"
+      },
+      {
+        "name": "PLAYER",
+        "serializedName": "player",
+        "value": "player"
+      },
+      {
+        "name": "PROFILE",
+        "serializedName": "profile",
+        "value": "profile"
+      },
+      {
+        "name": "READING",
+        "serializedName": "reading",
+        "value": "reading"
+      },
+      {
+        "name": "REQUESTS",
+        "serializedName": "requests",
+        "value": "requests"
+      },
+      {
+        "name": "SEARCH",
+        "serializedName": "search",
+        "value": "search"
+      },
+      {
+        "name": "SETTINGS",
+        "serializedName": "settings",
+        "value": "settings"
+      },
+      {
+        "name": "SHOWS",
+        "serializedName": "shows",
+        "value": "shows"
+      }
+    ],
+    "PtvPlaybackStatus": [
+      {
+        "name": "BUFFERING",
+        "serializedName": "buffering",
+        "value": "buffering"
+      },
+      {
+        "name": "ENDED",
+        "serializedName": "ended",
+        "value": "ended"
+      },
+      {
+        "name": "ERROR",
+        "serializedName": "error",
+        "value": "error"
+      },
+      {
+        "name": "IDLE",
+        "serializedName": "idle",
+        "value": "idle"
+      },
+      {
+        "name": "LOADING",
+        "serializedName": "loading",
+        "value": "loading"
+      },
+      {
+        "name": "PAUSED",
+        "serializedName": "paused",
+        "value": "paused"
+      },
+      {
+        "name": "PLAYING",
+        "serializedName": "playing",
+        "value": "playing"
+      }
+    ],
+    "PtvRecommendationClassification": [
+      {
+        "name": "AFFINITY",
+        "serializedName": "affinity",
+        "value": "affinity"
+      },
+      {
+        "name": "DISCOVERY",
+        "serializedName": "discovery",
+        "value": "discovery"
+      },
+      {
+        "name": "MIXED",
+        "serializedName": "mixed",
+        "value": "mixed"
+      }
+    ],
+    "PtvRepeatMode": [
+      {
+        "name": "ALL",
+        "serializedName": "all",
+        "value": "all"
+      },
+      {
+        "name": "OFF",
+        "serializedName": "off",
+        "value": "off"
+      },
+      {
+        "name": "ONE",
+        "serializedName": "one",
+        "value": "one"
+      }
+    ]
+  },
+  "errorCodes": [
+    "NAVIGATION_MEDIA_ID_REQUIRED"
+  ],
+  "models": {
+    "AddToQueue": [
+      {
+        "name": "mediaIds",
+        "nullable": false,
+        "serializedName": "mediaIds",
+        "type": "List<String>"
+      }
+    ],
+    "Failure": [
+      {
+        "name": "error",
+        "nullable": false,
+        "serializedName": "error",
+        "type": "PtvCoreError"
+      }
+    ],
+    "PlayNext": [
+      {
+        "name": "mediaIds",
+        "nullable": false,
+        "serializedName": "mediaIds",
+        "type": "List<String>"
+      }
+    ],
+    "PtvArtworkReference": [
+      {
+        "name": "aspectRatio",
+        "nullable": true,
+        "serializedName": "aspectRatio",
+        "type": "Double?"
+      },
+      {
+        "name": "imageType",
+        "nullable": false,
+        "serializedName": "imageType",
+        "type": "String"
+      },
+      {
+        "name": "index",
+        "nullable": true,
+        "serializedName": "index",
+        "type": "Int?"
+      },
+      {
+        "name": "mediaId",
+        "nullable": false,
+        "serializedName": "mediaId",
+        "type": "String"
+      },
+      {
+        "name": "tag",
+        "nullable": true,
+        "serializedName": "tag",
+        "type": "String?"
+      }
+    ],
+    "PtvCacheEnvelope": [
+      {
+        "name": "contractVersion",
+        "nullable": false,
+        "serializedName": "contractVersion",
+        "type": "String"
+      },
+      {
+        "name": "createdAt",
+        "nullable": false,
+        "serializedName": "createdAt",
+        "type": "String"
+      },
+      {
+        "name": "expiresAt",
+        "nullable": false,
+        "serializedName": "expiresAt",
+        "type": "String"
+      },
+      {
+        "name": "key",
+        "nullable": false,
+        "serializedName": "key",
+        "type": "String"
+      },
+      {
+        "name": "payload",
+        "nullable": false,
+        "serializedName": "payload",
+        "type": "T"
+      },
+      {
+        "name": "payloadBytes",
+        "nullable": true,
+        "serializedName": "payloadBytes",
+        "type": "Long?"
+      },
+      {
+        "name": "schemaVersion",
+        "nullable": false,
+        "serializedName": "schemaVersion",
+        "type": "Int"
+      },
+      {
+        "name": "scope",
+        "nullable": false,
+        "serializedName": "scope",
+        "type": "PtvCoreScope"
+      },
+      {
+        "name": "staleWhileRevalidateUntil",
+        "nullable": true,
+        "serializedName": "staleWhileRevalidateUntil",
+        "type": "String?"
+      }
+    ],
+    "PtvClientCapabilityReport": [
+      {
+        "name": "capabilities",
+        "nullable": false,
+        "serializedName": "capabilities",
+        "type": "Map<String,Boolean>"
+      },
+      {
+        "name": "contractVersion",
+        "nullable": false,
+        "serializedName": "contractVersion",
+        "type": "String"
+      },
+      {
+        "name": "deviceClass",
+        "nullable": false,
+        "serializedName": "deviceClass",
+        "type": "String"
+      },
+      {
+        "name": "platform",
+        "nullable": false,
+        "serializedName": "platform",
+        "type": "String"
+      }
+    ],
+    "PtvCoreError": [
+      {
+        "name": "cause",
+        "nullable": true,
+        "serializedName": "cause",
+        "type": "String?"
+      },
+      {
+        "name": "code",
+        "nullable": false,
+        "serializedName": "code",
+        "type": "String"
+      },
+      {
+        "name": "contractVersion",
+        "nullable": false,
+        "serializedName": "contractVersion",
+        "type": "String"
+      },
+      {
+        "name": "correlationId",
+        "nullable": true,
+        "serializedName": "correlationId",
+        "type": "String?"
+      },
+      {
+        "name": "developerDetail",
+        "nullable": true,
+        "serializedName": "developerDetail",
+        "type": "String?"
+      },
+      {
+        "name": "httpStatus",
+        "nullable": true,
+        "serializedName": "httpStatus",
+        "type": "Int?"
+      },
+      {
+        "name": "kind",
+        "nullable": false,
+        "serializedName": "kind",
+        "type": "PtvCoreErrorKind"
+      },
+      {
+        "name": "message",
+        "nullable": false,
+        "serializedName": "message",
+        "type": "String"
+      },
+      {
+        "name": "operation",
+        "nullable": true,
+        "serializedName": "operation",
+        "type": "String?"
+      },
+      {
+        "name": "retryable",
+        "nullable": false,
+        "serializedName": "retryable",
+        "type": "Boolean"
+      },
+      {
+        "name": "timestamp",
+        "nullable": false,
+        "serializedName": "timestamp",
+        "type": "String"
+      }
+    ],
+    "PtvCoreInitializationResult": [
+      {
+        "name": "degraded",
+        "nullable": false,
+        "serializedName": "degraded",
+        "type": "Boolean"
+      },
+      {
+        "name": "error",
+        "nullable": true,
+        "serializedName": "error",
+        "type": "PtvCoreError?"
+      },
+      {
+        "name": "ready",
+        "nullable": false,
+        "serializedName": "ready",
+        "type": "Boolean"
+      },
+      {
+        "name": "routeToLogin",
+        "nullable": false,
+        "serializedName": "routeToLogin",
+        "type": "Boolean"
+      },
+      {
+        "name": "steps",
+        "nullable": false,
+        "serializedName": "steps",
+        "type": "List<PtvCoreInitializationStepResult>"
+      }
+    ],
+    "PtvCoreInitializationStepResult": [
+      {
+        "name": "critical",
+        "nullable": false,
+        "serializedName": "critical",
+        "type": "Boolean"
+      },
+      {
+        "name": "durationMs",
+        "nullable": false,
+        "serializedName": "durationMs",
+        "type": "Long"
+      },
+      {
+        "name": "error",
+        "nullable": true,
+        "serializedName": "error",
+        "type": "PtvCoreError?"
+      },
+      {
+        "name": "status",
+        "nullable": false,
+        "serializedName": "status",
+        "type": "PtvCoreInitializationStatus"
+      },
+      {
+        "name": "step",
+        "nullable": false,
+        "serializedName": "step",
+        "type": "PtvCoreInitializationStep"
+      }
+    ],
+    "PtvCoreScope": [
+      {
+        "name": "deviceId",
+        "nullable": true,
+        "serializedName": "deviceId",
+        "type": "String?"
+      },
+      {
+        "name": "kind",
+        "nullable": false,
+        "serializedName": "kind",
+        "type": "PtvCoreScopeKind"
+      },
+      {
+        "name": "serverId",
+        "nullable": true,
+        "serializedName": "serverId",
+        "type": "String?"
+      },
+      {
+        "name": "userId",
+        "nullable": true,
+        "serializedName": "userId",
+        "type": "String?"
+      }
+    ],
+    "PtvDiagnosticEvent": [
+      {
+        "name": "appVersion",
+        "nullable": false,
+        "serializedName": "appVersion",
+        "type": "String"
+      },
+      {
+        "name": "category",
+        "nullable": false,
+        "serializedName": "category",
+        "type": "String"
+      },
+      {
+        "name": "contractVersion",
+        "nullable": false,
+        "serializedName": "contractVersion",
+        "type": "String"
+      },
+      {
+        "name": "deviceClass",
+        "nullable": false,
+        "serializedName": "deviceClass",
+        "type": "String"
+      },
+      {
+        "name": "durationMs",
+        "nullable": true,
+        "serializedName": "durationMs",
+        "type": "Long?"
+      },
+      {
+        "name": "errorCode",
+        "nullable": true,
+        "serializedName": "errorCode",
+        "type": "String?"
+      },
+      {
+        "name": "metadata",
+        "nullable": false,
+        "serializedName": "metadata",
+        "type": "Map<String,Any?>"
+      },
+      {
+        "name": "name",
+        "nullable": false,
+        "serializedName": "name",
+        "type": "String"
+      },
+      {
+        "name": "platform",
+        "nullable": false,
+        "serializedName": "platform",
+        "type": "String"
+      },
+      {
+        "name": "serverIdHash",
+        "nullable": true,
+        "serializedName": "serverIdHash",
+        "type": "String?"
+      },
+      {
+        "name": "sessionId",
+        "nullable": false,
+        "serializedName": "sessionId",
+        "type": "String"
+      },
+      {
+        "name": "success",
+        "nullable": false,
+        "serializedName": "success",
+        "type": "Boolean"
+      },
+      {
+        "name": "timestamp",
+        "nullable": false,
+        "serializedName": "timestamp",
+        "type": "String"
+      },
+      {
+        "name": "userIdHash",
+        "nullable": true,
+        "serializedName": "userIdHash",
+        "type": "String?"
+      }
+    ],
+    "PtvFeatureFlagDocument": [
+      {
+        "name": "contractVersion",
+        "nullable": false,
+        "serializedName": "contractVersion",
+        "type": "String"
+      },
+      {
+        "name": "schemaVersion",
+        "nullable": false,
+        "serializedName": "schemaVersion",
+        "type": "Int"
+      },
+      {
+        "name": "scope",
+        "nullable": false,
+        "serializedName": "scope",
+        "type": "PtvCoreScope"
+      },
+      {
+        "name": "updatedAt",
+        "nullable": true,
+        "serializedName": "updatedAt",
+        "type": "String?"
+      },
+      {
+        "name": "values",
+        "nullable": false,
+        "serializedName": "values",
+        "type": "Map<String,Boolean>"
+      }
+    ],
+    "PtvMediaIdentity": [
+      {
+        "name": "id",
+        "nullable": false,
+        "serializedName": "id",
+        "type": "String"
+      },
+      {
+        "name": "libraryId",
+        "nullable": true,
+        "serializedName": "libraryId",
+        "type": "String?"
+      },
+      {
+        "name": "mediaType",
+        "nullable": false,
+        "serializedName": "mediaType",
+        "type": "PtvCoreMediaType"
+      },
+      {
+        "name": "originalMediaType",
+        "nullable": true,
+        "serializedName": "originalMediaType",
+        "type": "String?"
+      },
+      {
+        "name": "serverId",
+        "nullable": false,
+        "serializedName": "serverId",
+        "type": "String"
+      },
+      {
+        "name": "sortTitle",
+        "nullable": true,
+        "serializedName": "sortTitle",
+        "type": "String?"
+      },
+      {
+        "name": "title",
+        "nullable": false,
+        "serializedName": "title",
+        "type": "String"
+      },
+      {
+        "name": "userId",
+        "nullable": true,
+        "serializedName": "userId",
+        "type": "String?"
+      }
+    ],
+    "PtvNavigationIntent": [
+      {
+        "name": "backBehavior",
+        "nullable": false,
+        "serializedName": "backBehavior",
+        "type": "PtvNavigationBackBehavior"
+      },
+      {
+        "name": "contractVersion",
+        "nullable": false,
+        "serializedName": "contractVersion",
+        "type": "String"
+      },
+      {
+        "name": "deepLink",
+        "nullable": true,
+        "serializedName": "deepLink",
+        "type": "String?"
+      },
+      {
+        "name": "destination",
+        "nullable": false,
+        "serializedName": "destination",
+        "type": "PtvNavigationDestination"
+      },
+      {
+        "name": "libraryId",
+        "nullable": true,
+        "serializedName": "libraryId",
+        "type": "String?"
+      },
+      {
+        "name": "mediaId",
+        "nullable": true,
+        "serializedName": "mediaId",
+        "type": "String?"
+      },
+      {
+        "name": "query",
+        "nullable": false,
+        "serializedName": "query",
+        "type": "Map<String,String>"
+      },
+      {
+        "name": "requiredCapabilities",
+        "nullable": false,
+        "serializedName": "requiredCapabilities",
+        "type": "Set<String>"
+      }
+    ],
+    "PtvPlaybackProgress": [
+      {
+        "name": "completed",
+        "nullable": false,
+        "serializedName": "completed",
+        "type": "Boolean"
+      },
+      {
+        "name": "durationMs",
+        "nullable": true,
+        "serializedName": "durationMs",
+        "type": "Long?"
+      },
+      {
+        "name": "lastPlayedAt",
+        "nullable": true,
+        "serializedName": "lastPlayedAt",
+        "type": "String?"
+      },
+      {
+        "name": "playCount",
+        "nullable": true,
+        "serializedName": "playCount",
+        "type": "Int?"
+      },
+      {
+        "name": "played",
+        "nullable": false,
+        "serializedName": "played",
+        "type": "Boolean"
+      },
+      {
+        "name": "playedPercentage",
+        "nullable": true,
+        "serializedName": "playedPercentage",
+        "type": "Double?"
+      },
+      {
+        "name": "positionMs",
+        "nullable": false,
+        "serializedName": "positionMs",
+        "type": "Long"
+      }
+    ],
+    "PtvPlaybackState": [
+      {
+        "name": "audioTrackId",
+        "nullable": true,
+        "serializedName": "audioTrackId",
+        "type": "String?"
+      },
+      {
+        "name": "completed",
+        "nullable": false,
+        "serializedName": "completed",
+        "type": "Boolean"
+      },
+      {
+        "name": "contractVersion",
+        "nullable": false,
+        "serializedName": "contractVersion",
+        "type": "String"
+      },
+      {
+        "name": "durationMs",
+        "nullable": true,
+        "serializedName": "durationMs",
+        "type": "Long?"
+      },
+      {
+        "name": "error",
+        "nullable": true,
+        "serializedName": "error",
+        "type": "PtvCoreError?"
+      },
+      {
+        "name": "mediaId",
+        "nullable": true,
+        "serializedName": "mediaId",
+        "type": "String?"
+      },
+      {
+        "name": "positionMs",
+        "nullable": false,
+        "serializedName": "positionMs",
+        "type": "Long"
+      },
+      {
+        "name": "queue",
+        "nullable": false,
+        "serializedName": "queue",
+        "type": "List<String>"
+      },
+      {
+        "name": "queueIndex",
+        "nullable": false,
+        "serializedName": "queueIndex",
+        "type": "Int"
+      },
+      {
+        "name": "repeatMode",
+        "nullable": false,
+        "serializedName": "repeatMode",
+        "type": "PtvRepeatMode"
+      },
+      {
+        "name": "shuffled",
+        "nullable": false,
+        "serializedName": "shuffled",
+        "type": "Boolean"
+      },
+      {
+        "name": "status",
+        "nullable": false,
+        "serializedName": "status",
+        "type": "PtvPlaybackStatus"
+      },
+      {
+        "name": "subtitleTrackId",
+        "nullable": true,
+        "serializedName": "subtitleTrackId",
+        "type": "String?"
+      }
+    ],
+    "PtvRecommendationItem": [
+      {
+        "name": "classification",
+        "nullable": false,
+        "serializedName": "classification",
+        "type": "PtvRecommendationClassification"
+      },
+      {
+        "name": "id",
+        "nullable": false,
+        "serializedName": "id",
+        "type": "String"
+      },
+      {
+        "name": "mediaType",
+        "nullable": false,
+        "serializedName": "mediaType",
+        "type": "PtvCoreMediaType"
+      },
+      {
+        "name": "reasons",
+        "nullable": false,
+        "serializedName": "reasons",
+        "type": "List<PtvRecommendationReason>"
+      },
+      {
+        "name": "score",
+        "nullable": false,
+        "serializedName": "score",
+        "type": "Double"
+      },
+      {
+        "name": "source",
+        "nullable": false,
+        "serializedName": "source",
+        "type": "String"
+      },
+      {
+        "name": "title",
+        "nullable": false,
+        "serializedName": "title",
+        "type": "String"
+      }
+    ],
+    "PtvRecommendationReason": [
+      {
+        "name": "code",
+        "nullable": true,
+        "serializedName": "code",
+        "type": "String?"
+      },
+      {
+        "name": "score",
+        "nullable": true,
+        "serializedName": "score",
+        "type": "Double?"
+      },
+      {
+        "name": "text",
+        "nullable": false,
+        "serializedName": "text",
+        "type": "String"
+      }
+    ],
+    "PtvRecommendationResponse": [
+      {
+        "name": "cacheVersion",
+        "nullable": false,
+        "serializedName": "cacheVersion",
+        "type": "Int"
+      },
+      {
+        "name": "contractVersion",
+        "nullable": false,
+        "serializedName": "contractVersion",
+        "type": "String"
+      },
+      {
+        "name": "generatedAt",
+        "nullable": false,
+        "serializedName": "generatedAt",
+        "type": "String"
+      },
+      {
+        "name": "rows",
+        "nullable": false,
+        "serializedName": "rows",
+        "type": "List<PtvRecommendationRow>"
+      },
+      {
+        "name": "serverId",
+        "nullable": false,
+        "serializedName": "serverId",
+        "type": "String"
+      },
+      {
+        "name": "userId",
+        "nullable": false,
+        "serializedName": "userId",
+        "type": "String"
+      }
+    ],
+    "PtvRecommendationRow": [
+      {
+        "name": "explanation",
+        "nullable": true,
+        "serializedName": "explanation",
+        "type": "String?"
+      },
+      {
+        "name": "id",
+        "nullable": false,
+        "serializedName": "id",
+        "type": "String"
+      },
+      {
+        "name": "items",
+        "nullable": false,
+        "serializedName": "items",
+        "type": "List<PtvRecommendationItem>"
+      },
+      {
+        "name": "mediaType",
+        "nullable": true,
+        "serializedName": "mediaType",
+        "type": "String?"
+      },
+      {
+        "name": "source",
+        "nullable": true,
+        "serializedName": "source",
+        "type": "String?"
+      },
+      {
+        "name": "title",
+        "nullable": false,
+        "serializedName": "title",
+        "type": "String"
+      }
+    ],
+    "PtvSessionSnapshot": [
+      {
+        "name": "error",
+        "nullable": true,
+        "serializedName": "error",
+        "type": "PtvCoreError?"
+      },
+      {
+        "name": "serverId",
+        "nullable": true,
+        "serializedName": "serverId",
+        "type": "String?"
+      },
+      {
+        "name": "state",
+        "nullable": false,
+        "serializedName": "state",
+        "type": "PtvAuthenticationState"
+      },
+      {
+        "name": "userId",
+        "nullable": true,
+        "serializedName": "userId",
+        "type": "String?"
+      },
+      {
+        "name": "userName",
+        "nullable": true,
+        "serializedName": "userName",
+        "type": "String?"
+      }
+    ],
+    "ReplaceQueue": [
+      {
+        "name": "mediaIds",
+        "nullable": false,
+        "serializedName": "mediaIds",
+        "type": "List<String>"
+      },
+      {
+        "name": "startIndex",
+        "nullable": false,
+        "serializedName": "startIndex",
+        "type": "Int"
+      }
+    ],
+    "Seek": [
+      {
+        "name": "positionMs",
+        "nullable": false,
+        "serializedName": "positionMs",
+        "type": "Long"
+      }
+    ],
+    "SetRepeat": [
+      {
+        "name": "mode",
+        "nullable": false,
+        "serializedName": "mode",
+        "type": "PtvRepeatMode"
+      }
+    ],
+    "SetShuffle": [
+      {
+        "name": "enabled",
+        "nullable": false,
+        "serializedName": "enabled",
+        "type": "Boolean"
+      }
+    ],
+    "Success": [
+      {
+        "name": "value",
+        "nullable": false,
+        "serializedName": "value",
+        "type": "T"
+      }
+    ]
+  }
+}

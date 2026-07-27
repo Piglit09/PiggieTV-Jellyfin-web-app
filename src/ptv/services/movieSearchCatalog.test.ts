@@ -47,20 +47,27 @@ describe('PTV Movie search catalog', () => {
     });
 
     it('continues past primary-root matches and never transmits ParentId for the global catalog', async () => {
-        const rootA = [
+        const primaryRootMatches = [
             movie('toy-1', 'Toy Story'),
             movie('toy-2', 'Toy Story 2'),
             movie('toy-3', 'Toy Story 3'),
             movie('toy-4', 'Toy Story 4')
         ].map(item => ({ ...item, TopParentId: 'root-a' }));
+        const rootA = [
+            ...primaryRootMatches,
+            ...Array.from({ length: 496 }, (_, index) => ({
+                ...movie(`root-a-${index}`, `Primary root movie ${index}`),
+                TopParentId: 'root-a'
+            }))
+        ];
         const toyStoryFive = { ...movie('toy-5', 'Toy Story 5'), TopParentId: 'root-b' };
 
         vi.mocked(getPtvItems).mockImplementation((query, _options) => {
             if (!query) return Promise.resolve({ Items: [] });
             if (query.Ids) return Promise.resolve({ Items: [toyStoryFive] });
             return Promise.resolve(query.StartIndex === 0
-                ? page(0, rootA, 5)
-                : page(4, [toyStoryFive], 5));
+                ? page(0, rootA, 501)
+                : page(500, [toyStoryFive], 501));
         });
 
         const result = await searchPtvMovieCatalog('toy story', {

@@ -86,5 +86,17 @@ describe('PiggieTV server origin selection', () => {
             fallbackOrigin: 'http://192.0.2.125:8080'
         })).toEqual([]);
     });
+
+    it('keeps the LG development document and Jellyfin/plugin origins split', () => {
+        const candidates = buildPtvServerOriginCandidates({
+            development: true,
+            explicitDevelopmentUrl: 'http://10.16.0.50:8096',
+            fallbackOrigin: 'http://10.16.0.125:8082',
+            runtimeUrls: [ 'http://10.16.0.50:8096' ]
+        });
+
+        expect(candidates).toEqual([ 'http://10.16.0.50:8096' ]);
+        expect(candidates).not.toContain('http://10.16.0.125:8096');
+    });
 });
 /* eslint-enable sonarjs/no-clear-text-protocols */

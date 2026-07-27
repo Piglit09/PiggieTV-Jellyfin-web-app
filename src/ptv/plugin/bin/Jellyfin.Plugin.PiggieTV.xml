@@ -79,6 +79,9 @@
             Versioned ephemeral remote client diagnostics route.
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1DiagnosticsStorage">
+            <summary>Versioned rolling diagnostics storage route.</summary>
+        </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1MusicMetadataSearch">
             <summary>
             Versioned music metadata lookup route.
@@ -109,7 +112,7 @@
             Local, ephemeral coordination for opt-in PiggieTV client diagnostics.
             </summary>
         </member>
-        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController},Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore,Microsoft.AspNetCore.Authorization.IAuthorizationService)">
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.#ctor(Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController},Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore,Microsoft.AspNetCore.Authorization.IAuthorizationService,Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter)">
             <summary>Initializes a new instance of the controller.</summary>
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.CheckIn(Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence)">
@@ -139,6 +142,24 @@
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.DownloadReport(System.String,System.Threading.CancellationToken)">
             <summary>Downloads the latest unexpired report for one client.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.GetStorage(System.Threading.CancellationToken)">
+            <summary>Returns bounded rolling diagnostics storage status.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.DownloadStorageLog(System.Threading.CancellationToken)">
+            <summary>Downloads the active rolling JSONL log.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.DownloadStorageBundle(System.Threading.CancellationToken)">
+            <summary>Downloads a temporary in-memory ZIP of retained rolling diagnostics.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.RotateStorage(System.Threading.CancellationToken)">
+            <summary>Forces a safe rolling-log rotation.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.ClearStorage(Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionRequest,System.Threading.CancellationToken)">
+            <summary>Deletes only recognized rolling diagnostics logs after explicit confirmation.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController.ConsolidateLegacyStorage(Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionRequest,System.Threading.CancellationToken)">
+            <summary>Archives and removes only verified legacy PTV diagnostics files after confirmation.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvSignupController">
             <summary>
@@ -584,6 +605,9 @@
             <summary>
             Gets or sets random discovery settings.
             </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.DiagnosticsStorageSettings">
+            <summary>Gets or sets bounded persistent diagnostics storage settings.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.EnableTmdbMetadata">
             <summary>
@@ -1382,6 +1406,39 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.RandomSettings.Behavior">
             <summary>Gets or sets random action behavior.</summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings">
+            <summary>Bounded persistent diagnostics storage policy.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.FileLoggingEnabled">
+            <summary>Gets or sets whether JSONL diagnostic persistence is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.MaximumFileSizeMb">
+            <summary>Gets or sets the active log size limit in megabytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.MaximumRotatedFiles">
+            <summary>Gets or sets the number of rotated log files retained.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.RetentionDays">
+            <summary>Gets or sets the retention period in days.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.MinimumPersistentLogLevel">
+            <summary>Gets or sets the minimum level persisted to disk.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.IncludePerformanceSamples">
+            <summary>Gets or sets whether high-frequency performance samples are persisted.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.IncludeClientCheckIns">
+            <summary>Gets or sets whether client check-ins are summarized to disk.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.IncludeFilesystemPaths">
+            <summary>Gets or sets whether filesystem paths are retained in disk diagnostics.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.IncludeRequestUrls">
+            <summary>Gets or sets whether request URLs are retained in disk diagnostics.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.IncludeItemIds">
+            <summary>Gets or sets whether content and account identifiers are retained in disk diagnostics.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings">
             <summary>
             PiggieTV native signup settings.
@@ -1729,6 +1786,108 @@
             </summary>
             <param name="storeStatus">Store status.</param>
             <returns>Public content cache status.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent">
+            <summary>One persistent PiggieTV diagnostics event.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent.TimestampUtc">
+            <summary>Gets or sets the event timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent.Level">
+            <summary>Gets or sets the normalized severity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent.Category">
+            <summary>Gets or sets the subsystem category.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent.EventName">
+            <summary>Gets or sets the stable event name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent.ClientId">
+            <summary>Gets or sets an optional opaque client identifier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent.Detail">
+            <summary>Gets or sets the event detail before sanitization.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus">
+            <summary>Current bounded diagnostics storage state.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.ActiveLogPath">
+            <summary>Gets or sets the active JSONL path.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.ActiveFileSizeBytes">
+            <summary>Gets or sets active file size.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.RotatedFileCount">
+            <summary>Gets or sets rotated file count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.TotalRetainedBytes">
+            <summary>Gets or sets total retained bytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.OldestRetainedAtUtc">
+            <summary>Gets or sets the oldest retained timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.RetentionDays">
+            <summary>Gets or sets configured retention days.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.MaximumFileSizeMb">
+            <summary>Gets or sets configured active file size limit.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.MaximumRotatedFiles">
+            <summary>Gets or sets configured rotation count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.EventsQueued">
+            <summary>Gets or sets events currently queued.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.EventsWritten">
+            <summary>Gets or sets events appended to JSONL.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.EventsAggregated">
+            <summary>Gets or sets high-frequency events aggregated.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.DuplicateEventsSuppressed">
+            <summary>Gets or sets duplicate events suppressed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.EventsDropped">
+            <summary>Gets or sets events dropped by minimum level or queue pressure.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.WriteFailures">
+            <summary>Gets or sets persistent write failures.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.RotationsCompleted">
+            <summary>Gets or sets completed rotations.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.LastRotationUtc">
+            <summary>Gets or sets the last completed rotation.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.LegacyFileCount">
+            <summary>Gets or sets known safe legacy file count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageStatus.LegacyFileSizeBytes">
+            <summary>Gets or sets estimated legacy disk usage.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionRequest">
+            <summary>Confirmation body used by destructive diagnostics storage actions.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionRequest.Confirm">
+            <summary>Gets or sets whether the administrator confirmed the action.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionRequest.CreateArchive">
+            <summary>Gets or sets whether legacy files should be archived before removal.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionResult">
+            <summary>Result of a diagnostics storage maintenance action.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionResult.Message">
+            <summary>Gets or sets a user-safe action message.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionResult.FileCount">
+            <summary>Gets or sets affected file count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionResult.ReclaimedBytes">
+            <summary>Gets or sets reclaimed bytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageActionResult.ArchiveFileName">
+            <summary>Gets or sets the optional legacy archive file name.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvErrorResponse">
             <summary>
@@ -2377,6 +2536,9 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.PerformanceSettings">
             <summary>Gets or sets performance settings.</summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.DiagnosticsStorageSettings">
+            <summary>Gets or sets bounded diagnostics storage settings.</summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsDto.TmdbSettings">
             <summary>Gets or sets TMDb settings.</summary>
         </member>
@@ -2436,6 +2598,9 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.PerformanceSettings">
             <summary>Gets or sets performance setting updates.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.DiagnosticsStorageSettings">
+            <summary>Gets or sets diagnostics storage updates.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPluginSettingsPatchDto.TmdbSettings">
             <summary>Gets or sets TMDb setting updates.</summary>
@@ -2557,6 +2722,39 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvPerformanceSettingsPatch.LowPowerDisableAnimations">
             <summary>Gets or sets whether low power disables animations.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch">
+            <summary>Partial bounded diagnostics storage settings patch.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.FileLoggingEnabled">
+            <summary>Gets or sets whether JSONL file logging is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.MaximumFileSizeMb">
+            <summary>Gets or sets the active log size limit in megabytes.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.MaximumRotatedFiles">
+            <summary>Gets or sets the retained rotation count.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.RetentionDays">
+            <summary>Gets or sets retention in days.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.MinimumPersistentLogLevel">
+            <summary>Gets or sets the minimum disk log level.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.IncludePerformanceSamples">
+            <summary>Gets or sets whether high-frequency performance samples persist.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.IncludeClientCheckIns">
+            <summary>Gets or sets whether client check-ins are summarized.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.IncludeFilesystemPaths">
+            <summary>Gets or sets whether filesystem paths persist.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.IncludeRequestUrls">
+            <summary>Gets or sets whether request URLs persist.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvDiagnosticsStorageSettingsPatch.IncludeItemIds">
+            <summary>Gets or sets whether item identifiers persist.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvTmdbSettingsPatch">
             <summary>
@@ -3038,6 +3236,47 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.Diagnostics">
             <summary>Gets or sets the client's current local diagnostics state.</summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.Metadata">
+            <summary>Gets or sets safe app/device metadata from the running PiggieTV client.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.Capabilities">
+            <summary>Gets or sets explicit client diagnostics capabilities.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence.Boot">
+            <summary>Gets or sets the client-side boot/check-in marker.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker">
+            <summary>
+            Safe client boot/check-in status marker for diagnosing stale or packaged app runtimes.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.PlatformDetected">
+            <summary>Gets or sets the detected platform string.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.PtvRuntimeLoaded">
+            <summary>Gets or sets a value indicating whether the PTV runtime loaded.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.DiagnosticsModuleLoaded">
+            <summary>Gets or sets a value indicating whether the diagnostics module loaded.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.CheckInAttempted">
+            <summary>Gets or sets a value indicating whether a check-in was attempted.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.CheckInStatus">
+            <summary>Gets or sets the last check-in HTTP status, if known.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.FailureCode">
+            <summary>Gets or sets the coarse failure code, if any.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.FrontendBuildId">
+            <summary>Gets or sets the frontend build identifier compiled into the loaded client.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.LoadedClientBuildId">
+            <summary>Gets or sets the loaded client build identifier.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsBootMarker.RemoteDiagnosticsRegistrationCount">
+            <summary>Gets or sets the remote diagnostics runtime registration count.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsProfile">
             <summary>
             Minimal subset of the client profile used for server-side filtering.
@@ -3046,6 +3285,67 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsProfile.Kind">
             <summary>Gets or sets the coarse client kind.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsProfile.TvPlatform">
+            <summary>Gets or sets the detected TV platform, if any.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientMetadata">
+            <summary>
+            Privacy-safe device/app labels sent by a running PiggieTV web client.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientMetadata.ApplicationName">
+            <summary>Gets or sets the application/client name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientMetadata.ApplicationVersion">
+            <summary>Gets or sets the application/client version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientMetadata.DeviceDisplayName">
+            <summary>Gets or sets the preferred safe device display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientMetadata.DeviceName">
+            <summary>Gets or sets the safe Jellyfin/apphost device name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientMetadata.DeviceType">
+            <summary>Gets or sets the coarse device type/platform label.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientMetadata.Platform">
+            <summary>Gets or sets the coarse platform label.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientMetadata.NativeRuntime">
+            <summary>Gets or sets a value indicating whether the client reports a native wrapper/runtime.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities">
+            <summary>
+            Explicit support matrix for remote diagnostics actions.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.Heartbeat">
+            <summary>Gets or sets a value indicating whether periodic check-ins are supported.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.MemoryMetrics">
+            <summary>Gets or sets a value indicating whether memory samples can be collected.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.NavigationTiming">
+            <summary>Gets or sets a value indicating whether navigation timing can be collected.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.NetworkTiming">
+            <summary>Gets or sets a value indicating whether network timing/failure samples can be collected.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.PerformanceMetrics">
+            <summary>Gets or sets a value indicating whether render/performance samples can be collected.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.PhysicalLayoutSnapshot">
+            <summary>Gets or sets a value indicating whether bounded physical layout snapshots can be collected.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.PlaybackTelemetry">
+            <summary>Gets or sets a value indicating whether playback transitions can be collected.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.RemoteCommands">
+            <summary>Gets or sets a value indicating whether remote start/stop/snapshot commands are supported.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientCapabilities.ReportExport">
+            <summary>Gets or sets a value indicating whether reports can be viewed/exported.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresenceState">
             <summary>
@@ -3119,6 +3419,33 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.Profile">
             <summary>Gets or sets the detected client profile.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.FirstSeenUtc">
+            <summary>Gets or sets the first time the client was observed.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.DisplayName">
+            <summary>Gets or sets the primary friendly display name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.DeviceName">
+            <summary>Gets or sets the sanitized device name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.ApplicationName">
+            <summary>Gets or sets the application/client name.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.ApplicationVersion">
+            <summary>Gets or sets the application/client version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.Platform">
+            <summary>Gets or sets the coarse platform label.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.NativeRuntime">
+            <summary>Gets or sets a value indicating whether the client reports a native wrapper/runtime.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.Capabilities">
+            <summary>Gets or sets explicit client diagnostics capabilities.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.Boot">
+            <summary>Gets or sets the client-side boot/check-in marker.</summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsClientSummary.Route">
             <summary>Gets or sets the normalized route category.</summary>
@@ -4497,6 +4824,33 @@
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore.GetReport(System.String)">
             <summary>Gets the latest unexpired report.</summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter">
+            <summary>Bounded centralized persistent diagnostics writer.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter.Enqueue(Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent)">
+            <summary>Queues a sanitized persistent diagnostic event without blocking a request thread.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter.GetStatus">
+            <summary>Returns current bounded storage health.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter.FlushAsync(System.Threading.CancellationToken)">
+            <summary>Flushes queued events.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter.RotateAsync(System.Threading.CancellationToken)">
+            <summary>Forces one safe log rotation.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter.ClearAsync(System.Threading.CancellationToken)">
+            <summary>Deletes only recognized rolling log files.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter.ConsolidateLegacyAsync(System.Boolean,System.Threading.CancellationToken)">
+            <summary>Archives and removes only recognized legacy diagnostic files.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter.ReadActiveLogAsync(System.Threading.CancellationToken)">
+            <summary>Reads the active JSONL file after flushing.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRollingDiagnosticsWriter.CreateBundleAsync(System.Threading.CancellationToken)">
+            <summary>Builds an in-memory diagnostic bundle without leaving a temporary ZIP behind.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvSignupService">
             <summary>
             Native PiggieTV signup service.
@@ -4624,6 +4978,12 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvBoundedWorkResult`1.SkippedCount">
             <summary>Number of work items deferred by the per-pass limit.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvDiagnosticsSanitizer">
+            <summary>Shared bounded sanitizer for in-memory reports and persistent diagnostics.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvDiagnosticsSanitizer.Sanitize(System.Text.Json.JsonElement,Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings)">
+            <summary>Sanitizes a JSON value using the configured disk privacy policy.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentRefreshService">
             <summary>
@@ -4896,6 +5256,9 @@
             <param name="configuration">Plugin configuration.</param>
             <returns>Normalized plugin configuration.</returns>
         </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.NormalizeDiagnosticsStorageSettings(Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings)">
+            <summary>Normalizes diagnostics storage settings with bounded safe values.</summary>
+        </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsNormalizer.NormalizeRowBuilderSettings(Jellyfin.Plugin.PiggieTV.Configuration.RowBuilderSettings)">
             <summary>
             Normalizes row-builder settings in place.
@@ -4967,6 +5330,48 @@
             <inheritdoc />
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore.GetReport(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter">
+            <summary>Single-consumer, bounded JSONL diagnostics writer with rolling retention.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.#ctor(MediaBrowser.Common.Configuration.IApplicationPaths,Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter})">
+            <summary>Initializes the production writer in the plugin configuration directory.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.#ctor(System.String,System.Func{Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings},Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter},System.Int32)">
+            <summary>Initializes a writer for a supplied directory and settings provider.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.StartAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.StopAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.Enqueue(Jellyfin.Plugin.PiggieTV.Models.PtvRollingDiagnosticEvent)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.GetStatus">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.FlushAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.RotateAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.ClearAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.ConsolidateLegacyAsync(System.Boolean,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.ReadActiveLogAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.CreateBundleAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRollingDiagnosticsWriter.DisposeAsync">
             <inheritdoc />
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvSignupCleanupService">

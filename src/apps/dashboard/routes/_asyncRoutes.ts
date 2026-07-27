@@ -4,6 +4,7 @@ import { registerPtvRecommendationRouteOnce } from 'ptv/modules/recommendations/
 
 const PTV_ROW_BUILDER_ROUTE: AsyncRoute = { path: 'piggietv/rows', type: AppType.Dashboard };
 const PTV_RECOMMENDATIONS_ROUTE: AsyncRoute = { path: 'piggietv/recommendations', type: AppType.Dashboard };
+const PTV_DIAGNOSTICS_ROUTE: AsyncRoute = { path: 'piggietv/diagnostics', type: AppType.Dashboard };
 
 registerPtvRecommendationRouteOnce(PTV_RECOMMENDATIONS_ROUTE.path);
 
@@ -33,6 +34,7 @@ export const ASYNC_ADMIN_ROUTES: AsyncRoute[] = [
     { path: 'piggietv', type: AppType.Dashboard },
     PTV_ROW_BUILDER_ROUTE,
     PTV_RECOMMENDATIONS_ROUTE,
+    PTV_DIAGNOSTICS_ROUTE,
     { path: 'tasks', type: AppType.Dashboard },
     { path: 'tasks/:id', page: 'tasks/task', type: AppType.Dashboard },
     { path: 'users', type: AppType.Dashboard },

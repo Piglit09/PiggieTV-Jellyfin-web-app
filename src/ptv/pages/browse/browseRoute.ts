@@ -97,6 +97,23 @@ function getBrowsePath(kind: PtvBrowseMediaKind) {
     return `#/${kind}`;
 }
 
+function getBrowsePathView(pathname: string) {
+    const segments = normalizeKey(pathname)
+        .replace(/^#/, '')
+        .split('/')
+        .filter(Boolean);
+
+    return segments.length > 1 ? segments[segments.length - 1] : '';
+}
+
+function getBrowseViewPath(kind: PtvBrowseMediaKind, view: PtvBrowseView) {
+    const basePath = getBrowsePath(kind);
+
+    if (view === 'landing' || view === 'unsupported') return basePath;
+
+    return `${basePath}/${view}`;
+}
+
 function getDefaultSort(view: PtvBrowseView) {
     if (view === 'latest') return { sortBy: 'DateCreated', sortOrder: 'Descending' as const };
     if (view === 'continue') return { sortBy: 'DatePlayed', sortOrder: 'Descending' as const };
@@ -135,7 +152,6 @@ function canonicalizeBrowseParams(route: Omit<PtvBrowseRoute, 'canonicalHref' | 
     const defaultSort = getDefaultSort(route.view);
     const entries: PtvQueryStringEntry[] = [
         ['topParentId', route.scopeAlias],
-        ['view', route.view === 'landing' ? '' : route.rawView || route.view],
         ['genre', route.genre],
         ['studio', route.studio],
         ['network', route.network],
@@ -175,7 +191,7 @@ function getFilterUpdate(update: string | undefined, preserveCurrent: boolean, c
 export function parsePtvBrowseRoute(pathname: string, search = ''): PtvBrowseRoute {
     const kind = getBrowseKind(pathname);
     const params = parsePtvQueryString(search);
-    const rawView = normalizeKey(getParam(params, 'view'));
+    const rawView = normalizeKey(getParam(params, 'view') || getBrowsePathView(pathname));
     const requestedView = (rawView || 'landing') as PtvBrowseView;
     const view = SUPPORTED_VIEWS[kind].has(requestedView) ? requestedView : 'unsupported';
     const genre = normalizeText(getParam(params, 'genre'));
@@ -218,12 +234,12 @@ export function parsePtvBrowseRoute(pathname: string, search = ''): PtvBrowseRou
     };
     const canonicalSearch = canonicalizeBrowseParams(routeWithoutCanonical);
     const searchSuffix = canonicalSearch ? `?${canonicalSearch}` : '';
-    const canonicalHref = `${getBrowsePath(kind)}${searchSuffix}`;
+    const canonicalHref = `${getBrowseViewPath(kind, view)}${searchSuffix}`;
 
     return {
         ...routeWithoutCanonical,
         canonicalHref,
-        canonicalRouteKey: `${kind}|${canonicalSearch || 'landing'}`
+        canonicalRouteKey: `${kind}|${view}|${canonicalSearch || 'unfiltered'}`
     };
 }
 
@@ -242,7 +258,6 @@ export function buildPtvBrowseHref(route: PtvBrowseRoute, updates: PtvBrowseRout
     const sortOrder = updates.sortOrder || defaultSort.sortOrder;
     const entries: PtvQueryStringEntry[] = [
         ['topParentId', scopeAlias],
-        ['view', nextView === 'landing' ? '' : nextView],
         ['genre', genre],
         ['studio', studio],
         ['network', network],
@@ -256,7 +271,7 @@ export function buildPtvBrowseHref(route: PtvBrowseRoute, updates: PtvBrowseRout
     const search = serializePtvQueryString(entries);
     const searchSuffix = search ? `?${search}` : '';
 
-    return `${getBrowsePath(route.kind)}${searchSuffix}`;
+    return `${getBrowseViewPath(route.kind, nextView)}${searchSuffix}`;
 }
 
 export function getPtvBrowseSupportedViews(kind: PtvBrowseMediaKind) {

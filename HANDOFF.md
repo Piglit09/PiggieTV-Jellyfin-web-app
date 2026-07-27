@@ -1,6 +1,629 @@
 # PiggieTV Handoff
 
-Updated 2026-07-19 for HEAD `6d483399b3` plus the current uncommitted worktree.
+Updated 2026-07-24 for HEAD `6d483399b3` plus the current uncommitted worktree.
+
+## WebOS Phase 3A playback correction (2026-07-27)
+
+Status: **HOLD — implementation and LG device-assisted validation pass; final
+literal physical-remote Music acceptance and repository lint remain open.**
+
+- One derived presentation service now owns compact/full-screen/video
+  presentation while existing Jellyfin video and PTV Music engines remain
+  authoritative.
+- Existing TV focus and `inputManager` paths now own video scope, one seek
+  action, one Back branch, and PTV Music transport adaptation. No second key,
+  route, focus, or playback owner was introduced.
+- Loaded PTV audio guarantees one persistent mini-player outside full-screen or
+  video. The runtime host uses viewport anchoring and literal Chrome 68-safe
+  WebOS geometry.
+- Reading and Request are intentionally excluded from WebOS navigation, direct
+  routes, and loaded chunks. Other web clients retain both.
+- WebOS Music bounds initial card/section rendering, defers lyrics, omits
+  expensive backdrops, and disables Music-tree animation without changing
+  queue/playback authority.
+- Final LG renderer checks passed mini/full-screen exclusivity, Home plus six
+  content/settings routes, track transition, stop, audio/video transport,
+  hidden seek, and one-hide/one-exit Back without a crash.
+- Automated gates pass: PTV 115/701, full Vitest 138/907, TV-profile Playwright
+  9/9, TypeScript, Stylelint, schema/privacy checks, production build, secret
+  scan, and diff check. A timer teardown defect found by the full run was fixed.
+- Repository `lint:ptv` remains red from accumulated debt above its checked-in
+  baseline. Focused Phase 3A lint outside legacy `PTVShell.tsx` has no errors.
+- Production was not deployed or changed. See
+  `docs/diagnostics/phase3a-playback-correction-report.md`.
+
+## Jellyfin Backend Latency Attribution (2026-07-24)
+
+- Decision: **HOLD**. The approved browser account remained non-admin. A
+  separate administrator observer accessed current Jellyfin logs, tasks,
+  plugins, system storage, and database-directory metadata without exposing or
+  persisting either identity or token.
+- Provenance: Jellyfin 10.11.11/X64; PiggieTV 10.11.8.2/API v1 with 13
+  advertised capabilities; fixed program-data storage with 156,048,969,728
+  free bytes; 16 library folders split across 11 network and five fixed
+  storage entries. Main SQLite database presence was observed before/after;
+  WAL/SHM/journal companions were absent at those observations.
+- Admin APIs do not expose journal mode, busy timeout, filesystem type, inode
+  state, process count, CPU/memory/swap, disk await/queue, mount latency, or
+  retransmits. Host-level attribution remains incomplete. The safe integrity
+  check was skipped to avoid adding a production lock.
+- Matrix: warm 9/13, repeat 12/13, transport-cold 11/13. Overall
+  p50/p90/p95/max is 8.909/34.906/55.436/68.615 seconds; warm p50/p90 is
+  13.045/28.223. Warm Season details, Reading, Music, and focus failed;
+  transport-cold Shows and focus failed.
+- Correlation: 76 reads exceeded 1.5 seconds, 68 exceeded three, and 58 exceeded
+  five; every read over three seconds has a server row. Seventy-four rows are
+  proven/strong server-duration matches. Median server/browser ratio is 1.0,
+  median absolute delta 7 ms, and browser transfer median 0.7 ms. Network is
+  contradicted as the primary owner.
+- Current logs: zero SQLite locked/busy events, optimistic retries, EF warnings,
+  or query-splitting warnings. These hypotheses are not observed in this
+  window and historical playback-lock evidence remains active.
+- Scheduled-task evidence: `Optimize database` ran
+  11:30:31Z-11:35:37Z. Pre-task reads were already slow
+  (p50/p90/max 9.103/33.744/43.707 seconds). Five reads crossing task start
+  reached 65.634/68.615/68.615; 19 reads starting during it measured
+  4.971/12.880/21.753. Treat database maintenance as a strongly correlated
+  amplifier, not the sole owner.
+- Focus: the visible initial browse card retained focus through Right, Down,
+  Left, and Up in all passes. No focus movement, activation, or request
+  occurred. Focus remains independent and unchanged.
+- Isolation proposal only: with explicit approval, defer only the scheduled
+  `Optimize database` execution for one unchanged matrix and 30-second
+  pre/post windows while host sampling is active; restore the original trigger
+  immediately. Accept only p90 below three seconds, 13/13 per pass, and clean
+  current DB logs. No isolation was executed.
+- Artifacts: `test-results/backend-latency-attribution` contains all eight
+  required attribution reports and the four unchanged matrix reports. Privacy
+  validation found zero prohibited fields/values.
+- Validation: focused 153/153 across 25 files; full Vitest 816/816 across 125;
+  TypeScript; zero-warning harness ESLint; production Webpack with two
+  established size warnings; 10 schemas; Android parity at 26 models/14
+  enums/19 capabilities/one error; frontend/plugin contract; 118,246-path
+  secret scan; 12-artifact privacy scan; and Web/mobile/TV `git diff --check`.
+  Android source did not change, so Android builds/lint were not required.
+- Cleanup: both temporary Jellyfin sessions were revoked, the helper-owned
+  browser/profile was removed, and loopback CDP port 9223 is closed.
+- No operator timeout, account, database, plugin, server, auth, playback, Core,
+  Android, production-data, configuration, or media-path change occurred. The
+  scheduled maintenance was automatic and unmodified. Phase 2E remains HOLD.
+
+## Production Authenticated Items Pipeline Stabilization (2026-07-24)
+
+- Decision: **HOLD**. The same approved non-administrator account was used
+  throughout. Provenance: frontend/Jellyfin 10.11.11, plugin 10.11.8.2 API v1
+  with 13 capabilities, Chrome 149.0.7827.199, loopback frontend,
+  private-network direct HTTP Jellyfin listener, and no service-worker
+  registration/control. Uptime/restart state was unavailable.
+- Initial timing: 90 classified reads, 17 exact concurrent duplicates, peak
+  11, and p50/p90/p95/max time to headers of
+  3.060/11.876/16.269/37.016 seconds. The corrected duplicate-attribution
+  baseline recorded 21 duplicates and peak 12.
+- Proven frontend owner: stock details, DOM-driven integration enhancement,
+  and the PTV details fallback independently requested the same item. The
+  integrations enhancer could dispatch four identical reads before its
+  existing response cache populated. Back/Forward also overlapped one
+  identical genre-directory read.
+- Correction: those existing legacy item-detail consumers and the
+  genre/studio directory now reuse the global request coordinator for exact
+  in-flight requests. The transport, raw DTO/error, settled behavior,
+  integration response cache, renderers, navigation, and lifecycle remain
+  authoritative. No second cache, retry, timeout, Core boundary, query
+  reduction, or UI change was added.
+- Authoritative after-run: zero exact concurrent duplicates, zero
+  canonicalization misses, peak 8, and aggregate p50/p90/p95/max
+  1.390/3.644/4.464/6.978 seconds. p50/p95/max pass their fixed targets; p90
+  remains over 3 seconds. Warm-only p50/p90 are 1.698/3.724 seconds and also
+  fail.
+- Equivalent final paths were aligned: shared/browser/direct/ApiClient p50
+  completion or header values were 0.544/0.567/0.570/0.584 seconds, with p95
+  1.124/1.128/1.078/1.113 seconds. Direct transfer median was 0.8 ms. The
+  remaining delay is proven upstream of frontend transport, but the specific
+  Jellyfin database/storage/plugin/host owner is not proven.
+- Each warm, immediate-repeat, and legitimate transport-cold pass was 12/13.
+  TV-like browser focus was the only failure. Transport-cold disabled browser
+  cache without losing the session; it is not full application cold. Playback
+  continuation validated Resume read-only and did not start playback.
+- Query audit: zero invalid ItemFields, zero `UserData` field tokens, and zero
+  parameter collisions. Five Season/Episode child-list requests had no
+  explicit Limit and 16 observed reads requested MediaSources. Existing
+  consumers were retained because unused fields were not proven.
+- Current server logs, scheduled tasks, and plugin inventory returned 403 to
+  the approved account. No read-only host session existed. Current
+  database/host correlation is explicitly not observed. Historical SQLite
+  lock, 35.22-second playback HTTP 500, and 93.39-second read evidence remain
+  unresolved; Playback Reporting overlap is not causation. No isolation was
+  performed.
+- Validation: focused 257/257 across 38 files; full Vitest 816/816 across 125
+  files; TypeScript; zero-warning new-scope ESLint; production Webpack with two
+  established size warnings; ten schemas; Android parity at 26 models/14
+  enums/19 capabilities/one error code; 118,245-path secret scan; 11-artifact
+  privacy scan; and Web/mobile/TV `git diff --check`. Android source was not
+  changed or rebuilt.
+- Artifacts:
+  `test-results/items-stabilization-after-coordinated`. Source-changing
+  intermediate runs and raw query-contract telemetry were discarded.
+- Exact next action: retain the same browser account and obtain time-bounded
+  read-only access to the actual Jellyfin logs and host. Rerun this matrix with
+  sanitized log completion plus CPU/memory/disk/mount/network and read-only
+  SQLite evidence. Do not isolate a plugin/task or mutate the database/server
+  until that evidence identifies a specific owner and rollback.
+- Phase 2E remains HOLD. No Episode Core migration was reopened.
+
+## PTV Core Phase 2E Episode-Details Design Audit (2026-07-23)
+
+- Decision: **HOLD**. Phase 2E is an audit, not an implementation. No
+  production behavior, API call, Core facade/projection, route, UI, test
+  behavior, schema, persistence, plugin, Android, or ownership boundary
+  changed.
+- Inventory: 45 direct production `.getItem(...)` expressions, two SDK
+  single-item helpers, one bound hero hydration loop, the existing
+  `getPtvItem` fallback/consumers, and every `getEpisodes` call were audited.
+  The complete call-by-call inventory and transport profiles are in
+  `docs/architecture/PTV_CORE_MIGRATION.md`.
+- Rejected owners include the stock details DTO, More Commands/context menus,
+  app-router hydration, theme/display mirroring, media info/sources, active
+  playback and queues, Cast/SyncPlay/remote control, pause artwork, hero
+  continue/featured hydration, editors, batch/external actions, More From
+  Season, download-all, and Series/Season playback expansion.
+- The closest low-risk seam is
+  `ptv/modules/details/index.js:enhanceDetailItem`. It calls the current
+  Jellyfin client's `getItem(currentUserId, routeId)` only when the normal
+  `detailsrendered` event did not already hand the same raw item to PTV. For
+  Episode, the fallback feeds only shell-section classification and optional
+  direct/parent artwork. It has no explicit timeout/retry/cancellation or
+  request coordinator; dataset and current-route checks suppress duplicate or
+  stale application, and failure is nonblocking.
+- That seam is not approved. Normal production flow bypasses it; the generic
+  `getPtvItem` boundary already supplies raw identity, unknown-field
+  preservation, safe diagnostics, and platform-error identity; Phase 2C
+  already projects useful Episode metadata. Reusing `getPtvItem` would add a
+  coordinator, while a new projection would add stricter failure behavior and
+  no portable consumer.
+- A hypothetical minimum projection would be required `episodeId` plus
+  optional `seriesId`, `seasonId`, and artwork. Title/index/overview/runtime/
+  progress are excluded because this seam does not consume them and Phase 2C
+  already covers them. Wrong/missing requested ID, wrong type, or conflicting
+  supplied parent scope would fail the whole single-item Core result; missing
+  optional parents and unknown raw fields would remain compatible.
+- Any later experiment must retain one legacy call-site seam, exactly one
+  transport call, raw object/error identity, and Jellyfin's auth/login/network
+  behavior; add no retry, timeout, coordinator, route/UI change, persistence,
+  plugin, schema, or Android dependency; and be revertible as one bounded
+  commit.
+- Required future evidence is designed but not implemented: boundary casing/
+  identity/scope tests, exact transport and error identity, privacy-safe
+  diagnostics, Phase 2A-2D regressions, and an independently instrumented
+  Episode browser route proving one request, unchanged visible content,
+  refresh/Back/Forward, and no playback/duplicate/Core-event expansion.
+- Score: 26/50, below the 38/50 approval threshold. Cross-platform usefulness,
+  duplication reduction, and architectural necessity are each 1/5.
+- Exact next task: stabilize and measure the production authenticated Items
+  pipeline with the existing same-account regression matrix and read-only
+  server/host evidence. Physical-TV acceptance and release/deployment hygiene
+  also outrank another Core abstraction. Reopen Phase 2E only when a distinct
+  portable Episode consumer or diagnostic requirement exists.
+
+## PTV Logout Action Ownership Fix (2026-07-23)
+
+- Root cause: the PTV native shell user menu and PTV sidebar encoded Sign Out
+  as `#/logout`. Jellyfin has no registered logout page, so the router rendered
+  Page Not Found and never entered the stock logout lifecycle.
+- All visible callers were audited. Stock `AppUserMenu` and `libraryMenu`
+  already call `Dashboard.logout()`. The corrected PTV controls now close their
+  menu and call a shared in-flight adapter around that exact action.
+- The stock call chain is unchanged:
+  `Dashboard.logout()` -> `ServerConnections.logout()` -> each authenticated
+  `ApiClient.logout()` -> `localusersignedout` and credential persistence
+  clearing -> query/view reset -> `selectserver` for multi-server clients or
+  `login` otherwise. `Dashboard.logout()` now returns that existing promise so
+  the adapter can share it.
+- No `#/logout` compatibility route was added. Production source contains no
+  such hash. Login/Select Server remain the authentication classifier's real
+  Jellyfin-owned destinations.
+- Overlapping mouse, keyboard, remote, and synthesized activations share one
+  request. The menu closes before invocation. Success and failure both release
+  the guard; failure is preserved for callers and does not force navigation.
+- Focused logout/auth/header/router/Core validation passes 98/98 across 16
+  files; full Vitest passes 803/803 across 123 files. New tests cover both PTV
+  controls, duplicate activation, failure/retry, stock routing/cache reset,
+  ConnectionManager credential/event fallback, auth transitions, and removal
+  of the cosmetic route.
+- TypeScript, scoped changed-file ESLint, the PTV style baseline, production
+  Webpack, ten schemas, Android parity, secret scan (118,240 paths), and
+  Web/mobile/TV whitespace checks pass. Webpack has only its two established
+  size warnings. Test-only Vite aliases now resolve stock Jellyfin source
+  modules for behavioral tests. Android source was untouched, so Android
+  build/lint were not rerun.
+- Physical browser verification passed. The PTV Sign Out control was a button
+  with no `href`, the menu closed immediately, exactly one Jellyfin
+  session-logout request was observed, authenticated state/shell retired, and
+  Jellyfin routed to Select Server without Page Not Found. The existing server
+  selection and stock login then restored authenticated Home and the PTV shell.
+  No credential or token was logged or persisted by the validation.
+- Android mobile/TV and their contracts are unchanged. This is not full Core
+  adoption and does not move auth/session/token/logout ownership into Core.
+- The separate corrected Phase 2D run now passes all five read-only acceptance
+  scenarios. That validation remains independent of the focused logout
+  regression.
+
+## PTV Core Phase 2D Authenticated Browser Validation (2026-07-23)
+
+- Phase 2D is complete and remains validation-only. No product API/navigation/
+  playback/auth/focus/Android/UI/cache/plugin/server/database/production
+  ownership boundary changed.
+- Audit result: the old interaction command was CDP-only, defaulted to
+  `127.0.0.1:9223`, and required an externally launched Chrome page already
+  holding `ApiClient` user/token state. It supported neither storage state nor
+  credential variables, owned no browser process/profile, persisted private
+  request/route/item details, mixed in mutation/playback tests, and called
+  `browser.close()` on the supplied browser.
+- New helper commands launch/status/cleanup a Chrome instance bound to loopback
+  only with a dedicated OS-temporary profile. No personal profile or
+  credential argument is used. The interaction runner never closes an
+  external browser and automatically removes helper-owned state after a run.
+- The rewritten interaction runner is read-only, accepts exactly one expected
+  frontend page, and fails closed on unauthenticated/wrong-origin/wrong-server/
+  stale-runtime/missing-appRouter/service-worker/conflicting-page conditions.
+  It contains the Home, Search, Series seasons, Season episodes, navigation,
+  call-count, refresh, and safe error probes required by Phase 2D.
+- Home is now split into 16 bounded records covering the required 14 stages
+  plus separate keyboard and refresh checks. The first deterministic failure
+  was `eligible-card-found` / `home-card-not-found`: the old selector required
+  an optional descendant artwork attribute, and one rerun re-entered an
+  already-active Home as a no-op. The runner now establishes a fresh Home
+  generation and selects a native Movie/Series media anchor through a
+  layout-neutral, non-identifying `data-ptv-item-type` marker.
+- Real-browser Home activation was healthy: Playwright pointer and keyboard
+  input each reached the feature handler, primary activation was prevented
+  once, `appRouter` ran once, History recorded one route-category transition,
+  details ownership and usable content settled, Back restored populated Home
+  plus the original shelf/card ordinal within tolerance, and deep-link refresh
+  remained usable. Native `hashchange` count was zero because the current
+  router commits through History state; treating that as failure was a harness
+  assumption, not a product defect.
+- Search's opaque error was a Playwright strict-locator exception because an
+  accessible-name selector matched both shell and native Search inputs. It now
+  uses the existing native focus-key marker, returns safe stage/error
+  categories, waits for both query and results restoration, and selects
+  generic/specialized results by media type instead of title. Movie, Series,
+  and Episode generic routes and Book/Audio/Album/Artist specialized routes
+  all pass.
+- Series and Season each establish an independent supported details route from
+  the in-memory read-only catalog. Their actual production renderer is
+  `#listChildrenCollapsible`, not the stale `#childrenCollapsible` assumption.
+  Series rendered 4/4 seasons and Season rendered 29/29 episodes; each issued
+  exactly one initial and one refresh boundary call with ordering and existing
+  scope/field semantics retained.
+- The all-zero synthetic GUID is Jellyfin's root-folder sentinel and correctly
+  returned HTTP 200 with a `UserRootFolder` fallback. The corrected
+  nonempty/unallocated identifier returns HTTP 404 and a rejected Jellyfin
+  client promise, which `getPtvItem` preserves. The artifact records only
+  `transport-404-client-rejection`.
+- Instrumentation restores an existing installation before wrapping
+  `appRouter`/History once, resets counters per scenario, observes capture
+  activation and Core events read-only, and restores every wrapper/listener/
+  observer during cleanup. Unit coverage verifies install, reset, duplicate
+  suppression, restoration, safe errors, staged first failure, selectors,
+  independent setup, missing-item classification, and artifact privacy.
+- Observation/artifacts contain only categories, methods, statuses, durations,
+  counts, route categories, and pass/fail reasons. The sole artifact is the
+  gitignored `core-phase2d-authenticated-browser.json`; screenshots, traces,
+  and storage-state capture are disabled.
+- Latest run: the frontend and configured Jellyfin endpoint returned HTTP 200,
+  and dedicated Chrome 149.0.7827.199 exposed CDP only at loopback port 9223.
+  Authenticated preflight passed all runtime, origin, router, service-worker,
+  overlay, and Home gates. Read-only catalog discovery found a usable
+  Series/Season/Episode chain and all requested media categories.
+- The complete ordered acceptance summary is 5/5: Home details/Back, Search
+  details/navigation, Series seasons, Season episodes, and error compatibility.
+  The anonymous/authorization and browser-aborted network probes remained
+  read-only. The missing-item and aborted network checks each made one request,
+  with no retry and no forced session expiration.
+- Cleanup completed automatically: the helper-owned Chrome tree and temporary
+  profile were removed and CDP port 9223 closed. Personal Chrome state was
+  untouched.
+- Current automated gates: harness 9/9; explicit Phase 2A-2D regression
+  118/118 across 14 files; retained logout/authentication coverage 57/57
+  across 10 files; full Vitest 808/808 across 123 files; TypeScript; Phase 2D
+  scoped ESLint; PTV style baseline; production Webpack with two established
+  size warnings; ten schemas; Android parity at 26 models/14 enums/19
+  capabilities/one error declaration; secret scan across 118,241 paths; and
+  all-repository `git diff --check`. The broader repository ESLint debt gate
+  still reports pre-existing findings outside this scope. Android source was
+  untouched.
+- Product defects found: none. The only product-source change is the
+  diagnostic media-type marker on the existing Home anchor; it is
+  layout-neutral and does not change activation or routing.
+- The recommended Phase 2E audit is now complete with a HOLD decision; see the
+  top section. No episode-details boundary was implemented.
+
+## PTV Core Phase 2C Episode List Adoption (2026-07-23)
+
+- The sole selected boundary is `renderChildren`'s Season-details episode list.
+  Its established caller resolves `ApiClient` from the Season server, takes
+  `item.SeriesId`, `item.Id`, and `getCurrentUserId()`, and renders the returned
+  `Items` through `normalizeItemMediaSources` and the current large episode
+  list. More From Season and every other `getEpisodes` caller stay direct.
+- Old path:
+  `apiClient.getEpisodes(item.SeriesId, { seasonId: item.Id, userId, Fields })`.
+  New path: `getPtvSeasonEpisodes` invokes that exact transport once with the
+  same options reference, obtains an internal Core result, and returns the same
+  raw response object. Original transport failures are rethrown by identity.
+- The exact fields remain
+  `ItemCounts,PrimaryImageAspectRatio,CanDelete,MediaSourceCount,Overview,MediaSources`.
+  No sort, paging/limit, `EnableUserData`, recursive flag, `IncludeItemTypes`,
+  coordinator, retry, or new cancellation is added. Jellyfin still owns URL,
+  auth, its existing 30-second GET/failover, local-ID mutation, and parsing.
+- The portable episode view includes opaque episode/series/season identity,
+  title, season/episode indexes, runtime milliseconds, premiere date, overview,
+  present Primary artwork, and present played/playback-position/percentage.
+  Raw ticks and objects are never mutated; missing progress remains absent.
+- Mixed policy: valid episodes remain ordered; missing/blank IDs,
+  cross-series children, and cross-season children are dropped and counted
+  separately. Missing child scope inherits requested scope. Empty/all-malformed
+  child lists normalize successfully; invalid envelopes, requested scopes, or
+  envelope scopes fail.
+- Diagnostics are bounded, count-only, and nonblocking. They expose safe
+  operation/category/request/timing/status/size/result/error data and three
+  drop counts, with no raw IDs, titles, paths, origins, URLs, query values,
+  identity/auth data, bodies, or media-source details.
+- Validation: focused 124/124 across 15 files; full Vitest 781/781 across 116
+  files; TypeScript; scoped ESLint; production Webpack with two established
+  size warnings; ten schemas; Android parity at 26 models/14 enums/19
+  capabilities/one error declaration; secret scan of 118,231 paths; and
+  `git diff --check` in web/mobile/TV. Android source was untouched, so Android
+  builds/lint were not rerun.
+- Browser validation remains blocked and is not claimed. App/Jellyfin ports
+  8082/8096 respond, but no CDP endpoint exists at `127.0.0.1:9223`, no safe
+  auth state exists, and no test credentials are configured.
+  `npm run test:e2e:authenticated:interactions` fails with
+  `connect ECONNREFUSED 127.0.0.1:9223`.
+- Flake observation: the first focused run had one deterministic source-test
+  regex mistake while all 24 new boundary/facade tests passed. After correcting
+  the regex, focused and full runs passed; no timeout changed.
+- Phase 2D subsequently closed that authenticated matrix 5/5. Phase 2E then
+  audited and held the episode-details candidate without implementation.
+
+## PTV Core Phase 2B Metadata and Search Navigation Adoption (2026-07-23)
+
+- Selected metadata boundary: the season list loaded by
+  `controllers/itemDetails/renderChildren` for a Series. It is details-only,
+  read-only, non-authentication/non-playback state, and hands one Jellyfin
+  query-result object to an established renderer. Season-details episodes,
+  More From Season, context menus, playback, Search APIs, and Home generation
+  remain unchanged.
+- Old path: `apiClient.getSeasons(item.Id, { userId, Fields })` was called
+  directly. New path: `getPtvSeriesSeasons` calls that exact transport once
+  with the same options object, passes the response/error through a focused
+  Core boundary, and returns the same raw object. The old path had no explicit
+  abort signal, retry, or coordinator; none was added. Original transport
+  failures, including 401/cancellation, are rethrown by identity.
+- The portable season projection accepts supported PascalCase/camelCase fields,
+  validates opaque season IDs and the requested parent series scope, retains
+  raw children/order, and projects title/index/episode count/Primary artwork.
+  Empty is valid. Mixed payloads keep valid children and count malformed or
+  cross-scope drops; only invalid envelope or parent scope fails.
+- Selected navigation boundary: generic native Search Movie, Series, Season,
+  Episode, and BoxSet result cards. They reuse the Phase 2A details intent/web
+  adapter and existing `appRouter`. The same anchor hash/query/library context
+  remains in markup. Unmodified primary activation prevents the anchor default
+  and invokes the router once; an in-flight key suppresses double activation.
+  Modifier/middle-click and Book/Audio/Album/Artist specialized routes retain
+  old behavior.
+- Diagnostics are bounded and nonblocking. Metadata emits only safe
+  operation/category/request ID/method/duration/status/size/counts/result/error
+  fields. Search emits the existing Core navigation ID-presence event at most
+  once. No raw media/series/user IDs, hosts/query values, auth, bodies, paths,
+  or email addresses are emitted.
+- Validation is green: focused 58/58 across eight files; full Vitest 756/756
+  across 114 files; TypeScript; Phase 2B standalone-file ESLint; production
+  Webpack with the two established size warnings; ten schemas; Android parity
+  at 26 models/14 enums/19 capabilities/one error-code declaration; secret scan
+  of 118,227 paths; and `git diff --check` in all three repositories. No flake
+  or rerun occurred. Android sources were untouched, so builds/lint were not
+  rerun.
+- Phase 2D subsequently closed the real authenticated browser validation
+  without reusable auth state or stored credentials. The helper-owned loopback
+  CDP run passes Home, Search, Series, Season, and error compatibility 5/5;
+  see the Phase 2D section above for staged evidence and cleanup.
+- Compatibility retained: raw responses, query casing/fields, ordering,
+  current artwork/version handling, errors/login flow, anchors/deep links,
+  browser history, specialized Search destinations, route stacks, playback,
+  focus, Android clients, and all Phase 1/1.5/2A paths. This remains partial
+  Core adoption.
+- Exact Phase 2C: first restore and pass the authenticated Phase 2B browser
+  checklist, then migrate exactly one season-details episode-list
+  `getEpisodes` read through a sibling focused Core boundary with raw-response
+  compatibility and an episode projection. Do not add another navigation,
+  playback, cache, Android, or UI migration in that phase.
+
+## PTV Core Phase 2A Safe API and Navigation Adoption (2026-07-23)
+
+- Selected API boundary: `getPtvItem`, because it is one read-only,
+  non-authentication, non-playback item lookup used by visible native
+  music/reading details views and does not own Home, featured-cache, Row
+  Builder, recommendation, or search generation.
+- Old path: the public helper resolved user/server and called Jellyfin
+  `ApiClient.getItem`, or its existing URL fallback, returning the transport
+  promise directly. New path: the same helper and transport enter the shared
+  request coordinator and focused Core item-details adapter; the facade unwraps
+  success and rethrows the exact original platform error. The internal
+  `getPtvItemCoreResult` exposes normalized `CoreResult/CoreError`.
+- The adapter validates a required opaque string ID, accepts PascalCase and
+  supported camelCase aliases, ignores unknown fields, tolerates missing/null
+  optional fields and empty collections, keeps feature fields on the untouched
+  original item, and converts only `RunTimeTicks` in its portable view.
+- Selected navigation action: a movie/show details click from a native Home
+  shelf card. It now creates a details `PtvNavigationIntent`, preserves the
+  legacy query/hash and push/back behavior, prevents the anchor default from
+  creating a second route, and calls the existing `appRouter` once. Search,
+  Browse, music/reading native routes, route tables, history, deep links, TV
+  focus, and Android destinations are unchanged.
+- Bounded API/navigation diagnostics retain safe operation/route names,
+  request ID, method/timing/status/size, destination/source, ID-presence
+  booleans, result, and Core error code. Diagnostic failures are ignored; raw
+  IDs, hosts/query values, headers/tokens, response bodies, and media paths are
+  excluded.
+- Validation: focused API/navigation/item-route/feature tests 41/41; full
+  Vitest 716/716 across 110 files; TypeScript; scoped ESLint; production
+  Webpack with only the two established size warnings; ten schemas; Android
+  structural parity (26 models, 14 enums, 19 capabilities, one error-code
+  declaration). No featured-cache timeout or other flaky failure occurred.
+  Android source was untouched, so Android builds/lint were not run.
+- Physical regression remains pending. Check Home shelf details, exact Back
+  restoration, details refresh, unchanged Search opening, one route per click,
+  and unchanged visible/authentication error behavior.
+- Compatibility retained: public signatures, raw item fields, original errors,
+  Jellyfin transport/auth/URL ownership, request sharing, hashes/query values,
+  `appRouter`, startup, cache/recommendation migrations, auth/login, playback,
+  and focus. This remains partial Core adoption.
+- Exact Phase 2B: migrate one details-only season/episode metadata GET through
+  the same Core result/error/diagnostic policy, then migrate the native Search
+  result-card details action to `PtvNavigationIntent` and current `appRouter`,
+  with focused parity tests and a real-browser back/refresh check.
+
+## PTV Core Phase 1.5 Runtime Adoption (2026-07-22)
+
+- Web, Android mobile, and Android TV now use the ordered PTV Core initializer
+  from their real startup composition roots. Web holds the initializer on
+  `window` across hot reload; Android applications share one synchronized
+  coordinator across Application/Activity entry. Concurrent and repeated
+  callers reuse one run/result, and settings listeners are keyed/deduplicated.
+- Low-risk adapters are active for current settings, feature flags, cache
+  envelopes, diagnostic events, and capability reports. Session, API,
+  navigation, and playback steps deliberately wrap or acknowledge the current
+  owners; no token/login/Quick Connect, route/focus, browser/Media3/Android
+  Auto, notification, or lock-screen implementation moved.
+- Noncritical cache or diagnostic failure produces a ready, degraded result.
+  Authentication failure retains `route-to-login`/`routeToLogin` and the
+  existing platform login flow. A critical API adapter failure stops before
+  diagnostics/navigation/playback/ready.
+- The selected cache is the web Reading/Music library index because it contains
+  no credentials or playback state, is already server/user scoped, has feature
+  tests, and can preserve its IndexedDB database/store/key. It now writes v1
+  envelopes, reads current records, falls back to the old record shape,
+  validates scope/version/corruption/expiry/stale policy, and diagnoses
+  successful legacy rewrites. The legacy key and reader remain.
+- The plugin recommendations endpoint now passes one response through the v1
+  compatibility normalizer. PascalCase/camelCase Row Builder payloads, explicit
+  or stable generated row IDs, item scores, legacy scope/time defaults, and
+  cache version remain compatible; the engine and persisted recommendation
+  models did not move.
+- Cross-repository parity is structural rather than textual. The Node validator
+  generates normalized manifests from both Kotlin sources, compares contract
+  version/models/fields/types/nullability/serialized names/enums/error codes/
+  capabilities, compares the canonical v1 manifest, validates required schema
+  fields, and emits each Android build report. The central quality workflow
+  checks out both Android repositories and runs schema plus parity validation.
+- Final validation is green: web Phase 1.5 focused tests 15/15 and full Vitest
+  695/695 across 107 files; TypeScript; scoped ESLint; production Webpack with
+  only the two established size warnings; ten schemas; normalized Android
+  parity (26 models, 14 enums, 19 capabilities); secret scan; and
+  `git diff --check` in all three repositories. Android mobile passed the
+  12-test focused core selection, every unit-test variant,
+  `assembleProprietaryDebug`, and `lintProprietaryDebug`. Android TV passed the
+  12-test focused core selection, every unit-test variant, `assembleDebug`, and
+  `lintDebug`. One pre-existing featured-cache test hit its five-second timeout
+  under the first full-suite load; it passed 7/7 alone and the immediate full
+  rerun passed 695/695.
+- This is partial core adoption, not full adoption. The exact Phase 2
+  recommendation is to adapt read-only API request/error normalization for one
+  non-auth, non-playback feature and introduce logical navigation intents at
+  one web/Android boundary, while leaving execution with current routers and
+  adding physical auth/playback/focus regression gates before any owner moves.
+
+## PTV Core Phase 1 Shared-Core Foundation (2026-07-22)
+
+- The cross-repository audit, v1 behavior specification, overview, and
+  incremental migration ledger are complete under `docs/architecture`. The
+  canonical JSON Schema 2020-12 contract is `contracts/ptv-core/v1` with ten
+  schemas and positive/negative compatibility fixtures.
+- Web now has a small portable `src/ptv/core/index.ts` boundary covering
+  results/errors, API policy, auth/session, focused media models, settings and
+  flags, scoped cache envelopes/fallback reads, privacy-bounded diagnostics,
+  capabilities, navigation intents/deep links, playback state/commands,
+  recommendation normalization, and observable idempotent initialization.
+  `src/ptv/api/client.ts` retains its public behavior and adds a standardized
+  redacted `coreError`; current callers and PascalCase normalization remain.
+- Android TV and Android mobile contain exact-byte-identical dependency-free
+  `com.piggietv.core` contracts with app-local capability adapters and six
+  focused tests each. A physical `:ptv-core` module is deferred because the
+  apps are independent repositories with incompatible AGP/Kotlin/JVM build
+  conventions. Platform UI, storage, networking, Media3, Android Auto, focus,
+  and service implementations were not replaced.
+- The plugin status response adds contract/cache/recommendation/diagnostics
+  versions, server capabilities, supported feature flags, and compatibility
+  warnings without renaming/removing existing fields or routes. Two new
+  contract tests protect object and serialized compatibility.
+- Final validation: focused web 37/37; full web 680/680 across 104 files;
+  TypeScript; scoped core ESLint; style baseline; production Webpack (only the
+  two established size warnings); ten schemas; plugin contract; secret scan;
+  plugin 33/33; Android TV full unit, assemble, and lint; mobile full unit,
+  proprietary-debug assemble, and Android lint; focused Kotlin 6/6 in each
+  app. Mobile Detekt still exits nonzero on 76 pre-existing app findings, but
+  reports zero findings in the new core. The repository-wide PTV ESLint
+  baseline also remains nonzero (325 errors/33 warnings in 45 pre-existing
+  dirty files); every newly added core/script file passes scoped ESLint.
+- Existing systems are intentionally only partially migrated. Next, wire the
+  noncritical diagnostics/cache/settings steps into each app's existing
+  startup composition root behind the current implementations, then add
+  runtime parity tests before touching auth, navigation, or playback.
+- No production server, deployment, credential, URL, user data, playback
+  engine, UI layout, or production configuration was changed for this work.
+
+## Current Release Gate (2026-07-22)
+
+- Physical production acceptance ran on the same LG 70UN7070PUA against the newly deployed `http://10.16.0.50:8096/web/index.html`. The LG-loaded bundle proves build `10.11.11`, commit `c81c8ed516-dirty`, build timestamp `2026-07-23T02:21:05.700Z`, and mode `production`. Loaded identities include `runtime.bundle.js`, `main.jellyfin.bundle.js`, `main.jellyfin.3c97233c513f91355010.css`, `home.5a40f926d5e57dd113e1.chunk.js`, and `home.791cfebc132b647fce87.css`.
+- The production page was not service-worker controlled; scope and script URL were null. Document, Jellyfin API, and plugin origins were all `.50:8096`. The runtime reported `PTV_WEBOS_OPTIMIZED`, platform `webos`, TV tier, and both `ptv-render-webos` and `ptv-render-tv`. No restart or cache-clear recovery was required or performed.
+- Corrected geometry passed on production: header 1788x80 at `(66,36)`, brand 220x64 at `(66,44)`, centered 712x80 primary navigation, bounded 296x60 utilities, readable 21px hero content, two hero actions, zero horizontal overflow, visible in-viewport focus, and an invisible legacy header. One stabilized ArrowRight produced exactly one focus move from Movies to Shows.
+- The initial production Home state passed a 100.2-second hold. Samples at 0/30/60/95 seconds retained 25 semantic rows, 19 shelf containers, two populated scrollers, 36 cards, two hero actions, and the same geometry. Shelves did not disappear while Home remained continuously mounted.
+- The route-return gate failed. Home -> Movies -> Back returned the hero/actions but, after 16 seconds, had only six semantic sections and zero shelf markers, scrollers, or cards. It remained in that state through `2026-07-23T02:47:09.944Z`, more than six minutes after return. The bounded physical report was preserved before Dashboard/Stop and reports `warning`, issue `first-shelf-missing`, latest milestone `report-generated`, corrected shell geometry, visible focus, and no legacy header.
+- Production acceptance artifacts are `production-home-acceptance-timeline.json`, `production-home-before-navigation.png`, `production-home-route-return.json`, `production-home-after-return.png`, `production-home-preserved-diagnostic-heartbeat.json`, and `production-home-failed-final.png` under `test-results/webos-physical`. The PNGs are LG framebuffer captures; a new camera photo was not available and remains required.
+- The five-minute diagnostics lease was started through the authenticated admin API without opening Dashboard, the local and plugin-stored Home report were preserved, and the lease was revoked. The client confirmed `diagnosticsActive=false` on the next heartbeat. No source, plugin, server configuration, database, CSS, or cache state was modified.
+- Do not close the webOS/Home P1. The stale-build branch is retired and the shared-shell geometry sub-defect is corrected, but route-return Home restoration still fails physically. The same-account 13/13 interaction, authenticated Items latency, cold/warm discovery, backend lock evidence, camera-photo, and complete user-operated remote/playback gates remain independently open.
+
+- The LG Home disappearance corrective pass is implemented and physically observed. `featuredContentSemantics.ts` now classifies complete, partial, degraded, configuration-only, empty, and explicitly intentional-empty featured payloads. Browser/plugin cache writes accept only populated complete payloads or an explicit intentional-empty result; a fresh empty/configuration-only response cannot replace a usable populated model.
+- `homeModelAuthority.ts` gives native Home one atomic replacement policy. Stale route generations, hash mismatches, empty late aggregates, partial models, and section shells without content are rejected when a populated model is already committed. Route-scoped count-only milestones record cache reads, adoption/rejection, hero/shelf readiness, live work, final commit, and retirement without media IDs, titles, request URLs, or payloads.
+- The exact six-empty-section plugin path was `BuildConfiguredRows(... includeEmptyRows: true)`: enabled Row Builder definitions were serialized as section shells even when candidate selection produced zero hero/row items. Refresh now excludes empty generated rows, semantic validation rejects configuration-only output before persistence, and refresh failure retains the prior cache. The plugin source/payload was not deployed to the remote server during this prompt.
+- The tracked LG hosted-development document now targets `http://10.16.0.125:8082/` exactly. The development bundle was restarted with `PTV_DEV_JELLYFIN_URL=http://10.16.0.50:8096`; physical runtime evidence confirmed frontend resources from `.125:8082`, Jellyfin/API/plugin resources from `.50:8096`, and no `.125:8096` traffic. The old hosted wrapper had derived a `.125:8096` target before Jellyfin server selection could correct it.
+- On the connected LG webOS Chrome 68 client, the corrected split-origin build completed a Movies-to-Home return and then held the same hero, 25 semantic rows, 36 cards, and 40 images for 100.1 seconds with zero logger errors. The untouched `.50:8096/web/index.html` frontend independently held the same counts and hero for 100.7 seconds. The reported shelf disappearance did not reproduce in either bounded run; this is positive evidence, not proof that all timing/concurrency paths are retired.
+- Physical artifacts are `test-results/webos-physical/home-split-origin-after.json`, `home-split-origin-after.png`, `home-original-server-after.json`, and `home-original-server-after.png`. The PNGs are inspector screen captures, not replacement camera photos. The LG was restored to authenticated `http://10.16.0.125:8082/#/home` with 25 rows and 36 cards visible.
+- Final validation passed: focused cache/origin/Home tests 28/28, full Vitest 95 files and 646/646 tests, plugin tests 31/31, TypeScript/build policy, production Webpack in 111.724 seconds with only the two established size warnings, plugin contract, secret scan, and `git diff --check`. Scoped standalone lint passed; changed legacy cache/Home files retain only documented findings on unchanged lines.
+- Production remains blocked. The Home persistence regression is not currently reproduced, but the same-account 13/13 interaction gate, authoritative clean cold/warm discovery, representative server/playback evidence without conversion/lock failures, read-only backend contention evidence, and complete user-operated LG remote/focus/back/playback acceptance are still required. Do not raise timeouts, substitute identities, deploy the plugin implicitly, or call this production-ready.
+
+- The narrow shared-shell/webOS correction is now deployed only to the connected local LG test path. The exact defect was that `PTV_WEBOS_OPTIMIZED` applied `ptv-render-webos` while the authoritative ten-foot geometry was keyed only to `ptv-render-tv`; `applyPtvRenderProfileClasses` removed that TV class. Chrome 68 also needed literal fallback dimensions because intrinsic 1077x500 brand sizing and unsupported `clamp()` offsets could expand or misplace the header.
+- `renderProfile.ts` now keeps the specific `ptv-render-webos` class and adds `ptv-render-tv` for every TV-tier profile. Shared shell and webOS styles bound grid min-content sizing, brand/image width and height, overflow, header tracks, and 720p/1080p/4K offsets with literal fallbacks. Stable layout markers were added without changing Home data loading, route ownership, or diagnostics schema.
+- The authoritative physical after capture at 1920x1080 reports an 80px header at `(66,36)` with width 1788, a 220x64 brand, a primary navigation centered at x=960, utilities within the same header, one visible brand owner, zero horizontal overflow, and no legacy header. The original `shell-brand-oversized`, `hero-content-obscured-by-shell-brand`, and `focus-not-visible` issue codes are absent.
+- Focus was visible on the brand and remained visibly bounded after one injected ArrowRight move to the primary navigation. This proves one directional transition in the physical browser, not the complete user-operated LG remote matrix.
+- The saved after reports are `test-results/webos-physical/physical-layout-after.json` and `physical-layout-after-focus.json`. Both remain `warning` because this local account settled with `mountedRows=0`, no hero actions, and no first shelf/scroller after the extended observation window. `first-shelf-missing` therefore remains open, and no post-fix camera photo was captured.
+- Post-fix validation passes: focused regressions 39/39 on the final CSS, full Vitest 93 files and 629/629 tests, TypeScript/build policy, scoped Stylelint, production Webpack in 81.951 seconds with only the two established size warnings, secret scan, and Playwright 43 passed with six opt-in live checks skipped. Changed-file ESLint reports only the documented pre-existing legacy findings on unchanged lines.
+- Production readiness remains blocked. The local wrapper/Jellyfin test path was changed; the remote production server was not modified. Remaining gates include a populated same-device Home capture and after photo, the full physical remote matrix, same-account 13/13 interactions, clean warm/cold discovery, representative clean server traffic, and read-only lock/host evidence.
+
+- Physical LG webOS inspection is now available through the embedded production diagnostics path. The signed-in 70UN7070PUA (webOS SDK 5.6.2, firmware 04.64.00) loaded the current production bundle at a 1920x1080 CSS viewport with DPR 2, selected `PTV_WEBOS_OPTIMIZED`, advertised `physicalLayoutSnapshot=true`, and checked in successfully.
+- The authoritative Home capture is a P1 regression, not a visual sign-off. It recorded `shell-brand-oversized`, `hero-content-obscured-by-shell-brand`, `first-shelf-missing`, and `focus-not-visible`. The shell header was 1920x500 and the brand/image were 1077x500; the Home root was 1920x1215, while the first shelf and shell main were absent from the fixed-selector snapshot. The server report observed before Stop matched all four issue codes and contained seven bounded milestones through `report-generated`.
+- The live exercise exposed a frontend compatibility defect at the diagnostics response boundary: Jellyfin serialized plugin DTOs with PascalCase keys while the Dashboard and client transport expected camelCase. Both paths now accept either casing without weakening malformed-row rejection. Focused diagnostics tests pass 20/20, TypeScript passes, the full frontend suite passes 624/624, and production Webpack passes in 121.095 seconds with only the two established size warnings.
+- No CSS/layout correction was made in this prompt. The owner marker proves the oversized element is the shell brand image rendered at its 1077x500 intrinsic size, but reliable winning-cascade source attribution is unsupported, so the exact overriding rule is not yet proven. The P1 stays open until a narrow fix is deployed and the same physical Home route produces a clean after snapshot and photo.
+- A later Dashboard shutdown snapshot replaced the latest stored report with a warning-only focus result after Stop. This is the known latest-report timing limitation; it does not invalidate the directly observed Home report, but future acceptance captures must request/view or download the Home report before navigating away or stopping the lease.
+- The embedded wrapper, rebuilt frontend, and five-file plugin payload were exercised only against the local test Jellyfin instance. The remote production server was not changed. The TV remains signed in to the local test instance for follow-up work.
+- Physical LG webOS Home is a separate P1 release blocker. The supplied physical-device report describes compressed/obscured hero metadata, oversized PiggieTV and `Powered by Jellyfin` branding inside the hero, header/nav/utility overlap, a partial-height upper hero, a mostly empty blurred lower panel, and no visible first shelf. Treat this as the new authoritative physical failure baseline, not as an Items-latency symptom or an emulation result.
+- The physical photo is now available and visually confirms the complete oversized asset is `src/ptv/assets/logo/banner-light.png`, including the pig emblem, `PiggieTV`, and `Powered by Jellyfin`. Source tracing shows native `PTVShell` assigns this banner to `.ptv-shell-brand`; base shell CSS intends to constrain it with `clamp()` and the TV profile adds literal `196px` by `64px` maxima. The photo proves those intended bounds are not winning on the television, but exact live DOM ownership and the losing/winning declarations still require inspection.
+- The physical target is now connected as `PiggieTV-LG`. Read-only system information identifies LG model `70UN7070PUA`, SDK `5.6.2`, firmware `04.64.00`, and board `K6LP_ATSC_US`. This clears device discovery but not app-runtime provenance.
+- The installed store Jellyfin wrapper is outside the Developer Mode app sandbox: installed/running app enumeration returns no package, `ares-inspect` against `org.jellyfin.webos` times out, and the `tv` profile rejects both `ares-shell` and `ares-log`. Therefore loaded build, service worker, chunks, profile/classes, live DOM owner, winning CSS, numeric geometry, and focus state still cannot be captured through the current account. Do not choose among stale/mixed assets, missing profile classes, unsupported base `clamp()`, or specificity/source-order conflict without an inspectable runtime or equivalent embedded diagnostics.
+- No shell, Home, hero, branding, focus, or CSS source was changed for this physical report. Do not add compensating webOS rules until the real television is available through `ares` and stale/mixed bundle control has been ruled out. The investigation contract and missing evidence are recorded in `WEBOS_PHYSICAL_REGRESSION_REPORT.md`.
+- The supplied post-correction Jellyfin log contains zero `UserData is not a valid value for ItemFields` failures, confirming that specific compatibility defect is retired. It does contain 256 debug-level conversion exceptions for other unsupported `Fields` tokens such as `ImageTags`, `ProductionYear`, `Container`, and `SeriesId`; these are response properties, not members of Jellyfin's generated `ItemFields` enum.
+- `src/ptv/api/client.ts` now normalizes every PTV `Fields` query at the shared request boundary against the generated Jellyfin SDK enum. Unsupported values are omitted, valid values are canonicalized and deduplicated, and an all-invalid `Fields` parameter is removed without changing other query parameters. This replaces further page-local field removals.
+- The same server log proves a backend release blocker independent of the frontend request cleanup: SQLite returned `database is locked` while committing playback user data, causing `POST /Sessions/Playing/Progress` to take 35.22 seconds and return HTTP 500 after three optimistic-lock retries. Forty-two other slow responses include successful Genre, BoxSet, Season, and Episode requests taking roughly 6.5 to 93.4 seconds; an EF Core multiple-collection single-query warning is also present.
+- Playback Reporting activity overlaps the lock window, but the log does not prove that plugin caused the contention. Do not disable plugins, rewrite the database, or claim a root cause without read-only server/host evidence.
+- A newer 8,908-line post-restart log provides a clean limited verification sample: zero `ItemFields` binder conversions, zero `UserData` field errors, zero database-lock messages, zero optimistic-lock retries, zero HTTP 500s, and zero error lines. All three logged PTV `Fields` queries contain only generated-enum members, confirming the shared sanitizer for the observed Latest and Resume traffic.
+- The newer sample has only five slow HTTP responses, all successful, ranging from 1.51 to 3.24 seconds. It covers User Views, Studios, Latest, and Audio/Video Resume during roughly two minutes after restart; it contains no playback-progress write and does not supersede the earlier 35.22-second SQLite lock or 93.39-second read evidence.
+- The only warning in the newer sample says ASP.NET's `WebRootPath` `/var/lib/jellyfin/wwwroot` was not found, while Jellyfin separately reports the configured web resources path `/usr/share/jellyfin/web`. Treat it as deployment configuration evidence to review, not as the established cause of API latency.
+- Production readiness remains blocked. After the `UserData` request-field correction, the unchanged interaction matrix passed 11/13 and then 5/13 on a 222.9-second warm repeat. Content/state completion, Movies/details availability, playback continuation, and TV focus still miss fixed scenario windows nondeterministically.
+- Live browser evidence confirms the compatibility correction: 44 recent `Items` requests contained zero `Fields=UserData` tokens; 18 exposed Resource Timing statuses were HTTP 200 and none exposed an error status. This proves the invalid client contract is gone, but it does not prove the server log is clean or the slow successful-request tail is repaired.
+- The clean post-fix warm discovery passed 21/23 with all responsive profiles healthy. Reading Books recorded six functional failed requests, and Preferences again retained the correct route/shell but did not render its heading/content inside the unchanged observation window.
+- Earlier broad-overflow cold/warm reports remain invalid because an invisible Webpack Dev Server overlay iframe alone caused the width delta. The final cold attempt prevented that iframe and allowed 30 seconds for API-client restoration, but the same account still became unauthenticated; no authoritative cold report exists.
+- Post-fix automated validation is complete: `client.test.ts` and `items.test.ts` pass 9/9, `npm run build:check` passes with zero TypeScript errors, and production Webpack compiles successfully in 104.624 seconds with only the two established aggregate asset/entrypoint size warnings. This validates the generated-enum import, sanitizer behavior, coordinated Items boundary, and production bundling; it does not rerun authenticated or physical-device scenarios.
+- Do not increase timeouts, substitute identities, or call this production-ready. Remaining gates are a same-account 13/13 interaction run, clean warm and cold discovery, representative route/playback traffic with no `ItemFields` conversion exceptions, read-only server/host/database-lock evidence, and physical LG webOS correction proven on the same television with matching-build/profile evidence, corrected geometry/photo, and startup remote navigation.
 
 ## Critical TV Navigation Worktree (2026-07-19)
 
@@ -507,7 +1130,7 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 
 ## 2026-07-19 Secret scan hardening for remote diagnostics tests
 
-- `RemoteDiagnosticsStoreTests.cs` removed the inline credential-shaped literal `authorization = "Bearer private-value"` that triggered `scripts/ptv-secret-scan.mjs` (`authorization literal` rule.
+- `RemoteDiagnosticsStoreTests.cs` removed an inline credential-shaped test value that triggered the scanner's authorization-value rule.
 - The test now composes synthetic authorization and query values at runtime with split/concatenated fragments (`string.Join`/`string.Concat`) and keeps the same assertions for sanitized values and redaction.
 - Validation now reports: `npm run secret:scan` passes; filtered `RemoteDiagnosticsStoreTests` pass; `npm run build:check` passes.
 
@@ -572,3 +1195,88 @@ Live verification is still required: search `toy story` and confirm the debug bl
 Added `PtvRollingDiagnosticsWriter`: all persistent diagnostics append JSON Lines to `ptv-diagnostics.log`, rotate to bounded numbered files, and retain at most five rotations by default. It does not create request-, session-, device-, timestamp-, or GUID-named diagnostic files. Check-ins aggregate and repeated events suppress before disk writes; logging failures do not affect diagnostics, search, or playback.
 
 The Remote Diagnostics dashboard now includes Diagnostics Storage health and protected rotate/download/clear/consolidate actions. The live server still needs deployment verification for before/after file counts and disk usage.
+
+## 2026-07-21 authenticated non-admin regression validation handoff
+
+The dedicated non-administrator session at `http://localhost:8082` completed both authenticated discovery and interaction validation. Keep `test-results/authenticated-discovery/discovery-report.json` unchanged as the before baseline. The corrected after artifacts are:
+
+- `test-results/authenticated-discovery/discovery-report-after.json`
+- `test-results/authenticated-discovery/artwork-probe-after.json`
+- `test-results/authenticated-discovery/interaction-report-after.json`
+
+The discovery harness now distinguishes functional route failures, expected missing artwork, failed fallback chains, duplicate artwork requests, expected navigation aborts, and real runtime errors. Optional Jellyfin image 404 responses no longer fail a rendered route.
+
+Artwork requests now require the corresponding Jellyfin `ImageTags` entry. Failure memory is shared across request dimensions so a failed source is not retried merely because the requested size changed. The focused after probe found 22 stale advertised Primary tags, 0 unadvertised image attempts, 0 Primary-to-Thumb fallback chains, 0 duplicate failed URLs, 22 rendered fallbacks, and 0 visibly broken images.
+
+Browse subroutes use stable path identities. Movies and Shows replace the landing shell once when entering a focused browse view, then preserve the same shell across sibling focused views. Music and Reading preserve the shell throughout their subroutes. Preferences renders one shell with no horizontal overflow.
+
+Non-admin home and Reading code no longer probes admin-only plugin settings, row configuration, or series-correction endpoints. Dashboard authorization was preserved: direct non-admin dashboard navigation redirects to Home and protected endpoints remain forbidden.
+
+Music Artists now renders at the canonical `#/music/artists` route. Music recommendation rows are de-overlapped so Recommended is distinct from Made For You. Songs controls and search now have stable accessible names. The after discovery report contains zero unnamed controls.
+
+The authenticated interaction suite passes 13 of 13 scenarios: authorization boundaries, Artists loading, movie filters, details actions, non-admin Identify exclusion, favorite and watched round trips with state restoration, search, recommendation distinction, playback queue continuation, Reading isolation, Back/Forward, and Fire TV directional focus.
+
+Before versus after: functional route failures 12 -> 0; image 404 responses 118 -> 7 in the broad route run; unnamed controls 117 -> 0; duplicate image paths 8 -> 1; overflow routes 1 -> 0; long tasks 11 -> 2; maximum long task 394 ms -> 91 ms. All 23 desktop routes and all four responsive profiles passed, with one visible shell and no horizontal overflow.
+
+Validation gates:
+
+- `npm run build:check`: passed with zero TypeScript errors.
+- `npm run build:production`: passed in 117.011 seconds with two existing size warnings.
+- Runtime assertions: 570 of 570 passed.
+- Full `npm test`: three files still fail during collection because Vitest cannot resolve Jellyfin's `components/apphost` import boundary. This is test-runner infrastructure debt, not a failing runtime assertion. Do not solve it by booting the full Jellyfin application in jsdom; add focused mocks or a purpose-built resolver.
+
+Remaining validation scope: no physical TV device was used, and admin-only Dashboard performance still requires a separately authorized administrator session. The preliminary 394 ms Dashboard task came from the wrong account context; the correct non-admin authorization path redirects cleanly and did not reproduce it.
+
+## 2026-07-21 Authenticated stabilization sprint
+
+The stabilization implementation is complete, but the overall release gate is
+blocked. Production build, build policy, 615 unit tests, and 23 of 23 warm-cache
+authenticated route checks pass. Artwork fallback classification, Reading image
+queries, browse shell ownership, Preferences ownership, non-admin dashboard
+redirects, Artists content, Songs accessibility, and TV focus regressions were
+addressed.
+
+The authoritative post-sign-in interaction run passed 4 of 13 checks. The
+required account remained authenticated, while a direct authenticated Jellyfin
+`Items` request took 19.8 seconds and an immediate repeat exceeded 8 seconds.
+Treat remote item-pipeline latency as the current release blocker; do not raise
+interaction timeouts to manufacture a pass.
+
+Start with `PRODUCTION_READINESS_REPORT.md`. Preserve
+`test-results/authenticated-discovery/discovery-report.json` as the baseline.
+The route-only final artifact is
+`test-results/authenticated-discovery/discovery-report-production-ready-final.json`,
+and the blocked interaction artifact is
+`test-results/authenticated-discovery/interaction-report-production-readiness-blocked.json`.
+
+Next work is to profile the remote authenticated `Items` pipeline, rerun the 13
+interaction checks with the same non-admin account, collect cold and warm route
+passes, and complete physical webOS validation. Do not call the project
+production-ready until those gates pass.
+
+## 2026-07-21 Authenticated Items pipeline investigation
+
+The frontend amplification is corrected, but release remains blocked. PTV list
+and Resume helpers now use the shared coordinated JSON request boundary, and a
+retired Home pipeline cannot start recommendation quality hydration after
+navigation. The live Movies trace improved from 11 list/resume requests, four
+duplicate pairs, one 47-item stale hydration, and peak concurrency 9 to five
+requests, zero duplicate contracts, zero stale hydration, peak concurrency 4,
+and 70 rendered cards.
+
+This did not repair the remote Jellyfin tail. The representative post-fix Movie
+browse schedule measured 5.71 seconds median and 11.32 seconds p95. Direct and
+`ApiClient` samples remained nondeterministic, including 12.97-second direct
+Movie card and 22.03-second `ApiClient` Views requests. Time before headers
+dominates, and no stable browser/direct/client-path penalty was found. The PTV
+plugin source does not intercept core Jellyfin `Items` routes; server logs,
+database plans/locks, host I/O, reverse proxy, and other installed plugins were
+not available to the non-admin session.
+
+Validation: focused 10/10, full Vitest 91 files/617 tests, TypeScript, and
+production Webpack passed. The unchanged interaction gate passed 7/13, then
+3/13 on a warm repeat. The HTTP cold-cache reload did not restore the dedicated
+authenticated browser, so no cold/warm discovery report was written. Do not use
+another account, raise timeouts, or call this production-ready. Reauthenticate
+the same user, gather read-only server evidence, require 13/13, rerun cold/warm
+discovery, and complete physical webOS. See `ITEMS_PIPELINE_REPORT.md`.

@@ -1,4 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('lib/jellyfin-apiclient', () => ({
+    ServerConnections: {
+        currentApiClient: () => null,
+        getApiClient: () => null
+    }
+}));
+
+vi.mock('../../api', () => ({
+    getCurrentPtvApiClient: () => null,
+    getPtvCurrentUser: vi.fn(async () => null),
+    getPtvItems: vi.fn(async () => ({ Items: [], TotalRecordCount: 0 })),
+    getPtvRecentlyAdded: vi.fn(async () => []),
+    getPtvResumeItems: vi.fn(async () => []),
+    isPtvAdminUser: () => false
+}));
 
 import { dedupeNativeHomeItems, getNativeHomeItemVersionKey } from './hooks';
 import { resolveNativeHomeDerivedRowSourceValue } from './rowSourceValue';

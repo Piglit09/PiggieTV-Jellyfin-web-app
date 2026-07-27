@@ -10,8 +10,18 @@ const playbackMocks = vi.hoisted(() => ({
     eventHandlers: new Map<string, () => void>(),
     incrementCounter: vi.fn(),
     pauseMusic: vi.fn(async () => undefined),
+    playbackCommandHandler: null as ((command: string) => boolean) | null,
+    playbackCommandUnregister: vi.fn(),
     queueListener: null as ((snapshot: PtvMusicQueueSnapshot) => void) | null,
-    queueUnsubscribe: vi.fn()
+    queueUnsubscribe: vi.fn(),
+    toggleMusic: vi.fn(async () => undefined)
+}));
+
+vi.mock('../../scripts/inputManager', () => ({
+    registerPlaybackCommandHandler: vi.fn((_owner: string, handler: (command: string) => boolean) => {
+        playbackMocks.playbackCommandHandler = handler;
+        return playbackMocks.playbackCommandUnregister;
+    })
 }));
 
 vi.mock('../../components/playback/playbackmanager', () => ({
@@ -54,7 +64,7 @@ vi.mock('../modules/music/musicQueue', () => ({
 
         return playbackMocks.queueUnsubscribe;
     }),
-    togglePtvMusicPlayPause: vi.fn()
+    togglePtvMusicPlayPause: playbackMocks.toggleMusic
 }));
 
 vi.mock('./performanceMonitor', () => ({
@@ -101,7 +111,10 @@ describe('global playback state reconciliation', () => {
         playbackMocks.eventHandlers.clear();
         playbackMocks.incrementCounter.mockClear();
         playbackMocks.pauseMusic.mockClear();
+        playbackMocks.playbackCommandHandler = null;
+        playbackMocks.playbackCommandUnregister.mockClear();
         playbackMocks.queueUnsubscribe.mockClear();
+        playbackMocks.toggleMusic.mockClear();
         playbackMocks.queueListener = null;
         playbackMocks.currentItem = null;
         playbackMocks.currentPlayer = null;
@@ -146,6 +159,50 @@ describe('global playback state reconciliation', () => {
         disposePtvPlaybackStateServiceForTests();
         expect(playbackMocks.queueUnsubscribe).toHaveBeenCalledTimes(1);
         expect(playbackMocks.eventOff).toHaveBeenCalledTimes(5);
+    });
+
+    it('routes hardware play and pause through the existing input owner exactly once for PTV music', () => {
+        const track = {
+            Id: 'track',
+            MediaType: 'Audio',
+            Name: 'Track',
+            RunTimeTicks: 30_000_000,
+            Type: 'Audio'
+        };
+
+        startPtvPlaybackStateService();
+        playbackMocks.queueListener?.(createMusicSnapshot(track, true));
+        playbackMocks.playbackCommandHandler?.('pause');
+        expect(playbackMocks.toggleMusic).toHaveBeenCalledTimes(1);
+
+        playbackMocks.queueListener?.(createMusicSnapshot(track, false));
+        playbackMocks.playbackCommandHandler?.('play');
+        expect(playbackMocks.toggleMusic).toHaveBeenCalledTimes(2);
+
+        playbackMocks.playbackCommandHandler?.('play');
+        expect(playbackMocks.toggleMusic).toHaveBeenCalledTimes(3);
+
+        playbackMocks.queueListener?.(createMusicSnapshot(track, true));
+        playbackMocks.playbackCommandHandler?.('play');
+        expect(playbackMocks.toggleMusic).toHaveBeenCalledTimes(3);
+    });
+
+    it('classifies the authoritative PTV music queue as audio when Jellyfin metadata is incomplete', () => {
+        startPtvPlaybackStateService();
+        playbackMocks.queueListener?.(createMusicSnapshot({
+            Id: 'album-shaped-audio',
+            Name: 'Queue item',
+            RunTimeTicks: 30_000_000,
+            Type: 'MusicAlbum'
+        }, false));
+
+        expect(getPtvGlobalPlaybackState()).toMatchObject({
+            active: true,
+            itemType: 'MusicAlbum',
+            mediaType: 'Audio',
+            paused: true,
+            source: 'ptv-music'
+        });
     });
 
     it('polls only while a Jellyfin playback source is active', () => {

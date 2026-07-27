@@ -4,6 +4,10 @@ import { describe, expect, it } from 'vitest';
 
 const tvStyles = fs.readFileSync(path.join(__dirname, 'tv.scss'), 'utf8');
 const webOsStyles = fs.readFileSync(path.join(__dirname, 'webos.scss'), 'utf8');
+const shellStyles = fs.readFileSync(path.join(__dirname, '../../shell/ptvShell.scss'), 'utf8');
+const shellSource = fs.readFileSync(path.join(__dirname, '../../shell/PTVShell.tsx'), 'utf8');
+const homeSource = fs.readFileSync(path.join(__dirname, '../../pages/home/NativeHome.tsx'), 'utf8');
+const renderProfileSource = fs.readFileSync(path.join(__dirname, '../../core/renderProfile.ts'), 'utf8');
 
 describe('PiggieTV TV compatibility profile', () => {
     it('uses fixed ten-foot hero and card geometry instead of fit-all shrinking', () => {
@@ -46,5 +50,74 @@ describe('PiggieTV TV compatibility profile', () => {
         expect(webOsStyles).toContain('animation: none !important');
         expect(webOsStyles).toContain('transition: opacity 180ms linear !important');
         expect(webOsStyles).toContain('transition: box-shadow 90ms linear');
+    });
+
+    it('prevents the shell brand intrinsic image size from owning the header track', () => {
+        expect(shellStyles).toContain('grid-template-rows: minmax(0, auto)');
+        expect(shellStyles).toContain('height: clamp(34px, 4vw, 58px)');
+        expect(shellStyles).toContain('overflow: hidden');
+        expect(shellStyles).toContain('width: 100%');
+        expect(tvStyles).toContain('grid-template-rows: minmax(0, var(--ptv-tv-header-height))');
+        expect(tvStyles).toContain('height: var(--ptv-tv-header-height)');
+        expect(tvStyles).toContain('flex: 0 0 196px');
+    });
+
+    it('uses literal Chrome 68-safe webOS geometry at 720p, 1080p, and 4K', () => {
+        expect(webOsStyles).toContain('grid-template-columns: minmax(220px, 1fr) max-content minmax(220px, 1fr)');
+        expect(webOsStyles).toContain('grid-template-rows: 80px');
+        expect(webOsStyles).toContain('flex: 0 0 220px');
+        expect(webOsStyles).toContain('height: 64px');
+        expect(webOsStyles).toContain('max-width: 220px');
+        expect(webOsStyles).toContain('left: 66px');
+        expect(webOsStyles).toContain('right: 66px');
+        expect(webOsStyles).toContain('top: 36px');
+        expect(webOsStyles).toContain('grid-template-rows: 64px');
+        expect(webOsStyles).toContain('grid-template-rows: 120px');
+        expect(webOsStyles).toContain('max-width: 240px');
+        expect(webOsStyles).not.toContain('1077px');
+        expect(webOsStyles).not.toMatch(/(^|[^\d])500px/);
+    });
+
+    it('keeps physical layout markers stable without adding another layout owner', () => {
+        expect(shellSource).toContain("className='ptv-shell-main ptv-shell-page-content'");
+        expect(shellSource).toContain("data-ptv-layout-node='shell-main'");
+        expect(homeSource).toContain("data-ptv-layout-node='home-root'");
+        expect(homeSource).toContain("data-ptv-layout-node='home-hero'");
+        expect(homeSource).toContain("data-ptv-layout-node='home-shelf'");
+        expect(homeSource).toContain("data-ptv-layout-node='home-shelf-scroller'");
+    });
+
+    it('keeps the authoritative TV geometry class on webOS TV-tier profiles', () => {
+        expect(renderProfileSource).toContain("root.classList.toggle('ptv-render-tv', renderProfile.tier === 'tv')");
+        expect(renderProfileSource).toContain("className: 'ptv-render-webos'");
+    });
+
+    it('uses a static webOS focus ring that does not depend on scaling or blur', () => {
+        expect(webOsStyles).toContain('outline: 3px solid rgb(244 228 255 / 98%) !important');
+        expect(webOsStyles).toContain('border-color: rgb(232 204 255 / 94%) !important');
+        expect(webOsStyles).toContain('transform: none !important');
+    });
+
+    it('keeps the WebOS Music tree free of compositor transitions and animations', () => {
+        expect(webOsStyles).toContain('html.ptv-platform-webos .ptv-music-page *');
+        expect(webOsStyles).toContain("html.ptv-platform-webos [data-ptv-music-player-root='true'] *");
+        expect(webOsStyles).toContain('animation: none !important');
+        expect(webOsStyles).toContain('transition: none !important');
+    });
+
+    it('anchors the persistent playback dock host to the viewport', () => {
+        expect(shellStyles).toContain("[data-ptv-runtime-root-host='true']");
+        expect(shellStyles).toMatch(
+            /\[data-ptv-runtime-root-host='true'\]\s*\{[^}]*inset:\s*0;[^}]*position:\s*fixed;/
+        );
+        expect(shellStyles).toMatch(
+            /\.ptv-runtime-root,\s*\.ptv-runtime-media-dock-slot\s*\{[^}]*inset:\s*0;[^}]*position:\s*absolute;/
+        );
+        expect(shellStyles).toMatch(
+            /\.ptv-runtime-media-dock-slot \.ptv-media-dock\s*\{[^}]*position:\s*absolute;/
+        );
+        expect(webOsStyles).toMatch(
+            /html\.ptv-platform-webos \.ptv-media-dock\s*\{[^}]*bottom:\s*36px;[^}]*right:\s*66px;[^}]*width:\s*560px;/
+        );
     });
 });

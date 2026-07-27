@@ -6,6 +6,7 @@
 
 .skinHeader,
 .ptv-legacy-skinHeader {
+    box-sizing: border-box;
     z-index: 1200 !important;
     min-height: var(--ptv-shell-header-height) !important;
     padding: 0 18px !important;

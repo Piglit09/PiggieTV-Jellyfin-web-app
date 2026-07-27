@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v1/recommendation-row.schema.json",
+  "title": "PTV Recommendation Row v1",
+  "type": "object",
+  "required": ["id", "title", "items"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "explanation": { "type": "string", "maxLength": 1000 },
+    "source": { "type": "string", "maxLength": 120 },
+    "mediaType": {
+      "enum": [
+        "movie",
+        "show",
+        "season",
+        "episode",
+        "music",
+        "album",
+        "artist",
+        "playlist",
+        "book",
+        "comic",
+        "manga",
+        "audiobook",
+        "live-tv",
+        "game",
+        "unknown",
+        "mixed"
+      ]
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "https://piggietv.com/contracts/ptv-core/v1/recommendation-item.schema.json"
+      }
+    },
+    "debug": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": true
+}

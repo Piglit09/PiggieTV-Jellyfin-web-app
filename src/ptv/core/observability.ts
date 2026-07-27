@@ -13,7 +13,7 @@ import { resetRuntimeScope } from './scope';
 import { classifyPtvRequestUrl } from './urlOrigins';
 import { appendBoundedPtvEvent } from './observabilityBuffer';
 
-type PtvDebugEventType =
+export type PtvDebugEventType =
     | 'api'
     | 'cache'
     | 'frame'
@@ -25,6 +25,15 @@ type PtvDebugEventType =
     | 'render'
     | 'route'
     | 'row-fetch';
+
+export type PtvObservabilityEvent = Readonly<{
+    at: number;
+    detail?: unknown;
+    durationMs?: number;
+    kind: 'event' | 'timing';
+    name: string;
+    type: PtvDebugEventType;
+}>;
 
 type PtvDebugTiming = {
     at: number;
@@ -124,6 +133,7 @@ type PtvGlobal = Record<string, unknown> & {
     debug?: PtvDebugApi;
 };
 
+/* eslint-disable @typescript-eslint/naming-convention -- Existing browser runtime sentinels intentionally use global-style names. */
 type PtvWindow = Window & Partial<Record<'PTV_DEBUG' | '__PTV_IMAGE_TRACKER__' | '__PTV_OBSERVABILITY_INSTALLED__' | '__PTV_STARTUP_EVENT_RECORDED__', boolean>> & {
     PTV?: PtvGlobal;
     __PTV_INITIALIZATION_ATTEMPT_COUNT__?: number;
@@ -132,6 +142,7 @@ type PtvWindow = Window & Partial<Record<'PTV_DEBUG' | '__PTV_IMAGE_TRACKER__' |
     __PTV_INITIALIZATION_SKIPPED_COUNT__?: number;
     __PTV_INITIALIZATION_OWNER__?: string;
 };
+/* eslint-enable @typescript-eslint/naming-convention */
 
 type NavigatorWithMemory = Navigator & {
     deviceMemory?: number;
@@ -149,6 +160,7 @@ const ptvWindow = window as PtvWindow;
 const dispatchDebugEvent = dispatchPtvCustomEvent as (eventName: string, detail?: unknown) => void;
 const timings: PtvDebugTiming[] = [];
 const events: PtvDebugEvent[] = [];
+const observabilitySubscribers = new Set<(event: PtvObservabilityEvent) => void>();
 const readingImageProfileCacheHits = new Map<string, {
     count: number;
     imageProfile: string;
@@ -1345,6 +1357,16 @@ export function setPtvDebug(enabled: boolean) {
 }
 
 export function recordPtvEvent(type: PtvDebugEventType, name: string, detail?: unknown) {
+    const at = Date.now();
+
+    observabilitySubscribers.forEach(listener => {
+        try {
+            listener({ at, detail, kind: 'event', name, type });
+        } catch {
+            // Passive observers cannot affect application behavior.
+        }
+    });
+
     if (!shouldCollectDiagnostics()) return;
 
     const eventDetail = type === 'image' && name === 'reading-image-profile-cache-hit' ?
@@ -1354,7 +1376,7 @@ export function recordPtvEvent(type: PtvDebugEventType, name: string, detail?: u
     if (eventDetail === null) return;
 
     appendBoundedPtvEvent(events, {
-        at: Date.now(),
+        at,
         detail: eventDetail,
         name,
         type
@@ -1367,6 +1389,23 @@ export function recordPtvTiming(
     durationMs: number,
     detail?: unknown
 ) {
+    const roundedDuration = Number(durationMs.toFixed(1));
+
+    observabilitySubscribers.forEach(listener => {
+        try {
+            listener({
+                at: Date.now(),
+                detail,
+                durationMs: roundedDuration,
+                kind: 'timing',
+                name,
+                type
+            });
+        } catch {
+            // Passive observers cannot affect application behavior.
+        }
+    });
+
     if (!shouldCollectDiagnostics()) return;
 
     if (type === 'image' && durationMs > IMAGE_MAX_LIFECYCLE_MS) {
@@ -1377,8 +1416,6 @@ export function recordPtvTiming(
         });
         return;
     }
-
-    const roundedDuration = Number(durationMs.toFixed(1));
 
     timings.push({
         at: Date.now(),
@@ -1392,6 +1429,14 @@ export function recordPtvTiming(
     if (roundedDuration > 500) {
         debugConsole(`${type}:${name} ${roundedDuration}ms`, detail);
     }
+}
+
+export function subscribePtvObservability(listener: (event: PtvObservabilityEvent) => void) {
+    observabilitySubscribers.add(listener);
+
+    return () => {
+        observabilitySubscribers.delete(listener);
+    };
 }
 
 export function timePtvAsync<T>(

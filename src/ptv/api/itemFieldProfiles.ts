@@ -26,8 +26,7 @@ const CARD_FIELDS = [
     'RunTimeTicks',
     'SeriesId',
     'SeriesName',
-    'SortName',
-    'UserData'
+    'SortName'
 ];
 
 const HERO_FIELDS = [
@@ -61,8 +60,7 @@ const PLAYBACK_FIELDS = [
     'MediaStreams',
     'Path',
     'ProviderIds',
-    'RunTimeTicks',
-    'UserData'
+    'RunTimeTicks'
 ];
 
 const COLLECTION_FIELDS = [
@@ -70,8 +68,7 @@ const COLLECTION_FIELDS = [
     'DateCreated',
     'ImageTags',
     'PrimaryImageAspectRatio',
-    'SortName',
-    'UserData'
+    'SortName'
 ];
 
 const READING_CARD_FIELDS = [
@@ -88,8 +85,7 @@ const MUSIC_CARD_FIELDS = [
     'ParentId',
     'ProductionYear',
     'RunTimeTicks',
-    'SortName',
-    'UserData'
+    'SortName'
 ];
 
 const FIELD_PROFILES: Record<PtvItemFieldProfileId, PtvItemFieldProfile> = {
