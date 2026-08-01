@@ -25,3 +25,6 @@
 /bundle-report*.json
 /src/ptv/plugin/**/bin/
 /src/ptv/plugin/**/obj/
+/.codex-remote-attachments/
+/test-results.zip
+/tmp/.npm-cache/
