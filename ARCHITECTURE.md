@@ -1,5 +1,16 @@
 # PiggieTV Architecture
 
+## Current Architecture Status
+
+As of 2026-08-01, Web reliability and performance work through Phase F2D-B1
+is approved. Phase H1 is repository-only hygiene and does not alter playback,
+routing, request/cache ownership, connection ownership, or native application
+scope. The next feature phase after H1 approval is F3: TV-first Collections
+and cross-library discovery.
+
+Dated HOLD and BLOCK decisions below are retained as point-in-time architecture
+records. They do not override the current project status in `PROJECT_STATE.md`.
+
 ## WebOS playback presentation and resource policy (Phase 3A)
 
 Playback engine authority is unchanged: Jellyfin owns video and PTV
@@ -207,7 +218,7 @@ Home diagnostics emit bounded count-only lifecycle evidence for route entry, mem
 
 ## LG Hosted Split-Origin Contract
 
-The tracked hosted-development wrapper targets the frontend document literally at `http://10.16.0.125:8082/`. Development startup supplies `PTV_DEV_JELLYFIN_URL=http://10.16.0.50:8096`, so authenticated Jellyfin, Items, and `/Ptv/v1` traffic remain on the backend while scripts, styles, HMR, and the document remain on the development origin. Hostname-derived `:8096` wrapper redirects are prohibited because they can pin the TV to the wrong server before saved-server selection or `ApiClient` readiness.
+The tracked hosted-development wrapper targets the frontend document literally at `http://<development-frontend>:8082/`. Development startup supplies `PTV_DEV_JELLYFIN_URL=http://<test-server>:8096`, so authenticated Jellyfin, Items, and `/Ptv/v1` traffic remain on the backend while scripts, styles, HMR, and the document remain on the development origin. Hostname-derived `:8096` wrapper redirects are prohibited because they can pin the TV to the wrong server before saved-server selection or `ApiClient` readiness.
 
 The webOS hosted app remains a local `file://` container with one full-viewport child frame. Runtime provenance must report the wrapper container, child document origin, API/plugin origin, resource-origin counts, build/mode, and service-worker control separately. Cross-origin comparison may navigate only that child frame and must not mutate the remote Jellyfin web root, plugin, database, or server configuration.
 
@@ -287,7 +298,7 @@ Browser / TV client
 
 Jellyfin server
   -> Jellyfin libraries, users, playback, and metadata providers
-  -> Jellyfin.Plugin.PiggieTV (net9.0, plugin version 10.11.8.2)
+  -> Jellyfin.Plugin.PiggieTV (net9.0, plugin version <private-address>)
        -> featured cache v7
        -> settings and Row Builder persistence
        -> integrations and signup services
@@ -586,7 +597,7 @@ The hardening pass does not change plugin routes, cache schema v7, recommendatio
 | 2026-07-14 | Restored Jellyfin's hidden login-time header/drawer compatibility anchors without remounting visible authenticated controls, eliminating the `libraryMenu` null and circular-initialization runtime cascade. |
 | 2026-07-14 | Replaced Reading's 200-item terminal cap with a cancellable 50-item progressive index: the first 200 items render promptly, later pages accumulate monotonically to the server total, only complete schema-v4 library indexes persist, and card grids remain incrementally mounted. Route lifecycle events now synchronize exact Movies, Shows, Reading, Dashboard, and authentication ownership before render/unmount telemetry. |
 | 2026-07-14 | Added authentication-gated/deduplicated plugin startup reads, canonical singleton runtime diagnostics, advertised and contract-tested Reading series-override routes, explicit development provenance fallbacks, and priority-aware image telemetry aggregation. |
-| 2026-07-15 | Established plugin `10.11.8.2` as the first release advertising durable Reading series overrides, with assembly-derived runtime identity, manifest/contract verification, and capability-aware frontend compatibility. |
+| 2026-07-15 | Established plugin `<private-address>` as the first release advertising durable Reading series overrides, with assembly-derived runtime identity, manifest/contract verification, and capability-aware frontend compatibility. |
 | 2026-07-15 | Deployment verification exposed and corrected plugin configuration XML serialization, production runtime entry ownership, authenticated plugin-client readiness, and base-path-safe service-worker registration. The corrected candidate pair is locally healthy; permanent web-root deployment and the real 1,818-item Manga completion run remain external deployment gates. |
 | 2026-07-15 | Made drawer edge-swipe listener ownership lifecycle-safe: missing authentication handles fail closed, exact bound targets are retired, replacement handles rebind once, and page-show reconciliation no longer depends on a page-type change. |
 | 2026-07-15 | Corrected split-origin development discovery with explicit `PTV_DEV_JELLYFIN_URL` precedence and stale plugin-root retirement. Restricted shell geometry to PTV-owned containers so native Jellyfin page hosts no longer insert a viewport spacer ahead of Home, Reading, or Dashboard. |
@@ -594,9 +605,9 @@ The hardening pass does not change plugin routes, cache schema v7, recommendatio
 
 ### Plugin Release Compatibility Boundary
 
-Plugin `10.11.8.2` is the first release in this line that advertises durable `readingSeriesOverrides`. `PtvPluginVersion` in the plugin project is authoritative; assembly/file metadata and runtime status derive from the built assembly, while source and published `meta.json` files are contract-checked against it. Plugin API v1, featured cache schema v7, Jellyfin package target `10.11.8`, and manifest target ABI `10.11.8.0` are independent compatibility axes and must not be patch-bumped with the plugin.
+Plugin `<private-address>` is the first release in this line that advertises durable `readingSeriesOverrides`. `PtvPluginVersion` in the plugin project is authoritative; assembly/file metadata and runtime status derive from the built assembly, while source and published `meta.json` files are contract-checked against it. Plugin API v1, featured cache schema v7, Jellyfin package target `10.11.8`, and manifest target ABI `<private-address>` are independent compatibility axes and must not be patch-bumped with the plugin.
 
-The frontend evaluates transport compatibility and feature capability separately. Plugin `10.11.8.1` without `readingSeriesOverrides` remains connected but cannot claim server-persisted Reading corrections; reads may use browser cache and writes request a plugin upgrade. Plugin `10.11.8.2` with the advertised feature is compatible. The dashboard shows this distinction without creating a second runtime or treating cache fallback as server persistence.
+The frontend evaluates transport compatibility and feature capability separately. Plugin `<private-address>` without `readingSeriesOverrides` remains connected but cannot claim server-persisted Reading corrections; reads may use browser cache and writes request a plugin upgrade. Plugin `<private-address>` with the advertised feature is compatible. The dashboard shows this distinction without creating a second runtime or treating cache fallback as server persistence.
 
 The release payload is the five-file `src/ptv/plugin/bin` publish output. Replacing the DLL/manifest requires a Jellyfin restart before deploying the matching frontend behavior.
 
@@ -608,7 +619,7 @@ The production Jellyfin-web entry imports `ptv/core/app` exactly once so the can
 
 Service-worker registration uses a path-relative `serviceworker.js` URL. This resolves to `/web/serviceworker.js` when Jellyfin is hosted under `/web` instead of incorrectly requesting a server-root asset. Update deferral during playback and unsaved workflows remains owned by `updateService`.
 
-The 2026-07-15 local deployment candidate verified plugin `10.11.8.2`, API v1, cache v7, `readingSeriesOverrides=true`, healthy cache/status, authenticated override GET/PUT for books/comics/manga/reading, and persistence across a clean Jellyfin restart. The installed plugin directory and web root were backed up before replacement and those backups must be retained until production sign-off. The permanent Jellyfin web root was not replaced because the current process lacked the required filesystem permission; the matching production `dist` was served through Jellyfin's explicit web-directory option for verification only.
+The 2026-07-15 local deployment candidate verified plugin `<private-address>`, API v1, cache v7, `readingSeriesOverrides=true`, healthy cache/status, authenticated override GET/PUT for books/comics/manga/reading, and persistence across a clean Jellyfin restart. The installed plugin directory and web root were backed up before replacement and those backups must be retained until production sign-off. The permanent Jellyfin web root was not replaced because the current process lacked the required filesystem permission; the matching production `dist` was served through Jellyfin's explicit web-directory option for verification only.
 
 ### Primary Navigation Dropdown Boundary
 

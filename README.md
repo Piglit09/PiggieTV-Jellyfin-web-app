@@ -8,6 +8,17 @@ PiggieTV is a custom Jellyfin Web experience focused on a polished, TV-friendly 
 
 This repository is based on [Jellyfin Web](https://github.com/jellyfin/jellyfin-web), the official web frontend for the [Jellyfin](https://jellyfin.org) media server.
 
+## Current Project Status
+
+Web reliability and performance work through Phase F2D-B1 is approved. Phase
+H1 records repository hygiene, recoverability, and local commit boundaries
+without changing product ownership or behavior. After H1 approval, the next
+feature phase is F3: TV-first Collections and cross-library discovery.
+
+Current status and historical decisions are indexed in
+[Project State](PROJECT_STATE.md), [Handoff](HANDOFF.md),
+[Architecture](ARCHITECTURE.md), and the [phase index](docs/PHASE_INDEX.md).
+
 ## What Is Jellyfin?
 
 Jellyfin is a free and open-source media system for hosting movies, shows, music, live TV, and other personal media. Jellyfin Web is the browser-based client used directly in desktop browsers and as the frontend foundation for many Jellyfin client experiences.
@@ -325,7 +336,7 @@ Install manually by copying the published plugin output into a Jellyfin plugin f
 
 Then restart Jellyfin.
 
-The current companion release is `10.11.8.2`. Deploy the complete matching output from `src/ptv/plugin/bin`: `Jellyfin.Plugin.PiggieTV.dll`, `Jellyfin.Plugin.PiggieTV.deps.json`, `Jellyfin.Plugin.PiggieTV.pdb`, `Jellyfin.Plugin.PiggieTV.xml`, and `meta.json`. The DLL and manifest are required; never mix files from different plugin builds. Plugin API v1, featured cache v7, and the Jellyfin package target `10.11.8` remain unchanged.
+The current companion release is `<server-address>`. Deploy the complete matching output from `src/ptv/plugin/bin`: `Jellyfin.Plugin.PiggieTV.dll`, `Jellyfin.Plugin.PiggieTV.deps.json`, `Jellyfin.Plugin.PiggieTV.pdb`, `Jellyfin.Plugin.PiggieTV.xml`, and `meta.json`. The DLL and manifest are required; never mix files from different plugin builds. Plugin API v1, featured cache v7, and the Jellyfin package target `10.11.8` remain unchanged.
 
 ## Documentation
 

@@ -1,6 +1,17 @@
 # PiggieTV Handoff
 
-Updated 2026-07-24 for HEAD `6d483399b3` plus the current uncommitted worktree.
+Updated 2026-08-01 for Phase H1 repository hygiene.
+
+## Current Handoff
+
+Web reliability and performance work through Phase F2D-B1 is **APPROVED**.
+Phase H1 preserves that implementation, records every dirty path, removes only
+proven generated noise, and establishes local commit boundaries. No product
+feature or runtime ownership change is part of H1.
+
+After H1 approval, the next feature phase is F3: TV-first Collections and
+cross-library discovery. Dated sections below preserve the decision that was
+valid at that time and may contain superseded HOLD recommendations.
 
 ## WebOS Phase 3A playback correction (2026-07-27)
 
@@ -38,7 +49,7 @@ literal physical-remote Music acceptance and repository lint remain open.**
   separate administrator observer accessed current Jellyfin logs, tasks,
   plugins, system storage, and database-directory metadata without exposing or
   persisting either identity or token.
-- Provenance: Jellyfin 10.11.11/X64; PiggieTV 10.11.8.2/API v1 with 13
+- Provenance: Jellyfin 10.11.11/X64; PiggieTV <private-address>/API v1 with 13
   advertised capabilities; fixed program-data storage with 156,048,969,728
   free bytes; 16 library folders split across 11 network and five fixed
   storage entries. Main SQLite database presence was observed before/after;
@@ -91,7 +102,7 @@ literal physical-remote Music acceptance and repository lint remain open.**
 ## Production Authenticated Items Pipeline Stabilization (2026-07-24)
 
 - Decision: **HOLD**. The same approved non-administrator account was used
-  throughout. Provenance: frontend/Jellyfin 10.11.11, plugin 10.11.8.2 API v1
+  throughout. Provenance: frontend/Jellyfin 10.11.11, plugin <private-address> API v1
   with 13 capabilities, Chrome 149.0.7827.199, loopback frontend,
   private-network direct HTTP Jellyfin listener, and no service-worker
   registration/control. Uptime/restart state was unavailable.
@@ -574,8 +585,8 @@ literal physical-remote Music acceptance and repository lint remain open.**
 
 ## Current Release Gate (2026-07-22)
 
-- Physical production acceptance ran on the same LG 70UN7070PUA against the newly deployed `http://10.16.0.50:8096/web/index.html`. The LG-loaded bundle proves build `10.11.11`, commit `c81c8ed516-dirty`, build timestamp `2026-07-23T02:21:05.700Z`, and mode `production`. Loaded identities include `runtime.bundle.js`, `main.jellyfin.bundle.js`, `main.jellyfin.3c97233c513f91355010.css`, `home.5a40f926d5e57dd113e1.chunk.js`, and `home.791cfebc132b647fce87.css`.
-- The production page was not service-worker controlled; scope and script URL were null. Document, Jellyfin API, and plugin origins were all `.50:8096`. The runtime reported `PTV_WEBOS_OPTIMIZED`, platform `webos`, TV tier, and both `ptv-render-webos` and `ptv-render-tv`. No restart or cache-clear recovery was required or performed.
+- Physical production acceptance ran on the same LG 70UN7070PUA against the newly deployed `http://<test-server>:8096/web/index.html`. The LG-loaded bundle proves build `10.11.11`, commit `c81c8ed516-dirty`, build timestamp `2026-07-23T02:21:05.700Z`, and mode `production`. Loaded identities include `runtime.bundle.js`, `main.jellyfin.bundle.js`, `main.jellyfin.3c97233c513f91355010.css`, `home.5a40f926d5e57dd113e1.chunk.js`, and `home.791cfebc132b647fce87.css`.
+- The production page was not service-worker controlled; scope and script URL were null. Document, Jellyfin API, and plugin origins were all `<private-host>:8096`. The runtime reported `PTV_WEBOS_OPTIMIZED`, platform `webos`, TV tier, and both `ptv-render-webos` and `ptv-render-tv`. No restart or cache-clear recovery was required or performed.
 - Corrected geometry passed on production: header 1788x80 at `(66,36)`, brand 220x64 at `(66,44)`, centered 712x80 primary navigation, bounded 296x60 utilities, readable 21px hero content, two hero actions, zero horizontal overflow, visible in-viewport focus, and an invisible legacy header. One stabilized ArrowRight produced exactly one focus move from Movies to Shows.
 - The initial production Home state passed a 100.2-second hold. Samples at 0/30/60/95 seconds retained 25 semantic rows, 19 shelf containers, two populated scrollers, 36 cards, two hero actions, and the same geometry. Shelves did not disappear while Home remained continuously mounted.
 - The route-return gate failed. Home -> Movies -> Back returned the hero/actions but, after 16 seconds, had only six semantic sections and zero shelf markers, scrollers, or cards. It remained in that state through `2026-07-23T02:47:09.944Z`, more than six minutes after return. The bounded physical report was preserved before Dashboard/Stop and reports `warning`, issue `first-shelf-missing`, latest milestone `report-generated`, corrected shell geometry, visible focus, and no legacy header.
@@ -586,9 +597,9 @@ literal physical-remote Music acceptance and repository lint remain open.**
 - The LG Home disappearance corrective pass is implemented and physically observed. `featuredContentSemantics.ts` now classifies complete, partial, degraded, configuration-only, empty, and explicitly intentional-empty featured payloads. Browser/plugin cache writes accept only populated complete payloads or an explicit intentional-empty result; a fresh empty/configuration-only response cannot replace a usable populated model.
 - `homeModelAuthority.ts` gives native Home one atomic replacement policy. Stale route generations, hash mismatches, empty late aggregates, partial models, and section shells without content are rejected when a populated model is already committed. Route-scoped count-only milestones record cache reads, adoption/rejection, hero/shelf readiness, live work, final commit, and retirement without media IDs, titles, request URLs, or payloads.
 - The exact six-empty-section plugin path was `BuildConfiguredRows(... includeEmptyRows: true)`: enabled Row Builder definitions were serialized as section shells even when candidate selection produced zero hero/row items. Refresh now excludes empty generated rows, semantic validation rejects configuration-only output before persistence, and refresh failure retains the prior cache. The plugin source/payload was not deployed to the remote server during this prompt.
-- The tracked LG hosted-development document now targets `http://10.16.0.125:8082/` exactly. The development bundle was restarted with `PTV_DEV_JELLYFIN_URL=http://10.16.0.50:8096`; physical runtime evidence confirmed frontend resources from `.125:8082`, Jellyfin/API/plugin resources from `.50:8096`, and no `.125:8096` traffic. The old hosted wrapper had derived a `.125:8096` target before Jellyfin server selection could correct it.
-- On the connected LG webOS Chrome 68 client, the corrected split-origin build completed a Movies-to-Home return and then held the same hero, 25 semantic rows, 36 cards, and 40 images for 100.1 seconds with zero logger errors. The untouched `.50:8096/web/index.html` frontend independently held the same counts and hero for 100.7 seconds. The reported shelf disappearance did not reproduce in either bounded run; this is positive evidence, not proof that all timing/concurrency paths are retired.
-- Physical artifacts are `test-results/webos-physical/home-split-origin-after.json`, `home-split-origin-after.png`, `home-original-server-after.json`, and `home-original-server-after.png`. The PNGs are inspector screen captures, not replacement camera photos. The LG was restored to authenticated `http://10.16.0.125:8082/#/home` with 25 rows and 36 cards visible.
+- The tracked LG hosted-development document now targets `http://<development-frontend>:8082/` exactly. The development bundle was restarted with `PTV_DEV_JELLYFIN_URL=http://<test-server>:8096`; physical runtime evidence confirmed frontend resources from `<private-host>:8082`, Jellyfin/API/plugin resources from `<private-host>:8096`, and no `<private-host>:8096` traffic. The old hosted wrapper had derived a `<private-host>:8096` target before Jellyfin server selection could correct it.
+- On the connected LG webOS Chrome 68 client, the corrected split-origin build completed a Movies-to-Home return and then held the same hero, 25 semantic rows, 36 cards, and 40 images for 100.1 seconds with zero logger errors. The untouched `<private-host>:8096/web/index.html` frontend independently held the same counts and hero for 100.7 seconds. The reported shelf disappearance did not reproduce in either bounded run; this is positive evidence, not proof that all timing/concurrency paths are retired.
+- Physical artifacts are `test-results/webos-physical/home-split-origin-after.json`, `home-split-origin-after.png`, `home-original-server-after.json`, and `home-original-server-after.png`. The PNGs are inspector screen captures, not replacement camera photos. The LG was restored to authenticated `http://<development-frontend>:8082/#/home` with 25 rows and 36 cards visible.
 - Final validation passed: focused cache/origin/Home tests 28/28, full Vitest 95 files and 646/646 tests, plugin tests 31/31, TypeScript/build policy, production Webpack in 111.724 seconds with only the two established size warnings, plugin contract, secret scan, and `git diff --check`. Scoped standalone lint passed; changed legacy cache/Home files retain only documented findings on unchanged lines.
 - Production remains blocked. The Home persistence regression is not currently reproduced, but the same-account 13/13 interaction gate, authoritative clean cold/warm discovery, representative server/playback evidence without conversion/lock failures, read-only backend contention evidence, and complete user-operated LG remote/focus/back/playback acceptance are still required. Do not raise timeouts, substitute identities, deploy the plugin implicitly, or call this production-ready.
 
@@ -899,7 +910,7 @@ The final local results are 165 focused PTV tests, 334 full-suite tests, 26 Chro
 
 Historical note: this 2026-07-14 checkpoint originally required restoring tracked Vite and nested plugin `bin`/`obj` output. The approved 2026-07-19 hygiene pass supersedes that instruction and intentionally removes those generated paths from tracking while preserving `src/ptv/plugin/bin`. Continue removing ignored `dist`, `e2e/.harness`, and `test-results`, and keep intended project-memory, CI/workflow, quality, hardening, e2e, contributor, and lock-file changes in scope.
 
-Deployment order for the corrected pair: build/test the plugin and frontend from the same revision, deploy plugin `10.11.8.2` and its matching `meta.json`, restart Jellyfin, verify `/Ptv/v1/status` advertises `readingSeriesOverrides`, then deploy the frontend and accept the offered service-worker update. Application caches do not need clearing; a hard refresh/service-worker clear is recovery-only if the old bundle remains controlled.
+Deployment order for the corrected pair: build/test the plugin and frontend from the same revision, deploy plugin `<private-address>` and its matching `meta.json`, restart Jellyfin, verify `/Ptv/v1/status` advertises `readingSeriesOverrides`, then deploy the frontend and accept the offered service-worker update. Application caches do not need clearing; a hard refresh/service-worker clear is recovery-only if the old bundle remains controlled.
 
 ## 2026-07-14 - Authentication header visibility checkpoint
 
@@ -925,16 +936,16 @@ Deployment order for the corrected pair: build/test the plugin and frontend from
 
 ## 2026-07-15 Release Candidate Handoff
 
-- Old installed/source plugin: `10.11.8.1`; corrected release plugin: `10.11.8.2`.
+- Old installed/source plugin: `<private-address>`; corrected release plugin: `<private-address>`.
 - Copy all files from `src/ptv/plugin/bin` into the Jellyfin PiggieTV plugin directory: `Jellyfin.Plugin.PiggieTV.dll`, `Jellyfin.Plugin.PiggieTV.deps.json`, `Jellyfin.Plugin.PiggieTV.pdb`, `Jellyfin.Plugin.PiggieTV.xml`, and `meta.json`.
-- Restart Jellyfin, then confirm `/Ptv/v1/status` reports plugin/version `10.11.8.2`, API `1`, cache `7`, and `readingSeriesOverrides=true`. Only then deploy the matching frontend bundle.
+- Restart Jellyfin, then confirm `/Ptv/v1/status` reports plugin/version `<private-address>`, API `1`, cache `7`, and `readingSeriesOverrides=true`. Only then deploy the matching frontend bundle.
 - Expected old-plugin behavior: connected, API/cache usable, Reading server persistence marked upgrade-required, browser fallback labeled local cache. Expected new-plugin behavior: compatible and server persistence available.
 - Automated release result: focused compatibility 12/12, full Vitest 351/351, plugin 9/9, TypeScript/scoped ESLint/contract/secret scan clean, Release build/publish clean, and production Webpack successful with only established size warnings.
 - After deployment, manually test an override save/reload, the old-plugin upgrade warning if rollback is exercised, dashboard version/capability labels, login/auth transitions, active playback, and normal service-worker update adoption. No routine cache purge is required.
 
 ## 2026-07-15 Deployment Verification Handoff
 
-The local Jellyfin instance now runs the corrected five-file plugin `10.11.8.2`. Full status is healthy and advertises API v1, cache v7, and `readingSeriesOverrides`. Override GET/PUT succeeded for books, comics, manga, and reading; a synthetic value survived restart and was removed afterward. The complete pre-deployment plugin backup remains retained.
+The local Jellyfin instance now runs the corrected five-file plugin `<private-address>`. Full status is healthy and advertises API v1, cache v7, and `readingSeriesOverrides`. Override GET/PUT succeeded for books, comics, manga, and reading; a synthetic value survived restart and was removed afterward. The complete pre-deployment plugin backup remains retained.
 
 The initial `.2` DLL exposed a real configuration defect: XML serialization failed on the nested Reading override dictionary and made full status return HTTP 500. Deploy only the newly rebuilt payload containing the deterministic XML surrogate and its 10/10 plugin test result.
 
@@ -1003,11 +1014,11 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 
 - Corrected source is ready in the working tree. Do not revert the Music/video dock or service-worker fixes from the preceding commits.
 - Deploy only the five files from `src/ptv/plugin/bin` to `/var/lib/jellyfin/plugins/PTV_Plugin/`: DLL, deps JSON, PDB, XML documentation, and `meta.json`.
-- DLL assembly/file version and manifest version are all `10.11.8.2`. The corrected staged DLL SHA-256 is `51E6BBD8D7A742A01528DC59E5A8A21AD718A602BF868F16B64C0B64A886DD05`.
+- DLL assembly/file version and manifest version are all `<private-address>`. The corrected staged DLL SHA-256 is `51E6BBD8D7A742A01528DC59E5A8A21AD718A602BF868F16B64C0B64A886DD05`.
 - Before replacement, stop Jellyfin and back up the complete installed plugin directory. Replace all five files together, preserve Jellyfin ownership/permissions, and restart Jellyfin.
 - Required live checks after restart: authenticated `/Ptv/v1/status`, `/status?full`, `/settings`, and `/featured` return 200; full status advertises `readingSeriesOverrides=true`; dashboard reports connected rather than fallback; Jellyfin logs contain no `Cannot serialize member ... ReadingSeriesOverrideSettings.Routes` error.
 - Automated verification passed: plugin 13/13, focused frontend 7/7, full Vitest 405/405, TypeScript, scoped ESLint, plugin contract, secret scan, production Webpack, and whitespace validation.
-- Deployment was not attempted because neither `10.16.0.240` nor `10.16.0.50` accepted available non-interactive SSH authentication. No remote state changed.
+- Deployment was not attempted because neither `<private-address>` nor `<private-address>` accepted available non-interactive SSH authentication. No remote state changed.
 
 ## 2026-07-16 production chunk coherency handoff
 
@@ -1015,11 +1026,11 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 - Deploy the complete matching frontend output. Use `scripts/deploy-jellyfin-web.ps1` or preserve its ordering: copy all assets first, verify them, retain old content-hashed chunks, and replace root `index.html` last. Do not copy only `main`/`runtime` bundles.
 - New production clients request async JS/CSS with a build-scoped `ptv_asset` query. A caught same-origin chunk failure gets one session-bounded document reload with the current hash route preserved; it cannot reload-loop or treat an ordinary error as a stale bundle.
 - Automated gates pass: focused 5/5; full Vitest 410/410; TypeScript; scoped ESLint; production Webpack; clean-target deployment simulation for 2,498 files; and whitespace validation. Webpack reports only established size warnings.
-- A frontend deployment does not require a Jellyfin restart by itself. The corrected XML-safe plugin payload is still a separate deployment: the supplied startup log proves the installed `10.11.8.2` DLL still contains the old public dictionary model and throws during configuration serialization. Replace all five staged plugin files and restart Jellyfin before considering plugin status healthy.
+- A frontend deployment does not require a Jellyfin restart by itself. The corrected XML-safe plugin payload is still a separate deployment: the supplied startup log proves the installed `<private-address>` DLL still contains the old public dictionary model and throws during configuration serialization. Replace all five staged plugin files and restart Jellyfin before considering plugin status healthy.
 
 ## 2026-07-16 authenticated diagnostics cleanup handoff
 
-- The latest authenticated export is the live-health authority: plugin connected at `10.11.8.2`, API `1`, cache `7`, Reading overrides compatible, and the Reading index complete at 2,911/2,911.
+- The latest authenticated export is the live-health authority: plugin connected at `<private-address>`, API `1`, cache `7`, Reading overrides compatible, and the Reading index complete at 2,911/2,911.
 - Dashboard/fallback routes now reject stale native Reading header state. Verify `#/reading -> #/dashboard/piggietv` reports Dashboard as the route and no Reading page title, nav group, or header section.
 - Reading index progress is deliberately coalesced. The UI must still reach and report 2,911/2,911, but `reading-page-rendered` and `reading-shell-ready` should grow only when route/stage/section readiness changes, not for every background page.
 - Idle playback state owns no reconcile interval. Confirm no low-frequency reconcile growth with null item/session/source; active Jellyfin playback must still reconcile and the previously fixed video mini-player behavior must remain unchanged.
@@ -1032,7 +1043,7 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 - Details routes now have native PiggieTV presentation ownership. Verify `#/details?id=<movie>`, Series, Episode, and any shared item route show one current PiggieTV header, no visible legacy Jellyfin header, and details content beginning immediately below the safe header area. `#/music/item/...` must remain Music-owned and `#/video` must remain Jellyfin-owned.
 - Video ownership now pauses, rather than clears, native Music. The current queue, item, index, and position survive; active global state must no longer report `ptv-music` while video owns playback; leaving video must not restart audio. After returning to a non-video route, the paused dock may reappear and only an explicit Play command may resume it.
 - Automated gates: focused 40/40; full Vitest 431/431 on the final run; TypeScript; scoped regression ESLint; changed Stylelint; E2E harness 36 passed/6 live skipped; production Webpack in 106.7 seconds; and whitespace validation. Webpack retained only established size warnings. One initial full-suite featured-cache timeout passed isolated and on immediate full rerun.
-- Authenticated physical verification is still required. The opt-in live Playwright run reached `10.16.0.125:8082`, but clean browser contexts had no saved server/session and stopped at Jellyfin's Select Server page, so it could not exercise the requested signed-in details or playback sequence.
+- Authenticated physical verification is still required. The opt-in live Playwright run reached `<development-frontend>:8082`, but clean browser contexts had no saved server/session and stopped at Jellyfin's Select Server page, so it could not exercise the requested signed-in details or playback sequence.
 - No plugin/backend change or Jellyfin restart is required. Deploy the complete frontend build through the existing atomic asset-first/index-last process and accept the normal service-worker update; do not clear user data merely for this patch.
 
 ## 2026-07-16 native details geometry correction
@@ -1040,8 +1051,8 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 - The details route ownership fix remains intact. A new reversible layout lifecycle isolates the native page from stock Jellyfin details geometry, assigns named poster/ribbon/content grid areas, moves the logo into the native ribbon while mounted, and restores it during teardown.
 - Tightly scoped details styles remove the flowing `40vh` backdrop gap, stock ribbon height, viewport-width content inset, and secondary shelf offsets. Overview/meta use normal widths, tags/genres/studios/external links wrap horizontally, desktop content is centered, mobile stacks cleanly, and the secondary region includes Music-dock-safe bottom padding.
 - Automated gates pass: focused 42/42; full Vitest 433/433; TypeScript; scoped ESLint; details Stylelint; Playwright 38 passed/6 opt-in live skipped; production Webpack in 101.095 seconds; and details whitespace validation. Webpack emitted only its established size warnings.
-- The opt-in dev-host probe reached `10.16.0.125:8082`, but a clean profile landed on Select Server. With the backend environment supplied, the split-origin test still observed the dev bundle's retained localhost selection. Authenticated movie, Series, Episode, dock-clearance, and Music -> video audible checks therefore remain manual.
-- Manual production check: authenticate against `10.16.0.50:8096`; open movie, Series, and Episode details; verify one PiggieTV header, no blank top gap, readable wrapping metadata, aligned Cast & Crew/related shelves, and unobstructed controls with Music active. Start video and confirm Music pauses, the dock hides, and Music does not resume until explicitly played.
+- The opt-in dev-host probe reached `<development-frontend>:8082`, but a clean profile landed on Select Server. With the backend environment supplied, the split-origin test still observed the dev bundle's retained localhost selection. Authenticated movie, Series, Episode, dock-clearance, and Music -> video audible checks therefore remain manual.
+- Manual production check: authenticate against `<test-server>:8096`; open movie, Series, and Episode details; verify one PiggieTV header, no blank top gap, readable wrapping metadata, aligned Cast & Crew/related shelves, and unobstructed controls with Music active. Start video and confirm Music pauses, the dock hides, and Music does not resume until explicitly played.
 - No plugin/backend change, deployment, Jellyfin restart, commit, push, or remote operation occurred.
 
 ## 2026-07-17 native details artwork and premium glass
@@ -1079,7 +1090,7 @@ Release remains HOLD until an authenticated physical client proves: one dock for
 - Settings now mounts one header-only shared `PTVShell` and adds scoped header-safe padding to the stock Settings content. No settings data or backend behavior changed.
 - Details no longer waits for a redundant full item request on normal navigation. The item controller emits the exact committed item after stale-generation validation; PTV immediately applies its artwork and may later upgrade to related parent artwork only if the item is still active. Shared lazy image loading replaces a second poster preload, and later DOM mutations cannot erase the native glass/layout classes.
 - Final gates: focused 24/24; full Vitest 69 files/457 tests; TypeScript; scoped ESLint with no errors; changed Stylelint; focused Details/shell Playwright 7/7; production Webpack in 106.7 seconds with established size warnings; whitespace validation passed.
-- Manual authenticated checks at `10.16.0.125:8082`: sign in as an administrator and confirm Dashboard appears without refresh; open Settings and confirm one PTV header; navigate in-app between Movie, Series, Season, and Episode details and confirm the first paint already has the correct item, backdrop, glass layout, and centered utilities; compare Network timing/request count; verify Music still pauses and the dock hides for video.
+- Manual authenticated checks at `<development-frontend>:8082`: sign in as an administrator and confirm Dashboard appears without refresh; open Settings and confirm one PTV header; navigate in-app between Movie, Series, Season, and Episode details and confirm the first paint already has the correct item, backdrop, glass layout, and centered utilities; compare Network timing/request count; verify Music still pauses and the dock hides for video.
 - No plugin deployment or Jellyfin restart is required. Deploy the complete frontend bundle atomically and accept the normal service-worker update/cache refresh.
 
 ## 2026-07-18 TV compatibility and webOS recovery handoff

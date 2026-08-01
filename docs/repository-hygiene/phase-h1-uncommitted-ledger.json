@@ -1,0 +1,124 @@
+{
+    "schemaVersion":  1,
+    "phase":  "H1",
+    "entryCount":  13,
+    "entries":  [
+                    {
+                        "path":  ".codex-remote-attachments/019f8ce7-286e-7182-9215-a3266e7b99b7/8b87c846-79c7-4683-8ae9-04590e07df88/1-Photo-1.jpg",
+                        "category":  "L",
+                        "categoryLabel":  "Unrelated user work",
+                        "reason":  "Private user-provided attachment unrelated to approved PiggieTV source; preserved untouched and excluded from shared backup.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Leave untouched and uncommitted; preserve as unrelated user work.",
+                        "recommendedFutureAction":  "Owner review only; leave untouched."
+                    },
+                    {
+                        "path":  ".codex-remote-attachments/019f8ce7-286e-7182-9215-a3266e7b99b7/8b87c846-79c7-4683-8ae9-04590e07df88/2-Photo-2.jpg",
+                        "category":  "L",
+                        "categoryLabel":  "Unrelated user work",
+                        "reason":  "Private user-provided attachment unrelated to approved PiggieTV source; preserved untouched and excluded from shared backup.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Leave untouched and uncommitted; preserve as unrelated user work.",
+                        "recommendedFutureAction":  "Owner review only; leave untouched."
+                    },
+                    {
+                        "path":  ".codex-remote-attachments/019f8ce7-286e-7182-9215-a3266e7b99b7/c58dcd34-7087-4ae5-a80e-517394b8e9ba/1-Photo-1.jpg",
+                        "category":  "L",
+                        "categoryLabel":  "Unrelated user work",
+                        "reason":  "Private user-provided attachment unrelated to approved PiggieTV source; preserved untouched and excluded from shared backup.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Leave untouched and uncommitted; preserve as unrelated user work.",
+                        "recommendedFutureAction":  "Owner review only; leave untouched."
+                    },
+                    {
+                        "path":  "test-results.zip",
+                        "category":  "G",
+                        "categoryLabel":  "Test results or evidence",
+                        "reason":  "Local test-evidence archive; preserved outside Git because it is reproducible and may contain environment-specific evidence.",
+                        "backedUp":  true,
+                        "whyUncommitted":  "Keep local, backed up, and ignored; do not commit the evidence archive.",
+                        "recommendedFutureAction":  "Regenerate or retain outside Git as needed."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_logs/2026-07-31T02_33_50_883Z-debug-0.log",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_logs/2026-07-31T02_33_58_437Z-debug-0.log",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_logs/2026-07-31T02_34_00_929Z-debug-0.log",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_logs/2026-07-31T02_34_03_285Z-debug-0.log",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_logs/2026-07-31T02_34_37_605Z-debug-0.log",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_logs/2026-07-31T02_36_29_662Z-debug-0.log",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_logs/2026-07-31T02_38_32_638Z-debug-0.log",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_logs/2026-07-31T02_38_35_130Z-debug-0.log",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    },
+                    {
+                        "path":  "tmp/.npm-cache/_update-notifier-last-checked",
+                        "category":  "H",
+                        "categoryLabel":  "Dependency or tool cache",
+                        "reason":  "Local npm cache/log output; generated and reproducible.",
+                        "backedUp":  false,
+                        "whyUncommitted":  "Keep local and ignored; regenerate on demand.",
+                        "recommendedFutureAction":  "Regenerate on demand; keep ignored."
+                    }
+                ]
+}
