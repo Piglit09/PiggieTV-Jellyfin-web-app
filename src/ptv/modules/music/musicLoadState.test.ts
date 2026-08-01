@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import type { PtvMusicHomeData } from './musicTypes';
-import { getMusicHeroTrackCountLabel } from './musicLoadState';
+import {
+    getMusicCatalogLoadState,
+    getMusicHeroTrackCountLabel
+} from './musicLoadState';
 
 function createHomeData(trackCount: number, failedSections: string[] | null = null): PtvMusicHomeData {
     return {
@@ -63,5 +66,16 @@ describe('Music library load state', () => {
 
     it('reports an authoritative live count after indexing completes', () => {
         expect(getMusicHeroTrackCountLabel(createHomeData(1, []), 'ready')).toBe('1 library track');
+    });
+
+    it('keeps an empty catalog route loading while its own index is pending', () => {
+        expect(getMusicCatalogLoadState(0, 'scheduled')).toBe('loading');
+        expect(getMusicCatalogLoadState(0, 'loading')).toBe('loading');
+    });
+
+    it('renders cached catalog items immediately and settles true empty states', () => {
+        expect(getMusicCatalogLoadState(12, 'loading')).toBe('ready');
+        expect(getMusicCatalogLoadState(0, 'ready')).toBe('empty');
+        expect(getMusicCatalogLoadState(0, 'failed')).toBe('empty');
     });
 });

@@ -1,5 +1,8 @@
 import type { PtvItem, PtvItemUserData } from '../../api';
-import type { PtvRecommendationSurfaceDebug } from '../recommendations/types/recommendationTypes';
+import type {
+    PtvRecommendationFeedbackState,
+    PtvRecommendationSurfaceDebug
+} from '../recommendations/types/recommendationTypes';
 
 export type PtvMusicCodec = 'flac' | 'mp3' | 'opus' | string;
 
@@ -187,10 +190,14 @@ export type PtvMusicLibraryIndex = {
 };
 
 export type PtvMusicPlaylistRequest = {
+    feedback?: PtvRecommendationFeedbackState;
+    isCurrent?: () => boolean;
     limit?: number;
     name?: string;
     prompt?: string;
     seed?: PtvMusicSeed;
+    sessionSeed?: number | string;
+    signal?: AbortSignal;
 };
 
 export type PtvMusicPlaylistResult = {
@@ -285,8 +292,10 @@ export type PtvMusicQueueSnapshot = {
     isAudio: boolean;
     isPlaying: boolean;
     isShuffled: boolean;
+    playbackError?: string | null;
     playlist: PtvMusicQueueItem[];
     positionTicks: number;
+    queueSourceLabel: string;
     repeatMode: string;
     runtimeTicks: number;
     volumeLevel: number;
@@ -297,6 +306,8 @@ export type PtvMusicLyricLine = {
     Text?: string;
 };
 
+export type PtvMusicLyricsPayload = PtvMusicLyricLine[] | string | string[] | null;
+
 export type PtvMusicLyricsResponse = {
-    Lyrics?: PtvMusicLyricLine[];
+    Lyrics?: PtvMusicLyricsPayload;
 };

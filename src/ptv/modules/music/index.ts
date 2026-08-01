@@ -1,8 +1,6 @@
 import { registerModule } from '../../core/lifecycle';
 import { recordPtvEvent } from '../../core/observability';
 
-import './music.scss';
-
 type PtvMusicOverlayWindow = Window & {
     __ptvMusicOverlayLoadPromise?: Promise<void> | null;
     __ptvMusicOverlayRoot?: import('react-dom/client').Root | null;
@@ -11,10 +9,6 @@ type PtvMusicOverlayWindow = Window & {
 function getMusicOverlayWindow() {
     return window as PtvMusicOverlayWindow;
 }
-
-recordPtvEvent('render', 'music-style-loaded', {
-    module: 'music'
-});
 
 function disposeLegacyMusicPlayerOverlay(source = 'module-start') {
     const overlayWindow = getMusicOverlayWindow();

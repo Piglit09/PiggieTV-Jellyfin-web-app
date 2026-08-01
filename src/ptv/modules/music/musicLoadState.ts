@@ -1,11 +1,22 @@
 import type { PtvMusicHomeData } from './musicTypes';
 
 export type MusicLibraryIndexLoadState = 'failed' | 'loading' | 'ready' | 'scheduled';
+export type MusicCatalogLoadState = 'empty' | 'loading' | 'ready';
 
 function formatTrackCount(trackCount: number, qualifier: 'cached' | 'library') {
     const noun = trackCount === 1 ? 'track' : 'tracks';
 
     return `${trackCount} ${qualifier} ${noun}`;
+}
+
+export function getMusicCatalogLoadState(
+    itemCount: number,
+    libraryIndexLoadState: MusicLibraryIndexLoadState
+): MusicCatalogLoadState {
+    if (itemCount > 0) return 'ready';
+    if (libraryIndexLoadState === 'loading' || libraryIndexLoadState === 'scheduled') return 'loading';
+
+    return 'empty';
 }
 
 export function getMusicHeroTrackCountLabel(

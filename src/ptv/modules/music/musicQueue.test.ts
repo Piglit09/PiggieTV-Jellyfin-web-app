@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const queueMocks = vi.hoisted(() => ({
     apiClient: {
@@ -9,12 +9,17 @@ const queueMocks = vi.hoisted(() => ({
         reportPlaybackProgress: vi.fn(async () => undefined),
         reportPlaybackStart: vi.fn(async () => undefined),
         reportPlaybackStopped: vi.fn(async () => undefined)
+    },
+    identity: {
+        serverId: 'test-server',
+        userId: 'test-user'
     }
 }));
 
 vi.mock('../../api', () => ({
     getPtvApiClient: vi.fn(() => queueMocks.apiClient),
-    getPtvCurrentUserId: vi.fn(() => 'test-user')
+    getPtvCurrentUserId: vi.fn(() => queueMocks.identity.userId),
+    getPtvServerId: vi.fn(() => queueMocks.identity.serverId)
 }));
 
 vi.mock('../../core/observability', () => ({
@@ -26,23 +31,39 @@ vi.mock('./musicPlaylists', () => ({
 }));
 
 import {
+    addPtvMusicToQueue,
     getPtvMusicQueueSnapshot,
     nextPtvMusicTrack,
     openPtvMusicPlayer,
     pausePtvMusicPlayback,
     playPtvMusicTracks,
     movePtvMusicQueueItem,
+    removePtvMusicQueueItem,
+    setPtvMusicVirtualQueue,
     stopPtvMusicPlayback,
-    subscribeToPtvMusicQueue
+    subscribeToPtvMusicQueue,
+    togglePtvMusicShuffle
 } from './musicQueue';
+import {
+    getPtvMusicContinuityStorageKey,
+    loadPtvMusicContinuity
+} from './musicContinuity';
 
 describe('native Music queue subscriptions', () => {
+    beforeEach(() => {
+        window.localStorage.clear();
+    });
+
     afterEach(() => {
         if (getPtvMusicQueueSnapshot().currentItem) {
             void stopPtvMusicPlayback('test-cleanup');
         }
         vi.useRealTimers();
         vi.restoreAllMocks();
+        queueMocks.identity.serverId = 'test-server';
+        queueMocks.identity.userId = 'test-user';
+        queueMocks.apiClient.reportPlaybackStopped.mockClear();
+        window.localStorage.clear();
     });
 
     it('uses native queue events without creating one polling interval per subscriber', () => {
@@ -152,6 +173,131 @@ describe('native Music queue subscriptions', () => {
         expect(window.location.hash).toBe('#/music/player');
     });
 
+    it('keeps explicit upcoming tracks ahead of progressively generated related items', async () => {
+        vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+        const firstTrack = { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' };
+        const secondTrack = { Id: 'track-two', MediaType: 'Audio', Name: 'Track Two', Type: 'Audio' };
+        const relatedTrack = { Id: 'track-three', MediaType: 'Audio', Name: 'Track Three', Type: 'Audio' };
+
+        await playPtvMusicTracks([firstTrack, secondTrack], 0, {
+            queueSourceLabel: 'Album'
+        });
+        setPtvMusicVirtualQueue(firstTrack, [relatedTrack], 'player-related');
+
+        const snapshot = getPtvMusicQueueSnapshot();
+
+        expect(snapshot.playlist.map(item => item.Id)).toEqual(['track-one', 'track-two']);
+        expect(snapshot.queueSourceLabel).toBe('Album');
+    });
+
+    it('returns queue snapshots by value and protects the current item from queue removal', async () => {
+        vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+
+        await playPtvMusicTracks([
+            { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' },
+            { Id: 'track-two', MediaType: 'Audio', Name: 'Track Two', Type: 'Audio' }
+        ]);
+        const exposed = getPtvMusicQueueSnapshot();
+        const currentPlaylistItemId = exposed.playlist[0].PlaylistItemId;
+
+        exposed.playlist.pop();
+        exposed.currentItem!.Name = 'Changed outside owner';
+        await removePtvMusicQueueItem(currentPlaylistItemId || '');
+
+        expect(getPtvMusicQueueSnapshot().playlist.map(item => item.Id)).toEqual([
+            'track-one',
+            'track-two'
+        ]);
+        expect(getPtvMusicQueueSnapshot().currentItem?.Name).toBe('Track One');
+    });
+
+    it('does not resurrect queue mutations when shuffle is disabled', async () => {
+        vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+
+        await playPtvMusicTracks([
+            { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' },
+            { Id: 'track-two', MediaType: 'Audio', Name: 'Track Two', Type: 'Audio' },
+            { Id: 'track-three', MediaType: 'Audio', Name: 'Track Three', Type: 'Audio' }
+        ]);
+        togglePtvMusicShuffle();
+        const removable = getPtvMusicQueueSnapshot().playlist.find((_, index) => index !== 0)!;
+
+        await removePtvMusicQueueItem(removable.PlaylistItemId || '');
+        await addPtvMusicToQueue({
+            Id: 'track-four',
+            MediaType: 'Audio',
+            Name: 'Track Four',
+            Type: 'Audio'
+        });
+        togglePtvMusicShuffle();
+
+        const ids = getPtvMusicQueueSnapshot().playlist.map(item => item.Id);
+
+        expect(ids).not.toContain(removable.Id);
+        expect(ids).toContain('track-four');
+    });
+
+    it('retires an active queue when the server/user identity changes', async () => {
+        vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+
+        await playPtvMusicTracks([
+            { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' }
+        ]);
+
+        queueMocks.identity.userId = 'different-user';
+
+        expect(getPtvMusicQueueSnapshot()).toMatchObject({
+            currentIndex: -1,
+            currentItem: null,
+            playlist: []
+        });
+    });
+
+    it('retires deferred queue and history persistence when identity changes', async () => {
+        vi.useFakeTimers();
+        vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+        const oldScope = {
+            serverId: queueMocks.identity.serverId,
+            userId: queueMocks.identity.userId
+        };
+
+        await playPtvMusicTracks([{
+            Id: 'private-track',
+            MediaType: 'Audio',
+            Name: 'Private Track',
+            RunTimeTicks: 180 * 10_000_000,
+            Type: 'Audio'
+        }]);
+        const audio = document.querySelector<HTMLAudioElement>('[data-ptv-music-native-player="true"]')!;
+
+        audio.currentTime = 40;
+        const pauseRequest = pausePtvMusicPlayback('identity-retirement-test');
+
+        queueMocks.identity.userId = 'next-user';
+        getPtvMusicQueueSnapshot();
+        await pauseRequest;
+        await Promise.resolve();
+        await Promise.resolve();
+        vi.runAllTimers();
+        await Promise.resolve();
+
+        const oldDocument = loadPtvMusicContinuity(oldScope);
+        const oldStorageKey = getPtvMusicContinuityStorageKey(oldScope) || '';
+
+        expect(oldDocument?.recentTracks || []).toEqual([]);
+        expect(window.localStorage.getItem(oldStorageKey)).toBeNull();
+    });
+
     it('continues queue playback after ownership pause then ended', async () => {
         let paused = true;
         const loadSpy = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
@@ -202,6 +348,29 @@ describe('native Music queue subscriptions', () => {
         expect(pauseSpy).toHaveBeenCalled();
     });
 
+    it('suppresses a duplicate ended event before it can skip another queue item', async () => {
+        vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+
+        await playPtvMusicTracks([
+            { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' },
+            { Id: 'track-two', MediaType: 'Audio', Name: 'Track Two', Type: 'Audio' },
+            { Id: 'track-three', MediaType: 'Audio', Name: 'Track Three', Type: 'Audio' }
+        ]);
+        const audio = document.querySelector<HTMLAudioElement>('[data-ptv-music-native-player="true"]')!;
+
+        audio.dispatchEvent(new Event('ended'));
+        audio.dispatchEvent(new Event('ended'));
+        await Promise.resolve();
+
+        expect(getPtvMusicQueueSnapshot()).toMatchObject({
+            currentIndex: 1,
+            currentItem: { Id: 'track-two' }
+        });
+        expect(playSpy).toHaveBeenCalledTimes(2);
+    });
+
     it('advances when queue is reordered without reloading playback', async () => {
         let paused = true;
         const loadSpy = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
@@ -237,9 +406,9 @@ describe('native Music queue subscriptions', () => {
             throw new Error('Expected a current playlist item id.');
         }
 
-        movePtvMusicQueueItem(currentPlaylistItemId, 0);
+        await movePtvMusicQueueItem(currentPlaylistItemId, 0);
 
-        const audio = document.querySelector<HTMLAudioElement>('[data-ptv-music-native-player=\"true\"]');
+        const audio = document.querySelector<HTMLAudioElement>('[data-ptv-music-native-player="true"]');
         expect(audio).not.toBeNull();
 
         audio!.dispatchEvent(new Event('ended'));
@@ -252,6 +421,46 @@ describe('native Music queue subscriptions', () => {
             currentItem: { Id: 'track-one' }
         });
         expect(loadSpy).toHaveBeenCalledTimes(2);
+        expect(playSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips non-track records before a natural virtual-queue transition', async () => {
+        let paused = true;
+
+        vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+        const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+            paused = false;
+            Object.defineProperty(this, 'paused', {
+                configurable: true,
+                get: () => paused
+            });
+            return Promise.resolve();
+        });
+        vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+            paused = true;
+        });
+
+        const firstTrack = { Id: 'track-one', MediaType: 'Audio', Name: 'Track One', Type: 'Audio' };
+        const nextTrack = { Id: 'track-two', MediaType: 'Audio', Name: 'Track Two', Type: 'Audio' };
+
+        await playPtvMusicTracks([firstTrack], 0);
+        setPtvMusicVirtualQueue(firstTrack, [
+            { Id: 'album-one', MediaType: 'Audio', Name: 'Album One', Type: 'MusicAlbum' },
+            { Id: 'artist-one', Name: 'Artist One', Type: 'MusicArtist' },
+            nextTrack
+        ], 'player-related');
+
+        const audio = document.querySelector<HTMLAudioElement>('[data-ptv-music-native-player="true"]');
+
+        expect(audio).not.toBeNull();
+        audio!.dispatchEvent(new Event('ended'));
+        await Promise.resolve();
+
+        expect(getPtvMusicQueueSnapshot()).toMatchObject({
+            currentItem: { Id: 'track-two', Type: 'Audio' },
+            isPlaying: true
+        });
+        expect(getPtvMusicQueueSnapshot().playlist.map(item => item.Id)).toEqual(['track-one', 'track-two']);
         expect(playSpy).toHaveBeenCalledTimes(2);
     });
 });

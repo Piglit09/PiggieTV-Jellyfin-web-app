@@ -10,6 +10,7 @@ import {
 } from '../../services/runtimeStability';
 
 import type { PtvMusicItem } from './musicTypes';
+import { updatePtvMusicQueueItemUserData } from './musicQueue';
 
 type PtvLikedMusicEntry = {
     item: PtvMusicItem;
@@ -217,6 +218,10 @@ export async function setPtvMusicItemLiked(item: PtvMusicItem, liked: boolean) {
 
     writeStoredLikedMusicEntries(nextEntries);
     emitLikedMusicUpdated();
+    updatePtvMusicQueueItemUserData(item.Id, {
+        ...(item.UserData || {}),
+        IsFavorite: liked
+    });
 
     try {
         await setPtvFavorite(item.Id, liked, {
@@ -232,6 +237,7 @@ export async function setPtvMusicItemLiked(item: PtvMusicItem, liked: boolean) {
     } catch (error) {
         writeStoredLikedMusicEntries(previousEntries);
         emitLikedMusicUpdated();
+        updatePtvMusicQueueItemUserData(item.Id, item.UserData);
         recordPtvEvent('render', 'music-liked-song-failed', {
             error: error instanceof Error ? error.message : String(error),
             itemId: item.Id,

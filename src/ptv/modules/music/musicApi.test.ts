@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { compactPtvMusicHomeSnapshotForStorage } from './musicHomeSnapshot';
-import { getPtvMusicPageLimit } from './musicPaging';
+import {
+    getPtvMusicPageLimit,
+    PTV_MUSIC_LIBRARY_RETAIN_LIMIT
+} from './musicPaging';
 import type { PtvMusicHomeData, PtvMusicItem } from './musicTypes';
 
 describe('getPtvMusicPageLimit', () => {
@@ -19,6 +22,12 @@ describe('getPtvMusicPageLimit', () => {
 
     it('normalizes invalid retained counts without exceeding the page size', () => {
         expect(getPtvMusicPageLimit(-10, 48, 24)).toBe(24);
+    });
+
+    it('caps catalog retention at the UI-reachable two pages', () => {
+        expect(PTV_MUSIC_LIBRARY_RETAIN_LIMIT).toBe(96);
+        expect(getPtvMusicPageLimit(48, 48, PTV_MUSIC_LIBRARY_RETAIN_LIMIT)).toBe(48);
+        expect(getPtvMusicPageLimit(96, 48, PTV_MUSIC_LIBRARY_RETAIN_LIMIT)).toBe(0);
     });
 });
 

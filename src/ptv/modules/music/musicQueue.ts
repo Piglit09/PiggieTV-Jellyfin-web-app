@@ -1,10 +1,12 @@
 import {
     getPtvApiClient,
-    getPtvCurrentUserId
+    getPtvCurrentUserId,
+    getPtvServerId
 } from '../../api';
 import { recordPtvEvent } from '../../core/observability';
 
 import { savePtvMusicPlaylist } from './musicPlaylists';
+import { isPlayablePtvMusicTrack } from './musicPlaybackItem';
 import type {
     PtvMusicItem,
     PtvMusicQueueItem,
@@ -14,7 +16,9 @@ import type {
 type QueueListener = (snapshot: PtvMusicQueueSnapshot) => void;
 type PlayOptions = {
     preserveVirtualQueue?: boolean;
+    queueSourceLabel?: string;
     rejectOnPlaybackError?: boolean;
+    startPositionTicks?: number;
 };
 type NativeMusicApiClient = NonNullable<ReturnType<typeof getPtvApiClient>> & {
     accessToken?: () => string | null;
@@ -25,6 +29,15 @@ type NativeMusicApiClient = NonNullable<ReturnType<typeof getPtvApiClient>> & {
     reportPlaybackStopped?: (options: Record<string, unknown>) => Promise<unknown>;
 };
 type StreamMode = 'download' | 'universal';
+type PlaybackReportContext = {
+    item: PtvMusicItem;
+    isMuted: boolean;
+    isPaused: boolean;
+    playSessionId: string;
+    positionTicks: number;
+    runtimeTicks: number;
+    volumeLevel: number;
+};
 
 const TICKS_PER_SECOND = 10000000;
 const MUSIC_PLAYER_HASH = '#/music/player';
@@ -66,6 +79,8 @@ let lastQueueProgressPublishAt = 0;
 let nativePlaySessionSeed = Date.now();
 let playbackRunToken = 0;
 let playlist: PtvMusicQueueItem[] = [];
+let queueIdentityKey = '';
+let queueSourceLabel = 'Active session';
 let repeatMode = 'RepeatNone';
 let sourcePlaylist: PtvMusicQueueItem[] = [];
 let virtualQueue: PtvMusicItem[] = [];
@@ -73,6 +88,14 @@ let virtualQueueCursor = 0;
 let virtualQueueSeedId = '';
 let lastEndedAt = 0;
 let lastEndedNavigationToken = 0;
+let continuityModulePromise: Promise<typeof import('./musicContinuity')> | null = null;
+let continuityWriteTimerId = 0;
+let continuityRetirementGeneration = 0;
+let continuityWriteGeneration = 0;
+let lastContinuityRestoreIdentityKey = '';
+let lastPlaybackError: string | null = null;
+let pendingContinuityIdentityKey = '';
+let pendingContinuitySnapshot: PtvMusicQueueSnapshot | null = null;
 
 type MusicPlaybackNavigationContext = {
     index: number;
@@ -108,6 +131,8 @@ function uniqueVirtualItems(items: PtvMusicItem[], seedId = '') {
     const nextItems: PtvMusicItem[] = [];
 
     items.forEach(item => {
+        if (!isPlayablePtvMusicTrack(item)) return;
+
         const key = getMusicItemKey(item);
 
         if (!key || key === seedId || seen.has(key)) return;
@@ -179,7 +204,281 @@ function capturePlaybackContext(item: PtvMusicQueueItem | null | undefined, inde
 }
 
 function isActivePlaybackContext(context: MusicPlaybackNavigationContext | null) {
-    return Boolean(context && activePlaybackContext && context.runToken === activePlaybackContext.runToken);
+    return Boolean(
+        context
+        && activePlaybackContext
+        && context.runToken === activePlaybackContext.runToken
+        && context.itemId === activePlaybackContext.itemId
+        && context.playlistItemId === activePlaybackContext.playlistItemId
+        && context.index === activePlaybackContext.index
+    );
+}
+
+function getCurrentQueueIdentityKey() {
+    const serverId = getPtvServerId();
+    const userId = serverId ? getPtvCurrentUserId(serverId) : '';
+
+    return serverId && userId ? `${serverId}:${userId}` : '';
+}
+
+function resetQueueState() {
+    autoQueueSeedItem = null;
+    autoQueueSeedRevision += 1;
+    currentIndex = -1;
+    currentItem = null;
+    currentPlayPromise = null;
+    currentPlaySessionId = '';
+    currentStreamMode = 'universal';
+    hasTriedDownloadFallback = false;
+    isShuffled = false;
+    lastEndedAt = 0;
+    lastEndedNavigationToken = 0;
+    lastProgressReportAt = 0;
+    lastPlaybackError = null;
+    playlist = [];
+    queueIdentityKey = '';
+    queueSourceLabel = 'Active session';
+    repeatMode = 'RepeatNone';
+    sourcePlaylist = [];
+    virtualQueue = [];
+    virtualQueueCursor = 0;
+    virtualQueueSeedId = '';
+    activePlaybackContext = null;
+}
+
+function retireQueueForIdentityChange(reason: string) {
+    const hadQueue = Boolean(currentItem || playlist.length);
+
+    playbackRunToken += 1;
+    continuityRetirementGeneration += 1;
+    continuityWriteGeneration += 1;
+    lastContinuityRestoreIdentityKey = '';
+    pendingContinuitySnapshot = null;
+    pendingContinuityIdentityKey = '';
+    if (continuityWriteTimerId) {
+        window.clearTimeout(continuityWriteTimerId);
+        continuityWriteTimerId = 0;
+    }
+
+    if (audioElement) {
+        try {
+            audioElement.pause();
+            audioElement.removeAttribute('src');
+            audioElement.load();
+        } catch {
+            // Identity retirement must finish even when a platform media
+            // element is already being torn down.
+        }
+    }
+
+    resetQueueState();
+
+    if (hadQueue) {
+        recordPtvEvent('playback', 'music-queue-identity-retired', {
+            reason
+        });
+    }
+
+    return hadQueue;
+}
+
+function validateQueueIdentity() {
+    if (!queueIdentityKey) return false;
+
+    const currentIdentityKey = getCurrentQueueIdentityKey();
+
+    if (currentIdentityKey === queueIdentityKey) return false;
+
+    return retireQueueForIdentityChange('identity-changed');
+}
+
+function bindQueueIdentity() {
+    const currentIdentityKey = getCurrentQueueIdentityKey();
+
+    if (currentIdentityKey) {
+        queueIdentityKey = currentIdentityKey;
+    }
+}
+
+function getMusicContinuityModule() {
+    continuityModulePromise ||= import('./musicContinuity');
+
+    return continuityModulePromise;
+}
+
+function getMusicContinuityScope() {
+    const serverId = getPtvServerId();
+    const userId = serverId ? getPtvCurrentUserId(serverId) : '';
+
+    return {
+        serverId,
+        userId
+    };
+}
+
+function scheduleQueueContinuityWrite(action: string, snapshot: PtvMusicQueueSnapshot) {
+    if ([
+        'duration',
+        'pause',
+        'play',
+        'playing',
+        'timeupdate',
+        'volume'
+    ].includes(action)) {
+        return;
+    }
+
+    pendingContinuitySnapshot = snapshot;
+    pendingContinuityIdentityKey = getCurrentQueueIdentityKey();
+    const writeGeneration = ++continuityWriteGeneration;
+
+    if (continuityWriteTimerId) {
+        window.clearTimeout(continuityWriteTimerId);
+    }
+
+    continuityWriteTimerId = window.setTimeout(() => {
+        continuityWriteTimerId = 0;
+        const nextSnapshot = pendingContinuitySnapshot;
+        const scheduledIdentityKey = pendingContinuityIdentityKey;
+
+        pendingContinuitySnapshot = null;
+        pendingContinuityIdentityKey = '';
+        if (
+            !nextSnapshot
+            || !scheduledIdentityKey
+            || writeGeneration !== continuityWriteGeneration
+            || getCurrentQueueIdentityKey() !== scheduledIdentityKey
+        ) {
+            return;
+        }
+
+        const scope = getMusicContinuityScope();
+
+        if (!scope.serverId || !scope.userId) return;
+
+        void getMusicContinuityModule().then(module => {
+            if (
+                writeGeneration !== continuityWriteGeneration
+                || getCurrentQueueIdentityKey() !== scheduledIdentityKey
+            ) {
+                recordPtvEvent('playback', 'music-continuity-stale-write-suppressed', {
+                    action
+                });
+                return;
+            }
+
+            if (nextSnapshot.playlist.length) {
+                module.savePtvMusicQueueContinuity(scope, nextSnapshot);
+            } else {
+                module.clearPtvMusicQueueContinuity(scope);
+            }
+        }).catch(error => {
+            recordPtvEvent('playback', 'music-continuity-write-failed', {
+                action,
+                errorName: error instanceof Error ? error.name : typeof error
+            });
+        });
+    }, 120);
+}
+
+function recordMeaningfulPlaybackHistory(context: PlaybackReportContext | null, completed = false) {
+    if (!context?.item.Id) return;
+
+    const scope = getMusicContinuityScope();
+    const identityKey = getCurrentQueueIdentityKey();
+    const retirementGeneration = continuityRetirementGeneration;
+
+    if (!scope.serverId || !scope.userId || !identityKey) return;
+
+    void getMusicContinuityModule().then(module => {
+        if (
+            retirementGeneration !== continuityRetirementGeneration
+            || getCurrentQueueIdentityKey() !== identityKey
+        ) {
+            recordPtvEvent('playback', 'music-history-stale-write-suppressed', {});
+            return;
+        }
+
+        module.recordPtvMusicRecentTrack(scope, context.item, {
+            completed,
+            positionTicks: context.positionTicks,
+            runtimeTicks: context.runtimeTicks
+        });
+    }).catch(error => {
+        recordPtvEvent('playback', 'music-history-write-failed', {
+            errorName: error instanceof Error ? error.name : typeof error
+        });
+    });
+}
+
+async function restorePtvMusicQueueContinuity() {
+    const identityKey = getCurrentQueueIdentityKey();
+
+    if (!identityKey || identityKey === lastContinuityRestoreIdentityKey || currentItem || playlist.length) return false;
+
+    lastContinuityRestoreIdentityKey = identityKey;
+    const retirementGeneration = continuityRetirementGeneration;
+
+    try {
+        const scope = getMusicContinuityScope();
+        const module = await getMusicContinuityModule();
+        const document = module.loadPtvMusicContinuity(scope);
+        const restoredQueue = document?.queue;
+
+        if (
+            !restoredQueue?.items.length
+            || retirementGeneration !== continuityRetirementGeneration
+            || getCurrentQueueIdentityKey() !== identityKey
+            || currentItem
+            || playlist.length
+        ) {
+            return false;
+        }
+
+        const restoredItems = restoredQueue.items.filter(isPlayablePtvMusicTrack);
+
+        if (!restoredItems.length) {
+            module.clearPtvMusicQueueContinuity(scope);
+            return false;
+        }
+
+        playlist = restoredItems.map((item, index) => normalizeQueueItem(item, index));
+        sourcePlaylist = playlist.slice();
+        const restoredCurrentIndex = playlist.findIndex(item => item.Id === restoredQueue.currentItemId);
+
+        currentIndex = restoredCurrentIndex >= 0 ?
+            restoredCurrentIndex :
+            Math.max(0, Math.min(restoredQueue.currentIndex, playlist.length - 1));
+        repeatMode = restoredQueue.repeatMode;
+        isShuffled = restoredQueue.shuffled;
+        queueSourceLabel = restoredQueue.context.source || 'Restored session';
+        autoQueueSeedItem = playlist[currentIndex] || null;
+        autoQueueSeedRevision += 1;
+        bindQueueIdentity();
+
+        await loadCurrentItem(false, restoredQueue.positionTicks);
+        if (
+            retirementGeneration !== continuityRetirementGeneration
+            || getCurrentQueueIdentityKey() !== identityKey
+        ) {
+            retireQueueForIdentityChange('identity-changed-during-restore');
+            return false;
+        }
+
+        recordPtvEvent('playback', 'music-queue-continuity-restored', {
+            queueCount: playlist.length
+        });
+
+        return true;
+    } catch (error) {
+        if (getCurrentQueueIdentityKey() === identityKey) {
+            lastContinuityRestoreIdentityKey = '';
+        }
+        recordPtvEvent('playback', 'music-queue-continuity-restore-failed', {
+            errorName: error instanceof Error ? error.name : typeof error
+        });
+        return false;
+    }
 }
 
 function setMusicStartupVolume() {
@@ -266,14 +565,40 @@ function emitQueueUpdated(action: string) {
     listeners.forEach(listener => {
         listener(snapshot);
     });
+    scheduleQueueContinuityWrite(action, snapshot);
 
     return snapshot;
 }
 
-function reportPlayback(method: 'reportPlaybackProgress' | 'reportPlaybackStart' | 'reportPlaybackStopped', item = currentItem) {
-    if (!item?.Id) return;
+function capturePlaybackReportContext(item = currentItem): PlaybackReportContext | null {
+    if (!item?.Id) return null;
 
-    const apiClient = getCurrentApiClient(item);
+    const audio = getAudioElement();
+
+    return {
+        item,
+        isMuted: audio.muted,
+        isPaused: audio.paused,
+        playSessionId: currentPlaySessionId,
+        positionTicks: getCurrentPositionTicks(),
+        runtimeTicks: getCurrentRuntimeTicks(),
+        volumeLevel: Math.round(audio.volume * 100)
+    };
+}
+
+function reportPlayback(
+    method: 'reportPlaybackProgress' | 'reportPlaybackStart' | 'reportPlaybackStopped',
+    item = currentItem,
+    capturedContext: PlaybackReportContext | null = null
+) {
+    const context = capturedContext || capturePlaybackReportContext(item);
+
+    if (!context?.item.Id) return;
+    if (method === 'reportPlaybackStopped') {
+        recordMeaningfulPlaybackHistory(context, getAudioElement().ended);
+    }
+
+    const apiClient = getCurrentApiClient(context.item);
     const report = apiClient?.[method];
 
     if (typeof report !== 'function') return;
@@ -281,18 +606,18 @@ function reportPlayback(method: 'reportPlaybackProgress' | 'reportPlaybackStart'
     void report.call(apiClient, {
         AudioStreamIndex: 0,
         CanSeek: true,
-        IsMuted: getAudioElement().muted,
-        IsPaused: getAudioElement().paused,
-        ItemId: item.Id,
-        MediaSourceId: item.MediaSources?.[0]?.Id || item.Id,
+        IsMuted: context.isMuted,
+        IsPaused: context.isPaused,
+        ItemId: context.item.Id,
+        MediaSourceId: context.item.MediaSources?.[0]?.Id || context.item.Id,
         PlayMethod: 'DirectStream',
-        PlaySessionId: currentPlaySessionId,
-        PositionTicks: getCurrentPositionTicks(),
-        VolumeLevel: Math.round(getAudioElement().volume * 100)
+        PlaySessionId: context.playSessionId,
+        PositionTicks: context.positionTicks,
+        VolumeLevel: context.volumeLevel
     }).catch(error => {
         recordPtvEvent('render', 'music-native-report-failed', {
             error: error instanceof Error ? error.message : String(error),
-            itemId: item.Id,
+            itemId: context.item.Id,
             method
         });
     });
@@ -361,11 +686,13 @@ function appendVirtualQueueToPlaylist(item: PtvMusicItem) {
         ...playlist.slice(0, Math.max(currentIndex + 1, 0)),
         ...nextItems
     ];
+    sourcePlaylist = playlist.slice();
     currentIndex = Math.max(0, currentIndex + 1);
 }
 
 function promoteVirtualQueueToAutoplay(seedItem: PtvMusicItem | null, source: string) {
     if (source !== 'player-related' || !isSameMusicItem(seedItem, currentItem)) return false;
+    if (currentIndex >= 0 && currentIndex + 1 < playlist.length) return false;
 
     const currentQueueItem = playlist[currentIndex] || (currentItem ? normalizeQueueItem(currentItem) : null);
 
@@ -377,6 +704,7 @@ function promoteVirtualQueueToAutoplay(seedItem: PtvMusicItem | null, source: st
     ];
     sourcePlaylist = playlist.slice();
     currentIndex = 0;
+    queueSourceLabel = 'Related autoplay';
     virtualQueueCursor = virtualQueue.length;
 
     recordPtvEvent('render', 'music-related-autoplay-queue-set', {
@@ -393,9 +721,13 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
     const item = playlist[currentIndex];
     const audio = getAudioElement();
     const playToken = ++playbackRunToken;
+    const outgoingContext = currentItem && item && !isSameMusicItem(currentItem, item) ?
+        capturePlaybackReportContext(currentItem) :
+        null;
 
     if (!item) {
         currentItem = null;
+        lastPlaybackError = null;
         audio.pause();
         audio.removeAttribute('src');
         audio.load();
@@ -403,7 +735,12 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
         return Promise.resolve(emitQueueUpdated('empty'));
     }
 
+    if (outgoingContext) {
+        reportPlayback('reportPlaybackStopped', outgoingContext.item, outgoingContext);
+    }
+
     currentItem = item;
+    lastPlaybackError = null;
     currentStreamMode = mode;
     hasTriedDownloadFallback = mode === 'download';
     lastProgressReportAt = 0;
@@ -413,7 +750,7 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
         audio.src = getAudioStreamUrl(item, startTicks, mode);
         audio.load();
     } catch (error) {
-        return handleNativePlaybackError(error, 'load', options);
+        return handleNativePlaybackError(error, 'load', options, playToken, item, autoplay);
     }
 
     capturePlaybackContext(item, currentIndex, playToken);
@@ -423,7 +760,7 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
         return Promise.resolve(emitQueueUpdated('loaded-paused'));
     }
 
-    currentPlayPromise = audio.play()
+    const playPromise: Promise<unknown> = audio.play()
         .then(() => {
             if (playToken !== playbackRunToken || currentItem?.Id !== item.Id) {
                 return emitQueueUpdated('play-start-ignored');
@@ -438,15 +775,35 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
             });
             return emitQueueUpdated('play-started');
         })
-        .catch(error => handleNativePlaybackError(error, 'play', options))
+        .catch(error => handleNativePlaybackError(error, 'play', options, playToken, item))
         .finally(() => {
-            currentPlayPromise = null;
+            if (currentPlayPromise === playPromise) {
+                currentPlayPromise = null;
+            }
         });
+    currentPlayPromise = playPromise;
 
     return currentPlayPromise;
 }
 
-function handleNativePlaybackError(error: unknown, stage: string, options: PlayOptions = {}): Promise<unknown> {
+function handleNativePlaybackError(
+    error: unknown,
+    stage: string,
+    options: PlayOptions = {},
+    expectedRunToken = playbackRunToken,
+    expectedItem = currentItem,
+    expectedAutoplay = true
+): Promise<unknown> {
+    if (
+        expectedRunToken !== playbackRunToken
+        || !isSameMusicItem(expectedItem, currentItem)
+    ) {
+        recordPtvEvent('playback', 'music-playback-error-stale-suppressed', {
+            stage
+        });
+        return Promise.resolve();
+    }
+
     const item = currentItem;
     const message = error instanceof Error ? error.message : String(error);
 
@@ -459,8 +816,12 @@ function handleNativePlaybackError(error: unknown, stage: string, options: PlayO
             target: 'download'
         });
 
-        return loadCurrentItem(true, getCurrentPositionTicks(), 'download', options);
+        return loadCurrentItem(expectedAutoplay, getCurrentPositionTicks(), 'download', options);
     }
+
+    lastPlaybackError = item ?
+        `${item.Name || 'This track'} is unavailable. Choose another track or try again.` :
+        'Music playback is unavailable. Choose another track or try again.';
 
     recordPtvEvent('render', 'music-playback-error', {
         engine: 'native-audio',
@@ -479,7 +840,15 @@ function handleNativePlaybackError(error: unknown, stage: string, options: PlayO
 }
 
 function onNativeError() {
-    void handleNativePlaybackError(getAudioElement().error || new Error('Native audio playback failed.'), 'audio-element');
+    const context = activePlaybackContext;
+
+    void handleNativePlaybackError(
+        getAudioElement().error || new Error('Native audio playback failed.'),
+        'audio-element',
+        {},
+        context?.runToken ?? playbackRunToken,
+        currentItem
+    );
 }
 
 function onNativeEnded() {
@@ -497,10 +866,11 @@ function onNativeEnded() {
         return;
     }
 
-    if (endedContext.runToken === lastEndedNavigationToken && now - lastEndedAt < 280) {
+    if (now - lastEndedAt < 280) {
         recordPtvEvent('playback', 'music-playback-ended-duplicate-suppressed', {
             endedItemId: endedItem?.Id || null,
             itemRunToken: endedRunToken,
+            previousRunToken: lastEndedNavigationToken,
             queueIndex: endedContext.index
         });
         return;
@@ -526,6 +896,9 @@ function onNativeEnded() {
         });
 
         if (repeatMode === 'RepeatOne') {
+            const endedReportContext = capturePlaybackReportContext(endedItem);
+
+            reportPlayback('reportPlaybackStopped', endedItem, endedReportContext);
             recordPtvEvent('playback', 'music-queue-next-resolved', {
                 nextReason: 'repeat-one',
                 queueIndex: currentIndex,
@@ -573,7 +946,6 @@ function onNativeEnded() {
             queueCount: playlist.length
         });
         emitQueueUpdated('ended');
-        return;
     }
 }
 
@@ -608,19 +980,31 @@ function shuffleItems(items: PtvMusicQueueItem[]) {
 }
 
 export function getPtvMusicQueueSnapshot(): PtvMusicQueueSnapshot {
+    validateQueueIdentity();
     const audio = getAudioElement();
+    const cloneItem = <T extends PtvMusicItem | PtvMusicQueueItem | null>(item: T): T => {
+        if (!item) return item;
+
+        return {
+            ...item,
+            MediaSources: item.MediaSources?.map(mediaSource => ({ ...mediaSource })),
+            UserData: item.UserData ? { ...item.UserData } : item.UserData
+        } as T;
+    };
 
     return {
-        autoQueueSeedItem,
+        autoQueueSeedItem: cloneItem(autoQueueSeedItem),
         autoQueueSeedRevision,
         currentIndex,
-        currentItem,
+        currentItem: cloneItem(currentItem),
         isAudio: Boolean(currentItem),
         isMuted: audio.muted,
         isPlaying: Boolean(currentItem && !audio.paused && !audio.ended),
         isShuffled,
-        playlist,
+        playbackError: lastPlaybackError,
+        playlist: playlist.map(item => cloneItem(item)),
         positionTicks: getCurrentPositionTicks(),
+        queueSourceLabel,
         repeatMode,
         runtimeTicks: getCurrentRuntimeTicks(),
         volumeLevel: Math.round(audio.volume * 100)
@@ -628,11 +1012,15 @@ export function getPtvMusicQueueSnapshot(): PtvMusicQueueSnapshot {
 }
 
 export function getPtvMusicVirtualQueue() {
+    validateQueueIdentity();
     return getVirtualQueueRemaining();
 }
 
 export function setPtvMusicVirtualQueue(seedItem: PtvMusicItem | null, items: PtvMusicItem[], source = 'unknown') {
+    validateQueueIdentity();
+    bindQueueIdentity();
     const seedId = seedItem?.Id || '';
+    const rejectedNonTrackCount = items.filter(item => !isPlayablePtvMusicTrack(item)).length;
 
     virtualQueueSeedId = seedId;
     virtualQueue = uniqueVirtualItems(items, seedId);
@@ -640,6 +1028,7 @@ export function setPtvMusicVirtualQueue(seedItem: PtvMusicItem | null, items: Pt
 
     recordPtvEvent('render', 'music-virtual-queue-set', {
         count: virtualQueue.length,
+        rejectedNonTrackCount,
         seedId: virtualQueueSeedId || null,
         source
     });
@@ -662,10 +1051,23 @@ export function openPtvMusicPlayer(source = 'unknown') {
     }
 }
 
+export function openPtvMusicQueuePanel(source = 'unknown') {
+    recordPtvEvent('render', 'music-queue-open-requested', {
+        engine: 'native-audio',
+        navigationReason: 'explicit-user-action',
+        source
+    });
+
+    if (window.location.hash !== `${MUSIC_PLAYER_HASH}?panel=queue`) {
+        window.location.hash = `${MUSIC_PLAYER_HASH}?panel=queue`;
+    }
+}
+
 export function subscribeToPtvMusicQueue(listener: QueueListener) {
     getAudioElement();
     listeners.add(listener);
     listener(getPtvMusicQueueSnapshot());
+    void restorePtvMusicQueueContinuity();
 
     return () => {
         listeners.delete(listener);
@@ -673,6 +1075,8 @@ export function subscribeToPtvMusicQueue(listener: QueueListener) {
 }
 
 export function playPtvMusicTracks(items: PtvMusicItem[], startIndex = 0, options: PlayOptions = {}) {
+    validateQueueIdentity();
+
     if (!items.length) {
         recordPtvEvent('render', 'music-play-request-empty', {
             engine: 'native-audio',
@@ -687,11 +1091,12 @@ export function playPtvMusicTracks(items: PtvMusicItem[], startIndex = 0, option
     const normalizedItems = items.map(normalizeQueueItem);
     const safeStartIndex = Math.max(0, Math.min(startIndex, normalizedItems.length - 1));
 
-    reportPlayback('reportPlaybackStopped');
+    bindQueueIdentity();
     setMusicStartupVolume();
     playlist = normalizedItems;
-    sourcePlaylist = normalizedItems;
+    sourcePlaylist = normalizedItems.slice();
     currentIndex = safeStartIndex;
+    queueSourceLabel = options.queueSourceLabel?.trim() || 'Now Playing';
 
     if (!options.preserveVirtualQueue) {
         autoQueueSeedItem = normalizedItems[safeStartIndex] || null;
@@ -714,54 +1119,90 @@ export function playPtvMusicTracks(items: PtvMusicItem[], startIndex = 0, option
         startIndex: safeStartIndex
     });
 
-    return loadCurrentItem(true, 0, 'universal', options);
+    return loadCurrentItem(true, options.startPositionTicks || 0, 'universal', options);
 }
 
 export function playPtvMusicNext(item: PtvMusicItem) {
+    validateQueueIdentity();
+    bindQueueIdentity();
+
     if (!currentItem) {
-        return playPtvMusicTracks([item], 0);
+        return playPtvMusicTracks([item], 0, {
+            queueSourceLabel: 'Play Next'
+        });
     }
 
     playlist.splice(currentIndex + 1, 0, normalizeQueueItem(item));
+    if (isShuffled) sourcePlaylist = playlist.slice();
 
     return Promise.resolve(emitQueueUpdated('play-next'));
 }
 
 export function addPtvMusicToQueue(item: PtvMusicItem) {
+    validateQueueIdentity();
+    bindQueueIdentity();
     playlist.push(normalizeQueueItem(item, playlist.length));
+    if (isShuffled) sourcePlaylist = playlist.slice();
 
     return Promise.resolve(emitQueueUpdated('add'));
 }
 
+export function addPtvMusicItemsToQueue(items: PtvMusicItem[]) {
+    validateQueueIdentity();
+    bindQueueIdentity();
+    const playableItems = items.filter(isPlayablePtvMusicTrack);
+
+    if (!playableItems.length) return Promise.resolve(getPtvMusicQueueSnapshot());
+
+    playlist.push(...playableItems.map((item, index) => normalizeQueueItem(item, playlist.length + index)));
+    if (isShuffled) sourcePlaylist = playlist.slice();
+
+    return Promise.resolve(emitQueueUpdated('add-many'));
+}
+
+export function playPtvMusicItemsNext(items: PtvMusicItem[]) {
+    validateQueueIdentity();
+    bindQueueIdentity();
+    const playableItems = items.filter(isPlayablePtvMusicTrack);
+
+    if (!playableItems.length) return Promise.resolve(getPtvMusicQueueSnapshot());
+    if (!currentItem) {
+        return playPtvMusicTracks(playableItems, 0, {
+            queueSourceLabel: 'Play Next'
+        });
+    }
+
+    playlist.splice(
+        currentIndex + 1,
+        0,
+        ...playableItems.map((item, index) => normalizeQueueItem(item, currentIndex + 1 + index))
+    );
+    if (isShuffled) sourcePlaylist = playlist.slice();
+
+    return Promise.resolve(emitQueueUpdated('play-next-many'));
+}
+
 export function removePtvMusicQueueItem(playlistItemId: string) {
+    validateQueueIdentity();
     if (!playlistItemId) return Promise.resolve(getPtvMusicQueueSnapshot());
 
     const removeIndex = playlist.findIndex(item => item.PlaylistItemId === playlistItemId);
 
     if (removeIndex < 0) return Promise.resolve(getPtvMusicQueueSnapshot());
 
-    playlist.splice(removeIndex, 1);
-
-    if (removeIndex < currentIndex) {
-        currentIndex -= 1;
-    } else if (removeIndex === currentIndex) {
-        if (playlist[currentIndex]) {
-            void loadCurrentItem(true, 0);
-        } else {
-            currentIndex = playlist.length - 1;
-            if (currentIndex >= 0) {
-                void loadCurrentItem(true, 0);
-            } else {
-                currentItem = null;
-                getAudioElement().pause();
-            }
-        }
+    if (removeIndex === currentIndex) {
+        return Promise.resolve(emitQueueUpdated('remove-current-blocked'));
     }
+
+    playlist.splice(removeIndex, 1);
+    if (removeIndex < currentIndex) currentIndex -= 1;
+    if (isShuffled) sourcePlaylist = playlist.slice();
 
     return Promise.resolve(emitQueueUpdated('remove'));
 }
 
 export function movePtvMusicQueueItem(playlistItemId: string, newIndex: number) {
+    validateQueueIdentity();
     if (!playlistItemId) return Promise.resolve(getPtvMusicQueueSnapshot());
 
     const oldIndex = playlist.findIndex(item => item.PlaylistItemId === playlistItemId);
@@ -781,17 +1222,35 @@ export function movePtvMusicQueueItem(playlistItemId: string, newIndex: number) 
         currentIndex += 1;
     }
 
+    if (isShuffled) sourcePlaylist = playlist.slice();
+
     return Promise.resolve(emitQueueUpdated('reorder'));
 }
 
 export function clearPtvMusicQueue() {
+    validateQueueIdentity();
     playlist = currentItem ? [normalizeQueueItem(currentItem)] : [];
     currentIndex = currentItem ? 0 : -1;
+    sourcePlaylist = playlist.slice();
 
     return Promise.resolve(emitQueueUpdated('clear'));
 }
 
+export function playPtvMusicQueueItem(playlistItemId: string) {
+    validateQueueIdentity();
+    const nextIndex = playlist.findIndex(item => item.PlaylistItemId === playlistItemId);
+
+    if (nextIndex < 0 || nextIndex === currentIndex) {
+        return Promise.resolve(getPtvMusicQueueSnapshot());
+    }
+
+    currentIndex = nextIndex;
+
+    return loadCurrentItem(true, 0).then(() => emitQueueUpdated('play-queue-item'));
+}
+
 export function pausePtvMusicPlayback(reason = 'unknown') {
+    validateQueueIdentity();
     const item = currentItem;
 
     if (!item) return Promise.resolve(getPtvMusicQueueSnapshot());
@@ -802,7 +1261,10 @@ export function pausePtvMusicPlayback(reason = 'unknown') {
 
     try {
         audio.pause();
-        reportPlayback('reportPlaybackProgress', item);
+        const reportContext = capturePlaybackReportContext(item);
+
+        reportPlayback('reportPlaybackProgress', item, reportContext);
+        recordMeaningfulPlaybackHistory(reportContext);
     } catch (error) {
         recordPtvEvent('render', 'music-playback-error', {
             engine: 'native-audio',
@@ -822,6 +1284,7 @@ export function pausePtvMusicPlayback(reason = 'unknown') {
 }
 
 export function stopPtvMusicPlayback(reason = 'unknown') {
+    validateQueueIdentity();
     const item = currentItem;
     const audio = getAudioElement();
 
@@ -844,22 +1307,7 @@ export function stopPtvMusicPlayback(reason = 'unknown') {
         });
     }
 
-    autoQueueSeedItem = null;
-    autoQueueSeedRevision += 1;
-    currentIndex = -1;
-    currentItem = null;
-    currentPlayPromise = null;
-    currentPlaySessionId = '';
-    currentStreamMode = 'universal';
-    hasTriedDownloadFallback = false;
-    isShuffled = false;
-    lastProgressReportAt = 0;
-    playlist = [];
-    repeatMode = 'RepeatNone';
-    sourcePlaylist = [];
-    virtualQueue = [];
-    virtualQueueCursor = 0;
-    virtualQueueSeedId = '';
+    resetQueueState();
 
     recordPtvEvent('render', 'music-player-stopped', {
         itemId: item?.Id || null,
@@ -870,12 +1318,19 @@ export function stopPtvMusicPlayback(reason = 'unknown') {
 }
 
 export function setPtvMusicRepeatMode(mode: string) {
-    repeatMode = mode;
+    const supportedModes = new Set([
+        'RepeatNone',
+        'RepeatOne',
+        'RepeatAll'
+    ]);
+
+    repeatMode = supportedModes.has(mode) ? mode : 'RepeatNone';
 
     return emitQueueUpdated('repeat');
 }
 
 export function togglePtvMusicShuffle() {
+    validateQueueIdentity();
     if (!playlist.length) {
         isShuffled = !isShuffled;
         return emitQueueUpdated('shuffle');
@@ -901,6 +1356,7 @@ export function togglePtvMusicShuffle() {
 }
 
 export function togglePtvMusicPlayPause() {
+    validateQueueIdentity();
     const audio = getAudioElement();
 
     if (!currentItem) return Promise.resolve(emitQueueUpdated('play-pause-empty'));
@@ -915,12 +1371,16 @@ export function togglePtvMusicPlayPause() {
     }
 
     audio.pause();
-    reportPlayback('reportPlaybackProgress');
+    const reportContext = capturePlaybackReportContext();
+
+    reportPlayback('reportPlaybackProgress', currentItem, reportContext);
+    recordMeaningfulPlaybackHistory(reportContext);
 
     return Promise.resolve(emitQueueUpdated('play-pause'));
 }
 
 export function seekPtvMusicPercent(percent: number) {
+    validateQueueIdentity();
     const audio = getAudioElement();
 
     if (!currentItem || !getCurrentRuntimeTicks()) {
@@ -960,6 +1420,7 @@ export function seekPtvMusicFromClientX(clientX: number, element: Element) {
 }
 
 export function previousPtvMusicTrack() {
+    validateQueueIdentity();
     const audio = getAudioElement();
 
     if (audio.currentTime > 3) {
@@ -978,6 +1439,7 @@ export function previousPtvMusicTrack() {
 }
 
 export function nextPtvMusicTrack() {
+    validateQueueIdentity();
     const nextIndex = getNextPlaylistIndex();
 
     if (nextIndex >= 0) {
@@ -996,6 +1458,7 @@ export function nextPtvMusicTrack() {
 }
 
 export function setPtvMusicVolume(volumeLevel: number) {
+    validateQueueIdentity();
     const normalizedVolume = Math.max(0, Math.min(100, Math.round(volumeLevel)));
     const audio = getAudioElement();
 
@@ -1005,6 +1468,7 @@ export function setPtvMusicVolume(volumeLevel: number) {
 }
 
 export function togglePtvMusicMute() {
+    validateQueueIdentity();
     const audio = getAudioElement();
 
     audio.muted = !audio.muted;
@@ -1016,4 +1480,44 @@ export function savePtvMusicQueueAsPlaylist(name: string) {
     const snapshot = getPtvMusicQueueSnapshot();
 
     return savePtvMusicPlaylist(name, snapshot.playlist);
+}
+
+export function restorePtvMusicContinuity() {
+    return restorePtvMusicQueueContinuity();
+}
+
+export function updatePtvMusicQueueItemUserData(
+    itemId: string,
+    userData: PtvMusicItem['UserData']
+) {
+    if (!itemId) return getPtvMusicQueueSnapshot();
+
+    let changed = false;
+    const updateItem = <T extends PtvMusicItem>(item: T): T => {
+        if (item.Id !== itemId) return item;
+
+        changed = true;
+        return {
+            ...item,
+            UserData: userData ? { ...userData } : userData
+        };
+    };
+
+    playlist = playlist.map(updateItem);
+    sourcePlaylist = sourcePlaylist.map(updateItem);
+    virtualQueue = virtualQueue.map(updateItem);
+    currentItem = currentItem ? updateItem(currentItem) : null;
+    autoQueueSeedItem = autoQueueSeedItem ? updateItem(autoQueueSeedItem) : null;
+
+    return changed ? emitQueueUpdated('user-data') : getPtvMusicQueueSnapshot();
+}
+
+export function retirePtvMusicIdentityState(reason = 'identity-retired') {
+    const retired = retireQueueForIdentityChange(reason);
+
+    if (retired) {
+        emitQueueUpdated('identity-retired');
+    }
+
+    return retired;
 }
