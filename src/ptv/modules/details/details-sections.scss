@@ -109,6 +109,78 @@
     min-width: 0;
 }
 
+.ptv-detail-page .ptv-details-discovery {
+    overflow: hidden;
+}
+
+.ptv-detail-page .ptv-details-discovery-description {
+    max-width: 720px;
+    margin: -6px 0 16px;
+
+    color: rgba(230, 226, 245, 0.72);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.ptv-detail-page .ptv-details-discovery-links {
+    display: grid;
+    grid-auto-columns: minmax(190px, 240px);
+    grid-auto-flow: column;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 2px 2px 8px;
+
+    scroll-snap-type: x proximity;
+}
+
+.ptv-detail-page .ptv-details-discovery-link {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding: 12px 14px;
+
+    color: rgba(255, 255, 255, 0.94);
+    border: 1px solid rgba(185, 155, 255, 0.24);
+    border-radius: 14px;
+    outline: none;
+    background: linear-gradient(145deg, rgba(103, 69, 156, 0.26), rgba(28, 24, 43, 0.5));
+    scroll-snap-align: start;
+    text-decoration: none;
+
+    transition:
+        border-color 140ms ease,
+        box-shadow 140ms ease,
+        transform 140ms ease;
+}
+
+.ptv-detail-page .ptv-details-discovery-link strong,
+.ptv-detail-page .ptv-details-discovery-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-detail-page .ptv-details-discovery-link strong {
+    font-size: 14px;
+    font-weight: 850;
+}
+
+.ptv-detail-page .ptv-details-discovery-link span {
+    color: rgba(214, 201, 241, 0.72);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.ptv-detail-page .ptv-details-discovery-link:hover,
+.ptv-detail-page .ptv-details-discovery-link:focus-visible {
+    color: #fff;
+    border-color: rgba(202, 176, 255, 0.68);
+    box-shadow: 0 10px 28px rgba(25, 10, 52, 0.3);
+    transform: translateY(-2px);
+}
+
 @media (max-width: 900px) {
     .ptv-detail-page .detailPageSecondaryContainer {
         padding: 0 0 120px !important;
@@ -117,5 +189,17 @@
     .ptv-detail-page .detailsGroupItem {
         grid-template-columns: 1fr;
         gap: 4px;
+    }
+}
+
+@media (max-width: 600px) {
+    .ptv-detail-page .ptv-details-discovery-links {
+        grid-auto-columns: minmax(180px, 76vw);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-detail-page .ptv-details-discovery-link {
+        transition: none;
     }
 }

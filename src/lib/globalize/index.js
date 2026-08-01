@@ -3,6 +3,12 @@ import isEmpty from 'lodash-es/isEmpty';
 import { currentSettings as userSettings } from 'scripts/settings/userSettings';
 import Events from 'utils/events';
 import { updateLocale } from 'utils/dateFnsLocale';
+import { publishCultureChange } from './cultureEvents';
+
+export {
+    CULTURE_CHANGED_EVENT,
+    cultureEvents
+} from './cultureEvents';
 
 const Direction = {
     rtl: 'rtl',
@@ -104,6 +110,7 @@ export function updateCurrentCulture() {
     updateLocale(currentDateTimeCulture);
 
     ensureTranslations(currentCulture);
+    publishCultureChange(currentCulture);
 }
 
 function ensureTranslations(culture) {
@@ -299,4 +306,3 @@ export default {
     getIsRTL,
     getIsElementRTL
 };
-

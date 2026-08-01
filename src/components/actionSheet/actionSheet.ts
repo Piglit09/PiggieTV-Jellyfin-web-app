@@ -1,4 +1,8 @@
 import escapeHtml from 'escape-html';
+import {
+    bindActionSheetAbort,
+    createActionSheetCancelledError
+} from './actionSheetAbort';
 import dialogHelper from '../dialogHelper/dialogHelper';
 import layoutManager from '../layoutManager';
 import globalize from '../../lib/globalize';
@@ -40,6 +44,7 @@ interface Options {
     resolveOnClick?: boolean | (string | null)[];
     shaded?: boolean;
     showCancel?: boolean;
+    signal?: AbortSignal;
     text?: string;
     timeout?: number;
     title?: string;
@@ -142,6 +147,14 @@ export function show(options: Options) {
     // positionTo
     // showCancel
     // title
+    if (options.signal?.aborted) {
+        const error = new Error('ActionSheet operation was aborted');
+
+        error.name = 'AbortError';
+
+        return Promise.reject(error);
+    }
+
     const dialogOptions: DialogOptions = {
         removeOnClose: true,
         enableHistory: options.enableHistory,
@@ -322,6 +335,9 @@ export function show(options: Options) {
 
     return new Promise(function (resolve, reject) {
         let isResolved = false;
+        const unbindAbort = bindActionSheetAbort(options.signal, () => {
+            dialogHelper.close(dlg);
+        });
 
         dlg.addEventListener('click', function (e) {
             const actionSheetMenuItem = dom.parentWithClass(e.target as HTMLElement, 'actionSheetMenuItem');
@@ -346,6 +362,8 @@ export function show(options: Options) {
         });
 
         dlg.addEventListener('close', function () {
+            unbindAbort();
+
             if (layoutManager.tv) {
                 const scroller = dlg.querySelector('.actionSheetScroller');
                 if (scroller) {
@@ -366,7 +384,7 @@ export function show(options: Options) {
 
                     resolve(selectedId);
                 } else {
-                    reject(new Error('ActionSheet closed without resolving'));
+                    reject(createActionSheetCancelledError());
                 }
             }
         });

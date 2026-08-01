@@ -6,6 +6,7 @@ import dom from '../utils/dom';
 import globalize from '../lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import actionsheet from './actionSheet/actionSheet';
+import { isActionSheetCancelledError } from './actionSheet/actionSheetAbort';
 import { appHost } from './apphost';
 import { appRouter } from './router/appRouter';
 import itemHelper, { canEditPlaylist } from './itemHelper';
@@ -21,6 +22,95 @@ const DOWNLOAD_ALL_TYPES = [
     BaseItemKind.Season,
     BaseItemKind.Series
 ];
+
+const BUILT_IN_COMMAND_IDS = new Set([
+    'addtocollection',
+    'addtoplaylist',
+    'album',
+    'artist',
+    'canceltimer',
+    'cancelseriestimer',
+    'clearQueue',
+    'copy-stream',
+    'delete',
+    'download',
+    'downloadall',
+    'edit',
+    'editimages',
+    'editlyrics',
+    'editplaylist',
+    'editsubtitles',
+    'favorite',
+    'identify',
+    'instantmix',
+    'lyrics',
+    'markplayed',
+    'markunplayed',
+    'moremediainfo',
+    'movetobottom',
+    'movetotop',
+    'multiSelect',
+    'open',
+    'play',
+    'playallfromhere',
+    'queue',
+    'queueallfromhere',
+    'queuenext',
+    'record',
+    'refresh',
+    'removefromcollection',
+    'removefromplaylist',
+    'resume',
+    'share',
+    'shuffle',
+    'stopPlayback',
+    'unfavorite'
+]);
+
+function appendCommandGroup(commands, commandGroup) {
+    if (!commandGroup.length) {
+        return;
+    }
+
+    if (commands.length && !commands[commands.length - 1].divider) {
+        commands.push({
+            divider: true
+        });
+    }
+
+    commands.push(...commandGroup);
+}
+
+function getExtraCommands(options, commands) {
+    if (!Array.isArray(options.extraCommands)) {
+        return [];
+    }
+
+    const commandIds = new Set([
+        ...BUILT_IN_COMMAND_IDS,
+        ...commands.map(command => command.id).filter(Boolean)
+    ]);
+
+    return options.extraCommands.reduce((result, command) => {
+        const id = String(command?.id || '').trim();
+        const name = String(command?.name || '').trim();
+
+        if (!id || !name || commandIds.has(id)) {
+            return result;
+        }
+
+        commandIds.add(id);
+        result.push({
+            asideText: command.asideText,
+            icon: command.icon,
+            id,
+            name,
+            secondaryText: command.secondaryText
+        });
+
+        return result;
+    }, []);
+}
 
 function getDeleteLabel(type) {
     switch (type) {
@@ -121,9 +211,37 @@ export async function getCommands(options) {
         });
     }
 
+    if (item.Id && options.open !== false) {
+        commands.push({
+            name: globalize.translate('ViewDetails'),
+            id: 'open',
+            icon: 'info_outline'
+        });
+    }
+
     if (commands.length) {
         commands.push({
             divider: true
+        });
+    }
+
+    if (itemHelper.canMarkPlayed(item) && options.played !== false) {
+        const isPlayed = item.UserData?.Played === true;
+
+        commands.push({
+            name: globalize.translate(isPlayed ? 'MarkUnplayed' : 'MarkPlayed'),
+            id: isPlayed ? 'markunplayed' : 'markplayed',
+            icon: 'check'
+        });
+    }
+
+    if (itemHelper.canRate(item) && options.favorite !== false) {
+        const isFavorite = item.UserData?.IsFavorite === true;
+
+        commands.push({
+            name: globalize.translate(isFavorite ? 'RemoveFromFavorites' : 'AddToFavorites'),
+            id: isFavorite ? 'unfavorite' : 'favorite',
+            icon: 'favorite'
         });
     }
 
@@ -220,7 +338,12 @@ export async function getCommands(options) {
     }
 
     if (item.Type === BaseItemKind.Playlist) {
-        const _canEditPlaylist = await canEditPlaylist(user, item);
+        const _canEditPlaylist = await (
+            options.playlistEditabilityPromise
+            || canEditPlaylist(user, item, {
+                signal: options.signal
+            })
+        );
         if (_canEditPlaylist) {
             commands.push({
                 name: globalize.translate('Edit'),
@@ -369,6 +492,8 @@ export async function getCommands(options) {
         });
     }
 
+    appendCommandGroup(commands, getExtraCommands(options, commands));
+
     return commands;
 }
 
@@ -381,6 +506,60 @@ function getResolveFunction(resolve, commandId, changed, deleted, itemId) {
             itemId: itemId
         });
     };
+}
+
+function rejectCommand(error, reject) {
+    toast(globalize.translate('ErrorDefault'));
+    reject(error);
+}
+
+function executeUserDataCommand(apiClient, item, id, resolve, reject) {
+    const userId = apiClient.getCurrentUserId();
+    let promise;
+
+    try {
+        if (id === 'favorite' || id === 'unfavorite') {
+            promise = apiClient.updateFavoriteStatus(userId, item.Id, id === 'favorite');
+        } else {
+            const method = id === 'markplayed' ? 'markPlayed' : 'markUnplayed';
+            promise = apiClient[method](userId, item.Id, new Date());
+        }
+    } catch (error) {
+        rejectCommand(error, reject);
+        return;
+    }
+
+    Promise.resolve(promise).then(
+        getResolveFunction(resolve, id, true, false, item.Id),
+        error => rejectCommand(error, reject)
+    );
+}
+
+function executeExtraCommand(item, id, options, resolve, reject) {
+    const extraCommand = getExtraCommands(options, []).find(command => command.id === id);
+
+    if (!extraCommand || typeof options.onExtraCommand !== 'function') {
+        reject(new Error('Unknown item command'));
+        return;
+    }
+
+    let result;
+
+    try {
+        result = options.onExtraCommand(id, item);
+    } catch (error) {
+        rejectCommand(error, reject);
+        return;
+    }
+
+    Promise.resolve(result).then(value => {
+        resolve({
+            command: id,
+            updated: value?.updated === true,
+            deleted: value?.deleted === true,
+            itemId: item.Id
+        });
+    }, error => rejectCommand(error, reject));
 }
 
 function executeCommand(item, id, options) {
@@ -549,6 +728,12 @@ function executeCommand(item, id, options) {
                 play(item, true);
                 getResolveFunction(resolve, id)();
                 break;
+            case 'favorite':
+            case 'unfavorite':
+            case 'markplayed':
+            case 'markunplayed':
+                executeUserDataCommand(apiClient, item, id, resolve, reject);
+                break;
             case 'queue':
                 play(item, false, true);
                 getResolveFunction(resolve, id)();
@@ -653,7 +838,7 @@ function executeCommand(item, id, options) {
                 deleteSeriesTimer(apiClient, item, resolve, id);
                 break;
             default:
-                reject();
+                executeExtraCommand(item, id, options, resolve, reject);
                 break;
         }
     });
@@ -756,16 +941,42 @@ function refresh(apiClient, item) {
 }
 
 export async function show(options) {
+    const isCurrent = !options.signal?.aborted
+        && (typeof options.isCurrent !== 'function' || options.isCurrent());
+    if (!isCurrent) return { cancelled: true };
+
     const commands = await getCommands(options);
     if (!commands.length) {
         throw new Error('No item commands present');
     }
+    if (options.signal?.aborted || (typeof options.isCurrent === 'function' && !options.isCurrent())) {
+        return { cancelled: true };
+    }
 
-    const id = await actionsheet.show({
-        items: commands,
-        positionTo: options.positionTo,
-        resolveOnClick: ['share']
-    });
+    let id;
+
+    try {
+        id = await actionsheet.show({
+            items: commands,
+            positionTo: options.positionTo,
+            resolveOnClick: ['share'],
+            signal: options.signal
+        });
+    } catch (error) {
+        if (
+            isActionSheetCancelledError(error)
+            || options.signal?.aborted
+            || (typeof options.isCurrent === 'function' && !options.isCurrent())
+        ) {
+            return { cancelled: true };
+        }
+
+        throw error;
+    }
+
+    if (options.signal?.aborted || (typeof options.isCurrent === 'function' && !options.isCurrent())) {
+        return { cancelled: true };
+    }
 
     return executeCommand(options.item, id, options);
 }

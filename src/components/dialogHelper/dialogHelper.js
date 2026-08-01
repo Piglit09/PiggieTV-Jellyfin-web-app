@@ -19,6 +19,13 @@ function enableAnimation() {
         return false;
     }
 
+    if (
+        typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+        return false;
+    }
+
     return browser.supportsCssAnimation();
 }
 

@@ -1,13 +1,14 @@
 import { on } from '../../core/events';
 import { registerModule } from '../../core/lifecycle';
 import { runIconEngine } from '../../utils/icons';
-import { playbackManager } from '../../../components/playback/playbackmanager';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { isPiggieTvReaderItem, resolveReaderSource } from '../reader/sourceResolver';
 import { loadReaderProgress } from '../reader/readerProgressStore';
+import { playPtvReaderItem } from '../reader/readerLoader';
 import { recordPtvEvent, shouldCollectDiagnostics } from '../../core/observability';
 import { getPtvItemImageCandidates } from '../../api';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
+import { createPtvAbortController } from '../../core/abortController';
 import { getCoordinatedLegacyItemDetail } from '../../services/coordinatedLegacyItemDetail';
 import {
     getPtvDetailsShellSection,
@@ -20,12 +21,60 @@ import {
     resetPtvDetailsBackdrop,
     setPtvDetailsBackdropCandidates
 } from './detailsLayout';
+import {
+    claimPtvDetailImageRepair,
+    clearPtvDetailImageRepairAttempts
+} from './detailImageRepairState';
 
 import './details.scss';
 
 const DETAIL_PAGE_SELECTOR = '#itemDetailPage, .itemDetailPage';
+const DETAILS_DISCOVERY_CLASS = 'ptv-details-discovery';
 const READER_ACTIONS_CLASS = 'ptv-reader-detail-actions';
-const repairedDetailImageUrls = new Set();
+let detailsEnhancementActive = false;
+let detailsEnhancementController = null;
+let detailsEnhancementGeneration = 0;
+let releasePendingInspection = null;
+
+function beginDetailsEnhancementGeneration() {
+    releasePendingInspection?.();
+    releasePendingInspection = null;
+    detailsEnhancementController?.abort();
+    detailsEnhancementController = createPtvAbortController();
+    detailsEnhancementGeneration += 1;
+
+    return {
+        controller: detailsEnhancementController,
+        generation: detailsEnhancementGeneration
+    };
+}
+
+function captureDetailsEnhancementGeneration() {
+    if (!detailsEnhancementActive || !detailsEnhancementController) return null;
+
+    return {
+        controller: detailsEnhancementController,
+        generation: detailsEnhancementGeneration
+    };
+}
+
+function isDetailsEnhancementGenerationCurrent(owner) {
+    return Boolean(
+        detailsEnhancementActive
+        && owner
+        && owner.controller === detailsEnhancementController
+        && owner.generation === detailsEnhancementGeneration
+        && !owner.controller.signal.aborted
+    );
+}
+
+function retireDetailsEnhancementGeneration() {
+    releasePendingInspection?.();
+    releasePendingInspection = null;
+    detailsEnhancementController?.abort();
+    detailsEnhancementController = null;
+    detailsEnhancementGeneration += 1;
+}
 
 function getHashParams() {
     const hash = window.location.hash || '';
@@ -224,9 +273,8 @@ function handleDetailImageError(event) {
 
     const target = getDetailImageRepairTarget(image);
 
-    if (!target || repairedDetailImageUrls.has(target.nextUrl)) return;
+    if (!target || !claimPtvDetailImageRepair(image, target.itemId, target.nextUrl)) return;
 
-    repairedDetailImageUrls.add(target.nextUrl);
     image.dataset.ptvImageRepairStep = String(target.nextStep);
 
     if (shouldCollectDiagnostics()) {
@@ -242,6 +290,16 @@ function handleDetailImageError(event) {
     image.src = target.nextUrl;
 }
 
+function handleDetailImageLoad(event) {
+    const image = event.currentTarget;
+
+    if (!(image instanceof HTMLImageElement)) return;
+
+    clearPtvDetailImageRepairAttempts(image);
+    image.classList.add('ptv-detail-artwork-ready');
+    image.closest('.detailImageContainer')?.classList.remove('ptv-detail-artwork-pending');
+}
+
 function repairDetailImages(page) {
     page.querySelectorAll('img').forEach(image => {
         if (image.dataset.ptvImageRepairInstalled === 'true') return;
@@ -249,10 +307,7 @@ function repairDetailImages(page) {
         image.dataset.ptvImageRepairInstalled = 'true';
         image.classList.add('ptv-detail-artwork-image');
         image.closest('.detailImageContainer')?.classList.add('ptv-detail-artwork-pending');
-        image.addEventListener('load', () => {
-            image.classList.add('ptv-detail-artwork-ready');
-            image.closest('.detailImageContainer')?.classList.remove('ptv-detail-artwork-pending');
-        });
+        image.addEventListener('load', handleDetailImageLoad);
         image.addEventListener('error', handleDetailImageError);
 
         if (image.complete && image.naturalWidth > 0) {
@@ -262,7 +317,35 @@ function repairDetailImages(page) {
     });
 }
 
-function enhanceDetails(pageHint, item) {
+function releaseDetailImages(page) {
+    page.querySelectorAll('img[data-ptv-image-repair-installed="true"]').forEach(image => {
+        image.removeEventListener('load', handleDetailImageLoad);
+        image.removeEventListener('error', handleDetailImageError);
+        clearPtvDetailImageRepairAttempts(image);
+        delete image.dataset.ptvImageRepairInstalled;
+        delete image.dataset.ptvImageRepairStep;
+        image.classList.remove('ptv-detail-artwork-image', 'ptv-detail-artwork-ready');
+        image.closest('.detailImageContainer')?.classList.remove('ptv-detail-artwork-pending');
+    });
+}
+
+function resetDetailEnhancementState(page) {
+    releaseDetailImages(page);
+    page.querySelector(`.${READER_ACTIONS_CLASS}`)?.remove();
+    page.querySelector(`.${DETAILS_DISCOVERY_CLASS}`)?.remove();
+    delete page.dataset.ptvDetailsDiscoveryGeneration;
+    delete page.dataset.ptvDetailsDiscoveryItemId;
+    delete page.dataset.ptvDetailsDiscoveryPendingItemId;
+    delete page.dataset.ptvDetailsEnhancementGeneration;
+    delete page.dataset.ptvDetailsHydratedItemId;
+    delete page.dataset.ptvDetailsItemId;
+    delete page.dataset.ptvDetailsPendingItemId;
+    delete page.dataset.ptvDetailsReaderItemId;
+    delete page.dataset.ptvDetailsRelatedArtworkItemId;
+    delete page.dataset.ptvDetailsBackdropItemId;
+}
+
+function enhanceDetails(pageHint, item, owner = captureDetailsEnhancementGeneration()) {
     const page = pageHint instanceof Element && pageHint.matches(DETAIL_PAGE_SELECTOR) ?
         pageHint :
         document.querySelector(DETAIL_PAGE_SELECTOR);
@@ -272,7 +355,7 @@ function enhanceDetails(pageHint, item) {
     preparePtvDetailsLayout(page);
     normalizeDetailButtons(page);
     repairDetailImages(page);
-    if (item) enhanceDetailItem(page, item);
+    if (item) enhanceDetailItem(page, item, owner);
     runIconEngine(page);
 }
 
@@ -311,9 +394,11 @@ function renderReaderActions(page, item, source) {
     `;
 
     container.querySelector('[data-ptv-reader-action="read"]').addEventListener('click', () => {
-        playbackManager.play({
+        void playPtvReaderItem({
             items: [item],
             startPositionTicks: progress ? Math.round((progress.percent / 100) * 10000000) : 0
+        }).catch(() => {
+            console.warn('[PiggieTV Reader] Unable to open this item');
         });
     });
 
@@ -335,6 +420,100 @@ function renderReaderActions(page, item, source) {
     });
 }
 
+function clearDetailsDiscovery(page) {
+    page.querySelector(`.${DETAILS_DISCOVERY_CLASS}`)?.remove();
+    delete page.dataset.ptvDetailsDiscoveryGeneration;
+    delete page.dataset.ptvDetailsDiscoveryItemId;
+    delete page.dataset.ptvDetailsDiscoveryPendingItemId;
+}
+
+function createDetailsDiscoverySection(links) {
+    const section = document.createElement('section');
+    const heading = document.createElement('h2');
+    const description = document.createElement('p');
+    const linkStrip = document.createElement('nav');
+    const headingId = 'ptv-details-discovery-heading';
+
+    section.className = `${DETAILS_DISCOVERY_CLASS} verticalSection detailVerticalSection ptv-details-glass`;
+    section.setAttribute('aria-labelledby', headingId);
+    heading.id = headingId;
+    heading.className = 'sectionTitle sectionTitle-cards';
+    heading.textContent = 'Discover more';
+    description.className = 'ptv-details-discovery-description';
+    description.textContent = 'Explore the people, places, and themes connected to this title.';
+    linkStrip.className = 'ptv-details-discovery-links';
+    linkStrip.setAttribute('aria-label', 'Related discovery searches');
+
+    links.forEach((link, index) => {
+        const anchor = document.createElement('a');
+        const label = document.createElement('strong');
+        const meta = document.createElement('span');
+
+        anchor.className = `ptv-details-discovery-link ptv-details-discovery-link--${link.kind}`;
+        anchor.dataset.ptvFocusKey = `details:discover:${index}`;
+        anchor.href = link.href;
+        anchor.setAttribute('aria-label', link.ariaLabel);
+        label.textContent = link.label;
+        meta.textContent = link.meta;
+        anchor.append(label, meta);
+        linkStrip.append(anchor);
+    });
+
+    section.append(heading, description, linkStrip);
+    return section;
+}
+
+function renderDetailsDiscovery(page, itemId, item, owner) {
+    const generation = String(owner.generation);
+
+    if (
+        page.dataset.ptvDetailsDiscoveryItemId === itemId
+        && page.dataset.ptvDetailsDiscoveryGeneration === generation
+    ) return;
+    if (
+        page.dataset.ptvDetailsDiscoveryPendingItemId === itemId
+        && page.dataset.ptvDetailsDiscoveryGeneration === generation
+    ) return;
+
+    page.dataset.ptvDetailsDiscoveryGeneration = generation;
+    page.dataset.ptvDetailsDiscoveryPendingItemId = itemId;
+
+    void import('./detailsDiscoveryModel')
+        .then(({ getPtvDetailsDiscoveryLinks }) => {
+            if (!isCurrentDetailItem(page, itemId, owner)) return;
+
+            const links = getPtvDetailsDiscoveryLinks(item);
+
+            page.querySelector(`.${DETAILS_DISCOVERY_CLASS}`)?.remove();
+            delete page.dataset.ptvDetailsDiscoveryPendingItemId;
+            page.dataset.ptvDetailsDiscoveryGeneration = generation;
+            page.dataset.ptvDetailsDiscoveryItemId = itemId;
+
+            if (!links.length) return;
+
+            const section = createDetailsDiscoverySection(links);
+            const similarSection = page.querySelector('#similarCollapsible');
+            const host = similarSection?.parentElement || page.querySelector('.detailPageContent');
+
+            if (!host || !isCurrentDetailItem(page, itemId, owner)) return;
+
+            if (similarSection?.parentElement === host) {
+                host.insertBefore(section, similarSection);
+            } else {
+                host.append(section);
+            }
+
+            runIconEngine(section);
+        })
+        .catch(() => {
+            if (!isCurrentDetailItem(page, itemId, owner)) return;
+
+            delete page.dataset.ptvDetailsDiscoveryPendingItemId;
+            page.dataset.ptvDetailsDiscoveryGeneration = generation;
+            page.dataset.ptvDetailsDiscoveryItemId = itemId;
+        });
+}
+
 function getRelatedArtworkIds(item) {
     if (item.Type !== 'Season' && item.Type !== 'Episode') return [];
 
@@ -342,12 +521,15 @@ function getRelatedArtworkIds(item) {
         .filter((id, index, values) => id && id !== item.Id && values.indexOf(id) === index);
 }
 
-function isCurrentDetailItem(page, itemId) {
+function isCurrentDetailItem(page, itemId, owner) {
+    if (!isDetailsEnhancementGenerationCurrent(owner)) return false;
+
     const params = getHashParams();
     const routeItemId = params.get('id') || params.get('itemId');
 
     return page.isConnected
         && page.dataset.ptvDetailsItemId === itemId
+        && page.dataset.ptvDetailsEnhancementGeneration === String(owner.generation)
         && routeItemId === itemId;
 }
 
@@ -379,20 +561,27 @@ function getBackdropCandidates(item, relatedItems) {
     ];
 }
 
-function prepareDetailItemState(page, itemId) {
-    if (page.dataset.ptvDetailsItemId === itemId) return;
+function prepareDetailItemState(page, itemId, owner) {
+    const generation = String(owner.generation);
+
+    if (
+        page.dataset.ptvDetailsItemId === itemId
+        && page.dataset.ptvDetailsEnhancementGeneration === generation
+    ) return;
 
     page.dataset.ptvDetailsItemId = itemId;
+    page.dataset.ptvDetailsEnhancementGeneration = generation;
     delete page.dataset.ptvDetailsHydratedItemId;
     delete page.dataset.ptvDetailsPendingItemId;
     delete page.dataset.ptvDetailsRelatedArtworkItemId;
     delete page.dataset.ptvDetailsReaderItemId;
     page.querySelector(`.${READER_ACTIONS_CLASS}`)?.remove();
+    clearDetailsDiscovery(page);
     resetPtvDetailsBackdrop(page, itemId);
 }
 
-function applyDetailItem(page, itemId, item, apiClient) {
-    if (!isCurrentDetailItem(page, itemId)) return;
+function applyDetailItem(page, itemId, item, apiClient, owner) {
+    if (!isCurrentDetailItem(page, itemId, owner)) return;
 
     setPtvDetailsShellSection(getPtvDetailsShellSection(item));
     setPtvDetailsBackdropCandidates(page, getBackdropCandidates(item, []), itemId);
@@ -405,9 +594,11 @@ function applyDetailItem(page, itemId, item, apiClient) {
     ) {
         page.dataset.ptvDetailsRelatedArtworkItemId = itemId;
         void Promise.all(relatedArtworkIds.map(relatedId => (
-            apiClient.getItem(apiClient.getCurrentUserId(), relatedId).catch(() => null)
+            getCoordinatedLegacyItemDetail(apiClient, relatedId, {
+                signal: owner.controller.signal
+            }).catch(() => null)
         ))).then(relatedItems => {
-            if (!isCurrentDetailItem(page, itemId)) return;
+            if (!isCurrentDetailItem(page, itemId, owner)) return;
 
             setPtvDetailsBackdropCandidates(
                 page,
@@ -417,41 +608,44 @@ function applyDetailItem(page, itemId, item, apiClient) {
         });
     }
 
+    renderDetailsDiscovery(page, itemId, item, owner);
+
     if (!isPiggieTvReaderItem(item) || page.dataset.ptvDetailsReaderItemId === itemId) return;
 
     page.dataset.ptvDetailsReaderItemId = itemId;
     void resolveReaderSource(item)
         .then(source => {
-            if (isCurrentDetailItem(page, itemId)) {
+            if (isCurrentDetailItem(page, itemId, owner)) {
                 renderReaderActions(page, item, source);
             }
         })
         .catch(error => {
-            if (isCurrentDetailItem(page, itemId)) {
+            if (isCurrentDetailItem(page, itemId, owner)) {
                 delete page.dataset.ptvDetailsReaderItemId;
             }
 
+            if (owner.controller.signal.aborted) return;
             console.warn('[PiggieTV Reader] Could not resolve detail source', error);
         });
 }
 
-function enhanceDetailItem(page, renderedItem) {
+function enhanceDetailItem(page, renderedItem, owner = captureDetailsEnhancementGeneration()) {
     const params = getHashParams();
     const id = params.get('id') || params.get('itemId');
     const serverId = params.get('serverId') || params.get('server');
 
-    if (!id) return;
+    if (!id || !isDetailsEnhancementGenerationCurrent(owner)) return;
 
     const apiClient = getApiClient(serverId);
 
     if (!apiClient?.getItem || !apiClient?.getCurrentUserId) return;
 
-    prepareDetailItemState(page, id);
+    prepareDetailItemState(page, id, owner);
 
     if (String(renderedItem?.Id || '') === id) {
         page.dataset.ptvDetailsHydratedItemId = id;
         delete page.dataset.ptvDetailsPendingItemId;
-        applyDetailItem(page, id, renderedItem, apiClient);
+        applyDetailItem(page, id, renderedItem, apiClient, owner);
         return;
     }
 
@@ -462,53 +656,98 @@ function enhanceDetailItem(page, renderedItem) {
 
     page.dataset.ptvDetailsPendingItemId = id;
 
-    getCoordinatedLegacyItemDetail(apiClient, id)
+    getCoordinatedLegacyItemDetail(apiClient, id, {
+        signal: owner.controller.signal
+    })
         .then(item => {
-            if (!isCurrentDetailItem(page, id)) return;
+            if (!isCurrentDetailItem(page, id, owner)) return;
 
             page.dataset.ptvDetailsHydratedItemId = id;
             delete page.dataset.ptvDetailsPendingItemId;
-            applyDetailItem(page, id, item, apiClient);
+            applyDetailItem(page, id, item, apiClient, owner);
         })
         .catch(error => {
-            if (isCurrentDetailItem(page, id)) {
+            if (isCurrentDetailItem(page, id, owner)) {
                 delete page.dataset.ptvDetailsPendingItemId;
             }
 
+            if (error?.name === 'AbortError' || owner.controller.signal.aborted) return;
             console.warn('[PiggieTV Details] Could not inspect detail item', error);
         });
 }
 
-function inspectCurrentDetailItem() {
+function inspectCurrentDetailItem(owner = captureDetailsEnhancementGeneration()) {
+    if (!isDetailsEnhancementGenerationCurrent(owner)) return;
+
     const page = document.querySelector(DETAIL_PAGE_SELECTOR);
 
-    if (page) enhanceDetailItem(page);
+    if (page) enhanceDetailItem(page, undefined, owner);
+}
+
+function isRenderedDetailEventCurrent(page, item) {
+    const params = getHashParams();
+    const routeItemId = params.get('id') || params.get('itemId');
+    const routeServerId = params.get('serverId') || params.get('server');
+    const itemId = String(item?.Id || '');
+    const itemServerId = String(item?.ServerId || '');
+
+    return page.matches(DETAIL_PAGE_SELECTOR)
+        && page.isConnected
+        && routeItemId === itemId
+        && (!routeServerId || routeServerId === itemServerId);
 }
 
 function handleDetailsRendered(event) {
     const { item, page } = event.detail || {};
 
-    if (!item || !(page instanceof Element)) return;
-    enhanceDetails(page, item);
+    if (
+        !detailsEnhancementActive
+        || !item
+        || !(page instanceof Element)
+        || !isRenderedDetailEventCurrent(page, item)
+    ) return;
+
+    const owner = beginDetailsEnhancementGeneration();
+
+    enhanceDetails(page, item, owner);
+}
+
+function scheduleDetailInspection(scope, owner) {
+    if (!scope?.timeout || !isDetailsEnhancementGenerationCurrent(owner)) return;
+
+    releasePendingInspection = scope.timeout(() => {
+        releasePendingInspection = null;
+        inspectCurrentDetailItem(owner);
+    }, 900);
 }
 
 function init({ scope } = {}) {
+    detailsEnhancementActive = true;
+    const owner = beginDetailsEnhancementGeneration();
+
     document.documentElement.classList.add('ptv-route-detail-page');
     scope?.add(mountPtvDetailsShell());
     enhanceDetails();
     scope?.add(on('detailsrendered', handleDetailsRendered));
     scope?.watchDom(() => enhanceDetails());
-    scope?.timeout(inspectCurrentDetailItem, 900);
+    scheduleDetailInspection(scope, owner);
 }
 
 function refresh({ scope } = {}) {
+    if (!detailsEnhancementActive) return;
+
+    const owner = beginDetailsEnhancementGeneration();
+
     enhanceDetails();
-    scope?.timeout(inspectCurrentDetailItem, 900);
+    scheduleDetailInspection(scope, owner);
 }
 
 function destroy() {
+    detailsEnhancementActive = false;
+    retireDetailsEnhancementGeneration();
     document.documentElement.classList.remove('ptv-route-detail-page');
     document.querySelectorAll(DETAIL_PAGE_SELECTOR).forEach(page => {
+        resetDetailEnhancementState(page);
         releasePtvDetailsLayout(page);
     });
 }

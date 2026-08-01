@@ -3,6 +3,7 @@ import { PTV_BRANDING, PTV_EVENTS, PTV_ROUTES, PTV_SERVICES, PTV_TIMERS } from '
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
 import { getPtvRequestPortalUrl } from '../integrations/integrationsConfig';
+import { isPtvRequestFeatureRoute } from '../extendedFeatureRoutes';
 
 import './request.scss';
 
@@ -57,9 +58,7 @@ function normalizeRequestTriggers() {
 }
 
 function isRequestRoute() {
-    const hash = window.location.hash || '';
-
-    return hash === REQUEST_ROUTE || hash === REQUEST_FALLBACK_ROUTE || hash === REQUEST_LEGACY_ROUTE;
+    return isPtvRequestFeatureRoute(window.location.hash || '');
 }
 
 function getCurrentUrl() {
@@ -437,8 +436,8 @@ requestScope.watchDom(scheduleRequestView);
 requestScope.listen(document, 'pointerdown', handleRequestActivation, true);
 requestScope.listen(document, 'click', handleRequestActivation, true);
 requestScope.listen(document, 'keydown', handleRequestActivation, true);
-requestScope.listen(window, REQUEST_OPEN_EVENT, () => openRequestView());
-requestScope.listen(window, REQUEST_CLOSE_EVENT, () => closeRequestView());
+requestScope.listen(window, REQUEST_OPEN_EVENT, (event) => openRequestView(event.detail || {}));
+requestScope.listen(window, REQUEST_CLOSE_EVENT, (event) => closeRequestView(event.detail || {}));
 requestScope.listen(window, 'hashchange', scheduleRequestView);
 requestScope.listen(window, 'popstate', handleRequestPopState);
 requestScope.add(on('routechange', scheduleRequestView));

@@ -10,6 +10,7 @@ import {
     type PtvItemQuery,
     type PtvLibrary
 } from '../../api';
+import { createPtvAbortController } from '../../core/abortController';
 import { recordPtvEvent, recordPtvTiming, timePtvAsync } from '../../core/observability';
 import {
     deletePtvLibraryIndexCacheByPrefix,
@@ -24,7 +25,6 @@ import {
     writePtvLocalStorageJson
 } from '../../services/runtimeStability';
 import { runPtvScheduledRequests } from '../../utils/ptvMediaRequestScheduler';
-import { withPtvTimeout } from '../../utils/withPtvTimeout';
 
 import { getPtvReadingMetadataStats } from './booksMetadataProviders';
 import {
@@ -105,15 +105,16 @@ const READING_INITIAL_LIMIT = 20;
 const DEFAULT_READING_LIMIT = 32;
 const READING_HOME_LIBRARY_PREVIEW_LIMIT = 50;
 const READING_LIBRARY_PAGE_SIZE = 50;
-const READING_LIBRARY_INITIAL_INDEX_ITEM_COUNT = 200;
-const READING_LIBRARY_COUNT_TIMEOUT_MS = 3500;
-const READING_SHELF_TIMEOUT_MS = 6500;
-const READING_OPTIONAL_SHELF_TIMEOUT_MS = 2500;
+const READING_LIBRARY_INITIAL_INDEX_ITEM_COUNT = READING_LIBRARY_PAGE_SIZE;
+const READING_LIBRARY_COUNT_TIMEOUT_MS = 10_000;
+const READING_SHELF_TIMEOUT_MS = 20_000;
+const READING_OPTIONAL_SHELF_TIMEOUT_MS = 7_000;
 const READING_CONTINUE_LIMIT = 12;
 const READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 4;
 const READING_HOME_STORAGE_SCHEMA_VERSION = 5;
 const READING_HOME_SCOPE_STORAGE_SCHEMA_VERSION = 1;
-const BOOKS_KEYWORDS = /\b(?:book|books|ebook|ebooks|novel|novels|light novel|reader)\b/i;
+const BOOKS_KEYWORDS = /\b(?:books?|ebooks?|novels?|reader|reading|pdfs?|docs?)\b/i;
+const PUBLICATION_KEYWORDS = /\b(?:documents?|magazines?|publications?|literature|bookshelf)\b/i;
 const READING_PLACEHOLDER_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent([
     '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="640" viewBox="0 0 420 640">',
     '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#67e8f9"/><stop offset=".48" stop-color="#facc15"/><stop offset="1" stop-color="#fb7185"/></linearGradient></defs>',
@@ -158,6 +159,7 @@ type PtvReadingProgressiveLibraryState = {
 type ReadingItemsRequestOptions = {
     enableImages?: boolean;
     fields?: string;
+    signal?: AbortSignal;
     stage?: string;
     timeoutMs?: number;
 };
@@ -321,6 +323,7 @@ function withCacheDiagnostic(
     };
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- Cache acceptance validates schema, identity, completeness, and freshness independently.
 function readStoredReadingHome(
     routeKind: PtvReadingRouteKind,
     initialOnly: boolean,
@@ -495,7 +498,7 @@ function writeStoredReadingHome(
 function clearStoredReadingHomeCache() {
     try {
         const count = clearPtvLocalStorageByPrefix([
-            `ptv:reading-home:`,
+            'ptv:reading-home:',
             `ptv:reading-home:v${READING_HOME_STORAGE_SCHEMA_VERSION}:`
         ]);
 
@@ -548,6 +551,7 @@ function isReadingLibrary(library: PtvLibrary) {
 
     return collectionType === 'books'
         || BOOKS_KEYWORDS.test(text)
+        || PUBLICATION_KEYWORDS.test(text)
         || hasPtvReadingComicKeyword(text)
         || hasPtvReadingMangaKeyword(text);
 }
@@ -646,22 +650,65 @@ function getReadingQueryDefaults(options: ReadingItemsRequestOptions = {}): PtvI
     };
 }
 
-function getItems<TItem = PtvReadingItem>(
+function createReadingAbortError() {
+    if (typeof DOMException !== 'undefined') {
+        return new DOMException('PiggieTV Reading route work was aborted.', 'AbortError');
+    }
+
+    return Object.assign(new Error('PiggieTV Reading route work was aborted.'), {
+        name: 'AbortError'
+    });
+}
+
+function isReadingAbortError(error: unknown) {
+    const errorRecord = error && typeof error === 'object' ? error as {
+        message?: unknown;
+        name?: unknown;
+    } : null;
+    const message = typeof errorRecord?.message === 'string' ? errorRecord.message : '';
+
+    return errorRecord?.name === 'AbortError' || /abort|cancel|superseded/i.test(message);
+}
+
+function throwIfReadingAborted(signal?: AbortSignal) {
+    if (signal?.aborted) throw createReadingAbortError();
+}
+
+async function getItems<TItem = PtvReadingItem>(
     query: PtvItemQuery,
     options: ReadingItemsRequestOptions = {}
 ) {
-    const request = getPtvItems<TItem>({
-        ...getReadingQueryDefaults(options),
-        ...query
-    });
+    throwIfReadingAborted(options.signal);
 
-    if (!options.timeoutMs) return request;
+    const controller = createPtvAbortController();
+    let timedOut = false;
+    const abortFromOwner = () => {
+        controller.abort();
+    };
+    const timeoutId = options.timeoutMs ? globalThis.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, options.timeoutMs) : null;
 
-    return withPtvTimeout(
-        request,
-        options.timeoutMs,
-        `${options.stage || 'Reading'} timed out after ${options.timeoutMs}ms.`
-    );
+    options.signal?.addEventListener('abort', abortFromOwner, { once: true });
+
+    try {
+        return await getPtvItems<TItem>({
+            ...getReadingQueryDefaults(options),
+            ...query
+        }, {
+            signal: controller.signal
+        });
+    } catch (error) {
+        if (timedOut) {
+            throw new Error(`${options.stage || 'Reading'} timed out after ${options.timeoutMs}ms.`);
+        }
+
+        throw error;
+    } finally {
+        if (timeoutId !== null) globalThis.clearTimeout(timeoutId);
+        options.signal?.removeEventListener('abort', abortFromOwner);
+    }
 }
 
 function getReadingItemsQueryUrl(
@@ -726,6 +773,7 @@ async function getLibraryReadingItems(
         }, {
             enableImages: options.enableImages ?? false,
             fields: options.fields || READING_PROBE_FIELDS,
+            signal: options.signal,
             stage: options.stage || `${library.name} reading items`,
             timeoutMs: options.timeoutMs ?? READING_SHELF_TIMEOUT_MS
         });
@@ -734,6 +782,8 @@ async function getLibraryReadingItems(
             .map(item => addLibraryHint(item, library))
             .filter(item => isPtvReadingKindMatch(item, routeKind, library.name));
     } catch (error) {
+        if (options.signal?.aborted || isReadingAbortError(error) || isTimeoutError(error)) throw error;
+
         recordPtvEvent('api', 'reading-library-recursive-fetch-fallback', {
             error: getErrorMessage(error),
             libraryId: library.id,
@@ -743,7 +793,7 @@ async function getLibraryReadingItems(
         });
 
         const fallbackResult = await getItems<PtvReadingItem>({
-            IncludeItemTypes: 'Book,Folder,Photo,BoxSet',
+            IncludeItemTypes: 'Book',
             Limit: query.Limit,
             ParentId: library.id,
             Recursive: false,
@@ -753,6 +803,7 @@ async function getLibraryReadingItems(
         }, {
             enableImages: options.enableImages ?? false,
             fields: options.fields || READING_PROBE_FIELDS,
+            signal: options.signal,
             stage: `${library.name} direct reading items`,
             timeoutMs: Math.max(2500, Math.round((options.timeoutMs ?? READING_SHELF_TIMEOUT_MS) / 2))
         });
@@ -765,15 +816,17 @@ async function getLibraryReadingItems(
 
 async function getScopedReadingEntries(
     routeKind: PtvReadingRouteKind,
-    query: PtvItemQuery
+    query: PtvItemQuery,
+    options: ReadingItemsRequestOptions = {}
 ): Promise<ScopedReadingItem[]> {
-    const libraries = await getPtvReadingLibraries();
+    const libraries = await getPtvReadingLibraries({ signal: options.signal });
     const limit = typeof query.Limit === 'number' ? query.Limit : undefined;
 
     if (query.ParentId || !libraries.length) {
         const result = await getItems<PtvReadingItem>(query, {
             enableImages: true,
             fields: READING_SHELF_FIELDS,
+            signal: options.signal,
             stage: `${routeKind} scoped items`,
             timeoutMs: READING_SHELF_TIMEOUT_MS
         });
@@ -792,6 +845,7 @@ async function getScopedReadingEntries(
         }, {
             enableImages: true,
             fields: READING_SHELF_FIELDS,
+            signal: options.signal,
             stage: `${library.name} scoped ${routeKind} items`,
             timeoutMs: READING_SHELF_TIMEOUT_MS
         });
@@ -801,7 +855,8 @@ async function getScopedReadingEntries(
             library
         }));
     }, {
-        concurrency: 2
+        concurrency: 2,
+        signal: options.signal
     });
 
     const entries = results
@@ -816,7 +871,8 @@ function createReadingProgressiveLibraryState(
     routeKind: PtvReadingRouteKind,
     query: PtvItemQuery,
     library: PtvReadingLibraryScope | undefined,
-    isCurrent: () => boolean
+    isCurrent: () => boolean,
+    signal?: AbortSignal
 ): PtvReadingProgressiveLibraryState {
     const state: PtvReadingProgressiveLibraryState = {
         dropReasons: [],
@@ -839,6 +895,7 @@ function createReadingProgressiveLibraryState(
             const requestOptions: ReadingItemsRequestOptions = {
                 enableImages: false,
                 fields: READING_PROBE_FIELDS,
+                signal,
                 stage: `${library?.name || routeKind} library index page ${Math.floor(startIndex / limit) + 1}`,
                 timeoutMs: READING_SHELF_TIMEOUT_MS
             };
@@ -877,6 +934,11 @@ async function loadReadingProgressivePage(
     try {
         return stage === 'initial' ? await state.loader.loadInitial() : await state.loader.loadNext('background');
     } catch (error) {
+        if (isReadingAbortError(error)) {
+            state.loader.retire();
+            throw error;
+        }
+
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         state.dropReasons.push(`${state.library?.name || routeKind}: fetch failed - ${errorMessage}`);
@@ -970,8 +1032,11 @@ export async function fetchPtvReadingLibraryIndex(
         forceRefresh?: boolean;
         isCurrent?: () => boolean;
         onProgress?: (index: PtvReadingLibraryIndex) => void;
+        signal?: AbortSignal;
     } = {}
 ): Promise<PtvReadingLibraryIndex> {
+    throwIfReadingAborted(options.signal);
+
     const startedAt = performance.now();
     const cacheKey = getReadingLibraryIndexCacheKey(routeKind);
 
@@ -981,6 +1046,7 @@ export async function fetchPtvReadingLibraryIndex(
             READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION
         );
 
+        throwIfReadingAborted(options.signal);
         if (cachedIndex?.debug.indexIsComplete) {
             return {
                 ...cachedIndex,
@@ -999,6 +1065,7 @@ export async function fetchPtvReadingLibraryIndex(
 
     const isCurrent = () => readingLibraryIndexGenerations.get(cacheKey) === generation
         && getReadingLibraryIndexCacheKey(routeKind) === cacheKey
+        && !options.signal?.aborted
         && (
             expectedLibrarySetIdentity === null
             || getReadingLibrarySetIdentity(
@@ -1008,7 +1075,9 @@ export async function fetchPtvReadingLibraryIndex(
         )
         && options.isCurrent?.() !== false;
 
-    const discovery = await fetchPtvReadingLibraryDiscovery(routeKind);
+    const discovery = await fetchPtvReadingLibraryDiscovery(routeKind, {
+        signal: options.signal
+    });
     const libraries = discovery.libraries;
     expectedLibrarySetIdentity = getReadingLibrarySetIdentity(libraries, routeKind);
     const targetLibraries: Array<PtvReadingLibraryScope | undefined> = libraries.length ?
@@ -1022,13 +1091,17 @@ export async function fetchPtvReadingLibraryIndex(
             SortOrder: 'Ascending'
         },
         library,
-        isCurrent
+        isCurrent,
+        options.signal
     ));
 
     await runPtvScheduledRequests(
         states,
         state => loadReadingProgressivePage(routeKind, state, 'initial'),
-        { concurrency: 2 }
+        {
+            concurrency: 2,
+            signal: options.signal
+        }
     );
 
     const index = buildPtvReadingLibraryIndex(
@@ -1043,7 +1116,7 @@ export async function fetchPtvReadingLibraryIndex(
 
     recordPtvEvent('api', 'reading-library-index-loaded', index.debug);
 
-    if (index.debug.indexIsComplete && (index.items.length || !index.debug.dropReasons.length)) {
+    if (isCurrent() && index.debug.indexIsComplete && (index.items.length || !index.debug.dropReasons.length)) {
         await writePtvLibraryIndexCache(
             cacheKey,
             READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION,
@@ -1060,7 +1133,10 @@ export async function fetchPtvReadingLibraryIndex(
                 await runPtvScheduledRequests(
                     activeStates,
                     state => loadReadingProgressivePage(routeKind, state, 'background'),
-                    { concurrency: 2 }
+                    {
+                        concurrency: 2,
+                        signal: options.signal
+                    }
                 );
 
                 if (!isCurrent()) break;
@@ -1107,6 +1183,8 @@ export async function fetchPtvReadingLibraryIndex(
                 });
             }
         })().catch(error => {
+            if (options.signal?.aborted || isReadingAbortError(error)) return;
+
             recordPtvEvent('api', 'reading-library-index-background-failed', {
                 error: error instanceof Error ? error.message : String(error),
                 routeKind
@@ -1128,7 +1206,13 @@ export function invalidatePtvReadingHomeCache() {
     void deletePtvLibraryIndexCacheByPrefix(getReadingLibraryIndexCachePrefix());
 }
 
-export async function getPtvReadingLibraries(): Promise<PtvReadingLibraryScope[]> {
+export async function getPtvReadingLibraries(
+    options: {
+        signal?: AbortSignal;
+    } = {}
+): Promise<PtvReadingLibraryScope[]> {
+    throwIfReadingAborted(options.signal);
+
     const startedAt = performance.now();
     const cacheKey = getCacheKey('all');
 
@@ -1142,13 +1226,16 @@ export async function getPtvReadingLibraries(): Promise<PtvReadingLibraryScope[]
         return readingLibraryCache.get(cacheKey) || [];
     }
 
-    const existingRequest = readingLibraryResolutionRequests.get(cacheKey);
+    const existingRequest = options.signal ? null : readingLibraryResolutionRequests.get(cacheKey);
 
     if (existingRequest) return existingRequest;
 
     const request = (async () => {
         const requestStartedAt = performance.now();
-        const result = await getPtvUserViews();
+        const result = await getPtvUserViews({
+            signal: options.signal
+        });
+        throwIfReadingAborted(options.signal);
         const libraryDiscoveryRequestMs = Number((performance.now() - requestStartedAt).toFixed(1));
         const libraries = (result.Items || [])
             .filter(isReadingLibrary)
@@ -1175,8 +1262,9 @@ export async function getPtvReadingLibraries(): Promise<PtvReadingLibraryScope[]
         return libraries;
     })();
 
-    readingLibraryResolutionRequests.set(cacheKey, request);
+    if (options.signal) return request;
 
+    readingLibraryResolutionRequests.set(cacheKey, request);
     return request.finally(() => {
         if (readingLibraryResolutionRequests.get(cacheKey) === request) readingLibraryResolutionRequests.delete(cacheKey);
     });
@@ -1209,7 +1297,8 @@ function getLibraryDiagnosticFromError(
 
 async function fetchPtvReadingLibraryDiagnostic(
     library: PtvReadingLibraryScope,
-    routeKind: PtvReadingRouteKind
+    routeKind: PtvReadingRouteKind,
+    signal?: AbortSignal
 ): Promise<{
         diagnostic: PtvReadingLibraryDiagnostic;
         library: PtvReadingLibraryScope;
@@ -1224,6 +1313,7 @@ async function fetchPtvReadingLibraryDiagnostic(
     const requestOptions: ReadingItemsRequestOptions = {
         enableImages: false,
         fields: READING_PROBE_FIELDS,
+        signal,
         stage: `Reading library probe ${library.name}`,
         timeoutMs: READING_LIBRARY_COUNT_TIMEOUT_MS
     };
@@ -1266,6 +1356,8 @@ async function fetchPtvReadingLibraryDiagnostic(
             }
         };
     } catch (error) {
+        if (signal?.aborted || isReadingAbortError(error)) throw error;
+
         const requestDurationMs = Number((performance.now() - startedAt).toFixed(1));
         const diagnostic = getLibraryDiagnosticFromError(library, lastQueriedUrl, requestDurationMs, error);
 
@@ -1297,6 +1389,7 @@ async function fetchPtvReadingLibraryDiscovery(
     routeKind: PtvReadingRouteKind,
     options: {
         probeLibraries?: boolean;
+        signal?: AbortSignal;
     } = {}
 ): Promise<{
         diagnostics: PtvReadingLibraryDiagnostic[];
@@ -1305,7 +1398,11 @@ async function fetchPtvReadingLibraryDiscovery(
     }> {
     const startedAt = performance.now();
     const libraryResolutionStartedAt = performance.now();
-    const libraries = await getPtvReadingLibraries().catch(error => {
+    const libraries = await getPtvReadingLibraries({
+        signal: options.signal
+    }).catch(error => {
+        if (options.signal?.aborted || isReadingAbortError(error)) throw error;
+
         recordPtvEvent('api', 'reading-library-discovery-failed', {
             error: getErrorMessage(error),
             routeKind
@@ -1360,8 +1457,11 @@ async function fetchPtvReadingLibraryDiscovery(
 
     const results = await runPtvScheduledRequests(
         sortReadingLibrariesForRoute(libraries, routeKind),
-        library => fetchPtvReadingLibraryDiagnostic(library, routeKind),
-        { concurrency: 2 }
+        library => fetchPtvReadingLibraryDiagnostic(library, routeKind, options.signal),
+        {
+            concurrency: 2,
+            signal: options.signal
+        }
     );
     const requestDurationMs = Number((performance.now() - startedAt).toFixed(1));
 
@@ -1709,13 +1809,18 @@ export function mergePtvReadingLibraryIndex(
 export async function fetchPtvReadingItems(
     routeKind: PtvReadingRouteKind,
     query: PtvItemQuery = {},
-    limit = DEFAULT_READING_LIMIT
+    limit = DEFAULT_READING_LIMIT,
+    options: {
+        signal?: AbortSignal;
+    } = {}
 ): Promise<PtvReadingItem[]> {
     const entries = await getScopedReadingEntries(routeKind, {
         Limit: limit,
         SortBy: 'SortName',
         SortOrder: 'Ascending',
         ...query
+    }, {
+        signal: options.signal
     });
 
     return entries.map(entry => entry.item);
@@ -1723,17 +1828,22 @@ export async function fetchPtvReadingItems(
 
 export async function fetchPtvReadingRecentlyAdded(
     routeKind: PtvReadingRouteKind,
-    limit = DEFAULT_READING_LIMIT
+    limit = DEFAULT_READING_LIMIT,
+    options: {
+        signal?: AbortSignal;
+    } = {}
 ): Promise<PtvReadingItem[]> {
     const cacheKey = `${getCacheKey(routeKind)}:recently-added:${limit}`;
-    const inFlightRequest = readingRecentlyAddedRequestCache.get(cacheKey);
+    const inFlightRequest = options.signal ? null : readingRecentlyAddedRequestCache.get(cacheKey);
 
     if (inFlightRequest) return inFlightRequest;
 
-    const request = fetchPtvReadingRecentlyAddedUncached(routeKind, limit)
+    const request = fetchPtvReadingRecentlyAddedUncached(routeKind, limit, options.signal)
         .finally(() => {
-            readingRecentlyAddedRequestCache.delete(cacheKey);
+            if (!options.signal) readingRecentlyAddedRequestCache.delete(cacheKey);
         });
+
+    if (options.signal) return request;
 
     readingRecentlyAddedRequestCache.set(cacheKey, request);
 
@@ -1742,9 +1852,10 @@ export async function fetchPtvReadingRecentlyAdded(
 
 async function fetchPtvReadingRecentlyAddedUncached(
     routeKind: PtvReadingRouteKind,
-    limit: number
+    limit: number,
+    signal?: AbortSignal
 ): Promise<PtvReadingItem[]> {
-    const libraries = await getPtvReadingLibraries();
+    const libraries = await getPtvReadingLibraries({ signal });
     const recentQuery: PtvItemQuery = {
         SortBy: 'DateCreated',
         SortOrder: 'Descending'
@@ -1755,6 +1866,7 @@ async function fetchPtvReadingRecentlyAddedUncached(
             ...recentQuery,
             Limit: Math.min(limit, READING_HOME_LIBRARY_PREVIEW_LIMIT)
         }, {
+            signal,
             stage: `${routeKind} recently added`,
             timeoutMs: READING_SHELF_TIMEOUT_MS
         });
@@ -1774,11 +1886,13 @@ async function fetchPtvReadingRecentlyAddedUncached(
         }, {
             enableImages: true,
             fields: READING_SHELF_FIELDS,
+            signal,
             stage: `${library.name} recently added`,
             timeoutMs: READING_SHELF_TIMEOUT_MS
         });
     }, {
-        concurrency: 2
+        concurrency: 2,
+        signal
     });
 
     return uniquePtvReadingItems(results.reduce<PtvReadingItem[]>((items, result) => items.concat(result), []))
@@ -1789,7 +1903,10 @@ async function fetchPtvReadingRecentlyAddedUncached(
 export function searchPtvReading(
     routeKind: PtvReadingRouteKind,
     searchTerm: string,
-    limit = 60
+    limit = 60,
+    options: {
+        signal?: AbortSignal;
+    } = {}
 ): Promise<PtvReadingItem[]> {
     const normalizedSearchTerm = searchTerm.trim();
 
@@ -1799,27 +1916,42 @@ export function searchPtvReading(
         SearchTerm: normalizedSearchTerm,
         SortBy: 'SortName',
         SortOrder: 'Ascending'
-    }, limit);
+    }, limit, options);
 }
 
-export function fetchPtvReadingItem(itemId: string): Promise<PtvReadingItem> {
-    return getPtvItem<PtvReadingItem>(itemId);
+export function fetchPtvReadingItem(
+    itemId: string,
+    options: {
+        signal?: AbortSignal;
+    } = {}
+): Promise<PtvReadingItem> {
+    return getPtvItem<PtvReadingItem>(itemId, {
+        signal: options.signal
+    });
 }
 
-function fetchPtvReadingContinueItems(routeKind: PtvReadingRouteKind, limit = 36): Promise<PtvReadingItem[]> {
+function fetchPtvReadingContinueItems(
+    routeKind: PtvReadingRouteKind,
+    limit = 36,
+    signal?: AbortSignal
+): Promise<PtvReadingItem[]> {
     return fetchPtvReadingItems(routeKind, {
         Filters: 'IsResumable',
         SortBy: 'DatePlayed',
         SortOrder: 'Descending'
-    }, limit);
+    }, limit, { signal });
 }
 
-function fetchPtvReadingFavoriteItems(routeKind: PtvReadingRouteKind, limit = 48): Promise<PtvReadingItem[]> {
+function fetchPtvReadingFavoriteItems(
+    routeKind: PtvReadingRouteKind,
+    limit = 48,
+    signal?: AbortSignal
+): Promise<PtvReadingItem[]> {
     return fetchPtvReadingItems(routeKind, {
         Filters: 'IsFavorite',
         SortBy: 'SortName',
         SortOrder: 'Ascending'
-    }, limit);
+    }, limit, { signal });
 }
 
 function getReadingSectionTitle(sectionId: string, routeKind: PtvReadingRouteKind) {
@@ -1853,10 +1985,11 @@ function getReadingSectionSubtitle(sectionId: string) {
 async function runReadingShelf(
     routeKind: PtvReadingRouteKind,
     sectionId: string,
-    task: () => Promise<PtvReadingItem[]>,
+    task: (signal: AbortSignal) => Promise<PtvReadingItem[]>,
     options: {
         kind?: PtvReadingItemKind;
         lastQueriedUrl?: string;
+        signal?: AbortSignal;
         source?: string;
         subtitle?: string;
         timeoutMs?: number;
@@ -1869,12 +2002,21 @@ async function runReadingShelf(
     const timeoutMs = options.timeoutMs ?? READING_SHELF_TIMEOUT_MS;
     const startedAt = performance.now();
 
+    throwIfReadingAborted(options.signal);
+
+    const controller = createPtvAbortController();
+    let timedOut = false;
+    const abortFromOwner = () => {
+        controller.abort();
+    };
+    const timeoutId = globalThis.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeoutMs);
+
+    options.signal?.addEventListener('abort', abortFromOwner, { once: true });
     try {
-        const items = await withPtvTimeout(
-            task(),
-            timeoutMs,
-            `${title} shelf timed out after ${timeoutMs}ms.`
-        );
+        const items = await task(controller.signal);
         const requestDurationMs = Number((performance.now() - startedAt).toFixed(1));
         const diagnostics = getSectionDiagnostic(sectionId, title, source, items, {
             lastQueriedUrl: options.lastQueriedUrl,
@@ -1894,15 +2036,21 @@ async function runReadingShelf(
             subtitle
         });
     } catch (error) {
-        const errorMessage = getErrorMessage(error);
+        if (options.signal?.aborted) throw createReadingAbortError();
+        if (!timedOut && isReadingAbortError(error)) throw error;
+
+        const reportedError = timedOut ?
+            new Error(`${title} shelf timed out after ${timeoutMs}ms.`) :
+            error;
+        const errorMessage = getErrorMessage(reportedError);
         const requestDurationMs = Number((performance.now() - startedAt).toFixed(1));
         const diagnostics = getSectionDiagnostic(sectionId, title, source, [], {
             error: errorMessage,
             lastQueriedUrl: options.lastQueriedUrl,
             requestDurationMs,
             status: 'error',
-            statusCode: getErrorStatusCode(error),
-            timeoutReason: isTimeoutError(error) ? errorMessage : undefined
+            statusCode: getErrorStatusCode(reportedError),
+            timeoutReason: isTimeoutError(reportedError) ? errorMessage : undefined
         });
 
         recordPtvEvent('api', 'reading-api-section-failed', {
@@ -1933,14 +2081,22 @@ async function runReadingShelf(
             kind: options.kind,
             subtitle
         });
+    } finally {
+        globalThis.clearTimeout(timeoutId);
+        options.signal?.removeEventListener('abort', abortFromOwner);
     }
 }
 
 async function getReadingRouteQueryForDiagnostics(
     routeKind: PtvReadingRouteKind,
-    query: PtvItemQuery
+    query: PtvItemQuery,
+    signal?: AbortSignal
 ) {
-    const libraries = await getPtvReadingLibraries().catch(() => []);
+    const libraries = await getPtvReadingLibraries({ signal }).catch(error => {
+        if (signal?.aborted || isReadingAbortError(error)) throw error;
+
+        return [];
+    });
     const selectedLibraries = getReadingLibrariesForRoute(libraries, routeKind);
     const selectedLibrary = selectedLibraries.length === 1 ? selectedLibraries[0] : null;
 
@@ -1953,7 +2109,10 @@ async function getReadingRouteQueryForDiagnostics(
 export async function fetchPtvReadingHomeSection(
     routeKind: PtvReadingRouteKind,
     sectionId: string,
-    limit = READING_HOME_LIBRARY_PREVIEW_LIMIT
+    limit = READING_HOME_LIBRARY_PREVIEW_LIMIT,
+    options: {
+        signal?: AbortSignal;
+    } = {}
 ): Promise<PtvReadingSection> {
     if (sectionId === 'recently-added') {
         const query = {
@@ -1965,12 +2124,21 @@ export async function fetchPtvReadingHomeSection(
         return runReadingShelf(
             routeKind,
             sectionId,
-            () => fetchPtvReadingRecentlyAdded(routeKind, Math.min(limit, READING_HOME_LIBRARY_PREVIEW_LIMIT)),
+            signal => fetchPtvReadingRecentlyAdded(
+                routeKind,
+                Math.min(limit, READING_HOME_LIBRARY_PREVIEW_LIMIT),
+                { signal }
+            ),
             {
-                lastQueriedUrl: getReadingItemsQueryUrl(await getReadingRouteQueryForDiagnostics(routeKind, query), {
+                lastQueriedUrl: getReadingItemsQueryUrl(await getReadingRouteQueryForDiagnostics(
+                    routeKind,
+                    query,
+                    options.signal
+                ), {
                     enableImages: false,
                     fields: READING_PROBE_FIELDS
                 }),
+                signal: options.signal,
                 source: 'jellyfin-latest'
             }
         );
@@ -1988,12 +2156,17 @@ export async function fetchPtvReadingHomeSection(
         return runReadingShelf(
             routeKind,
             sectionId,
-            () => fetchPtvReadingContinueItems(routeKind, sectionLimit),
+            signal => fetchPtvReadingContinueItems(routeKind, sectionLimit, signal),
             {
-                lastQueriedUrl: getReadingItemsQueryUrl(await getReadingRouteQueryForDiagnostics(routeKind, query), {
+                lastQueriedUrl: getReadingItemsQueryUrl(await getReadingRouteQueryForDiagnostics(
+                    routeKind,
+                    query,
+                    options.signal
+                ), {
                     enableImages: false,
                     fields: READING_PROBE_FIELDS
                 }),
+                signal: options.signal,
                 source: 'jellyfin-resume',
                 timeoutMs: READING_OPTIONAL_SHELF_TIMEOUT_MS
             }
@@ -2011,12 +2184,21 @@ export async function fetchPtvReadingHomeSection(
         return runReadingShelf(
             routeKind,
             sectionId,
-            () => fetchPtvReadingFavoriteItems(routeKind, Math.min(limit, READING_HOME_LIBRARY_PREVIEW_LIMIT)),
+            signal => fetchPtvReadingFavoriteItems(
+                routeKind,
+                Math.min(limit, READING_HOME_LIBRARY_PREVIEW_LIMIT),
+                signal
+            ),
             {
-                lastQueriedUrl: getReadingItemsQueryUrl(await getReadingRouteQueryForDiagnostics(routeKind, query), {
+                lastQueriedUrl: getReadingItemsQueryUrl(await getReadingRouteQueryForDiagnostics(
+                    routeKind,
+                    query,
+                    options.signal
+                ), {
                     enableImages: false,
                     fields: READING_PROBE_FIELDS
                 }),
+                signal: options.signal,
                 source: 'jellyfin-favorites'
             }
         );
@@ -2025,19 +2207,22 @@ export async function fetchPtvReadingHomeSection(
     return runReadingShelf(
         routeKind,
         'library',
-        () => fetchPtvReadingItems(routeKind, {
+        signal => fetchPtvReadingItems(routeKind, {
             SortBy: 'SortName',
             SortOrder: 'Ascending'
-        }, Math.min(limit, READING_HOME_LIBRARY_PREVIEW_LIMIT)),
+        }, Math.min(limit, READING_HOME_LIBRARY_PREVIEW_LIMIT), {
+            signal
+        }),
         {
             lastQueriedUrl: getReadingItemsQueryUrl(await getReadingRouteQueryForDiagnostics(routeKind, {
                 Limit: Math.min(limit, READING_HOME_LIBRARY_PREVIEW_LIMIT),
                 SortBy: 'SortName',
                 SortOrder: 'Ascending'
-            }), {
+            }, options.signal), {
                 enableImages: false,
                 fields: READING_PROBE_FIELDS
             }),
+            signal: options.signal,
             source: 'jellyfin-items'
         }
     );
@@ -2115,9 +2300,12 @@ export function getPtvReadingHome(
     options: {
         initialOnly?: boolean;
         forceRefresh?: boolean;
+        signal?: AbortSignal;
         view?: string;
     } = {}
 ): Promise<PtvReadingHomeData> {
+    if (options.signal?.aborted) return Promise.reject(createReadingAbortError());
+
     const view = options.view || 'home';
     const memoryLibrarySetIdentity = getReadingLibrarySetIdentity(readingLibraryCache.get(getCacheKey('all')) || [], routeKind);
     const knownLibrarySetIdentity = memoryLibrarySetIdentity !== 'unscoped' ?
@@ -2195,14 +2383,23 @@ export function getPtvReadingHome(
     });
 
     return timePtvAsync('api', 'reading-api-loaded', async () => {
+        throwIfReadingAborted(options.signal);
+
         const startedAt = performance.now();
-        const discovery = await fetchPtvReadingLibraryDiscovery(routeKind);
+        const discovery = await fetchPtvReadingLibraryDiscovery(routeKind, {
+            signal: options.signal
+        });
         const { diagnostics: libraryDiagnostics, libraries } = discovery;
         const resolvedLibrarySetIdentity = getReadingLibrarySetIdentity(libraries, routeKind);
         cacheKey = getReadingHomeCacheKey(routeKind, resolvedLibrarySetIdentity, view);
 
         if (options.initialOnly) {
-            const recentlyAddedSection = await fetchPtvReadingHomeSection(routeKind, 'recently-added', READING_INITIAL_LIMIT);
+            const recentlyAddedSection = await fetchPtvReadingHomeSection(
+                routeKind,
+                'recently-added',
+                READING_INITIAL_LIMIT,
+                { signal: options.signal }
+            );
             const sections = [
                 recentlyAddedSection,
                 getLoadingSection('continue-reading', 'Continue Reading', 'Loading in background'),
@@ -2234,6 +2431,7 @@ export function getPtvReadingHome(
             }));
             const createdAt = Date.now();
 
+            throwIfReadingAborted(options.signal);
             readingHomeSummaryCache.set(cacheKey, {
                 createdAt,
                 data: cachedData,
@@ -2266,13 +2464,36 @@ export function getPtvReadingHome(
             libraryPreviewSection
         ] = await runPtvScheduledRequests(
             [
-                () => fetchPtvReadingHomeSection(routeKind, 'recently-added', READING_HOME_LIBRARY_PREVIEW_LIMIT),
-                () => fetchPtvReadingHomeSection(routeKind, 'continue-reading', READING_HOME_LIBRARY_PREVIEW_LIMIT),
-                () => fetchPtvReadingHomeSection(routeKind, 'favorites', READING_HOME_LIBRARY_PREVIEW_LIMIT),
-                () => fetchPtvReadingHomeSection(routeKind, 'library', READING_HOME_LIBRARY_PREVIEW_LIMIT)
+                () => fetchPtvReadingHomeSection(
+                    routeKind,
+                    'recently-added',
+                    READING_HOME_LIBRARY_PREVIEW_LIMIT,
+                    { signal: options.signal }
+                ),
+                () => fetchPtvReadingHomeSection(
+                    routeKind,
+                    'continue-reading',
+                    READING_HOME_LIBRARY_PREVIEW_LIMIT,
+                    { signal: options.signal }
+                ),
+                () => fetchPtvReadingHomeSection(
+                    routeKind,
+                    'favorites',
+                    READING_HOME_LIBRARY_PREVIEW_LIMIT,
+                    { signal: options.signal }
+                ),
+                () => fetchPtvReadingHomeSection(
+                    routeKind,
+                    'library',
+                    READING_HOME_LIBRARY_PREVIEW_LIMIT,
+                    { signal: options.signal }
+                )
             ],
             task => task(),
-            { concurrency: 2 }
+            {
+                concurrency: 2,
+                signal: options.signal
+            }
         );
         const allItems = uniquePtvReadingItems([
             ...continueReadingSection.items,
@@ -2322,6 +2543,7 @@ export function getPtvReadingHome(
         }));
         const createdAt = Date.now();
 
+        throwIfReadingAborted(options.signal);
         readingHomeCache.set(cacheKey, {
             createdAt,
             data: cachedData,

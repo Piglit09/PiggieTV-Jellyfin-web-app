@@ -1,0 +1,6 @@
+@use "./noto-sans/tc-400-normal";
+@use "./noto-sans/tc-700-normal";
+
+html[data-ptv-noto-font-profile='tc'] {
+    font-family: "Noto Sans", "Noto Sans TC", "Noto Sans HK", "Noto Sans JP", "Noto Sans KR", "Noto Sans SC", sans-serif;
+}

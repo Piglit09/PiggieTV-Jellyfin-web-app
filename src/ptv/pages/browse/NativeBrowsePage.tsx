@@ -5,8 +5,10 @@ import Page from 'components/Page';
 
 import {
     getPtvCurrentUserId,
+    getItemImageTag,
     getPtvItemImageCandidates,
     getPtvItemImageUrl,
+    getPtvServerId,
     getPtvItems,
     getPtvResumeItems,
     getPtvItemFieldProfileDiagnostics,
@@ -31,19 +33,37 @@ import {
     registerPtvNativeRoute
 } from '../../shell/routeController';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
+import { createPtvAbortController } from '../../core/abortController';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import {
     getPtvQualityPillClass,
     getPtvQualityTags
 } from '../../modules/cards/qualityTags';
 import { PtvIcon } from '../../modules/icons';
+import { getPtvRecommendationHomeData } from '../../modules/recommendations';
 import {
     getPtvBrowseFeaturedQueryOverrides,
     prioritizePtvBrowseTasks
 } from './browseLoadingPolicy';
 import {
+    assertPtvBrowseLoadOwnerCurrent,
+    createPtvBrowseCancellationError,
+    getMissingPtvBrowseRetryTaskId,
+    getPtvBrowseSettledCancellation,
+    isPtvBrowseCancellation,
+    isPtvBrowseLoadOwnerCurrent,
+    recoverPtvBrowseRequestWithFallback,
+    throwIfPtvBrowseCancelled
+} from './browseReliability';
+import {
+    mergePtvBrowseShelfResult,
+    preparePtvBrowseSectionsForRetry
+} from './browseShelfState';
+import {
     applyPtvBrowseScope,
     findExactPtvBrowseDirectoryEntry,
+    getPtvBrowseScopeIdentityKey,
+    isPtvBrowseScopeIdentityCurrent,
     loadPtvBrowseDirectory,
     loadPtvFocusedBrowsePages,
     resolvePtvBrowseScope,
@@ -90,6 +110,27 @@ type PtvBrowseSection = Readonly<{
     status: 'empty' | 'error' | 'loading' | 'ready' | 'slow';
 }>;
 
+type PtvBrowseLandingTagSection = Readonly<{
+    id: string;
+    label: string;
+    tag: string;
+    tagId: string;
+    type: 'genre' | 'studio';
+}>;
+
+type PtvBrowseLandingTagSelectionSummary = Readonly<{
+    minItemCount: number;
+    total: number;
+    eligible: number;
+    selected: string[];
+    skippedUnderMinimum: string[];
+}>;
+
+type PtvBrowseLandingTagDebug = Readonly<{
+    genre: PtvBrowseLandingTagSelectionSummary;
+    studio: PtvBrowseLandingTagSelectionSummary;
+}>;
+
 type PtvBrowseDiagnostic = Readonly<{
     bytesPerItem: number;
     count: number;
@@ -127,6 +168,7 @@ type PtvBrowseState = Readonly<{
     heroItem: PtvItem | null;
     isLoading: boolean;
     sections: PtvBrowseSection[];
+    tagSectionDebug: PtvBrowseLandingTagDebug;
     tags: {
         genres: string[];
         studios: string[];
@@ -148,11 +190,67 @@ const PTV_BROWSE_ROW_HARD_TIMEOUT_MS = 26000;
 const PTV_BROWSE_ROW_NAV_EPSILON = 2;
 const PTV_BROWSE_EAGER_ROW_COUNT = 2;
 const PTV_BROWSE_DEFERRED_ROW_ROOT_MARGIN = '900px 0px';
+const PTV_BROWSE_RANDOM_TAG_SHELVES_COUNT = 4;
+const PTV_BROWSE_TAG_SHELF_MIN_ITEM_COUNT = 12;
 
 let browseMountedCardCount = 0;
 let browsePeakMountedCardCount = 0;
 let browseShelfMountCount = 0;
 let browseShelfUnmountCount = 0;
+
+function createPtvBrowseSeed(value: string) {
+    let hash = 2166136261;
+
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+
+    return hash >>> 0;
+}
+
+function createPtvBrowseRandom(seed: number) {
+    let state = seed >>> 0;
+
+    return () => {
+        state = (state * 1664525 + 1013904223) >>> 0;
+
+        return state / 0x100000000;
+    };
+}
+
+function shufflePtvBrowseItems<T>(items: readonly T[], nextRandom: () => number = Math.random) {
+    const shuffledItems = [...items];
+
+    for (let index = shuffledItems.length - 1; index > 0; index -= 1) {
+        const next = Math.max(0, Math.min(index, Math.floor(nextRandom() * (index + 1))));
+        const candidate = shuffledItems[index];
+        shuffledItems[index] = shuffledItems[next];
+        shuffledItems[next] = candidate;
+    }
+
+    return shuffledItems;
+}
+
+function getPtvBrowseSectionSeed(route: PtvBrowseRoute, scope: PtvBrowseResolvedScope) {
+    return createPtvBrowseSeed(`${route.kind}|${route.scopeAlias || ''}|${scope.alias}|${scope.libraryIds.join(',')}`);
+}
+
+function slugPtvBrowseSection(value: string) {
+    const normalized = getText(value).toLowerCase();
+
+    return normalized
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .replace(/-+/g, '-');
+}
+
+function buildPtvBrowseLandingTagSectionId(type: 'genre' | 'studio', index: number, tag: string) {
+    const prefix = type === 'genre' ? 'genre' : 'studio';
+    const fallback = String(index + 1);
+
+    return `${prefix}-${slugPtvBrowseSection(tag) || fallback}-${index + 1}`;
+}
 
 function getBrowseFieldProfileForSection(section: string): PtvItemFieldProfileId {
     if (section === 'collections') return 'COLLECTION_FIELDS';
@@ -185,6 +283,22 @@ const EMPTY_BROWSE_STATE: PtvBrowseState = {
     heroItem: null,
     isLoading: true,
     sections: [],
+    tagSectionDebug: {
+        genre: {
+            minItemCount: PTV_BROWSE_TAG_SHELF_MIN_ITEM_COUNT,
+            eligible: 0,
+            skippedUnderMinimum: [],
+            selected: [],
+            total: 0
+        },
+        studio: {
+            minItemCount: PTV_BROWSE_TAG_SHELF_MIN_ITEM_COUNT,
+            eligible: 0,
+            skippedUnderMinimum: [],
+            selected: [],
+            total: 0
+        }
+    },
     tags: {
         genres: [],
         studios: []
@@ -410,6 +524,17 @@ function getPtvBrowseShellSection(config: PtvBrowseConfig): PtvShellSection {
     return config.kind;
 }
 
+function getPtvBrowseLibraryTitle(config: PtvBrowseConfig, route: PtvBrowseRoute) {
+    if (route.kind === 'movies' && route.scopeAlias === 'animemovies') return 'AniMovies library';
+    if (route.kind === 'shows' && route.scopeAlias === 'anime') return 'Anime library';
+    if (route.kind === 'shows' && route.scopeAlias === 'cartoons') return 'Cartoons library';
+
+    if (route.kind === 'movies') return 'Movies Library';
+    if (route.kind === 'shows') return 'Shows Library';
+
+    return config.title;
+}
+
 function getBaseQuery(
     config: PtvBrowseConfig,
     overrides: PtvItemQuery = {},
@@ -477,22 +602,126 @@ function getBrowseMetadata(item: PtvItem) {
     ].filter(Boolean).join(' | ');
 }
 
+function hasBrowseLogoImage(item: PtvItem | null | undefined): boolean {
+    if (!item) return false;
+
+    const logoTag = getItemImageTag(item, 'Logo');
+    const parentLogoItemId = getText(item.ParentLogoItemId) || getText((item as Record<string, unknown>).parentLogoItemId);
+
+    return Boolean(logoTag || parentLogoItemId);
+}
+
+function isPreferredHeroItemType(item: PtvItem, config?: PtvBrowseConfig): boolean {
+    const type = getText(item.Type);
+
+    if (!type) return true;
+    if (config?.kind === 'shows') {
+        return type === 'Series' || type === 'BoxSet';
+    }
+    if (config?.kind === 'movies') {
+        return type === 'Movie' || type === 'BoxSet';
+    }
+    if (config?.kind === 'collections') {
+        return type === 'BoxSet';
+    }
+
+    return type !== 'Episode';
+}
+
+function getHeroItemScore(item: PtvItem, config?: PtvBrowseConfig): number {
+    let score = 0;
+    const type = getText(item.Type);
+
+    if (isPreferredHeroItemType(item, config)) {
+        score += 1000;
+    } else if (type === 'Episode') {
+        score -= 500;
+    }
+
+    const hasBackdrop = Boolean(
+        (Array.isArray(item.BackdropImageTags) && item.BackdropImageTags.length)
+        || item.BackdropImageTag
+        || item.ParentBackdropImageTag
+        || item.ParentBackdropItemId
+        || item.BackdropItemId
+    );
+    if (hasBackdrop) score += 200;
+
+    if (hasBrowseLogoImage(item)) score += 100;
+    if (getText(item.Overview)) score += 50;
+
+    return score;
+}
+
+function findPtvBrowseHeroItem(items: PtvItem[] | undefined, config?: PtvBrowseConfig): PtvItem | null {
+    if (!items || !items.length) return null;
+
+    let bestItem: PtvItem | null = null;
+    let bestScore = -Infinity;
+
+    for (const item of items) {
+        const score = getHeroItemScore(item, config);
+        if (score > bestScore) {
+            bestScore = score;
+            bestItem = item;
+        }
+    }
+
+    return bestItem;
+}
+
+function selectPtvBrowseHeroItem(
+    currentHero: PtvItem | null,
+    sectionId: string,
+    items: PtvItem[],
+    config: PtvBrowseConfig
+): PtvItem | null {
+    const candidate = findPtvBrowseHeroItem(items, config);
+
+    if (!candidate) return currentHero;
+    if (!currentHero) return candidate;
+
+    const currentIsEpisode = getText(currentHero.Type) === 'Episode';
+    const candidateIsPreferred = isPreferredHeroItemType(candidate, config);
+
+    if (currentIsEpisode && candidateIsPreferred) {
+        return candidate;
+    }
+
+    if (sectionId === 'featured' && candidateIsPreferred) {
+        return candidate;
+    }
+
+    const currentScore = getHeroItemScore(currentHero, config);
+    const candidateScore = getHeroItemScore(candidate, config);
+
+    if (candidateScore > currentScore + 100) {
+        return candidate;
+    }
+
+    return currentHero;
+}
+
 function getBrowseBackdropImage(item: PtvItem | null) {
     if (!item) return '';
+    const performanceProfile = getPtvPerformanceProfile();
 
     return getPtvItemImageUrl(item, {
+        serverId: getPtvServerId() || undefined,
         imageType: 'Backdrop',
-        maxWidth: 1920,
+        maxWidth: performanceProfile.heroBackdropMaxWidth,
         quality: 88
     });
 }
 
 function getBrowseLogoImage(item: PtvItem | null) {
-    if (!item || !item.ImageTags?.Logo) return '';
+    if (!item || !hasBrowseLogoImage(item)) return '';
+    const performanceProfile = getPtvPerformanceProfile();
 
     return getPtvItemImageUrl(item, {
+        serverId: getPtvServerId() || undefined,
         imageType: 'Logo',
-        maxWidth: 520,
+        maxWidth: Math.min(520, performanceProfile.rowPrimaryMaxWidth),
         quality: 92
     });
 }
@@ -517,6 +746,99 @@ function getDistinctTags(items: PtvItem[], key: 'Genres' | 'Studios') {
         .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
         .map(([tag]) => tag)
         .slice(0, 18);
+}
+
+function getPtvBrowseLandingTagSections(
+    config: PtvBrowseConfig,
+    directories: PtvBrowseDirectoryEntry[],
+    type: 'genre' | 'studio',
+    nextRandom: () => number,
+    maxCount: number
+): PtvBrowseLandingTagSection[] {
+    const eligibleDirectories = directories.filter(entry => entry.count >= PTV_BROWSE_TAG_SHELF_MIN_ITEM_COUNT);
+
+    if (!eligibleDirectories.length || maxCount <= 0) return [];
+
+    const label = type === 'genre' ? 'Genre' : (config.kind === 'shows' ? 'Studio / Network' : 'Studio');
+    const rows = shufflePtvBrowseItems(eligibleDirectories, nextRandom)
+        .slice(0, Math.min(maxCount, eligibleDirectories.length));
+
+    return rows.map((entry, index) => ({
+        id: buildPtvBrowseLandingTagSectionId(type, index, entry.name),
+        label,
+        tag: entry.name,
+        tagId: entry.id,
+        type
+    })).filter(section => section.tag);
+}
+
+function getPtvBrowseLandingTagSectionSummary(
+    directories: PtvBrowseDirectoryEntry[],
+    sections: readonly PtvBrowseLandingTagSection[],
+    minItemCount: number
+): PtvBrowseLandingTagSelectionSummary {
+    const directoryByTag = new Map<string, number>(directories.map(directory => [directory.name, directory.count]));
+    const selected = sections
+        .map(section => `${section.tag} (${directoryByTag.get(section.tag) || 0})`)
+        .slice(0, PTV_BROWSE_RANDOM_TAG_SHELVES_COUNT);
+
+    const skippedUnderMinimum = directories
+        .filter(entry => entry.count > 0 && entry.count < minItemCount)
+        .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name))
+        .slice(0, PTV_BROWSE_RANDOM_TAG_SHELVES_COUNT * 2)
+        .map(entry => `${entry.name} (${entry.count})`);
+
+    return {
+        eligible: directories.filter(entry => entry.count >= minItemCount).length,
+        minItemCount,
+        selected,
+        skippedUnderMinimum,
+        total: directories.length
+    };
+}
+
+function getEmptyPtvBrowseLandingTagSectionSummary(minItemCount: number): PtvBrowseLandingTagSelectionSummary {
+    return {
+        eligible: 0,
+        minItemCount,
+        selected: [],
+        skippedUnderMinimum: [],
+        total: 0
+    };
+}
+
+function getEmptyPtvBrowseLandingTagDebug(minItemCount: number): PtvBrowseLandingTagDebug {
+    return {
+        genre: getEmptyPtvBrowseLandingTagSectionSummary(minItemCount),
+        studio: getEmptyPtvBrowseLandingTagSectionSummary(minItemCount)
+    };
+}
+
+function getPtvBrowseLandingTagSectionQuery(
+    config: PtvBrowseConfig,
+    scope: PtvBrowseResolvedScope,
+    section: PtvBrowseLandingTagSection
+) {
+    const hasTagId = Boolean(section.tagId);
+    const genreFilters = hasTagId ?
+        { GenreIds: section.tagId, Genres: section.tag } :
+        { Genres: section.tag };
+    const studioFilters = hasTagId ?
+        { StudioIds: section.tagId, Studios: section.tag } :
+        { Studios: section.tag };
+    const sectionOverrides = section.type === 'genre' ? {
+        ...genreFilters,
+        Limit: 20,
+        SortBy: 'SortName',
+        SortOrder: 'Ascending'
+    } : {
+        ...studioFilters,
+        Limit: 20,
+        SortBy: 'SortName',
+        SortOrder: 'Ascending'
+    };
+
+    return getBaseQuery(config, sectionOverrides, section.id, scope);
 }
 
 function getBrowseRequestUrl(query: PtvItemQuery) {
@@ -547,20 +869,70 @@ function getBrowseFieldDiagnostics(section: string, query: PtvItemQuery, itemCou
     };
 }
 
+function createPtvBrowseMissingRetryDiagnostic(section: string): PtvBrowseDiagnostic {
+    const error = 'This shelf is no longer available for the current browse route.';
+
+    return {
+        ...getBrowseFieldDiagnostics(section, {}, 0, 0),
+        count: 0,
+        durationMs: 0,
+        error,
+        fields: '',
+        includeItemTypes: '',
+        lateResultDiscarded: false,
+        limit: 0,
+        normalizationDurationMs: 0,
+        payloadSize: 0,
+        requestUrl: 'browse-directory',
+        section,
+        status: 'error',
+        timeoutReason: '',
+        timeoutSource: 'none',
+        wasAborted: false
+    };
+}
+
 function withBrowseHardTimeout<T>(
-    promise: Promise<T>,
+    task: (signal: AbortSignal) => Promise<T>,
     section: string,
     timeoutMs: number,
+    parentSignal?: AbortSignal,
     onLateResult?: (status: 'error' | 'success') => void
 ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
         let settled = false;
+        const requestController = createPtvAbortController();
+        const createAbortError = () => {
+            const error = new Error(`${section} request was cancelled.`);
+
+            error.name = 'AbortError';
+            return error;
+        };
+        const cleanup = () => {
+            window.clearTimeout(timeout);
+            parentSignal?.removeEventListener('abort', onParentAbort);
+        };
+        const onParentAbort = () => {
+            if (settled) return;
+
+            settled = true;
+            requestController.abort();
+            cleanup();
+            reject(createAbortError());
+        };
         const timeout = window.setTimeout(() => {
             if (settled) return;
 
             settled = true;
+            requestController.abort();
+            cleanup();
             reject(new PtvBrowseTimeoutError(section, timeoutMs));
         }, timeoutMs);
+        const promise = parentSignal?.aborted ?
+            Promise.reject(createAbortError()) :
+            task(requestController.signal);
+
+        parentSignal?.addEventListener('abort', onParentAbort, { once: true });
 
         promise.then(
             value => {
@@ -570,7 +942,7 @@ function withBrowseHardTimeout<T>(
                 }
 
                 settled = true;
-                window.clearTimeout(timeout);
+                cleanup();
                 resolve(value);
             },
             error => {
@@ -580,14 +952,14 @@ function withBrowseHardTimeout<T>(
                 }
 
                 settled = true;
-                window.clearTimeout(timeout);
+                cleanup();
                 reject(error);
             }
         );
     });
 }
 
-async function fetchBrowseItems(section: string, query: PtvItemQuery): Promise<{
+async function fetchBrowseItems(section: string, query: PtvItemQuery, signal?: AbortSignal): Promise<{
     diagnostic: PtvBrowseDiagnostic;
     items: PtvItem[];
 }> {
@@ -609,9 +981,10 @@ async function fetchBrowseItems(section: string, query: PtvItemQuery): Promise<{
 
     try {
         const result = await withBrowseHardTimeout(
-            getPtvItems<PtvItem>(query),
+            requestSignal => getPtvItems<PtvItem>(query, { signal: requestSignal }),
             section,
             timeoutMs,
+            signal,
             () => {
                 lateResultDiscarded = true;
             }
@@ -660,6 +1033,8 @@ async function fetchBrowseItems(section: string, query: PtvItemQuery): Promise<{
             items
         };
     } catch (error) {
+        throwIfPtvBrowseCancelled(error, signal);
+
         const isTimeout = error instanceof PtvBrowseTimeoutError;
         const message = error instanceof Error ? error.message : 'Browse row failed';
         const durationMs = Number((performance.now() - startedAt).toFixed(1));
@@ -701,7 +1076,100 @@ async function fetchBrowseItems(section: string, query: PtvItemQuery): Promise<{
     }
 }
 
-async function fetchBrowseResumeItems(section: string, query: PtvItemQuery): Promise<{
+function filterPtvBrowseRecommendationItems(config: PtvBrowseConfig, items: Array<{ item?: unknown; mediaType?: unknown }>) {
+    const expectedType = config.kind === 'movies' ? 'movie' : 'show';
+    const targetItemType = config.kind === 'movies' ? 'Movie' : 'Series';
+
+    return items
+        .filter(entry => Boolean(entry.item))
+        .filter(entry => !entry.mediaType || String(entry.mediaType).toLowerCase() === expectedType)
+        .map(entry => entry.item as PtvItem)
+        .filter(item => {
+            const itemType = getText(item?.Type);
+
+            return !itemType || itemType === targetItemType;
+        });
+}
+
+async function fetchBrowseRecommendations(config: PtvBrowseConfig, scope: PtvBrowseResolvedScope, signal?: AbortSignal): Promise<{
+    diagnostic: PtvBrowseDiagnostic;
+    items: PtvItem[];
+}> {
+    const startedAt = performance.now();
+    const requestUrl = 'recommendations/engine/getPtvRecommendationHomeData';
+    let lateResultDiscarded = false;
+    const timeoutMs = PTV_BROWSE_ROW_HARD_TIMEOUT_MS;
+    const fallbackQuery = getBaseQuery(config, {
+        Limit: 20,
+        SortBy: 'Random'
+    }, 'recommendations', scope);
+    const fallback = () => fetchBrowseItems('recommendations', fallbackQuery, signal);
+
+    const userId = getPtvCurrentUserId();
+
+    if (!userId) return fallback();
+
+    try {
+        const result = await withBrowseHardTimeout(
+            requestSignal => getPtvRecommendationHomeData({ signal: requestSignal }),
+            'recommendations',
+            timeoutMs,
+            signal,
+            () => {
+                lateResultDiscarded = true;
+            }
+        );
+        const items = dedupeBrowseItems(filterPtvBrowseRecommendationItems(config, result.candidates));
+
+        if (!items.length) return fallback();
+
+        const durationMs = Number((performance.now() - startedAt).toFixed(1));
+        const payloadSize = getSerializedPayloadSize(result);
+        const timeoutSource = durationMs > PTV_BROWSE_SOFT_TIMEOUT_MS ? 'soft' : 'none';
+        const fieldDiagnostics = getBrowseFieldDiagnostics('recommendations', fallbackQuery, items.length, payloadSize);
+
+        return {
+            diagnostic: {
+                ...fieldDiagnostics,
+                count: items.length,
+                durationMs,
+                error: '',
+                fields: fallbackQuery.Fields || '',
+                includeItemTypes: fallbackQuery.IncludeItemTypes || '',
+                lateResultDiscarded,
+                limit: Number(fallbackQuery.Limit || 0),
+                normalizationDurationMs: 0,
+                payloadSize,
+                requestUrl,
+                section: 'recommendations',
+                status: 'ready',
+                timeoutReason: timeoutSource === 'soft' ? `recommendations exceeded soft warning after ${PTV_BROWSE_SOFT_TIMEOUT_MS}ms.` : '',
+                timeoutSource,
+                wasAborted: false
+            },
+            items
+        };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Browse row failed';
+        const fallbackResult = await recoverPtvBrowseRequestWithFallback(error, fallback, signal);
+
+        if (fallbackResult.items.length && fallbackResult.diagnostic.status === 'ready') {
+            return fallbackResult;
+        }
+
+        return {
+            ...fallbackResult,
+            diagnostic: {
+                ...fallbackResult.diagnostic,
+                status: 'error',
+                error: message,
+                requestUrl
+            }
+        };
+    }
+}
+
+async function fetchBrowseResumeItems(section: string, query: PtvItemQuery, signal?: AbortSignal): Promise<{
     diagnostic: PtvBrowseDiagnostic;
     items: PtvItem[];
 }> {
@@ -723,9 +1191,10 @@ async function fetchBrowseResumeItems(section: string, query: PtvItemQuery): Pro
 
     try {
         const result = await withBrowseHardTimeout(
-            getPtvResumeItems<PtvItem>(query),
+            requestSignal => getPtvResumeItems<PtvItem>(query, { signal: requestSignal }),
             section,
             timeoutMs,
+            signal,
             () => {
                 lateResultDiscarded = true;
             }
@@ -774,6 +1243,8 @@ async function fetchBrowseResumeItems(section: string, query: PtvItemQuery): Pro
             items
         };
     } catch (error) {
+        throwIfPtvBrowseCancelled(error, signal);
+
         const isTimeout = error instanceof PtvBrowseTimeoutError;
         const message = error instanceof Error ? error.message : 'Browse row failed';
         const durationMs = Number((performance.now() - startedAt).toFixed(1));
@@ -826,14 +1297,25 @@ function makeSection(id: string, title: string, kicker: string, items: PtvItem[]
     };
 }
 
-function getInitialSections(config: PtvBrowseConfig, featuredItems: PtvItem[]): PtvBrowseSection[] {
-    return [
+function getInitialSections(config: PtvBrowseConfig, featuredItems: PtvItem[], dynamicSections: readonly PtvBrowseLandingTagSection[] = []): PtvBrowseSection[] {
+    const baseSections = [
         makeSection('featured', config.featuredTitle, 'Featured', featuredItems),
         makeSection('continue', 'Continue', 'Pick up where you left off', [], true),
-        makeSection('recommendations', config.recommendationsTitle, 'Recommended', [], true),
-        makeSection('recently-added', config.recentlyTitle, 'Recently Added', [], true),
-        makeSection('browse', config.browseTitle, 'Browse', [], true),
-        makeSection('collections', config.collectionTitle, 'Collections', [], true)
+        makeSection('recommendations', config.recommendationsTitle, 'Recommended', [], true)
+    ];
+
+    if (config.kind === 'collections') {
+        return [
+            ...baseSections,
+            makeSection('recently-added', config.recentlyTitle, 'Recently Added', [], true),
+            makeSection('browse', config.browseTitle, 'Browse', [], true),
+            makeSection('collections', config.collectionTitle, 'Collections', [], true)
+        ];
+    }
+
+    return [
+        ...baseSections,
+        ...dynamicSections.map(section => makeSection(section.id, section.tag, section.label, [], true))
     ];
 }
 
@@ -850,26 +1332,66 @@ function getCompleteSections(
     featuredItems: PtvItem[],
     resumeItems: PtvItem[],
     recommendationItems: PtvItem[],
+    dynamicSections: readonly PtvBrowseLandingTagSection[] = [],
     recentlyAddedItems: PtvItem[],
     browseItems: PtvItem[],
     collectionItems: PtvItem[]
 ): PtvBrowseSection[] {
-    return [
+    const baseSections = [
         makeSection('featured', config.featuredTitle, 'Featured', featuredItems),
         makeSection('continue', 'Continue', 'Pick up where you left off', resumeItems),
-        makeSection('recommendations', config.recommendationsTitle, 'Recommendations', recommendationItems),
-        makeSection('recently-added', config.recentlyTitle, 'Recently Added', recentlyAddedItems),
-        makeSection('browse', config.browseTitle, 'Browse', browseItems),
-        makeSection('collections', config.collectionTitle, 'Collections', collectionItems)
+        makeSection('recommendations', config.recommendationsTitle, 'Recommendations', recommendationItems)
+    ];
+
+    if (config.kind === 'collections') {
+        return [
+            ...baseSections,
+            makeSection('recently-added', config.recentlyTitle, 'Recently Added', recentlyAddedItems),
+            makeSection('browse', config.browseTitle, 'Browse', browseItems),
+            makeSection('collections', config.collectionTitle, 'Collections', collectionItems)
+        ];
+    }
+
+    return [
+        ...baseSections,
+        ...dynamicSections.map(section => makeSection(section.id, section.tag, section.label, []))
     ];
 }
 
-function PtvBrowseHero({ config, item }: Readonly<{ config: PtvBrowseConfig; item: PtvItem | null }>) {
+function cleanBrowseOverviewText(overview: string): string {
+    if (!overview) return '';
+
+    return overview
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<\/?[^>]+(>|$)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function PtvBrowseHero({
+    config,
+    item,
+    title
+}: Readonly<{
+    config: PtvBrowseConfig;
+    item: PtvItem | null;
+    title: string;
+}>) {
+    const resolvedTitle = title || config.title;
     const backdropUrl = getBrowseBackdropImage(item);
     const logoUrl = getBrowseLogoImage(item);
-    const title = getText(item?.Name) || config.title;
-    const overview = getText(item?.Overview) || config.description;
+    const heroTitle = getText(item?.Name) || resolvedTitle;
+    const overview = cleanBrowseOverviewText(getText(item?.Overview)) || config.description;
     const route = item ? getBrowseRoute(item) : null;
+    const [logoFailed, setLogoFailed] = useState(false);
+
+    useEffect(() => {
+        setLogoFailed(false);
+    }, [item?.Id]);
+
+    const handleLogoError = useCallback(() => {
+        setLogoFailed(true);
+    }, []);
 
     return (
         <section className='ptv-cinematic-hero ptv-cinematic-hero--browse ptv-browse-hero'>
@@ -878,12 +1400,12 @@ function PtvBrowseHero({ config, item }: Readonly<{ config: PtvBrowseConfig; ite
             <div className='ptv-browse-hero-copy'>
                 <div className='ptv-browse-section-kicker'>
                     <PtvIcon name={config.icon} />
-                    <span>{config.title}</span>
+                    <span>{resolvedTitle}</span>
                 </div>
-                {logoUrl ? (
-                    <img className='ptv-browse-hero-logo' src={logoUrl} alt={title} />
+                {logoUrl && !logoFailed ? (
+                    <img className='ptv-browse-hero-logo' src={logoUrl} alt={heroTitle} onError={handleLogoError} />
                 ) : (
-                    <h1>{title}</h1>
+                    <h1>{heroTitle}</h1>
                 )}
                 {item ? <p className='ptv-browse-hero-meta'>{getBrowseMetadata(item)}</p> : null}
                 <p className='ptv-browse-hero-overview'>{overview}</p>
@@ -918,8 +1440,10 @@ function PtvBrowseCard({
         baseOptions: {
             fillHeight: 558,
             fillWidth: 372,
-            quality: 92
+            quality: 92,
+            serverId: getPtvServerId() || undefined
         },
+        includeUntagged: true,
         order: ['Primary', 'SeriesPrimary', 'ParentPrimary', 'Thumb']
     }).slice(0, 4), [item]);
     const [imageAttemptIndex, setImageAttemptIndex] = useState(0);
@@ -1126,7 +1650,7 @@ function PtvBrowseSectionView({
     section
 }: Readonly<{
     onFocusItem: (sectionId: string, item: PtvItem) => void;
-    onRetry: () => void;
+    onRetry: (sectionId: string) => void;
     rowIndex: number;
     section: PtvBrowseSection;
 }>) {
@@ -1135,6 +1659,7 @@ function PtvBrowseSectionView({
     const mountCountedRef = useRef(false);
     const shouldMountImmediately = rowIndex < PTV_BROWSE_EAGER_ROW_COUNT;
     const [readyRailMounted, setReadyRailMounted] = useState(shouldMountImmediately);
+    const handleRetry = useCallback(() => onRetry(section.id), [onRetry, section.id]);
 
     useEffect(() => {
         if (!readyRailMounted || !section.items.length || mountCountedRef.current) return undefined;
@@ -1226,8 +1751,6 @@ function PtvBrowseSectionView({
         shouldMountImmediately
     ]);
 
-    if (section.status === 'empty') return null;
-
     return (
         <section
             ref={sectionRef}
@@ -1260,7 +1783,7 @@ function PtvBrowseSectionView({
                 <div className='ptv-browse-row-empty ptv-browse-row-failure'>
                     <strong>{getBrowseShelfFailureMessage(section)}</strong>
                     <span>Try again when the server catches up.</span>
-                    <button type='button' onClick={onRetry}>
+                    <button type='button' onClick={handleRetry}>
                         <PtvIcon name='refresh' />
                         <span>Retry</span>
                     </button>
@@ -1338,6 +1861,8 @@ function PtvBrowseTagSection({ route, tags, title, type }: Readonly<{
 
 function PtvBrowseDebugPanel({ diagnostics, state }: Readonly<{ diagnostics: PtvBrowseDiagnostic[]; state: PtvBrowseState }>) {
     const { canShowDebug } = usePtvAdminDebugVisibility();
+    const genreTagDebug = state.tagSectionDebug.genre;
+    const studioTagDebug = state.tagSectionDebug.studio;
 
     if (!canShowDebug) return null;
 
@@ -1353,6 +1878,22 @@ function PtvBrowseDebugPanel({ diagnostics, state }: Readonly<{ diagnostics: Ptv
                 <dd>{getBoundedBrowseDiagnosticText(state.tags.genres.join(', '), 500) || 'none'}</dd>
                 <dt>studios</dt>
                 <dd>{getBoundedBrowseDiagnosticText(state.tags.studios.join(', '), 500) || 'none'}</dd>
+                <dt>genre.tagDirectory.total</dt>
+                <dd>{genreTagDebug.total}</dd>
+                <dt>genre.tagDirectory.eligible (minimum {genreTagDebug.minItemCount})</dt>
+                <dd>{genreTagDebug.eligible}</dd>
+                <dt>genre.tagDirectory.selected</dt>
+                <dd>{getBoundedBrowseDiagnosticText(genreTagDebug.selected.join(', '), 500) || 'none'}</dd>
+                <dt>genre.tagDirectory.skippedUnderMinimum</dt>
+                <dd>{getBoundedBrowseDiagnosticText(genreTagDebug.skippedUnderMinimum.join(', '), 500) || 'none'}</dd>
+                <dt>studio.tagDirectory.total</dt>
+                <dd>{studioTagDebug.total}</dd>
+                <dt>studio.tagDirectory.eligible (minimum {studioTagDebug.minItemCount})</dt>
+                <dd>{studioTagDebug.eligible}</dd>
+                <dt>studio.tagDirectory.selected</dt>
+                <dd>{getBoundedBrowseDiagnosticText(studioTagDebug.selected.join(', '), 500) || 'none'}</dd>
+                <dt>studio.tagDirectory.skippedUnderMinimum</dt>
+                <dd>{getBoundedBrowseDiagnosticText(studioTagDebug.skippedUnderMinimum.join(', '), 500) || 'none'}</dd>
             </dl>
             <div className='ptv-browse-debug-list'>
                 {diagnostics.slice(0, 8).map(entry => (
@@ -1377,10 +1918,11 @@ function PtvBrowseDebugPanel({ diagnostics, state }: Readonly<{ diagnostics: Ptv
     );
 }
 
-function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope }: Readonly<{
+function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope, title }: Readonly<{
     config: PtvBrowseConfig;
     location: { pathname: string; search: string };
     onBackdropChange: (url: string) => void;
+    title: string;
     route: PtvBrowseRoute;
     scope: PtvBrowseResolvedScope;
 }>) {
@@ -1388,7 +1930,12 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
     const memoryKey = useMemo(() => getPtvBrowseMemoryKey(location.pathname, location.search), [location.pathname, location.search]);
     const memoryRef = useRef<PtvBrowseMemory>(loadPtvBrowseMemory(memoryKey));
     const memoryRestoredRef = useRef(false);
-    const [retryNonce, setRetryNonce] = useState(0);
+    const [retryRequest, setRetryRequest] = useState({
+        loadKey: '',
+        nonce: 0,
+        routeGeneration: 0,
+        sectionId: ''
+    });
     const [state, setState] = useState<PtvBrowseState>(EMPTY_BROWSE_STATE);
     const saveBrowseMemory = useCallback((updates: Partial<PtvBrowseMemory>) => {
         const nextMemory: PtvBrowseMemory = {
@@ -1408,9 +1955,14 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
             scrollY: Math.max(0, Math.round(window.scrollY || document.documentElement.scrollTop || 0))
         });
     }, [saveBrowseMemory]);
-    const handleBrowseRetry = useCallback(() => {
-        setRetryNonce(value => value + 1);
-    }, []);
+    const handleBrowseRetry = useCallback((sectionId: string) => {
+        setRetryRequest(previous => ({
+            loadKey: memoryKey,
+            nonce: previous.nonce + 1,
+            routeGeneration: getPtvRouteControllerState().routeGeneration,
+            sectionId
+        }));
+    }, [memoryKey]);
 
     useEffect(() => {
         memoryRef.current = loadPtvBrowseMemory(memoryKey);
@@ -1447,8 +1999,13 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
 
     useEffect(() => {
         let isMounted = true;
+        const routeAbortController = createPtvAbortController();
         const startedAt = performance.now();
         const routeGeneration = getPtvRouteControllerState().routeGeneration;
+        const retrySectionId = (
+            retryRequest.loadKey === memoryKey
+            && retryRequest.routeGeneration === routeGeneration
+        ) ? retryRequest.sectionId : '';
         let firstInteractiveRecorded = false;
         let firstShelfRenderedRecorded = false;
         let aboveFoldLoadedRecorded = false;
@@ -1494,14 +2051,105 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                 });
             }, PTV_BROWSE_SOFT_TIMEOUT_MS));
         };
+        const sectionSeed = getPtvBrowseSectionSeed(route, scope);
+        const randomTagGenerator = createPtvBrowseRandom(sectionSeed + 101);
+        const featuredRandomGenerator = createPtvBrowseRandom(sectionSeed + 202);
+        const getBrowseLoadOwner = () => ({
+            currentRouteGeneration: getPtvRouteControllerState().routeGeneration,
+            expectedRouteGeneration: routeGeneration,
+            isMounted,
+            signal: routeAbortController.signal
+        });
+        const isCurrentBrowseLoad = () => isPtvBrowseLoadOwnerCurrent(getBrowseLoadOwner());
+        const assertCurrentBrowseLoad = () => assertPtvBrowseLoadOwnerCurrent(getBrowseLoadOwner());
+        const getBrowseTagSections = async (): Promise<{
+            sections: PtvBrowseLandingTagSection[];
+            debug: PtvBrowseLandingTagDebug;
+        }> => {
+            if (config.kind === 'collections' || !scope.status || scope.status === 'error') {
+                return {
+                    sections: [],
+                    debug: getEmptyPtvBrowseLandingTagDebug(PTV_BROWSE_TAG_SHELF_MIN_ITEM_COUNT)
+                };
+            }
 
-        async function loadBrowsePage() {
+            try {
+                const [genreDirectoryResult, studioDirectoryResult] = await Promise.allSettled([
+                    loadPtvBrowseDirectory(route, scope, 'genre', routeAbortController.signal),
+                    loadPtvBrowseDirectory(route, scope, 'studio', routeAbortController.signal)
+                ]);
+                assertCurrentBrowseLoad();
+
+                const directoryCancellation = getPtvBrowseSettledCancellation(
+                    [ genreDirectoryResult, studioDirectoryResult ],
+                    routeAbortController.signal
+                );
+
+                if (directoryCancellation) throw directoryCancellation;
+
+                const genreDirectory = genreDirectoryResult.status === 'fulfilled' ? genreDirectoryResult.value : [];
+                const studioDirectory = studioDirectoryResult.status === 'fulfilled' ? studioDirectoryResult.value : [];
+                const genreSections = getPtvBrowseLandingTagSections(
+                    config,
+                    genreDirectory,
+                    'genre',
+                    randomTagGenerator,
+                    PTV_BROWSE_RANDOM_TAG_SHELVES_COUNT
+                );
+                const studioSections = getPtvBrowseLandingTagSections(
+                    config,
+                    studioDirectory,
+                    'studio',
+                    randomTagGenerator,
+                    PTV_BROWSE_RANDOM_TAG_SHELVES_COUNT
+                );
+
+                return {
+                    sections: [...genreSections, ...studioSections],
+                    debug: {
+                        genre: getPtvBrowseLandingTagSectionSummary(genreDirectory, genreSections, PTV_BROWSE_TAG_SHELF_MIN_ITEM_COUNT),
+                        studio: getPtvBrowseLandingTagSectionSummary(studioDirectory, studioSections, PTV_BROWSE_TAG_SHELF_MIN_ITEM_COUNT)
+                    }
+                };
+            } catch (error) {
+                if (isPtvBrowseCancellation(error, routeAbortController.signal)) throw error;
+                if (!isCurrentBrowseLoad()) {
+                    throw createPtvBrowseCancellationError('Browse directory work was superseded.');
+                }
+
+                return {
+                    sections: [],
+                    debug: getEmptyPtvBrowseLandingTagDebug(PTV_BROWSE_TAG_SHELF_MIN_ITEM_COUNT)
+                };
+            }
+        };
+
+        if (retrySectionId) {
+            setState(previous => {
+                const sections = preparePtvBrowseSectionsForRetry(
+                    previous.sections,
+                    retrySectionId
+                );
+                const hasReadyContent = sections.some(section => (
+                    section.status === 'ready' && section.items.length
+                ));
+
+                return {
+                    ...previous,
+                    error: '',
+                    isLoading: !hasReadyContent,
+                    sections
+                };
+            });
+        } else {
             setState({
                 ...EMPTY_BROWSE_STATE,
                 isLoading: true,
                 sections: getInitialSections(config, [])
             });
+        }
 
+        async function loadBrowsePage() {
             const updateBrowseSection = (sectionId: string, result: {
                 diagnostic: PtvBrowseDiagnostic;
                 items: PtvItem[];
@@ -1547,13 +2195,16 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                 setState(previous => {
                     const sections = previous.sections.map(section => (
                         section.id === sectionId ?
-                            makeSection(
-                                section.id,
-                                section.title,
-                                section.kicker,
-                                result.items,
-                                false,
-                                result.diagnostic.status === 'ready' ? '' : result.diagnostic.error || result.diagnostic.timeoutReason || 'Shelf failed to load.'
+                            mergePtvBrowseShelfResult(
+                                section,
+                                makeSection(
+                                    section.id,
+                                    section.title,
+                                    section.kicker,
+                                    result.items,
+                                    false,
+                                    result.diagnostic.status === 'ready' ? '' : result.diagnostic.error || result.diagnostic.timeoutReason || 'Shelf failed to load.'
+                                )
                             ) :
                             section
                     ));
@@ -1581,70 +2232,141 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                     return {
                         diagnostics,
                         error: failedCount >= 2 || (!allItems.length && failedCount) ? 'Some shelves could not be loaded.' : '',
-                        heroItem: previous.heroItem || result.items[0] || null,
+                        heroItem: selectPtvBrowseHeroItem(previous.heroItem, sectionId, result.items, config),
                         isLoading: !hasReadyContent && sections.some(section => section.status === 'loading' || section.status === 'slow'),
-                        sections,
-                        tags: {
+                    sections,
+                    tagSectionDebug: previous.tagSectionDebug,
+                    tags: {
                             genres: getDistinctTags(allItems, 'Genres'),
                             studios: getDistinctTags(allItems, 'Studios')
                         }
                     };
                 });
             };
+            const browseTagData = await getBrowseTagSections();
+            assertCurrentBrowseLoad();
 
-            const sectionTasks = prioritizePtvBrowseTasks([
-                {
-                    id: 'featured',
-                    run: () => fetchBrowseItems(
-                        'featured',
-                        getBaseQuery(config, getPtvBrowseFeaturedQueryOverrides(), 'featured', scope)
-                    )
-                },
-                {
-                    id: 'continue',
-                    run: () => fetchBrowseResumeItems('continue', getBaseQuery(config, {
-                        IncludeItemTypes: config.continueIncludeItemTypes,
-                        Limit: 20,
-                        SortBy: 'DatePlayed',
-                        SortOrder: 'Descending'
-                    }, 'continue', scope))
-                },
-                {
-                    id: 'recommendations',
-                    run: () => fetchBrowseItems('recommendations', getBaseQuery(config, {
-                        Limit: 20,
-                        SortBy: 'Random'
-                    }, 'recommendations', scope))
-                },
-                {
-                    id: 'recently-added',
-                    run: () => fetchBrowseItems('recently-added', getBaseQuery(config, {
-                        Limit: 20,
-                        SortBy: 'DateCreated',
-                        SortOrder: 'Descending'
-                    }, 'recently-added', scope))
-                },
-                {
-                    id: 'browse',
-                    run: () => fetchBrowseItems('browse', getBaseQuery(config, {
-                        Limit: 50,
-                        SortBy: 'SortName',
-                        SortOrder: 'Ascending'
-                    }, 'browse', scope))
-                },
-                {
-                    id: 'collections',
-                    run: () => fetchBrowseItems('collections', getBaseQuery({
-                        ...config,
-                        genreFilter: '',
-                        includeItemTypes: 'BoxSet'
-                    }, {
-                        Limit: 24,
-                        SortBy: 'SortName',
-                        SortOrder: 'Ascending'
-                    }, 'collections', scope))
-                }
-            ]);
+            const browseTagSections = browseTagData.sections;
+
+            if (!retrySectionId && config.kind !== 'collections') {
+                setState(previous => {
+                    if (!isCurrentBrowseLoad()) return previous;
+
+                    return {
+                        ...previous,
+                        sections: getInitialSections(config, [], browseTagSections),
+                        tagSectionDebug: browseTagData.debug
+                    };
+                });
+            }
+
+            const sectionTasks = (
+                config.kind === 'collections' ? prioritizePtvBrowseTasks([
+                    {
+                        id: 'featured',
+                        run: () => fetchBrowseItems(
+                            'featured',
+                            getBaseQuery(config, getPtvBrowseFeaturedQueryOverrides(config.kind), 'featured', scope),
+                            routeAbortController.signal
+                        )
+                    },
+                    {
+                        id: 'continue',
+                        run: () => fetchBrowseResumeItems('continue', getBaseQuery(config, {
+                            IncludeItemTypes: config.continueIncludeItemTypes,
+                            Limit: 20,
+                            SortBy: 'DatePlayed',
+                            SortOrder: 'Descending'
+                        }, 'continue', scope), routeAbortController.signal)
+                    },
+                    {
+                        id: 'recommendations',
+                        run: () => fetchBrowseItems('recommendations', getBaseQuery(config, {
+                            Limit: 20,
+                            SortBy: 'Random'
+                        }, 'recommendations', scope), routeAbortController.signal)
+                    },
+                    {
+                        id: 'recently-added',
+                        run: () => fetchBrowseItems('recently-added', getBaseQuery(config, {
+                            Limit: 20,
+                            SortBy: 'DateCreated',
+                            SortOrder: 'Descending'
+                        }, 'recently-added', scope), routeAbortController.signal)
+                    },
+                    {
+                        id: 'browse',
+                        run: () => fetchBrowseItems('browse', getBaseQuery(config, {
+                            Limit: 50,
+                            SortBy: 'SortName',
+                            SortOrder: 'Ascending'
+                        }, 'browse', scope), routeAbortController.signal)
+                    },
+                    {
+                        id: 'collections',
+                        run: () => fetchBrowseItems('collections', getBaseQuery({
+                            ...config,
+                            genreFilter: '',
+                            includeItemTypes: 'BoxSet'
+                        }, {
+                            Limit: 24,
+                            SortBy: 'SortName',
+                            SortOrder: 'Ascending'
+                        }, 'collections', scope), routeAbortController.signal)
+                    }
+                ]) : [
+                    {
+                        id: 'featured',
+                        run: async () => {
+                            const result = await fetchBrowseItems(
+                                'featured',
+                                getBaseQuery(config, getPtvBrowseFeaturedQueryOverrides(config.kind), 'featured', scope),
+                                routeAbortController.signal
+                            );
+
+                            return {
+                                ...result,
+                                items: shufflePtvBrowseItems(result.items, featuredRandomGenerator)
+                            };
+                        }
+                    },
+                    {
+                        id: 'continue',
+                        run: () => fetchBrowseResumeItems('continue', getBaseQuery(config, {
+                            IncludeItemTypes: config.continueIncludeItemTypes,
+                            Limit: 20,
+                            SortBy: 'DatePlayed',
+                            SortOrder: 'Descending'
+                        }, 'continue', scope), routeAbortController.signal)
+                    },
+                    {
+                        id: 'recommendations',
+                        run: () => fetchBrowseRecommendations(config, scope, routeAbortController.signal)
+                    },
+                    ...browseTagSections.map((section: PtvBrowseLandingTagSection) => ({
+                        id: section.id,
+                        run: () => fetchBrowseItems(section.id, getPtvBrowseLandingTagSectionQuery(config, scope, section), routeAbortController.signal)
+                    }))
+                ]).filter(task => !retrySectionId || task.id === retrySectionId);
+            const sectionTaskIds: string[] = [];
+
+            for (const task of sectionTasks) sectionTaskIds.push(task.id);
+
+            const missingRetryTaskId = getMissingPtvBrowseRetryTaskId(retrySectionId, sectionTaskIds);
+
+            if (missingRetryTaskId) {
+                updateBrowseSection(missingRetryTaskId, {
+                    diagnostic: createPtvBrowseMissingRetryDiagnostic(missingRetryTaskId),
+                    items: []
+                });
+                recordPtvEvent('api', 'ptv-browse-row-retry-task-missing', {
+                    kind: config.kind,
+                    routeGeneration,
+                    rowId: missingRetryTaskId
+                });
+                return;
+            }
+
             let nextSectionIndex = 0;
 
             const runSectionWorker = async () => {
@@ -1664,6 +2386,7 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
             const browseConcurrency = performanceProfile.isLowPower || performanceProfile.clientKind === 'mobile' ? 2 : 4;
 
             await Promise.all(Array.from({ length: browseConcurrency }, () => runSectionWorker()));
+            if (!isCurrentBrowseLoad()) return;
 
             if (shouldCollectDiagnostics()) {
                 if (!firstInteractiveRecorded) {
@@ -1684,14 +2407,17 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                     fullyLoadedMs: Number((performance.now() - startedAt).toFixed(1)),
                     kind: config.kind,
                     routeGeneration,
-                    sectionCount: 6,
+                    sectionCount: sectionTasks.length,
                     title: config.title
                 });
             }
         }
 
         void loadBrowsePage().catch(error => {
-            if (!isMounted) return;
+            if (
+                !isCurrentBrowseLoad()
+                || isPtvBrowseCancellation(error, routeAbortController.signal)
+            ) return;
 
             const message = error instanceof Error ? error.message : 'Browse page failed to load.';
             recordPtvEvent('route', 'browse-page-load-failed', {
@@ -1709,10 +2435,11 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
 
         return () => {
             isMounted = false;
+            routeAbortController.abort();
             slowTimers.forEach(timer => window.clearTimeout(timer));
             slowTimers.clear();
         };
-    }, [config, handleBrowseRetry, retryNonce, scope]);
+    }, [config, memoryKey, retryRequest, route, scope]);
 
     useEffect(() => {
         if (memoryRestoredRef.current || !state.sections.length) return undefined;
@@ -1759,27 +2486,35 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
 
     return (
         <>
-            <PtvBrowseHero config={config} item={state.heroItem} />
-                <main className='ptv-browse-content' aria-busy={state.isLoading}>
-                    {state.error && canShowDebug ? <div className='ptv-browse-error'>{state.error}</div> : null}
-                    {state.sections.map((section, rowIndex) => (
-                        <PtvBrowseSectionView
-                            key={`${config.title}-${section.id}`}
-                            onFocusItem={handleBrowseItemFocus}
-                            onRetry={handleBrowseRetry}
-                            rowIndex={rowIndex}
-                            section={section}
+            <PtvBrowseHero
+                config={config}
+                item={state.heroItem}
+                title={title}
+            />
+            <main className='ptv-browse-content' aria-busy={state.isLoading}>
+                {state.error && canShowDebug ? <div className='ptv-browse-error'>{state.error}</div> : null}
+            {state.sections.map((section, rowIndex) => (
+                <PtvBrowseSectionView
+                    key={`${config.title}-${section.id}`}
+                    onFocusItem={handleBrowseItemFocus}
+                    onRetry={handleBrowseRetry}
+                    rowIndex={rowIndex}
+                    section={section}
+                />
+            ))}
+                {config.kind === 'collections' ? (
+                    <>
+                        <PtvBrowseTagSection route={route} title={`${config.title} Genres`} tags={state.tags.genres} type='genre' />
+                        <PtvBrowseTagSection
+                            route={route}
+                            title={`${config.title} Studios`}
+                            tags={state.tags.studios}
+                            type='studio'
                         />
-                    ))}
-                    <PtvBrowseTagSection route={route} title={`${config.title} Genres`} tags={state.tags.genres} type='genre' />
-                    <PtvBrowseTagSection
-                        route={route}
-                        title={`${config.title} ${config.kind === 'shows' ? 'Studios & Networks' : 'Studios'}`}
-                        tags={state.tags.studios}
-                        type={config.kind === 'shows' ? 'network' : 'studio'}
-                    />
-                    <PtvBrowseDebugPanel diagnostics={state.diagnostics} state={state} />
-                </main>
+                    </>
+                ) : null}
+                <PtvBrowseDebugPanel diagnostics={state.diagnostics} state={state} />
+            </main>
         </>
     );
 }
@@ -2000,13 +2735,14 @@ function getPtvFocusedBrowseBackHref(route: PtvBrowseRoute) {
 
 async function loadPtvFocusedBrowseState(
     route: PtvBrowseRoute,
-    scope: PtvBrowseResolvedScope
+    scope: PtvBrowseResolvedScope,
+    signal?: AbortSignal
 ): Promise<PtvFocusedBrowseState> {
     if (route.error) throw new Error(route.error);
     if (scope.status === 'error') throw new Error(scope.error);
 
     if (isPtvBrowseDirectoryView(route)) {
-        const directory = await loadPtvBrowseDirectory(route, scope, getPtvBrowseDirectoryType(route));
+        const directory = await loadPtvBrowseDirectory(route, scope, getPtvBrowseDirectoryType(route), signal);
 
         return {
             directory,
@@ -2023,7 +2759,7 @@ async function loadPtvFocusedBrowseState(
     let exactFilterResolved = route.view !== 'studio' && route.view !== 'network';
 
     if (route.view === 'studio' || route.view === 'network') {
-        const directory = await loadPtvBrowseDirectory(route, scope, 'studio');
+        const directory = await loadPtvBrowseDirectory(route, scope, 'studio', signal);
         const filterName = route.view === 'studio' ? route.studio : route.network;
         const selected = findExactPtvBrowseDirectoryEntry(directory, filterName);
 
@@ -2037,7 +2773,7 @@ async function loadPtvFocusedBrowseState(
         exactFilterResolved = true;
     }
 
-    const result = await loadPtvFocusedBrowsePages(route, scope, metadataId);
+    const result = await loadPtvFocusedBrowsePages(route, scope, metadataId, signal);
 
     return {
         directory: [],
@@ -2133,11 +2869,16 @@ function PtvFocusedBrowsePage({ config, onBackdropChange, route, scope }: Readon
         const loadInput = loadInputRef.current;
         const loadOwner = loadOwnerRef.current;
         const loadToken = loadOwner.begin(loadInput.loaderKey);
+        const routeAbortController = createPtvAbortController();
         const startedAt = performance.now();
         const routeGeneration = getPtvRouteControllerState().routeGeneration;
 
         setState(EMPTY_FOCUSED_BROWSE_STATE);
-        void loadPtvFocusedBrowseState(loadInput.route, loadInput.scope).then(nextState => {
+        void loadPtvFocusedBrowseState(
+            loadInput.route,
+            loadInput.scope,
+            routeAbortController.signal
+        ).then(nextState => {
             if (!loadOwner.isActive(loadToken) || getPtvRouteControllerState().routeGeneration !== routeGeneration) {
                 recordPtvEvent('route', 'focused-browse-stale-response-suppressed', {
                     kind: loadInput.route.kind,
@@ -2191,6 +2932,7 @@ function PtvFocusedBrowsePage({ config, onBackdropChange, route, scope }: Readon
         });
 
         return () => {
+            routeAbortController.abort();
             loadOwner.retire(loadToken);
         };
     }, [loaderKey, retryNonce]);
@@ -2206,21 +2948,21 @@ function PtvFocusedBrowsePage({ config, onBackdropChange, route, scope }: Readon
 
     return (
         <main className='ptv-browse-focused-content' aria-busy={state.status === 'loading'}>
-                    <header className='ptv-browse-focused-header'>
-                        <div>
-                            <span className='ptv-browse-section-kicker'>{getFocusedBrowseKicker(route)}</span>
-                            <h1>{title}</h1>
-                            <p>{getPtvFocusedBrowseStatusText(state)}</p>
-                        </div>
-                        <a className='ptv-browse-focused-back' href={getPtvFocusedBrowseBackHref(route)}>
-                            Back to {config.title}
-                        </a>
-                    </header>
+            <header className='ptv-browse-focused-header'>
+                <div>
+                    <span className='ptv-browse-section-kicker'>{getFocusedBrowseKicker(route)}</span>
+                    <h1>{title}</h1>
+                    <p>{getPtvFocusedBrowseStatusText(state)}</p>
+                </div>
+                <a className='ptv-browse-focused-back' href={getPtvFocusedBrowseBackHref(route)}>
+                    Back to {config.title}
+                </a>
+            </header>
 
-                    {showToolbar ? <PtvFocusedBrowseToolbar route={route} /> : null}
-                    <PtvFocusedBrowseBody onRetry={handleRetry} route={route} state={state} title={title} />
+            {showToolbar ? <PtvFocusedBrowseToolbar route={route} /> : null}
+            <PtvFocusedBrowseBody onRetry={handleRetry} route={route} state={state} title={title} />
 
-                    <PtvFocusedBrowseDebug route={route} scope={scope} state={state} title={title} />
+            <PtvFocusedBrowseDebug route={route} scope={scope} state={state} title={title} />
         </main>
     );
 }
@@ -2235,7 +2977,8 @@ function NativeBrowsePage() {
         () => getPtvBrowseConfig(location.pathname, route.scopeAlias),
         [location.pathname, route.scopeAlias]
     );
-    const scopeResolutionKey = `${route.kind}:${route.scopeAlias || ''}`;
+    const scopeIdentityKey = getPtvBrowseScopeIdentityKey();
+    const scopeResolutionKey = `${scopeIdentityKey || 'identity-pending'}:${route.kind}:${route.scopeAlias || ''}`;
     const [resolvedScope, setResolvedScope] = useState<Readonly<{
         key: string;
         scope: PtvBrowseResolvedScope | null;
@@ -2244,22 +2987,36 @@ function NativeBrowsePage() {
 
     useEffect(() => {
         let cancelled = false;
+        const scopeAbortController = createPtvAbortController();
+        const requestIdentityKey = scopeIdentityKey;
 
         setResolvedScope(current => current.key === scopeResolutionKey && current.scope ? current : {
             key: scopeResolutionKey,
             scope: null
         });
-        void resolvePtvBrowseScope(route).then(scope => {
-            if (!cancelled) setResolvedScope({ key: scopeResolutionKey, scope });
+        void resolvePtvBrowseScope(route, scopeAbortController.signal).then(scope => {
+            if (!cancelled && isPtvBrowseScopeIdentityCurrent(requestIdentityKey)) {
+                setResolvedScope({ key: scopeResolutionKey, scope });
+            }
+        }).catch(error => {
+            if (cancelled || error?.name === 'AbortError') return;
+
+            recordPtvEvent('route', 'browse-scope-resolution-failed', {
+                error: error instanceof Error ? error.message : String(error),
+                kind: route.kind,
+                scopeAlias: route.scopeAlias
+            });
         });
 
         return () => {
             cancelled = true;
+            scopeAbortController.abort();
         };
-    }, [route.kind, route.scopeAlias, scopeResolutionKey]);
+    }, [route, scopeIdentityKey, scopeResolutionKey]);
 
     const scope = resolvedScope.key === scopeResolutionKey ? resolvedScope.scope : null;
-    const title = route.view === 'landing' ? config.title : getFocusedBrowseTitle(route, config);
+    const browseLibraryTitle = useMemo(() => getPtvBrowseLibraryTitle(config, route), [config, route]);
+    const title = route.view === 'landing' ? browseLibraryTitle : getFocusedBrowseTitle(route, config);
     const backdropSource = route.view === 'landing' ? `${config.kind}-hero` : `${route.kind}-${route.view}`;
 
     return (
@@ -2281,13 +3038,14 @@ function NativeBrowsePage() {
             >
                 {!scope ? (
                     <main className='ptv-browse-focused-content' aria-busy='true'>
-                        <div className='ptv-browse-focused-status'>Resolving your {config.title} library...</div>
+                        <div className='ptv-browse-focused-status'>Resolving your {browseLibraryTitle}...</div>
                     </main>
                 ) : route.view === 'landing' ? (
                     <PtvBrowseLandingPage
                         config={config}
                         location={location}
                         onBackdropChange={setBackdropUrl}
+                        title={title}
                         route={route}
                         scope={scope}
                     />

@@ -1,11 +1,10 @@
 import {
-    getCurrentPtvApiClient,
-    getPtvApiUrl,
     getPtvCurrentUserId,
     getPtvItems,
     getPtvResumeItems,
     getPtvServerId,
     getPtvUserViews,
+    requestPtvJson,
     serializePtvItemFieldProfile,
     type PtvItem,
     type PtvItemQuery,
@@ -15,10 +14,7 @@ import {
 import type { PtvBrowseMediaKind, PtvBrowseRoute } from './browseRoute';
 import { getPtvFocusedBrowseLoaderKey } from './focusedBrowseLoader';
 import { normalizePtvLibraryItems } from '../../services/libraryRootNormalizer';
-import {
-    coordinatePtvJsonRequest,
-    getPtvRequestCoordinatorKey
-} from '../../services/requestCoordinator';
+import { getPtvDisplayIdentityKey } from '../../services/displayIdentity';
 
 export type PtvBrowseScopeStatus = 'error' | 'resolved' | 'unscoped';
 
@@ -41,41 +37,60 @@ export type PtvFocusedBrowseResult = Readonly<{
     totalRecordCount: number;
 }>;
 
-type PtvBrowseMetadataApiClient = ReturnType<typeof getCurrentPtvApiClient> & {
-    getGenres?: (userId: string, query: PtvItemQuery) => Promise<PtvItemsResult<PtvItem>>;
-    getStudios?: (userId: string, query: PtvItemQuery) => Promise<PtvItemsResult<PtvItem>>;
-};
-
 const PTV_BROWSE_SCOPE_NAMES: Record<string, Readonly<{
     collectionTypes: string[];
     kind: PtvBrowseMediaKind;
     names: string[];
 }>> = {
+    movies: {
+        collectionTypes: ['movies'],
+        kind: 'movies',
+        names: ['movies', 'movies library']
+    },
+    shows: {
+        collectionTypes: ['tvshows'],
+        kind: 'shows',
+        names: ['shows', 'shows library', 'tv shows']
+    },
     anime: {
         collectionTypes: ['tvshows'],
         kind: 'shows',
-        names: ['anime', 'anime series', 'anime shows']
+        names: ['anime', 'anime library']
     },
     animemovies: {
         collectionTypes: ['movies'],
         kind: 'movies',
-        names: ['anime films', 'anime movies', 'animemovies']
+        names: ['ani movies', 'anime movies', 'animemovies', 'animovies', 'animovies library']
     },
     cartoons: {
         collectionTypes: ['tvshows'],
         kind: 'shows',
-        names: ['cartoon shows', 'cartoons']
+        names: ['cartoons', 'cartoons library']
     }
 };
 const PTV_BROWSE_DIRECTORY_LIMIT = 500;
 const PTV_BROWSE_FOCUSED_CACHE_LIMIT = 80;
 const PTV_BROWSE_FOCUSED_CACHE_MS = 2 * 60 * 1000;
+const PTV_BROWSE_SCOPE_CACHE_LIMIT = 8;
+const PTV_BROWSE_SCOPE_CACHE_MS = 2 * 60 * 1000;
 const PTV_BROWSE_TRENDING_POOL_LIMIT = 200;
 const PTV_BROWSE_TRENDING_CACHE_MS = 5 * 60 * 1000;
-const scopeDiscoveryCache = new Map<string, Promise<PtvLibrary[]>>();
+type PtvBrowseMetadataCacheEntry =
+    | Readonly<{
+        expiresAt: number;
+        kind: 'directory';
+        value: PtvBrowseDirectoryEntry[];
+    }>
+    | Readonly<{
+        expiresAt: number;
+        kind: 'libraries';
+        value: PtvLibrary[];
+    }>;
+
+const browseMetadataCache = new Map<string, PtvBrowseMetadataCacheEntry>();
 const focusedPageCache = new Map<string, Readonly<{
     expiresAt: number;
-    result: Promise<PtvFocusedBrowseResult>;
+    result: PtvFocusedBrowseResult;
 }>>();
 const trendingCache = new Map<string, Readonly<{
     expiresAt: number;
@@ -108,8 +123,23 @@ function getBrowseNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function getScopeDiscoveryKey() {
-    return `${getPtvServerId() || 'server'}:${getPtvCurrentUserId() || 'user'}`;
+function getScopeDiscoveryIdentity() {
+    const serverId = getPtvServerId();
+    const userId = getPtvCurrentUserId(serverId);
+
+    return {
+        key: getPtvDisplayIdentityKey(serverId, userId),
+        serverId,
+        userId
+    };
+}
+
+export function getPtvBrowseScopeIdentityKey() {
+    return getScopeDiscoveryIdentity().key;
+}
+
+export function isPtvBrowseScopeIdentityCurrent(identityKey: string | null) {
+    return getPtvBrowseScopeIdentityKey() === identityKey;
 }
 
 export function getPtvFocusedBrowseCacheKey(
@@ -117,7 +147,10 @@ export function getPtvFocusedBrowseCacheKey(
     scope: PtvBrowseResolvedScope,
     metadataId = ''
 ) {
-    return getPtvFocusedBrowseLoaderKey(route, scope, metadataId);
+    const identityKey = getPtvDisplayIdentityKey(getPtvServerId(), getPtvCurrentUserId())
+        || 'identity-pending';
+
+    return `${identityKey}|${getPtvFocusedBrowseLoaderKey(route, scope, metadataId)}`;
 }
 
 function trimFocusedPageCache() {
@@ -129,27 +162,110 @@ function trimFocusedPageCache() {
     }
 }
 
-async function getBrowseLibraries() {
-    const key = getScopeDiscoveryKey();
-    const cached = scopeDiscoveryCache.get(key);
+function trimBrowseMetadataCache() {
+    while (browseMetadataCache.size > PTV_BROWSE_SCOPE_CACHE_LIMIT) {
+        const oldestKey = browseMetadataCache.keys().next().value;
 
-    if (cached) return cached;
-
-    const request = getPtvUserViews()
-        .then(result => result.Items || [])
-        .catch(error => {
-            scopeDiscoveryCache.delete(key);
-            throw error;
-        });
-
-    scopeDiscoveryCache.set(key, request);
-    return request;
+        if (!oldestKey) return;
+        browseMetadataCache.delete(oldestKey);
+    }
 }
 
-function libraryMatchesScope(library: PtvLibrary, route: PtvBrowseRoute) {
-    const definition = PTV_BROWSE_SCOPE_NAMES[route.scopeAlias];
+function getEffectiveBrowseScopeAlias(route: PtvBrowseRoute) {
+    if (route.scopeAlias) return route.scopeAlias;
+    if (route.kind === 'movies') return 'movies';
+    if (route.kind === 'shows') return 'shows';
+
+    return '';
+}
+
+function createBrowseScopeAbortError() {
+    const error = new Error('Browse scope discovery was cancelled.');
+
+    error.name = 'AbortError';
+    return error;
+}
+
+function createBrowseDirectoryAbortError() {
+    const error = new Error('Browse directory work was cancelled.');
+
+    error.name = 'AbortError';
+    return error;
+}
+
+function waitForPtvBrowseMetadataConsumer<T>(
+    cacheOwner: Promise<T>,
+    signal?: AbortSignal
+): Promise<T> {
+    if (!signal) return cacheOwner;
+    if (signal.aborted) return Promise.reject(createBrowseDirectoryAbortError());
+
+    return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => signal.removeEventListener('abort', onAbort);
+        const onAbort = () => {
+            if (settled) return;
+
+            settled = true;
+            cleanup();
+            reject(createBrowseDirectoryAbortError());
+        };
+
+        signal.addEventListener('abort', onAbort, { once: true });
+        cacheOwner.then(
+            value => {
+                if (settled) return;
+
+                settled = true;
+                cleanup();
+                resolve(value);
+            },
+            error => {
+                if (settled) return;
+
+                settled = true;
+                cleanup();
+                reject(error);
+            }
+        );
+    });
+}
+
+async function getBrowseLibraries(signal?: AbortSignal) {
+    if (signal?.aborted) throw createBrowseScopeAbortError();
+
+    const identity = getScopeDiscoveryIdentity();
+    const cached = identity.key ? browseMetadataCache.get(identity.key) : undefined;
+
+    if (cached?.kind === 'libraries' && cached.expiresAt > Date.now()) return cached.value;
+    if (cached && identity.key) browseMetadataCache.delete(identity.key);
+
+    const result = await getPtvUserViews({
+        serverId: identity.serverId || null,
+        signal,
+        userId: identity.userId || null
+    });
+
+    if (signal?.aborted) throw createBrowseScopeAbortError();
+
+    const libraries = result.Items || [];
+
+    if (identity.key) {
+        browseMetadataCache.set(identity.key, {
+            expiresAt: Date.now() + PTV_BROWSE_SCOPE_CACHE_MS,
+            kind: 'libraries',
+            value: libraries
+        });
+        trimBrowseMetadataCache();
+    }
+
+    return libraries;
+}
+
+function libraryMatchesScope(library: PtvLibrary, route: PtvBrowseRoute, scopeAlias: string) {
+    const definition = PTV_BROWSE_SCOPE_NAMES[scopeAlias];
     const libraryId = normalizeBrowseKey(library.Id).replace(/ /g, '');
-    const requestedId = normalizeBrowseKey(route.scopeAlias).replace(/ /g, '');
+    const requestedId = normalizeBrowseKey(scopeAlias).replace(/ /g, '');
 
     if (libraryId && libraryId === requestedId) return true;
     if (!definition || definition.kind !== route.kind) return false;
@@ -161,18 +277,23 @@ function libraryMatchesScope(library: PtvLibrary, route: PtvBrowseRoute) {
         && definition.names.some(name => normalizeBrowseKey(name) === libraryName);
 }
 
-export async function resolvePtvBrowseScope(route: PtvBrowseRoute): Promise<PtvBrowseResolvedScope> {
-    if (!route.scopeAlias) return UNSCOPED_BROWSE_SCOPE;
+export async function resolvePtvBrowseScope(
+    route: PtvBrowseRoute,
+    signal?: AbortSignal
+): Promise<PtvBrowseResolvedScope> {
+    const scopeAlias = getEffectiveBrowseScopeAlias(route);
+
+    if (!scopeAlias) return UNSCOPED_BROWSE_SCOPE;
 
     try {
-        const libraries = await getBrowseLibraries();
-        const matches = libraries.filter(library => libraryMatchesScope(library, route));
+        const libraries = await getBrowseLibraries(signal);
+        const matches = libraries.filter(library => libraryMatchesScope(library, route, scopeAlias));
         const libraryIds = matches.map(library => getBrowseText(library.Id)).filter(Boolean);
 
         if (!libraryIds.length) {
             return {
-                alias: route.scopeAlias,
-                error: `The ${route.scopeAlias} library is not available for this account.`,
+                alias: scopeAlias,
+                error: `The ${scopeAlias} library is not available for this account.`,
                 libraryIds: [],
                 libraryNames: [],
                 status: 'error'
@@ -180,13 +301,20 @@ export async function resolvePtvBrowseScope(route: PtvBrowseRoute): Promise<PtvB
         }
 
         return {
-            alias: route.scopeAlias,
+            alias: scopeAlias,
             error: '',
             libraryIds,
             libraryNames: matches.map(library => getBrowseText(library.Name)).filter(Boolean),
             status: 'resolved'
         };
-    } catch {
+    } catch (error) {
+        if (
+            signal?.aborted
+            || (error && typeof error === 'object' && 'name' in error && error.name === 'AbortError')
+        ) {
+            throw error;
+        }
+
         return {
             alias: route.scopeAlias,
             error: 'Library discovery failed. Try this view again.',
@@ -265,6 +393,20 @@ export function buildPtvFocusedBrowseQuery(
 
 function mergeDirectoryEntries(results: PtvItemsResult<PtvItem>[]) {
     const entries = new Map<string, PtvBrowseDirectoryEntry>();
+    const resolveDirectoryEntryCount = (item: unknown) => {
+        const value = item as Record<string, unknown>;
+
+        return Math.max(
+            getBrowseNumber(value.ChildCount),
+            getBrowseNumber(value.ItemCount),
+            getBrowseNumber(value.ItemCountNum),
+            getBrowseNumber((value as Record<string, unknown>).MovieCount),
+            getBrowseNumber((value as Record<string, unknown>).SeriesCount),
+            getBrowseNumber((value as Record<string, unknown>).EpisodeCount),
+            getBrowseNumber((value as Record<string, unknown>).StudioCount),
+            getBrowseNumber(value.TotalRecordCount)
+        );
+    };
 
     results.forEach(result => {
         (result.Items || []).forEach(item => {
@@ -274,7 +416,7 @@ function mergeDirectoryEntries(results: PtvItemsResult<PtvItem>[]) {
 
             if (!key || !id) return;
 
-            const count = getBrowseNumber(item.ChildCount);
+            const count = resolveDirectoryEntryCount(item);
             const existing = entries.get(key);
 
             entries.set(key, {
@@ -288,16 +430,50 @@ function mergeDirectoryEntries(results: PtvItemsResult<PtvItem>[]) {
     return [...entries.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function getPtvBrowseDirectoryCacheKey(
+    route: PtvBrowseRoute,
+    scope: PtvBrowseResolvedScope,
+    type: 'genre' | 'studio',
+    identityKey = getPtvBrowseScopeIdentityKey()
+) {
+    if (!identityKey) return null;
+
+    const libraryIds = scope.libraryIds
+        .map(libraryId => encodeURIComponent(libraryId))
+        .sort((left, right) => left.localeCompare(right))
+        .join(',');
+
+    return [
+        'directory',
+        identityKey,
+        route.kind,
+        type,
+        scope.status,
+        encodeURIComponent(scope.alias),
+        libraryIds
+    ].join('|');
+}
+
 export async function loadPtvBrowseDirectory(
     route: PtvBrowseRoute,
     scope: PtvBrowseResolvedScope,
-    type: 'genre' | 'studio'
+    type: 'genre' | 'studio',
+    signal?: AbortSignal
 ): Promise<PtvBrowseDirectoryEntry[]> {
-    const apiClient = getCurrentPtvApiClient() as PtvBrowseMetadataApiClient;
-    const userId = getPtvCurrentUserId();
-    const method = type === 'genre' ? apiClient?.getGenres : apiClient?.getStudios;
+    if (signal?.aborted) throw createBrowseDirectoryAbortError();
 
-    if (!userId || !method) throw new Error(`${type === 'genre' ? 'Genre' : 'Studio'} browsing is unavailable.`);
+    const identity = getScopeDiscoveryIdentity();
+    const { serverId, userId } = identity;
+
+    if (!userId) throw new Error(`${type === 'genre' ? 'Genre' : 'Studio'} browsing is unavailable.`);
+
+    const cacheKey = getPtvBrowseDirectoryCacheKey(route, scope, type, identity.key);
+    const cached = cacheKey ? browseMetadataCache.get(cacheKey) : undefined;
+
+    if (cached?.kind === 'directory' && cached.expiresAt > Date.now()) {
+        return waitForPtvBrowseMetadataConsumer(Promise.resolve(cached.value), signal);
+    }
+    if (cached && cacheKey) browseMetadataCache.delete(cacheKey);
 
     const baseQuery: PtvItemQuery = {
         EnableTotalRecordCount: true,
@@ -311,27 +487,30 @@ export async function loadPtvBrowseDirectory(
         scope.libraryIds.map(libraryId => ({ ...baseQuery, ParentId: libraryId })) :
         [baseQuery];
     const endpoint = type === 'genre' ? 'Genres' : 'Studios';
-    const results = await Promise.all(scopedQueries.map(query => {
-        const requestKey = getPtvRequestCoordinatorKey(
-            'GET',
-            getPtvApiUrl(endpoint, query),
-            true
-        );
-
-        return coordinatePtvJsonRequest(
-            requestKey,
-            () => method.call(apiClient, userId, query),
-            {
-                diagnosticKey: `GET auth jellyfin:${type}-directory`,
-                endpoint,
-                includeAuthorization: true,
-                method: 'GET',
-                source: 'browse-directory'
+    const cacheOwner = Promise.all(scopedQueries.map(query => (
+        requestPtvJson<PtvItemsResult<PtvItem>>(endpoint, {
+            params: {
+                ...query,
+                userId
+            },
+            serverId: serverId || null
+        })
+    )))
+        .then(mergeDirectoryEntries)
+        .then(directory => {
+            if (cacheKey && getPtvBrowseDirectoryCacheKey(route, scope, type) === cacheKey) {
+                browseMetadataCache.set(cacheKey, {
+                    expiresAt: Date.now() + PTV_BROWSE_SCOPE_CACHE_MS,
+                    kind: 'directory',
+                    value: directory
+                });
+                trimBrowseMetadataCache();
             }
-        );
-    }));
 
-    return mergeDirectoryEntries(results);
+            return directory;
+        });
+
+    return waitForPtvBrowseMetadataConsumer(cacheOwner, signal);
 }
 
 export function findExactPtvBrowseDirectoryEntry(entries: PtvBrowseDirectoryEntry[], value: string) {
@@ -373,10 +552,15 @@ export function rankPtvBrowseTrendingItems(items: PtvItem[], now = Date.now()) {
     });
 }
 
-async function loadTrendingPool(route: PtvBrowseRoute, scope: PtvBrowseResolvedScope) {
+async function loadTrendingPool(
+    route: PtvBrowseRoute,
+    scope: PtvBrowseResolvedScope,
+    signal?: AbortSignal
+) {
+    const identityKey = getPtvDisplayIdentityKey(getPtvServerId(), getPtvCurrentUserId());
     const scopeKey = [...scope.libraryIds].sort((left, right) => left.localeCompare(right)).join(',');
-    const cacheKey = `${route.kind}|${route.scopeAlias || 'all'}|${scopeKey}|${route.genre}|${route.studio}|${route.network}|${route.query}`;
-    const cached = trendingCache.get(cacheKey);
+    const cacheKey = `${identityKey || 'identity-pending'}|${route.kind}|${route.scopeAlias || 'all'}|${scopeKey}|${route.genre}|${route.studio}|${route.network}|${route.query}`;
+    const cached = identityKey ? trendingCache.get(cacheKey) : undefined;
 
     if (cached && cached.expiresAt > Date.now()) return cached.items;
 
@@ -388,13 +572,17 @@ async function loadTrendingPool(route: PtvBrowseRoute, scope: PtvBrowseResolvedS
         SortBy: 'DatePlayed,DateCreated',
         SortOrder: 'Descending',
         StartIndex: 0
+    }, {
+        signal
     });
     const ranked = rankPtvBrowseTrendingItems(normalizePtvLibraryItems(result.Items || []).items);
 
-    trendingCache.set(cacheKey, {
-        expiresAt: Date.now() + PTV_BROWSE_TRENDING_CACHE_MS,
-        items: ranked
-    });
+    if (identityKey) {
+        trendingCache.set(cacheKey, {
+            expiresAt: Date.now() + PTV_BROWSE_TRENDING_CACHE_MS,
+            items: ranked
+        });
+    }
 
     if (trendingCache.size > 12) {
         const oldestKey = trendingCache.keys().next().value;
@@ -408,10 +596,11 @@ async function loadTrendingPool(route: PtvBrowseRoute, scope: PtvBrowseResolvedS
 async function fetchPtvFocusedBrowsePage(
     route: PtvBrowseRoute,
     scope: PtvBrowseResolvedScope,
-    metadataId = ''
+    metadataId = '',
+    signal?: AbortSignal
 ): Promise<PtvFocusedBrowseResult> {
     if (route.view === 'trending') {
-        const ranked = await loadTrendingPool(route, scope);
+        const ranked = await loadTrendingPool(route, scope, signal);
         const startIndex = route.page * route.pageSize;
 
         return {
@@ -422,8 +611,8 @@ async function fetchPtvFocusedBrowsePage(
 
     const query = buildPtvFocusedBrowseQuery(route, scope, metadataId);
     const result = route.view === 'continue' ?
-        await getPtvResumeItems<PtvItem>(query) :
-        await getPtvItems<PtvItem>(query);
+        await getPtvResumeItems<PtvItem>(query, { signal }) :
+        await getPtvItems<PtvItem>(query, { signal });
 
     const normalized = normalizePtvLibraryItems(result.Items || []);
 
@@ -436,25 +625,25 @@ async function fetchPtvFocusedBrowsePage(
 export async function loadPtvFocusedBrowsePage(
     route: PtvBrowseRoute,
     scope: PtvBrowseResolvedScope,
-    metadataId = ''
+    metadataId = '',
+    signal?: AbortSignal
 ): Promise<PtvFocusedBrowseResult> {
+    const identityKey = getPtvDisplayIdentityKey(getPtvServerId(), getPtvCurrentUserId());
     const cacheKey = getPtvFocusedBrowseCacheKey(route, scope, metadataId);
-    const cached = focusedPageCache.get(cacheKey);
+    const cached = identityKey ? focusedPageCache.get(cacheKey) : undefined;
 
     if (cached && cached.expiresAt > Date.now()) return cached.result;
     if (cached) focusedPageCache.delete(cacheKey);
 
-    const result = fetchPtvFocusedBrowsePage(route, scope, metadataId)
-        .catch(error => {
-            focusedPageCache.delete(cacheKey);
-            throw error;
-        });
+    const result = await fetchPtvFocusedBrowsePage(route, scope, metadataId, signal);
 
-    focusedPageCache.set(cacheKey, {
-        expiresAt: Date.now() + PTV_BROWSE_FOCUSED_CACHE_MS,
-        result
-    });
-    trimFocusedPageCache();
+    if (identityKey && !signal?.aborted) {
+        focusedPageCache.set(cacheKey, {
+            expiresAt: Date.now() + PTV_BROWSE_FOCUSED_CACHE_MS,
+            result
+        });
+        trimFocusedPageCache();
+    }
 
     return result;
 }
@@ -462,10 +651,11 @@ export async function loadPtvFocusedBrowsePage(
 export async function loadPtvFocusedBrowsePages(
     route: PtvBrowseRoute,
     scope: PtvBrowseResolvedScope,
-    metadataId = ''
+    metadataId = '',
+    signal?: AbortSignal
 ): Promise<PtvFocusedBrowseResult> {
     const pages = await Promise.all(Array.from({ length: route.page + 1 }, (_, page) => (
-        loadPtvFocusedBrowsePage({ ...route, page }, scope, metadataId)
+        loadPtvFocusedBrowsePage({ ...route, page }, scope, metadataId, signal)
     )));
     const itemsById = new Map<string, PtvItem>();
 
@@ -487,6 +677,6 @@ export async function loadPtvFocusedBrowsePages(
 
 export function resetPtvBrowseDataCachesForTests() {
     focusedPageCache.clear();
-    scopeDiscoveryCache.clear();
+    browseMetadataCache.clear();
     trendingCache.clear();
 }

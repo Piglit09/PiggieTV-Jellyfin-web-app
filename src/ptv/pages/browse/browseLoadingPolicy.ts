@@ -22,10 +22,18 @@ export function prioritizePtvBrowseTasks<TTask extends PtvBrowseTask>(tasks: TTa
     ));
 }
 
-export function getPtvBrowseFeaturedQueryOverrides() {
+export function getPtvBrowseFeaturedQueryOverrides(kind: 'collections' | 'movies' | 'shows') {
+    if (kind === 'collections') {
+        return {
+            Limit: 20,
+            SortBy: 'DateCreated',
+            SortOrder: 'Descending'
+        } as const;
+    }
+
     return {
         Limit: 20,
-        SortBy: 'DateCreated',
+        SortBy: 'CommunityRating',
         SortOrder: 'Descending'
     } as const;
 }

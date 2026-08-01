@@ -27,9 +27,23 @@ describe('browseLoadingPolicy', () => {
     });
 
     it('avoids an expensive server-side random sort for the featured shelf', () => {
-        expect(getPtvBrowseFeaturedQueryOverrides()).toEqual({
+        expect(getPtvBrowseFeaturedQueryOverrides('collections')).toEqual({
             Limit: 20,
             SortBy: 'DateCreated',
+            SortOrder: 'Descending'
+        });
+    });
+
+    it('uses community rating for movie/show featured shelves', () => {
+        expect(getPtvBrowseFeaturedQueryOverrides('movies')).toEqual({
+            Limit: 20,
+            SortBy: 'CommunityRating',
+            SortOrder: 'Descending'
+        });
+
+        expect(getPtvBrowseFeaturedQueryOverrides('shows')).toEqual({
+            Limit: 20,
+            SortBy: 'CommunityRating',
             SortOrder: 'Descending'
         });
     });

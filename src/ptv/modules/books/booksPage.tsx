@@ -11,11 +11,11 @@ import React, {
 import { useLocation } from 'react-router-dom';
 
 import Page from 'components/Page';
-import { playbackManager } from 'components/playback/playbackmanager';
 
 import './books.scss';
 
 import { setPtvFavorite } from '../../api';
+import { createPtvAbortController } from '../../core/abortController';
 import { PTV_ASSETS, PTV_ROUTES } from '../../core/config';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { recordPtvEvent } from '../../core/observability';
@@ -30,6 +30,7 @@ import {
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import { PtvIcon } from '../icons';
 import { loadReaderProgress } from '../reader/readerProgressStore';
+import { playPtvReaderItem } from '../reader/readerLoader';
 import {
     buildPtvReadingSeries,
     findPtvReadingSeriesById,
@@ -82,9 +83,14 @@ import {
     normalizePtvReadingImageRoute
 } from './readingImageFailures';
 import { shouldPreservePtvReadingIndex } from './readingProgressiveIndex';
+import {
+    getPtvReadingRouteHomeGate,
+    shouldStartPtvReadingLibraryIndexImmediately
+} from './readingRoutePolicy';
 import type {
     PtvReadingHomeData,
     PtvReadingItem,
+    PtvReadingItemKind,
     PtvReadingLibraryDebug,
     PtvReadingLibraryIndex,
     PtvReadingRouteKind,
@@ -694,6 +700,18 @@ function getAllReadingItems(homeData: PtvReadingHomeData) {
     return uniquePtvReadingItems(homeData.sections.reduce<PtvReadingItem[]>((items, section) => items.concat(section.items), []));
 }
 
+function getReadingKindCount(items: PtvReadingItem[], kind: PtvReadingItemKind) {
+    return items.filter(item => getPtvReadingItemKind(item) === kind).length;
+}
+
+function getReadingSectionItemCount(
+    sections: PtvReadingSection[],
+    sectionId: string,
+    fallback: number
+) {
+    return sections.find(section => section.id === sectionId)?.items.length || fallback;
+}
+
 export function mergeReadingHomeRefresh(previous: PtvReadingHomeData, nextHomeData: PtvReadingHomeData, stage: string) {
     if (previous.kind !== nextHomeData.kind) return nextHomeData;
 
@@ -1178,7 +1196,7 @@ function readPtvItem(item: PtvReadingItem) {
         kind: getPtvReadingItemKind(item)
     });
 
-    return playbackManager.play({
+    return playPtvReaderItem({
         items: [item],
         serverId: item.ServerId,
         startPositionTicks: item.UserData?.PlaybackPositionTicks || 0
@@ -1842,12 +1860,20 @@ function ReadingHomeView({ homeData, onRetrySection, routeKind }: Readonly<{
     routeKind: PtvReadingRouteKind;
 }>) {
     const rows = homeData.sections;
+    const hasItems = rows.some(section => section.items.length > 0);
 
     return (
         <div className='ptv-books-view ptv-books-home-view'>
             <ReadingHero homeData={homeData} routeKind={routeKind} />
             <ReadingChips homeData={homeData} routeKind={routeKind} />
             <ReadingLibraryDebugPanel cacheDiagnostics={homeData.cacheDiagnostics} debug={homeData.libraryDebug} />
+            {!hasItems && !homeData.isPartial ? (
+                <section className='ptv-books-empty'>
+                    <PtvIcon name='books' />
+                    <h2>No {getRouteTitle(routeKind)} Content Found</h2>
+                    <p>No books, comics, or manga items were returned by Jellyfin for this library.</p>
+                </section>
+            ) : null}
             {rows.map((section, index) => (
                 <ReadingRow
                     key={section.id}
@@ -2058,8 +2084,9 @@ function ReadingBrowseTools({ filter, formatFilter, itemCount, query, routeKind,
     );
 }
 
-function ReadingLibraryView({ homeData, onSeriesOverrideChange, routeKind, seriesOverrides }: Readonly<{
+function ReadingLibraryView({ homeData, isLoading, onSeriesOverrideChange, routeKind, seriesOverrides }: Readonly<{
     homeData: PtvReadingHomeData;
+    isLoading: boolean;
     onSeriesOverrideChange: (updates: ReadingSeriesOverrideUpdate[]) => void;
     routeKind: PtvReadingRouteKind;
     seriesOverrides: Record<string, PtvReadingSeriesOverride>;
@@ -2139,7 +2166,7 @@ function ReadingLibraryView({ homeData, onSeriesOverrideChange, routeKind, serie
 
     let libraryContent: React.ReactNode = null;
 
-    if (!homeData.isPartial || libraryItems.length) {
+    if ((!homeData.isPartial || libraryItems.length) && (!isLoading || sourceItems.length)) {
         libraryContent = showSeriesToggle && browseViewMode === 'series' ? (
             <ReadingSeriesGrid
                 onSeriesOverrideChange={onSeriesOverrideChange}
@@ -2177,7 +2204,7 @@ function ReadingLibraryView({ homeData, onSeriesOverrideChange, routeKind, serie
                 debug={homeData.libraryDebug}
                 seriesDiagnostics={seriesDiagnostics}
             />
-            {homeData.isPartial && !libraryItems.length && !librarySection?.error ? (
+            {(isLoading || homeData.isPartial) && !sourceItems.length && !librarySection?.error ? (
                 <ReadingLoading label='Loading library shelf' />
             ) : null}
             {librarySection?.error ? (
@@ -2541,6 +2568,16 @@ function getReadingErrorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
 }
 
+function isReadingRequestAbort(error: unknown) {
+    const errorRecord = error && typeof error === 'object' ? error as {
+        message?: unknown;
+        name?: unknown;
+    } : null;
+    const message = typeof errorRecord?.message === 'string' ? errorRecord.message : '';
+
+    return errorRecord?.name === 'AbortError' || /abort|cancel|superseded/i.test(message);
+}
+
 export default function PiggieTvBooksPage() {
     const location = useLocation();
     const route = useMemo(() => getReadingRoute(location.pathname, location.search), [location.pathname, location.search]);
@@ -2550,9 +2587,12 @@ export default function PiggieTvBooksPage() {
     const readingInitialRecordedRef = useRef(false);
     const readingFullyLoadedRecordedRef = useRef(false);
     const readingLibraryIndexRequestIdRef = useRef(0);
+    const readingItemRefreshControllerRef = useRef<AbortController | null>(null);
     const readingMountedRef = useRef(false);
     const readingPageRenderIdentityRef = useRef('');
     const readingRequestIdRef = useRef(0);
+    const readingRouteWorkControllerRef = useRef<AbortController | null>(null);
+    const readingSectionRetryControllersRef = useRef(new Map<string, AbortController>());
     const [homeData, setHomeData] = useState<PtvReadingHomeData>(EMPTY_HOME_DATA);
     const [searchResults, setSearchResults] = useState<PtvReadingItem[]>([]);
     const [itemDetail, setItemDetail] = useState<ItemDetailState>(getInitialItemDetail);
@@ -2612,7 +2652,8 @@ export default function PiggieTvBooksPage() {
     const loadReadingLibraryIndex = useCallback((
         kind: PtvReadingRouteKind,
         forceRefresh = false,
-        ownerRequestId = readingRequestIdRef.current
+        ownerRequestId = readingRequestIdRef.current,
+        signal?: AbortSignal
     ) => {
         const libraryRequestId = ++readingLibraryIndexRequestIdRef.current;
         let lastPublishedIndex: PtvReadingLibraryIndex | null = null;
@@ -2649,28 +2690,50 @@ export default function PiggieTvBooksPage() {
         return fetchPtvReadingLibraryIndex(kind, {
             forceRefresh,
             isCurrent: isCurrentIndexRequest,
-            onProgress: libraryIndex => applyLibraryIndex(libraryIndex, 'reading-library-index-background-progress')
+            onProgress: libraryIndex => applyLibraryIndex(libraryIndex, 'reading-library-index-background-progress'),
+            signal
         })
             .then(libraryIndex => {
                 applyLibraryIndex(libraryIndex, 'reading-library-index-background-loaded');
+
+                if (!libraryIndex.items.length && libraryIndex.debug.dropReasons.length) {
+                    throw new Error(libraryIndex.debug.dropReasons[0]);
+                }
             })
             .catch(error => {
+                if (signal?.aborted || isReadingRequestAbort(error)) return;
+
                 recordPtvEvent('api', 'reading-library-index-background-failed', {
                     error: getReadingErrorMessage(error),
                     kind
                 });
+
+                throw error;
             });
     }, []);
 
     const refreshReadingItemDetail = useCallback((itemId: string) => {
+        readingItemRefreshControllerRef.current?.abort();
+        const controller = createPtvAbortController();
+        const isCurrent = () => readingMountedRef.current
+            && readingItemRefreshControllerRef.current === controller
+            && route.view === 'item'
+            && route.id === itemId
+            && !controller.signal.aborted;
+
+        readingItemRefreshControllerRef.current = controller;
         setItemDetail(previous => ({
             ...previous,
             error: '',
             isLoading: true
         }));
 
-        return fetchPtvReadingItem(itemId)
+        return fetchPtvReadingItem(itemId, {
+            signal: controller.signal
+        })
             .then(item => {
+                if (!isCurrent()) return;
+
                 setItemDetail({
                     error: '',
                     isLoading: false,
@@ -2678,13 +2741,20 @@ export default function PiggieTvBooksPage() {
                 });
             })
             .catch(error => {
+                if (!isCurrent() || isReadingRequestAbort(error)) return;
+
                 setItemDetail({
                     ...getInitialItemDetail(),
                     error: getReadingErrorMessage(error) || 'Item could not be loaded.',
                     isLoading: false
                 });
+            })
+            .finally(() => {
+                if (readingItemRefreshControllerRef.current === controller) {
+                    readingItemRefreshControllerRef.current = null;
+                }
             });
-    }, []);
+    }, [route.id, route.view]);
 
     const saveReadingSeriesOverrideUpdates = useCallback((updates: ReadingSeriesOverrideUpdate[]) => {
         if (!updates.length) return;
@@ -2785,8 +2855,15 @@ export default function PiggieTvBooksPage() {
     }, [route.kind, seriesOverridesByKind]);
 
     const loadReadingData = useCallback((forceRefresh = false) => {
+        readingRouteWorkControllerRef.current?.abort();
+        const routeWorkController = createPtvAbortController();
+
+        readingRouteWorkControllerRef.current = routeWorkController;
+        const { signal } = routeWorkController;
         const requestId = ++readingRequestIdRef.current;
-        const isCurrentRequest = () => readingMountedRef.current && requestId === readingRequestIdRef.current;
+        const isCurrentRequest = () => readingMountedRef.current
+            && requestId === readingRequestIdRef.current
+            && !signal.aborted;
 
         readingLoadStartedAtRef.current = performance.now();
         readingFirstShelfRecordedRef.current = false;
@@ -2805,10 +2882,25 @@ export default function PiggieTvBooksPage() {
 
             window.setTimeout(() => {
                 if (isCurrentRequest()) {
-                    void loadReadingLibraryIndex(route.kind, forceRefresh, requestId);
+                    void loadReadingLibraryIndex(route.kind, forceRefresh, requestId, signal)
+                        .catch(error => {
+                            if (!isCurrentRequest() || isReadingRequestAbort(error)) return;
+
+                            setErrorMessage(getReadingErrorMessage(error) || 'Reading library could not be loaded.');
+                        })
+                        .finally(() => {
+                            if (isCurrentRequest()) setLoading(false);
+                        });
                 }
             }, route.view === 'library' ? 0 : PTV_READING_LIBRARY_INDEX_LOAD_DELAY_MS);
         };
+        const startsLibraryIndexImmediately = shouldStartPtvReadingLibraryIndexImmediately(route.view);
+
+        if (startsLibraryIndexImmediately) {
+            scheduleLibraryIndex();
+            return Promise.resolve();
+        }
+
         const loadFullReadingData = (bypassCacheForRefresh = false) => {
             const refreshStartedAt = performance.now();
 
@@ -2825,7 +2917,11 @@ export default function PiggieTvBooksPage() {
                 } : previous.cacheDiagnostics
             } : previous);
 
-            void getPtvReadingHome(route.kind, { forceRefresh: forceRefresh || bypassCacheForRefresh, view: route.view })
+            void getPtvReadingHome(route.kind, {
+                forceRefresh: forceRefresh || bypassCacheForRefresh,
+                signal,
+                view: route.view
+            })
                 .then(nextHomeData => {
                     if (!isCurrentRequest()) return;
 
@@ -2859,6 +2955,8 @@ export default function PiggieTvBooksPage() {
                     });
                 })
                 .catch(error => {
+                    if (!isCurrentRequest() || isReadingRequestAbort(error)) return;
+
                     const refreshErrorMessage = getReadingErrorMessage(error);
 
                     setHomeData(previous => previous.kind === route.kind ? {
@@ -2881,39 +2979,21 @@ export default function PiggieTvBooksPage() {
                 });
         };
 
-        return getPtvReadingHome(route.kind, { forceRefresh, initialOnly: true, view: route.view })
+        return getPtvReadingHome(route.kind, {
+            forceRefresh,
+            initialOnly: true,
+            signal,
+            view: route.view
+        })
             .then(nextHomeData => {
                 if (!isCurrentRequest()) return;
 
-                setHomeData(nextHomeData);
+                setHomeData(previous => startsLibraryIndexImmediately ?
+                    mergeReadingHomeRefresh(previous, nextHomeData, 'catalog-initial') :
+                    nextHomeData);
                 setLoading(false);
-                scheduleLibraryIndex();
+                if (!startsLibraryIndexImmediately) scheduleLibraryIndex();
                 recordReadingLoadMetrics(nextHomeData, nextHomeData.cacheDiagnostics?.source || 'initial');
-
-                if (route.view === 'library') {
-                    void fetchPtvReadingHomeSection(route.kind, 'library')
-                        .then(section => {
-                            if (!isCurrentRequest()) return;
-
-                            setHomeData(previous => {
-                                if (previous.kind !== route.kind) return previous;
-
-                                const sections = replaceReadingSection(previous.sections, section);
-
-                                return {
-                                    ...previous,
-                                    sectionDiagnostics: getReadingSectionDiagnostics(sections),
-                                    sections
-                                };
-                            });
-                        })
-                        .catch(error => {
-                            recordPtvEvent('api', 'reading-library-preview-failed', {
-                                error: getReadingErrorMessage(error),
-                                kind: route.kind
-                            });
-                        });
-                }
 
                 if (nextHomeData.isPartial || nextHomeData.cacheDiagnostics?.staleHit) {
                     const bypassCacheForRefresh = Boolean(nextHomeData.cacheDiagnostics?.staleHit);
@@ -2934,7 +3014,7 @@ export default function PiggieTvBooksPage() {
                 }
             })
             .catch(error => {
-                if (!isCurrentRequest()) return;
+                if (!isCurrentRequest() || isReadingRequestAbort(error)) return;
 
                 setErrorMessage(getReadingErrorMessage(error) || 'Reading library could not be loaded.');
                 recordPtvEvent('render', 'reading-page-error', {
@@ -2947,6 +3027,19 @@ export default function PiggieTvBooksPage() {
     }, [loadReadingLibraryIndex, recordReadingLoadMetrics, route.kind, route.view]);
 
     const retryReadingSection = useCallback((sectionId: string) => {
+        readingSectionRetryControllersRef.current.get(sectionId)?.abort();
+        const controller = createPtvAbortController();
+        const routeSignal = readingRouteWorkControllerRef.current?.signal;
+        const abortFromRoute = () => {
+            controller.abort();
+        };
+        const isCurrentRetry = () => readingMountedRef.current
+            && readingSectionRetryControllersRef.current.get(sectionId) === controller
+            && !controller.signal.aborted;
+
+        if (routeSignal?.aborted) controller.abort();
+        else routeSignal?.addEventListener('abort', abortFromRoute, { once: true });
+        readingSectionRetryControllersRef.current.set(sectionId, controller);
         setHomeData(previous => {
             if (previous.kind !== route.kind) return previous;
 
@@ -2976,8 +3069,12 @@ export default function PiggieTvBooksPage() {
             };
         });
 
-        void fetchPtvReadingHomeSection(route.kind, sectionId)
+        void fetchPtvReadingHomeSection(route.kind, sectionId, undefined, {
+            signal: controller.signal
+        })
             .then(section => {
+                if (!isCurrentRetry()) return;
+
                 setHomeData(previous => {
                     if (previous.kind !== route.kind) return previous;
 
@@ -2995,9 +3092,9 @@ export default function PiggieTvBooksPage() {
                             fetchedItemCount: allItems.length,
                             jellyfinRouteItemTotal: allItems.length,
                             kindCounts: {
-                                book: allItems.filter(item => getPtvReadingItemKind(item) === 'book').length,
-                                comic: allItems.filter(item => getPtvReadingItemKind(item) === 'comic').length,
-                                manga: allItems.filter(item => getPtvReadingItemKind(item) === 'manga').length
+                                book: getReadingKindCount(allItems, 'book'),
+                                comic: getReadingKindCount(allItems, 'comic'),
+                                manga: getReadingKindCount(allItems, 'manga')
                             },
                             sectionDiagnostics
                         } : previous.libraryDebug,
@@ -3005,18 +3102,34 @@ export default function PiggieTvBooksPage() {
                         sections,
                         stats: {
                             ...previous.stats,
-                            favoriteCount: sections.find(entry => entry.id === 'favorites')?.items.length || previous.stats.favoriteCount,
-                            resumedCount: sections.find(entry => entry.id === 'continue-reading')?.items.length || previous.stats.resumedCount
+                            favoriteCount: getReadingSectionItemCount(
+                                sections,
+                                'favorites',
+                                previous.stats.favoriteCount
+                            ),
+                            resumedCount: getReadingSectionItemCount(
+                                sections,
+                                'continue-reading',
+                                previous.stats.resumedCount
+                            )
                         }
                     };
                 });
             })
             .catch(error => {
+                if (!isCurrentRetry() || isReadingRequestAbort(error)) return;
+
                 recordPtvEvent('api', 'reading-section-retry-failed', {
                     error: getReadingErrorMessage(error),
                     kind: route.kind,
                     sectionId
                 });
+            })
+            .finally(() => {
+                routeSignal?.removeEventListener('abort', abortFromRoute);
+                if (readingSectionRetryControllersRef.current.get(sectionId) === controller) {
+                    readingSectionRetryControllersRef.current.delete(sectionId);
+                }
             });
     }, [route.kind]);
 
@@ -3098,6 +3211,8 @@ export default function PiggieTvBooksPage() {
     }, [route.kind]);
 
     useEffect(() => {
+        const sectionRetryControllers = readingSectionRetryControllersRef.current;
+
         readingMountedRef.current = true;
         document.documentElement.classList.add('ptv-route-reading-mounted');
         document.body.classList.add('ptv-route-reading-mounted');
@@ -3120,6 +3235,14 @@ export default function PiggieTvBooksPage() {
 
         return () => {
             readingMountedRef.current = false;
+            readingRouteWorkControllerRef.current?.abort();
+            readingRouteWorkControllerRef.current = null;
+            readingItemRefreshControllerRef.current?.abort();
+            readingItemRefreshControllerRef.current = null;
+            sectionRetryControllers.forEach(controller => {
+                controller.abort();
+            });
+            sectionRetryControllers.clear();
             if (document.body.dataset.ptvReadingRoute === route.kind) {
                 delete document.body.dataset.ptvReadingRoute;
             }
@@ -3163,18 +3286,23 @@ export default function PiggieTvBooksPage() {
 
     useEffect(() => {
         let isMounted = true;
+        const controller = createPtvAbortController();
 
         setSearchResults([]);
 
         if (route.view !== 'explore' || !route.search) return undefined;
 
-        void searchPtvReading(route.kind, route.search, 60)
+        void searchPtvReading(route.kind, route.search, 60, {
+            signal: controller.signal
+        })
             .then(results => {
                 if (isMounted) {
                     setSearchResults(results);
                 }
             })
             .catch(error => {
+                if (controller.signal.aborted || isReadingRequestAbort(error)) return;
+
                 recordPtvEvent('api', 'reading-search-failed', {
                     error: getReadingErrorMessage(error),
                     kind: route.kind,
@@ -3188,11 +3316,13 @@ export default function PiggieTvBooksPage() {
 
         return () => {
             isMounted = false;
+            controller.abort();
         };
     }, [route.kind, route.search, route.view]);
 
     useEffect(() => {
         let isMounted = true;
+        const controller = createPtvAbortController();
 
         if (route.view !== 'item' || !route.id) {
             setItemDetail(getInitialItemDetail());
@@ -3204,7 +3334,9 @@ export default function PiggieTvBooksPage() {
             isLoading: true
         });
 
-        void fetchPtvReadingItem(route.id)
+        void fetchPtvReadingItem(route.id, {
+            signal: controller.signal
+        })
             .then(item => {
                 if (isMounted) {
                     setItemDetail({
@@ -3215,6 +3347,8 @@ export default function PiggieTvBooksPage() {
                 }
             })
             .catch(error => {
+                if (controller.signal.aborted || isReadingRequestAbort(error)) return;
+
                 if (isMounted) {
                     setItemDetail({
                         ...getInitialItemDetail(),
@@ -3226,6 +3360,7 @@ export default function PiggieTvBooksPage() {
 
         return () => {
             isMounted = false;
+            controller.abort();
         };
     }, [route.id, route.view]);
 
@@ -3235,8 +3370,14 @@ export default function PiggieTvBooksPage() {
 
     const renderView = () => {
         if (homeData.kind !== route.kind) return <ReadingLoading label={`Loading ${getRouteTitle(route.kind)}`} />;
-        if (isLoading && !homeData.sections.length) return <ReadingLoading label={`Loading ${getRouteTitle(route.kind)}`} />;
-        if (errorMessage && !homeData.sections.length) return <ReadingError message={errorMessage} />;
+        const homeGate = getPtvReadingRouteHomeGate(route.view, {
+            hasError: Boolean(errorMessage),
+            hasHomeSections: homeData.sections.length > 0,
+            isLoading
+        });
+
+        if (homeGate === 'loading') return <ReadingLoading label={`Loading ${getRouteTitle(route.kind)}`} />;
+        if (homeGate === 'error') return <ReadingError message={errorMessage} />;
 
         switch (route.view) {
             case 'explore':
@@ -3252,6 +3393,7 @@ export default function PiggieTvBooksPage() {
                 return (
                     <ReadingLibraryView
                         homeData={homeData}
+                        isLoading={isLoading}
                         onSeriesOverrideChange={saveReadingSeriesOverrideUpdates}
                         routeKind={route.kind}
                         seriesOverrides={seriesOverrides}

@@ -13,7 +13,7 @@ import { buildCardImage } from 'components/cardbuilder/cardImage';
 import confirm from 'components/confirm/confirm';
 import imageLoader from 'components/images/imageLoader';
 import itemContextMenu from 'components/itemContextMenu';
-import itemHelper from 'components/itemHelper';
+import itemHelper, { canEditPlaylist } from 'components/itemHelper';
 import mediaInfo from 'components/mediainfo/mediainfo';
 import layoutManager from 'components/layoutManager';
 import listView from 'components/listview/listview';
@@ -36,10 +36,30 @@ import Events from 'utils/events';
 import { getItemBackdropImageUrl } from 'utils/jellyfin-apiclient/backdropImage';
 
 import { emit as emitPtvEvent } from '../../ptv/core/events';
+import { requestPtvJson } from '../../ptv/api/client';
+import { getPtvItems } from '../../ptv/api/items';
 import { getPtvSeasonEpisodes } from '../../ptv/api/seasonEpisodes';
 import { getPtvSeriesSeasons } from '../../ptv/api/seriesSeasons';
 import { getCoordinatedLegacyItemDetail } from '../../ptv/services/coordinatedLegacyItemDetail';
 import { DetailRequestGate } from './detailRequestGate';
+import {
+    beginPtvDetailChildLoad,
+    retirePtvDetailChildLoad
+} from './detailChildLoadOwner';
+import { createPtvAbortController } from '../../ptv/core/abortController';
+import {
+    beginPtvDetailPageGeneration,
+    isPtvDetailItemGenerationCurrent,
+    retirePtvDetailPageGeneration,
+    resumePtvDetailPageGeneration,
+    stampPtvDetailItemGeneration
+} from './detailGenerationOwner';
+import {
+    awaitPtvDetailLoad,
+    clearPtvDetailLoadFailure,
+    PtvDetailLoadTimeoutError,
+    renderPtvDetailLoadFailure
+} from './detailLoadRecovery';
 import { normalizeItemMediaSources } from './mediaSourceDeduplication';
 
 import 'elements/emby-itemscontainer/emby-itemscontainer';
@@ -66,27 +86,47 @@ function autoFocus(container) {
     });
 }
 
-function getPromise(apiClient, params) {
+function getPromise(apiClient, params, signal) {
     const id = params.id;
+    const serverId = apiClient.serverId?.();
+    const userId = apiClient.getCurrentUserId();
 
     if (id) {
-        return getCoordinatedLegacyItemDetail(apiClient, id);
+        return getCoordinatedLegacyItemDetail(apiClient, id, { signal });
     }
 
     if (params.seriesTimerId) {
-        return apiClient.getLiveTvSeriesTimer(params.seriesTimerId);
+        return requestPtvJson(
+            `LiveTv/SeriesTimers/${encodeURIComponent(params.seriesTimerId)}`,
+            {
+                serverId,
+                signal
+            }
+        );
     }
 
     if (params.genre) {
-        return apiClient.getGenre(params.genre, apiClient.getCurrentUserId());
+        return requestPtvJson(`Genres/${encodeURIComponent(params.genre)}`, {
+            params: { userId },
+            serverId,
+            signal
+        });
     }
 
     if (params.musicgenre) {
-        return apiClient.getMusicGenre(params.musicgenre, apiClient.getCurrentUserId());
+        return requestPtvJson(`MusicGenres/${encodeURIComponent(params.musicgenre)}`, {
+            params: { userId },
+            serverId,
+            signal
+        });
     }
 
     if (params.musicartist) {
-        return apiClient.getArtist(params.musicartist, apiClient.getCurrentUserId());
+        return requestPtvJson(`Artists/${encodeURIComponent(params.musicartist)}`, {
+            params: { userId },
+            serverId,
+            signal
+        });
     }
 
     throw new Error('Invalid request');
@@ -103,12 +143,13 @@ function hideAll(page, className, show) {
 }
 
 function isDetailItemCurrent(page, item) {
-    return !page.dataset.ptvDetailItemId || page.dataset.ptvDetailItemId === item?.Id;
+    return isPtvDetailItemGenerationCurrent(page, item);
 }
 
-function resetDetailPageForItem(page, itemId) {
-    page.dataset.ptvDetailItemId = itemId || '';
+function resetDetailPageForItem(page, itemId, generation) {
+    beginPtvDetailPageGeneration(page, itemId || '', generation);
     page.classList.add('ptv-detail-data-loading');
+    clearPtvDetailLoadFailure(page);
     page.querySelector('.detailLogo')?.classList.add('hide');
     page.querySelectorAll('.detailImageContainer').forEach(container => {
         container.classList.add('ptv-detail-artwork-pending');
@@ -167,7 +208,13 @@ function preloadImage(url) {
     });
 }
 
-function getContextMenuOptions(item, user, button) {
+function getContextMenuOptions(
+    item,
+    user,
+    button,
+    signal,
+    playlistEditabilityPromise
+) {
     return {
         item: item,
         open: false,
@@ -181,7 +228,9 @@ function getContextMenuOptions(item, user, button) {
         shuffle: false,
         instantMix: false,
         user: user,
-        share: true
+        playlistEditabilityPromise,
+        share: true,
+        signal
     };
 }
 
@@ -206,17 +255,23 @@ function getSelectedMediaSource(page, mediaSources) {
     return mediaSources.filter(m => m.Id === mediaSourceId)[0];
 }
 
-function renderSeriesTimerSchedule(page, apiClient, seriesTimerId) {
-    apiClient.getLiveTvTimers({
-        UserId: apiClient.getCurrentUserId(),
-        ImageTypeLimit: 1,
-        SortBy: 'StartDate',
-        EnableTotalRecordCount: false,
-        EnableUserData: false,
-        SeriesTimerId: seriesTimerId,
-        Fields: 'ChannelInfo,ChannelImage'
+function renderSeriesTimerSchedule(page, item, apiClient, signal) {
+    requestPtvJson('LiveTv/Timers', {
+        params: {
+            UserId: apiClient.getCurrentUserId(),
+            ImageTypeLimit: 1,
+            SortBy: 'StartDate',
+            EnableTotalRecordCount: false,
+            EnableUserData: false,
+            SeriesTimerId: item.Id,
+            Fields: 'ChannelInfo,ChannelImage'
+        },
+        serverId: item.ServerId,
+        signal
     }).then(function (result) {
-        if (result.Items.length && result.Items[0].SeriesTimerId != seriesTimerId) {
+        if (signal?.aborted || !isDetailItemCurrent(page, item)) return;
+
+        if (result.Items.length && result.Items[0].SeriesTimerId != item.Id) {
             result.Items = [];
         }
 
@@ -224,6 +279,12 @@ function renderSeriesTimerSchedule(page, apiClient, seriesTimerId) {
         const scheduleTab = page.querySelector('#seriesTimerSchedule');
         scheduleTab.innerHTML = html;
         imageLoader.lazyChildren(scheduleTab);
+    }).catch(error => {
+        if (error?.name === 'AbortError') return;
+        if (!isDetailItemCurrent(page, item)) return;
+
+        page.querySelector('#seriesTimerScheduleSection').classList.add('hide');
+        console.error('Failed to load series timer schedule', error);
     });
 }
 
@@ -236,7 +297,7 @@ function renderTimerEditor(page, item, apiClient, user) {
     hideAll(page, 'btnCancelTimer', true);
 }
 
-function renderSeriesTimerEditor(page, item, apiClient, user) {
+function renderSeriesTimerEditor(page, item, apiClient, user, childLoadController) {
     if (item.Type !== 'SeriesTimer') {
         hideAll(page, 'btnCancelSeriesTimer');
         return;
@@ -251,7 +312,7 @@ function renderSeriesTimerEditor(page, item, apiClient, user) {
 
         page.querySelector('#seriesTimerScheduleSection').classList.remove('hide');
         hideAll(page, 'btnCancelSeriesTimer', true);
-        renderSeriesTimerSchedule(page, apiClient, item.Id);
+        renderSeriesTimerSchedule(page, item, apiClient, childLoadController.signal);
         return;
     }
 
@@ -618,6 +679,12 @@ function renderHeaderBackdrop(page, item, apiClient) {
 
 function reloadFromItem(instance, page, params, item, user) {
     const apiClient = ServerConnections.getApiClient(item.ServerId);
+    const childLoadController = beginPtvDetailChildLoad(page);
+    const playlistEditabilityPromise = item.Type === BaseItemKind.Playlist ?
+        canEditPlaylist(user, item, {
+            signal: childLoadController.signal
+        }) :
+        null;
 
     libraryMenu.setTitle('');
 
@@ -635,12 +702,19 @@ function reloadFromItem(instance, page, params, item, user) {
 
     // Render the main information for the item
     renderName(item, page.querySelector('.nameContainer'), params.context);
-    renderDetails(page, item, apiClient, params.context);
+    renderDetails(page, item, apiClient, params.context, childLoadController);
     renderTrackSelections(page, instance, item);
 
-    renderSeriesTimerEditor(page, item, apiClient, user);
-    renderTimerEditor(page, item, apiClient, user);
-    setInitialCollapsibleState(page, item, apiClient, params.context, user);
+    renderDetailChildPipeline(
+        page,
+        item,
+        apiClient,
+        params.context,
+        user,
+        childLoadController,
+        playlistEditabilityPromise
+    );
+
     const canPlay = reloadPlayButtons(page, item);
 
     setTrailerButtonVisibility(page, item);
@@ -662,7 +736,15 @@ function reloadFromItem(instance, page, params, item, user) {
         page.querySelector('.btnSplitVersions').classList.add('hide');
     }
 
-    itemContextMenu.getCommands(getContextMenuOptions(item, user)).then(commands => {
+    itemContextMenu.getCommands(
+        getContextMenuOptions(
+            item,
+            user,
+            undefined,
+            childLoadController.signal,
+            playlistEditabilityPromise
+        )
+    ).then(commands => {
         if (!isDetailItemCurrent(page, item)) return;
 
         if (commands.length) {
@@ -670,6 +752,11 @@ function reloadFromItem(instance, page, params, item, user) {
         } else {
             hideAll(page, 'btnMoreCommands');
         }
+    }).catch(error => {
+        if (error?.name === 'AbortError') return;
+        if (!isDetailItemCurrent(page, item)) return;
+
+        console.error('Failed to load item commands', error);
     });
 
     const itemBirthday = page.querySelector('#itemBirthday');
@@ -737,6 +824,28 @@ function reloadFromItem(instance, page, params, item, user) {
     }
 
     autoFocus(page);
+}
+
+function renderDetailChildPipeline(
+    page,
+    item,
+    apiClient,
+    context,
+    user,
+    childLoadController,
+    playlistEditabilityPromise
+) {
+    renderSeriesTimerEditor(page, item, apiClient, user, childLoadController);
+    renderTimerEditor(page, item, apiClient, user);
+    setInitialCollapsibleState(
+        page,
+        item,
+        apiClient,
+        context,
+        user,
+        childLoadController,
+        playlistEditabilityPromise
+    );
 }
 
 function logoImageUrl(item, apiClient, options) {
@@ -927,24 +1036,38 @@ function renderNextUp(page, item, user) {
     });
 }
 
-function setInitialCollapsibleState(page, item, apiClient, context, user) {
+function setInitialCollapsibleState(
+    page,
+    item,
+    apiClient,
+    context,
+    user,
+    childLoadController,
+    playlistEditabilityPromise
+) {
     page.querySelector('.collectionItems').innerHTML = '';
 
     if (item.Type == 'Playlist') {
         page.querySelector('#listChildrenCollapsible').classList.remove('hide');
         page.querySelector('#childrenCollapsible').classList.add('hide');
-        renderPlaylistItems(page, item);
+        renderPlaylistItems(
+            page,
+            item,
+            childLoadController,
+            user.Id,
+            playlistEditabilityPromise
+        );
     } else if (item.Type == 'Studio' || item.Type == 'Person' || item.Type == 'Genre' || item.Type == 'MusicGenre' || item.Type == 'MusicArtist') {
         page.querySelector('#listChildrenCollapsible').classList.remove('hide');
         page.querySelector('#childrenCollapsible').classList.add('hide');
-        renderItemsByName(page, item);
+        renderItemsByName(page, item, childLoadController, user.Id);
     } else if (item.IsFolder) {
         if (item.Type == 'BoxSet') {
             page.querySelector('#listChildrenCollapsible').classList.add('hide');
             page.querySelector('#childrenCollapsible').classList.add('hide');
         }
 
-        renderChildren(page, item);
+        renderChildren(page, item, childLoadController);
     } else {
         page.querySelector('#listChildrenCollapsible').classList.add('hide');
         page.querySelector('#childrenCollapsible').classList.add('hide');
@@ -1030,7 +1153,7 @@ function renderOverview(page, item) {
                     expandButton.classList.add('hide');
                 }
 
-                expandButton.addEventListener('click', toggleLineClamp.bind(null, overviewElemnt));
+                expandButton.onclick = toggleLineClamp.bind(null, overviewElemnt);
 
                 for (const anchor of overviewElemnt.querySelectorAll('a')) {
                     anchor.setAttribute('target', '_blank');
@@ -1204,10 +1327,10 @@ function renderTagline(page, item) {
     }
 }
 
-function renderDetails(page, item, apiClient, context) {
-    renderSimilarItems(page, item, context);
-    renderMoreFromSeason(page, item, apiClient);
-    renderMoreFromArtist(page, item, apiClient);
+function renderDetails(page, item, apiClient, context, childLoadController) {
+    renderSimilarItems(page, item, context, childLoadController.signal);
+    renderMoreFromSeason(page, item, apiClient, childLoadController.signal);
+    renderMoreFromArtist(page, item, apiClient, childLoadController.signal);
     renderDirector(page, item, context);
     renderStudio(page, item, context);
     renderWriter(page, item, context);
@@ -1217,7 +1340,7 @@ function renderDetails(page, item, apiClient, context) {
     renderOverview(page, item);
     renderMiscInfo(page, item);
     reloadUserDataButtons(page, item);
-    renderLyricsContainer(page, item, apiClient);
+    renderLyricsContainer(page, item, childLoadController.signal);
 
     // Don't allow redirection to other websites from the TV layout
     if (!layoutManager.tv && appHost.supports(AppFeature.ExternalLinks)) {
@@ -1232,18 +1355,16 @@ function enableScrollX() {
     return browser.mobile && window.screen.availWidth <= 1000;
 }
 
-function renderLyricsContainer(view, item, apiClient) {
+function renderLyricsContainer(view, item, signal) {
     const lyricContainer = view.querySelector('.lyricsContainer');
     if (lyricContainer && item.HasLyrics) {
         if (item.Type !== 'Audio') {
             lyricContainer.classList.add('hide');
             return;
         }
-        //get lyrics
-        apiClient.ajax({
-            url: apiClient.getUrl('Audio/' + item.Id + '/Lyrics'),
-            type: 'GET',
-            dataType: 'json'
+        requestPtvJson(`Audio/${encodeURIComponent(item.Id)}/Lyrics`, {
+            serverId: item.ServerId,
+            signal
         }).then((response) => {
             if (!isDetailItemCurrent(view, item)) return;
 
@@ -1260,13 +1381,15 @@ function renderLyricsContainer(view, item, apiClient) {
                 }, '');
                 itemsContainer.innerHTML = html;
             }
-        }).catch(() => {
+        }).catch(error => {
+            if (error?.name === 'AbortError' || !isDetailItemCurrent(view, item)) return;
+
             lyricContainer.classList.add('hide');
         });
     }
 }
 
-function renderMoreFromSeason(view, item, apiClient) {
+function renderMoreFromSeason(view, item, apiClient, signal) {
     const section = view.querySelector('.moreFromSeasonSection');
 
     if (section) {
@@ -1276,10 +1399,14 @@ function renderMoreFromSeason(view, item, apiClient) {
         }
 
         const userId = apiClient.getCurrentUserId();
-        apiClient.getEpisodes(item.SeriesId, {
+        getPtvSeasonEpisodes(apiClient, item.SeriesId, item.SeasonId, {
+            Limit: 100,
             SeasonId: item.SeasonId,
             UserId: userId,
             Fields: 'ItemCounts,PrimaryImageAspectRatio,CanDelete,MediaSourceCount,MediaSources'
+        }, {
+            serverId: item.ServerId,
+            signal
         }).then(function (result) {
             if (!isDetailItemCurrent(view, item)) return;
 
@@ -1308,14 +1435,20 @@ function renderMoreFromSeason(view, item, apiClient) {
 
             if (card) {
                 setTimeout(function () {
+                    if (!isDetailItemCurrent(view, item) || signal.aborted) return;
+
                     section.querySelector('.emby-scroller').toStart(card.previousSibling || card, true);
                 }, 100);
             }
+        }).catch(error => {
+            if (error?.name === 'AbortError' || !isDetailItemCurrent(view, item)) return;
+
+            section.classList.add('hide');
         });
     }
 }
 
-function renderMoreFromArtist(view, item, apiClient) {
+function renderMoreFromArtist(view, item, apiClient, signal) {
     const section = view.querySelector('.moreFromArtistSection');
 
     if (section) {
@@ -1325,7 +1458,9 @@ function renderMoreFromArtist(view, item, apiClient) {
         }
 
         const query = {
+            EnableTotalRecordCount: false,
             IncludeItemTypes: 'MusicAlbum',
+            Limit: 24,
             Recursive: true,
             ExcludeItemIds: item.Id,
             SortBy: 'PremiereDate,ProductionYear,SortName',
@@ -1338,7 +1473,11 @@ function renderMoreFromArtist(view, item, apiClient) {
             query.AlbumArtistIds = item.AlbumArtists.map(artist => artist.Id).join(',');
         }
 
-        apiClient.getItems(apiClient.getCurrentUserId(), query).then(function (result) {
+        getPtvItems(query, {
+            serverId: item.ServerId,
+            signal,
+            userId: apiClient.getCurrentUserId()
+        }).then(function (result) {
             if (!isDetailItemCurrent(view, item)) return;
 
             if (!result.Items.length) {
@@ -1368,11 +1507,15 @@ function renderMoreFromArtist(view, item, apiClient) {
                 overlayPlayButton: true,
                 showYear: true
             });
+        }).catch(error => {
+            if (error?.name === 'AbortError' || !isDetailItemCurrent(view, item)) return;
+
+            section.classList.add('hide');
         });
     }
 }
 
-function renderSimilarItems(page, item, context) {
+function renderSimilarItems(page, item, context, signal) {
     const similarCollapsible = page.querySelector('#similarCollapsible');
 
     if (similarCollapsible) {
@@ -1393,7 +1536,11 @@ function renderSimilarItems(page, item, context) {
             options.ExcludeArtistIds = item.AlbumArtists[0].Id;
         }
 
-        apiClient.getSimilarItems(item.Id, options).then(function (result) {
+        requestPtvJson(`Items/${encodeURIComponent(item.Id)}/Similar`, {
+            params: options,
+            serverId: item.ServerId,
+            signal
+        }).then(function (result) {
             if (!isDetailItemCurrent(page, item)) return;
 
             if (!result.Items.length) {
@@ -1420,6 +1567,10 @@ function renderSimilarItems(page, item, context) {
             const similarContent = similarCollapsible.querySelector('.similarContent');
             similarContent.innerHTML = html;
             imageLoader.lazyChildren(similarContent);
+        }).catch(error => {
+            if (error?.name === 'AbortError' || !isDetailItemCurrent(page, item)) return;
+
+            similarCollapsible.classList.add('hide');
         });
     }
 }
@@ -1482,7 +1633,25 @@ function renderTags(page, item) {
     }
 }
 
-function renderChildren(page, item) {
+function renderDetailChildrenFailure(childrenCollapsible, childrenItemsContainer, retry) {
+    const message = document.createElement('span');
+    const button = document.createElement('button');
+    const panel = document.createElement('div');
+
+    panel.className = 'ptv-detail-section-failure';
+    panel.setAttribute('role', 'status');
+    message.textContent = 'This section could not be loaded.';
+    button.type = 'button';
+    button.className = 'button-submit raised emby-button';
+    button.dataset.ptvFocusKey = 'details:children-retry';
+    button.textContent = 'Retry';
+    button.addEventListener('click', retry, { once: true });
+    panel.append(message, button);
+    childrenItemsContainer.replaceChildren(panel);
+    childrenCollapsible.classList.remove('hide');
+}
+
+function renderChildren(page, item, childLoadController = beginPtvDetailChildLoad(page)) {
     const childrenCollapsible = page.querySelector(LIST_VIEW_TYPES.includes(item.Type) ? '#listChildrenCollapsible' : '#childrenCollapsible');
     const childrenItemsContainer = childrenCollapsible.querySelector('.itemsContainer');
 
@@ -1506,6 +1675,9 @@ function renderChildren(page, item) {
         promise = getPtvSeriesSeasons(apiClient, item.Id, {
             userId: userId,
             Fields: fields
+        }, {
+            serverId: item.ServerId,
+            signal: childLoadController.signal
         });
     } else if (item.Type == 'Season') {
         fields += ',Overview,MediaSources';
@@ -1513,13 +1685,23 @@ function renderChildren(page, item) {
             seasonId: item.Id,
             userId: userId,
             Fields: fields
+        }, {
+            serverId: item.ServerId,
+            signal: childLoadController.signal
         });
     } else if (item.Type == 'MusicArtist') {
         query.SortBy = 'PremiereDate,ProductionYear,SortName';
     }
 
-    promise = promise || apiClient.getItems(apiClient.getCurrentUserId(), query);
-    promise.then(function (result) {
+    promise = promise || getPtvItems(query, {
+        serverId: item.ServerId,
+        signal: childLoadController.signal,
+        userId
+    });
+    awaitPtvDetailLoad(promise, {
+        onTimeout: () => childLoadController.abort(),
+        signal: childLoadController.signal
+    }).then(function (result) {
         if (!isDetailItemCurrent(page, item)) return;
 
         result.Items = result.Items.map(normalizeItemMediaSources);
@@ -1650,6 +1832,15 @@ function renderChildren(page, item) {
             }];
             renderCollectionItems(page, item, collectionItemTypes, result.Items);
         }
+    }).catch(error => {
+        if (error?.name === 'AbortError') return;
+        if (!isDetailItemCurrent(page, item)) return;
+
+        renderDetailChildrenFailure(
+            childrenCollapsible,
+            childrenItemsContainer,
+            () => renderChildren(page, item)
+        );
     });
 
     let childrenTitle = globalize.translate('Items');
@@ -1672,15 +1863,59 @@ function renderChildren(page, item) {
     }
 }
 
-function renderItemsByName(page, item) {
+function renderItemsByName(
+    page,
+    item,
+    childLoadController = beginPtvDetailChildLoad(page),
+    userId
+) {
     import('../../scripts/itemsByName').then(({ default: ItemsByName }) => {
-        ItemsByName.renderItems(page, item);
+        if (childLoadController.signal.aborted || !isDetailItemCurrent(page, item)) return;
+
+        return ItemsByName.renderItems(page, item, {
+            isCurrent: () => isDetailItemCurrent(page, item),
+            signal: childLoadController.signal,
+            userId
+        });
+    }).catch(error => {
+        if (error?.name === 'AbortError') return;
+        if (!isDetailItemCurrent(page, item)) return;
+
+        const childrenCollapsible = page.querySelector('#listChildrenCollapsible');
+        renderDetailChildrenFailure(
+            childrenCollapsible,
+            childrenCollapsible.querySelector('.itemsContainer'),
+            () => renderItemsByName(page, item, undefined, userId)
+        );
     });
 }
 
-function renderPlaylistItems(page, item) {
+function renderPlaylistItems(
+    page,
+    item,
+    childLoadController = beginPtvDetailChildLoad(page),
+    userId,
+    editabilityPromise
+) {
     import('../../scripts/playlistViewer').then(({ default: PlaylistViewer }) => {
-        PlaylistViewer.render(page, item);
+        if (childLoadController.signal.aborted || !isDetailItemCurrent(page, item)) return;
+
+        return PlaylistViewer.render(page, item, {
+            editabilityPromise,
+            isCurrent: () => isDetailItemCurrent(page, item),
+            signal: childLoadController.signal,
+            userId
+        });
+    }).catch(error => {
+        if (error?.name === 'AbortError') return;
+        if (!isDetailItemCurrent(page, item)) return;
+
+        const childrenCollapsible = page.querySelector('#listChildrenCollapsible');
+        renderDetailChildrenFailure(
+            childrenCollapsible,
+            childrenCollapsible.querySelector('.itemsContainer'),
+            () => renderPlaylistItems(page, item, undefined, userId)
+        );
     });
 }
 
@@ -1785,8 +2020,6 @@ function renderSeriesSchedule(page, item) {
         const scheduleTab = page.querySelector('#seriesScheduleList');
         scheduleTab.innerHTML = html;
         imageLoader.lazyChildren(scheduleTab);
-
-        loading.hide();
     });
 }
 
@@ -2079,17 +2312,31 @@ export default function (view, params) {
         const apiClient = getApiClient();
         const itemId = String(pageParams.id || '');
         const request = detailRequestGate.begin(itemId);
+        const loadController = createPtvAbortController();
+
+        activeDetailLoadController?.abort();
+        activeDetailLoadController = loadController;
 
         currentItem = null;
-        resetDetailPageForItem(page, itemId);
+        currentUser = null;
+        resetDetailPageForItem(page, itemId, request.generation);
 
-        Promise.all([getPromise(apiClient, pageParams), apiClient.getCurrentUser()]).then(([item, user]) => {
+        awaitPtvDetailLoad(
+            Promise.all([getPromise(apiClient, pageParams, loadController.signal), apiClient.getCurrentUser()]),
+            {
+                onTimeout: () => loadController.abort(),
+                signal: loadController.signal
+            }
+        ).then(([item, user]) => {
             if (!detailRequestGate.isCurrent(request)) return;
 
             const normalizedItem = normalizeItemMediaSources(item);
+            stampPtvDetailItemGeneration(normalizedItem, request.generation);
             currentItem = normalizedItem;
+            currentUser = user;
             reloadFromItem(instance, page, pageParams, normalizedItem, user);
             page.classList.remove('ptv-detail-data-loading');
+            clearPtvDetailLoadFailure(page);
             emitPtvEvent('detailsrendered', {
                 item: normalizedItem,
                 itemId,
@@ -2097,11 +2344,40 @@ export default function (view, params) {
             });
         }).catch((error) => {
             if (!detailRequestGate.isCurrent(request)) return;
+            if (error?.name === 'AbortError') {
+                page.classList.remove('ptv-detail-data-loading');
+                loading.hide();
+                return;
+            }
 
             page.classList.remove('ptv-detail-data-loading');
             loading.hide();
+            renderPtvDetailLoadFailure(
+                page,
+                error instanceof PtvDetailLoadTimeoutError ?
+                    'The server took too long to return this item.' :
+                    'The server could not return this item.',
+                () => reload(instance, page, pageParams)
+            );
             console.error('failed to get item or current user: ', error);
+        }).finally(() => {
+            if (activeDetailLoadController === loadController) {
+                activeDetailLoadController = null;
+            }
         });
+    }
+
+    function retireActiveDetailLoad(page) {
+        const ownedPrimaryLoad = Boolean(activeDetailLoadController)
+            || page.classList.contains('ptv-detail-data-loading');
+
+        activeDetailLoadController?.abort();
+        activeDetailLoadController = null;
+        page.classList.remove('ptv-detail-data-loading');
+
+        if (ownedPrimaryLoad) {
+            loading.hide();
+        }
     }
 
     function splitVersions(instance, page, apiClient, pageParams) {
@@ -2258,8 +2534,10 @@ export default function (view, params) {
     }
 
     let currentItem;
+    let currentUser;
     const self = this;
     const detailRequestGate = new DetailRequestGate();
+    let activeDetailLoadController = null;
 
     function init() {
         const apiClient = getApiClient();
@@ -2289,10 +2567,28 @@ export default function (view, params) {
             libraryMenu.setTransparentMenu(!layoutManager.mobile);
 
             if (e.detail.isRestored) {
-                if (currentItem?.Id === params.id) {
+                if (currentItem?.Id === params.id && currentUser) {
+                    const restoredRequest = detailRequestGate.begin(String(currentItem.Id || ''));
+                    const childLoadController = beginPtvDetailChildLoad(page);
+
+                    currentItem = resumePtvDetailPageGeneration(page, currentItem, restoredRequest.generation);
                     libraryMenu.setTitle('');
                     renderTrackSelections(page, self, currentItem, true);
                     renderBackdrop(page, currentItem);
+                    renderDetails(page, currentItem, apiClient, params.context, childLoadController);
+                    renderDetailChildPipeline(
+                        page,
+                        currentItem,
+                        apiClient,
+                        params.context,
+                        currentUser,
+                        childLoadController
+                    );
+                    emitPtvEvent('detailsrendered', {
+                        item: currentItem,
+                        itemId: currentItem.Id,
+                        page
+                    });
                 } else {
                     reload(self, page, params);
                 }
@@ -2306,6 +2602,9 @@ export default function (view, params) {
             itemShortcuts.on(view.querySelector('.nameContainer'));
         });
         view.addEventListener('viewbeforehide', function () {
+            retireActiveDetailLoad(view);
+            retirePtvDetailChildLoad(view);
+            retirePtvDetailPageGeneration(view);
             detailRequestGate.retire();
             itemShortcuts.off(view.querySelector('.nameContainer'));
             Events.off(apiClient, 'message', onWebSocketMessage);
@@ -2313,8 +2612,12 @@ export default function (view, params) {
             libraryMenu.setTransparentMenu(false);
         });
         view.addEventListener('viewdestroy', function () {
+            retireActiveDetailLoad(view);
+            retirePtvDetailChildLoad(view);
+            retirePtvDetailPageGeneration(view);
             detailRequestGate.retire();
             currentItem = null;
+            currentUser = null;
             self._currentPlaybackMediaSources = null;
             self.currentRecordingFields = null;
         });

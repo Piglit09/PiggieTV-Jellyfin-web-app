@@ -105,10 +105,8 @@ export function isPtvReadingKindMatch(
     libraryName = ''
 ) {
     if (!item) return false;
+    if (routeKind === 'reading' || routeKind === 'books') return true;
+
     const itemKind = getPtvReadingItemKind(item, libraryName);
-
-    if (routeKind === 'reading') return true;
-    if (routeKind === 'books') return itemKind === 'book';
-
     return itemKind === (routeKind === 'manga' ? 'manga' : 'comic');
 }
