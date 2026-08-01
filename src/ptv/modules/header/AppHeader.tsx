@@ -2,11 +2,14 @@ import React, { FC, useCallback, useEffect, useState } from 'react';
 import Sidebar from '../sidebar/Sidebar';
 import { PtvIcon } from '../icons';
 import { PTV_ASSETS, PTV_BRANDING, PTV_EVENTS, PTV_ROUTES } from '../../core/config';
-import { dispatchPtvCustomEvent } from '../../core/events';
 import { applyPtvResponsiveImage } from '../../core/images';
 import { getPtvPlatformFeaturePolicy } from '../../core/platformFeatures';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
 import { playPtvItem } from '../../api';
+import {
+    cancelPendingPtvRequestActivation,
+    openPtvRequestPortal
+} from '../request/requestLoader';
 
 interface AppHeaderParams {
     isHidden?: boolean;
@@ -17,6 +20,7 @@ function navigateToSearch(): void {
 }
 
 function navigateBack(): void {
+    cancelPendingPtvRequestActivation();
     window.history.back();
 }
 
@@ -68,10 +72,7 @@ function navigateToRequest(event: React.MouseEvent<HTMLAnchorElement>): void {
     event.preventDefault();
     event.stopPropagation();
     event.nativeEvent.stopImmediatePropagation?.();
-    void import('../request').then(({ openRequestPortal }) => {
-        openRequestPortal();
-        dispatchPtvCustomEvent(PTV_EVENTS.requestOpen);
-    });
+    void openPtvRequestPortal();
 }
 
 function isActiveRoute(route: string): boolean {
@@ -101,6 +102,7 @@ function AppHeaderPrimaryNavigation({
         <nav className='ptv-header-nav' aria-label='Primary navigation'>
             <a
                 href={PTV_ROUTES.home}
+                onClick={cancelPendingPtvRequestActivation}
                 className={`ptv-nav-link ${
                     !isRequestActive && isActiveRoute(PTV_ROUTES.home) ? 'ptv-nav-link-active' : ''
                 }`}
@@ -110,6 +112,7 @@ function AppHeaderPrimaryNavigation({
 
             <a
                 href={PTV_ROUTES.music}
+                onClick={cancelPendingPtvRequestActivation}
                 className={`ptv-nav-link ${
                     !isRequestActive && isActiveRoute(PTV_ROUTES.music) ? 'ptv-nav-link-active' : ''
                 }`}
@@ -120,6 +123,7 @@ function AppHeaderPrimaryNavigation({
             {readingAvailable ? (
                 <a
                     href={PTV_ROUTES.reading}
+                    onClick={cancelPendingPtvRequestActivation}
                     className={`ptv-nav-link ${
                         !isRequestActive && isReadingRoute() ? 'ptv-nav-link-active' : ''
                     }`}
@@ -130,6 +134,7 @@ function AppHeaderPrimaryNavigation({
 
             <a
                 href={PTV_ROUTES.favorites}
+                onClick={cancelPendingPtvRequestActivation}
                 className={`ptv-nav-link ${
                     !isRequestActive && isFavoritesRoute() ? 'ptv-nav-link-active' : ''
                 }`}
@@ -227,6 +232,7 @@ const AppHeader: FC<AppHeaderParams> = ({
                             className='ptv-header-icon-btn ptv-home-btn itemAction'
                             data-action='link'
                             aria-label='Home'
+                            onClick={cancelPendingPtvRequestActivation}
                         >
                             <PtvIcon name='home' />
                         </a>
@@ -245,6 +251,7 @@ const AppHeader: FC<AppHeaderParams> = ({
                             className='ptv-brand itemAction'
                             data-action='link'
                             aria-label='Go to home'
+                            onClick={cancelPendingPtvRequestActivation}
                         >
                             <img
                                 ref={mountHeaderLogo}

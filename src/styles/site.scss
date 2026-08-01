@@ -31,7 +31,14 @@
 @media screen
     and (min-device-width: 992px) {
     .splashLogo {
-        background-image: url(../ptv/assets/logo/banner-light.png);
+        /* Use the canonical optimized logo set for the transient splash.
+           PNG remains available to clients that do not support image-set. */
+        background-image: url(../assets/logo/banner-light.png);
+        background-image:
+            image-set(
+                url(../assets/logo/banner-light.webp) type('image/webp'),
+                url(../assets/logo/banner-light.png) type('image/png')
+            );
     }
 }
 

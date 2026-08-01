@@ -13,13 +13,17 @@ import loading from 'components/loading/loading';
 import { pluginManager } from './components/pluginManager';
 import { appRouter } from './components/router/appRouter';
 import { AppFeature } from 'constants/appFeature';
-import globalize from './lib/globalize';
+import globalize, {
+    CULTURE_CHANGED_EVENT,
+    cultureEvents
+} from './lib/globalize';
 import { loadCoreDictionary } from 'lib/globalize/loader';
 import { initialize as initializeAutoCast } from 'scripts/autocast';
 import browser from './scripts/browser';
 import keyboardNavigation from './scripts/keyboardNavigation';
 import { getPlugins } from './scripts/settings/webSettings';
 import taskButton from './scripts/taskbutton';
+import { createNotoFontLoader } from './styles/notoFontLoader';
 import { pageClassOn, serverAddress } from './utils/dashboard';
 import Events from './utils/events';
 import { initializeServerConnections } from './scripts/serverNotifications';
@@ -28,8 +32,18 @@ import {
     clearPtvChunkRecoveryQuery,
     installPtvChunkAssetVersioning
 } from './ptv/services/chunkLoadRecovery';
+import { initializePtvWebAppOnce } from './ptv/core/initialization/webAppBootstrap';
 
 import RootApp from './RootApp';
+
+function bindRequestFailureHandler(apiClient) {
+    Events.off(apiClient, 'requestfail', appRouter.onRequestFail);
+    Events.on(apiClient, 'requestfail', appRouter.onRequestFail);
+}
+
+function onApiClientCreated(_event, apiClient) {
+    bindRequestFailureHandler(apiClient);
+}
 
 // Import the button webcomponent for use throughout the site
 // NOTE: This is a bit of a hack, files should ensure the component is imported before use
@@ -56,7 +70,6 @@ import './elements/emby-scroller/emby-scroller.scss';
 import './ptv/styles/ptv.scss';
 import './ptv/core/app';
 import './ptv/modules/header';
-import './ptv/modules/dashboard';
 import './ptv/modules/settings';
 import './ptv/modules/playback';
 
@@ -107,7 +120,9 @@ build: ${__JF_BUILD_VERSION__}`);
 
     // Load the translation dictionary
     await loadCoreDictionary();
-    // Update localization on user changes
+    // Use the culture module as the single owner for account and live settings
+    // changes. Font loading subscribes to the same normalized culture signal.
+    Events.on(cultureEvents, CULTURE_CHANGED_EVENT, updateFontsForCulture);
     Events.on(ServerConnections, 'localusersignedin', globalize.updateCurrentCulture);
     Events.on(ServerConnections, 'localusersignedout', globalize.updateCurrentCulture);
 
@@ -128,14 +143,9 @@ build: ${__JF_BUILD_VERSION__}`);
     });
 
     // Register API request error handlers
-    ServerConnections.getApiClients().forEach(apiClient => {
-        Events.off(apiClient, 'requestfail', appRouter.onRequestFail);
-        Events.on(apiClient, 'requestfail', appRouter.onRequestFail);
-    });
-    Events.on(ServerConnections, 'apiclientcreated', (_e, apiClient) => {
-        Events.off(apiClient, 'requestfail', appRouter.onRequestFail);
-        Events.on(apiClient, 'requestfail', appRouter.onRequestFail);
-    });
+    ServerConnections.getApiClients().forEach(bindRequestFailureHandler);
+    Events.off(ServerConnections, 'apiclientcreated', onApiClientCreated);
+    Events.on(ServerConnections, 'apiclientcreated', onApiClientCreated);
 
     // Start server notifications
     initializeServerConnections();
@@ -151,17 +161,52 @@ build: ${__JF_BUILD_VERSION__}`);
     autoFocuser.enable();
 }
 
+function loadNotoLocaleFont(profile) {
+    switch (profile) {
+        case 'hk':
+            return import('./styles/fonts.noto.hk.scss');
+        case 'jp':
+            return import('./styles/fonts.noto.jp.scss');
+        case 'kr':
+            return import('./styles/fonts.noto.kr.scss');
+        case 'sc':
+            return import('./styles/fonts.noto.sc.scss');
+        case 'tc':
+            return import('./styles/fonts.noto.tc.scss');
+        default:
+            return Promise.resolve();
+    }
+}
+
+const loadNotoFonts = createNotoFontLoader({
+    getLocale: () => globalize.getCurrentLocale() || document.documentElement.lang,
+    loadBase: () => import('./styles/fonts.noto.scss'),
+    loadLocale: loadNotoLocaleFont,
+    applyProfile: profile => {
+        document.documentElement.dataset.ptvNotoFontProfile = profile;
+    },
+    onError: error => {
+        console.warn('[PTV] Failed to load locale font styles.', error);
+    }
+});
+
+function updateFontsForCulture() {
+    if (!(browser.tv && !browser.android) && !__USE_SYSTEM_FONTS__) {
+        void loadNotoFonts();
+    }
+}
+
 function loadFonts() {
     if (browser.tv && !browser.android) {
         console.debug('using system fonts with explicit sizes');
-        import('./styles/fonts.sized.scss');
+        void import('./styles/fonts.sized.scss');
     } else if (__USE_SYSTEM_FONTS__) {
         console.debug('using system fonts');
-        import('./styles/fonts.scss');
+        void import('./styles/fonts.scss');
     } else {
         console.debug('using default fonts');
-        import('./styles/fonts.scss');
-        import('./styles/fonts.noto.scss');
+        void import('./styles/fonts.scss');
+        void loadNotoFonts();
     }
 }
 
@@ -248,4 +293,4 @@ async function renderApp() {
     );
 }
 
-init();
+void initializePtvWebAppOnce(init);

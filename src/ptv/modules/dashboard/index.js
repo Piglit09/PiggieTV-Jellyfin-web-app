@@ -13,7 +13,7 @@ import {
 import { wasApplied, markApplied } from '../../utils/dom';
 import { iconNameFromText, iconUrl, runIconEngine } from '../../utils/icons';
 
-import './dashboard.scss';
+import './dashboard.bundle.scss';
 
 const DASHBOARD_DOCUMENT_SELECTOR = '.dashboardDocument';
 const DASHBOARD_DRAWER_SELECTOR = '.dashboardDocument .MuiDrawer-paper';

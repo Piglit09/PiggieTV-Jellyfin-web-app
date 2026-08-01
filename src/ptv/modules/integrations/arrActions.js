@@ -2,7 +2,7 @@ import { ServerConnections } from '../../../lib/jellyfin-apiclient';
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
 import { getCoordinatedLegacyItemDetail } from '../../services/coordinatedLegacyItemDetail';
-import { openRequestPortal } from '../request';
+import { openPtvRequestPortal } from '../request/requestLoader';
 import { getPtvIntegrationActions } from './arrLinks';
 import { getPtvIntegrationSettings } from './integrationsConfig';
 
@@ -111,7 +111,7 @@ function getRequestQuery(item) {
     ].filter(Boolean).join(' ');
 }
 
-function createRequestButton(item) {
+export function createRequestButton(item) {
     const button = document.createElement('button');
     const icon = document.createElement('span');
     const label = document.createElement('span');
@@ -126,7 +126,7 @@ function createRequestButton(item) {
     button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        openRequestPortal({
+        void openPtvRequestPortal({
             query: getRequestQuery(item)
         });
     });

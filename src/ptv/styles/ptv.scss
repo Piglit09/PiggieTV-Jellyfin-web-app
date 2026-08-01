@@ -18,7 +18,6 @@
 @use '../modules/hero/hero';
 @use '../pages/home/nativeHome';
 @use '../modules/media-bar/media-bar';
-@use '../modules/dashboard/dashboard';
 @use '../modules/settings/settings';
 @use '../modules/login/login';
 @use '../modules/playback/playback';
@@ -30,9 +29,6 @@
 @use './header' as theme-header;
 @use './sidebar' as theme-sidebar;
 @use './cards' as theme-cards;
-@use './dashboard' as theme-dashboard;
-@use '../modules/dashboard/admin-forms';
-@use '../modules/dashboard/admin-system';
 @use './debug';
 @use './profiles/tv';
 @use './profiles/webos';

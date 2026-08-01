@@ -70,9 +70,7 @@ class AppRouter {
         return this.promiseShow;
     }
 
-    async show(path, options) {
-        if (this.promiseShow) await this.promiseShow;
-
+    normalizePath(path) {
         // ensure the path does not start with '#' since the router adds this
         if (path.startsWith('#')) {
             path = path.substring(1);
@@ -88,6 +86,14 @@ class AppRouter {
 
         path = path.replace(this.baseUrl(), '');
 
+        return path;
+    }
+
+    async show(path, options) {
+        if (this.promiseShow) await this.promiseShow;
+
+        path = this.normalizePath(path);
+
         // can't use this with home right now due to the back menu
         if (history.location.pathname === path && path !== '/home') {
             loading.hide();
@@ -98,6 +104,24 @@ class AppRouter {
             this.resolveOnNextShow = resolve;
             // Schedule a call to return the promise
             setTimeout(() => history.push(path, options), 0);
+        });
+
+        return this.promiseShow;
+    }
+
+    async replace(path, options) {
+        if (this.promiseShow) await this.promiseShow;
+
+        path = this.normalizePath(path);
+
+        if (history.location.pathname === path) {
+            loading.hide();
+            return Promise.resolve();
+        }
+
+        this.promiseShow = new Promise((resolve) => {
+            this.resolveOnNextShow = resolve;
+            setTimeout(() => history.replace(path, options), 0);
         });
 
         return this.promiseShow;

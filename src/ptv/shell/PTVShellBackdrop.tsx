@@ -22,6 +22,11 @@ export default function PTVShellBackdrop({
     const [isPreviousVisible, setPreviousVisible] = useState(false);
     const mountEventRecordedRef = useRef(false);
     const shellInstanceIdRef = useRef('');
+    const currentUrlRef = useRef(currentUrl);
+    const sourceRef = useRef(source);
+
+    currentUrlRef.current = currentUrl;
+    sourceRef.current = source;
 
     if (!shellInstanceIdRef.current) {
         shellBackdropInstanceSequence += 1;
@@ -36,45 +41,66 @@ export default function PTVShellBackdrop({
     });
 
     useEffect(() => {
-        if (!resolvedUrl || resolvedUrl === currentUrl) return undefined;
+        if (!resolvedUrl || resolvedUrl === currentUrlRef.current) return undefined;
 
         const startedAt = performance.now();
         let cancelled = false;
+        let frame = 0;
+        let previousUrlTimeout = 0;
+        let transitionCleanupTimeout = 0;
         const image = new Image();
 
         image.decoding = 'async';
         image.onload = () => {
             if (cancelled) return;
 
-            setPreviousUrl(currentUrl);
-            setPreviousVisible(Boolean(currentUrl));
+            const outgoingUrl = currentUrlRef.current;
+
+            setPreviousUrl(outgoingUrl);
+            setPreviousVisible(Boolean(outgoingUrl));
+            currentUrlRef.current = resolvedUrl;
             setCurrentUrl(resolvedUrl);
             setCurrentVisible(false);
 
-            const frame = window.requestAnimationFrame(() => {
+            frame = window.requestAnimationFrame(() => {
+                frame = 0;
+                if (cancelled) return;
+
                 setPreviousVisible(false);
                 setCurrentVisible(true);
             });
-            const timeout = window.setTimeout(() => {
+            previousUrlTimeout = window.setTimeout(() => {
+                previousUrlTimeout = 0;
+                if (cancelled) return;
+
                 setPreviousUrl('');
             }, 900);
 
             recordPtvEvent('render', 'ptv-shell-backdrop-loaded', {
-                activeBackdropSource: source || 'unknown',
+                activeBackdropSource: sourceRef.current || 'unknown',
                 backdropCacheHit: performance.now() - startedAt < 10,
                 backdropLoadMs: Number((performance.now() - startedAt).toFixed(1))
             });
 
-            window.setTimeout(() => {
-                window.cancelAnimationFrame(frame);
-                window.clearTimeout(timeout);
+            transitionCleanupTimeout = window.setTimeout(() => {
+                transitionCleanupTimeout = 0;
+                if (cancelled) return;
+
+                if (frame) {
+                    window.cancelAnimationFrame(frame);
+                    frame = 0;
+                }
+                if (previousUrlTimeout) {
+                    window.clearTimeout(previousUrlTimeout);
+                    previousUrlTimeout = 0;
+                }
             }, 950);
         };
         image.onerror = () => {
             if (cancelled) return;
 
             recordPtvEvent('render', 'ptv-shell-backdrop-failed', {
-                activeBackdropSource: source || 'unknown',
+                activeBackdropSource: sourceRef.current || 'unknown',
                 fallbackUrl: PTV_SHELL_FALLBACK_BACKDROP_URL,
                 requestedUrl: resolvedUrl
             });
@@ -83,8 +109,23 @@ export default function PTVShellBackdrop({
 
         return () => {
             cancelled = true;
+            image.onload = null;
+            image.onerror = null;
+
+            if (frame) {
+                window.cancelAnimationFrame(frame);
+                frame = 0;
+            }
+            if (previousUrlTimeout) {
+                window.clearTimeout(previousUrlTimeout);
+                previousUrlTimeout = 0;
+            }
+            if (transitionCleanupTimeout) {
+                window.clearTimeout(transitionCleanupTimeout);
+                transitionCleanupTimeout = 0;
+            }
         };
-    }, [currentUrl, resolvedUrl, source]);
+    }, [resolvedUrl]);
 
     useEffect(() => {
         if (mountEventRecordedRef.current) return;
@@ -116,4 +157,3 @@ export default function PTVShellBackdrop({
         </div>
     );
 }
-

@@ -104,6 +104,20 @@ html.ptv-render-tv.ptv-platform-webos .ptv-shell-header-right {
     justify-self: end;
 }
 
+/*
+ * Native video OSD buttons retain Jellyfin's 38px geometry. Clear only the
+ * inherited content padding and use Flex so Chrome 68 centers the existing
+ * icon without changing margins, focus behavior, or control ownership.
+ */
+html.ptv-render-tv.ptv-platform-webos .videoOsdBottom .paper-icon-button-light,
+html.ptv-render-tv.ptv-platform-webos .videoOsdBottom button[is='paper-icon-button-light'] {
+    align-items: center !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    line-height: 0 !important;
+    padding: 0 !important;
+}
+
 html.ptv-platform-webos .ptv-native-home-hero-backdrop,
 html.ptv-platform-webos .ptv-browse-hero-backdrop,
 html.ptv-platform-webos .ptv-details-backdrop__image {
@@ -125,6 +139,24 @@ html.ptv-platform-webos .ptv-browse-card,
 html.ptv-platform-webos .ptv-shell-nav-button,
 html.ptv-platform-webos .ptv-shell-icon-button {
     transition: none !important;
+}
+
+/*
+ * Chrome 68 left-aligns fixed-size children inside native buttons whose layout
+ * is Grid. Links do not exhibit the bug, but using Flex for every WebOS shell
+ * utility keeps Notifications, Profile, and the link controls identical.
+ */
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-icon-button {
+    align-items: center;
+    display: inline-flex;
+    justify-content: center;
+    line-height: 0;
+}
+
+html.ptv-render-tv.ptv-platform-webos .ptv-shell-icon-button > .ptv-icon {
+    margin: 0 !important;
+    position: static !important;
+    top: auto !important;
 }
 
 /*
@@ -174,6 +206,14 @@ html.ptv-platform-webos .ptv-media-dock {
     max-width: 560px;
     right: 66px;
     width: 560px;
+}
+
+html.ptv-render-tv.ptv-platform-webos .ptv-media-dock-art {
+    aspect-ratio: auto;
+    box-sizing: border-box;
+    height: 4.875rem;
+    min-height: 4.875rem;
+    width: 3.25rem;
 }
 
 @media (max-width: 1500px), (max-height: 820px) {

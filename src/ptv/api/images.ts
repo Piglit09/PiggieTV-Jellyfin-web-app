@@ -1,4 +1,4 @@
-import { getPtvApiUrl } from './client';
+import { getPtvApiUrl, getPtvServerId } from './client';
 import { recordPtvEvent, shouldCollectDiagnostics } from '../core/observability';
 import type {
     PtvImageOptions,
@@ -24,6 +24,7 @@ export type PtvItemImageCandidateOptions = {
     includePrimary?: boolean;
     includeSeriesPrimary?: boolean;
     includeThumb?: boolean;
+    includeUntagged?: boolean;
     order?: PtvImageCandidateRequest[];
 };
 
@@ -104,7 +105,19 @@ function hasActiveFailure(failures: Map<string, number>, key: string) {
 function getPtvImageCandidateFailureKey(candidate: PtvItemImageCandidate | null | undefined) {
     if (!candidate?.imageItemId || !candidate.imageType) return '';
 
+    let serverScope = '';
+
+    try {
+        const anchor = document.createElement('a');
+
+        anchor.href = candidate.url;
+        serverScope = `${anchor.protocol}//${anchor.host}`;
+    } catch {
+        serverScope = candidate.url;
+    }
+
     return [
+        serverScope,
         candidate.imageItemId,
         candidate.imageType.toLowerCase(),
         candidate.tag || 'untagged'
@@ -326,9 +339,10 @@ function addTaggedAndUntaggedCandidate(
         tag: string;
         taggedMode: string;
         untaggedMode: string;
+        includeUntagged?: boolean;
     }
 ) {
-    if (!imageItemId || !options.tag) return;
+    if (!imageItemId) return;
 
     const imageOptions = {
         ...baseOptions,
@@ -336,10 +350,19 @@ function addTaggedAndUntaggedCandidate(
         imageType: options.imageType
     };
 
+    if (options.tag) {
+        addPtvImageCandidate(candidates, seenUrls, imageItemId, {
+            ...imageOptions,
+            tag: options.tag
+        }, options.taggedMode, options.requestedType);
+    }
+
+    if (!options.includeUntagged) return;
+
     addPtvImageCandidate(candidates, seenUrls, imageItemId, {
         ...imageOptions,
-        tag: options.tag
-    }, options.taggedMode, options.requestedType);
+        tag: ''
+    }, options.tag ? options.fallbackMode : options.untaggedMode, options.requestedType, options.tag);
 }
 
 function getPrimaryImageTag(item?: PtvItem | null): string | null {
@@ -366,7 +389,7 @@ function getLogoTag(item?: PtvItem | null): string | null {
         || null;
 }
 
-function getItemImageTag(item: PtvItem | null | undefined, imageType: string, imageIndex = 0): string | null {
+export function getItemImageTag(item: PtvItem | null | undefined, imageType: string, imageIndex = 0): string | null {
     switch (imageType.toLowerCase()) {
         case 'backdrop':
             return getBackdropTag(item, imageIndex);
@@ -421,7 +444,11 @@ export function getPtvItemImageUrl(
     const imageIndex = options.imageIndex || 0;
     const item = typeof itemOrId === 'string' ? null : itemOrId;
     const itemId = getPtvImageRequestItemId(itemOrId, imageType);
-    const serverId = options.serverId || item?.ServerId || null;
+    const serverId = options.serverId
+        || item?.ServerId
+        || getStringValue(item, 'ServerId', 'serverId')
+        || getPtvServerId()
+        || null;
 
     if (!itemId || !serverId) {
         if ((window as Window & Partial<Record<'PTV_DEBUG', boolean>>).PTV_DEBUG === true) {
@@ -457,7 +484,9 @@ export function getPtvItemImageCandidates(
     if (!item) return [];
 
     const itemId = getStringValue(item, 'Id', 'id');
-    const serverId = getStringValue(item, 'ServerId', 'serverId');
+    const serverId = getStringValue(item, 'ServerId', 'serverId')
+        || options.baseOptions?.serverId
+        || getPtvServerId();
 
     if (!itemId || !serverId) return [];
     const primaryItemId = getPtvImageRequestItemId(item, 'Primary') || itemId;
@@ -506,6 +535,7 @@ export function getPtvItemImageCandidates(
         ArtistPrimary: () => {
             addTaggedAndUntaggedCandidate(candidates, seenUrls, artistPrimaryId, baseOptions, {
                 fallbackMode: 'untagged-artist-primary-fallback',
+                includeUntagged: options.includeUntagged,
                 imageType: 'Primary',
                 requestedType: 'ArtistPrimary',
                 tag: artistPrimaryTag,
@@ -517,6 +547,7 @@ export function getPtvItemImageCandidates(
             if (!includeBackdrop) return;
             addTaggedAndUntaggedCandidate(candidates, seenUrls, backdropItemId, baseOptions, {
                 fallbackMode: 'untagged-backdrop-fallback',
+                includeUntagged: options.includeUntagged,
                 imageIndex: 0,
                 imageType: 'Backdrop',
                 requestedType: 'Backdrop',
@@ -529,6 +560,7 @@ export function getPtvItemImageCandidates(
             if (!includeParentPrimary) return;
             addTaggedAndUntaggedCandidate(candidates, seenUrls, parentId, baseOptions, {
                 fallbackMode: 'untagged-parent-primary-fallback',
+                includeUntagged: options.includeUntagged,
                 imageType: 'Primary',
                 requestedType: 'ParentPrimary',
                 tag: parentPrimaryTag,
@@ -540,6 +572,7 @@ export function getPtvItemImageCandidates(
             if (!includePrimary) return;
             addTaggedAndUntaggedCandidate(candidates, seenUrls, primaryItemId, baseOptions, {
                 fallbackMode: 'untagged-primary-fallback',
+                includeUntagged: options.includeUntagged,
                 imageType: 'Primary',
                 requestedType: 'Primary',
                 tag: primaryTag,
@@ -551,6 +584,7 @@ export function getPtvItemImageCandidates(
             if (!includeSeriesPrimary) return;
             addTaggedAndUntaggedCandidate(candidates, seenUrls, seriesId, baseOptions, {
                 fallbackMode: 'untagged-series-primary-fallback',
+                includeUntagged: options.includeUntagged,
                 imageType: 'Primary',
                 requestedType: 'SeriesPrimary',
                 tag: seriesPrimaryTag,
@@ -562,6 +596,7 @@ export function getPtvItemImageCandidates(
             if (!includeThumb) return;
             addTaggedAndUntaggedCandidate(candidates, seenUrls, thumbItemId, baseOptions, {
                 fallbackMode: 'untagged-thumb-fallback',
+                includeUntagged: options.includeUntagged,
                 imageType: 'Thumb',
                 requestedType: 'Thumb',
                 tag: thumbTag,

@@ -14,9 +14,17 @@ import {
     getPtvPlatformFeaturePolicy,
     installPtvWebOsRouteGuard
 } from '../core/platformFeatures';
+import { on } from '../core/events';
+import {
+    isPtvReadingFeatureRoute,
+    isPtvRequestFeatureRoute
+} from './extendedFeatureRoutes';
+import { ensurePtvReaderLoaded } from './reader/readerLoader';
+import { ensurePtvRequestRoute } from './request/requestLoader';
 
 let dashboardEnhancementLoadPromise = null;
-let extendedWebFeatureLoadPromise = null;
+let readingFeatureLoadPromise = null;
+let requestFeatureLoadPromise = null;
 
 function isDashboardRoute() {
     return `${window.location.pathname} ${window.location.hash}`.toLowerCase().includes('/dashboard');
@@ -33,6 +41,39 @@ function loadDashboardEnhancements() {
     });
 }
 
+function loadReadingFeatures() {
+    if (readingFeatureLoadPromise) return readingFeatureLoadPromise;
+
+    readingFeatureLoadPromise = Promise.all([
+        ensurePtvReaderLoaded(),
+        import(/* webpackChunkName: "ptv-reading" */ './books')
+    ]).catch(error => {
+        readingFeatureLoadPromise = null;
+        console.warn('[PiggieTV] Reading features failed to load', error);
+    });
+
+    return readingFeatureLoadPromise;
+}
+
+function loadRequestFeatures() {
+    if (requestFeatureLoadPromise) return requestFeatureLoadPromise;
+
+    requestFeatureLoadPromise = ensurePtvRequestRoute()
+        .then(loaded => {
+            if (!loaded) {
+                requestFeatureLoadPromise = null;
+            }
+
+            return loaded;
+        })
+        .catch(error => {
+            requestFeatureLoadPromise = null;
+            console.warn('[PiggieTV] Request features failed to load', error);
+        });
+
+    return requestFeatureLoadPromise;
+}
+
 function loadExtendedWebFeatures() {
     const featurePolicy = getPtvPlatformFeaturePolicy();
 
@@ -41,19 +82,23 @@ function loadExtendedWebFeatures() {
         return;
     }
 
-    if (extendedWebFeatureLoadPromise) return;
+    const hash = window.location.hash || '';
 
-    extendedWebFeatureLoadPromise = Promise.all([
-        import(/* webpackChunkName: "ptv-request" */ './request'),
-        import(/* webpackChunkName: "ptv-reading" */ './reader'),
-        import(/* webpackChunkName: "ptv-reading" */ './books')
-    ]).catch(error => {
-        extendedWebFeatureLoadPromise = null;
-        console.warn('[PiggieTV] Extended web features failed to load', error);
-    });
+    if (featurePolicy.reading && isPtvReadingFeatureRoute(hash)) {
+        void loadReadingFeatures();
+    }
+
+    if (featurePolicy.request && isPtvRequestFeatureRoute(hash)) {
+        void loadRequestFeatures();
+    }
 }
 
-loadExtendedWebFeatures();
-loadDashboardEnhancements();
-window.addEventListener('hashchange', loadDashboardEnhancements);
-window.addEventListener('popstate', loadDashboardEnhancements);
+function loadRouteFeatures() {
+    loadExtendedWebFeatures();
+    loadDashboardEnhancements();
+}
+
+loadRouteFeatures();
+window.addEventListener('hashchange', loadRouteFeatures);
+window.addEventListener('popstate', loadRouteFeatures);
+on('routechange', loadRouteFeatures);

@@ -5,6 +5,8 @@ import {
 import { type PtvCoreApiResponse } from '../core/api/apiContracts';
 import { type PtvCoreResult } from '../core/errors/coreError';
 import { recordPtvEvent } from '../core/observability';
+import { requestPtvJson } from './client';
+import { type PtvApiQuery } from './types';
 
 type PtvSeasonEpisodesApiClient = Readonly<{
     getEpisodes: (seriesId: string, options?: Record<string, unknown>) => Promise<unknown>;
@@ -13,6 +15,11 @@ type PtvSeasonEpisodesApiClient = Readonly<{
 type PtvSeasonEpisodesExecution<TResponse, TEpisode> = Readonly<{
     legacyError?: unknown;
     result: PtvCoreResult<PtvCoreApiResponse<PtvCoreSeasonEpisodes<TResponse, TEpisode>>>;
+}>;
+
+type PtvSeasonEpisodesRequestOptions = Readonly<{
+    serverId?: string | null;
+    signal?: AbortSignal;
 }>;
 
 let seasonEpisodesRequestSequence = 0;
@@ -35,7 +42,8 @@ async function executePtvSeasonEpisodesRequest<TResponse, TEpisode>(
     apiClient: PtvSeasonEpisodesApiClient,
     seriesId: string,
     seasonId: string,
-    options?: Record<string, unknown>
+    options?: Record<string, unknown>,
+    requestOptions: PtvSeasonEpisodesRequestOptions = {}
 ): Promise<PtvSeasonEpisodesExecution<TResponse, TEpisode>> {
     let legacyError: unknown;
     const result = await executePtvSeasonEpisodesApiBoundary<TResponse, TEpisode>({
@@ -45,6 +53,14 @@ async function executePtvSeasonEpisodesRequest<TResponse, TEpisode>(
         seriesId,
         transport: async () => {
             try {
+                if (requestOptions.signal) {
+                    return await requestPtvJson<TResponse>(`Shows/${seriesId}/Episodes`, {
+                        params: options as PtvApiQuery | undefined,
+                        serverId: requestOptions.serverId,
+                        signal: requestOptions.signal
+                    });
+                }
+
                 return await apiClient.getEpisodes(seriesId, options);
             } catch (error) {
                 legacyError = error;
@@ -63,13 +79,15 @@ export async function getPtvSeasonEpisodes<TResponse, TEpisode = unknown>(
     apiClient: PtvSeasonEpisodesApiClient,
     seriesId: string,
     seasonId: string,
-    options?: Record<string, unknown>
+    options?: Record<string, unknown>,
+    requestOptions: PtvSeasonEpisodesRequestOptions = {}
 ): Promise<TResponse> {
     const execution = await executePtvSeasonEpisodesRequest<TResponse, TEpisode>(
         apiClient,
         seriesId,
         seasonId,
-        options
+        options,
+        requestOptions
     );
 
     if (execution.result.success) return execution.result.value.value.raw;
@@ -87,13 +105,15 @@ export async function getPtvSeasonEpisodesCoreResult<TResponse, TEpisode = unkno
     apiClient: PtvSeasonEpisodesApiClient,
     seriesId: string,
     seasonId: string,
-    options?: Record<string, unknown>
+    options?: Record<string, unknown>,
+    requestOptions: PtvSeasonEpisodesRequestOptions = {}
 ): Promise<PtvCoreResult<PtvCoreApiResponse<PtvCoreSeasonEpisodes<TResponse, TEpisode>>>> {
     const execution = await executePtvSeasonEpisodesRequest<TResponse, TEpisode>(
         apiClient,
         seriesId,
         seasonId,
-        options
+        options,
+        requestOptions
     );
 
     return execution.result;

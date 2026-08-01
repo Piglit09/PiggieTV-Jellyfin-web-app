@@ -1,15 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./client', () => ({
-    getPtvApiUrl: vi.fn((path: string, query: Record<string, unknown> = {}) => {
-        const params = new URLSearchParams();
+    getPtvApiUrl: vi.fn((path: string, query: Record<string, unknown> = {}, serverId = 'ptv') => {
+        const params = Object.entries(query).reduce<string[]>((accumulator, [key, value]) => {
+            if (value !== undefined && value !== null && value !== '') {
+                accumulator.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+            }
 
-        Object.entries(query).forEach(([key, value]) => {
-            if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
-        });
+            return accumulator;
+        }, []);
 
-        return `https://ptv.test/${path}${params.size ? `?${params.toString()}` : ''}`;
-    })
+        const queryString = params.length ? `?${params.join('&')}` : '';
+
+        return `https://${serverId || 'ptv'}.test/${path}${queryString}`;
+    }),
+    getPtvServerId: vi.fn(() => '')
 }));
 
 vi.mock('../core/observability', () => ({
@@ -60,6 +65,41 @@ describe('PTV image startup guards', () => {
         })).toEqual([]);
     });
 
+    it('falls back to untagged artwork when tags are missing and fallback is allowed', () => {
+        const item = {
+            Id: 'untagged-primary',
+            ServerId: 'server-one'
+        } as PtvItem;
+
+        expect(getPtvItemImageCandidates(item, {
+            order: ['Primary'],
+            includeUntagged: true
+        })).toHaveLength(1);
+    });
+
+    it('places an untagged fallback after advertised artwork for a stale tag', () => {
+        const item = {
+            Id: 'stale-tag-primary',
+            ImageTags: { Primary: 'stale-tag' },
+            ServerId: 'server-one'
+        } as PtvItem;
+        const candidates = getPtvItemImageCandidates(item, {
+            includeUntagged: true,
+            order: [ 'Primary' ]
+        });
+
+        expect(candidates).toHaveLength(2);
+        expect(candidates[0]).toMatchObject({
+            tag: 'stale-tag',
+            tagMode: 'tagged-primary'
+        });
+        expect(candidates[1]).toMatchObject({
+            tag: '',
+            tagMode: 'untagged-primary-fallback',
+            untaggedFallbackFor: 'stale-tag'
+        });
+    });
+
     it('suppresses a failed image identity across requested types and dimensions', () => {
         const item = {
             Id: 'stale-primary',
@@ -78,5 +118,26 @@ describe('PTV image startup guards', () => {
             baseOptions: { fillWidth: 640 },
             order: ['Primary', 'ParentPrimary']
         })).toEqual([]);
+    });
+
+    it('does not suppress the same item and tag on another server', () => {
+        const firstServerItem = {
+            Id: 'shared-item-id',
+            ImageTags: { Primary: 'shared-tag' },
+            ServerId: 'server-one'
+        } as PtvItem;
+        const secondServerItem = {
+            ...firstServerItem,
+            ServerId: 'server-two'
+        } as PtvItem;
+        const firstCandidate = getPtvItemImageCandidates(firstServerItem, {
+            order: [ 'Primary' ]
+        })[0];
+
+        markPtvImageCandidateFailed(firstCandidate);
+
+        expect(getPtvItemImageCandidates(secondServerItem, {
+            order: [ 'Primary' ]
+        })).toHaveLength(1);
     });
 });

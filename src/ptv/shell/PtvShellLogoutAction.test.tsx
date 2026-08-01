@@ -54,13 +54,18 @@ vi.mock('../modules/icons', () => ({
     PtvIcon: ({ name }: { name: string }) => <span data-icon={name} />
 }));
 
-import { PtvShellActions } from './PTVShell';
+import {
+    getPtvRuntimeOverlayOcclusionCount,
+    resetPtvRuntimeOverlayOcclusionsForTests
+} from '../services/runtimeOverlayOcclusion';
+import PTVShell, { PtvShellActions } from './PTVShell';
 
 describe('PTV shell logout control', () => {
     let container: HTMLDivElement;
     let root: Root;
 
     beforeEach(() => {
+        resetPtvRuntimeOverlayOcclusionsForTests();
         logoutMocks.request.mockReset();
         logoutMocks.request.mockResolvedValue(undefined);
         window.location.hash = '#/home';
@@ -72,6 +77,7 @@ describe('PTV shell logout control', () => {
     afterEach(() => {
         flushSync(() => root.unmount());
         container.remove();
+        resetPtvRuntimeOverlayOcclusionsForTests();
     });
 
     function renderUserMenu(onPanelToggle = vi.fn()) {
@@ -112,6 +118,42 @@ describe('PTV shell logout control', () => {
         expect(onPanelToggle).toHaveBeenCalledWith(null);
         expect(onPanelToggle.mock.invocationCallOrder[0])
             .toBeLessThan(logoutMocks.request.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
+    });
+
+    it('acquires and releases runtime occlusion with a real shell panel lifecycle', () => {
+        const shellContainer = document.createElement('div');
+        const shellRoot = createRoot(shellContainer);
+
+        document.body.appendChild(shellContainer);
+        flushSync(() => shellRoot.render(
+            <PTVShell headerOnly>
+                <div />
+            </PTVShell>
+        ));
+
+        const userMenu = shellContainer.querySelector<HTMLButtonElement>('[aria-label="User menu"]')!;
+
+        expect(getPtvRuntimeOverlayOcclusionCount()).toBe(0);
+        flushSync(() => userMenu.click());
+        expect(getPtvRuntimeOverlayOcclusionCount()).toBe(1);
+        expect(document.documentElement.classList.contains('ptv-runtime-overlay-occluded')).toBe(true);
+
+        flushSync(() => shellRoot.unmount());
+        expect(getPtvRuntimeOverlayOcclusionCount()).toBe(0);
+        expect(document.documentElement.classList.contains('ptv-runtime-overlay-occluded')).toBe(false);
+        shellContainer.remove();
+    });
+
+    it('marks the full-screen Music route so physical TV navigation can stay pinned', () => {
+        window.location.hash = '#/music/player';
+
+        flushSync(() => root.render(
+            <PTVShell>
+                <div />
+            </PTVShell>
+        ));
+
+        expect(container.querySelector('.ptv-shell-frame-fullscreen-music')).not.toBeNull();
     });
 
     it.each([

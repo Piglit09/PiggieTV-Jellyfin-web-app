@@ -168,6 +168,12 @@ html.ptv-render-tv .ptv-browse-hero-overview {
     font-size: 21px;
     line-height: 1.45;
     max-width: 720px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-height: 4.5em;
 }
 
 html.ptv-render-tv .ptv-native-home-rows,

@@ -1,5 +1,10 @@
 import { getPtvItems } from '../api/items';
+import {
+    getPtvCurrentUserId,
+    getPtvServerId
+} from '../api/client';
 import type { PtvItem, PtvItemQuery, PtvItemsResult } from '../api/types';
+import { createPtvAbortController } from '../core/abortController';
 import { normalizePtvLibraryItems, normalizePtvLibraryRoot } from './libraryRootNormalizer';
 import { filterPtvSearchRecoveryCandidates } from './searchRecovery';
 
@@ -55,6 +60,7 @@ export type PtvMovieSearchCatalogOptions = Readonly<{
     fields?: string;
     foregroundPageBudget?: number;
     serverId?: string | null;
+    signal?: AbortSignal;
     userId?: string | null;
 }>;
 
@@ -64,12 +70,20 @@ type PtvMovieSearchCatalogPage = Readonly<{
     startIndex: number;
 }>;
 
+type PtvMovieSearchCatalogInFlightPage = {
+    abortController: AbortController;
+    abortableConsumers: Set<symbol>;
+    hasUnabortableConsumer: boolean;
+    promise: Promise<PtvMovieSearchCatalogPage>;
+    settled: boolean;
+};
+
 type PtvMovieSearchCatalog = {
     actualRequestCountByParentId: Map<string, number>;
     createdAt: number;
     expiresAt: number;
     hydratedItems: Map<string, PtvItem>;
-    inFlightPage?: Promise<PtvMovieSearchCatalogPage>;
+    inFlightPage?: PtvMovieSearchCatalogInFlightPage;
     itemLocations: Map<string, { index: number; page: number }>;
     items: PtvItem[];
     lastActualQueryKeys: string[];
@@ -99,6 +113,55 @@ const MOVIE_SEARCH_CATALOG_FIELDS = [
 ].join(',');
 const movieSearchCatalogs = new Map<string, PtvMovieSearchCatalog>();
 
+function createCatalogAbortError() {
+    const error = new Error('Movie search catalog request was cancelled.');
+
+    error.name = 'AbortError';
+    return error;
+}
+
+function throwIfCatalogAborted(signal?: AbortSignal) {
+    if (signal?.aborted) throw createCatalogAbortError();
+}
+
+function awaitCatalogAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!signal) return promise;
+    if (signal.aborted) {
+        void promise.catch(() => undefined);
+        return Promise.reject(createCatalogAbortError());
+    }
+
+    return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const cleanup = () => signal.removeEventListener('abort', onAbort);
+        const onAbort = () => {
+            if (settled) return;
+
+            settled = true;
+            cleanup();
+            reject(createCatalogAbortError());
+        };
+
+        signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(
+            value => {
+                if (settled) return;
+
+                settled = true;
+                cleanup();
+                resolve(value);
+            },
+            error => {
+                if (settled) return;
+
+                settled = true;
+                cleanup();
+                reject(error);
+            }
+        );
+    });
+}
+
 function getText(value: unknown) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -107,10 +170,23 @@ function getItemId(item: PtvItem) {
     return getText(item.Id);
 }
 
+function resolveCatalogOptions(options: PtvMovieSearchCatalogOptions): PtvMovieSearchCatalogOptions {
+    const serverId = getPtvServerId(options.serverId);
+    const userId = options.userId || getPtvCurrentUserId(serverId);
+
+    return {
+        ...options,
+        serverId: serverId || null,
+        userId: userId || null
+    };
+}
+
 function getCatalogKey(options: PtvMovieSearchCatalogOptions) {
+    if (!options.serverId || !options.userId) return null;
+
     return [
-        options.serverId || 'default-server',
-        options.userId || 'default-user',
+        options.serverId,
+        options.userId,
         'movie-catalog-v1'
     ].join('|');
 }
@@ -164,6 +240,8 @@ function rememberCatalog(key: string, catalog: PtvMovieSearchCatalog) {
 
 function getOrCreateCatalog(options: PtvMovieSearchCatalogOptions) {
     const key = getCatalogKey(options);
+    if (!key) return createCatalog();
+
     const existing = movieSearchCatalogs.get(key);
 
     if (existing) {
@@ -240,10 +318,89 @@ function getCatalogRootSummary(items: PtvItem[]) {
     };
 }
 
+function retireCatalogPageRequest(
+    catalog: PtvMovieSearchCatalog,
+    request: PtvMovieSearchCatalogInFlightPage
+) {
+    if (catalog.inFlightPage === request) {
+        catalog.inFlightPage = undefined;
+    }
+    if (!request.abortController.signal.aborted) {
+        request.abortController.abort();
+    }
+}
+
+function attachCatalogPageConsumer(
+    catalog: PtvMovieSearchCatalog,
+    request: PtvMovieSearchCatalogInFlightPage,
+    networkRequest: boolean,
+    signal?: AbortSignal
+): Promise<PtvMovieSearchCatalogPage> {
+    if (!signal) {
+        request.hasUnabortableConsumer = true;
+        return request.promise.then(page => ({ ...page, networkRequest }));
+    }
+
+    if (signal.aborted) {
+        if (!request.hasUnabortableConsumer && request.abortableConsumers.size === 0) {
+            retireCatalogPageRequest(catalog, request);
+        }
+
+        return Promise.reject(createCatalogAbortError());
+    }
+
+    const consumer = Symbol('movie-search-catalog-page');
+
+    request.abortableConsumers.add(consumer);
+
+    return new Promise<PtvMovieSearchCatalogPage>((resolve, reject) => {
+        let settled = false;
+        const detach = () => {
+            signal.removeEventListener('abort', onAbort);
+            request.abortableConsumers.delete(consumer);
+        };
+        const onAbort = () => {
+            if (settled) return;
+
+            settled = true;
+            detach();
+            reject(createCatalogAbortError());
+
+            if (
+                !request.settled
+                && !request.hasUnabortableConsumer
+                && request.abortableConsumers.size === 0
+            ) {
+                retireCatalogPageRequest(catalog, request);
+            }
+        };
+
+        signal.addEventListener('abort', onAbort, { once: true });
+        request.promise.then(
+            page => {
+                if (settled) return;
+
+                settled = true;
+                detach();
+                resolve({ ...page, networkRequest });
+            },
+            error => {
+                if (settled) return;
+
+                settled = true;
+                detach();
+                reject(error);
+            }
+        );
+    });
+}
+
 function loadNextCatalogPage(
     catalog: PtvMovieSearchCatalog,
     options: PtvMovieSearchCatalogOptions
 ): Promise<PtvMovieSearchCatalogPage> {
+    throwIfCatalogAborted(options.signal);
+
     if (catalog.complete) {
         return Promise.resolve({
             items: [],
@@ -252,7 +409,9 @@ function loadNextCatalogPage(
         });
     }
 
-    if (catalog.inFlightPage) return catalog.inFlightPage.then(page => ({ ...page, networkRequest: false }));
+    if (catalog.inFlightPage) {
+        return attachCatalogPageConsumer(catalog, catalog.inFlightPage, false, options.signal);
+    }
 
     const startIndex = catalog.nextStartIndex;
     const request = getCatalogRequest(options, startIndex);
@@ -269,6 +428,13 @@ function loadNextCatalogPage(
         StartIndex: request.startIndex
     };
 
+    const pageRequest: PtvMovieSearchCatalogInFlightPage = {
+        abortController: createPtvAbortController(),
+        abortableConsumers: new Set(),
+        hasUnabortableConsumer: false,
+        promise: undefined as unknown as Promise<PtvMovieSearchCatalogPage>,
+        settled: false
+    };
     const promise = getPtvItems<PtvItem>(query, {
         onRequest: actualRequest => {
             const actualQuery = actualRequest.params as PtvItemQuery;
@@ -279,17 +445,23 @@ function loadNextCatalogPage(
             catalog.actualRequestCountByParentId.set(parentId, (catalog.actualRequestCountByParentId.get(parentId) || 0) + 1);
         },
         serverId: options.serverId,
+        signal: pageRequest.abortController.signal,
         userId: options.userId
     }).then(result => {
+        throwIfCatalogAborted(pageRequest.abortController.signal);
         const items = result.Items || [];
         appendCatalogPage(catalog, result, startIndex);
         return { items, networkRequest: true, startIndex };
     }).finally(() => {
-        catalog.inFlightPage = undefined;
+        pageRequest.settled = true;
+        if (catalog.inFlightPage === pageRequest) {
+            catalog.inFlightPage = undefined;
+        }
     });
 
-    catalog.inFlightPage = promise;
-    return promise;
+    pageRequest.promise = promise;
+    catalog.inFlightPage = pageRequest;
+    return attachCatalogPageConsumer(catalog, pageRequest, true, options.signal);
 }
 
 async function hydrateCatalogMatches(
@@ -297,6 +469,7 @@ async function hydrateCatalogMatches(
     matches: PtvItem[],
     options: PtvMovieSearchCatalogOptions
 ) {
+    throwIfCatalogAborted(options.signal);
     const ids = matches
         .map(getItemId)
         .filter(id => id && !catalog.hydratedItems.has(id));
@@ -304,7 +477,7 @@ async function hydrateCatalogMatches(
     if (!ids.length) return { count: 0, durationMs: 0 };
 
     const startedAt = performance.now();
-    const result = await getPtvItems<PtvItem>({
+    const result = await awaitCatalogAbort(getPtvItems<PtvItem>({
         EnableImages: true,
         EnableImageTypes: 'Primary',
         EnableUserData: true,
@@ -316,9 +489,11 @@ async function hydrateCatalogMatches(
         Recursive: true
     }, {
         serverId: options.serverId,
+        signal: options.signal,
         userId: options.userId
-    });
+    }), options.signal);
 
+    throwIfCatalogAborted(options.signal);
     (result.Items || []).forEach(item => {
         const id = getItemId(item);
         if (id) catalog.hydratedItems.set(id, item);
@@ -340,24 +515,58 @@ function getHydratedCatalogMatches(catalog: PtvMovieSearchCatalog, matches: PtvI
 }
 
 function scheduleCatalogPage(catalog: PtvMovieSearchCatalog, options: PtvMovieSearchCatalogOptions) {
-    if (catalog.complete || catalog.inFlightPage) return;
+    if (catalog.complete || catalog.inFlightPage || options.signal?.aborted) return;
 
-    const requestIdleCallback = (globalThis as typeof globalThis & {
-        requestIdleCallback?: (callback: () => void) => unknown;
-    }).requestIdleCallback;
+    const idleApi = globalThis as typeof globalThis & {
+        cancelIdleCallback?: (handle: number) => void;
+        requestIdleCallback?: (callback: () => void) => number;
+    };
+    const requestIdleCallback = idleApi.requestIdleCallback;
 
     if (!requestIdleCallback) return;
 
-    requestIdleCallback(() => {
-        if (catalog.complete || catalog.inFlightPage) return;
+    let pending = true;
+    let idleHandle = 0;
+    const cleanup = () => options.signal?.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+        if (!pending) return;
+
+        pending = false;
+        idleApi.cancelIdleCallback?.(idleHandle);
+        cleanup();
+    };
+
+    idleHandle = requestIdleCallback(() => {
+        if (!pending) return;
+
+        pending = false;
+        cleanup();
+        if (catalog.complete || catalog.inFlightPage || options.signal?.aborted) return;
         void loadNextCatalogPage(catalog, options).catch(() => undefined);
     });
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+}
+
+function getCatalogStopReason(
+    catalog: PtvMovieSearchCatalog,
+    matchCount: number,
+    requestsThisSearch: number,
+    foregroundPageBudget: number
+): PtvMovieSearchCatalogStopReason {
+    if (matchCount) return 'exact-match-found';
+    if (catalog.complete) return 'exhausted';
+    if (requestsThisSearch >= foregroundPageBudget) return 'page-budget';
+
+    return 'empty-page';
 }
 
 export async function searchPtvMovieCatalog(
     searchTerm: string,
-    options: PtvMovieSearchCatalogOptions = {}
+    requestedOptions: PtvMovieSearchCatalogOptions = {}
 ): Promise<PtvMovieSearchCatalogSearchResult> {
+    const options = resolveCatalogOptions(requestedOptions);
+
+    throwIfCatalogAborted(options.signal);
     const startedAt = performance.now();
     const catalog = getOrCreateCatalog(options);
     const initialStatus = catalog.status;
@@ -368,22 +577,24 @@ export async function searchPtvMovieCatalog(
     const foregroundPageBudget = Math.max(1, options.foregroundPageBudget || PTV_MOVIE_SEARCH_CATALOG_FOREGROUND_PAGE_BUDGET);
 
     while (!matches.length && !catalog.complete && requestsThisSearch < foregroundPageBudget) {
+        throwIfCatalogAborted(options.signal);
         const page = await loadNextCatalogPage(catalog, options);
+        throwIfCatalogAborted(options.signal);
         if (page.networkRequest) requestsThisSearch += 1;
         else if (!catalog.items.length) cacheSource = 'shared-promise';
 
         matches = getCatalogMatches(catalog, searchTerm, options.excludeItemIds);
     }
 
-    const stopReason: PtvMovieSearchCatalogStopReason = matches.length
-        ? 'exact-match-found'
-        : catalog.complete
-            ? 'exhausted'
-            : requestsThisSearch >= foregroundPageBudget
-                ? 'page-budget'
-                : 'empty-page';
+    const stopReason = getCatalogStopReason(
+        catalog,
+        matches.length,
+        requestsThisSearch,
+        foregroundPageBudget
+    );
 
     const hydration = await hydrateCatalogMatches(catalog, matches, options);
+    throwIfCatalogAborted(options.signal);
     if (matches.length) scheduleCatalogPage(catalog, options);
     const request = getCatalogRequest(options, Math.max(0, catalog.nextStartIndex - PTV_MOVIE_SEARCH_CATALOG_PAGE_SIZE));
     const actualParentId = catalog.actualRequestCountByParentId.size === 1
@@ -424,5 +635,8 @@ export async function searchPtvMovieCatalog(
 }
 
 export function resetPtvMovieSearchCatalogForTests() {
+    movieSearchCatalogs.forEach(catalog => {
+        catalog.inFlightPage?.abortController.abort();
+    });
     movieSearchCatalogs.clear();
 }

@@ -74,6 +74,7 @@ function executePtvItemDetailsRequest<TItem>(
     itemId: string,
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     }
 ): Promise<PtvItemDetailsExecution<TItem>> {
@@ -88,7 +89,7 @@ function executePtvItemDetailsRequest<TItem>(
     ].join(':');
     const requestKey = getPtvRequestCoordinatorKey('GET', requestIdentity, true);
 
-    return coordinatePtvJsonRequest<PtvItemDetailsExecution<TItem>>(requestKey, async () => {
+    return coordinatePtvJsonRequest<PtvItemDetailsExecution<TItem>>(requestKey, async signal => {
         let legacyError: unknown;
         const result = await executePtvItemDetailsApiBoundary<TItem>({
             diagnostic: recordPtvItemDetailsDiagnostic,
@@ -96,13 +97,16 @@ function executePtvItemDetailsRequest<TItem>(
             serverId: options.serverId || apiClient?.serverId?.() || undefined,
             transport: async () => {
                 try {
-                    if (userId && typeof apiClient?.getItem === 'function') {
+                    if (!options.signal && userId && typeof apiClient?.getItem === 'function') {
                         return await apiClient.getItem<TItem>(userId, itemId);
                     }
 
                     return await requestPtvJson<TItem>(
                         userId ? `Users/${userId}/Items/${itemId}` : `Items/${itemId}`,
-                        { serverId: options.serverId }
+                        {
+                            serverId: options.serverId,
+                            signal
+                        }
                     );
                 } catch (error) {
                     legacyError = error;
@@ -121,6 +125,7 @@ function executePtvItemDetailsRequest<TItem>(
         endpoint: PTV_ITEM_DETAILS_ROUTE_IDENTIFIER,
         includeAuthorization: true,
         method: 'GET',
+        signal: options.signal,
         source: 'getPtvItem'
     });
 }
@@ -180,6 +185,7 @@ export function buildPtvRecentlyAddedRequest(
     query: PtvItemQuery = {},
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     } = {}
 ): PtvRecentlyAddedRequest {
@@ -196,6 +202,7 @@ export function getPtvItem<TItem = PtvItem>(
     itemId: string,
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     } = {}
 ): Promise<TItem> {
@@ -216,6 +223,7 @@ export function getPtvItemCoreResult<TItem = PtvItem>(
     itemId: string,
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     } = {}
 ): Promise<PtvCoreResult<PtvCoreApiResponse<PtvCoreItemDetails<TItem>>>> {
@@ -227,6 +235,7 @@ export function getPtvItems<TItem = PtvItem>(
     options: {
         onRequest?: (request: PtvItemsRequestDiagnostic) => void;
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     } = {}
 ): Promise<PtvItemsResult<TItem>> {
@@ -247,7 +256,8 @@ export function getPtvItems<TItem = PtvItem>(
 
     return requestPtvJson<PtvItemsResult<TItem>>(endpoint, {
         params: cleanedQuery,
-        serverId: options.serverId
+        serverId: options.serverId,
+        ...(options.signal ? { signal: options.signal } : {})
     });
 }
 
@@ -255,6 +265,7 @@ export function getPtvResumeItems<TItem = PtvItem>(
     query: PtvItemQuery = {},
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     } = {}
 ): Promise<PtvItemsResult<TItem>> {
@@ -267,7 +278,8 @@ export function getPtvResumeItems<TItem = PtvItem>(
 
     return requestPtvJson<PtvItemsResult<TItem>>(`Users/${userId}/Items/Resume`, {
         params: cleanedQuery,
-        serverId: options.serverId
+        serverId: options.serverId,
+        ...(options.signal ? { signal: options.signal } : {})
     });
 }
 
@@ -275,18 +287,20 @@ export function getPtvNextUp<TItem = PtvItem>(
     query: PtvItemQuery = {},
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
     } = {}
 ): Promise<PtvItemsResult<TItem>> {
     const apiClient = getPtvApiClient(options.serverId);
     const cleanedQuery = cleanPtvQuery(query);
 
-    if (typeof apiClient?.getNextUpEpisodes === 'function') {
+    if (!options.signal && typeof apiClient?.getNextUpEpisodes === 'function') {
         return apiClient.getNextUpEpisodes<TItem>(cleanedQuery);
     }
 
     return requestPtvJson<PtvItemsResult<TItem>>('Shows/NextUp', {
         params: cleanedQuery,
-        serverId: options.serverId
+        serverId: options.serverId,
+        ...(options.signal ? { signal: options.signal } : {})
     });
 }
 
@@ -294,6 +308,7 @@ export function getPtvRecentlyAdded<TItem = PtvItem>(
     query: PtvItemQuery = {},
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     } = {}
 ): Promise<TItem[]> {
@@ -304,6 +319,7 @@ export function getPtvRecentlyAddedResult<TItem = PtvItem>(
     query: PtvItemQuery = {},
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     } = {}
 ): Promise<PtvRecentlyAddedResult<TItem>> {
@@ -318,7 +334,8 @@ export function getPtvRecentlyAddedResult<TItem = PtvItem>(
 
     return requestPtvJson<unknown>(request.endpoint, {
         params: request.params,
-        serverId: options.serverId
+        serverId: options.serverId,
+        ...(options.signal ? { signal: options.signal } : {})
     }).then(response => ({
         ...normalizeJellyfinItemListResponse<TItem>(response),
         request
@@ -329,6 +346,7 @@ export function getPtvFavoriteItems<TItem = PtvItem>(
     query: PtvItemQuery = {},
     options: {
         serverId?: string | null;
+        signal?: AbortSignal;
         userId?: string | null;
     } = {}
 ): Promise<PtvItemsResult<TItem>> {

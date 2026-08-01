@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const logoutMocks = vi.hoisted(() => ({
+    cancelRequest: vi.fn(),
     request: vi.fn<() => Promise<void>>()
 }));
 
@@ -15,7 +16,8 @@ vi.mock('../../core/events', () => ({
     dispatchPtvCustomEvent: vi.fn()
 }));
 
-vi.mock('../request', () => ({
+vi.mock('../request/requestLoader', () => ({
+    cancelPendingPtvRequestActivation: logoutMocks.cancelRequest,
     openRequestPortal: vi.fn()
 }));
 
@@ -30,6 +32,7 @@ describe('PTV sidebar logout action', () => {
     let root: Root;
 
     beforeEach(() => {
+        logoutMocks.cancelRequest.mockReset();
         logoutMocks.request.mockReset();
         logoutMocks.request.mockResolvedValue(undefined);
         window.location.hash = '#/movies';
@@ -65,6 +68,7 @@ describe('PTV sidebar logout action', () => {
         button?.click();
 
         expect(onAction).toHaveBeenCalledTimes(1);
+        expect(logoutMocks.cancelRequest).toHaveBeenCalledTimes(1);
         expect(logoutMocks.request).toHaveBeenCalledTimes(1);
         expect(window.location.hash).toBe('#/movies');
     });

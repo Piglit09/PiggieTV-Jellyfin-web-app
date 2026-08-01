@@ -172,8 +172,9 @@
 
 .headerButton,
 .paper-icon-button-light,
-.ptv-header-icon-btn {
-    border-radius: 12px !important;
+.ptv-header-icon-btn,
+.ptv-header-action-btn {
+    border-radius: 50% !important;
     transition:
         background var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
         box-shadow var(--ptv-motion-fast) var(--ptv-motion-ease-standard),

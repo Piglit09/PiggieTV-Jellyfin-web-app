@@ -1,6 +1,7 @@
 import {
     getPtvItems
 } from './items';
+import { createPtvAbortController } from '../core/abortController';
 import {
     normalizePtvLibraryItems,
     type PtvLibraryRootDiagnostics
@@ -94,7 +95,10 @@ function isPtvAuthenticationError(error: Error | undefined) {
 
 function awaitPtvSearchAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
     if (!signal) return promise;
-    if (signal.aborted) return Promise.reject(new PtvSearchAbortedError());
+    if (signal.aborted) {
+        void promise.catch(() => undefined);
+        return Promise.reject(new PtvSearchAbortedError());
+    }
 
     return new Promise<T>((resolve, reject) => {
         const onAbort = () => reject(new PtvSearchAbortedError());
@@ -113,7 +117,11 @@ function awaitPtvSearchAbort<T>(promise: Promise<T>, signal?: AbortSignal): Prom
     });
 }
 
-function withPtvSearchTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
+function withPtvSearchTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs?: number,
+    onTimeout?: () => void
+): Promise<T> {
     if (!timeoutMs || timeoutMs <= 0) return promise;
 
     return new Promise<T>((resolve, reject) => {
@@ -122,6 +130,7 @@ function withPtvSearchTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promi
             if (settled) return;
 
             settled = true;
+            onTimeout?.();
             reject(new PtvSearchPrimaryTimeoutError(timeoutMs));
         }, timeoutMs);
 
@@ -149,13 +158,26 @@ export async function getPtvSearchPrimaryOutcome<TItem extends PtvItem>(
     options: Pick<PtvSearchOptions, 'primaryTimeoutMs' | 'serverId' | 'signal' | 'userId'>
 ): Promise<PtvSearchPrimaryOutcome<TItem>> {
     const startedAt = performance.now();
+    const requestController = createPtvAbortController();
+    const abortRequest = () => requestController.abort();
+
+    if (options.signal?.aborted) {
+        requestController.abort();
+    } else {
+        options.signal?.addEventListener('abort', abortRequest, { once: true });
+    }
+
     const request = Promise.resolve().then(() => getPtvItems<TItem>(query, {
         serverId: options.serverId,
+        signal: requestController.signal,
         userId: options.userId
     }));
 
     try {
-        const result = await awaitPtvSearchAbort(withPtvSearchTimeout(request, options.primaryTimeoutMs), options.signal);
+        const result = await awaitPtvSearchAbort(
+            withPtvSearchTimeout(request, options.primaryTimeoutMs, abortRequest),
+            options.signal
+        );
 
         return {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
@@ -177,6 +199,8 @@ export async function getPtvSearchPrimaryOutcome<TItem extends PtvItem>(
             items: [],
             status
         };
+    } finally {
+        options.signal?.removeEventListener('abort', abortRequest);
     }
 }
 
@@ -270,6 +294,7 @@ export async function searchPtvItems<TItem extends PtvItem = PtvItem>(
             excludeItemIds: primaryItems.map(item => String(item.Id || '')).filter(Boolean),
             fields: options.recoveryFields || options.fields,
             serverId: options.serverId,
+            signal: options.signal,
             userId: options.userId
         }), options.signal);
         const supplementalDurationMs = Number((performance.now() - supplementalStartedAt).toFixed(1));

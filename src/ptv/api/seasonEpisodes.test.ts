@@ -4,7 +4,13 @@ vi.mock('../core/observability', () => ({
     recordPtvEvent: vi.fn()
 }));
 
+vi.mock('./client', () => ({
+    requestPtvJson: vi.fn()
+}));
+
 import { recordPtvEvent } from '../core/observability';
+import { createPtvAbortController } from '../core/abortController';
+import { requestPtvJson } from './client';
 import {
     getPtvSeasonEpisodes,
     getPtvSeasonEpisodesCoreResult
@@ -157,5 +163,35 @@ describe('season details episode metadata facade', () => {
         await expect(getPtvSeasonEpisodes({
             getEpisodes: vi.fn().mockResolvedValue(response)
         }, 'series-1', 'season-1')).resolves.toBe(response);
+    });
+
+    it('uses the abortable route transport without changing the legacy query contract', async () => {
+        const controller = createPtvAbortController();
+        const response = { Items: [{ Id: 'episode-1' }] };
+        const query = {
+            Fields: 'Overview,MediaSources',
+            seasonId: 'season-1',
+            userId: 'user-1'
+        };
+        const getEpisodes = vi.fn();
+
+        vi.mocked(requestPtvJson).mockResolvedValue(response);
+
+        await expect(getPtvSeasonEpisodes(
+            { getEpisodes },
+            'series-1',
+            'season-1',
+            query,
+            {
+                serverId: 'server-1',
+                signal: controller.signal
+            }
+        )).resolves.toBe(response);
+        expect(requestPtvJson).toHaveBeenCalledWith('Shows/series-1/Episodes', {
+            params: query,
+            serverId: 'server-1',
+            signal: controller.signal
+        });
+        expect(getEpisodes).not.toHaveBeenCalled();
     });
 });

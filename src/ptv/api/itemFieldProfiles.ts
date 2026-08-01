@@ -78,16 +78,31 @@ const READING_CARD_FIELDS = [
 
 const MUSIC_CARD_FIELDS = [
     'Album',
+    'AlbumArtist',
+    'AlbumPrimaryImageItemId',
+    'AlbumPrimaryImageTag',
     'AlbumArtists',
+    'Artist',
+    'ArtistItems',
     'Artists',
+    'BackdropImageTags',
+    'CanDownload',
+    'Container',
     'DateCreated',
+    'Genres',
     'ImageTags',
+    'ParentBackdropImageTags',
     'ParentId',
+    'ParentPrimaryImageItemId',
+    'ParentPrimaryImageTag',
+    'PremiereDate',
+    'PrimaryImageAspectRatio',
     'ProductionYear',
     'RunTimeTicks',
     'SortName'
 ];
 
+/* eslint-disable @typescript-eslint/naming-convention -- Public field-profile IDs intentionally use constant-style names. */
 const FIELD_PROFILES: Record<PtvItemFieldProfileId, PtvItemFieldProfile> = {
     CARD_FIELDS: {
         fields: CARD_FIELDS,
@@ -118,9 +133,10 @@ const FIELD_PROFILES: Record<PtvItemFieldProfileId, PtvItemFieldProfile> = {
         id: 'READING_CARD_FIELDS'
     }
 };
+/* eslint-enable @typescript-eslint/naming-convention */
 
 function uniqueFields(fields: string[]) {
-    return Array.from(new Set(fields.filter(Boolean))).sort();
+    return Array.from(new Set(fields.filter(Boolean))).sort((left, right) => left.localeCompare(right));
 }
 
 export function getPtvItemFieldProfile(profileId: PtvItemFieldProfileId) {

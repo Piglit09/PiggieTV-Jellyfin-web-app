@@ -3,13 +3,11 @@ import { BaseItemKind } from '@jellyfin/sdk/lib/generated-client/models/base-ite
 import { LocationType } from '@jellyfin/sdk/lib/generated-client/models/location-type';
 import { RecordingStatus } from '@jellyfin/sdk/lib/generated-client/models/recording-status';
 import { MediaType } from '@jellyfin/sdk/lib/generated-client/models/media-type';
-import { getPlaylistsApi } from '@jellyfin/sdk/lib/utils/api/playlists-api';
 
 import { appHost } from './apphost';
 import { AppFeature } from 'constants/appFeature';
 import globalize from 'lib/globalize';
-import { ServerConnections } from 'lib/jellyfin-apiclient';
-import { toApi } from 'utils/jellyfin-apiclient/compat';
+import { requestPtvJson } from '../ptv/api/client';
 
 export function getDisplayName(item, options = {}) {
     if (!item) {
@@ -164,19 +162,19 @@ export function canEditImages (user, item) {
     return itemType !== 'Timer' && itemType !== 'SeriesTimer' && canEdit(user, item) && !isLocalItem(item);
 }
 
-export async function canEditPlaylist(user, item) {
-    const apiClient = ServerConnections.getApiClient(item.ServerId);
-    const api = toApi(apiClient);
-
+export async function canEditPlaylist(user, item, options = {}) {
     try {
-        const { data: permissions } = await getPlaylistsApi(api)
-            .getPlaylistUser({
-                userId: user.Id,
-                playlistId: item.Id
-            });
+        const permissions = await requestPtvJson(
+            `Playlists/${item.Id}/Users/${user.Id}`,
+            {
+                serverId: item.ServerId,
+                signal: options.signal
+            }
+        );
 
-        return !!permissions.CanEdit;
+        return !!permissions?.CanEdit;
     } catch (err) {
+        if (err?.name === 'AbortError') throw err;
         console.error('Failed to get playlist permissions', err);
     }
 

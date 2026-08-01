@@ -3,8 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./items', () => ({
     getPtvItems: vi.fn()
 }));
+vi.mock('./client', () => ({
+    getPtvCurrentUserId: () => 'user-test',
+    getPtvServerId: (serverId?: string | null) => serverId || 'server-test'
+}));
 
 import { getPtvItems } from './items';
+import { createPtvAbortController } from '../core/abortController';
 import {
     PtvSearchAbortedError,
     resetPtvMovieSearchRecoveryCacheForTests,
@@ -191,5 +196,26 @@ describe('Movie search primary outcomes', () => {
 
         resolveCatalog?.({ Items: [toyStoryFive], TotalRecordCount: 1 });
         await expect(search).resolves.toMatchObject({ TotalRecordCount: 5 });
+    });
+
+    it('physically aborts supplemental catalog paging when the active query is cancelled', async () => {
+        const controller = createPtvAbortController();
+        let catalogTransportSignal: AbortSignal | undefined;
+
+        vi.mocked(getPtvItems).mockImplementation((query, options) => {
+            if (query?.SearchTerm) return Promise.resolve({ Items: toyStoryOneToFour });
+            if (query?.Ids) return Promise.resolve({ Items: [toyStoryFive] });
+
+            catalogTransportSignal = options?.signal;
+            return new Promise(() => undefined);
+        });
+
+        const search = searchPtvItems(movieSearchOptions({ signal: controller.signal }));
+
+        await vi.waitFor(() => expect(catalogTransportSignal).toBeDefined());
+        controller.abort();
+
+        await expect(search).rejects.toBeInstanceOf(PtvSearchAbortedError);
+        expect(catalogTransportSignal?.aborted).toBe(true);
     });
 });

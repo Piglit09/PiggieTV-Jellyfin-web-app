@@ -12,6 +12,7 @@ type PtvImageQueueKind = 'background' | 'decorative' | 'hero' | 'poster';
 
 type PtvImageTask = {
     cancelled: boolean;
+    consumers: Map<symbol, PtvImageTaskConsumer>;
     image: HTMLImageElement | null;
     kind: PtvImageQueueKind;
     priority: PtvImagePriority;
@@ -23,6 +24,11 @@ type PtvImageTask = {
     settled: boolean;
     started: boolean;
     url: string;
+};
+
+type PtvImageTaskConsumer = {
+    cancel: () => void;
+    scope: string;
 };
 
 export type PtvImageLoadHandle = {
@@ -207,11 +213,11 @@ function pruneImageCaches() {
     trimMap(failedUrls, FAILED_URL_CACHE_LIMIT);
 }
 
-function taskMatchesScope(task: PtvImageTask, scope: string) {
-    return task.scope === scope
-        || task.scope === `preload:${scope}`
-        || task.scope.startsWith(`${scope}:`)
-        || task.scope.startsWith(`preload:${scope}:`);
+function imageScopeMatches(candidate: string, scope: string) {
+    return candidate === scope
+        || candidate === `preload:${scope}`
+        || candidate.startsWith(`${scope}:`)
+        || candidate.startsWith(`preload:${scope}:`);
 }
 
 function settleTask(task: PtvImageTask, success: boolean) {
@@ -340,6 +346,56 @@ function updateMetrics() {
     metrics.queuedRequests = Object.values(queuedByKind).reduce((sum, count) => sum + count, 0);
 }
 
+function attachTaskConsumer(
+    task: PtvImageTask,
+    scope: string
+): PtvImageLoadHandle {
+    const token = Symbol(scope);
+    let consumerSettled = false;
+    let settleConsumer: (value: boolean) => void = value => Boolean(value);
+    const promise = new Promise<boolean>(resolve => {
+        settleConsumer = resolve;
+    });
+    const detach = () => {
+        task.consumers.delete(token);
+    };
+    const cancel = () => {
+        if (consumerSettled) return;
+
+        consumerSettled = true;
+        detach();
+        settleConsumer(false);
+
+        if (!task.settled && task.consumers.size === 0) {
+            cancelTask(task);
+        }
+    };
+
+    task.consumers.set(token, {
+        cancel,
+        scope
+    });
+    task.promise.then(result => {
+        if (consumerSettled) return;
+
+        consumerSettled = true;
+        detach();
+        settleConsumer(result);
+    }).catch(() => {
+        if (consumerSettled) return;
+
+        consumerSettled = true;
+        detach();
+        settleConsumer(false);
+    });
+
+    return {
+        cancel,
+        promise,
+        url: task.url
+    };
+}
+
 function queueTask(
     url: string,
     priority: PtvImagePriority,
@@ -381,13 +437,7 @@ function queueTask(
     if (existingTask && !existingTask.cancelled && !existingTask.settled) {
         metrics.dedupeHits += 1;
 
-        return {
-            cancel: () => undefined,
-            promise: new Promise<boolean>((resolve, reject) => {
-                existingTask.promise?.then(resolve).catch(reject);
-            }),
-            url: normalizedUrl
-        };
+        return attachTaskConsumer(existingTask, scope);
     }
 
     metrics.cacheMisses += 1;
@@ -401,6 +451,7 @@ function queueTask(
     });
     const task: PtvImageTask = {
         cancelled: false,
+        consumers: new Map<symbol, PtvImageTaskConsumer>(),
         image: null,
         kind: config.kind,
         promise,
@@ -416,6 +467,8 @@ function queueTask(
 
     inflightByUrl.set(normalizedUrl, task);
     queues[task.kind].push(task);
+    const handle = attachTaskConsumer(task, scope);
+
     debugLog('queued image', {
         priority,
         scope,
@@ -423,11 +476,7 @@ function queueTask(
     });
     processQueue(task.kind);
 
-    return {
-        cancel: () => cancelTask(task),
-        promise,
-        url: normalizedUrl
-    };
+    return handle;
 }
 
 function getElementImageUrl(element: Element) {
@@ -490,20 +539,11 @@ export function syncPtvManagedPreloads(
     Array.from(activeUrls).forEach((url, index) => {
         if (scopedEntries.has(url)) return;
 
-        const link = document.createElement('link');
         const priority = priorities[index] || 'decorative';
-
-        link.rel = 'preload';
-        link.as = 'image';
-        link.href = url;
-        link.dataset.ptvPreloadScope = scope;
-        link.dataset.ptvPreloadUrl = url;
-        link.setAttribute('fetchpriority', index === 0 ? 'high' : 'low');
-        document.head.appendChild(link);
 
         scopedEntries.set(url, {
             handle: preloadPtvImage(url, priority, scope),
-            link
+            link: null
         });
     });
 
@@ -521,17 +561,11 @@ export function cancelPtvImageScope(scope: string) {
     });
     scopedPreloads.delete(scope);
 
-    Object.values(queues).forEach(queue => {
-        [...queue].forEach(task => {
-            if (taskMatchesScope(task, scope)) {
-                cancelTask(task);
-            }
-        });
-    });
-
     Array.from(inflightByUrl.values()).forEach(task => {
-        if (taskMatchesScope(task, scope)) {
-            cancelTask(task);
+        for (const consumer of [...task.consumers.values()]) {
+            if (imageScopeMatches(consumer.scope, scope)) {
+                consumer.cancel();
+            }
         }
     });
 }

@@ -207,11 +207,17 @@
 .ptv-client-webos .homeSectionsContainer .cardImageContainer,
 .ptv-client-webos .homeSectionsContainer .cardImage,
 .ptv-client-webos .homeSectionsContainer .coveredImage,
-.ptv-client-webos .ptv-sidebar,
 .ptv-client-webos .ptv-legacy-skinHeader {
     animation: none !important;
     filter: none !important;
     transform: none !important;
+    transition: none !important;
+    will-change: auto !important;
+}
+
+.ptv-client-webos .ptv-sidebar {
+    animation: none !important;
+    filter: none !important;
     transition: none !important;
     will-change: auto !important;
 }
@@ -233,6 +239,18 @@
 .ptv-client-webos .homeSectionsContainer .cardBox,
 .ptv-client-webos .homeSectionsContainer .emby-scrollbuttons-button {
     box-shadow: none !important;
+}
+
+.ptv-client-webos .ptv-sidebar:not(.ptv-sidebar-open) {
+    transform: translateX(-105%) !important;
+
+    pointer-events: none !important;
+}
+
+.ptv-client-webos .ptv-sidebar.ptv-sidebar-open {
+    transform: translateX(0) !important;
+
+    pointer-events: auto !important;
 }
 
 .ptv-render-tv .homeSectionsContainer .card,

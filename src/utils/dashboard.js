@@ -27,6 +27,16 @@ import { isPtvWebpackDevServerOrigin } from 'ptv/core/urlOrigins';
 
 const SERVER_DISCOVERY_TIMEOUT_MS = 2200;
 
+function getCurrentApiClientForDiscovery() {
+    try {
+        return ServerConnections.currentApiClient() || window.ApiClient;
+    } catch {
+        // A partially restored server record can exist without an Id. Discovery can
+        // still recover from its saved addresses, so do not strand startup here.
+        return window.ApiClient;
+    }
+}
+
 export function getCurrentUser() {
     return window.ApiClient.getCurrentUser(false);
 }
@@ -44,7 +54,7 @@ export async function serverAddress() {
     if (requestedServerUrl) {
         console.info('[PTV] Using explicit server override from shell query:', requestedServerUrl);
     }
-    const apiClient = ServerConnections.currentApiClient() || window.ApiClient;
+    const apiClient = getCurrentApiClientForDiscovery();
     const development = PTV_CONFIG.runtime.mode === 'development';
     const urls = buildPtvServerOriginCandidates({
         apiClient,

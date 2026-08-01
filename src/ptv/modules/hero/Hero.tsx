@@ -2,6 +2,7 @@ import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 're
 
 import { playbackManager } from '../../../components/playback/playbackmanager';
 import {
+    getPtvServerId,
     getPtvItemImageCandidates,
     type PtvItem,
     type PtvItemImageCandidate
@@ -127,9 +128,11 @@ function getHeroBackdropCandidates(item?: HeroItem | null): PtvItemImageCandidat
     return getPtvItemImageCandidates(item as PtvItem, {
         baseOptions: {
             maxWidth: heroBackdropMaxWidth,
+            serverId: getPtvServerId() || undefined,
             quality: 92
         },
-        order: ['Backdrop', 'Primary', 'Thumb', 'SeriesPrimary']
+        order: ['Backdrop', 'Primary', 'Thumb', 'SeriesPrimary'],
+        includeUntagged: true
     }).filter(candidate => !failedHeroImageUrls.has(candidate.url));
 }
 
@@ -165,11 +168,11 @@ function getLogoUrl(apiClient?: HeroApiClient, item?: HeroItem | null) {
         });
     }
 
-    if (!item.Id || !item.ImageTags?.Logo) return '';
+    if (!item.Id) return '';
 
     return getImageUrl(apiClient, item.Id, 'Logo', {
         maxWidth: heroLogoMaxWidth,
-        tag: item.ImageTags.Logo
+        tag: item.ImageTags?.Logo
     });
 }
 

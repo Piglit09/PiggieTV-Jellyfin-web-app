@@ -8,14 +8,20 @@ export function isPtvAuthenticated(serverId?: string | null): boolean {
     return Boolean(getPtvCurrentUserId(serverId));
 }
 
-export function getPtvCurrentUser(serverId?: string | null): Promise<PtvUser | null> {
+export function getPtvCurrentUser(
+    serverId?: string | null,
+    signal?: AbortSignal
+): Promise<PtvUser | null> {
     const userId = getPtvCurrentUserId(serverId);
 
     if (!userId) {
         return Promise.resolve(null);
     }
 
-    return requestPtvJson<PtvUser>(`Users/${userId}`, { serverId });
+    return requestPtvJson<PtvUser>(`Users/${userId}`, {
+        serverId,
+        signal
+    });
 }
 
 export function requirePtvCurrentUser(serverId?: string | null): Promise<PtvUser> {
@@ -41,4 +47,3 @@ export function requirePtvAdminUser(serverId?: string | null): Promise<PtvUser> 
         return user;
     });
 }
-

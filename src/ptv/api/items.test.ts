@@ -53,6 +53,7 @@ import {
     getPtvCurrentUserId,
     requestPtvJson
 } from './client';
+import { recordPtvEvent } from '../core/observability';
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -180,6 +181,31 @@ describe('coordinated Jellyfin item requests', () => {
             success: false
         });
         expect(getItem).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects one missing-item lookup after one 404 transport without retrying', async () => {
+        const legacyError = Object.assign(new Error('Item not found'), { status: 404 });
+        const getItem = vi.fn().mockRejectedValue(legacyError);
+
+        vi.mocked(getPtvApiClient).mockReturnValue({
+            getItem,
+            serverId: () => 'server-1'
+        });
+
+        await expect(getPtvItem('missing-movie')).rejects.toBe(legacyError);
+
+        expect(getItem).toHaveBeenCalledTimes(1);
+        expect(getItem).toHaveBeenCalledWith('user-1', 'missing-movie');
+        expect(recordPtvEvent).toHaveBeenCalledTimes(1);
+        expect(recordPtvEvent).toHaveBeenCalledWith(
+            'api',
+            'ptv-core-item-details-request',
+            expect.objectContaining({
+                coreErrorCode: 'API_HTTP_404',
+                status: 404,
+                success: false
+            })
+        );
     });
 
     it('sends list reads through the shared JSON request boundary', async () => {

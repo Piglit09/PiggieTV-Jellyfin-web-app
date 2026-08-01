@@ -4,7 +4,7 @@ import './compatibility';
 import { initPtvObservability, recordPtvEvent, recordPtvStartupEvent } from './observability';
 import { initPtvLogging, ptvLogger } from './logger';
 import './lifecycle';
-import { scheduleRouteCheck, startRouter } from './router';
+import { startRouter } from './router';
 import {
     createPtvRuntime,
     markPtvRuntimeReady,
@@ -80,7 +80,6 @@ ready(() => {
         startPtvRuntimeServices();
         document.documentElement.classList.add('ptv-ready');
         emit('ready');
-        scheduleRouteCheck(true);
         recordPtvStartupEvent('core-app-ready');
 
         ptvLogger.info('Runtime started', {

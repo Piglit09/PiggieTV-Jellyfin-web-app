@@ -2,9 +2,20 @@ import DefaultConfig from '../../config.json';
 import fetchLocal from '../../utils/fetchLocal.ts';
 
 let data;
+let configPromise;
+const configListeners = new Set();
 
-async function getConfig() {
-    if (data) return Promise.resolve(data);
+function notifyConfigListeners(config) {
+    configListeners.forEach(listener => {
+        try {
+            listener(config);
+        } catch (error) {
+            console.warn('failed to notify a web config listener:', error);
+        }
+    });
+}
+
+async function loadConfig() {
     try {
         const response = await fetchLocal('config.json', {
             cache: 'no-store'
@@ -15,13 +26,35 @@ async function getConfig() {
         }
 
         data = await response.json();
+        notifyConfigListeners(data);
 
         return data;
     } catch (error) {
         console.warn('failed to fetch the web config file:', error);
-        data = DefaultConfig;
-        return data;
+        return DefaultConfig;
     }
+}
+
+function getConfig() {
+    if (data) return Promise.resolve(data);
+
+    configPromise ||= loadConfig().finally(() => {
+        configPromise = undefined;
+    });
+
+    return configPromise;
+}
+
+export function getWebConfig() {
+    return getConfig();
+}
+
+export function subscribeWebConfig(listener) {
+    configListeners.add(listener);
+
+    return () => {
+        configListeners.delete(listener);
+    };
 }
 
 export function getIncludeCorsCredentials() {

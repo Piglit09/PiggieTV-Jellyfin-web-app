@@ -19,6 +19,7 @@ export function getPtvMediaFolders(options: {
 
 export function getPtvUserViews(options: {
     serverId?: string | null;
+    signal?: AbortSignal;
     userId?: string | null;
 } = {}): Promise<PtvItemsResult<PtvLibrary>> {
     const userId = options.userId || getPtvCurrentUserId(options.serverId);
@@ -30,7 +31,8 @@ export function getPtvUserViews(options: {
 
     if (typeof apiClient?.getJSON === 'function') {
         return requestPtvJson<PtvItemsResult<PtvLibrary>>(`Users/${userId}/Views`, {
-            serverId: options.serverId
+            serverId: options.serverId,
+            signal: options.signal
         });
     }
 
@@ -47,4 +49,3 @@ export function getPtvLibraryById(libraryId: string, options: {
         result.Items || []
     ).find(library => library.Id === libraryId) || null);
 }
-

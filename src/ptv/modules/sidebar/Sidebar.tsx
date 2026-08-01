@@ -3,6 +3,7 @@ import SidebarSection from './SidebarSection';
 import { PTV_ASSETS, PTV_BRANDING, PTV_EVENTS, PTV_ROUTES } from '../../core/config';
 import { applyPtvResponsiveImage } from '../../core/images';
 import { getPtvNavigationSections } from '../../shell';
+import { cancelPendingPtvRequestActivation } from '../request/requestLoader';
 
 type SidebarProps = {
     isOpen: boolean;
@@ -57,6 +58,7 @@ const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
                     className='ptv-sidebar-brand'
                     data-ptv-brand='sidebar'
                     aria-label={`Go to ${PTV_BRANDING.appName} home`}
+                    onClick={cancelPendingPtvRequestActivation}
                 >
                     <img
                         ref={mountSidebarLogo}

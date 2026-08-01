@@ -9,6 +9,7 @@ import { resolvePtvStaticAssetUrl } from '../core/urlOrigins';
 import { PtvIcon, type PtvIconName } from '../modules/icons';
 import { incrementPtvPerformanceCounter } from '../services/performanceMonitor';
 import { requestJellyfinLogout } from '../services/jellyfinLogoutAction';
+import { acquirePtvRuntimeOverlayOcclusion } from '../services/runtimeOverlayOcclusion';
 import {
     registerPtvNativeShellInstance,
     runPtvClientCacheMigration
@@ -914,7 +915,9 @@ export default function PTVShell({
     const headerRenderCountRef = useRef(0);
     const appLogoUrl = resolvePtvStaticAssetUrl(PTV_ASSETS.logos.bannerLight);
     const hash = window.location.hash || PTV_ROUTES.home;
+    const isFullScreenMusicRoute = getPtvShellHashPath(hash) === '#/music/player';
     const [openPanel, setOpenPanel] = useState<PtvShellOpenPanel>(null);
+    const hasOpenPanel = openPanel !== null;
     const [isSearchExpanded, setSearchExpanded] = useState(false);
     const [searchQuery, setSearchQuery] = useState(() => getPtvShellSearchRouteQuery() || readPtvShellSearchDraft());
     const navGroups = useMemo(() => getPtvShellNavGroups(section, hash), [hash, section]);
@@ -957,6 +960,12 @@ export default function PTVShell({
     useEffect(() => {
         onNavigationOpenChange?.(Boolean(openPanel));
     }, [onNavigationOpenChange, openPanel]);
+
+    useEffect(() => {
+        if (!hasOpenPanel) return undefined;
+
+        return acquirePtvRuntimeOverlayOcclusion('ptv-shell-panel');
+    }, [hasOpenPanel]);
 
     useEffect(() => () => {
         onNavigationOpenChange?.(false);
@@ -1045,7 +1054,7 @@ export default function PTVShell({
 
     return (
         <div
-            className={`ptv-shell-frame ptv-shell-frame-${section}${headerOnly ? ' ptv-shell-frame-header-only' : ''} ${className}`.trim()}
+            className={`ptv-shell-frame ptv-shell-frame-${section}${headerOnly ? ' ptv-shell-frame-header-only' : ''}${isFullScreenMusicRoute ? ' ptv-shell-frame-fullscreen-music' : ''} ${className}`.trim()}
             data-ptv-route-mode='native'
             data-ptv-shell-section={section}
         >

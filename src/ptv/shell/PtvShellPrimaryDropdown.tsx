@@ -299,6 +299,7 @@ export default function PtvShellPrimaryDropdown({
                 aria-expanded={isOpen}
                 aria-haspopup='menu'
                 className='ptv-shell-nav-button'
+                data-ptv-directional-menu-open='true'
                 id={triggerId}
                 onClick={handleTriggerClick}
                 onKeyDown={handleTriggerKeyDown}

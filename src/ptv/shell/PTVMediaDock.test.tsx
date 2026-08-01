@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PtvGlobalPlaybackState } from '../services/playbackStateService';
 
 const playbackMocks = vi.hoisted(() => ({
+    favorite: vi.fn(async () => undefined),
     openDetails: vi.fn(),
+    openQueue: vi.fn(),
     presentation: {
         audioLoaded: true,
         controlsVisible: true,
@@ -26,15 +28,21 @@ const playbackMocks = vi.hoisted(() => ({
         paused: false,
         positionTicks: 50,
         queueLength: 2,
+        sessionId: 'music-session',
         source: 'ptv-music',
         itemType: 'Audio',
         mediaType: 'Audio'
     } as PtvGlobalPlaybackState
 }));
 
+const focusMocks = vi.hoisted(() => ({
+    disposed: vi.fn(),
+    ready: vi.fn()
+}));
+
 vi.mock('../core/tvFocus', () => ({
-    notifyPtvTvPlaybackSurfaceDisposed: vi.fn(),
-    notifyPtvTvPlaybackSurfaceReady: vi.fn()
+    notifyPtvTvPlaybackSurfaceDisposed: focusMocks.disposed,
+    notifyPtvTvPlaybackSurfaceReady: focusMocks.ready
 }));
 
 vi.mock('../modules/icons', () => ({
@@ -46,9 +54,11 @@ vi.mock('../services/playbackStateService', () => ({
     nextPtvGlobalPlaybackTrack: vi.fn(),
     openPtvGlobalPlaybackDetails: playbackMocks.openDetails,
     openPtvGlobalPlaybackPrimary: vi.fn(async () => undefined),
+    openPtvGlobalPlaybackQueue: playbackMocks.openQueue,
     previousPtvGlobalPlaybackTrack: vi.fn(),
     stopPtvGlobalPlayback: vi.fn(),
-    subscribeToPtvGlobalPlaybackState: () => () => undefined
+    subscribeToPtvGlobalPlaybackState: () => () => undefined,
+    togglePtvGlobalPlaybackFavorite: playbackMocks.favorite
 }));
 
 vi.mock('../services/playbackPresentationService', () => ({
@@ -81,6 +91,7 @@ describe('PTV global media dock ownership', () => {
             paused: false,
             positionTicks: 50,
             queueLength: 2,
+            sessionId: 'music-session',
             source: 'ptv-music'
         };
         playbackMocks.presentation = {
@@ -93,6 +104,10 @@ describe('PTV global media dock ownership', () => {
             videoAvailable: false
         };
         playbackMocks.openDetails.mockReset();
+        playbackMocks.openQueue.mockReset();
+        playbackMocks.favorite.mockReset();
+        focusMocks.disposed.mockReset();
+        focusMocks.ready.mockReset();
         container = document.createElement('div');
         document.body.append(container);
         root = createRoot(container);
@@ -112,15 +127,39 @@ describe('PTV global media dock ownership', () => {
     it('renders exactly one compact dock for PTV-owned audio playback', () => {
         renderDock();
 
+        const dock = container.querySelector('.ptv-media-dock');
+
         expect(container.querySelectorAll('.ptv-media-dock')).toHaveLength(1);
+        expect(dock?.getAttribute('data-ptv-focus-escape-up')).toBe('page');
+        expect(dock?.getAttribute('data-ptv-playback-paused')).toBe('false');
         expect(document.querySelector('.ptv-music-mini-player')).toBeNull();
         expect(document.documentElement.classList.contains('ptv-playback-presentation-owned')).toBe(true);
         expect(document.body.classList.contains('ptv-playback-presentation-owned')).toBe(true);
+        expect(focusMocks.ready).toHaveBeenCalledTimes(1);
 
         flushSync(() => root.unmount());
         expect(document.documentElement.classList.contains('ptv-playback-presentation-owned')).toBe(false);
         expect(document.body.classList.contains('ptv-playback-presentation-owned')).toBe(false);
         root = createRoot(container);
+    });
+
+    it('renders one compact dock for Jellyfin-managed audio playback', () => {
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            sessionId: 'jellyfin-audio-session',
+            source: 'jellyfin-player'
+        };
+
+        renderDock();
+
+        const dock = container.querySelector('.ptv-media-dock');
+
+        expect(container.querySelectorAll('.ptv-media-dock')).toHaveLength(1);
+        expect(dock?.getAttribute('data-ptv-dock-source')).toBe('jellyfin-player');
+        expect(container.querySelector('[data-ptv-focus-key="mini-player:primary"]')).not.toBeNull();
+        expect(container.querySelector('[data-ptv-focus-key="mini-player:queue"]')).toBeNull();
+        expect(container.querySelector('[data-ptv-focus-key="mini-player:favorite"]')).toBeNull();
+        expect(document.documentElement.classList.contains('ptv-playback-presentation-owned')).toBe(true);
     });
 
     it('keeps paused queue audio reachable when the Jellyfin item type is album-shaped', () => {
@@ -138,7 +177,134 @@ describe('PTV global media dock ownership', () => {
         renderDock();
 
         expect(container.querySelectorAll('.ptv-media-dock')).toHaveLength(1);
+        expect(container.querySelector('.ptv-media-dock')?.getAttribute('data-ptv-playback-paused')).toBe('true');
         expect(container.querySelector('[data-ptv-focus-key="mini-player:primary"]')).not.toBeNull();
+    });
+
+    it('completes mini-player autofocus when a new track advances from queued to playing', () => {
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            active: false,
+            itemId: undefined,
+            paused: true,
+            sessionId: undefined,
+            source: 'none'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: false,
+            paused: true,
+            state: 'idle',
+            surface: 'none'
+        };
+        renderDock();
+        expect(focusMocks.ready).not.toHaveBeenCalled();
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            active: true,
+            itemId: 'new-track',
+            mediaType: 'Audio',
+            paused: true,
+            sessionId: 'new-session',
+            source: 'ptv-music'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: true,
+            paused: true,
+            state: 'audio-mini',
+            surface: 'mini-player'
+        };
+        renderDock();
+        expect(focusMocks.ready).toHaveBeenCalledTimes(1);
+        expect(container.querySelector('.ptv-media-dock')?.getAttribute('data-ptv-playback-paused')).toBe('true');
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            paused: false
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            paused: false
+        };
+        renderDock();
+
+        expect(focusMocks.ready).toHaveBeenCalledTimes(2);
+        expect(container.querySelector('.ptv-media-dock')?.getAttribute('data-ptv-playback-paused')).toBe('false');
+    });
+
+    it('does not carry video suppression into a later first Music session', () => {
+        window.location.hash = '#/video';
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            itemId: 'episode-item',
+            itemType: 'Episode',
+            mediaType: 'Video',
+            sessionId: 'video-session',
+            source: 'jellyfin-player'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: false,
+            routeFamily: 'video',
+            state: 'video-playing-controls-hidden',
+            surface: 'video-surface',
+            videoAvailable: true
+        };
+        renderDock();
+        expect(focusMocks.ready).not.toHaveBeenCalled();
+
+        window.location.hash = '#/home';
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            active: false,
+            itemId: undefined,
+            paused: true,
+            sessionId: undefined,
+            source: 'none'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: false,
+            routeFamily: 'other',
+            state: 'idle',
+            surface: 'none',
+            videoAvailable: false
+        };
+        renderDock();
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            active: true,
+            itemId: 'new-track',
+            itemType: 'Audio',
+            mediaType: 'Audio',
+            paused: true,
+            sessionId: 'new-session',
+            source: 'ptv-music'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: true,
+            paused: true,
+            state: 'audio-mini',
+            surface: 'mini-player'
+        };
+        renderDock();
+        expect(focusMocks.ready).toHaveBeenCalledTimes(1);
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            paused: false
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            paused: false
+        };
+        renderDock();
+
+        expect(focusMocks.ready).toHaveBeenCalledTimes(2);
     });
 
     it.each([
@@ -220,13 +386,47 @@ describe('PTV global media dock ownership', () => {
         expect(playbackMocks.openDetails).toHaveBeenCalledTimes(1);
     });
 
+    it('projects queue, elapsed time, and like actions from the existing playback state', () => {
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            durationTicks: 120 * 10_000_000,
+            isFavorite: true,
+            positionTicks: 30 * 10_000_000,
+            queueLength: 4,
+            queueSourceLabel: 'Artist Mix'
+        };
+
+        renderDock();
+
+        const queueButton = container.querySelector<HTMLButtonElement>('[data-ptv-focus-key="mini-player:queue"]');
+        const favoriteButton = container.querySelector<HTMLButtonElement>('[data-ptv-focus-key="mini-player:favorite"]');
+
+        expect(container.textContent).toContain('0:30 / 2:00');
+        expect(container.textContent).toContain('Artist Mix · 4 tracks');
+        expect(favoriteButton?.getAttribute('aria-pressed')).toBe('true');
+
+        queueButton?.click();
+        favoriteButton?.click();
+
+        expect(playbackMocks.openQueue).toHaveBeenCalledTimes(1);
+        expect(playbackMocks.favorite).toHaveBeenCalledTimes(1);
+    });
+
     it('restores the Music dock after video playback hands back to PTV audio', () => {
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            sessionId: 'retained-music-session'
+        };
+        renderDock();
+        expect(focusMocks.ready).toHaveBeenCalledTimes(1);
+
         window.location.hash = '#/video';
         playbackMocks.state = {
             ...playbackMocks.state,
             itemId: 'episode-item',
             itemType: 'Episode',
             mediaType: 'Video',
+            sessionId: 'video-session',
             source: 'jellyfin-player'
         };
         playbackMocks.presentation = {
@@ -245,6 +445,7 @@ describe('PTV global media dock ownership', () => {
             itemType: 'Audio',
             mediaType: 'Audio',
             paused: true,
+            sessionId: 'retained-music-session',
             source: 'ptv-music'
         };
         playbackMocks.presentation = {
@@ -259,7 +460,158 @@ describe('PTV global media dock ownership', () => {
         renderDock();
 
         expect(container.querySelectorAll('.ptv-media-dock')).toHaveLength(1);
+        expect(container.querySelector('.ptv-media-dock')?.getAttribute('data-ptv-playback-paused')).toBe('true');
         expect(playbackMocks.state.paused).toBe(true);
         expect(document.documentElement.classList.contains('ptv-playback-presentation-owned')).toBe(true);
+
+        const readyCountAfterPausedHandoff = focusMocks.ready.mock.calls.length;
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            paused: false
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            paused: false
+        };
+        renderDock();
+
+        expect(focusMocks.ready).toHaveBeenCalledTimes(readyCountAfterPausedHandoff);
+    });
+
+    it('autofocuses a new Music session after video instead of treating it as retained', () => {
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            sessionId: 'old-music-session'
+        };
+        renderDock();
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            itemId: 'episode-item',
+            itemType: 'Episode',
+            mediaType: 'Video',
+            sessionId: 'video-session',
+            source: 'jellyfin-player'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: false,
+            routeFamily: 'video',
+            state: 'video-playing-controls-hidden',
+            surface: 'video-surface',
+            videoAvailable: true
+        };
+        renderDock();
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            itemId: 'new-track',
+            itemType: 'Audio',
+            mediaType: 'Audio',
+            paused: true,
+            sessionId: 'new-music-session',
+            source: 'ptv-music'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: true,
+            paused: true,
+            routeFamily: 'other',
+            state: 'audio-mini',
+            surface: 'mini-player',
+            videoAvailable: false
+        };
+        renderDock();
+        const readyCountWhileQueued = focusMocks.ready.mock.calls.length;
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            paused: false
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            paused: false
+        };
+        renderDock();
+
+        expect(focusMocks.ready).toHaveBeenCalledTimes(readyCountWhileQueued + 1);
+    });
+
+    it('keeps repeated same-session handoff mounts passive', () => {
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            sessionId: 'retained-music-session'
+        };
+        renderDock();
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            itemId: 'episode-item',
+            itemType: 'Episode',
+            mediaType: 'Video',
+            sessionId: 'video-session',
+            source: 'jellyfin-player'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: false,
+            routeFamily: 'video',
+            state: 'video-playing-controls-hidden',
+            surface: 'video-surface',
+            videoAvailable: true
+        };
+        renderDock();
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            itemId: 'music-item',
+            itemType: 'Audio',
+            mediaType: 'Audio',
+            paused: true,
+            sessionId: 'retained-music-session',
+            source: 'ptv-music'
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: true,
+            paused: true,
+            routeFamily: 'other',
+            state: 'audio-mini',
+            surface: 'mini-player',
+            videoAvailable: false
+        };
+        renderDock();
+
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: false,
+            routeFamily: 'music-fullscreen',
+            state: 'transitioning',
+            surface: 'full-screen-player'
+        };
+        renderDock();
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            audioLoaded: true,
+            paused: true,
+            routeFamily: 'other',
+            state: 'audio-mini',
+            surface: 'mini-player'
+        };
+        renderDock();
+        const readyCountAfterRemount = focusMocks.ready.mock.calls.length;
+
+        playbackMocks.state = {
+            ...playbackMocks.state,
+            paused: false
+        };
+        playbackMocks.presentation = {
+            ...playbackMocks.presentation,
+            paused: false
+        };
+        renderDock();
+
+        expect(focusMocks.ready).toHaveBeenCalledTimes(readyCountAfterRemount);
     });
 });

@@ -4,6 +4,8 @@ import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const headerMocks = vi.hoisted(() => ({
+    cancelRequest: vi.fn(),
+    openRequest: vi.fn(),
     platformPolicy: {
         reading: true,
         request: true
@@ -30,16 +32,13 @@ vi.mock('../../core/pluginApi', () => ({
     getCurrentPtvPluginApiClient: vi.fn(() => null)
 }));
 
-vi.mock('../../core/events', () => ({
-    dispatchPtvCustomEvent: vi.fn()
-}));
-
 vi.mock('../../core/platformFeatures', () => ({
     getPtvPlatformFeaturePolicy: () => headerMocks.platformPolicy
 }));
 
-vi.mock('../request', () => ({
-    openRequestPortal: vi.fn()
+vi.mock('../request/requestLoader', () => ({
+    cancelPendingPtvRequestActivation: headerMocks.cancelRequest,
+    openPtvRequestPortal: headerMocks.openRequest
 }));
 
 vi.mock('../../api', () => ({
@@ -53,6 +52,9 @@ describe('AppHeader authentication compatibility mode', () => {
     let root: Root;
 
     beforeEach(() => {
+        headerMocks.cancelRequest.mockReset();
+        headerMocks.openRequest.mockReset();
+        headerMocks.openRequest.mockResolvedValue(true);
         headerMocks.platformPolicy = {
             reading: true,
             request: true
@@ -106,6 +108,28 @@ describe('AppHeader authentication compatibility mode', () => {
         expect(navigationText).not.toContain('Request');
         expect(navigationText).toContain('Music');
         expect(navigationText).toContain('Favorites');
+    });
+
+    it('uses the exactly-once lazy Request activation boundary', async () => {
+        flushSync(() => root.render(<AppHeader />));
+
+        container
+            .querySelector<HTMLAnchorElement>('[data-ptv-request-trigger="true"]')
+            ?.click();
+
+        await vi.waitFor(() => {
+            expect(headerMocks.openRequest).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    it('cancels a pending Request intent from every same-route Home control', () => {
+        flushSync(() => root.render(<AppHeader />));
+
+        container.querySelector<HTMLAnchorElement>('.ptv-home-btn')?.click();
+        container.querySelector<HTMLAnchorElement>('.ptv-brand')?.click();
+        container.querySelector<HTMLAnchorElement>('.ptv-header-nav a[href="#/home"]')?.click();
+
+        expect(headerMocks.cancelRequest).toHaveBeenCalledTimes(3);
     });
 
     it('replaces authentication anchors with the swipe target after login and removes it on logout', () => {

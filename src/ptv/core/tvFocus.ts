@@ -1,6 +1,7 @@
 /* eslint-disable @stylistic/operator-linebreak, compat/compat, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional -- The authoritative legacy-TV focus owner keeps branch order explicit for input ownership, compatibility, and passive stage diagnostics. */
 import type { PtvClientProfile } from './clientProfile';
 import { getPtvRouteControllerState, type PtvRouteControllerState } from '../shell/routeController';
+import { shouldContinuePtvHiddenVideoDirectionalGesture } from '../modules/playback/videoInputOwnership';
 import type {
     PtvFocusElementCategory,
     PtvFocusRegionClass,
@@ -207,6 +208,7 @@ const FULL_SCREEN_MUSIC_SCOPE_SELECTOR = [
 ].join(',');
 
 const MINI_PLAYER_SCOPE_SELECTOR = '.ptv-media-dock[data-ptv-playback-surface="mini-player"]';
+const MINI_PLAYER_PAGE_EXIT_SELECTOR = `${MINI_PLAYER_SCOPE_SELECTOR}[data-ptv-focus-escape-up="page"]`;
 const VIDEO_PLAYBACK_SCOPE_SELECTOR = [
     '#videoOsdPage',
     '.videoOsdPage',
@@ -913,8 +915,10 @@ class PtvTvFocusManager {
     private playbackActive = false;
     private playbackBackHandler: PtvPlaybackBackHandler | null = null;
     private playbackReturnFocus: PtvFocusMemory | null = null;
+    private inactivePlaybackSurfaceScopes = new Set<HTMLElement>();
     private playbackSurfaceFocusMemory = new Map<PtvPlaybackSurface, PtvFocusMemory>();
     private playbackSurfaceReturnFocus = new Map<PtvPlaybackSurface, PtvFocusMemory | null>();
+    private routeRestorePending = false;
     private restoreSequence = 0;
     private subscribers = new Set<PtvNavigationSubscriber>();
     private nextFocusReason = '';
@@ -1098,6 +1102,17 @@ class PtvTvFocusManager {
             return;
         }
 
+        if (this.shouldRejectPausedMiniPlayerFocus(target)) {
+            this.cacheDirty = true;
+            this.scheduleRestore(this.routeRestorePending ? 'route-change' : 'scope-changed');
+            return;
+        }
+
+        if (target.closest(MINI_PLAYER_SCOPE_SELECTOR)) {
+            this.cache = null;
+            this.cacheDirty = true;
+        }
+
         const scope = this.cache?.scope || this.findActiveScope();
 
         if (!scope.contains(target) && target !== scope) return;
@@ -1217,6 +1232,21 @@ class PtvTvFocusManager {
                 handlerReached: true
             });
             const direction = getPtvRemoteDirection(event);
+
+            if (
+                this.playbackActive
+                && shouldContinuePtvHiddenVideoDirectionalGesture(
+                    direction || '',
+                    event.repeat
+                )
+            ) {
+                this.recordInputStage(context, 'handler-rejected', {
+                    failureReason: 'hidden-video-directional-gesture-owned-by-player',
+                    handlerReached: true
+                });
+                return;
+            }
+
             const current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
             const editable = isEditable(current);
             const cache = this.getCache();
@@ -1299,7 +1329,7 @@ class PtvTvFocusManager {
     private handleBackKey(event: KeyboardEvent, cache: PtvFocusCache, editable: boolean) {
         if (!isPtvRemoteBackKey(event) || (editable && event.key === 'Backspace')) return false;
 
-        if (this.getActiveLayer()) {
+        if (this.reconcileActiveLayerForBack(cache)) {
             if (this.closeActiveLayer('back')) {
                 this.consumeOwnedKey(event);
                 this.recordBackDecision('transient-layer');
@@ -1356,6 +1386,18 @@ class PtvTvFocusManager {
         return true;
     }
 
+    private reconcileActiveLayerForBack(cache: PtvFocusCache) {
+        const liveLayer = getTopVisibleElement(LAYER_SELECTOR);
+
+        if (!liveLayer) return this.getActiveLayer();
+
+        // A physical Back can arrive in the same task that mounts a React menu,
+        // before MutationObserver has refreshed the layer stack. Reconcile the
+        // live DOM synchronously so Back cannot fall through to route history.
+        this.syncLayers(cache.scope);
+        return this.getActiveLayer();
+    }
+
     private handleSelectKey(
         event: KeyboardEvent,
         cache: PtvFocusCache,
@@ -1404,6 +1446,7 @@ class PtvTvFocusManager {
 
         event.preventDefault();
         if (current && this.handleMenuTriggerDirection(current, direction, event)) return;
+        if (current && this.moveMiniPlayerFocusToPage(direction, cache, current)) return;
         const focused = this.moveInDirection(direction, cache, current, editable);
 
         if (!focused) {
@@ -1411,9 +1454,96 @@ class PtvTvFocusManager {
         }
     }
 
+    private moveMiniPlayerFocusToPage(
+        direction: PtvDirection,
+        miniPlayerCache: PtvFocusCache,
+        current: HTMLElement
+    ) {
+        if (
+            direction !== 'up'
+            || !current.closest(MINI_PLAYER_PAGE_EXIT_SELECTOR)
+            || !miniPlayerCache.scope.matches(MINI_PLAYER_SCOPE_SELECTOR)
+        ) {
+            return false;
+        }
+
+        const pageScope = getTopVisibleElement(PAGE_SCOPE_SELECTOR);
+
+        if (!pageScope) return false;
+
+        const startedAt = performance.now();
+        if (this.activeInput) {
+            this.recordInputStage(this.activeInput, 'target-search-started', {
+                direction,
+                focusedCategory: classifyPtvTvFocusElement(current),
+                scopeTransition: 'mini-player-to-page'
+            });
+        }
+        this.graphRebuildReason = 'mini-player-exit-up';
+        const pageCache = this.buildCache(pageScope);
+        const rects = new Map(pageCache.candidates.map(element => [element, getElementRect(element)]));
+        const returnTarget = this.findMemoryTarget(
+            pageCache,
+            this.playbackSurfaceReturnFocus.get('mini-player') || null
+        );
+        const directionalTarget = findDirectionalTargetFromRects(current, pageCache.candidates, rects, 'up');
+        const target = returnTarget
+            || directionalTarget
+            || pageCache.candidates.find(candidate => classifyPtvTvFocusScope(candidate) === 'navigation')
+            || this.findInitialTarget(pageCache);
+
+        if (!target) return false;
+
+        if (this.activeInput) {
+            this.activeInput.targetFound = true;
+            this.recordInputStage(this.activeInput, 'target-found', {
+                targetCategory: classifyPtvTvFocusElement(target),
+                targetFingerprint: getPtvSafeFocusFingerprint(target),
+                targetFound: true
+            });
+        }
+
+        this.cache = pageCache;
+        this.cacheDirty = false;
+        this.navigationMoveCount += 1;
+        if (!returnTarget && !directionalTarget) this.geometryFallbackCount += 1;
+
+        const focused = this.moveFocus(target, 'direction:up:mini-player-exit');
+        this.recordNavigationTiming(performance.now() - startedAt);
+        this.recordDiagnostic('ptv-tv-focus-moved', {
+            direction,
+            focusGraphNodeCount: pageCache.candidates.length,
+            focusGraphTargetKey: pageCache.keys.get(target) || '',
+            focusGraphSourceKey: miniPlayerCache.keys.get(current) || '',
+            focusMoveDurationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+            focusedKey: pageCache.keys.get(target) || '',
+            focusMoveSuccess: focused,
+            scopeTransition: 'mini-player-to-page'
+        });
+
+        if (!focused) {
+            this.cache = null;
+            this.cacheDirty = true;
+        }
+
+        return focused;
+    }
+
     private readonly handleMutation = (records: MutationRecord[]) => {
         if (!this.enabled) return;
 
+        records.forEach(record => {
+            const target = record.target instanceof HTMLElement ? record.target : null;
+
+            if (
+                record.type === 'attributes'
+                && record.attributeName === 'data-ptv-playback-paused'
+                && target?.matches(MINI_PLAYER_SCOPE_SELECTOR)
+                && target.dataset.ptvPlaybackPaused !== 'true'
+            ) {
+                this.inactivePlaybackSurfaceScopes.delete(target);
+            }
+        });
         const meaningful = records.some(record => {
             if (record.type !== 'attributes' || record.attributeName !== 'class') return true;
 
@@ -1454,6 +1584,7 @@ class PtvTvFocusManager {
         this.routeOwner = routeState?.owner || document.documentElement.dataset.ptvRouteOwner || this.routeOwner;
         this.layerStack = [];
         this.pendingRestoreMemory = null;
+        this.routeRestorePending = true;
         this.graphRebuildReason = 'route-change';
         this.cacheDirty = true;
         this.scheduleRestore('route-change');
@@ -1507,7 +1638,18 @@ class PtvTvFocusManager {
 
         this.observer = new MutationObserver(this.handleMutation);
         this.observer.observe(document.documentElement, {
-            attributeFilter: ['aria-disabled', 'aria-hidden', 'class', 'disabled', 'hidden', 'inert', 'open', 'style', 'tabindex'],
+            attributeFilter: [
+                'aria-disabled',
+                'aria-hidden',
+                'class',
+                'data-ptv-playback-paused',
+                'disabled',
+                'hidden',
+                'inert',
+                'open',
+                'style',
+                'tabindex'
+            ],
             attributeOldValue: true,
             attributes: true,
             childList: true,
@@ -1549,10 +1691,12 @@ class PtvTvFocusManager {
         this.cache = null;
         this.cacheDirty = true;
         this.layerStack = [];
+        this.inactivePlaybackSurfaceScopes.clear();
         this.playbackSurfaceFocusMemory.clear();
         this.playbackSurfaceReturnFocus.clear();
         this.pendingRestoreReason = '';
         this.pendingRestoreMemory = null;
+        this.routeRestorePending = false;
         this.restoreSequence += 1;
         this.clearPendingMovementConfirmations();
         document.querySelectorAll('.ptv-tv-focus-visible').forEach(element => {
@@ -1947,6 +2091,27 @@ class PtvTvFocusManager {
         }
 
         this.graphRebuildReason = `playback-surface-ready:${surface}`;
+        const preservePageFocus = surface === 'mini-player'
+            && scope.dataset.ptvPlaybackPaused === 'true';
+
+        if (preservePageFocus) {
+            this.inactivePlaybackSurfaceScopes.add(scope);
+            this.cache = null;
+            this.cacheDirty = true;
+            this.recordDiagnostic('ptv-tv-focus-scope', {
+                candidateCount: scope.querySelectorAll(FOCUSABLE_SELECTOR).length,
+                initialFocusedCategory: classifyPtvTvFocusElement(
+                    document.activeElement instanceof HTMLElement ? document.activeElement : null
+                ),
+                previousFocusRestored: null,
+                scope: classifyPtvTvFocusScope(scope),
+                scopeStatus: 'open',
+                trapActive: false
+            });
+            return true;
+        }
+
+        this.inactivePlaybackSurfaceScopes.delete(scope);
         this.cache = this.buildCache(scope);
         this.cacheDirty = false;
         const surfaceMemory = this.playbackSurfaceFocusMemory.get(surface) || null;
@@ -1975,6 +2140,7 @@ class PtvTvFocusManager {
     }
 
     notifyPlaybackSurfaceDisposed(scope: HTMLElement, surface: PtvPlaybackSurface) {
+        this.inactivePlaybackSurfaceScopes.delete(scope);
         this.playbackSurfaceReturnFocus.delete(surface);
         if (this.cache?.scope === scope) this.cache = null;
         this.graphRebuildReason = `playback-surface-disposed:${surface}`;
@@ -2011,7 +2177,8 @@ class PtvTvFocusManager {
             .filter(candidate => (
                 !restrictToVisibleVideoControls
                 || Boolean(candidate.closest(VIDEO_PLAYBACK_CANDIDATE_SELECTOR))
-            ));
+            ))
+            .filter(candidate => !this.shouldExcludePausedMiniPlayerCandidate(candidate, scope));
 
         if (scope.matches(FOCUSABLE_SELECTOR)) candidates.unshift(scope);
 
@@ -2192,8 +2359,22 @@ class PtvTvFocusManager {
 
         const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         const activeMiniPlayer = activeElement?.closest<HTMLElement>(MINI_PLAYER_SCOPE_SELECTOR);
+        const inactiveMiniPlayer = activeMiniPlayer
+            ? this.isInactivePlaybackSurfaceScope(activeMiniPlayer)
+            : false;
+        const blockedPausedMiniPlayer = activeMiniPlayer?.dataset.ptvPlaybackPaused === 'true'
+            && (
+                this.routeRestorePending
+                || inactiveMiniPlayer
+            );
 
-        if (activeMiniPlayer && isElementStyleVisible(activeMiniPlayer)) return activeMiniPlayer;
+        if (
+            activeMiniPlayer
+            && isElementStyleVisible(activeMiniPlayer)
+            && !blockedPausedMiniPlayer
+        ) {
+            return activeMiniPlayer;
+        }
 
         if (this.playbackActive) {
             if (hasVisibleVideoPlaybackControls()) return document.body;
@@ -2203,7 +2384,59 @@ class PtvTvFocusManager {
             if (playbackScope) return playbackScope;
         }
 
-        return getTopVisibleElement(PAGE_SCOPE_SELECTOR) || document.body;
+        const pageScope = getTopVisibleElement(PAGE_SCOPE_SELECTOR);
+
+        // Enhanced Details keeps the Jellyfin-owned page and mounts a separate
+        // header-only shell at the end of <body>. The header is not the page
+        // scope; use their existing common ancestor so both remain in the one
+        // authoritative focus graph.
+        if (pageScope?.matches('.ptv-shell-frame-header-only')) return document.body;
+
+        return pageScope || document.body;
+    }
+
+    private isInactivePlaybackSurfaceScope(scope: HTMLElement) {
+        if (!this.inactivePlaybackSurfaceScopes.has(scope)) return false;
+        if (scope.dataset.ptvPlaybackPaused === 'true') return true;
+
+        this.inactivePlaybackSurfaceScopes.delete(scope);
+        return false;
+    }
+
+    private shouldRejectPausedMiniPlayerFocus(target: HTMLElement) {
+        const miniPlayer = target.closest<HTMLElement>(MINI_PLAYER_SCOPE_SELECTOR);
+
+        if (!miniPlayer) return false;
+
+        const inactiveMiniPlayer = this.isInactivePlaybackSurfaceScope(miniPlayer);
+
+        return miniPlayer.dataset.ptvPlaybackPaused === 'true'
+            && (this.routeRestorePending || inactiveMiniPlayer);
+    }
+
+    private shouldExcludePausedMiniPlayerCandidate(candidate: HTMLElement, scope: HTMLElement) {
+        const miniPlayer = candidate.closest<HTMLElement>(MINI_PLAYER_SCOPE_SELECTOR);
+
+        if (!miniPlayer || miniPlayer === scope) return false;
+
+        const inactiveMiniPlayer = this.isInactivePlaybackSurfaceScope(miniPlayer);
+
+        return miniPlayer.dataset.ptvPlaybackPaused === 'true'
+            && (this.routeRestorePending || inactiveMiniPlayer);
+    }
+
+    private completeRouteRestore(target: HTMLElement, focusRestored: boolean) {
+        if (!this.routeRestorePending || !focusRestored) return;
+
+        const pageScope = target.closest<HTMLElement>(PAGE_SCOPE_SELECTOR);
+
+        if (
+            pageScope?.isConnected
+            && isElementStyleVisible(pageScope)
+            && isPtvFocusableCandidate(target, pageScope)
+        ) {
+            this.routeRestorePending = false;
+        }
     }
 
     private findMemoryTarget(cache: PtvFocusCache, memory: PtvFocusMemory | null) {
@@ -2232,7 +2465,12 @@ class PtvTvFocusManager {
 
     private findBodyFallbackTarget() {
         const candidates = Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-            .filter(candidate => candidate !== document.body && candidate.isConnected && isElementStyleVisible(candidate, document.body));
+            .filter(candidate => (
+                candidate !== document.body
+                && candidate.isConnected
+                && isElementStyleVisible(candidate, document.body)
+                && !this.shouldExcludePausedMiniPlayerCandidate(candidate, document.body)
+            ));
 
         if (!candidates.length) return null;
 
@@ -2330,7 +2568,12 @@ class PtvTvFocusManager {
     }
 
     private handleMenuTriggerDirection(current: HTMLElement, direction: PtvDirection, event: KeyboardEvent) {
-        if (!current.matches('[aria-haspopup="menu"]') || (direction !== 'down' && direction !== 'up')) return false;
+        if (
+            !current.matches('[aria-haspopup="menu"][data-ptv-directional-menu-open="true"]')
+            || (direction !== 'down' && direction !== 'up')
+        ) {
+            return false;
+        }
 
         if (current.getAttribute('aria-expanded') !== 'true') current.click();
         event.preventDefault();
@@ -2505,8 +2748,11 @@ class PtvTvFocusManager {
             }
 
             this.focusSentinel(cache.scope);
-            const focusedFallback = document.activeElement === cache.scope || document.activeElement instanceof HTMLElement
-                && document.activeElement !== document.body;
+            const activeFallback = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            const focusedFallback = (
+                document.activeElement === cache.scope
+                || Boolean(activeFallback && activeFallback !== document.body)
+            ) && !(activeFallback && this.shouldRejectPausedMiniPlayerFocus(activeFallback));
 
             if (focusedFallback) {
                 this.pendingRestoreReason = '';
@@ -2536,6 +2782,7 @@ class PtvTvFocusManager {
 
         this.pendingRestoreReason = '';
         const focusRestored = this.moveFocus(target, `restore:${reason}`);
+        this.completeRouteRestore(target, focusRestored);
         this.recordDiagnostic('ptv-tv-focus-restored', {
             focusedCategory: classifyPtvTvFocusElement(target),
             focusedFingerprint: getPtvSafeFocusFingerprint(target),

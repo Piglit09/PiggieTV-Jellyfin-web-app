@@ -9,7 +9,6 @@ const PTV_DIAGNOSTICS_ROUTE: AsyncRoute = { path: 'piggietv/diagnostics', type: 
 registerPtvRecommendationRouteOnce(PTV_RECOMMENDATIONS_ROUTE.path);
 
 export const ASYNC_ADMIN_ROUTES: AsyncRoute[] = [
-    { path: '', type: AppType.Dashboard },
     { path: 'activity', type: AppType.Dashboard },
     { path: 'backups', type: AppType.Dashboard },
     { path: 'branding', type: AppType.Dashboard },

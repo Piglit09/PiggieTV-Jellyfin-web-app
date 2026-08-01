@@ -1,8 +1,18 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const identityState = vi.hoisted(() => ({
+    serverId: 'server-default',
+    userId: 'user-default'
+}));
 
 vi.mock('../api/items', () => ({ getPtvItems: vi.fn() }));
+vi.mock('../api/client', () => ({
+    getPtvCurrentUserId: () => identityState.userId,
+    getPtvServerId: (serverId?: string | null) => serverId || identityState.serverId
+}));
 
 import { getPtvItems } from '../api/items';
+import { createPtvAbortController } from '../core/abortController';
 import type { PtvItem, PtvItemQuery } from '../api/types';
 import {
     resetPtvMovieSearchCatalogForTests,
@@ -23,8 +33,14 @@ function page(startIndex: number, items: PtvItem[], totalRecordCount: number) {
     return { Items: items, StartIndex: startIndex, TotalRecordCount: totalRecordCount };
 }
 
+beforeEach(() => {
+    identityState.serverId = 'server-default';
+    identityState.userId = 'user-default';
+});
+
 afterEach(() => {
     resetPtvMovieSearchCatalogForTests();
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
 });
 
@@ -176,5 +192,158 @@ describe('PTV Movie search catalog', () => {
             sortOrder: 'Descending',
             startIndex: 0
         });
+    });
+
+    it('aborts catalog paging on route exit and does not commit the retired page', async () => {
+        const controller = createPtvAbortController();
+        let resolveRetiredPage: ((result: ReturnType<typeof page>) => void) | undefined;
+        let transportSignal: AbortSignal | undefined;
+
+        vi.mocked(getPtvItems).mockImplementation((...requestArguments) => {
+            transportSignal = requestArguments[1]?.signal;
+            return new Promise(resolve => {
+                resolveRetiredPage = resolve;
+            });
+        });
+
+        const retiredSearch = searchPtvMovieCatalog('retired title', {
+            signal: controller.signal,
+            userId: 'user-1'
+        });
+
+        await vi.waitFor(() => expect(transportSignal).toBeDefined());
+        controller.abort();
+
+        await expect(retiredSearch).rejects.toMatchObject({ name: 'AbortError' });
+        expect(transportSignal?.aborted).toBe(true);
+
+        resolveRetiredPage?.(page(0, [movie('retired', 'Retired title')], 1));
+        await Promise.resolve();
+        await Promise.resolve();
+
+        vi.mocked(getPtvItems).mockResolvedValue(page(0, [movie('current', 'Current title')], 1));
+        const current = await searchPtvMovieCatalog('current title', { userId: 'user-1' });
+        const catalogStartIndexes = vi.mocked(getPtvItems).mock.calls
+            .filter(([query]) => !query?.Ids)
+            .map(([query]) => query?.StartIndex);
+
+        expect(current.items.map(item => item.Id)).toEqual(['current']);
+        expect(catalogStartIndexes).toEqual([0, 0]);
+    });
+
+    it('does not commit hydration that resolves after the query is aborted', async () => {
+        const controller = createPtvAbortController();
+        const catalogItem = movie('toy-5', 'Toy Story 5');
+        let hydrationCalls = 0;
+        let resolveRetiredHydration: ((result: { Items: PtvItem[] }) => void) | undefined;
+
+        vi.mocked(getPtvItems).mockImplementation(query => {
+            if (!query?.Ids) return Promise.resolve(page(0, [catalogItem], 1));
+
+            hydrationCalls += 1;
+            if (hydrationCalls === 1) {
+                return new Promise(resolve => {
+                    resolveRetiredHydration = resolve;
+                });
+            }
+
+            return Promise.resolve({ Items: [catalogItem] });
+        });
+
+        const retiredSearch = searchPtvMovieCatalog('toy story', {
+            signal: controller.signal,
+            userId: 'user-1'
+        });
+
+        await vi.waitFor(() => expect(hydrationCalls).toBe(1));
+        controller.abort();
+        await expect(retiredSearch).rejects.toMatchObject({ name: 'AbortError' });
+
+        resolveRetiredHydration?.({ Items: [catalogItem] });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        await expect(searchPtvMovieCatalog('toy story', { userId: 'user-1' })).resolves.toMatchObject({
+            items: [catalogItem]
+        });
+        expect(hydrationCalls).toBe(2);
+    });
+
+    it('cancels the deferred idle page when the owning query is aborted', async () => {
+        const controller = createPtvAbortController();
+        const firstPage = [
+            movie('toy-5', 'Toy Story 5'),
+            ...Array.from({ length: 499 }, (_, index) => movie(`new-${index}`, `New movie ${index}`))
+        ];
+        let idleCallback: (() => void) | undefined;
+        const cancelIdleCallback = vi.fn();
+
+        vi.stubGlobal('requestIdleCallback', vi.fn((callback: () => void) => {
+            idleCallback = callback;
+            return 17;
+        }));
+        vi.stubGlobal('cancelIdleCallback', cancelIdleCallback);
+        vi.mocked(getPtvItems).mockImplementation(query => {
+            if (query?.Ids) return Promise.resolve({ Items: [firstPage[0]] });
+
+            return Promise.resolve(page(0, firstPage, 501));
+        });
+
+        await searchPtvMovieCatalog('toy story', {
+            signal: controller.signal,
+            userId: 'user-1'
+        });
+        expect(idleCallback).toBeDefined();
+
+        controller.abort();
+        expect(cancelIdleCallback).toHaveBeenCalledWith(17);
+
+        idleCallback?.();
+        await Promise.resolve();
+
+        expect(vi.mocked(getPtvItems).mock.calls.filter(([query]) => !query?.Ids)).toHaveLength(1);
+    });
+
+    it('isolates omitted-option catalogs when the active server and user change', async () => {
+        vi.mocked(getPtvItems).mockImplementation((query, options) => {
+            if (query?.Ids) {
+                return Promise.resolve({
+                    Items: [movie(String(options?.userId), `Visible to ${options?.userId}`)]
+                });
+            }
+
+            return Promise.resolve(page(
+                0,
+                [movie(String(options?.userId), `Visible to ${options?.userId}`)],
+                1
+            ));
+        });
+
+        identityState.serverId = 'server-a';
+        identityState.userId = 'user-a';
+        const first = await searchPtvMovieCatalog('visible');
+
+        identityState.serverId = 'server-b';
+        identityState.userId = 'user-b';
+        const second = await searchPtvMovieCatalog('visible');
+        const catalogCalls = vi.mocked(getPtvItems).mock.calls.filter(([query]) => !query?.Ids);
+
+        expect(first.items.map(item => item.Id)).toEqual(['user-a']);
+        expect(second.items.map(item => item.Id)).toEqual(['user-b']);
+        expect(catalogCalls.map(([, options]) => [options?.serverId, options?.userId])).toEqual([
+            ['server-a', 'user-a'],
+            ['server-b', 'user-b']
+        ]);
+    });
+
+    it('does not retain a catalog while display identity is incomplete', async () => {
+        identityState.serverId = '';
+        identityState.userId = '';
+        vi.mocked(getPtvItems).mockResolvedValue(page(0, [movie('visible', 'Visible title')], 1));
+
+        await searchPtvMovieCatalog('visible');
+        await searchPtvMovieCatalog('visible');
+
+        expect(vi.mocked(getPtvItems).mock.calls.filter(([query]) => !query?.Ids)).toHaveLength(2);
     });
 });

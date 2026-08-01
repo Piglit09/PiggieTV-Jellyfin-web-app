@@ -10,12 +10,20 @@ const coordinatorState = vi.hoisted(() => ({
     inFlight: new Map<string, Promise<unknown>>()
 }));
 
+vi.mock('../api/client', () => ({
+    requestPtvJson: vi.fn()
+}));
+
 vi.mock('./requestCoordinator', () => ({
-    coordinatePtvJsonRequest<T>(key: string, task: () => Promise<T>): Promise<T> {
+    coordinatePtvJsonRequest<T>(
+        key: string,
+        task: (signal: AbortSignal) => Promise<T>,
+        options: { signal?: AbortSignal } = {}
+    ): Promise<T> {
         const existing = coordinatorState.inFlight.get(key) as Promise<T> | undefined;
         if (existing) return existing;
 
-        const promise = task().finally(() => {
+        const promise = task(options.signal as AbortSignal).finally(() => {
             if (coordinatorState.inFlight.get(key) === promise) {
                 coordinatorState.inFlight.delete(key);
             }
@@ -29,6 +37,8 @@ vi.mock('./requestCoordinator', () => ({
     }
 }));
 
+import { requestPtvJson } from '../api/client';
+import { createPtvAbortController } from '../core/abortController';
 import { getCoordinatedLegacyItemDetail } from './coordinatedLegacyItemDetail';
 
 function createDeferred<T>() {
@@ -46,6 +56,7 @@ function createDeferred<T>() {
 describe('coordinated legacy item-detail reads', () => {
     beforeEach(() => {
         coordinatorState.inFlight.clear();
+        vi.clearAllMocks();
     });
 
     it('shares an exact same-account request while it is in flight', async () => {
@@ -107,5 +118,26 @@ describe('coordinated legacy item-detail reads', () => {
 
         request.resolve({ Id: 'complete' });
         await Promise.all([ firstItem, secondItem, secondAccount ]);
+    });
+
+    it('uses the abortable API transport when a route owns the request', async () => {
+        const controller = createPtvAbortController();
+        const getItem = vi.fn();
+        const apiClient = {
+            getCurrentUserId: () => 'user-e',
+            getItem,
+            serverId: () => 'server-a'
+        };
+
+        vi.mocked(requestPtvJson).mockResolvedValue({ Id: 'item-e' });
+
+        await expect(getCoordinatedLegacyItemDetail(apiClient, 'item-e', {
+            signal: controller.signal
+        })).resolves.toEqual({ Id: 'item-e' });
+        expect(requestPtvJson).toHaveBeenCalledWith('Users/user-e/Items/item-e', {
+            serverId: 'server-a',
+            signal: controller.signal
+        });
+        expect(getItem).not.toHaveBeenCalled();
     });
 });

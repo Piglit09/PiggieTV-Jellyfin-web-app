@@ -62,6 +62,33 @@ describe('PiggieTV TV compatibility profile', () => {
         expect(tvStyles).toContain('flex: 0 0 196px');
     });
 
+    it('centers native WebOS shell buttons without relying on Grid item placement', () => {
+        expect(webOsStyles).toMatch(
+            /html\.ptv-render-tv\.ptv-platform-webos \.ptv-shell-icon-button\s*\{[^}]*align-items:\s*center;[^}]*display:\s*inline-flex;[^}]*justify-content:\s*center;/
+        );
+        expect(webOsStyles).toMatch(
+            /html\.ptv-render-tv\.ptv-platform-webos \.ptv-shell-icon-button > \.ptv-icon\s*\{[^}]*margin:\s*0 !important;[^}]*position:\s*static !important;[^}]*top:\s*auto !important;/
+        );
+    });
+
+    it('centers native WebOS video OSD buttons without changing their geometry', () => {
+        const nativeVideoButtonRule = /html\.ptv-render-tv\.ptv-platform-webos \.videoOsdBottom \.paper-icon-button-light,\s*html\.ptv-render-tv\.ptv-platform-webos \.videoOsdBottom button\[is='paper-icon-button-light'\]\s*\{([^}]*)\}/
+            .exec(webOsStyles)?.[1] || '';
+
+        expect(nativeVideoButtonRule).toContain('align-items: center !important');
+        expect(nativeVideoButtonRule).toContain('display: inline-flex !important');
+        expect(nativeVideoButtonRule).toContain('justify-content: center !important');
+        expect(nativeVideoButtonRule).toContain('line-height: 0 !important');
+        expect(nativeVideoButtonRule).toContain('padding: 0 !important');
+        expect(nativeVideoButtonRule).not.toMatch(/(?:^|\s)(?:height|margin|width)\s*:/);
+    });
+
+    it('gives mini-player artwork literal Chrome 68-safe WebOS dimensions', () => {
+        expect(webOsStyles).toMatch(
+            /html\.ptv-render-tv\.ptv-platform-webos \.ptv-media-dock-art\s*\{[^}]*aspect-ratio:\s*auto;[^}]*box-sizing:\s*border-box;[^}]*height:\s*4\.875rem;[^}]*min-height:\s*4\.875rem;[^}]*width:\s*3\.25rem;/
+        );
+    });
+
     it('uses literal Chrome 68-safe webOS geometry at 720p, 1080p, and 4K', () => {
         expect(webOsStyles).toContain('grid-template-columns: minmax(220px, 1fr) max-content minmax(220px, 1fr)');
         expect(webOsStyles).toContain('grid-template-rows: 80px');
@@ -109,6 +136,15 @@ describe('PiggieTV TV compatibility profile', () => {
         expect(shellStyles).toContain("[data-ptv-runtime-root-host='true']");
         expect(shellStyles).toMatch(
             /\[data-ptv-runtime-root-host='true'\]\s*\{[^}]*inset:\s*0;[^}]*position:\s*fixed;/
+        );
+        expect(shellStyles).toMatch(
+            /\.ptv-shell-frame\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*2;/
+        );
+        expect(shellStyles).toMatch(
+            /html\.ptv-render-tv\.ptv-platform-webos \[data-ptv-runtime-root-host='true'\]\s*\{[^}]*bottom:\s*0;[^}]*left:\s*0;[^}]*right:\s*0;[^}]*top:\s*0;[^}]*z-index:\s*3;/
+        );
+        expect(shellStyles).toMatch(
+            /html\.ptv-render-tv\.ptv-platform-webos\.ptv-runtime-overlay-occluded \[data-ptv-runtime-root-host='true'\]\s*\{[^}]*z-index:\s*1;/
         );
         expect(shellStyles).toMatch(
             /\.ptv-runtime-root,\s*\.ptv-runtime-media-dock-slot\s*\{[^}]*inset:\s*0;[^}]*position:\s*absolute;/

@@ -2,7 +2,7 @@ import React, { type FC, type PropsWithChildren, createContext, useContext, useE
 
 import type { WebConfig } from '../types/webConfig';
 import defaultConfig from '../config.json';
-import fetchLocal from '../utils/fetchLocal';
+import { getWebConfig, subscribeWebConfig } from '../scripts/settings/webSettings';
 
 export const WebConfigContext = createContext<WebConfig>(defaultConfig);
 export const useWebConfig = () => useContext(WebConfigContext);
@@ -11,25 +11,26 @@ export const WebConfigProvider: FC<PropsWithChildren<unknown>> = ({ children }) 
     const [ config, setConfig ] = useState<WebConfig>(defaultConfig);
 
     useEffect(() => {
-        const fetchConfig = async () => {
-            try {
-                const response = await fetchLocal('config.json', { cache: 'no-store' });
-
-                if (!response.ok) {
-                    throw new Error('network response was not ok');
-                }
-
-                const configData = await response.json();
+        let active = true;
+        let appliedConfig: WebConfig = defaultConfig;
+        const updateConfig = (configData: WebConfig) => {
+            if (active && configData !== appliedConfig) {
+                appliedConfig = configData;
                 setConfig(configData);
-            } catch (err) {
-                console.warn('[WebConfigProvider] failed to fetch config file', err);
             }
         };
+        const unsubscribe = subscribeWebConfig(updateConfig);
 
-        fetchConfig()
-            .catch(() => {
-                // This should never happen since fetchConfig catches errors internally
+        getWebConfig()
+            .then(updateConfig)
+            .catch((err: unknown) => {
+                console.warn('[WebConfigProvider] failed to fetch config file', err);
             });
+
+        return () => {
+            active = false;
+            unsubscribe();
+        };
     }, [ setConfig ]);
 
     return (

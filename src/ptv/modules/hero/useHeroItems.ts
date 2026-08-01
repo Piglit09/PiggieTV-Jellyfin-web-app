@@ -23,7 +23,7 @@ const HERO_RECOMMENDATION_POOL_LIMIT = 24;
 const SEASONAL_LOOKUP_TIMEOUT_MS = 2200;
 const RECOMMENDATION_LOOKUP_TIMEOUT_MS = 2500;
 
-const HERO_FIELDS = 'Overview,Genres,PrimaryImageAspectRatio,ParentId,CommunityRating,CriticRating,PremiereDate';
+const HERO_FIELDS = 'Overview,Genres,PrimaryImageAspectRatio,ParentId,CommunityRating,CriticRating,PremiereDate,BackdropImageTags,ParentBackdropImageTags,ParentBackdropItemId,ImageTags,LogoImageTag,ParentLogoImageTag,ParentLogoItemId,SeriesPrimaryImageTag,ProductionYear,RunTimeTicks,OfficialRating';
 
 const SEASONAL_RECOMMENDATIONS: Array<SeasonalRecommendationContext & {
     start: [number, number];

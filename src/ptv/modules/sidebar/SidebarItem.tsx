@@ -1,9 +1,11 @@
 import React, { FC, useCallback } from 'react';
 import { PtvIcon } from '../icons';
-import { PTV_EVENTS, PTV_ROUTES } from '../../core/config';
-import { dispatchPtvCustomEvent } from '../../core/events';
-import { openRequestPortal } from '../request';
+import { PTV_ROUTES } from '../../core/config';
 import { requestJellyfinLogout } from '../../services/jellyfinLogoutAction';
+import {
+    cancelPendingPtvRequestActivation,
+    openPtvRequestPortal
+} from '../request/requestLoader';
 import type { PtvSidebarItem } from './sidebar.types';
 
 type SidebarItemProps = {
@@ -21,15 +23,18 @@ const SidebarItem: FC<SidebarItemProps> = ({
     const isLogoutAction = item.action === 'logout';
 
     const handleClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>): void => {
-        if (!isRequestItem) return;
+        if (!isRequestItem) {
+            cancelPendingPtvRequestActivation();
+            return;
+        }
 
         event.preventDefault();
         event.stopPropagation();
         event.nativeEvent.stopImmediatePropagation?.();
-        openRequestPortal();
-        dispatchPtvCustomEvent(PTV_EVENTS.requestOpen);
+        void openPtvRequestPortal();
     }, [isRequestItem]);
     const handleLogout = useCallback(() => {
+        cancelPendingPtvRequestActivation();
         onAction?.();
         void requestJellyfinLogout();
     }, [onAction]);

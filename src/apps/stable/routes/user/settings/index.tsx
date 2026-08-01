@@ -40,10 +40,7 @@ const UserSettingsPage: FC = () => {
     const { user: currentUser } = useApi();
     const [ fallbackCurrentUser, setFallbackCurrentUser ] = useState<UserDto>();
     const [ searchParams ] = useSearchParams();
-    const {
-        data: isQuickConnectEnabled,
-        isPending: isQuickConnectEnabledPending
-    } = useQuickConnectEnabled();
+    const { data: isQuickConnectEnabled } = useQuickConnectEnabled();
     const { data: users } = useUsers();
     const [ user, setUser ] = useState<UserDto>();
     const activeCurrentUser = currentUser || fallbackCurrentUser;
@@ -83,7 +80,7 @@ const UserSettingsPage: FC = () => {
         }
     }, [ activeCurrentUser, userId, users ]);
 
-    if (!userId || !user || isQuickConnectEnabledPending) {
+    if (!userId || !user) {
         return (
             <Loading />
         );

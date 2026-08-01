@@ -29,9 +29,11 @@ export type PtvApiClientLike = {
     getUrl?: (path: string, params?: PtvApiQuery) => string;
     getUser?: <T = PtvUser>(userId: string) => Promise<T>;
     getUsers?: <T = PtvUser>() => Promise<T[]>;
+    lastFetch?: number;
     markPlayed?: (userId: string, itemId: string, datePlayed?: string) => Promise<unknown>;
     markUnplayed?: (userId: string, itemId: string) => Promise<unknown>;
     serverId?: () => string;
+    setRequestHeaders?: (headers: Record<string, string>) => void;
     updateFavoriteStatus?: (userId: string, itemId: string, isFavorite: boolean) => Promise<unknown>;
 };
 

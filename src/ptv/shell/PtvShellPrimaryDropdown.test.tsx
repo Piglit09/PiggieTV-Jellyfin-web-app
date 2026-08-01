@@ -251,6 +251,23 @@ describe('PtvShellPrimaryDropdown', () => {
         expect(document.querySelectorAll('[data-ptv-shell-primary-menu="movies"]')).toHaveLength(1);
     });
 
+    it('preserves directional opening for the opted-in shell dropdown under the TV manager', () => {
+        container.className = 'ptv-shell-frame';
+        syncPtvTvFocusEngine({ isTv: true });
+        const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+
+        expect(trigger.dataset.ptvDirectionalMenuOpen).toBe('true');
+        trigger.focus();
+        flushSync(() => dispatchRemoteKey(trigger, 'ArrowDown'));
+        flushAnimationFrames();
+        flushAnimationFrames();
+
+        const firstItem = document.querySelector<HTMLAnchorElement>('[data-ptv-shell-primary-menu="movies"] a')!;
+
+        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        expect(document.activeElement).toBe(firstItem);
+    });
+
     it('navigates with legacy D-pad codes and closes with the webOS Back code', () => {
         const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
 

@@ -1,5 +1,4 @@
 import { PTV_ASSETS, PTV_BRANDING, PTV_EVENTS, PTV_ROUTES } from '../../core/config';
-import { dispatchPtvCustomEvent } from '../../core/events';
 import { applyPtvResponsiveImage } from '../../core/images';
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
@@ -8,6 +7,11 @@ import { create } from '../../utils/dom';
 import { createIcon, iconNameFromText, runIconEngine } from '../../utils/icons';
 import { startPtvIconEngine } from '../icons';
 import { getPtvPlatformFeaturePolicy } from '../../core/platformFeatures';
+import {
+    cancelPendingPtvRequestActivation,
+    closePtvRequestPortal,
+    openPtvRequestPortal
+} from '../request/requestLoader';
 
 const HEADER_ICON_TARGET_SELECTOR = [
     '.ptv-skinHeader button',
@@ -111,10 +115,7 @@ function openRequestTab(event) {
     event?.preventDefault?.();
     event?.stopPropagation?.();
     event?.stopImmediatePropagation?.();
-    void import('../request').then(({ openRequestPortal }) => {
-        openRequestPortal();
-        dispatchPtvCustomEvent(PTV_EVENTS.requestOpen);
-    });
+    void openPtvRequestPortal();
 }
 
 function openMusicTab() {
@@ -138,12 +139,12 @@ function openReadingTab() {
 }
 
 function closeRequestForHomeTab() {
+    cancelPendingPtvRequestActivation();
+
     if (!isRequestRoute()) return;
 
-    void import('../request').then(({ closeRequestPortal }) => {
-        closeRequestPortal({
-            useHistory: false
-        });
+    void closePtvRequestPortal({
+        useHistory: false
     });
 }
 

@@ -3,10 +3,57 @@ import { toBoolean } from '../../utils/string.ts';
 import browser from '../browser';
 import appSettings from './appSettings';
 
+function cloneDisplayPreferences(displayPrefs) {
+    return JSON.parse(JSON.stringify(displayPrefs));
+}
+
+function enqueueServerPreferences(instance) {
+    if (!instance.saveDirty) {
+        return instance.lastSavePromise || Promise.resolve();
+    }
+
+    if (!instance.currentApiClient || !instance.currentUserId || !instance.displayPrefs) {
+        return Promise.reject(new Error('User settings are not bound to an authenticated server user.'));
+    }
+
+    const apiClient = instance.currentApiClient;
+    const displayPrefs = cloneDisplayPreferences(instance.displayPrefs);
+    const generation = instance.settingsGeneration || 0;
+    const revision = instance.saveRevision || 0;
+    const userId = instance.currentUserId;
+    const saveQueue = instance.serverSaveQueue || Promise.resolve();
+
+    instance.saveDirty = false;
+
+    const savePromise = saveQueue.then(() => apiClient.updateDisplayPreferences('usersettings', displayPrefs, userId, 'emby'));
+    const trackedSavePromise = savePromise.catch(error => {
+        if (
+            generation === instance.settingsGeneration
+            && revision === instance.saveRevision
+        ) {
+            instance.saveDirty = true;
+        }
+
+        throw error;
+    });
+
+    // Keep the internal queue usable after a rejected write while returning the
+    // rejecting promise to callers that need to surface failure and retry.
+    instance.serverSaveQueue = trackedSavePromise.catch(() => undefined);
+    instance.lastSavePromise = trackedSavePromise;
+    instance.lastSaveRevision = revision;
+
+    return trackedSavePromise;
+}
+
 function onSaveTimeout() {
     const self = this;
+
     self.saveTimeout = null;
-    self.currentApiClient.updateDisplayPreferences('usersettings', self.displayPrefs, self.currentUserId, 'emby');
+    enqueueServerPreferences(self).catch(() => {
+        // Background preference saves remain best effort. Callers that require
+        // confirmation use flushServerPreferences() and receive the rejection.
+    });
 }
 
 function saveServerPreferences(instance) {
@@ -14,7 +61,18 @@ function saveServerPreferences(instance) {
         clearTimeout(instance.saveTimeout);
     }
 
+    instance.saveDirty = true;
+    instance.saveRevision = (instance.saveRevision || 0) + 1;
     instance.saveTimeout = setTimeout(onSaveTimeout.bind(instance), 50);
+}
+
+function flushServerPreferencesForInstance(instance) {
+    if (instance.saveTimeout) {
+        clearTimeout(instance.saveTimeout);
+        instance.saveTimeout = null;
+    }
+
+    return enqueueServerPreferences(instance);
 }
 
 const allowedSortSettings = ['SortBy', 'SortOrder'];
@@ -55,8 +113,14 @@ export class UserSettings {
     setUserInfo(userId, apiClient) {
         if (this.saveTimeout) {
             clearTimeout(this.saveTimeout);
+            this.saveTimeout = null;
         }
 
+        this.settingsGeneration = (this.settingsGeneration || 0) + 1;
+        this.saveDirty = false;
+        this.saveRevision = 0;
+        this.lastSavePromise = null;
+        this.lastSaveRevision = 0;
         this.currentUserId = userId;
         this.currentApiClient = apiClient;
 
@@ -66,8 +130,17 @@ export class UserSettings {
         }
 
         const self = this;
+        const generation = this.settingsGeneration;
 
         return apiClient.getDisplayPreferences('usersettings', userId, 'emby').then(function (result) {
+            if (
+                generation !== self.settingsGeneration
+                || userId !== self.currentUserId
+                || apiClient !== self.currentApiClient
+            ) {
+                return;
+            }
+
             result.CustomPrefs = result.CustomPrefs || {};
             self.displayPrefs = result;
         });
@@ -105,6 +178,16 @@ export class UserSettings {
         }
 
         return result;
+    }
+
+    /**
+     * Flush pending server-backed settings through the serialized settings
+     * owner. The promise rejects when persistence fails so callers can expose
+     * retry without racing another preference write.
+     * @returns {Promise<void>} Resolves after the latest staged write.
+     */
+    flushServerPreferences() {
+        return flushServerPreferencesForInstance(this);
     }
 
     /**
@@ -681,6 +764,7 @@ export const getData = currentSettings.getData.bind(currentSettings);
 export const importFrom = currentSettings.importFrom.bind(currentSettings);
 export const set = currentSettings.set.bind(currentSettings);
 export const get = currentSettings.get.bind(currentSettings);
+export const flushServerPreferences = currentSettings.flushServerPreferences.bind(currentSettings);
 export const serverConfig = currentSettings.serverConfig.bind(currentSettings);
 export const allowedAudioChannels = currentSettings.allowedAudioChannels.bind(currentSettings);
 export const preferFmp4HlsContainer = currentSettings.preferFmp4HlsContainer.bind(currentSettings);

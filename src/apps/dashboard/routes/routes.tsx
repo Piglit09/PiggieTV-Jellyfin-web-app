@@ -25,6 +25,10 @@ export const DASHBOARD_APP_ROUTES: RouteObject[] = [
                     {
                         path: DASHBOARD_APP_PATHS.Dashboard,
                         children: [
+                            {
+                                index: true,
+                                lazy: () => import('./index')
+                            },
                             ...ASYNC_ADMIN_ROUTES.map(toAsyncPageRoute),
                             ...LEGACY_ADMIN_ROUTES.map(toViewManagerPageRoute),
                             {
