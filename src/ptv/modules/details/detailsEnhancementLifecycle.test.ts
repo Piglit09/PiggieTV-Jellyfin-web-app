@@ -2,31 +2,18 @@ import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
-const controllerSource = fs.readFileSync(
-    path.join(__dirname, '../../../controllers/itemDetails/index.js'),
-    'utf8'
-);
-const enhancementSource = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8');
-const itemsByNameSource = fs.readFileSync(
-    path.join(__dirname, '../../../scripts/itemsByName.js'),
-    'utf8'
-);
-const playlistViewerSource = fs.readFileSync(
-    path.join(__dirname, '../../../scripts/playlistViewer.js'),
-    'utf8'
-);
-const itemContextMenuSource = fs.readFileSync(
-    path.join(__dirname, '../../../components/itemContextMenu.js'),
-    'utf8'
-);
-const itemHelperSource = fs.readFileSync(
-    path.join(__dirname, '../../../components/itemHelper.js'),
-    'utf8'
-);
-const integrationSource = fs.readFileSync(
-    path.join(__dirname, '../integrations/arrActions.js'),
-    'utf8'
-);
+function readSource(relativePath: string) {
+    return fs.readFileSync(path.join(__dirname, relativePath), 'utf8')
+        .replace(/\r\n?/g, '\n');
+}
+
+const controllerSource = readSource('../../../controllers/itemDetails/index.js');
+const enhancementSource = readSource('index.js');
+const itemsByNameSource = readSource('../../../scripts/itemsByName.js');
+const playlistViewerSource = readSource('../../../scripts/playlistViewer.js');
+const itemContextMenuSource = readSource('../../../components/itemContextMenu.js');
+const itemHelperSource = readSource('../../../components/itemHelper.js');
+const integrationSource = readSource('../integrations/arrActions.js');
 
 describe('PTV details render lifecycle', () => {
     it('hands the current rendered item to PTV after Jellyfin finishes the page DOM', () => {

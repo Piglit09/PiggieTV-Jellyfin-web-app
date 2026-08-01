@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+const normalizeNewlines = (source: string) => source.replace(/\r\n?/g, '\n');
+
 const activationSources = [
     'src/controllers/home.js',
     'src/ptv/modules/sidebar/SidebarItem.tsx',
@@ -9,7 +11,7 @@ const activationSources = [
     'src/ptv/modules/header/AppHeader.tsx',
     'src/ptv/modules/header/index.js',
     'src/ptv/modules/integrations/arrActions.js'
-].map(file => readFileSync(resolve(process.cwd(), file), 'utf8'));
+].map(file => normalizeNewlines(readFileSync(resolve(process.cwd(), file), 'utf8')));
 
 describe('Request lazy activation ownership', () => {
     it('routes every Request action through the shared activation boundary', () => {
@@ -20,9 +22,11 @@ describe('Request lazy activation ownership', () => {
     });
 
     it('keeps the Request implementation out of static action imports', () => {
-        const loaderSource = readFileSync(
-            resolve(process.cwd(), 'src/ptv/modules/request/requestLoader.ts'),
-            'utf8'
+        const loaderSource = normalizeNewlines(
+            readFileSync(
+                resolve(process.cwd(), 'src/ptv/modules/request/requestLoader.ts'),
+                'utf8'
+            )
         );
 
         expect(loaderSource).toContain("import(\n        /* webpackChunkName: \"ptv-request\" */ './index'");

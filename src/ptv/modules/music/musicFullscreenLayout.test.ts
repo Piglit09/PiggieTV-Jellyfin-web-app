@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const musicStyles = readFileSync(resolve(process.cwd(), 'src/ptv/modules/music/music.scss'), 'utf8');
+const musicStyles = readFileSync(
+    resolve(process.cwd(), 'src/ptv/modules/music/music.scss'),
+    'utf8'
+).replace(/\r\n?/g, '\n');
 const WEBOS_PLAYER_SELECTOR = 'html.ptv-render-tv.ptv-platform-webos .ptv-music-fullscreen-player';
 const WEBOS_SHELL_SELECTOR = 'html.ptv-render-tv.ptv-platform-webos .ptv-shell-frame-fullscreen-music';
 const WEBOS_REGULAR_MUSIC_SELECTOR = 'html.ptv-render-tv.ptv-platform-webos .ptv-music-shell:not(.ptv-shell-frame-fullscreen-music)';
