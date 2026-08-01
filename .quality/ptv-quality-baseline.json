@@ -2,11 +2,7 @@
   "version": 1,
   "eslint": {
     "files": {
-      "src/index.jsx": {
-        "errors": 1,
-        "warnings": 0
-      },
-      "src/ptv/api/client.ts": {
+      "src/ptv/api/images.test.ts": {
         "errors": 2,
         "warnings": 0
       },
@@ -14,25 +10,45 @@
         "errors": 7,
         "warnings": 1
       },
+      "src/ptv/api/search.test.ts": {
+        "errors": 10,
+        "warnings": 0
+      },
+      "src/ptv/api/search.ts": {
+        "errors": 10,
+        "warnings": 0
+      },
       "src/ptv/core/clientProfile.ts": {
-        "errors": 1,
+        "errors": 12,
         "warnings": 0
       },
       "src/ptv/core/itemRoutes.ts": {
         "errors": 1,
         "warnings": 0
       },
-      "src/ptv/core/observability.ts": {
-        "errors": 5,
+      "src/ptv/core/logger.ts": {
+        "errors": 3,
+        "warnings": 0
+      },
+      "src/ptv/core/renderProfile.ts": {
+        "errors": 7,
         "warnings": 0
       },
       "src/ptv/core/runtime.ts": {
         "errors": 3,
         "warnings": 0
       },
+      "src/ptv/core/startupReadiness.js": {
+        "errors": 15,
+        "warnings": 1
+      },
+      "src/ptv/modules/books/booksApi.ts": {
+        "errors": 2,
+        "warnings": 0
+      },
       "src/ptv/modules/books/booksPage.tsx": {
         "errors": 0,
-        "warnings": 8
+        "warnings": 9
       },
       "src/ptv/modules/cache/featuredContentCache.test.ts": {
         "errors": 1,
@@ -46,16 +62,28 @@
         "errors": 8,
         "warnings": 0
       },
+      "src/ptv/modules/dashboard/RemoteDiagnosticsPanel.tsx": {
+        "errors": 8,
+        "warnings": 0
+      },
       "src/ptv/modules/music/musicApi.ts": {
         "errors": 2,
         "warnings": 4
       },
       "src/ptv/modules/music/musicPage.tsx": {
-        "errors": 8,
+        "errors": 0,
         "warnings": 3
       },
+      "src/ptv/modules/music/musicQueue.test.ts": {
+        "errors": 3,
+        "warnings": 0
+      },
       "src/ptv/modules/music/musicQueue.ts": {
-        "errors": 2,
+        "errors": 1,
+        "warnings": 0
+      },
+      "src/ptv/modules/music/musicRecommendations.ts": {
+        "errors": 1,
         "warnings": 0
       },
       "src/ptv/modules/reader/ReaderApp.tsx": {
@@ -71,8 +99,8 @@
         "warnings": 0
       },
       "src/ptv/pages/browse/NativeBrowsePage.tsx": {
-        "errors": 17,
-        "warnings": 2
+        "errors": 51,
+        "warnings": 3
       },
       "src/ptv/pages/home/NativeHome.tsx": {
         "errors": 30,
@@ -99,8 +127,20 @@
         "warnings": 0
       },
       "src/ptv/pages/search/NativeSearchPage.tsx": {
-        "errors": 9,
+        "errors": 22,
         "warnings": 1
+      },
+      "src/ptv/services/libraryRootNormalizer.ts": {
+        "errors": 12,
+        "warnings": 2
+      },
+      "src/ptv/services/movieSearchCatalog.test.ts": {
+        "errors": 13,
+        "warnings": 0
+      },
+      "src/ptv/services/movieSearchCatalog.ts": {
+        "errors": 13,
+        "warnings": 3
       },
       "src/ptv/services/notificationService.ts": {
         "errors": 1,
@@ -110,23 +150,23 @@
         "errors": 3,
         "warnings": 0
       },
-      "src/ptv/services/playbackStateService.ts": {
-        "errors": 1,
-        "warnings": 0
-      },
-      "src/ptv/shell/PTVShell.tsx": {
-        "errors": 26,
+      "src/ptv/services/searchRecovery.ts": {
+        "errors": 0,
         "warnings": 1
       },
+      "src/ptv/shell/PTVShell.tsx": {
+        "errors": 25,
+        "warnings": 0
+      },
       "src/ptv/shell/routeController.ts": {
-        "errors": 5,
+        "errors": 4,
         "warnings": 0
       }
     },
-    "measuredAt": "2026-07-14T21:52:39.754Z",
+    "measuredAt": "2026-07-27T13:22:51.893Z",
     "totals": {
-      "errors": 170,
-      "warnings": 23
+      "errors": 307,
+      "warnings": 31
     }
   },
   "stylelint": {

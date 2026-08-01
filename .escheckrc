@@ -1,12 +1,15 @@
-/*
 {
     "ecmaVersion": "es5",
     "files": "./dist/**/*.js",
     "not": [
         "./dist/libraries/pdf.worker.js",
         "./dist/libraries/worker-bundle.js",
-        "./dist/serviceworker.js"
+        "./dist/serviceworker.js",
+        "./dist/node_modules.@vitest.*",
+        "./dist/node_modules.vitest.*",
+        "./dist/node_modules.chai.*",
+        "./dist/node_modules.loupe.*",
+        "./dist/32987.*",
+        "./dist/37904.*"
     ]
 }
-
-*/

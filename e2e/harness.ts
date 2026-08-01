@@ -1,10 +1,30 @@
-/* eslint-disable @stylistic/operator-linebreak, compat/compat, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional -- The deterministic harness keeps explicit stage-to-contract mappings visible and targets Playwright Chromium only. */
+/* eslint-disable @stylistic/operator-linebreak, compat/compat, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional, sonarjs/no-nested-functions -- The deterministic harness keeps explicit stage-to-contract mappings visible and targets Playwright Chromium only. */
 
 import {
     isPtvAuthenticationRoute,
     shouldMountPtvAuthenticatedHeader
 } from '../src/ptv/shell/authenticationRoutes';
 import { parsePtvBrowseRoute } from '../src/ptv/pages/browse/browseRoute';
+import {
+    getPtvSearchFilterConfig,
+    normalizePtvSearchFilter,
+    PTV_SEARCH_FILTERS,
+    serializePtvSearchParams,
+    type PtvSearchGroupId
+} from '../src/ptv/pages/search/nativeSearchState';
+import type { NativeHomeRow } from '../src/ptv/pages/home/hooks';
+import {
+    applyPtvRecommendationFeedback,
+    filterPtvRecommendationCandidates,
+    getPtvRecommendationFeedbackTerms,
+    normalizePtvRecommendationFeedbackState,
+    undoPtvRecommendationFeedback
+} from '../src/ptv/modules/recommendations/feedback/recommendationFeedback';
+import type {
+    PtvRecommendationFeedbackAction,
+    PtvRecommendationFeedbackState,
+    PtvRecommendationItem
+} from '../src/ptv/modules/recommendations/types/recommendationTypes';
 import {
     getPtvFocusedBrowseLoaderKey,
     PtvFocusedBrowseLoadOwner,
@@ -37,7 +57,13 @@ import {
 } from '../src/ptv/core/tvFocus';
 import { getPtvDiagnosticStore } from '../src/ptv/services/diagnostics/diagnosticStore';
 import '../src/ptv/modules/details/details.scss';
+import '../src/ptv/modules/music/music.scss';
+import '../src/ptv/pages/home/homeCustomizationDialog.scss';
+import '../src/ptv/pages/home/nativeHome.scss';
+import '../src/ptv/pages/search/nativeSearch.scss';
 import '../src/ptv/shell/ptvShell.scss';
+import '../src/ptv/styles/profiles/tv.scss';
+import '../src/ptv/styles/profiles/webos.scss';
 
 const root = document.getElementById('app');
 
@@ -62,7 +88,7 @@ style.textContent = `
     .directory-mode { display: flex; gap: 1rem; }
     .is-active { outline: 3px solid #bc7cff; }
     #diagnostics { padding: 1rem; background: #16101f; }
-    #update-notice { position: fixed; right: 1rem; bottom: 1rem; padding: 1rem; background: #321c4f; }
+    #update-notice { position: fixed; z-index: 12000; right: 1rem; bottom: 1rem; padding: 1rem; background: #321c4f; }
     body.ptv-e2e-details { min-height: 100vh; }
     body.ptv-e2e-details .authenticated-header { position: fixed; z-index: 9500; }
     .itemDetailPage .itemBackdrop { position: relative; height: 40vh; background: linear-gradient(135deg, #203b56, #47205d); }
@@ -74,10 +100,38 @@ style.textContent = `
     .detail-poster-fixture { display: grid; aspect-ratio: 2 / 3; place-items: center; min-height: 18rem; background: linear-gradient(145deg, #69469e, #171027); font-size: 1.5rem; }
     .detail-shelf-fixture { display: flex; gap: 1rem; overflow-x: auto; }
     .detail-shelf-fixture > div { flex: 0 0 10rem; min-height: 7rem; padding: 1rem; background: #2b1b42; }
+    .ptv-e2e-native-home { display: grid; gap: 1.5rem; width: min(100%, 96rem); margin: 0 auto; padding: 7rem 2rem 4rem; }
+    .ptv-e2e-native-home-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .ptv-e2e-native-home-toolbar h1 { margin: 0; }
+    .ptv-e2e-native-home-toolbar button,
+    .ptv-e2e-native-home button { border: 1px solid #9c70d0; border-radius: .75rem; color: #fff; background: #2b1b42; }
+    .ptv-e2e-native-home-hero { display: grid; min-height: 15rem; align-content: end; padding: 2rem; border-radius: 1.5rem; background: linear-gradient(135deg, #673b9b, #171027 70%); }
+    .ptv-e2e-native-home-hero[hidden] { display: none; }
+    .ptv-e2e-native-home-rows { display: grid; gap: 1.5rem; }
+    .ptv-e2e-native-home-row { display: grid; gap: .75rem; }
+    .ptv-e2e-native-home-row h2 { margin: 0; }
+    .ptv-e2e-native-home-rail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+    .ptv-e2e-native-home-card { display: grid; min-width: 0; min-height: 10rem; align-content: end; gap: .5rem; padding: 1rem; border: 1px solid rgba(187, 126, 255, .5); border-radius: 1rem; background: linear-gradient(145deg, #452867, #171027); }
+    .ptv-e2e-native-home-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ptv-e2e-native-home-card button { justify-self: start; }
+    .ptv-e2e-native-home.is-density-compact .ptv-e2e-native-home-rows { gap: .75rem; }
+    .ptv-e2e-native-home.is-density-compact .ptv-e2e-native-home-card { min-height: 7rem; padding: .7rem; }
+    .ptv-e2e-home-feedback-notice { display: flex; align-items: center; gap: .75rem; }
+    .ptv-e2e-home-feedback-notice[hidden] { display: none; }
+    .ptv-e2e-item-action-backdrop { position: fixed; z-index: 11000; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgba(4, 2, 9, .72); }
+    .ptv-e2e-item-action-menu { display: grid; width: min(28rem, 100%); gap: .5rem; padding: 1.25rem; border: 1px solid #a77ad8; border-radius: 1rem; background: #211635; box-shadow: 0 1rem 3rem rgba(0, 0, 0, .55); }
+    .ptv-e2e-item-action-menu h2 { margin: 0 0 .5rem; }
+    .ptv-e2e-item-action-menu button { width: 100%; text-align: left; }
     .hide-desktop { display: none; }
     @media (max-width: 900px) {
         .hide-mobile { display: none !important; }
         .hide-desktop { display: block; }
+        .ptv-e2e-native-home { padding: 6rem 1rem 3rem; }
+        .ptv-e2e-native-home-toolbar { align-items: flex-start; flex-direction: column; }
+        .ptv-e2e-native-home-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 520px) {
+        .ptv-e2e-native-home-rail { grid-template-columns: 1fr; }
     }
 `;
 document.head.append(style);
@@ -93,7 +147,110 @@ let activeHash = '';
 let renderedIds: string[] = [];
 let cleanupPrimaryNavigation = () => undefined;
 let cleanupDiagnosticsDashboard = () => undefined;
+let cleanupSearch = () => undefined;
+let cleanupHome = () => undefined;
 const diagnosticStore = getPtvDiagnosticStore();
+
+const SEARCH_FIXTURE_GROUPS: Readonly<Record<PtvSearchGroupId, Readonly<{
+    itemType: string;
+    title: string;
+}>>> = {
+    albums: { itemType: 'MusicAlbum', title: 'Albums' },
+    artists: { itemType: 'MusicArtist', title: 'Artists' },
+    collections: { itemType: 'BoxSet', title: 'Collections' },
+    episodes: { itemType: 'Episode', title: 'Episodes' },
+    movies: { itemType: 'Movie', title: 'Movies' },
+    music: { itemType: 'Audio', title: 'Songs' },
+    people: { itemType: 'Person', title: 'People' },
+    reading: { itemType: 'Book', title: 'Reading' },
+    shows: { itemType: 'Series', title: 'Shows' }
+};
+const retriedFixtureSearches = new Set<string>();
+const HOME_FIXTURE_STORAGE_PREFIX = 'ptv:e2e:home-preferences:';
+
+type FixtureHomeScope = {
+    serverId: string;
+    userId: string;
+};
+
+type FixtureHomeLayout = {
+    density: 'compact' | 'comfortable';
+    heroEnabled: boolean;
+    rowOrder: string[];
+    rowVisibility: Record<string, boolean>;
+};
+
+type FixtureHomePreferenceDocument = {
+    feedback: PtvRecommendationFeedbackState;
+    layout: FixtureHomeLayout;
+    schemaVersion: 1;
+    scope: FixtureHomeScope;
+    updatedAt: number;
+};
+
+type FixtureHomeCustomizationRow = Readonly<{
+    id: string;
+    title: string;
+}>;
+
+function createFixtureHomeItem(
+    id: string,
+    name: string,
+    genres: readonly string[]
+): NativeHomeRow['items'][number] {
+    return {
+        Genres: [...genres],
+        Id: id,
+        Name: name,
+        ServerId: 'fixture-server',
+        Type: 'Movie',
+        UserData: {
+            Played: false
+        }
+    } as NativeHomeRow['items'][number];
+}
+
+const HOME_FIXTURE_ROWS: NativeHomeRow[] = [{
+    id: 'continue-watching',
+    items: [
+        createFixtureHomeItem('fixture-resume-1', 'Continue One', ['Drama']),
+        createFixtureHomeItem('fixture-resume-2', 'Continue Two', ['Comedy'])
+    ],
+    kind: 'items',
+    source: 'resume',
+    subtitle: 'Resume where you left off',
+    title: 'Continue Watching'
+}, {
+    id: 'recommended-for-you',
+    items: [
+        createFixtureHomeItem('fixture-recommendation-target', 'Recommended Pick One', ['Adventure', 'Mystery']),
+        createFixtureHomeItem('fixture-recommendation-nearby', 'Recommended Pick Two', ['Adventure']),
+        createFixtureHomeItem('fixture-recommendation-other', 'Recommended Pick Three', ['Science Fiction'])
+    ],
+    kind: 'items',
+    renderedSource: 'recommendation-settings',
+    rowType: 'generated-recommendation',
+    source: 'recommendation',
+    subtitle: 'Selected from this profile history',
+    title: 'Recommended For You'
+}, {
+    id: 'because-you-watched',
+    items: [
+        createFixtureHomeItem('fixture-because-1', 'Because Pick One', ['Mystery']),
+        createFixtureHomeItem('fixture-because-2', 'Because Pick Two', ['Thriller'])
+    ],
+    kind: 'items',
+    renderedSource: 'recommendation-settings',
+    rowType: 'generated-recommendation',
+    source: 'because-you-watched',
+    subtitle: 'Connected to recent viewing',
+    title: 'Because You Watched'
+}];
+
+const HOME_CUSTOMIZATION_ROWS: FixtureHomeCustomizationRow[] = HOME_FIXTURE_ROWS.map(row => ({
+    id: row.id,
+    title: row.title
+}));
 
 function addElement<K extends keyof HTMLElementTagNameMap>(
     parent: HTMLElement,
@@ -107,6 +264,18 @@ function addElement<K extends keyof HTMLElementTagNameMap>(
     if (options.text) element.textContent = options.text;
     parent.append(element);
     return element;
+}
+
+function addFixtureIcon(parent: HTMLElement, size = 24) {
+    const icon = addElement(parent, 'span', { className: 'ptv-icon' });
+
+    icon.setAttribute('aria-hidden', 'true');
+    icon.style.display = 'block';
+    icon.style.flex = '0 0 auto';
+    icon.style.height = `${size}px`;
+    icon.style.setProperty('--ptv-icon-size', `${size}px`);
+    icon.style.width = `${size}px`;
+    return icon;
 }
 
 function getLocationState() {
@@ -135,6 +304,883 @@ function getFixtureItems(label: string) {
     }));
 }
 
+function replaceFixtureSearchRoute(query: string, filter: string) {
+    const search = serializePtvSearchParams(query, normalizePtvSearchFilter(filter));
+
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/search?${search}`);
+    renderRoute();
+}
+
+function getFixtureSearchItems(query: string, groupId: PtvSearchGroupId) {
+    const group = SEARCH_FIXTURE_GROUPS[groupId];
+
+    return Array.from({ length: 2 }, (_value, index) => ({
+        id: `search-${groupId}-${index + 1}`,
+        meta: `${group.itemType} | 2026`,
+        name: `${query} ${group.title.slice(0, -1) || group.title} ${index + 1}`,
+        type: group.itemType
+    }));
+}
+
+function renderFixtureSearchGroup(
+    results: HTMLElement,
+    query: string,
+    groupId: PtvSearchGroupId
+) {
+    const config = SEARCH_FIXTURE_GROUPS[groupId];
+    const section = addElement(results, 'section', {
+        className: 'ptv-search-group is-success'
+    });
+    const headingId = `ptv-search-group-${groupId}`;
+
+    section.setAttribute('aria-labelledby', headingId);
+    const header = addElement(section, 'header', { className: 'ptv-search-group-header' });
+    const headingContainer = addElement(header, 'div');
+
+    addElement(headingContainer, 'span', { text: `${config.title} results` });
+    const heading = addElement(headingContainer, 'h2', { id: headingId, text: config.title });
+    const rail = addElement(section, 'div', { className: 'ptv-search-card-rail' });
+
+    heading.tabIndex = -1;
+    getFixtureSearchItems(query, groupId).forEach(item => {
+        const card = addElement(rail, 'a', { className: 'ptv-search-card' });
+
+        card.dataset.ptvSearchItemId = item.id;
+        card.dataset.ptvSearchItemType = item.type;
+        card.dataset.ptvSearchSourceGroup = groupId;
+        card.href = `#/details?id=${encodeURIComponent(item.id)}`;
+        addElement(card, 'span', {
+            className: 'ptv-search-card-art',
+            text: item.name.slice(0, 1)
+        });
+        addElement(card, 'span', {
+            className: 'ptv-search-card-title',
+            text: item.name
+        });
+        addElement(card, 'span', {
+            className: 'ptv-search-card-meta',
+            text: item.meta
+        });
+    });
+}
+
+function renderSearch(search: string) {
+    const params = new URLSearchParams(search);
+    const query = (params.get('query') || '').trim();
+    const activeFilter = normalizePtvSearchFilter(params.get('filter'));
+    const activeFilterConfig = getPtvSearchFilterConfig(activeFilter);
+    const queryReady = query.length >= 2;
+    const normalizedQuery = query.toLocaleLowerCase('en-US');
+    const isEmpty = queryReady && normalizedQuery.includes('no match');
+    const isError = queryReady
+        && normalizedQuery.includes('server error')
+        && !retriedFixtureSearches.has(normalizedQuery);
+    const page = addElement(root, 'main', {
+        className: 'ptv-native-search-page ptv-search-page'
+    });
+    const hero = addElement(page, 'section', { className: 'ptv-search-hero' });
+
+    addElement(hero, 'p', { text: 'PiggieTV' });
+    addElement(hero, 'h1', { text: 'Search' });
+    const form = addElement(hero, 'form', { className: 'ptv-search-hero-form' });
+    const icon = addElement(form, 'span', { className: 'ptv-icon' });
+    const input = addElement(form, 'input');
+
+    form.setAttribute('role', 'search');
+    icon.setAttribute('aria-hidden', 'true');
+    input.setAttribute('aria-describedby', 'ptv-search-status');
+    input.setAttribute('aria-label', 'Search PiggieTV');
+    input.autocomplete = 'off';
+    input.dataset.ptvFocusKey = 'search-input';
+    input.dataset.ptvInitialFocus = 'search';
+    input.inputMode = 'search';
+    input.maxLength = 160;
+    input.placeholder = 'Search movies, shows, people, music, reading';
+    input.type = 'search';
+    input.value = query;
+
+    let debounce = 0;
+    const commitInput = () => replaceFixtureSearchRoute(input.value.trim(), activeFilter);
+
+    input.addEventListener('input', () => {
+        window.clearTimeout(debounce);
+        debounce = window.setTimeout(commitInput, 300);
+    });
+    form.addEventListener('submit', event => {
+        event.preventDefault();
+        window.clearTimeout(debounce);
+        commitInput();
+    });
+    cleanupSearch = () => {
+        window.clearTimeout(debounce);
+        cleanupSearch = () => undefined;
+    };
+
+    const filters = addElement(hero, 'nav', { className: 'ptv-search-filters' });
+
+    filters.setAttribute('aria-label', 'Search result filters');
+    PTV_SEARCH_FILTERS.forEach(filter => {
+        const button = addElement(filters, 'button', {
+            className: activeFilter === filter.id ? 'is-active' : '',
+            text: filter.label
+        });
+
+        button.type = 'button';
+        button.dataset.ptvFocusKey = `search-filter-${filter.id}`;
+        button.dataset.ptvSearchFilter = filter.id;
+        button.setAttribute('aria-controls', 'ptv-search-results');
+        button.setAttribute('aria-pressed', String(activeFilter === filter.id));
+        button.addEventListener('click', () => replaceFixtureSearchRoute(query, filter.id));
+    });
+
+    const status = addElement(hero, 'p', {
+        className: queryReady ? 'ptv-search-summary' : 'ptv-search-suggestions',
+        id: 'ptv-search-status'
+    });
+
+    status.setAttribute('aria-atomic', 'true');
+    status.setAttribute('aria-live', 'polite');
+    status.setAttribute('role', 'status');
+    status.textContent = queryReady
+        ? isError
+            ? `Search in ${activeFilterConfig.label} could not be completed.`
+            : isEmpty
+                ? `No results in ${activeFilterConfig.label} for "${query}".`
+                : `${activeFilterConfig.groups.length * 2} results in ${activeFilterConfig.label} for "${query}".`
+        : 'Start typing at least two characters.';
+
+    if (queryReady && (isEmpty || isError)) {
+        const feedback = addElement(page, 'section', {
+            className: `ptv-search-result-state ${isError ? 'is-error' : 'is-empty'}`
+        });
+        const feedbackHeadingId = 'ptv-search-result-state-title';
+
+        feedback.setAttribute('aria-labelledby', feedbackHeadingId);
+        addElement(feedback, 'h2', {
+            id: feedbackHeadingId,
+            text: isError ? 'Search could not finish' : 'No matches found'
+        });
+        addElement(feedback, 'p', {
+            text: isError
+                ? 'The server did not return this result group. Try the search again.'
+                : 'Try a shorter title, a creator name, or another result filter.'
+        });
+        const actions = addElement(feedback, 'div', {
+            className: 'ptv-search-result-state-actions'
+        });
+
+        if (isError) {
+            const retry = addElement(actions, 'button', { text: 'Try again' });
+
+            retry.type = 'button';
+            retry.addEventListener('click', () => {
+                retriedFixtureSearches.add(normalizedQuery);
+                renderRoute();
+            });
+        }
+        const clear = addElement(actions, 'button', { text: 'Clear search' });
+
+        clear.type = 'button';
+        clear.addEventListener('click', () => replaceFixtureSearchRoute('', activeFilter));
+    }
+
+    const results = addElement(page, 'section', {
+        className: 'ptv-search-groups',
+        id: 'ptv-search-results'
+    });
+
+    results.setAttribute('aria-busy', 'false');
+    results.setAttribute('aria-describedby', 'ptv-search-status');
+    results.setAttribute('aria-label', `${activeFilterConfig.label} search results`);
+
+    if (queryReady && !isEmpty && !isError) {
+        activeFilterConfig.groups.forEach(groupId => {
+            renderFixtureSearchGroup(results, query, groupId);
+        });
+    }
+
+    if (
+        window.innerWidth > 900
+        && !window.matchMedia('(pointer: coarse)').matches
+    ) {
+        window.queueMicrotask(() => input.focus());
+    }
+}
+
+function normalizeFixtureHomeIdentity(value: string | null, fallback: string) {
+    const normalized = String(value || '')
+        .trim()
+        .replace(/[^a-z0-9._-]/gi, '')
+        .slice(0, 48);
+
+    return normalized || fallback;
+}
+
+function createDefaultFixtureHomePreferenceDocument(
+    preferenceScope: FixtureHomeScope
+): FixtureHomePreferenceDocument {
+    return {
+        feedback: normalizePtvRecommendationFeedbackState(null),
+        layout: {
+            density: 'comfortable',
+            heroEnabled: true,
+            rowOrder: [],
+            rowVisibility: {}
+        },
+        schemaVersion: 1,
+        scope: {
+            ...preferenceScope
+        },
+        updatedAt: 0
+    };
+}
+
+function normalizeFixtureHomeRowOrder(value: unknown) {
+    if (!Array.isArray(value)) return [];
+
+    return Array.from(new Set(value
+        .filter((rowId): rowId is string => typeof rowId === 'string')
+        .map(rowId => rowId.trim())
+        .filter(rowId => HOME_FIXTURE_ROWS.some(row => row.id === rowId))));
+}
+
+function normalizeFixtureHomeRowVisibility(value: unknown) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+    return Object.fromEntries(
+        Object.entries(value)
+            .filter(([rowId, visible]) => (
+                typeof visible === 'boolean'
+                && HOME_FIXTURE_ROWS.some(row => row.id === rowId)
+            ))
+    ) as Record<string, boolean>;
+}
+
+function normalizeFixtureHomePreferenceDocument(
+    value: unknown,
+    preferenceScope: FixtureHomeScope
+): FixtureHomePreferenceDocument {
+    const defaults = createDefaultFixtureHomePreferenceDocument(preferenceScope);
+
+    if (!value || typeof value !== 'object') return defaults;
+
+    const candidate = value as Partial<FixtureHomePreferenceDocument>;
+    const candidateScope = candidate.scope;
+
+    if (
+        candidate.schemaVersion !== 1
+        || candidateScope?.serverId !== preferenceScope.serverId
+        || candidateScope.userId !== preferenceScope.userId
+    ) {
+        return defaults;
+    }
+
+    const layout = candidate.layout && typeof candidate.layout === 'object'
+        ? candidate.layout
+        : defaults.layout;
+    const updatedAt = Number(candidate.updatedAt);
+
+    return {
+        feedback: normalizePtvRecommendationFeedbackState(candidate.feedback),
+        layout: {
+            density: layout.density === 'compact' ? 'compact' : 'comfortable',
+            heroEnabled: typeof layout.heroEnabled === 'boolean' ? layout.heroEnabled : true,
+            rowOrder: normalizeFixtureHomeRowOrder(layout.rowOrder),
+            rowVisibility: normalizeFixtureHomeRowVisibility(layout.rowVisibility)
+        },
+        schemaVersion: 1,
+        scope: {
+            ...preferenceScope
+        },
+        updatedAt: Number.isFinite(updatedAt) ? Math.max(0, Math.floor(updatedAt)) : 0
+    };
+}
+
+function orderFixtureHomeCustomizationRows(
+    rows: readonly FixtureHomeCustomizationRow[],
+    rowOrder: readonly string[]
+) {
+    const rowsById = new Map(rows.map(row => [row.id, row]));
+
+    return [
+        ...rowOrder.map(rowId => rowsById.get(rowId))
+            .filter((row): row is FixtureHomeCustomizationRow => Boolean(row)),
+        ...rows.filter(row => !rowOrder.includes(row.id))
+    ];
+}
+
+function moveFixtureHomeCustomizationRow(
+    rows: readonly FixtureHomeCustomizationRow[],
+    rowId: string,
+    direction: 'down' | 'up'
+) {
+    const orderedRows = [...rows];
+    const currentIndex = orderedRows.findIndex(row => row.id === rowId);
+
+    if (currentIndex < 0) return orderedRows;
+
+    const nextIndex = direction === 'up'
+        ? Math.max(0, currentIndex - 1)
+        : Math.min(orderedRows.length - 1, currentIndex + 1);
+
+    if (nextIndex === currentIndex) return orderedRows;
+
+    const [row] = orderedRows.splice(currentIndex, 1);
+
+    orderedRows.splice(nextIndex, 0, row);
+    return orderedRows;
+}
+
+function filterFixtureHomeRecommendationRows(
+    rows: NativeHomeRow[],
+    feedback: PtvRecommendationFeedbackState
+) {
+    return rows.flatMap(row => {
+        if (row.source === 'resume') return [row];
+
+        const items = filterPtvRecommendationCandidates(
+            row.items as PtvRecommendationItem[],
+            feedback
+        ) as NativeHomeRow['items'];
+
+        return items.length ? [{
+            ...row,
+            items
+        }] : [];
+    });
+}
+
+function decorateFixtureHomeRows(
+    rows: NativeHomeRow[],
+    layout: FixtureHomeLayout
+) {
+    const rowOrder = new Map(layout.rowOrder.map((rowId, index) => [rowId, index]));
+
+    return rows
+        .map((row, index) => ({
+            index,
+            row
+        }))
+        .filter(({ row }) => layout.rowVisibility[row.id] !== false)
+        .sort((left, right) => {
+            const leftOrder = rowOrder.get(left.row.id);
+            const rightOrder = rowOrder.get(right.row.id);
+
+            if (leftOrder != null && rightOrder != null) return leftOrder - rightOrder;
+            if (leftOrder != null) return -1;
+            if (rightOrder != null) return 1;
+
+            return left.index - right.index;
+        })
+        .map(({ row }) => row);
+}
+
+function getFixtureHomeScope(): FixtureHomeScope {
+    const params = new URLSearchParams(window.location.search);
+
+    return {
+        serverId: normalizeFixtureHomeIdentity(params.get('e2eServer'), 'fixture-server-a'),
+        userId: normalizeFixtureHomeIdentity(params.get('e2eUser'), 'fixture-user-a')
+    };
+}
+
+function getFixtureHomeStorageKey(preferenceScope: FixtureHomeScope) {
+    return `${HOME_FIXTURE_STORAGE_PREFIX}${preferenceScope.serverId}:${preferenceScope.userId}`;
+}
+
+function loadFixtureHomePreferenceDocument(preferenceScope: FixtureHomeScope) {
+    const rawValue = window.localStorage.getItem(getFixtureHomeStorageKey(preferenceScope));
+
+    if (!rawValue) return createDefaultFixtureHomePreferenceDocument(preferenceScope);
+
+    try {
+        return normalizeFixtureHomePreferenceDocument(JSON.parse(rawValue), preferenceScope);
+    } catch {
+        return createDefaultFixtureHomePreferenceDocument(preferenceScope);
+    }
+}
+
+function saveFixtureHomePreferenceDocument(
+    document: FixtureHomePreferenceDocument,
+    preferenceScope: FixtureHomeScope
+) {
+    const normalized = normalizeFixtureHomePreferenceDocument({
+        ...document,
+        updatedAt: Date.now()
+    }, preferenceScope);
+
+    window.localStorage.setItem(
+        getFixtureHomeStorageKey(preferenceScope),
+        JSON.stringify(normalized)
+    );
+    return normalized;
+}
+
+function getFixtureHomeFeedbackMessage(action: PtvRecommendationFeedbackAction) {
+    if (action === 'hide-from-home') {
+        return 'Hidden from Home. This title remains available in the library.';
+    }
+    if (action === 'show-fewer-like-this') {
+        return 'PiggieTV will show fewer recommendations like this.';
+    }
+
+    return 'This title will no longer be recommended on Home.';
+}
+
+function getFixtureHomeFocusableElements(container: HTMLElement) {
+    return Array.from(container.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+    )).filter(element => !element.hidden);
+}
+
+function renderNativeHome() {
+    const homeScope = getFixtureHomeScope();
+    let preferenceDocument = loadFixtureHomePreferenceDocument(homeScope);
+    let activeActionBackdrop: HTMLElement | null = null;
+    let activeActionTrigger: HTMLButtonElement | null = null;
+    let customizationBackdrop: HTMLElement | null = null;
+    const page = addElement(root, 'main', {
+        className: 'ptv-native-home ptv-e2e-native-home'
+    });
+    const toolbar = addElement(page, 'header', {
+        className: 'ptv-e2e-native-home-toolbar'
+    });
+    const toolbarCopy = addElement(toolbar, 'div');
+
+    addElement(toolbarCopy, 'span', { text: 'Personalized for this profile' });
+    addElement(toolbarCopy, 'h1', { text: 'Home' });
+    const customizeButton = addElement(toolbar, 'button', { text: 'Customize Home' });
+    const feedbackNotice = addElement(page, 'div', {
+        className: 'ptv-e2e-home-feedback-notice'
+    });
+    const hero = addElement(page, 'section', {
+        className: 'ptv-native-home-hero ptv-e2e-native-home-hero'
+    });
+    const rowsHost = addElement(page, 'div', {
+        className: 'ptv-native-home-rows ptv-e2e-native-home-rows'
+    });
+
+    customizeButton.type = 'button';
+    customizeButton.dataset.ptvHomeCustomizeTrigger = 'true';
+    feedbackNotice.setAttribute('aria-atomic', 'true');
+    feedbackNotice.setAttribute('aria-live', 'polite');
+    feedbackNotice.setAttribute('role', 'status');
+    hero.dataset.ptvNativeHomeHero = 'true';
+    hero.setAttribute('aria-label', 'Featured');
+    page.dataset.ptvHomePreferenceServer = homeScope.serverId;
+    page.dataset.ptvHomePreferenceUser = homeScope.userId;
+    page.dataset.ptvPlaybackCallCount = '0';
+
+    const closeActionMenu = (restoreFocus = true) => {
+        const trigger = activeActionTrigger;
+
+        activeActionBackdrop?.remove();
+        activeActionBackdrop = null;
+        activeActionTrigger = null;
+        if (restoreFocus && trigger?.isConnected) trigger.focus();
+    };
+    const closeCustomization = (restoreFocus = true) => {
+        customizationBackdrop?.remove();
+        customizationBackdrop = null;
+        if (restoreFocus && customizeButton.isConnected) customizeButton.focus();
+    };
+    const getRenderedRows = () => {
+        const filteredRows = filterFixtureHomeRecommendationRows(
+            HOME_FIXTURE_ROWS.map(row => ({
+                ...row,
+                items: [...row.items]
+            })),
+            preferenceDocument.feedback
+        );
+
+        return decorateFixtureHomeRows(
+            filteredRows,
+            preferenceDocument.layout
+        );
+    };
+    const renderFeedbackNotice = () => {
+        feedbackNotice.replaceChildren();
+        const [currentFeedback] = preferenceDocument.feedback.entries;
+        const canUndo = preferenceDocument.feedback.undoStack.length > 0;
+
+        feedbackNotice.hidden = !canUndo;
+        if (!canUndo) return;
+
+        addElement(feedbackNotice, 'span', {
+            text: currentFeedback
+                ? getFixtureHomeFeedbackMessage(currentFeedback.action)
+                : 'Recommendation feedback updated.'
+        });
+        const undo = addElement(feedbackNotice, 'button', { text: 'Undo' });
+
+        undo.type = 'button';
+        undo.addEventListener('click', () => {
+            preferenceDocument = saveFixtureHomePreferenceDocument(
+                {
+                    ...preferenceDocument,
+                    feedback: undoPtvRecommendationFeedback(preferenceDocument.feedback),
+                    updatedAt: Date.now()
+                },
+                homeScope
+            );
+            applyDocument();
+        });
+    };
+    const commitFeedback = (
+        item: NativeHomeRow['items'][number],
+        action: PtvRecommendationFeedbackAction
+    ) => {
+        const recommendationItem = item as PtvRecommendationItem;
+
+        closeActionMenu(false);
+        preferenceDocument = saveFixtureHomePreferenceDocument(
+            {
+                ...preferenceDocument,
+                feedback: applyPtvRecommendationFeedback(preferenceDocument.feedback, {
+                    action,
+                    itemId: String(recommendationItem.Id || ''),
+                    now: Date.now(),
+                    terms: getPtvRecommendationFeedbackTerms(recommendationItem)
+                }),
+                updatedAt: Date.now()
+            },
+            homeScope
+        );
+        page.dataset.ptvLastHomeFeedbackAction = action;
+        applyDocument();
+    };
+    const openActionMenu = (
+        trigger: HTMLButtonElement,
+        item: NativeHomeRow['items'][number]
+    ) => {
+        closeActionMenu(false);
+        activeActionTrigger = trigger;
+        const itemName = String(item.Name || 'item');
+        const backdrop = addElement(page, 'div', {
+            className: 'ptv-e2e-item-action-backdrop'
+        });
+        const menu = addElement(backdrop, 'section', {
+            className: 'ptv-e2e-item-action-menu'
+        });
+        const headingId = 'ptv-e2e-item-actions-title';
+
+        activeActionBackdrop = backdrop;
+        backdrop.dataset.ptvItemActionOwner = 'canonical';
+        menu.dataset.ptvItemActionMenu = 'canonical';
+        menu.setAttribute('aria-labelledby', headingId);
+        menu.setAttribute('aria-modal', 'true');
+        menu.setAttribute('role', 'dialog');
+        addElement(menu, 'h2', {
+            id: headingId,
+            text: `Actions for ${itemName}`
+        });
+        const close = addElement(menu, 'button', { text: 'Close' });
+
+        close.type = 'button';
+        close.setAttribute('aria-label', 'Close item actions');
+        close.addEventListener('click', () => closeActionMenu());
+        const details = addElement(menu, 'button', { text: 'View Details' });
+
+        details.type = 'button';
+        details.addEventListener('click', () => {
+            closeActionMenu(false);
+            window.location.hash = `#/details?id=${encodeURIComponent(String(item.Id || ''))}`;
+        });
+
+        const feedbackActions: ReadonlyArray<{
+            action: PtvRecommendationFeedbackAction;
+            label: string;
+        }> = [{
+            action: 'not-interested',
+            label: 'Not Interested'
+        }, {
+            action: 'hide-from-home',
+            label: 'Hide From Home'
+        }, {
+            action: 'show-fewer-like-this',
+            label: 'Show Fewer Like This'
+        }];
+
+        feedbackActions.forEach(({ action, label }) => {
+            const command = addElement(menu, 'button', { text: label });
+
+            command.type = 'button';
+            command.dataset.ptvHomeFeedbackAction = action;
+            command.addEventListener('click', () => commitFeedback(item, action));
+        });
+        menu.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeActionMenu();
+                return;
+            }
+            if (event.key !== 'Tab') return;
+
+            const focusable = getFixtureHomeFocusableElements(menu);
+            const first = focusable[0];
+            const last = focusable.at(-1);
+
+            if (!first || !last) return;
+
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+        backdrop.addEventListener('mousedown', event => {
+            if (event.target === backdrop) closeActionMenu();
+        });
+        window.queueMicrotask(() => close.focus());
+    };
+    const renderRows = () => {
+        rowsHost.replaceChildren();
+
+        getRenderedRows().forEach(row => {
+            const section = addElement(rowsHost, 'section', {
+                className: 'ptv-native-home-row ptv-e2e-native-home-row'
+            });
+            const headingId = `ptv-e2e-home-row-${row.id}`;
+
+            section.dataset.ptvNativeRowId = row.id;
+            section.setAttribute('aria-labelledby', headingId);
+            addElement(section, 'h2', {
+                id: headingId,
+                text: row.title
+            });
+            addElement(section, 'p', { text: row.subtitle });
+            const rail = addElement(section, 'div', {
+                className: 'ptv-e2e-native-home-rail'
+            });
+
+            row.items.forEach(item => {
+                const itemId = String(item.Id || '');
+                const itemName = String(item.Name || 'Untitled');
+                const card = addElement(rail, 'article', {
+                    className: 'ptv-e2e-native-home-card'
+                });
+
+                card.dataset.ptvHomeItemId = itemId;
+                addElement(card, 'strong', { text: itemName });
+                const more = addElement(card, 'button', { text: 'More Actions' });
+
+                more.type = 'button';
+                more.dataset.ptvItemActionMenuTrigger = 'canonical';
+                more.setAttribute('aria-label', `More Actions for ${itemName}`);
+                more.addEventListener('click', () => openActionMenu(more, item));
+            });
+        });
+    };
+    const applyDocument = () => {
+        page.className = [
+            'ptv-native-home',
+            'ptv-e2e-native-home',
+            `is-density-${preferenceDocument.layout.density}`,
+            preferenceDocument.layout.heroEnabled ? '' : 'is-hero-disabled'
+        ].filter(Boolean).join(' ');
+        page.dataset.ptvShelfDensity = preferenceDocument.layout.density;
+        hero.hidden = !preferenceDocument.layout.heroEnabled;
+        hero.replaceChildren();
+        if (preferenceDocument.layout.heroEnabled) {
+            addElement(hero, 'span', { text: 'Featured for you' });
+            addElement(hero, 'h2', { text: 'A stable personalized hero' });
+            addElement(hero, 'p', { text: 'Selected without delaying the first shelf.' });
+        }
+        renderFeedbackNotice();
+        renderRows();
+    };
+    const commitLayout = (layout: FixtureHomePreferenceDocument['layout']) => {
+        preferenceDocument = saveFixtureHomePreferenceDocument({
+            ...preferenceDocument,
+            layout
+        }, homeScope);
+        applyDocument();
+    };
+    const openCustomization = () => {
+        closeCustomization(false);
+        const backdrop = addElement(page, 'div', {
+            className: 'ptv-home-customize-backdrop'
+        });
+        const dialog = addElement(backdrop, 'section', {
+            className: 'ptv-home-customize-dialog'
+        });
+        const headingId = 'ptv-e2e-home-customize-title';
+        const descriptionId = 'ptv-e2e-home-customize-description';
+
+        customizationBackdrop = backdrop;
+        backdrop.dataset.ptvHomeCustomizeBackdrop = 'true';
+        dialog.setAttribute('aria-describedby', descriptionId);
+        dialog.setAttribute('aria-labelledby', headingId);
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('role', 'dialog');
+        const header = addElement(dialog, 'header');
+        const headerCopy = addElement(header, 'div');
+
+        addElement(headerCopy, 'h2', {
+            id: headingId,
+            text: 'Customize Home'
+        });
+        addElement(headerCopy, 'p', {
+            id: descriptionId,
+            text: 'Changes apply immediately and stay with this server profile.'
+        });
+        const close = addElement(header, 'button', { text: 'Close' });
+
+        close.type = 'button';
+        close.setAttribute('aria-label', 'Close Home customization');
+        close.addEventListener('click', () => closeCustomization());
+        const content = addElement(dialog, 'div', {
+            className: 'ptv-home-customize-content'
+        });
+        const experience = addElement(content, 'fieldset');
+
+        addElement(experience, 'legend', { text: 'Experience' });
+        const heroLabel = addElement(experience, 'label');
+        const heroToggle = addElement(heroLabel, 'input');
+
+        heroToggle.type = 'checkbox';
+        heroToggle.checked = preferenceDocument.layout.heroEnabled;
+        addElement(heroLabel, 'span', { text: 'Featured hero' });
+        heroToggle.addEventListener('change', () => commitLayout({
+            ...preferenceDocument.layout,
+            heroEnabled: heroToggle.checked
+        }));
+
+        const density = addElement(content, 'fieldset');
+
+        addElement(density, 'legend', { text: 'Shelf density' });
+        (['comfortable', 'compact'] as const).forEach(value => {
+            const label = addElement(density, 'label');
+            const input = addElement(label, 'input');
+
+            input.type = 'radio';
+            input.name = 'ptv-e2e-home-density';
+            input.value = value;
+            input.checked = preferenceDocument.layout.density === value;
+            addElement(label, 'span', {
+                text: value === 'comfortable' ? 'Comfortable' : 'Compact'
+            });
+            input.addEventListener('change', () => {
+                if (!input.checked) return;
+
+                commitLayout({
+                    ...preferenceDocument.layout,
+                    density: value
+                });
+            });
+        });
+
+        const rowsFieldset = addElement(content, 'fieldset');
+
+        addElement(rowsFieldset, 'legend', { text: 'Rows' });
+        const rowList = addElement(rowsFieldset, 'ol', {
+            className: 'ptv-home-customize-rows'
+        });
+        const renderCustomizationRows = () => {
+            rowList.replaceChildren();
+            const orderedRows = orderFixtureHomeCustomizationRows(
+                HOME_CUSTOMIZATION_ROWS,
+                preferenceDocument.layout.rowOrder
+            );
+
+            orderedRows.forEach((row, index) => {
+                const listItem = addElement(rowList, 'li');
+                const label = addElement(listItem, 'label');
+                const visibility = addElement(label, 'input');
+
+                visibility.type = 'checkbox';
+                visibility.checked = preferenceDocument.layout.rowVisibility[row.id] !== false;
+                visibility.dataset.ptvHomeRowVisibility = row.id;
+                addElement(label, 'span', { text: row.title });
+                visibility.addEventListener('change', () => {
+                    commitLayout({
+                        ...preferenceDocument.layout,
+                        rowVisibility: {
+                            ...preferenceDocument.layout.rowVisibility,
+                            [row.id]: visibility.checked
+                        }
+                    });
+                });
+                const actions = addElement(listItem, 'div');
+                const up = addElement(actions, 'button', { text: 'Move up' });
+                const down = addElement(actions, 'button', { text: 'Move down' });
+
+                up.type = 'button';
+                down.type = 'button';
+                up.disabled = index === 0;
+                down.disabled = index === orderedRows.length - 1;
+                up.setAttribute('aria-label', `Move ${row.title} up`);
+                down.setAttribute('aria-label', `Move ${row.title} down`);
+                const move = (direction: 'down' | 'up') => {
+                    const nextRows = moveFixtureHomeCustomizationRow(
+                        orderedRows,
+                        row.id,
+                        direction
+                    );
+
+                    commitLayout({
+                        ...preferenceDocument.layout,
+                        rowOrder: nextRows.map(value => value.id)
+                    });
+                    renderCustomizationRows();
+                };
+
+                up.addEventListener('click', () => move('up'));
+                down.addEventListener('click', () => move('down'));
+            });
+        };
+
+        renderCustomizationRows();
+        const footer = addElement(dialog, 'footer');
+        const restore = addElement(footer, 'button', { text: 'Restore defaults' });
+        const done = addElement(footer, 'button', { text: 'Done' });
+
+        restore.type = 'button';
+        done.type = 'button';
+        restore.addEventListener('click', () => {
+            commitLayout(createDefaultFixtureHomePreferenceDocument(homeScope).layout);
+            closeCustomization();
+        });
+        done.addEventListener('click', () => closeCustomization());
+        dialog.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeCustomization();
+                return;
+            }
+            if (event.key !== 'Tab') return;
+
+            const focusable = getFixtureHomeFocusableElements(dialog);
+            const first = focusable[0];
+            const last = focusable.at(-1);
+
+            if (!first || !last) return;
+
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+        backdrop.addEventListener('mousedown', event => {
+            if (event.target === backdrop) closeCustomization();
+        });
+        window.queueMicrotask(() => close.focus());
+    };
+
+    customizeButton.addEventListener('click', openCustomization);
+    applyDocument();
+    cleanupHome = () => {
+        closeActionMenu(false);
+        closeCustomization(false);
+        cleanupHome = () => undefined;
+    };
+}
+
 function renderBasicHeader() {
     root.classList.add('ptv-shell-frame');
     const header = addElement(root, 'header', {
@@ -152,15 +1198,17 @@ function renderBasicHeader() {
     const right = addElement(header, 'div', { className: 'ptv-shell-header-right' });
     const actions = addElement(right, 'div', { className: 'ptv-shell-actions' });
 
-    for (const label of ['Notifications', 'Settings', 'Profile']) {
-        const action = addElement(actions, 'button', { className: 'ptv-shell-icon-button', text: label.slice(0, 1) });
+    for (const label of ['Notifications', 'Settings', 'User menu']) {
+        const action = addElement(actions, 'button', { className: 'ptv-shell-icon-button' });
 
         action.setAttribute('aria-label', label);
+        addFixtureIcon(action);
     }
     const search = addElement(right, 'form', { className: 'ptv-shell-search' });
-    const searchButton = addElement(search, 'button', { className: 'ptv-shell-search-trigger', text: 'S' });
+    const searchButton = addElement(search, 'button', { className: 'ptv-shell-search-trigger' });
 
     searchButton.setAttribute('aria-label', 'Search');
+    addFixtureIcon(searchButton);
 }
 
 function renderPrimaryNavigationHeader() {
@@ -466,6 +1514,100 @@ function renderBrowse(path: string, search: string) {
     void loadBrowse(container, path, search);
 }
 
+function isCurrentFixtureDetails(page: HTMLElement, itemId: string) {
+    const route = getHashRoute();
+    const params = new URLSearchParams(route.search);
+
+    return page.isConnected
+        && route.path === '/details'
+        && (params.get('id') || '') === itemId;
+}
+
+function renderFixtureDetailsDiscovery(page: HTMLElement) {
+    const route = getHashRoute();
+    const itemId = new URLSearchParams(route.search).get('id') || '';
+    const generation = activeHash;
+
+    page.dataset.ptvDetailsDiscoveryGeneration = generation;
+    page.dataset.ptvDetailsDiscoveryPendingItemId = itemId;
+
+    window.requestAnimationFrame(() => {
+        import('../src/ptv/modules/details/detailsDiscoveryModel')
+            .then(({ getPtvDetailsDiscoveryLinks }) => {
+                if (!isCurrentFixtureDetails(page, itemId)) return;
+
+                const links = getPtvDetailsDiscoveryLinks({
+                    CollectionName: 'Fixture Collection',
+                    Genres: ['Action', 'Drama'],
+                    People: [{
+                        Name: 'Fixture Director',
+                        Type: 'Director'
+                    }],
+                    Studios: [{
+                        Name: 'Fixture Studio'
+                    }],
+                    Type: 'Movie'
+                });
+
+                delete page.dataset.ptvDetailsDiscoveryPendingItemId;
+                page.dataset.ptvDetailsDiscoveryGeneration = generation;
+                page.dataset.ptvDetailsDiscoveryItemId = itemId;
+                if (!links.length) return;
+
+                const section = document.createElement('section');
+                const heading = document.createElement('h2');
+                const description = document.createElement('p');
+                const linkStrip = document.createElement('nav');
+                const headingId = 'ptv-details-discovery-heading';
+
+                section.className = 'ptv-details-discovery verticalSection detailVerticalSection ptv-details-glass';
+                section.setAttribute('aria-labelledby', headingId);
+                heading.id = headingId;
+                heading.className = 'sectionTitle sectionTitle-cards';
+                heading.textContent = 'Discover more';
+                description.className = 'ptv-details-discovery-description';
+                description.textContent = 'Explore the people, places, and themes connected to this title.';
+                linkStrip.className = 'ptv-details-discovery-links';
+                linkStrip.setAttribute('aria-label', 'Related discovery searches');
+
+                links.forEach((link, index) => {
+                    const anchor = document.createElement('a');
+                    const label = document.createElement('strong');
+                    const meta = document.createElement('span');
+
+                    anchor.className = `ptv-details-discovery-link ptv-details-discovery-link--${link.kind}`;
+                    anchor.dataset.ptvFocusKey = `details:discover:${index}`;
+                    anchor.href = link.href;
+                    anchor.setAttribute('aria-label', link.ariaLabel);
+                    label.textContent = link.label;
+                    meta.textContent = link.meta;
+                    anchor.append(label, meta);
+                    linkStrip.append(anchor);
+                });
+
+                section.append(heading, description, linkStrip);
+                const similarSection = page.querySelector('#similarCollapsible');
+                const host = similarSection?.parentElement
+                    || page.querySelector('.detailPageContent');
+
+                if (!host || !isCurrentFixtureDetails(page, itemId)) return;
+
+                if (similarSection?.parentElement === host) {
+                    host.insertBefore(section, similarSection);
+                } else {
+                    host.append(section);
+                }
+            })
+            .catch(() => {
+                if (!isCurrentFixtureDetails(page, itemId)) return;
+
+                delete page.dataset.ptvDetailsDiscoveryPendingItemId;
+                page.dataset.ptvDetailsDiscoveryGeneration = generation;
+                page.dataset.ptvDetailsDiscoveryItemId = itemId;
+            });
+    });
+}
+
 function renderDetails() {
     document.body.classList.add('ptv-e2e-details');
     const page = addElement(root, 'main', {
@@ -535,6 +1677,177 @@ function renderDetails() {
         </div>
     `;
     preparePtvDetailsLayout(page);
+    renderFixtureDetailsDiscovery(page);
+}
+
+function renderMusicFullscreenLayout() {
+    document.documentElement.classList.add('ptv-render-tv', 'ptv-platform-webos', 'ptv-route-music-mounted');
+    document.body.classList.add('ptv-route-music-mounted');
+    const page = addElement(root, 'main', {
+        className: 'mainAnimatedPage ptv-music-page',
+        id: 'ptvMusicPage'
+    });
+
+    page.style.height = '1080px';
+    page.style.inset = '0';
+    page.style.overflowY = 'auto';
+    page.style.position = 'absolute';
+    const shell = addElement(page, 'div', {
+        className: 'ptv-shell-frame ptv-shell-frame-music ptv-shell-frame-fullscreen-music'
+    });
+
+    shell.style.minHeight = '1185px';
+    const header = addElement(shell, 'header', { className: 'ptv-shell-header' });
+
+    addElement(header, 'a', { className: 'ptv-shell-brand', text: 'PiggieTV' });
+    const headerNav = addElement(header, 'nav', { className: 'ptv-shell-nav ptv-shell-header-primary' });
+
+    addElement(headerNav, 'button', { className: 'ptv-shell-nav-button', text: 'Music' });
+    const contextNav = addElement(shell, 'nav', { className: 'ptv-shell-context-nav' });
+
+    for (const label of ['Home', 'Explore', 'Library']) {
+        addElement(contextNav, 'a', { className: 'ptv-shell-context-link', text: label });
+    }
+    const shellMain = addElement(shell, 'div', { className: 'ptv-shell-main ptv-shell-page-content' });
+    const player = addElement(shellMain, 'div', {
+        className: 'ptv-music-view ptv-music-now-playing-view ptv-music-fullscreen-player'
+    });
+    const backdrop = addElement(player, 'div', { className: 'ptv-music-now-playing-backdrop' });
+    const backdropImage = addElement(backdrop, 'img');
+
+    backdropImage.alt = '';
+    backdropImage.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221920%22 height=%221080%22%3E%3Crect width=%221920%22 height=%221080%22 fill=%22%23140c20%22/%3E%3C/svg%3E';
+    const main = addElement(player, 'section', { className: 'ptv-music-now-playing-main' });
+    const toggle = addElement(main, 'div', { className: 'ptv-music-song-video-toggle' });
+
+    addElement(toggle, 'button', { className: 'ptv-music-toggle-active', text: 'Song' });
+    const art = addElement(main, 'img', { className: 'ptv-music-now-playing-art' });
+
+    art.alt = '';
+    art.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22480%22 height=%22480%22%3E%3Crect width=%22480%22 height=%22480%22 fill=%22%237336a8%22/%3E%3C/svg%3E';
+    const metadata = addElement(main, 'div', { className: 'ptv-music-now-playing-meta' });
+
+    addElement(metadata, 'h1', { text: 'Now Playing' });
+    addElement(metadata, 'p', { text: 'Artist - Album' });
+    const quality = addElement(metadata, 'div');
+
+    addElement(quality, 'span', { text: 'AUDIO' });
+    const progress = addElement(main, 'div', { className: 'ptv-music-now-playing-progress' });
+    const seek = addElement(progress, 'input');
+
+    seek.type = 'range';
+    const time = addElement(progress, 'div');
+
+    addElement(time, 'span', { text: '0:30' });
+    addElement(time, 'span', { text: '3:30' });
+    const controls = addElement(main, 'div', { className: 'ptv-music-now-playing-controls' });
+
+    for (const label of ['Shuffle', 'Previous', 'Favorite', 'Pause', 'Next', 'Repeat', 'Add']) {
+        const control = addElement(controls, 'button', {
+            className: label === 'Pause' ? 'ptv-music-action ptv-music-action-primary' : 'ptv-music-action'
+        });
+
+        control.setAttribute('aria-label', label);
+        if (label === 'Add') {
+            addElement(control, 'span', { text: '+' });
+        } else {
+            addFixtureIcon(control, label === 'Pause' ? 21 : 19);
+        }
+    }
+    const volume = addElement(main, 'div', { className: 'ptv-music-volume-strip' });
+
+    const mute = addElement(volume, 'button');
+
+    mute.setAttribute('aria-label', 'Mute');
+    addFixtureIcon(mute, 19);
+    const volumeRange = addElement(volume, 'input');
+
+    volumeRange.type = 'range';
+    addElement(volume, 'span', { text: '50%' });
+    const panel = addElement(player, 'aside', { className: 'ptv-music-player-panel' });
+    const tabs = addElement(panel, 'div', { className: 'ptv-music-player-tabs' });
+
+    tabs.setAttribute('aria-label', 'Now playing panels');
+    tabs.setAttribute('role', 'tablist');
+    for (const label of ['Up Next', 'Lyrics', 'Related']) {
+        const tab = addElement(tabs, 'button', {
+            className: label === 'Up Next' ? 'ptv-music-player-tab-active' : '',
+            text: label
+        });
+
+        tab.setAttribute('aria-selected', String(label === 'Up Next'));
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('tabindex', label === 'Up Next' ? '0' : '-1');
+    }
+    const panelActions = addElement(panel, 'div', { className: 'ptv-music-player-panel-actions' });
+    const panelCopy = addElement(panelActions, 'div');
+
+    addElement(panelCopy, 'strong', { text: 'Playing from' });
+    addElement(panelCopy, 'span', { text: 'Album' });
+    addElement(panelActions, 'button', { text: 'Save queue' });
+    const queueNote = addElement(panel, 'div', { className: 'ptv-music-related-queue-note' });
+
+    addElement(queueNote, 'strong', { text: 'Related queue' });
+    const queue = addElement(panel, 'ol', { className: 'ptv-music-queue-list' });
+
+    for (let index = 0; index < 24; index += 1) {
+        const current = index === 0;
+        const item = addElement(queue, 'li', {
+            className: current
+                ? 'ptv-music-queue-item ptv-music-queue-item-current'
+                : 'ptv-music-queue-item'
+        });
+        const button = addElement(item, 'button', { className: 'ptv-music-queue-item-main' });
+
+        if (current) button.setAttribute('disabled', '');
+        addElement(button, 'span', { text: current ? '●' : String(index + 1) });
+        const copy = addElement(button, 'span');
+
+        addElement(copy, 'strong', { text: `Queue track ${index + 1}` });
+        addElement(copy, 'small', { text: 'Artist' });
+        if (current) {
+            addElement(button, 'em', { text: 'Playing' });
+        } else {
+            const actions = addElement(item, 'span', { className: 'ptv-music-queue-item-actions' });
+
+            addElement(actions, 'button', { text: '↑' });
+            addElement(actions, 'button', { text: '↓' });
+            addElement(actions, 'button', { text: '×' });
+        }
+    }
+
+    page.scrollTop = 105;
+}
+
+function renderMusicHeaderLayout() {
+    document.documentElement.classList.add('ptv-render-tv', 'ptv-platform-webos', 'ptv-route-music-mounted');
+    document.body.classList.add('ptv-route-music-mounted');
+    root.classList.add('ptv-music-page', 'ptv-music-shell', 'ptv-shell-frame-music');
+    const contextNav = addElement(root, 'nav', { className: 'ptv-shell-context-nav' });
+
+    for (const label of ['Home', 'Explore', 'Artists', 'Albums', 'Songs', 'Playlists']) {
+        const link = addElement(contextNav, 'a', { className: 'ptv-shell-context-link' });
+
+        link.href = `#/music/${label.toLowerCase()}`;
+        addFixtureIcon(link, 18);
+        addElement(link, 'span', { text: label });
+    }
+    const app = addElement(root, 'main', { className: 'ptv-music-app ptv-music-app-shell' });
+    const body = addElement(app, 'div', { className: 'ptv-music-body' });
+    const main = addElement(body, 'section', { className: 'ptv-music-main' });
+    const scroll = addElement(main, 'div', { className: 'ptv-music-main-scroll' });
+    const toolbar = addElement(scroll, 'div', { className: 'ptv-music-main-toolbar' });
+    const heading = addElement(toolbar, 'div');
+
+    addElement(heading, 'p', { className: 'ptv-music-kicker', text: 'PiggieTV' });
+    addElement(heading, 'h1', { text: 'Music' });
+    addElement(heading, 'span', { className: 'ptv-music-toolbar-sync', text: 'Library' });
+    const refresh = addElement(toolbar, 'button');
+
+    refresh.setAttribute('aria-label', 'Refresh');
+    addFixtureIcon(refresh, 19);
+    addElement(refresh, 'span', { text: 'Refresh' });
+    addElement(scroll, 'section', { className: 'ptv-music-home-hero', text: 'Music hero' });
 }
 
 function renderDiagnostics() {
@@ -931,7 +2244,12 @@ function renderRoute() {
     activeHash = window.location.hash || '#/home';
     cleanupPrimaryNavigation();
     cleanupDiagnosticsDashboard();
+    cleanupSearch();
+    cleanupHome();
     document.body.classList.remove('ptv-e2e-details');
+    document.body.classList.remove('ptv-route-music-mounted');
+    document.documentElement.classList.remove('ptv-render-tv', 'ptv-platform-webos', 'ptv-route-music-mounted');
+    root.classList.remove('ptv-music-page', 'ptv-music-shell', 'ptv-shell-frame-music', 'ptv-shell-frame-fullscreen-music');
     root.replaceChildren();
     root.dataset.authenticationRoute = String(isPtvAuthenticationRoute(getLocationState()));
     const ownership = getPtvRouteOwnership(getLocationState());
@@ -949,10 +2267,18 @@ function renderRoute() {
 
     if (path === '/dashboard/piggietv/diagnostics') {
         renderDiagnosticsDashboard();
+    } else if (path === '/e2e/music-fullscreen-layout') {
+        renderMusicFullscreenLayout();
+    } else if (path === '/e2e/music-header-layout') {
+        renderMusicHeaderLayout();
     } else if (path === '/movies' || path === '/shows') {
         renderBrowse(path, search);
+    } else if (path === '/search') {
+        renderSearch(search);
     } else if (path === '/details' || path.startsWith('/item/')) {
         renderDetails();
+    } else if (path === '/home') {
+        renderNativeHome();
     } else {
         addElement(root, 'main', { className: 'browse-page', text: 'PiggieTV Home' });
     }
@@ -1010,4 +2336,4 @@ window.addEventListener('popstate', renderRoute);
 renderRoute();
 void startUpdateScenario();
 
-/* eslint-enable @stylistic/operator-linebreak, compat/compat, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional */
+/* eslint-enable @stylistic/operator-linebreak, compat/compat, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-nested-conditional, sonarjs/no-nested-functions */

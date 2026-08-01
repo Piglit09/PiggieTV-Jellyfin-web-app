@@ -78,6 +78,20 @@ function routeCategory(value) {
     }
 }
 
+function getDetailsRouteItemId(value) {
+    try {
+        const url = new URL(value, FRONTEND_ORIGIN);
+        const route = url.hash || `${url.pathname}${url.search}`;
+        const queryIndex = route.indexOf('?');
+
+        return queryIndex >= 0 ?
+            new URLSearchParams(route.slice(queryIndex + 1)).get('id') :
+            null;
+    } catch {
+        return null;
+    }
+}
+
 function safeFailureReason(error) {
     return classifySafeHarnessError(error);
 }
@@ -123,11 +137,12 @@ function classifyApiRequest(rawUrl) {
     if (url.origin !== BACKEND_ORIGIN) return null;
 
     const pathname = url.pathname;
+    const itemPathMatch = pathname.match(/\/Users\/[^/]+\/Items\/([^/]+)\/?$/i);
     let category = null;
 
     if (/\/Shows\/[^/]+\/Seasons\/?$/i.test(pathname)) category = 'getSeasons';
     else if (/\/Shows\/[^/]+\/Episodes\/?$/i.test(pathname)) category = 'getEpisodes';
-    else if (/\/Users\/[^/]+\/Items\/[^/]+\/?$/i.test(pathname)) category = 'getItem';
+    else if (itemPathMatch) category = 'getItem';
 
     if (!category) return null;
 
@@ -156,6 +171,7 @@ function classifyApiRequest(rawUrl) {
         hasFields: queryKeys.includes('Fields'),
         hasSeasonId: category === 'getEpisodes' ? exactLowercaseSeasonId : null,
         hasUserId,
+        itemDiscriminator: category === 'getItem' ? itemPathMatch?.[1] || null : null,
         queryCasingMatch
     };
 }
@@ -293,12 +309,64 @@ async function waitForRoute(page, category, timeout = 20_000) {
     }, category, { timeout });
 }
 
-async function waitForDetails(page) {
+async function waitForDetailsRouteItem(page, itemId, timeout = 20_000) {
+    await page.waitForFunction(expectedItemId => {
+        const route = window.location.hash
+            || `${window.location.pathname}${window.location.search}`;
+        const queryIndex = route.indexOf('?');
+
+        return queryIndex >= 0
+            && new URLSearchParams(route.slice(queryIndex + 1)).get('id') === expectedItemId;
+    }, itemId, { timeout });
+}
+
+async function completeUnlessTimedOut(action) {
+    try {
+        await action();
+        return true;
+    } catch (error) {
+        if (error?.name !== 'TimeoutError') throw error;
+        return false;
+    }
+}
+
+async function waitForVisibleDetailsOwner(
+    page,
+    { contentReady = false, itemId = '', timeout = 20_000 } = {}
+) {
+    await page.waitForFunction(({ expectedItemId, requireContent }) => {
+        const isActive = element => element.classList.contains('page-active')
+            || element.getAttribute('aria-hidden') !== 'true';
+        const isVisible = element => {
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+
+            return rect.width > 0
+                && rect.height > 100
+                && style.display !== 'none'
+                && style.visibility !== 'hidden';
+        };
+
+        return [ ...document.querySelectorAll('#itemDetailPage,.itemDetailPage') ]
+            .some(element => isActive(element)
+                && isVisible(element)
+                && (!expectedItemId
+                    || element.dataset.ptvDetailItemId === expectedItemId)
+                && (!requireContent
+                    || (!element.classList.contains('ptv-detail-data-loading')
+                        && Boolean(element.querySelector(
+                            '.detailPageWrapperContainer,.detailPagePrimaryContainer,.nameContainer'
+                        )))));
+    }, {
+        expectedItemId: itemId,
+        requireContent: contentReady
+    }, { timeout });
+}
+
+async function waitForDetails(page, itemId = '') {
     await waitForRoute(page, 'details');
-    await page.waitForFunction(() => Boolean(
-        [ ...document.querySelectorAll('#itemDetailPage,.itemDetailPage') ]
-            .find(element => element.getBoundingClientRect().height > 100)
-    ), null, { timeout: 20_000 });
+    if (itemId) await waitForDetailsRouteItem(page, itemId);
+    await waitForVisibleDetailsOwner(page, { itemId });
 }
 
 async function waitForAuthenticatedPage(browser) {
@@ -544,44 +612,136 @@ function buildDetailsHref(candidate) {
     return `#/details?id=${encodeURIComponent(candidate.Id)}${serverParam}`;
 }
 
+function buildSearchCardSelector(candidate) {
+    if (!candidate?.Id || !candidate.Type) {
+        throw new Error('search-result-identity-unavailable');
+    }
+
+    return [
+        '.ptv-search-card',
+        `[data-ptv-search-item-id=${JSON.stringify(String(candidate.Id))}]`,
+        `[data-ptv-search-item-type=${JSON.stringify(String(candidate.Type))}]`
+    ].join('');
+}
+
+function buildSearchCardTypeSelector(type) {
+    if (!type) throw new Error('search-result-type-unavailable');
+
+    return [
+        '.ptv-search-card',
+        `[data-ptv-search-item-type=${JSON.stringify(String(type))}]`
+    ].join('');
+}
+
+async function getVisibleSearchPage(page, timeout = 20_000) {
+    const searchPage = page.locator('.ptv-search-page').filter({ visible: true });
+    await searchPage.waitFor({ state: 'visible', timeout });
+    if (await searchPage.count() !== 1) {
+        throw new Error('search-current-page-ambiguous');
+    }
+
+    return searchPage;
+}
+
 async function openSearchResult(page, candidate) {
     await navigateWithRouter(page, '#/search');
     await waitForRoute(page, 'search');
-    const input = page.locator('input[data-ptv-focus-key="search-input"]');
+    const searchPage = await getVisibleSearchPage(page);
+    const input = searchPage.locator('input[data-ptv-focus-key="search-input"]')
+        .filter({ visible: true });
+    const query = candidate.SearchTerm || candidate.Name;
     await input.waitFor({ state: 'visible', timeout: 20_000 });
-    await input.fill(candidate.SearchTerm || candidate.Name);
+    await input.fill(query);
     await input.press('Enter');
-    await page.waitForFunction(type => (
-        [ ...document.querySelectorAll('.ptv-search-card') ]
-            .some(card => card.dataset.ptvSearchItemType === type)
-    ), candidate.Type, { timeout: 30_000 });
+    await page.waitForFunction(expectedQuery => {
+        const route = window.location.hash
+            || `${window.location.pathname}${window.location.search}`;
+        const queryIndex = route.indexOf('?');
 
-    const cards = page.locator(
-        `.ptv-search-card[data-ptv-search-item-type="${candidate.Type}"]`
-    );
-    const index = await cards.evaluateAll((elements, id) => (
-        elements.findIndex(element => element.dataset.ptvSearchItemId === id)
-    ), candidate.Id);
+        return queryIndex >= 0
+            && new URLSearchParams(route.slice(queryIndex + 1)).get('query') === expectedQuery;
+    }, query, { timeout: 20_000 });
 
-    return cards.nth(index >= 0 ? index : 0);
+    const visibleTypeCards = searchPage.locator(buildSearchCardTypeSelector(candidate.Type))
+        .filter({ visible: true });
+    await visibleTypeCards.first().waitFor({ state: 'visible', timeout: 30_000 });
+    const exactCard = searchPage.locator(buildSearchCardSelector(candidate))
+        .filter({ visible: true });
+    const preferredCard = await exactCard.count() > 0 ?
+        exactCard.first() :
+        visibleTypeCards.first();
+    const [ selectedHref, selectedItemId ] = await Promise.all([
+        preferredCard.getAttribute('href'),
+        preferredCard.getAttribute('data-ptv-search-item-id')
+    ]);
+    if (!selectedHref || !selectedItemId) {
+        throw new Error('search-result-identity-unavailable');
+    }
+    const selectedCard = searchPage.locator(buildSearchCardSelector({
+        Id: selectedItemId,
+        Type: candidate.Type
+    })).filter({ visible: true });
+    await selectedCard.waitFor({ state: 'visible', timeout: 20_000 });
+
+    return selectedCard;
 }
 
 async function waitForSearchRestoration(page, candidate) {
-    await page.waitForFunction(({ id, query }) => {
-        const input = document.querySelector('input[data-ptv-focus-key="search-input"]');
-        const resultPresent = [ ...document.querySelectorAll('.ptv-search-card') ]
-            .some(card => card.dataset.ptvSearchItemId === id);
+    await page.waitForFunction(({ id, query, type }) => {
+        const visibleSearchPages = [ ...document.querySelectorAll('.ptv-search-page') ]
+            .filter(element => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
 
-        return input?.value === query && resultPresent;
+                return rect.width > 0
+                    && rect.height > 0
+                    && style.display !== 'none'
+                    && style.visibility !== 'hidden';
+            });
+        if (visibleSearchPages.length !== 1) return false;
+
+        const currentSearchPage = visibleSearchPages[0];
+        const input = currentSearchPage.querySelector(
+            'input[data-ptv-focus-key="search-input"]'
+        );
+        const inputRect = input?.getBoundingClientRect();
+        const result = [ ...currentSearchPage.querySelectorAll('.ptv-search-card') ]
+            .find(card => card.dataset.ptvSearchItemId === id
+                && card.dataset.ptvSearchItemType === type);
+        const resultRect = result?.getBoundingClientRect();
+
+        return input?.value === query
+            && Boolean(inputRect && inputRect.width > 0 && inputRect.height > 0)
+            && Boolean(resultRect && resultRect.width > 0 && resultRect.height > 0);
     }, {
         id: candidate.Id,
-        query: candidate.Name
+        query: candidate.SearchTerm || candidate.Name,
+        type: candidate.Type
     }, { timeout: 20_000 });
 
     return {
         queryRestored: true,
         resultRestored: true
     };
+}
+
+async function getGenericSearchCardTarget(card, expectedType) {
+    const [ href, itemId, itemType ] = await Promise.all([
+        card.getAttribute('href'),
+        card.getAttribute('data-ptv-search-item-id'),
+        card.getAttribute('data-ptv-search-item-type')
+    ]);
+    if (!href?.startsWith('#/details?')) throw new Error('generic-search-route-invalid');
+    if (!itemId || itemType !== expectedType) {
+        throw new Error('search-result-identity-mismatch');
+    }
+    const routeItemId = new URLSearchParams(href.slice(href.indexOf('?') + 1))
+        .get('id');
+    if (routeItemId !== itemId) {
+        throw new Error('generic-search-route-identity-mismatch');
+    }
+
+    return { href, itemId };
 }
 
 const HOME_CARD_SELECTOR = [
@@ -591,26 +751,35 @@ const HOME_CARD_SELECTOR = [
     '[data-ptv-item-type="Series"]'
 ].join('');
 
-async function getDetailsOwnerState(page) {
-    return page.evaluate(() => {
+async function getDetailsOwnerState(page, itemId = '') {
+    return page.evaluate(expectedItemId => {
         const candidates = [ ...document.querySelectorAll('#itemDetailPage,.itemDetailPage') ];
-        const current = candidates.find(element => element.classList.contains('page-active'))
-            || candidates.find(element => element.getAttribute('aria-hidden') !== 'true')
-            || candidates[0];
-        const rect = current?.getBoundingClientRect();
+        const isActive = element => element.classList.contains('page-active')
+            || element.getAttribute('aria-hidden') !== 'true';
+        const current = candidates.find(element => {
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+
+            return isActive(element)
+                && (!expectedItemId
+                    || element.dataset.ptvDetailItemId === expectedItemId)
+                && rect.width > 0
+                && rect.height > 100
+                && style.display !== 'none'
+                && style.visibility !== 'hidden';
+        });
 
         return {
-            active: Boolean(current)
-                && (current.classList.contains('page-active')
-                    || current.getAttribute('aria-hidden') !== 'true'),
+            active: Boolean(current),
             contentBoundaryPresent: Boolean(current?.querySelector(
                 '.detailPageWrapperContainer,.detailPagePrimaryContainer,.nameContainer'
             )),
             dataLoading: current?.classList.contains('ptv-detail-data-loading') ?? null,
+            itemIdentityMatched: Boolean(current),
             ownerCount: candidates.length,
-            visible: Boolean(rect && rect.width > 0 && rect.height > 100)
+            visible: Boolean(current)
         };
-    });
+    }, itemId);
 }
 
 async function getHomeCardState(page) {
@@ -773,11 +942,7 @@ async function runHomeAcceptance(page) {
         };
     });
     await stage.requireStage('details-route-owner-observed', 'home-details-owner-not-ready', async () => {
-        await page.waitForFunction(() => (
-            [ ...document.querySelectorAll('#itemDetailPage,.itemDetailPage') ]
-                .some(element => element.classList.contains('page-active')
-                    || element.getAttribute('aria-hidden') !== 'true')
-        ), null, { timeout: 10_000 });
+        await waitForVisibleDetailsOwner(page, { timeout: 10_000 });
         const value = await getDetailsOwnerState(page);
 
         return {
@@ -790,13 +955,7 @@ async function runHomeAcceptance(page) {
         };
     }, value => value.active && value.visible);
     await stage.requireStage('details-content-ready', 'home-details-content-not-ready', async () => {
-        await page.waitForFunction(() => (
-            [ ...document.querySelectorAll('#itemDetailPage,.itemDetailPage') ]
-                .some(element => !element.classList.contains('ptv-detail-data-loading')
-                    && Boolean(element.querySelector(
-                        '.detailPageWrapperContainer,.detailPagePrimaryContainer,.nameContainer'
-                    )))
-        ), null, { timeout: 20_000 });
+        await waitForVisibleDetailsOwner(page, { contentReady: true });
         const value = await getDetailsOwnerState(page);
 
         return {
@@ -923,13 +1082,7 @@ async function runHomeAcceptance(page) {
     await stage.requireStage('details-refresh-ready', 'home-details-refresh-not-ready', async () => {
         await page.reload({ waitUntil: 'domcontentloaded' });
         await waitForRoute(page, 'details', 10_000);
-        await page.waitForFunction(() => (
-            [ ...document.querySelectorAll('#itemDetailPage,.itemDetailPage') ]
-                .some(element => !element.classList.contains('ptv-detail-data-loading')
-                    && Boolean(element.querySelector(
-                        '.detailPageWrapperContainer,.detailPagePrimaryContainer,.nameContainer'
-                    )))
-        ), null, { timeout: 20_000 });
+        await waitForVisibleDetailsOwner(page, { contentReady: true });
         const owner = await getDetailsOwnerState(page);
 
         return {
@@ -1001,24 +1154,20 @@ async function runSearchAcceptance(page, catalog) {
         'generic-movie-result-available',
         'search-generic-movie-result-unavailable',
         async () => {
-            await page.waitForFunction(({ id, type }) => (
-                [ ...document.querySelectorAll('.ptv-search-card') ]
-                    .some(card => card.dataset.ptvSearchItemId === id
-                        && card.dataset.ptvSearchItemType === type)
-            ), {
-                id: movie.Id,
-                type: movie.Type
-            }, { timeout: 30_000 });
-            const cards = page.locator(
+            const currentSearchPage = await getVisibleSearchPage(page);
+            const card = currentSearchPage.locator(buildSearchCardSelector(movie))
+                .filter({ visible: true });
+            await card.waitFor({ state: 'visible', timeout: 30_000 });
+            const visibleTypeCards = currentSearchPage.locator(
                 `.ptv-search-card[data-ptv-search-item-type="${movie.Type}"]`
-            );
-            const index = await cards.evaluateAll((elements, id) => (
+            ).filter({ visible: true });
+            const index = await visibleTypeCards.evaluateAll((elements, id) => (
                 elements.findIndex(element => element.dataset.ptvSearchItemId === id)
             ), movie.Id);
 
             return {
                 evidence: { mediaType: movie.Type, resultOrdinal: index },
-                value: cards.nth(index)
+                value: card
             };
         },
         () => true
@@ -1092,14 +1241,11 @@ async function runSearchAcceptance(page, catalog) {
         };
     });
     await stage.requireStage('details-route-owner-ready', 'search-details-owner-not-ready', async () => {
-        await page.waitForFunction(() => (
-            [ ...document.querySelectorAll('#itemDetailPage,.itemDetailPage') ]
-                .some(element => !element.classList.contains('ptv-detail-data-loading')
-                    && Boolean(element.querySelector(
-                        '.detailPageWrapperContainer,.detailPagePrimaryContainer,.nameContainer'
-                    )))
-        ), null, { timeout: 20_000 });
-        const owner = await getDetailsOwnerState(page);
+        await waitForVisibleDetailsOwner(page, {
+            contentReady: true,
+            itemId: movie.Id
+        });
+        const owner = await getDetailsOwnerState(page, movie.Id);
 
         return {
             evidence: {
@@ -1143,38 +1289,121 @@ async function runSearchAcceptance(page, catalog) {
         const card = await stage.requireStage(
             `generic-${type.toLowerCase()}-result-available`,
             `search-generic-${type.toLowerCase()}-result-unavailable`,
-            async () => ({
-                evidence: { mediaType: type },
-                value: await openSearchResult(page, candidate)
-            }),
+            async () => {
+                const value = await openSearchResult(page, candidate);
+                const selectedItemId = await value.getAttribute(
+                    'data-ptv-search-item-id'
+                );
+
+                return {
+                    evidence: {
+                        exactCandidateSelected: selectedItemId === candidate.Id,
+                        mediaType: type
+                    },
+                    value
+                };
+            },
             () => true
         );
-        const href = await card.getAttribute('href');
-        const selectedItemId = await card.getAttribute('data-ptv-search-item-id');
-        if (!href?.startsWith('#/details?')) throw new Error('generic-search-route-invalid');
-        if (!selectedItemId) throw new Error('search-result-identity-unavailable');
+        const { itemId: selectedItemId } = await getGenericSearchCardTarget(card, type);
 
         await installInstrumentation(page);
         await resetInstrumentation(page);
-        const counts = await stage.requireStage(
-            `generic-${type.toLowerCase()}-details-route`,
+        await stage.requireStage(
+            `generic-${type.toLowerCase()}-click-dispatched`,
+            `search-generic-${type.toLowerCase()}-click-not-dispatched`,
+            async () => {
+                const clickDispatched = await completeUnlessTimedOut(() => (
+                    card.click({ timeout: 5_000 })
+                ));
+
+                return {
+                    evidence: {
+                        clickDispatched,
+                        mediaType: type,
+                        routeCategory: routeCategory(page.url())
+                    },
+                    value: clickDispatched
+                };
+            },
+            Boolean
+        );
+        await stage.requireStage(
+            `generic-${type.toLowerCase()}-exact-hash-reached`,
             `search-generic-${type.toLowerCase()}-details-route-failed`,
             async () => {
-                await card.click();
-                await waitForDetails(page);
+                const routeWaitCompleted = await completeUnlessTimedOut(() => (
+                    waitForDetailsRouteItem(page, selectedItemId, 10_000)
+                ));
+                const currentUrl = page.url();
+                const exactHashItemMatched = routeCategory(currentUrl) === 'details'
+                    && getDetailsRouteItemId(currentUrl) === selectedItemId;
+                const counts = await getInstrumentationCounts(page);
+
+                return {
+                    evidence: {
+                        appRouterInvocationCount: counts.appRouterTransitions,
+                        coreNavigationEventCount: counts.coreNavigationDiagnostics,
+                        exactHashItemMatched,
+                        mediaType: type,
+                        routeCategory: routeCategory(currentUrl),
+                        routeWaitCompleted
+                    },
+                    value: {
+                        counts,
+                        exactHashItemMatched
+                    }
+                };
+            },
+            value => value.exactHashItemMatched
+        );
+        await stage.requireStage(
+            `generic-${type.toLowerCase()}-exact-owner-stamped`,
+            `search-generic-${type.toLowerCase()}-details-owner-failed`,
+            async () => {
+                const ownerWaitCompleted = await completeUnlessTimedOut(() => (
+                    waitForVisibleDetailsOwner(page, {
+                        itemId: selectedItemId,
+                        timeout: 10_000
+                    })
+                ));
+                const owner = await getDetailsOwnerState(page, selectedItemId);
+                const exactVisibleOwnerMatched = owner.active
+                    && owner.itemIdentityMatched
+                    && owner.visible;
+
+                return {
+                    evidence: {
+                        detailsOwnerActive: owner.active,
+                        detailsOwnerCount: owner.ownerCount,
+                        detailsOwnerIdentityMatched: owner.itemIdentityMatched,
+                        detailsOwnerVisible: owner.visible,
+                        exactVisibleOwnerMatched,
+                        mediaType: type,
+                        ownerWaitCompleted,
+                        routeCategory: routeCategory(page.url())
+                    },
+                    value: exactVisibleOwnerMatched
+                };
+            },
+            Boolean
+        );
+        const counts = await stage.requireStage(
+            `generic-${type.toLowerCase()}-navigation-counts`,
+            `search-generic-${type.toLowerCase()}-navigation-counts-invalid`,
+            async () => {
                 const value = await getInstrumentationCounts(page);
 
                 return {
                     evidence: {
                         appRouterInvocationCount: value.appRouterTransitions,
-                        mediaType: type,
-                        routeCategory: routeCategory(page.url())
+                        coreNavigationEventCount: value.coreNavigationDiagnostics,
+                        mediaType: type
                     },
                     value
                 };
             },
-            value => routeCategory(page.url()) === 'details'
-                && value.appRouterTransitions === 1
+            value => value.appRouterTransitions === 1
         );
         genericResults[type] = {
             coreNavigationDiagnostics: counts.coreNavigationDiagnostics,
@@ -1190,7 +1419,8 @@ async function runSearchAcceptance(page, catalog) {
                 await waitForRoute(page, 'search');
                 const value = await waitForSearchRestoration(page, {
                     Id: selectedItemId,
-                    Name: candidate.SearchTerm || candidate.Name
+                    Name: candidate.SearchTerm || candidate.Name,
+                    Type: type
                 });
 
                 return { evidence: { mediaType: type, ...value }, value };
@@ -1206,6 +1436,10 @@ async function runSearchAcceptance(page, catalog) {
         'search-modifier-result-unavailable',
         async () => ({ value: await openSearchResult(page, movie) }),
         () => true
+    );
+    const { itemId: keyboardItemId } = await getGenericSearchCardTarget(
+        card,
+        movie.Type
     );
     await installInstrumentation(page);
     await resetInstrumentation(page);
@@ -1242,7 +1476,7 @@ async function runSearchAcceptance(page, catalog) {
         async () => {
             await card.focus();
             await card.press('Enter');
-            await waitForDetails(page);
+            await waitForDetails(page, keyboardItemId);
             const value = await getInstrumentationCounts(page);
 
             return {
@@ -1265,6 +1499,10 @@ async function runSearchAcceptance(page, catalog) {
         async () => ({ value: await openSearchResult(page, movie) }),
         () => true
     );
+    const { itemId: doubleActivationItemId } = await getGenericSearchCardTarget(
+        card,
+        movie.Type
+    );
     await installInstrumentation(page);
     await resetInstrumentation(page);
     await card.evaluate(element => {
@@ -1280,7 +1518,7 @@ async function runSearchAcceptance(page, catalog) {
         'double-activation-details-route',
         'search-double-activation-route-failed',
         async () => {
-            await waitForDetails(page);
+            await waitForDetails(page, doubleActivationItemId);
             const value = await getInstrumentationCounts(page);
 
             return {
@@ -1791,7 +2029,10 @@ async function runErrorCompatibility(page, observer) {
         }
     }, missingId);
     const missingRecords = observer.recordsSince(missingSnapshot)
-        .filter(record => record.category === 'getItem');
+        .filter(record => (
+            record.category === 'getItem'
+            && record.itemDiscriminator === missingId
+        ));
     const missingTransportStatus = missingRecords[0]?.status ?? null;
     const missingCounts = await getInstrumentationCounts(page);
     const missingClassification = classifyMissingItemOutcome({
@@ -1819,7 +2060,10 @@ async function runErrorCompatibility(page, observer) {
     }, networkId);
     await page.unroute(networkPattern, abortRoute);
     const networkRecords = observer.recordsSince(networkSnapshot)
-        .filter(record => record.category === 'getItem');
+        .filter(record => (
+            record.category === 'getItem'
+            && record.itemDiscriminator === networkId
+        ));
 
     const forbiddenStatus = await page.evaluate(async () => {
         const apiClient = window.ApiClient;

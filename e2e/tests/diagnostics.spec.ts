@@ -74,6 +74,77 @@ test.describe('PiggieTV diagnostics browser integration', () => {
         await expect(page.locator('#diagnostics-focus-status')).toContainText('TV focus: unsupported; isTv=false');
     });
 
+    test('keeps the desktop mini-player pointer-active above the route shell', async ({ page }) => {
+        await page.goto('/#/dashboard/piggietv/diagnostics');
+        await page.evaluate(() => {
+            const shell = document.querySelector<HTMLElement>('#app');
+            const host = document.createElement('div');
+            const runtimeRoot = document.createElement('div');
+            const dockSlot = document.createElement('div');
+            const dock = document.createElement('aside');
+            const queueButton = document.createElement('button');
+            const routeCover = document.createElement('div');
+
+            if (!shell) throw new Error('PTV shell fixture is missing.');
+
+            host.dataset.ptvRuntimeRootHost = 'true';
+            host.dataset.ptvDesktopDockFixture = 'true';
+            runtimeRoot.className = 'ptv-runtime-root';
+            dockSlot.className = 'ptv-runtime-media-dock-slot';
+            dock.className = 'ptv-media-dock';
+            dock.style.cssText = 'top:40px;left:40px;width:320px;height:88px;';
+            queueButton.ariaLabel = 'Open validation queue';
+            queueButton.type = 'button';
+            queueButton.addEventListener('click', () => {
+                document.body.dataset.ptvDesktopDockClick = 'received';
+            });
+            routeCover.dataset.ptvDesktopRouteCover = 'true';
+            routeCover.style.cssText = [
+                'position:fixed',
+                'top:40px',
+                'left:40px',
+                'width:320px',
+                'height:88px',
+                'z-index:100000',
+                'background:#111'
+            ].join(';');
+
+            dock.append(queueButton);
+            dockSlot.append(dock);
+            runtimeRoot.append(dockSlot);
+            host.append(runtimeRoot);
+            shell.append(routeCover);
+            document.body.append(host);
+        });
+        const queueButton = page.getByRole('button', { name: 'Open validation queue' });
+
+        await expect(queueButton).toBeVisible();
+        await queueButton.click();
+        const hitTarget = await page.evaluate(() => {
+            const button = document.querySelector<HTMLElement>(
+                '[data-ptv-desktop-dock-fixture] .ptv-media-dock button'
+            );
+
+            if (!button) return false;
+
+            const bounds = button.getBoundingClientRect();
+            const target = document.elementFromPoint(
+                bounds.left + (bounds.width / 2),
+                bounds.top + (bounds.height / 2)
+            );
+
+            return target === button;
+        });
+
+        expect(hitTarget).toBe(true);
+        await expect(page.locator('body')).toHaveAttribute('data-ptv-desktop-dock-click', 'received');
+        await page.evaluate(() => {
+            document.querySelector('[data-ptv-desktop-dock-fixture]')?.remove();
+            document.querySelector('[data-ptv-desktop-route-cover]')?.remove();
+            delete document.body.dataset.ptvDesktopDockClick;
+        });
+    });
+
     test('activates focus diagnostics only after an actual TV user-agent profile is established', async ({ browser }) => {
         const context = await browser.newContext({
             userAgent: ANDROID_TV_UA
@@ -267,6 +338,95 @@ test.describe('PiggieTV diagnostics browser integration', () => {
             }));
             document.documentElement.classList.remove('ptv-player-osd-visible');
             document.querySelector('#videoOsdPage')?.remove();
+        });
+        await context.close();
+    });
+
+    test('keeps the persistent mini-player above the route shell and below body overlays', async ({ browser }) => {
+        const { context, page } = await openTvDiagnostics(browser, WEBOS_UA);
+
+        const stacking = await page.evaluate(() => {
+            document.documentElement.classList.add('ptv-render-tv', 'ptv-platform-webos');
+
+            const shell = document.querySelector<HTMLElement>('#app');
+            const host = document.createElement('div');
+            const runtimeRoot = document.createElement('div');
+            const dockSlot = document.createElement('div');
+            const dock = document.createElement('aside');
+            const routeCover = document.createElement('div');
+
+            if (!shell) throw new Error('PTV shell fixture is missing.');
+
+            host.dataset.ptvRuntimeRootHost = 'true';
+            runtimeRoot.className = 'ptv-runtime-root';
+            dockSlot.className = 'ptv-runtime-media-dock-slot';
+            dock.className = 'ptv-media-dock';
+            dock.dataset.ptvPlaybackSurface = 'mini-player';
+            dock.style.cssText = 'top:40px;left:40px;width:320px;height:88px;';
+            routeCover.dataset.ptvRouteCover = 'true';
+            routeCover.style.cssText = [
+                'position:fixed',
+                'top:40px',
+                'left:40px',
+                'width:320px',
+                'height:88px',
+                'z-index:100000',
+                'background:#111'
+            ].join(';');
+
+            dockSlot.append(dock);
+            runtimeRoot.append(dockSlot);
+            host.append(runtimeRoot);
+            shell.append(routeCover);
+            document.body.append(host);
+
+            const point = { x: 200, y: 84 };
+            const aboveRoute = document.elementFromPoint(point.x, point.y)?.closest('.ptv-media-dock') === dock;
+            const hostZIndex = getComputedStyle(host).zIndex;
+            const shellZIndex = getComputedStyle(shell).zIndex;
+            document.documentElement.classList.add('ptv-runtime-overlay-occluded');
+            const occludedHostZIndex = getComputedStyle(host).zIndex;
+            const routeAboveWhileOccluded = document.elementFromPoint(point.x, point.y) === routeCover;
+
+            document.documentElement.classList.remove('ptv-runtime-overlay-occluded');
+            const overlay = document.createElement('div');
+
+            overlay.dataset.ptvBodyOverlay = 'true';
+            overlay.style.cssText = [
+                'position:fixed',
+                'top:40px',
+                'left:40px',
+                'width:320px',
+                'height:88px',
+                'z-index:10050',
+                'background:#222'
+            ].join(';');
+            document.body.append(overlay);
+
+            const overlayAboveDock = document.elementFromPoint(point.x, point.y) === overlay;
+
+            overlay.remove();
+            host.remove();
+            routeCover.remove();
+            document.documentElement.classList.remove('ptv-render-tv', 'ptv-platform-webos');
+
+            return {
+                aboveRoute,
+                hostZIndex,
+                occludedHostZIndex,
+                overlayAboveDock,
+                routeAboveWhileOccluded,
+                shellZIndex
+            };
+        });
+
+        expect(stacking).toEqual({
+            aboveRoute: true,
+            hostZIndex: '3',
+            occludedHostZIndex: '1',
+            overlayAboveDock: true,
+            routeAboveWhileOccluded: true,
+            shellZIndex: '2'
         });
         await context.close();
     });

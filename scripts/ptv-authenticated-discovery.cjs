@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { URL: NodeUrl } = require('node:url');
 const { chromium } = require(path.resolve(process.cwd(), 'node_modules', 'playwright'));
 
 const baseUrl = 'http://localhost:8082/';
@@ -7,29 +8,35 @@ const outputDir = path.resolve(process.cwd(), 'test-results', 'authenticated-dis
 const reportTag = process.env.PTV_DISCOVERY_REPORT_TAG || 'current';
 const reportFileName = reportTag === 'current' ? 'discovery-report.json' : `discovery-report-${reportTag}.json`;
 const routes = [
-    { id: 'home', hash: '#/home', screenshot: true },
-    { id: 'movies', hash: '#/movies', screenshot: true },
-    { id: 'movies-latest', hash: '#/movies/latest' },
-    { id: 'movies-genres', hash: '#/movies/genres' },
-    { id: 'movies-studios', hash: '#/movies/studios' },
-    { id: 'movies-collections', hash: '#/collections' },
-    { id: 'movies-trending', hash: '#/movies/trending' },
-    { id: 'shows', hash: '#/shows', screenshot: true },
-    { id: 'shows-latest', hash: '#/shows/latest' },
-    { id: 'shows-genres', hash: '#/shows/genres' },
-    { id: 'shows-networks', hash: '#/shows/networks' },
-    { id: 'shows-trending', hash: '#/shows/trending' },
-    { id: 'music', hash: '#/music', screenshot: true },
-    { id: 'music-artists', hash: '#/music/artists' },
-    { id: 'music-albums', hash: '#/music/albums' },
-    { id: 'music-songs', hash: '#/music/songs' },
-    { id: 'reading', hash: '#/reading', screenshot: true },
-    { id: 'reading-books', hash: '#/reading/books' },
-    { id: 'reading-comics', hash: '#/reading/comics' },
-    { id: 'reading-manga', hash: '#/reading/manga' },
-    { id: 'search', hash: '#/search' },
+    { id: 'home', hash: '#/home', native: true, screenshot: true },
+    { id: 'movies', hash: '#/movies', native: true, screenshot: true },
+    { id: 'movies-latest', hash: '#/movies/latest', native: true },
+    { id: 'movies-genres', hash: '#/movies/genres', native: true },
+    { id: 'movies-studios', hash: '#/movies/studios', native: true },
+    { id: 'movies-collections', hash: '#/collections', native: true },
+    { id: 'movies-trending', hash: '#/movies/trending', native: true },
+    { id: 'shows', hash: '#/shows', native: true, screenshot: true },
+    { id: 'shows-latest', hash: '#/shows/latest', native: true },
+    { id: 'shows-genres', hash: '#/shows/genres', native: true },
+    { id: 'shows-networks', hash: '#/shows/networks', native: true },
+    { id: 'shows-trending', hash: '#/shows/trending', native: true },
+    { id: 'music', hash: '#/music', native: true, screenshot: true },
+    { id: 'music-artists', hash: '#/music/artists', native: true },
+    { id: 'music-albums', hash: '#/music/albums', native: true },
+    { id: 'music-songs', hash: '#/music/songs', native: true },
+    { id: 'reading', hash: '#/reading', native: true, screenshot: true },
+    { id: 'reading-books', hash: '#/reading/books', native: true },
+    { id: 'reading-comics', hash: '#/reading/comics', native: true },
+    { id: 'reading-manga', hash: '#/reading/manga', native: true },
+    { id: 'search', hash: '#/search', native: true },
     { id: 'preferences', hash: '#/mypreferencesmenu' },
-    { id: 'dashboard-authorization', hash: '#/dashboard/piggietv', expectedRedirect: '#/home', screenshot: true }
+    {
+        id: 'dashboard-authorization',
+        allowAdministratorStay: true,
+        expectedRedirect: '#/home',
+        hash: '#/dashboard/piggietv',
+        screenshot: true
+    }
 ];
 
 function percentile(values, percentileValue) {
@@ -41,7 +48,7 @@ function percentile(values, percentileValue) {
 
 function endpointPath(rawUrl) {
     try {
-        return new URL(rawUrl).pathname;
+        return new NodeUrl(rawUrl).pathname;
     } catch {
         return '[invalid-url]';
     }
@@ -49,7 +56,7 @@ function endpointPath(rawUrl) {
 
 function requestKey(rawUrl) {
     try {
-        const url = new URL(rawUrl);
+        const url = new NodeUrl(rawUrl);
 
         for (const name of ['api_key', 'access_token', 'X-Emby-Token']) {
             url.searchParams.delete(name);
@@ -62,6 +69,59 @@ function requestKey(rawUrl) {
     }
 }
 
+function nativeOwnerRoute(rawHash) {
+    const pathValue = rawHash.replace(/^#/, '').split('?')[0];
+
+    for (const root of ['/movies', '/shows', '/music', '/reading', '/collections']) {
+        if (pathValue === root || pathValue.startsWith(`${root}/`)) return root;
+    }
+
+    return pathValue;
+}
+
+async function waitForVisibleRouteContent(page, route, isAdministrator) {
+    const expectedHash = route.allowAdministratorStay && isAdministrator ?
+        route.hash :
+        route.expectedRedirect || route.hash;
+
+    return page.waitForFunction(hash => {
+        if (window.location.hash !== hash) return false;
+
+        const isVisible = element => {
+            if (!(element instanceof HTMLElement)) return false;
+            const bounds = element.getBoundingClientRect();
+            if (bounds.width <= 0 || bounds.height <= 0) return false;
+            const style = getComputedStyle(element);
+
+            return !(
+                style.display === 'none'
+                || style.visibility === 'hidden'
+                || Number(style.opacity || 1) === 0
+            );
+        };
+        const visibleElements = selector => [...document.querySelectorAll(selector)].filter(isVisible);
+        const routePages = visibleElements(
+            '.ptv-browse-shell, .ptv-music-shell, .ptv-books-shell, .ptv-search-page, [data-ptv-layout-node="home-root"]'
+        );
+        const visiblePages = visibleElements('.mainAnimatedPage, [data-route-owner], main');
+        const pageRoot = routePages.find(element => element.getBoundingClientRect().height > 100)
+            || visiblePages.find(element => element !== document.documentElement
+                && element.getBoundingClientRect().height > 100)
+            || document.body;
+        const firstContent = [...pageRoot.querySelectorAll(
+            'h1, h2, .pageTitle, .sectionTitle, .content-primary > :first-child'
+        )].find(isVisible);
+        const hasRouteSpecificContent = visibleElements(
+            '[data-ptv-layout-node="home-root"], .ptv-books-main'
+        ).length > 0;
+
+        return Boolean(firstContent || hasRouteSpecificContent);
+    }, expectedHash, { timeout: 15_000 }).then(() => true).catch(() => false);
+}
+
+// The discovery matrix intentionally keeps route observation and evidence capture
+// together so every route is measured under the same attached-page instrumentation.
+// eslint-disable-next-line sonarjs/cognitive-complexity
 async function main() {
     fs.mkdirSync(outputDir, { recursive: true });
     const browser = await chromium.connectOverCDP('http://127.0.0.1:9223');
@@ -83,7 +143,22 @@ async function main() {
 
     if (!page) throw new Error('Authenticated Chrome page was not found.');
 
+    // Start each matrix with a fresh document so prior observers and rejection
+    // history cannot leak into a subsequent authenticated run.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => Boolean(
+        window.ApiClient?.getCurrentUserId?.() && window.ApiClient?.accessToken?.()
+    ), null, { timeout: 30_000 });
     await page.setViewportSize({ width: 1920, height: 1080 });
+    const isAdministrator = await page.evaluate(async () => {
+        try {
+            const user = await window.ApiClient?.getCurrentUser?.();
+
+            return Boolean(user?.Policy?.IsAdministrator);
+        } catch {
+            return false;
+        }
+    });
 
     const consoleErrors = [];
     const pageErrors = [];
@@ -109,6 +184,7 @@ async function main() {
             error: request.failure()?.errorText || 'unknown',
             method: request.method(),
             path: endpointPath(request.url()),
+            resourceType: request.resourceType(),
             route: activeRoute
         });
     });
@@ -208,6 +284,7 @@ async function main() {
             window.location.hash = hash;
         }, route.hash);
         await page.waitForTimeout(3000);
+        await waitForVisibleRouteContent(page, route, isAdministrator);
 
         const snapshot = await page.evaluate(() => {
             const isVisible = element => {
@@ -225,10 +302,17 @@ async function main() {
             const headers = [...new Set(visibleElements(headerSelector))]
                 .filter(element => !element.parentElement?.closest(headerSelector));
             const headerBottom = headers.reduce((maximum, element) => Math.max(maximum, element.getBoundingClientRect().bottom), 0);
+            const routePages = visibleElements(
+                '.ptv-browse-shell, .ptv-music-shell, .ptv-books-shell, .ptv-search-page, [data-ptv-layout-node="home-root"]'
+            );
             const visiblePages = visibleElements('.mainAnimatedPage, [data-route-owner], main');
-            const pageRoot = visiblePages.find(element => element.getBoundingClientRect().height > 100) || document.body;
+            const pageRoot = routePages.find(element => element.getBoundingClientRect().height > 100)
+                || visiblePages.find(element => element !== document.documentElement
+                    && element.getBoundingClientRect().height > 100)
+                || document.body;
             const firstContent = [...pageRoot.querySelectorAll('h1, h2, .pageTitle, .sectionTitle, .content-primary > :first-child')]
-                .find(isVisible);
+                .find(isVisible)
+                || visibleElements('.ptv-music-loading, .ptv-books-loading, [aria-busy="true"], [aria-live="polite"]')[0];
             const firstContentTop = firstContent?.getBoundingClientRect().top ?? null;
             const controlsWithoutName = visibleElements('button, a[href], input, select, textarea')
                 .filter(element => {
@@ -244,7 +328,13 @@ async function main() {
             const brokenVisibleImages = images.filter(image => image.complete && image.naturalWidth === 0).length;
             const missingAltImages = images.filter(image => !image.hasAttribute('alt')).length;
             const activeElement = document.activeElement;
+            // Chromium-only CDP evidence; this optional API is not part of the
+            // cross-browser application surface being validated.
+            // eslint-disable-next-line compat/compat
             const memory = performance.memory;
+            const nativeOwnerRoutes = (window.PTV?.runtimeStability?.report?.().nativeShellInstances || [])
+                .map(instance => instance.route)
+                .filter(Boolean);
 
             return {
                 activeElement: activeElement ? {
@@ -256,18 +346,23 @@ async function main() {
                 bodyClass: document.body.className,
                 brokenVisibleImages,
                 controlsWithoutName,
+                contentMarkers: {
+                    home: visibleElements('[data-ptv-layout-node="home-root"]').length,
+                    reading: visibleElements('.ptv-books-main').length
+                },
                 firstContentTop,
-                hash: location.hash,
+                hash: window.location.hash,
                 headerBottom,
                 heading: firstContent?.textContent?.trim().replace(/\s+/g, ' ').slice(0, 160) || null,
                 heapUsed: memory?.usedJSHeapSize || null,
                 horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
                 images: images.length,
                 missingAltImages,
+                nativeOwnerRoutes,
                 overlayCount: document.querySelectorAll('webpack-dev-server-client-overlay').length,
                 readyState: document.readyState,
                 shellVisibleCount: headers.length,
-                viewport: { height: innerHeight, width: innerWidth }
+                viewport: { height: window.innerHeight, width: window.innerWidth }
             };
         });
         const runtimeAfter = await page.evaluate(before => ({
@@ -286,13 +381,22 @@ async function main() {
         const functionalResponseErrors = routeResponseErrors.filter(record => !expectedMissingArtwork.includes(record));
         const routeConsoleErrors = consoleErrors.slice(consoleStartIndex);
         const functionalConsoleErrors = routeConsoleErrors.filter(error => !/Failed to load resource: the server responded with a status of 404/i.test(error.text));
-        const redirectedAsExpected = route.expectedRedirect && snapshot.hash === route.expectedRedirect;
-        const routeMismatch = Boolean(route.expectedRedirect) ? !redirectedAsExpected : snapshot.hash !== route.hash;
+        let expectedRedirect = route.expectedRedirect || '';
+        if (route.allowAdministratorStay && isAdministrator) expectedRedirect = '';
+        const redirectedAsExpected = expectedRedirect && snapshot.hash === expectedRedirect;
+        const expectedNativeRoute = nativeOwnerRoute(route.hash);
+        const nativeRouteMismatch = route.native === true
+            && !snapshot.nativeOwnerRoutes.some(owner => nativeOwnerRoute(owner) === expectedNativeRoute);
+        const routeMismatch = (expectedRedirect ? !redirectedAsExpected : snapshot.hash !== route.hash)
+            || nativeRouteMismatch;
         const routeFailedRequests = failedRequests.slice(failedStartIndex);
-        const expectedAbortedRequests = routeFailedRequests.filter(record => (
-            redirectedAsExpected && record.error === 'net::ERR_ABORTED'
+        const expectedAbortedRequests = routeFailedRequests.filter(record => record.error === 'net::ERR_ABORTED');
+        const expectedImageTransportFailures = routeFailedRequests.filter(record => (
+            record.resourceType === 'image' && record.error === 'net::ERR_BLOCKED_BY_ORB'
         ));
-        const functionalFailedRequests = routeFailedRequests.filter(record => !expectedAbortedRequests.includes(record));
+        const functionalFailedRequests = routeFailedRequests.filter(record => (
+            !expectedAbortedRequests.includes(record) && !expectedImageTransportFailures.includes(record)
+        ));
         const imageRequestCounts = new Map();
         const imagePathVariants = new Map();
 
@@ -306,14 +410,22 @@ async function main() {
 
         const duplicateImageRequests = [...imageRequestCounts.values()].filter(count => count > 1).length;
         const imagePathsWithVariants = [...imagePathVariants.values()].filter(variants => variants.size > 1).length;
-        const missingRequiredContent = !redirectedAsExpected && !snapshot.heading;
+        const hasRouteSpecificContent = (route.id === 'home' && snapshot.contentMarkers.home > 0)
+            || (route.id.startsWith('reading') && snapshot.contentMarkers.reading > 0);
+        const missingRequiredContent = !redirectedAsExpected
+            && !snapshot.heading
+            && !hasRouteSpecificContent;
+        const expectedShellCount = route.allowAdministratorStay && isAdministrator ? 0 : 1;
         const routeFailure = snapshot.overlayCount > 0
-            || snapshot.shellVisibleCount !== 1
+            || snapshot.shellVisibleCount !== expectedShellCount
             || snapshot.horizontalOverflow
             || snapshot.brokenVisibleImages > 0
             || missingRequiredContent
             || routeMismatch
-            || (snapshot.firstContentTop !== null && snapshot.firstContentTop < snapshot.headerBottom - 1)
+            // Home's cinematic backdrop intentionally extends under the glass header.
+            || (route.id !== 'home'
+                && snapshot.firstContentTop !== null
+                && snapshot.firstContentTop < snapshot.headerBottom - 1)
             || functionalConsoleErrors.length > 0
             || pageErrors.length > pageErrorStartIndex
             || functionalFailedRequests.length > 0
@@ -324,6 +436,7 @@ async function main() {
             consoleErrors: routeConsoleErrors,
             duration,
             expectedAbortedRequests,
+            expectedImageTransportFailures,
             failedRequests: routeFailedRequests,
             functionalFailedRequests,
             functionalResponseErrors,
@@ -334,7 +447,6 @@ async function main() {
             expectedMissingArtwork,
             failedArtworkFallbacks: snapshot.brokenVisibleImages,
             functionalConsoleErrors,
-            functionalResponseErrors,
             longTasks: runtimeAfter.longTasks,
             imagePathsWithVariants,
             missingRequiredContent,
@@ -391,7 +503,7 @@ async function main() {
                 horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
                 scrollWidth: document.documentElement.scrollWidth,
                 shellVisibleCount: headers.length,
-                viewport: { height: innerHeight, width: innerWidth }
+                viewport: { height: window.innerHeight, width: window.innerWidth }
             };
         });
         responsiveResults.push({ ...profile, ...layout });

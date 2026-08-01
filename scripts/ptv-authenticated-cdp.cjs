@@ -255,6 +255,9 @@ async function launchOwnedSession() {
         `--remote-debugging-address=${CDP_HOST}`,
         `--remote-debugging-port=${CDP_PORT}`,
         `--user-data-dir=${profilePath}`,
+        // This disposable test profile explicitly targets a user-configured LAN server.
+        '--disable-features=LocalNetworkAccessChecks',
+        '--disable-web-security',
         '--no-first-run',
         '--no-default-browser-check',
         DEFAULT_FRONTEND_URL
