@@ -9,15 +9,6 @@ import {
 } from '../api';
 import { recordPtvItemRouteClick, resolvePtvItemRoute } from '../core/itemRoutes';
 import { recordPtvEvent } from '../core/observability';
-import {
-    nextPtvMusicTrack,
-    openPtvMusicPlayer,
-    pausePtvMusicPlayback,
-    previousPtvMusicTrack,
-    stopPtvMusicPlayback,
-    subscribeToPtvMusicQueue,
-    togglePtvMusicPlayPause
-} from '../modules/music/musicQueue';
 import type {
     PtvMusicItem,
     PtvMusicQueueSnapshot
@@ -41,6 +32,7 @@ export type PtvGlobalPlaybackState = {
     imageUrl?: string;
     itemId?: string;
     itemType?: string;
+    isFavorite?: boolean;
     lastEvent?: string;
     lastUpdatedAt: number;
     mediaType?: string;
@@ -48,6 +40,7 @@ export type PtvGlobalPlaybackState = {
     paused: boolean;
     positionTicks?: number;
     queueLength?: number;
+    queueSourceLabel?: string;
     rawItem?: PtvItem;
     routeHref?: string;
     seriesName?: string;
@@ -90,11 +83,99 @@ let reconcileTimer: number | null = null;
 let routeChangeHandler: (() => void) | null = null;
 let videoMusicPauseRequested = false;
 let videoPlaybackOwnsState = false;
+let mediaSessionProjectionGeneration = 0;
+let mediaSessionProjectionRequested = false;
+let mediaSessionModulePromise: Promise<typeof import('../../apps/stable/features/playback/utils/mediaSessionSubscriber')> | null = null;
+let musicQueueModulePromise: Promise<typeof import('../modules/music/musicQueue')> | null = null;
+let musicSubscriptionGeneration = 0;
 const boundPlaybackManagerEvents: Array<{
     handler: () => void;
     name: string;
     target: PtvPlaybackManagerLike;
 }> = [];
+
+function getMusicQueueModule() {
+    if (!musicQueueModulePromise) {
+        musicQueueModulePromise = import('../modules/music/musicQueue')
+            .catch(error => {
+                musicQueueModulePromise = null;
+                recordPtvEvent('playback', 'global-playback-music-owner-load-failed', {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                throw error;
+            });
+    }
+
+    return musicQueueModulePromise;
+}
+
+function getMediaSessionModule() {
+    if (!mediaSessionModulePromise) {
+        mediaSessionModulePromise = import('../../apps/stable/features/playback/utils/mediaSessionSubscriber')
+            .catch(error => {
+                mediaSessionModulePromise = null;
+                recordPtvEvent('playback', 'music-media-session-load-failed', {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                throw error;
+            });
+    }
+
+    return mediaSessionModulePromise;
+}
+
+function synchronizePtvMediaSession(state: PtvGlobalPlaybackState) {
+    const generation = ++mediaSessionProjectionGeneration;
+    const isPtvMusic = state.active && state.source === 'ptv-music';
+
+    if (!isPtvMusic && !mediaSessionProjectionRequested) return;
+    if (isPtvMusic) mediaSessionProjectionRequested = true;
+
+    void getMediaSessionModule()
+        .then(({ updatePtvExternalMediaSession }) => {
+            if (generation !== mediaSessionProjectionGeneration) return;
+
+            if (!isPtvMusic) {
+                mediaSessionProjectionRequested = false;
+                updatePtvExternalMediaSession(null, undefined, state.source !== 'jellyfin-player');
+                return;
+            }
+
+            updatePtvExternalMediaSession({
+                active: true,
+                album: state.album,
+                artist: state.artist,
+                durationTicks: state.durationTicks,
+                imageUrl: state.imageUrl,
+                name: state.name,
+                paused: state.paused,
+                positionTicks: state.positionTicks
+            }, {
+                next: () => getMusicQueueModule().then(owner => owner.nextPtvMusicTrack()),
+                pause: () => getPtvGlobalPlaybackState().paused ?
+                    undefined :
+                    getMusicQueueModule().then(owner => owner.togglePtvMusicPlayPause()),
+                play: () => getPtvGlobalPlaybackState().paused ?
+                    getMusicQueueModule().then(owner => owner.togglePtvMusicPlayPause()) :
+                    undefined,
+                previous: () => getMusicQueueModule().then(owner => owner.previousPtvMusicTrack()),
+                seekTo: positionSeconds => {
+                    const durationSeconds = (getPtvGlobalPlaybackState().durationTicks || 0) / 10_000_000;
+
+                    if (!durationSeconds) return;
+
+                    return getMusicQueueModule().then(owner => (
+                        owner.seekPtvMusicPercent((positionSeconds / durationSeconds) * 100)
+                    ));
+                },
+                stop: () => getMusicQueueModule().then(owner => owner.stopPtvMusicPlayback('media-session'))
+            });
+        })
+        .catch(() => {
+            // The loader records the classified failure and the next state
+            // transition is allowed to retry without affecting playback.
+        });
+}
 
 function getPlaybackManager() {
     return playbackManager as PtvPlaybackManagerLike | null | undefined;
@@ -176,6 +257,7 @@ function getMusicPlaybackState(snapshot: PtvMusicQueueSnapshot | null): PtvGloba
         imageUrl: getPlaybackImageUrl(item),
         itemId,
         itemType: item.Type || 'Audio',
+        isFavorite: Boolean(item.UserData?.IsFavorite),
         lastUpdatedAt: Date.now(),
         // The PTV music queue owns only native audio. Jellyfin items reached through
         // album/artist recommendation boundaries are not guaranteed to retain a
@@ -185,6 +267,7 @@ function getMusicPlaybackState(snapshot: PtvMusicQueueSnapshot | null): PtvGloba
         paused: !snapshot.isPlaying,
         positionTicks: snapshot.positionTicks || 0,
         queueLength: snapshot.playlist.length,
+        queueSourceLabel: snapshot.queueSourceLabel,
         rawItem: item,
         routeHref: route.href,
         sessionId: getRecordString(item, 'PlaylistItemId') || itemId,
@@ -282,13 +365,15 @@ function synchronizeVideoPlaybackOwnership(
         reason,
         to: 'jellyfin-video'
     });
-    void pausePtvMusicPlayback(reason).catch(error => {
-        videoMusicPauseRequested = false;
-        recordPtvEvent('playback', 'music-pause-for-video-failed', {
-            error: error instanceof Error ? error.message : String(error),
-            reason
+    getMusicQueueModule()
+        .then(owner => owner.pausePtvMusicPlayback(reason))
+        .catch(error => {
+            videoMusicPauseRequested = false;
+            recordPtvEvent('playback', 'music-pause-for-video-failed', {
+                error: error instanceof Error ? error.message : String(error),
+                reason
+            });
         });
-    });
 }
 
 function selectPlaybackState(lastEvent = '') {
@@ -332,7 +417,9 @@ function getStateSignature(state: PtvGlobalPlaybackState) {
         state.paused,
         positionBucket,
         state.durationTicks || 0,
-        state.queueLength || 0
+        state.queueLength || 0,
+        state.queueSourceLabel || '',
+        state.isFavorite
     ].join('|');
 }
 
@@ -380,6 +467,7 @@ function publishPlaybackState(lastEvent = 'reconcile') {
 
     const previousItemId = currentState.itemId || '';
     currentState = nextState;
+    synchronizePtvMediaSession(nextState);
     incrementPtvPerformanceCounter('playbackNormalizedEventCount', {
         lastPlaybackEvent: lastEvent
     });
@@ -438,14 +526,16 @@ function handlePtvMusicTransportCommand(command: string) {
     if (command === 'play' && !state.paused) return true;
     if (command === 'pause' && state.paused) return true;
 
-    void togglePtvMusicPlayPause().catch(error => {
-        recordPtvEvent('playback', 'global-playback-transport-failed', {
-            action: getTransportActionCategory(command),
-            error: error instanceof Error ? error.message : String(error),
-            source: 'input-manager-adapter',
-            target: 'audio'
+    getMusicQueueModule()
+        .then(owner => owner.togglePtvMusicPlayPause())
+        .catch(error => {
+            recordPtvEvent('playback', 'global-playback-transport-failed', {
+                action: getTransportActionCategory(command),
+                error: error instanceof Error ? error.message : String(error),
+                source: 'input-manager-adapter',
+                target: 'audio'
+            });
         });
-    });
 
     return true;
 }
@@ -519,17 +609,25 @@ export function startPtvPlaybackStateService() {
     window.addEventListener('hashchange', routeChangeHandler);
     window.addEventListener('popstate', routeChangeHandler);
 
-    try {
-        musicUnsubscribe = subscribeToPtvMusicQueue(snapshot => {
-            lastMusicSnapshot = snapshot;
-            if (!snapshot.isPlaying) videoMusicPauseRequested = false;
-            publishPlaybackState('ptv-music-queue');
+    const subscriptionGeneration = ++musicSubscriptionGeneration;
+
+    getMusicQueueModule()
+        .then(owner => {
+            if (!initialized || subscriptionGeneration !== musicSubscriptionGeneration) return;
+
+            musicUnsubscribe = owner.subscribeToPtvMusicQueue(snapshot => {
+                lastMusicSnapshot = snapshot;
+                if (!snapshot.isPlaying) videoMusicPauseRequested = false;
+                publishPlaybackState('ptv-music-queue');
+            });
+        })
+        .catch(error => {
+            if (!initialized || subscriptionGeneration !== musicSubscriptionGeneration) return;
+
+            recordPtvEvent('playback', 'global-playback-music-subscribe-failed', {
+                error: error instanceof Error ? error.message : String(error)
+            });
         });
-    } catch (error) {
-        recordPtvEvent('playback', 'global-playback-music-subscribe-failed', {
-            error: error instanceof Error ? error.message : String(error)
-        });
-    }
 
     const root = window.PTV || (window.PTV = {});
 
@@ -567,7 +665,11 @@ export function openPtvGlobalPlaybackDetails(state = getPtvGlobalPlaybackState()
     if (!state.rawItem) return;
 
     if (state.source === 'ptv-music') {
-        openPtvMusicPlayer('global-media-dock');
+        getMusicQueueModule()
+            .then(owner => owner.openPtvMusicPlayer('global-media-dock'))
+            .catch(() => {
+                // The shared loader records the classified failure.
+            });
         return;
     }
 
@@ -582,6 +684,24 @@ export function openPtvGlobalPlaybackDetails(state = getPtvGlobalPlaybackState()
     window.location.hash = route.href.slice(1);
 }
 
+export function openPtvGlobalPlaybackQueue(state = getPtvGlobalPlaybackState()) {
+    if (state.source !== 'ptv-music') return;
+
+    getMusicQueueModule()
+        .then(owner => owner.openPtvMusicQueuePanel('global-media-dock'))
+        .catch(() => {
+            // The shared loader records the classified failure.
+        });
+}
+
+export async function togglePtvGlobalPlaybackFavorite(state = getPtvGlobalPlaybackState()) {
+    if (state.source !== 'ptv-music' || !state.rawItem?.Id) return;
+
+    const { setPtvMusicItemLiked } = await import('../modules/music/musicLikes');
+
+    await setPtvMusicItemLiked(state.rawItem as PtvMusicItem, !state.isFavorite);
+}
+
 export function openPtvGlobalPlaybackPrimary(state = getPtvGlobalPlaybackState()) {
     if (!state.active || !state.itemId) return Promise.resolve();
 
@@ -593,7 +713,7 @@ export function openPtvGlobalPlaybackPrimary(state = getPtvGlobalPlaybackState()
     });
 
     if (state.source === 'ptv-music') {
-        return togglePtvMusicPlayPause();
+        return getMusicQueueModule().then(owner => owner.togglePtvMusicPlayPause());
     }
 
     const playbackManagerLike = getPlaybackManager();
@@ -611,7 +731,7 @@ export function openPtvGlobalPlaybackPrimary(state = getPtvGlobalPlaybackState()
 
 export function stopPtvGlobalPlayback(state = getPtvGlobalPlaybackState()) {
     if (state.source === 'ptv-music') {
-        return stopPtvMusicPlayback('global-media-dock');
+        return getMusicQueueModule().then(owner => owner.stopPtvMusicPlayback('global-media-dock'));
     }
 
     const playbackManagerLike = getPlaybackManager();
@@ -625,7 +745,9 @@ export function stopPtvGlobalPlayback(state = getPtvGlobalPlaybackState()) {
 }
 
 export function nextPtvGlobalPlaybackTrack(state = getPtvGlobalPlaybackState()) {
-    if (state.source === 'ptv-music') return nextPtvMusicTrack();
+    if (state.source === 'ptv-music') {
+        return getMusicQueueModule().then(owner => owner.nextPtvMusicTrack());
+    }
 
     const playbackManagerLike = getPlaybackManager();
     const player = playbackManagerLike?.getCurrentPlayer?.();
@@ -638,7 +760,9 @@ export function nextPtvGlobalPlaybackTrack(state = getPtvGlobalPlaybackState()) 
 }
 
 export function previousPtvGlobalPlaybackTrack(state = getPtvGlobalPlaybackState()) {
-    if (state.source === 'ptv-music') return previousPtvMusicTrack();
+    if (state.source === 'ptv-music') {
+        return getMusicQueueModule().then(owner => owner.previousPtvMusicTrack());
+    }
 
     const playbackManagerLike = getPlaybackManager();
     const player = playbackManagerLike?.getCurrentPlayer?.();
@@ -651,6 +775,7 @@ export function previousPtvGlobalPlaybackTrack(state = getPtvGlobalPlaybackState
 }
 
 export function disposePtvPlaybackStateServiceForTests() {
+    musicSubscriptionGeneration += 1;
     playbackCommandUnregister?.();
     playbackCommandUnregister = null;
     musicUnsubscribe?.();
@@ -677,4 +802,15 @@ export function disposePtvPlaybackStateServiceForTests() {
     videoPlaybackOwnsState = false;
     listeners.clear();
     currentState = EMPTY_PLAYBACK_STATE;
+    mediaSessionProjectionGeneration += 1;
+    mediaSessionProjectionRequested = false;
+    if (mediaSessionModulePromise) {
+        mediaSessionModulePromise
+            .then(({ updatePtvExternalMediaSession }) => {
+                updatePtvExternalMediaSession(null);
+            })
+            .catch(() => {
+                // The lazy loader already recorded this non-fatal projection failure.
+            });
+    }
 }

@@ -86,6 +86,10 @@ function numberField(detail: unknown, names: string[], fallback = 0) {
     return fallback;
 }
 
+function arrayField(detail: unknown, name: string) {
+    return isRecord(detail) && Array.isArray(detail[name]) ? detail[name] : [];
+}
+
 function booleanField(detail: unknown, name: string) {
     return isRecord(detail) && detail[name] === true;
 }
@@ -136,6 +140,100 @@ function classifyImageRole(element: HTMLImageElement): PtvImageRole {
     if (/poster|card|cover/.test(value)) return 'poster';
 
     return 'unknown';
+}
+
+type PtvImageLifecycleState = {
+    fingerprint: string;
+    startedAt: number;
+    terminal: boolean;
+};
+
+function getImageGenerationFingerprint(image: HTMLImageElement) {
+    const source = [
+        image.currentSrc,
+        image.getAttribute('src'),
+        image.getAttribute('data-src'),
+        image.getAttribute('srcset'),
+        image.getAttribute('sizes')
+    ].filter(Boolean).join('|');
+
+    return source ? safeHash(source) : '';
+}
+
+export function createPtvImageRemountGuard(limit = 32) {
+    const generations = new Set<string>();
+
+    return {
+        shouldRecord(scope: string, image: HTMLImageElement) {
+            const fingerprint = getImageGenerationFingerprint(image);
+            if (!scope || !fingerprint) return true;
+
+            const key = `${scope}:${fingerprint}`;
+            if (generations.has(key)) return false;
+
+            generations.add(key);
+            if (generations.size > limit) {
+                const oldest = generations.values().next().value;
+                if (oldest) generations.delete(oldest);
+            }
+
+            return true;
+        }
+    };
+}
+
+export function createPtvImageLifecycleTracker(now: () => number = () => performance.now()) {
+    const states = new WeakMap<HTMLImageElement, PtvImageLifecycleState>();
+
+    return {
+        begin(image: HTMLImageElement) {
+            const fingerprint = getImageGenerationFingerprint(image);
+            const previous = states.get(image);
+
+            if (!fingerprint || previous?.fingerprint === fingerprint) return null;
+
+            const state = {
+                fingerprint,
+                startedAt: now(),
+                terminal: false
+            };
+
+            states.set(image, state);
+            return state;
+        },
+        complete(image: HTMLImageElement) {
+            const state = states.get(image);
+
+            if (!state || state.terminal) return null;
+
+            state.terminal = true;
+            return state;
+        },
+        forget(image: HTMLImageElement) {
+            states.delete(image);
+        }
+    };
+}
+
+export function isPtvDiagnosticRouteContentReady(root: ParentNode = document) {
+    if ((root instanceof Element && root.matches('[data-ptv-route-critical-pending="true"]'))
+        || root.querySelector('[data-ptv-route-critical-pending="true"]')) return false;
+
+    const visiblePendingShelf = Array.from(root.querySelectorAll<HTMLElement>(
+        '[data-ptv-row-mounted="true"]:not([data-ptv-row-resumed="true"]), .ptv-row-virtual-slot.ptv-row-virtual-placeholder'
+    )).some(isPtvDiagnosticFocusVisible);
+    const visiblePendingImage = Array.from(root.querySelectorAll<HTMLImageElement>('img[src], img[data-src]'))
+        .some(image => !image.complete && isPtvDiagnosticFocusVisible(image));
+
+    return !visiblePendingShelf && !visiblePendingImage;
+}
+
+function getPtvDiagnosticLayoutFingerprint() {
+    const visibleShelves = Array.from(document.querySelectorAll<HTMLElement>(
+        '[data-ptv-row-mounted="true"], .ptv-recommendations-section, .verticalSection'
+    )).filter(isPtvDiagnosticFocusVisible).length;
+
+    return `${document.documentElement.scrollHeight}:${document.body.scrollHeight}:${visibleShelves}`;
 }
 
 function currentRouteFamily() {
@@ -548,7 +646,7 @@ export function bridgePtvFocusDiagnosticEvent(event: Event) {
     }
 }
 
-function bridgeObservability(event: PtvObservabilityEvent) {
+export function bridgePtvDiagnosticObservabilityEvent(event: PtvObservabilityEvent) {
     const store = getPtvDiagnosticStore();
 
     if (event.type === 'cache') {
@@ -560,27 +658,55 @@ function bridgeObservability(event: PtvObservabilityEvent) {
         const snapshot = store.getSnapshot();
         const previous = snapshot.recommendations;
         const failed = /fail|error/.test(event.name);
-        const completed = /complete|generated|success/.test(event.name);
+        const globalStarted = /generation-start|candidate-fetch-start/.test(event.name);
+        const completed = /provider-loaded|critical-completed|generation-completed|diagnostic-report|rows-generated|dashboard-data-loaded/.test(event.name);
+        const sourceTimings = arrayField(event.detail, 'sourceTimings');
+        const sourceFailures = arrayField(event.detail, 'sourceFailures');
+        const explicitFailedSourceCount = numberField(event.detail, ['failedSourceCount'], sourceFailures.length);
+        const sourceCount = Math.max(
+            previous.sourceCount,
+            numberField(event.detail, ['sourceCount']),
+            sourceTimings.length
+        );
+        const successfulSourceCount = sourceTimings.filter(timing => (
+            !isRecord(timing) || timing.status !== 'failed'
+        )).length;
+        const allSourcesFailed = completed && sourceCount > 0 && explicitFailedSourceCount >= sourceCount;
+        const partialFallback = completed && explicitFailedSourceCount > 0 && (
+            successfulSourceCount > 0 || explicitFailedSourceCount < sourceCount
+        );
+        const localSourceFailure = failed && /source|prerequisite/.test(event.name);
+        const nextHealth = allSourcesFailed
+            ? createPtvDiagnosticHealth('degraded', 'All observed recommendation sources failed safely.')
+            : completed
+                ? createPtvDiagnosticHealth(
+                    'healthy',
+                    partialFallback
+                        ? 'Recommendation generation completed with a bounded source fallback.'
+                        : sourceCount === 0
+                            ? 'Recommendation generation completed with no eligible sources.'
+                            : 'Recommendation generation completed successfully.'
+                )
+                : failed && !localSourceFailure
+                    ? createPtvDiagnosticHealth('degraded', 'Recommendation generation failed safely.')
+                    : previous.health;
 
         store.updateContext({
             recommendations: {
                 ...previous,
-                active: /start|loading|request/.test(event.name) && !completed,
+                active: completed ? false : globalStarted ? true : previous.active,
                 configuredRows: Math.max(previous.configuredRows, numberField(event.detail, ['configuredRows', 'configuredRowCount'])),
                 duplicateSuppressionCount: previous.duplicateSuppressionCount
                     + numberField(event.detail, ['duplicateItemsRemoved', 'duplicateSuppressionCount']),
                 generatedRows: Math.max(previous.generatedRows, numberField(event.detail, ['generatedRows', 'rowCount', 'recommendationRowsGenerated'])),
-                health: createPtvDiagnosticHealth(
-                    failed ? 'degraded' : completed ? 'healthy' : 'unknown',
-                    failed ? 'The latest observed recommendation event failed.' : completed
-                        ? 'Recommendation generation completed successfully.'
-                        : 'Recommendation activity has been observed.'
-                ),
+                health: nextHealth,
                 itemCount: Math.max(previous.itemCount, numberField(event.detail, ['itemCount', 'totalItems'])),
-                lastErrorCategory: failed ? 'generation' : previous.lastErrorCategory,
+                lastErrorCategory: allSourcesFailed ? 'generation'
+                    : partialFallback || localSourceFailure ? 'source-partial'
+                        : previous.lastErrorCategory,
                 lastGenerationAt: completed ? new Date(event.at).toISOString() : previous.lastGenerationAt,
-                runDurationMs: event.durationMs ?? previous.runDurationMs,
-                sourceCount: Math.max(previous.sourceCount, numberField(event.detail, ['sourceCount']))
+                runDurationMs: completed ? event.durationMs ?? numberField(event.detail, ['durationMs'], previous.runDurationMs || 0) : previous.runDurationMs,
+                sourceCount
             }
         });
         return;
@@ -828,12 +954,15 @@ function createCollector(): DisposableCollector {
     let scrollInputId = '';
     let scrollScope: PtvFocusScopeCategory = 'unknown';
     let currentRouteSessionId = '';
+    let routeLayoutFingerprint = '';
+    let routeReadySince = 0;
     let lastFrameAt = 0;
     let frameIntervals: number[] = [];
     let longTaskCount = 0;
     let collectorOverheadMs = 0;
     const disposers: Array<() => void> = [];
-    const imageStartedAt = new WeakMap<HTMLImageElement, number>();
+    const imageLifecycle = createPtvImageLifecycleTracker();
+    const diagnosticSelfImageGenerations = createPtvImageRemountGuard();
     const handleDiagnosticScroll = (event: Event) => {
         if (!scrollStartedAt) {
             const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -889,11 +1018,37 @@ function createCollector(): DisposableCollector {
         }, 120);
     };
 
+    const evaluateRouteSettlement = () => {
+        if (disposed || !currentRouteSessionId) return;
+
+        const route = store.getSnapshot().routes.find(candidate => candidate.routeSessionId === currentRouteSessionId);
+
+        if (!route || route.settledAt) return;
+
+        const ready = Boolean(route.firstContentAt) && isPtvDiagnosticRouteContentReady();
+        const fingerprint = getPtvDiagnosticLayoutFingerprint();
+        const now = performance.now();
+
+        if (!ready) {
+            routeReadySince = 0;
+            routeLayoutFingerprint = fingerprint;
+        } else if (!routeReadySince || routeLayoutFingerprint !== fingerprint) {
+            routeReadySince = now;
+            routeLayoutFingerprint = fingerprint;
+        } else if (now - routeReadySince >= 500) {
+            store.markRoutePhase(currentRouteSessionId, 'settled');
+            return;
+        }
+
+        routeSettleTimer = window.setTimeout(evaluateRouteSettlement, 100);
+    };
     const startRoute = (detail?: RouteControllerDetail) => {
         window.clearTimeout(routeSettleTimer);
         const route = detail?.normalizedPath || detail?.hash || detail?.path || detail?.full || window.location.hash;
 
         currentRouteSessionId = store.startRoute(route);
+        routeLayoutFingerprint = '';
+        routeReadySince = 0;
         window.requestAnimationFrame(() => {
             if (disposed || !currentRouteSessionId) return;
             store.markRoutePhase(currentRouteSessionId, 'initialized');
@@ -905,9 +1060,7 @@ function createCollector(): DisposableCollector {
                 store.markRoutePhase(currentRouteSessionId, 'first-focusable');
             }
         });
-        routeSettleTimer = window.setTimeout(() => {
-            if (currentRouteSessionId) store.markRoutePhase(currentRouteSessionId, 'settled');
-        }, 500);
+        routeSettleTimer = window.setTimeout(evaluateRouteSettlement, 100);
     };
     const handleRoute = (event: Event) => {
         startRoute((event as CustomEvent<RouteControllerDetail>).detail);
@@ -916,16 +1069,50 @@ function createCollector(): DisposableCollector {
     const recordImageRequest = (image: HTMLImageElement) => {
         if (!image.getAttribute('src') && !image.getAttribute('data-src')) return;
 
-        imageStartedAt.set(image, performance.now());
+        const role = classifyImageRole(image);
+        const routeFamily = currentRouteFamily();
+        if (
+            role === 'logo'
+            && routeFamily === 'dashboard/piggietv/diagnostics'
+            && !diagnosticSelfImageGenerations.shouldRecord(currentRouteSessionId || routeFamily, image)
+        ) return;
+
+        const lifecycle = imageLifecycle.begin(image);
+
+        if (!lifecycle) return;
+
         store.recordImage({
             cacheClassification: 'browser-managed',
             decodeDurationMs: null,
             durationMs: null,
             fallbackUsed: image.dataset.ptvFallback === 'true',
             occurredAt: new Date().toISOString(),
+            role,
+            routeFamily,
+            status: 'requested'
+        });
+
+        if (image.complete) {
+            void Promise.resolve().then(() => {
+                if (disposed || !image.isConnected) return;
+                recordImageTerminal(image, image.naturalWidth > 0 ? 'loaded' : 'errored');
+            });
+        }
+    };
+    const recordImageTerminal = (image: HTMLImageElement, status: 'errored' | 'loaded') => {
+        const lifecycle = imageLifecycle.complete(image);
+
+        if (!lifecycle) return;
+
+        store.recordImage({
+            cacheClassification: 'browser-managed',
+            decodeDurationMs: null,
+            durationMs: Number((performance.now() - lifecycle.startedAt).toFixed(1)),
+            fallbackUsed: image.dataset.ptvFallback === 'true',
+            occurredAt: new Date().toISOString(),
             role: classifyImageRole(image),
             routeFamily: currentRouteFamily(),
-            status: 'requested'
+            status
         });
     };
     const recordImageCompletion = (event: Event) => {
@@ -933,17 +1120,13 @@ function createCollector(): DisposableCollector {
 
         if (!image) return;
 
-        const startedAt = imageStartedAt.get(image);
-        store.recordImage({
-            cacheClassification: 'browser-managed',
-            decodeDurationMs: null,
-            durationMs: startedAt === undefined ? null : Number((performance.now() - startedAt).toFixed(1)),
-            fallbackUsed: image.dataset.ptvFallback === 'true',
-            occurredAt: new Date().toISOString(),
-            role: classifyImageRole(image),
-            routeFamily: currentRouteFamily(),
-            status: event.type === 'load' ? 'loaded' : 'errored'
-        });
+        recordImageRequest(image);
+        recordImageTerminal(image, event.type === 'load' ? 'loaded' : 'errored');
+    };
+    const forgetImages = (node: Node) => {
+        if (!(node instanceof Element)) return;
+        if (node instanceof HTMLImageElement) imageLifecycle.forget(node);
+        node.querySelectorAll<HTMLImageElement>('img').forEach(imageLifecycle.forget);
     };
 
     const mutationObserver = new MutationObserver(records => {
@@ -958,14 +1141,17 @@ function createCollector(): DisposableCollector {
                 if (node instanceof HTMLImageElement) recordImageRequest(node);
                 node.querySelectorAll<HTMLImageElement>('img[src], img[data-src]').forEach(recordImageRequest);
             });
+            record.removedNodes.forEach(forgetImages);
         });
 
         if (currentRouteSessionId) {
-            if (!store.getSnapshot().routes.find(route => route.routeSessionId === currentRouteSessionId)?.firstContentAt
+            const route = store.getSnapshot().routes.find(candidate => candidate.routeSessionId === currentRouteSessionId);
+
+            if (!route?.firstContentAt
                 && document.querySelector('main, [role="main"], .mainAnimatedPage:not(.hide), [data-ptv-route-content]')) {
                 store.markRoutePhase(currentRouteSessionId, 'first-content');
             }
-            if (!store.getSnapshot().routes.find(route => route.routeSessionId === currentRouteSessionId)?.firstFocusableAt
+            if (!route?.firstFocusableAt
                 && document.querySelector(FOCUSABLE_SELECTOR)) {
                 store.markRoutePhase(currentRouteSessionId, 'first-focusable');
             }
@@ -1036,7 +1222,7 @@ function createCollector(): DisposableCollector {
     document.addEventListener('error', recordImageCompletion, true);
     document.addEventListener('scroll', handleDiagnosticScroll, true);
     mutationObserver.observe(document.documentElement, {
-        attributeFilter: ['src'],
+        attributeFilter: ['data-src', 'sizes', 'src', 'srcset'],
         attributes: true,
         childList: true,
         subtree: true
@@ -1046,7 +1232,7 @@ function createCollector(): DisposableCollector {
     frameFlushTimer = window.setInterval(flushFrames, 1000);
 
     disposers.push(
-        subscribePtvObservability(bridgeObservability),
+        subscribePtvObservability(bridgePtvDiagnosticObservabilityEvent),
         subscribePtvTvNavigation(snapshot => store.setFocus(getFocusDiagnostic(snapshot))),
         subscribePtvDiagnosticPreferences(preferences => {
             store.setCollectorEnabled(preferences.collectionEnabled);

@@ -17,8 +17,9 @@ import {
 } from '../../core/tvFocus';
 import { setPtvVideoPlaybackPresentation } from '../../services/playbackPresentationService';
 import {
+    hidePtvVideoControls,
     isPtvVideoPlayerControlFocused,
-    requestPtvVideoControlsVisibility
+    reconcilePtvVideoControlSurface
 } from './videoInputOwnership';
 
 import './playbackChrome';
@@ -764,7 +765,7 @@ function handlePlaybackBackAction(action) {
         const active = document.activeElement;
 
         clearPlayerChromeTimer();
-        if (!requestPtvVideoControlsVisibility(false)) setPlayerOsdVisible(false);
+        hidePtvVideoControls(() => setPlayerOsdVisible(false));
         if (active instanceof HTMLElement && hasFocusedPlayerControl()) active.blur();
         const videoSurface = getActiveVideoElement();
 
@@ -788,47 +789,6 @@ function handlePlaybackBackAction(action) {
     }
 
     return false;
-}
-
-function copyShareUrl(url) {
-    const input = document.createElement('input');
-
-    input.value = url;
-    input.setAttribute('readonly', 'readonly');
-    input.style.position = 'fixed';
-    input.style.left = '-9999px';
-    document.body.appendChild(input);
-    input.select();
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    document.execCommand('copy');
-    input.remove();
-}
-
-async function shareCurrentPlayback() {
-    const title = getPlayerHeaderTitle(currentItem);
-    const url = window.location.href;
-
-    try {
-        if (navigator.share) {
-            await navigator.share({ title, url });
-            return;
-        }
-
-        copyShareUrl(url);
-    } catch {
-        // Sharing is best-effort and should never interrupt playback controls.
-    }
-}
-
-function castCurrentPlayback() {
-    const castButton = getPlaybackPages()
-        .map(page => page.querySelector('.btnAirPlay:not(.hide)'))
-        .find(Boolean)
-        || document.querySelector('.headerCastButton:not(.hide), .castButton:not(.hide)');
-
-    if (castButton instanceof HTMLElement) {
-        castButton.click();
-    }
 }
 
 function getPlayerChromeRoot() {
@@ -904,39 +864,15 @@ function hideReconnectingStateSoon(reason = 'settled') {
 }
 
 function getOrCreatePlayerHeader() {
-    const root = getPlayerChromeRoot();
-    let header = root.querySelector(`.${PLAYER_HEADER_CLASS}`);
-
-    if (header) return header;
-
-    header = document.createElement('div');
-    header.className = PLAYER_HEADER_CLASS;
-    header.dataset.ptvEnhanced = 'true';
-    header.innerHTML = `
-        <button class="ptv-player-top-button ptv-player-top-back" type="button" aria-label="Back"></button>
-        <div class="ptv-player-top-title-wrap">
-            <div class="ptv-player-top-logo" aria-hidden="true"></div>
-            <div class="ptv-player-top-title"></div>
-        </div>
-        <div class="ptv-player-top-actions">
-            <button class="ptv-player-top-button ptv-player-top-share" type="button" aria-label="Share"></button>
-            <button class="ptv-player-top-button ptv-player-top-cast" type="button" aria-label="Cast"></button>
-        </div>
-    `;
-
-    header.querySelector('.ptv-player-top-back')?.addEventListener('click', goBackFromPlayback);
-    header.querySelector('.ptv-player-top-share')?.addEventListener('click', () => {
-        void shareCurrentPlayback();
+    document.querySelectorAll(`.${PLAYER_HEADER_CLASS}`).forEach(header => {
+        header.remove();
     });
-    header.querySelector('.ptv-player-top-cast')?.addEventListener('click', castCurrentPlayback);
-
-    root.appendChild(header);
-
-    return header;
+    return null;
 }
 
 function renderPlayerHeader(item) {
     const header = getOrCreatePlayerHeader();
+    if (!header) return;
     const title = header.querySelector('.ptv-player-top-title');
     const logo = header.querySelector('.ptv-player-top-logo');
     const share = header.querySelector('.ptv-player-top-share');
@@ -993,8 +929,7 @@ function showPlayerChrome(autoHide = true) {
             showPlayerChrome(true);
             return;
         }
-        setPlayerChromeVisible(false);
-        setPlayerOsdVisible(false);
+        hidePtvVideoControls(() => setPlayerOsdVisible(false));
     }, PLAYER_CHROME_HIDE_MS);
 }
 
@@ -1507,6 +1442,7 @@ function enhancePlaybackDom() {
 
     document.documentElement.classList.add(PLAYER_PAGE_CLASS);
     document.body.classList.add(PLAYER_PAGE_CLASS);
+    reconcilePtvVideoControlSurface(page);
     setPtvVideoPlaybackPresentation({
         available: true,
         controlsVisible: document.documentElement.classList.contains(PLAYER_CHROME_VISIBLE_CLASS)
@@ -1536,6 +1472,7 @@ function enhancePlaybackDom() {
 }
 
 function cleanupPlaybackDom() {
+    reconcilePtvVideoControlSurface(null);
     clearPlayerChromeTimer();
     clearPlaybackStallTimer();
     lastKnownOsdVisible = false;

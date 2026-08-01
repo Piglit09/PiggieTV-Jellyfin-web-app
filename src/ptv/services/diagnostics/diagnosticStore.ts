@@ -356,7 +356,7 @@ export function createPtvDiagnosticStore() {
     let lastUiRenderDurationMs: number | null = null;
     let sessionStartedAt = createdAt;
     let diagnosticSessionId = `diagnostic-1-${hashSafe(createdAt)}`;
-    const subscribers = new Set<() => void>();
+    const subscribers = new Set<(stream: string) => void>();
     const activeRequests = new Map<string, ActiveRequest>();
     const requests: PtvRequestDiagnostic[] = [];
     const routes: PtvRouteDiagnostic[] = [];
@@ -375,14 +375,14 @@ export function createPtvDiagnosticStore() {
     const count = (stream: string) => {
         eventCounts[stream] = (eventCounts[stream] || 0) + 1;
     };
-    const publish = () => subscribers.forEach(listener => {
-        listener();
+    const publish = (stream = 'context') => subscribers.forEach(listener => {
+        listener(stream);
     });
     const record = <T>(stream: string, target: T[], value: T, limit: number) => {
         if (!collectorEnabled) return;
         boundedPush(target, value, limit, stream, dropped);
         count(stream);
-        publish();
+        publish(stream);
     };
 
     function getSnapshot(generatedAt = timestamp()): PtvDiagnosticSnapshot {
@@ -480,7 +480,7 @@ export function createPtvDiagnosticStore() {
             activeRequests.set(requestId, active);
             peakConcurrency = Math.max(peakConcurrency, activeRequests.size);
             count('request-starts');
-            publish();
+            publish('requests');
 
             return requestId;
         },
@@ -627,7 +627,7 @@ export function createPtvDiagnosticStore() {
 
             routes[index] = next;
             count('route-phases');
-            publish();
+            publish('routes');
         },
         recordFrame(frame: PtvFrameDiagnostic) {
             record('frames', frames, frame, PTV_DIAGNOSTIC_RETENTION_LIMITS.frames);
@@ -696,13 +696,13 @@ export function createPtvDiagnosticStore() {
                 pendingFocusRestorationStartedAt = null;
             }
             count('route-focus-phases');
-            publish();
+            publish('routes');
         },
         setFocus(focus: PtvFocusDiagnostic) {
             if (!collectorEnabled) return;
             context.focus = focus;
             count('focus');
-            publish();
+            publish('focus');
         },
         recordInput(input: PtvInputDiagnostic) {
             record('inputs', inputs, input, PTV_DIAGNOSTIC_RETENTION_LIMITS.inputs);
@@ -729,15 +729,15 @@ export function createPtvDiagnosticStore() {
                 ...context,
                 ...changes
             };
-            publish();
+            publish('context');
         },
         setCollectorCapability(name: string, available: boolean) {
             context.collectorCapabilities[name] = available;
-            publish();
+            publish('context');
         },
         setCollectorEnabled(enabled: boolean) {
             collectorEnabled = enabled;
-            publish();
+            publish('context');
         },
         recordUiRenderDuration(durationMs: number) {
             lastUiRenderDurationMs = Number(Math.max(0, durationMs).toFixed(1));
@@ -817,9 +817,9 @@ export function createPtvDiagnosticStore() {
             sessionSequence += 1;
             sessionStartedAt = timestamp();
             diagnosticSessionId = `diagnostic-${sessionSequence}-${hashSafe(sessionStartedAt)}`;
-            publish();
+            publish('reset');
         },
-        subscribe(listener: () => void) {
+        subscribe(listener: (stream: string) => void) {
             subscribers.add(listener);
 
             return () => {

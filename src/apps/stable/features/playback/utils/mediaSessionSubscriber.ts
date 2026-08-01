@@ -21,6 +21,31 @@ const DEFAULT_IMAGE_SIZES = [512, 384, 256, 192, 128, 96];
 const hasNavigatorSession = 'mediaSession' in navigator;
 const hasNativeShell = !!window.NativeShell;
 
+export type PtvExternalMediaSessionState = Readonly<{
+    active: boolean;
+    album?: string;
+    artist?: string;
+    durationTicks?: number;
+    imageUrl?: string;
+    name?: string;
+    paused: boolean;
+    positionTicks?: number;
+}>;
+
+export type PtvExternalMediaSessionController = Readonly<{
+    next: () => unknown;
+    pause: () => unknown;
+    play: () => unknown;
+    previous: () => unknown;
+    seekTo: (positionSeconds: number) => unknown;
+    stop: () => unknown;
+}>;
+
+let externalMediaSession: Readonly<{
+    controller: PtvExternalMediaSessionController;
+    state: PtvExternalMediaSessionState;
+}> | null = null;
+
 const getArtwork = (item: ItemDto): MediaImage[] => {
     const artwork: MediaImage[] = [];
 
@@ -44,6 +69,79 @@ const resetMediaSession = () => {
         shell.hideMediaSession();
     }
 };
+
+function updateExternalMediaSessionPresentation(state: PtvExternalMediaSessionState) {
+    const durationMs = state.durationTicks ? Math.round(state.durationTicks / TICKS_PER_MILLISECOND) : 0;
+    const positionMs = state.positionTicks ? Math.round(state.positionTicks / TICKS_PER_MILLISECOND) : 0;
+
+    if (hasNavigatorSession) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+            album: state.album,
+            artist: state.artist,
+            artwork: state.imageUrl ? [{ src: state.imageUrl }] : [],
+            title: state.name || 'Now Playing'
+        });
+        navigator.mediaSession.playbackState = state.paused ? 'paused' : 'playing';
+
+        if (durationMs > 0 && typeof navigator.mediaSession.setPositionState === 'function') {
+            try {
+                navigator.mediaSession.setPositionState({
+                    duration: durationMs / MILLISECONDS_PER_SECOND,
+                    playbackRate: 1,
+                    position: Math.min(positionMs, durationMs) / MILLISECONDS_PER_SECOND
+                });
+            } catch {
+                // Some partial MediaSession implementations expose the method
+                // but reject position updates until native playback is ready.
+            }
+        }
+    } else if (hasNativeShell) {
+        shell.updateMediaSession({
+            action: 'timeupdate',
+            album: state.album,
+            artist: state.artist,
+            canSeek: durationMs > 0,
+            duration: durationMs,
+            imageUrl: state.imageUrl,
+            isLocalPlayer: true,
+            isPaused: state.paused,
+            itemId: '',
+            position: positionMs,
+            title: state.name
+        });
+    }
+}
+
+function resetInactiveMediaSession(message: string, state?: PlayerState) {
+    if (externalMediaSession?.state.active) return;
+
+    console.debug(message, state);
+    resetMediaSession();
+}
+
+/**
+ * Projects PiggieTV's existing native Music owner through this sole
+ * MediaSession owner. It does not own playback or queue state.
+ */
+export function updatePtvExternalMediaSession(
+    state: PtvExternalMediaSessionState | null,
+    controller?: PtvExternalMediaSessionController,
+    resetOnRelease = true
+) {
+    if (!state?.active || !controller) {
+        const previouslyExternal = Boolean(externalMediaSession);
+
+        externalMediaSession = null;
+        if (previouslyExternal && resetOnRelease) resetMediaSession();
+        return;
+    }
+
+    externalMediaSession = {
+        controller,
+        state
+    };
+    updateExternalMediaSessionPresentation(state);
+}
 
 /** A PlaybackSubscriber that manages MediaSession state and events. */
 class MediaSessionSubscriber extends PlaybackSubscriber {
@@ -72,6 +170,34 @@ class MediaSessionSubscriber extends PlaybackSubscriber {
     }
 
     private onMediaSessionAction(details: MediaSessionActionDetails) {
+        if (externalMediaSession?.state.active) {
+            const controller = externalMediaSession.controller;
+            const currentPositionSeconds = (externalMediaSession.state.positionTicks || 0)
+                / TICKS_PER_MILLISECOND
+                / MILLISECONDS_PER_SECOND;
+
+            switch (details.action) {
+                case 'pause':
+                    return controller.pause();
+                case 'play':
+                    return controller.play();
+                case 'stop':
+                    return controller.stop();
+                case 'seekto':
+                    return controller.seekTo(details.seekTime || 0);
+                case 'previoustrack':
+                    return controller.previous();
+                case 'nexttrack':
+                    return controller.next();
+                case 'seekbackward':
+                    return controller.seekTo(Math.max(0, currentPositionSeconds - (details.seekOffset || 10)));
+                case 'seekforward':
+                    return controller.seekTo(currentPositionSeconds + (details.seekOffset || 10));
+                default:
+                    break;
+            }
+        }
+
         switch (details.action) {
             case 'pause':
                 return this.playbackManager.pause(this.player);
@@ -99,20 +225,25 @@ class MediaSessionSubscriber extends PlaybackSubscriber {
         stateOverride?: PlayerState
     ) {
         if (!this.player) {
-            console.debug('[MediaSessionSubscriber] no active player; resetting media session');
-            return resetMediaSession();
+            return resetInactiveMediaSession(
+                '[MediaSessionSubscriber] no active player; resetting media session'
+            );
         }
 
         const state: PlayerState = stateOverride || this.playbackManager.getPlayerState(this.player);
         const item = state.NowPlayingItem;
 
         if (!item) {
-            console.debug('[MediaSessionSubscriber] no now playing item; resetting media session', state);
-            return resetMediaSession();
+            return resetInactiveMediaSession(
+                '[MediaSessionSubscriber] no now playing item; resetting media session',
+                state
+            );
         }
 
         const isVideo = item.MediaType === MediaType.Video;
         const isLocalPlayer = !!this.player?.isLocalPlayer;
+
+        externalMediaSession = null;
 
         // Local players do their own notifications
         if (isLocalPlayer && isVideo) {
@@ -171,6 +302,7 @@ class MediaSessionSubscriber extends PlaybackSubscriber {
     }
 
     onPlayerPlaybackStop() {
+        if (externalMediaSession?.state.active) return;
         resetMediaSession();
     }
 

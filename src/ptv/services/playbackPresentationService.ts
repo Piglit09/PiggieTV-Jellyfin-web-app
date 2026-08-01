@@ -71,7 +71,7 @@ function isFullScreenMusicRoute(routeHash: string) {
 
 function isAudioPlayback(state: PtvGlobalPlaybackState) {
     return state.active
-        && state.source === 'ptv-music'
+        && ['jellyfin-player', 'ptv-music'].includes(state.source)
         && String(state.mediaType || '').toLowerCase() === 'audio';
 }
 

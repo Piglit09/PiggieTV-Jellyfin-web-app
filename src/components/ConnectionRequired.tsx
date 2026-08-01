@@ -3,9 +3,14 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { ApiClient, ConnectResponse } from 'jellyfin-apiclient';
 
 import { ConnectionState, ServerConnections } from 'lib/jellyfin-apiclient';
+import {
+    getPtvLoginRedirectDecision,
+    PTV_CURRENT_SETTINGS_REDIRECT
+} from 'ptv/shell/authenticationRoutes';
 
 import ConnectionErrorPage from './ConnectionErrorPage';
 import Loading from './loading/LoadingComponent';
+import { runServerConnectionAttempt } from './router/serverConnectionAttempt';
 
 enum AccessLevel {
     /** Requires a user with administrator access */
@@ -76,16 +81,28 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
             case ConnectionState.SignedIn:
                 // Already logged in, bounce to the home page
                 console.debug('[ConnectionRequired] already logged in, redirecting to home');
-                navigate(BounceRoutes.Home);
+                navigate(BounceRoutes.Home, { replace: true });
                 return;
             case ConnectionState.ServerSignIn:
                 // Bounce to the login page
                 if (location.pathname === BounceRoutes.Login) {
                     setIsLoading(false);
                 } else {
-                    console.debug('[ConnectionRequired] not logged in, redirecting to login page', location);
-                    const url = encodeURIComponent(location.pathname + location.search);
-                    navigate(`${BounceRoutes.Login}?serverid=${connectionResponse.ApiClient.serverId()}&url=${url}`);
+                    const redirect = getPtvLoginRedirectDecision(
+                        location.pathname + location.search,
+                        { explicitCurrentAttempt: location.key !== 'default' }
+                    );
+                    const params = new URLSearchParams({
+                        serverid: connectionResponse.ApiClient.serverId(),
+                        url: redirect.route
+                    });
+
+                    if (redirect.restoresCurrentSettings) {
+                        params.set('ptvredirect', PTV_CURRENT_SETTINGS_REDIRECT);
+                    }
+
+                    console.debug('[ConnectionRequired] redirecting to login', redirect.reason);
+                    navigate(`${BounceRoutes.Login}?${params.toString()}`, { replace: true });
                 }
                 return;
             case ConnectionState.ServerSelection:
@@ -97,7 +114,7 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
 
         console.warn('[ConnectionRequired] unhandled connection state', connectionResponse.State);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [ navigateIfNotThere, location.pathname, navigate ]);
+    }, [ navigateIfNotThere, location.key, location.pathname, location.search, navigate ]);
 
     const handleWizard = useCallback(async (firstConnection: ConnectResponse | null) => {
         const apiClient = firstConnection?.ApiClient || ServerConnections.currentApiClient();
@@ -151,7 +168,7 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
         if ((level === AccessLevel.Admin || level === AccessLevel.User) && !client?.isLoggedIn()) {
             try {
                 console.warn('[ConnectionRequired] unauthenticated user attempted to access user route');
-                bounce(await ServerConnections.connect())
+                bounce(await runServerConnectionAttempt(() => ServerConnections.connect()))
                     .catch(err => {
                         console.error('[ConnectionRequired] failed to bounce', err);
                     });
@@ -180,14 +197,21 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
     }, [bounce, level, navigate]);
 
     useEffect(() => {
+        let active = true;
         // Check connection status on initial page load
         const apiClient = ServerConnections.currentApiClient();
-        const connection = Promise.resolve(ServerConnections.firstConnection ? null : ServerConnections.connect());
+        const connection = Promise.resolve(
+            ServerConnections.firstConnection ?
+                null :
+                runServerConnectionAttempt(() => ServerConnections.connect())
+        );
         connection.then(firstConnection => {
+            if (!active) return;
+
             console.debug('[ConnectionRequired] connection state', firstConnection?.State);
             ServerConnections.firstConnection = true;
 
-            if (ERROR_STATES.includes(firstConnection?.State)) {
+            if (firstConnection && ERROR_STATES.includes(firstConnection.State)) {
                 setErrorState(firstConnection.State);
             } else if (level === AccessLevel.Wizard) {
                 handleWizard(firstConnection)
@@ -208,8 +232,13 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
                     });
             }
         }).catch(err => {
+            if (!active) return;
             console.error('[ConnectionRequired] failed to connect', err);
         });
+
+        return () => {
+            active = false;
+        };
     }, [handleIncompleteWizard, handleWizard, level, validateUserAccess]);
 
     if (errorState) {

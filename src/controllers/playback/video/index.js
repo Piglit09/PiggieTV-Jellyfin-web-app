@@ -34,10 +34,15 @@ import { setBackdropTransparency, TRANSPARENCY_LEVEL } from '../../../components
 import { pluginManager } from '../../../components/pluginManager';
 import { PluginType } from '../../../types/plugin.ts';
 import { getEpisodePlaybackTitle } from './videoDisplayTitle';
+import { createVideoFetchingDataState } from './fetchingDataState';
 import {
+    executePtvHiddenVideoDirectionalGestureKey,
     executePtvVideoSeekKey,
     isPtvVideoPlayerControlFocused,
     registerPtvVideoControlsVisibilityHandler,
+    resetPtvHiddenVideoDirectionalGesture,
+    resetPtvHiddenVideoDirectionalGestureForLease,
+    shouldTreatPtvVideoControlsAsHidden,
     shouldYieldVideoKeyToPtvFocusOwner
 } from '../../../ptv/modules/playback/videoInputOwnership';
 
@@ -46,6 +51,9 @@ function getOpenedDialog() {
 }
 
 export default function (view) {
+    const fetchingDataState = createVideoFetchingDataState(visible => {
+        view.querySelector('.osdMediaStatus')?.classList.toggle('hide', !visible);
+    });
     function getDisplayItem(item) {
         if (item.Type === 'TvChannel') {
             const apiClient = ServerConnections.getApiClient(item.ServerId);
@@ -302,11 +310,33 @@ export default function (view) {
         }
     }
 
-    const unregisterPtvVideoControlsVisibilityHandler =
-        registerPtvVideoControlsVisibilityHandler('jellyfin-video-controller', visible => {
-            if (visible) showOsd();
-            else hideOsd();
-        });
+    let ptvVideoControlsVisibilityLease = null;
+
+    function bindPtvVideoControlsVisibilityHandler() {
+        releasePtvVideoControlsVisibilityHandler();
+        ptvVideoControlsVisibilityLease =
+            registerPtvVideoControlsVisibilityHandler('jellyfin-video-controller', visible => {
+                if (visible) showOsd();
+                else hideOsd();
+            });
+        resetPtvHiddenVideoDirectionalGestureForLease(ptvVideoControlsVisibilityLease);
+    }
+
+    function releasePtvVideoControlsVisibilityHandler() {
+        if (!ptvVideoControlsVisibilityLease) return false;
+
+        const released = ptvVideoControlsVisibilityLease.release();
+
+        ptvVideoControlsVisibilityLease = null;
+        if (released) resetPtvHiddenVideoDirectionalGesture();
+        return released;
+    }
+
+    function resetActivePtvHiddenVideoDirectionalGesture() {
+        return resetPtvHiddenVideoDirectionalGestureForLease(
+            ptvVideoControlsVisibilityLease
+        );
+    }
 
     function startOsdHideTimer() {
         stopOsdHideTimer();
@@ -404,6 +434,15 @@ export default function (view) {
         }
     }
 
+    function shouldHandleVideoControlsAsHidden() {
+        const root = document.documentElement;
+
+        return shouldTreatPtvVideoControlsAsHidden(currentVisibleMenu, {
+            playbackActive: root.classList.contains('ptv-playing'),
+            controlsVisible: root.classList.contains('ptv-player-osd-visible')
+        });
+    }
+
     // TODO: Move all idle-related code to `inputManager` or `idleManager` or `idleHelper` (per dialog thing) and listen event from there.
 
     function resetIdle() {
@@ -444,21 +483,23 @@ export default function (view) {
 
         switch (e.detail.command) {
             case 'left':
-                if (currentVisibleMenu === 'osd') {
-                    showOsd();
-                } else if (!currentVisibleMenu) {
+                if (shouldHandleVideoControlsAsHidden()) {
                     e.preventDefault();
                     playbackManager.rewind(player);
+                    showOsd(nowPlayingPositionSlider);
+                } else if (currentVisibleMenu === 'osd') {
+                    showOsd();
                 }
 
                 break;
 
             case 'right':
-                if (currentVisibleMenu === 'osd') {
-                    showOsd();
-                } else if (!currentVisibleMenu) {
+                if (shouldHandleVideoControlsAsHidden()) {
                     e.preventDefault();
                     playbackManager.fastForward(player);
+                    showOsd(nowPlayingPositionSlider);
+                } else if (currentVisibleMenu === 'osd') {
+                    showOsd();
                 }
 
                 break;
@@ -538,6 +579,7 @@ export default function (view) {
     }
 
     function onPlayerChange() {
+        resetActivePtvHiddenVideoDirectionalGesture();
         bindToPlayer(playbackManager.getCurrentPlayer());
     }
 
@@ -570,6 +612,7 @@ export default function (view) {
         console.debug('nowplaying event: ' + e.type);
         const player = this;
         onStateChanged.call(player, e, state);
+        fetchingDataState.established(player);
         resetUpNextDialog();
     }
 
@@ -584,6 +627,8 @@ export default function (view) {
     }
 
     function onPlaybackStopped(e, state) {
+        fetchingDataState.end(this);
+        resetActivePtvHiddenVideoDirectionalGesture();
         currentRuntimeTicks = null;
         resetUpNextDialog();
         console.debug('nowplaying event: ' + e.type);
@@ -603,19 +648,29 @@ export default function (view) {
     }
 
     function onBeginFetch() {
-        view.querySelector('.osdMediaStatus').classList.remove('hide');
+        fetchingDataState.begin(this);
     }
 
     function onEndFetch() {
-        view.querySelector('.osdMediaStatus').classList.add('hide');
+        fetchingDataState.end(this);
     }
 
     function bindToPlayer(player) {
+        if (player === currentPlayer) {
+            if (player) {
+                const state = playbackManager.getPlayerState(player);
+                onStateChanged.call(player, { type: 'init' }, state);
+                fetchingDataState.sync(player);
+            }
+            return;
+        }
+
         if (player !== currentPlayer) {
             releaseCurrentPlayer();
             currentPlayer = player;
             if (!player) return;
         }
+        fetchingDataState.bind(player);
         const state = playbackManager.getPlayerState(player);
         onStateChanged.call(player, {
             type: 'init'
@@ -633,12 +688,11 @@ export default function (view) {
         Events.on(player, 'endFetch', onEndFetch);
         resetUpNextDialog();
 
-        if (player.isFetching) {
-            onBeginFetch();
-        }
+        fetchingDataState.sync(player);
     }
 
     function releaseCurrentPlayer() {
+        resetActivePtvHiddenVideoDirectionalGesture();
         destroyStats();
         destroySubtitleSync();
         resetUpNextDialog();
@@ -654,11 +708,15 @@ export default function (view) {
             Events.off(player, 'timeupdate', onTimeUpdate);
             Events.off(player, 'fullscreenchange', onFullscreenChanged);
             Events.off(player, 'mediastreamschange', onMediaStreamsChanged);
+            Events.off(player, 'beginFetch', onBeginFetch);
+            Events.off(player, 'endFetch', onEndFetch);
+            fetchingDataState.release(player);
             currentPlayer = null;
         }
     }
 
     function onTimeUpdate() {
+        fetchingDataState.established(this);
         // Test for 'currentItem' is required for Firefox since its player spams 'timeupdate' events even being at breakpoint
         if (isEnabled && currentItem) {
             const now = new Date().getTime();
@@ -1272,7 +1330,7 @@ export default function (view) {
             return;
         }
 
-        if (layoutManager.tv && !currentVisibleMenu) {
+        if (layoutManager.tv && shouldHandleVideoControlsAsHidden()) {
             // Change the behavior of some keys when the OSD is hidden
             switch (key) {
                 case 'ArrowLeft':
@@ -1467,8 +1525,35 @@ export default function (view) {
         }
     }
 
-    function onKeyDownCapture() {
+    function onKeyDownCapture(e) {
         resetIdle();
+
+        if (
+            shouldYieldVideoKeyToPtvFocusOwner(e.defaultPrevented)
+            || e.ctrlKey
+            || e.altKey
+            || e.metaKey
+            || e.shiftKey
+            || !layoutManager.tv
+        ) {
+            return;
+        }
+
+        const key = keyboardnavigation.getKeyName(e);
+        const seekHandled = executePtvHiddenVideoDirectionalGestureKey({
+            controlsHidden: shouldHandleVideoControlsAsHidden(),
+            key,
+            repeat: e.repeat
+        }, {
+            seekBack: () => playbackManager.rewind(currentPlayer),
+            seekForward: () => playbackManager.fastForward(currentPlayer)
+        });
+
+        if (!seekHandled) return;
+
+        e.preventDefault();
+        showOsd(nowPlayingPositionSlider);
+        e.stopImmediatePropagation();
     }
 
     function onWheel(e) {
@@ -1708,6 +1793,7 @@ export default function (view) {
     });
     view.addEventListener('viewshow', function () {
         try {
+            bindPtvVideoControlsVisibilityHandler();
             Events.on(playbackManager, 'playerchange', onPlayerChange);
             bindToPlayer(playbackManager.getCurrentPlayer());
             /* eslint-disable-next-line compat/compat */
@@ -1719,7 +1805,7 @@ export default function (view) {
             document.addEventListener('keydown', onKeyDown);
             dom.addEventListener(document, 'keydown', onKeyDownCapture, {
                 capture: true,
-                passive: true
+                passive: false
             });
             document.addEventListener('wheel', onWheel);
             /* eslint-disable-next-line compat/compat */
@@ -1750,11 +1836,13 @@ export default function (view) {
                 dom.addEventListener(document, 'click', onClickCapture, { capture: true });
             }
         } catch {
+            releasePtvVideoControlsVisibilityHandler();
             setBackdropTransparency(TRANSPARENCY_LEVEL.None); // reset state set in viewbeforeshow
             appRouter.goHome();
         }
     });
     view.addEventListener('viewbeforehide', function () {
+        releasePtvVideoControlsVisibilityHandler();
         if (statsOverlay) {
             statsOverlay.enabled(false);
         }
@@ -1762,7 +1850,7 @@ export default function (view) {
         document.removeEventListener('keydown', onKeyDown);
         dom.removeEventListener(document, 'keydown', onKeyDownCapture, {
             capture: true,
-            passive: true
+            passive: false
         });
         document.removeEventListener('wheel', onWheel);
         /* eslint-disable-next-line compat/compat */
@@ -1817,7 +1905,8 @@ export default function (view) {
         headerElement.classList.remove('hide');
     });
     view.addEventListener('viewdestroy', function () {
-        unregisterPtvVideoControlsVisibilityHandler();
+        fetchingDataState.release();
+        releasePtvVideoControlsVisibilityHandler();
         if (self.touchHelper) {
             self.touchHelper.destroy();
             self.touchHelper = null;

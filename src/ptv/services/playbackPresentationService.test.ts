@@ -96,6 +96,20 @@ describe('playback presentation ownership', () => {
             state: 'audio-mini',
             surface: 'mini-player'
         });
+        expect(derivePtvPlaybackPresentation(playbackState({
+            active: true,
+            itemId: 'jellyfin-audio-item',
+            itemType: 'Audio',
+            mediaType: 'Audio',
+            paused: false,
+            source: 'jellyfin-player'
+        }), {
+            routeHash: '#/home'
+        })).toMatchObject({
+            audioLoaded: true,
+            state: 'audio-mini',
+            surface: 'mini-player'
+        });
     });
 
     it.each([

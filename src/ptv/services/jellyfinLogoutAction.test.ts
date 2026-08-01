@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dashboardMocks = vi.hoisted(() => ({
-    logout: vi.fn<() => Promise<void>>()
+    logout: vi.fn<() => Promise<void>>(),
+    retireMusicIdentity: vi.fn()
 }));
 
 vi.mock('../../utils/dashboard', () => ({
     default: {
         logout: dashboardMocks.logout
     }
+}));
+
+vi.mock('../modules/music/musicQueue', () => ({
+    retirePtvMusicIdentityState: dashboardMocks.retireMusicIdentity
 }));
 
 import {
@@ -29,6 +34,7 @@ function deferred<T>() {
 describe('PTV Jellyfin logout action adapter', () => {
     beforeEach(() => {
         dashboardMocks.logout.mockReset();
+        dashboardMocks.retireMusicIdentity.mockReset();
     });
 
     it('delegates to the stock Jellyfin logout action', async () => {
@@ -37,6 +43,7 @@ describe('PTV Jellyfin logout action adapter', () => {
         await requestJellyfinLogout();
 
         expect(dashboardMocks.logout).toHaveBeenCalledTimes(1);
+        expect(dashboardMocks.retireMusicIdentity).toHaveBeenCalledWith('logout');
         expect(isJellyfinLogoutInFlight()).toBe(false);
     });
 

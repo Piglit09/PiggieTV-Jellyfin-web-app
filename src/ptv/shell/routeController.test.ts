@@ -41,7 +41,9 @@ vi.mock('./routes', () => ({
 }));
 
 import {
+    capturePtvRouteGeneration,
     getPtvRouteControllerState,
+    isPtvRouteGenerationCurrent,
     recordPtvRouteGenerationLifecycle,
     startPtvRouteController
 } from './routeController';
@@ -233,5 +235,26 @@ describe('routeController lifecycle telemetry', () => {
             });
             expect(lifecycleEvent.routeKey).toContain(transition.hash.split('?')[0].replace('#', ''));
         });
+    });
+
+    it('rejects a captured generation after route identity changes', () => {
+        const token = capturePtvRouteGeneration();
+
+        expect(isPtvRouteGenerationCurrent(token)).toBe(true);
+
+        routeMocks.current = {
+            ...routeMocks.current,
+            features: ['browse', 'movies'],
+            full: '/#/movies?view=latest',
+            hash: '#/movies?view=latest',
+            id: 'movies',
+            normalizedPath: '/movies',
+            owner: 'movies',
+            pageType: 'browse'
+        };
+        window.history.replaceState(null, '', '/#/movies?view=latest');
+
+        expect(isPtvRouteGenerationCurrent(token)).toBe(false);
+        expect(capturePtvRouteGeneration()).not.toEqual(token);
     });
 });

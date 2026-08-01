@@ -18,6 +18,19 @@ const normalizeImageOptions = options => {
     }
 };
 
+const normalizeServerAddress = value => String(value || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .toLowerCase();
+
+const WEB_SOCKET_RECONNECT_DELAYS_MS = Object.freeze([
+    1000,
+    2000,
+    5000,
+    10000,
+    30000
+]);
+
 const getMaxBandwidth = () => {
     if (navigator.connection) {
         let max = navigator.connection.downlinkMax;
@@ -32,13 +45,15 @@ const getMaxBandwidth = () => {
     return null;
 };
 
-class ServerConnections extends ConnectionManager {
+export class ServerConnections extends ConnectionManager {
     constructor() {
         super(...arguments);
         this.localApiClient = null;
         this.firstConnection = null;
+        this.webSocketReconnectStates = new WeakMap();
 
         Events.on(this, 'localusersignedout', (_e, logoutInfo) => {
+            this.retireWebSocketReconnect(this.localApiClient);
             setUserInfo(null, null);
             // Ensure the updated credentials are persisted to storage
             credentialProvider.credentials(credentialProvider.credentials());
@@ -54,7 +69,120 @@ class ServerConnections extends ConnectionManager {
         });
     }
 
+    bindWebSocketReconnect(apiClient) {
+        let state = this.webSocketReconnectStates.get(apiClient);
+
+        if (state) {
+            return state;
+        }
+
+        state = {
+            attempt: 0,
+            timer: null,
+            onClose: () => this.scheduleWebSocketReconnect(apiClient),
+            onOpen: () => this.resetWebSocketReconnect(apiClient)
+        };
+
+        this.webSocketReconnectStates.set(apiClient, state);
+        Events.on(apiClient, 'websocketclose', state.onClose);
+        Events.on(apiClient, 'websocketopen', state.onOpen);
+
+        return state;
+    }
+
+    scheduleWebSocketReconnect(apiClient) {
+        if (
+            !apiClient
+            || apiClient !== this.localApiClient
+            || !apiClient.accessToken?.()
+            || apiClient.isWebSocketOpenOrConnecting?.()
+        ) {
+            return;
+        }
+
+        const state = this.bindWebSocketReconnect(apiClient);
+
+        if (state.timer) {
+            return;
+        }
+
+        const delay = WEB_SOCKET_RECONNECT_DELAYS_MS[
+            Math.min(state.attempt, WEB_SOCKET_RECONNECT_DELAYS_MS.length - 1)
+        ];
+        state.attempt += 1;
+        state.timer = setTimeout(() => {
+            state.timer = null;
+
+            if (
+                apiClient !== this.localApiClient
+                || !apiClient.accessToken?.()
+                || apiClient.isWebSocketOpenOrConnecting?.()
+            ) {
+                return;
+            }
+
+            try {
+                apiClient.ensureWebSocket();
+            } catch {
+                this.scheduleWebSocketReconnect(apiClient);
+            }
+        }, delay);
+    }
+
+    resetWebSocketReconnect(apiClient) {
+        const state = this.webSocketReconnectStates.get(apiClient);
+
+        if (!state) {
+            return;
+        }
+
+        if (state.timer) {
+            clearTimeout(state.timer);
+            state.timer = null;
+        }
+
+        state.attempt = 0;
+    }
+
+    retireWebSocketReconnect(apiClient) {
+        const state = apiClient && this.webSocketReconnectStates.get(apiClient);
+
+        if (!state) {
+            return;
+        }
+
+        if (state.timer) {
+            clearTimeout(state.timer);
+        }
+
+        Events.off(apiClient, 'websocketclose', state.onClose);
+        Events.off(apiClient, 'websocketopen', state.onOpen);
+        this.webSocketReconnectStates.delete(apiClient);
+    }
+
+    getWebSocketReconnectSnapshot() {
+        const state = this.localApiClient && this.webSocketReconnectStates.get(this.localApiClient);
+
+        return {
+            attempt: state?.attempt || 0,
+            timerCount: state?.timer ? 1 : 0
+        };
+    }
+
     initApiClient(server) {
+        const normalizedServer = normalizeServerAddress(server);
+        const existingApiClient = this.getApiClients().find(apiClient => (
+            normalizeServerAddress(apiClient.serverAddress()) === normalizedServer
+        ));
+
+        if (existingApiClient) {
+            existingApiClient.enableAutomaticNetworking = false;
+            existingApiClient.manualAddressOnly = true;
+            this.setLocalApiClient(existingApiClient);
+            console.debug('reused ApiClient singleton');
+            return existingApiClient;
+        }
+
         console.debug('creating ApiClient singleton');
 
         const apiClient = new ApiClient(
@@ -73,6 +201,7 @@ class ServerConnections extends ConnectionManager {
         this.setLocalApiClient(apiClient);
 
         console.debug('loaded ApiClient singleton');
+        return apiClient;
     }
 
     connect(options) {
@@ -82,9 +211,23 @@ class ServerConnections extends ConnectionManager {
         });
     }
 
+    logout() {
+        this.retireWebSocketReconnect(this.localApiClient);
+        return super.logout();
+    }
+
     setLocalApiClient(apiClient) {
         if (apiClient) {
+            const previousApiClient = this.localApiClient;
+
+            if (previousApiClient && previousApiClient !== apiClient) {
+                this.retireWebSocketReconnect(previousApiClient);
+                previousApiClient.closeWebSocket?.();
+            }
+
             this.localApiClient = apiClient;
+            this.bindWebSocketReconnect(apiClient);
+            this.scheduleWebSocketReconnect(apiClient);
             window.ApiClient = apiClient;
         }
     }

@@ -51,6 +51,37 @@ const SECTIONS = [
 ] as const;
 
 type SectionName = typeof SECTIONS[number];
+const DIAGNOSTIC_DASHBOARD_REFRESH_MS = 1000;
+
+function shouldRefreshSection(section: SectionName, stream: string) {
+    if (section === 'Overview' || section === 'Export' || stream === 'reset') {
+        return true;
+    }
+    if (section === 'Performance') {
+        return [ 'frames', 'requests', 'routes' ].includes(stream);
+    }
+    if (section === 'Requests') {
+        return stream === 'requests';
+    }
+    if (section === 'Navigation & Focus') {
+        return [
+            'focus',
+            'focusChanges',
+            'focusGraphs',
+            'focusScopes',
+            'focusVisibility',
+            'inputs'
+        ].includes(stream);
+    }
+    if (section === 'Routes') {
+        return stream === 'routes';
+    }
+    if (section === 'Images & Shelves') {
+        return [ 'images', 'shelves' ].includes(stream);
+    }
+
+    return stream === 'context';
+}
 
 function formatNumber(value: number | null | undefined, suffix = '') {
     return value === null || value === undefined ? '—' : `${value.toLocaleString()}${suffix}`;
@@ -66,7 +97,7 @@ function HealthChip({ health }: { health: PtvDiagnosticHealth }) {
     );
 }
 
-function MetricCard({
+function MetricCardBase({
     title,
     value,
     caption,
@@ -92,6 +123,8 @@ function MetricCard({
         </Card>
     );
 }
+
+const MetricCard = React.memo(MetricCardBase);
 
 function TechnicalDetails({
     title,
@@ -480,8 +513,36 @@ function ExportPanel({
     const store = getPtvDiagnosticStore();
     const exportBundle = () => store.createExport();
     const copy = async () => {
-        await navigator.clipboard.writeText(JSON.stringify(exportBundle(), null, 2));
-        setExportStatus('Privacy-safe diagnostics copied.');
+        const exportText = JSON.stringify(exportBundle(), null, 2);
+
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(exportText);
+            } else {
+                const textArea = document.createElement('textarea');
+
+                textArea.value = exportText;
+                textArea.setAttribute('readonly', '');
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+
+                try {
+                    textArea.select();
+
+                    // eslint-disable-next-line @typescript-eslint/no-deprecated -- Required by legacy TV browsers without Clipboard API support.
+                    if (!document.execCommand('copy')) {
+                        throw new Error('The browser rejected the copy command.');
+                    }
+                } finally {
+                    textArea.remove();
+                }
+            }
+
+            setExportStatus('Privacy-safe diagnostics copied.');
+        } catch {
+            setExportStatus('Unable to copy diagnostics. Please use Download JSON instead.');
+        }
     };
     const download = () => {
         const blob = new Blob([JSON.stringify(exportBundle(), null, 2)], { type: 'application/json' });
@@ -536,15 +597,30 @@ export default function PtvDiagnosticsDashboardPage() {
     const [ snapshot, setSnapshot ] = useState(() => store.getSnapshot());
     const [ preferences, setPreferences ] = useState(getPtvDiagnosticPreferences);
     const renderStartedAt = useRef(performance.now());
+    const sectionRef = useRef(section);
     const requestSummary = store.getRequestSummary();
 
+    sectionRef.current = section;
+    renderStartedAt.current = performance.now();
+
     useEffect(() => {
-        const unsubscribeStore = store.subscribe(() => setSnapshot(store.getSnapshot()));
+        let disposed = false;
+        let refreshTimer = 0;
+        const unsubscribeStore = store.subscribe(stream => {
+            if (!shouldRefreshSection(sectionRef.current, stream) || refreshTimer) return;
+
+            refreshTimer = window.setTimeout(() => {
+                refreshTimer = 0;
+                if (!disposed) setSnapshot(store.getSnapshot());
+            }, DIAGNOSTIC_DASHBOARD_REFRESH_MS);
+        });
         const unsubscribePreferences = subscribePtvDiagnosticPreferences(setPreferences);
 
         refreshPtvWebDiagnosticExternalStatus().catch(() => undefined);
 
         return () => {
+            disposed = true;
+            window.clearTimeout(refreshTimer);
             unsubscribeStore();
             unsubscribePreferences();
         };
@@ -632,7 +708,10 @@ export default function PtvDiagnosticsDashboardPage() {
                         <Button
                             aria-current={section === name ? 'page' : undefined}
                             key={name}
-                            onClick={() => setSection(name)}
+                            onClick={() => {
+                                setSnapshot(store.getSnapshot());
+                                setSection(name);
+                            }}
                             size='small'
                             variant={section === name ? 'contained' : 'text'}
                         >

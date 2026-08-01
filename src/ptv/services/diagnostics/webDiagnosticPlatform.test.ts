@@ -35,11 +35,15 @@ vi.mock('../../modules/cache/featuredContentCache', () => ({
 }));
 
 import {
+    bridgePtvDiagnosticObservabilityEvent,
     bridgePtvFocusDiagnosticEvent,
     classifyPtvDiagnosticFocusElement,
+    createPtvImageRemountGuard,
+    createPtvImageLifecycleTracker,
     disposePtvWebDiagnosticPlatformForTests,
     initializePtvWebDiagnosticPlatform,
-    isPtvDiagnosticFocusVisible
+    isPtvDiagnosticFocusVisible,
+    isPtvDiagnosticRouteContentReady
 } from './webDiagnosticPlatform';
 import {
     getPtvDiagnosticStore,
@@ -195,5 +199,90 @@ describe('web diagnostic platform privacy classification', () => {
         scrollTarget.dispatchEvent(new Event('scroll', { bubbles: false }));
 
         expect(getSnapshot.mock.calls.length - baselineCallCount).toBe(1);
+    });
+
+    it('records one image request and terminal event per element/source generation', () => {
+        let now = 10;
+        const tracker = createPtvImageLifecycleTracker(() => now++);
+        const image = document.createElement('img');
+
+        image.setAttribute('src', '/logo.png');
+        expect(tracker.begin(image)).toMatchObject({ terminal: false });
+        expect(tracker.begin(image)).toBeNull();
+        expect(tracker.complete(image)).toMatchObject({ terminal: true });
+        expect(tracker.complete(image)).toBeNull();
+
+        image.setAttribute('src', '/logo-next.png');
+        expect(tracker.begin(image)).toMatchObject({ terminal: false });
+        tracker.forget(image);
+        expect(tracker.begin(image)).toMatchObject({ terminal: false });
+    });
+
+    it('suppresses an unchanged diagnostic image remounted in the same scope', () => {
+        const guard = createPtvImageRemountGuard();
+        const first = document.createElement('img');
+        const replacement = document.createElement('img');
+        first.setAttribute('src', '/logo.png');
+        replacement.setAttribute('src', '/logo.png');
+
+        expect(guard.shouldRecord('diagnostics', first)).toBe(true);
+        expect(guard.shouldRecord('diagnostics', replacement)).toBe(false);
+
+        replacement.setAttribute('src', '/logo-next.png');
+        expect(guard.shouldRecord('diagnostics', replacement)).toBe(true);
+        expect(guard.shouldRecord('another-route', first)).toBe(true);
+    });
+
+    it('does not settle while route-critical or visible shelf work is pending', () => {
+        const host = document.createElement('main');
+        const shelf = document.createElement('section');
+
+        shelf.dataset.ptvRowMounted = 'true';
+        shelf.getBoundingClientRect = vi.fn(() => ({
+            bottom: 300,
+            height: 200,
+            left: 0,
+            right: 800,
+            toJSON: () => ({}),
+            top: 100,
+            width: 800,
+            x: 0,
+            y: 100
+        }));
+        host.appendChild(shelf);
+        document.body.appendChild(host);
+
+        expect(isPtvDiagnosticRouteContentReady(host)).toBe(false);
+        shelf.dataset.ptvRowResumed = 'true';
+        expect(isPtvDiagnosticRouteContentReady(host)).toBe(true);
+        host.dataset.ptvRouteCriticalPending = 'true';
+        expect(isPtvDiagnosticRouteContentReady(host)).toBe(false);
+    });
+
+    it('classifies partial recommendation source failure as a bounded fallback', () => {
+        bridgePtvDiagnosticObservabilityEvent({
+            at: Date.now(),
+            detail: {
+                candidateCount: 4,
+                durationMs: 7460,
+                sourceFailures: [ { source: 'history' } ],
+                sourceTimings: [
+                    { source: 'favorites', status: 'success' },
+                    { source: 'history', status: 'failed' }
+                ]
+            },
+            durationMs: 7460,
+            kind: 'timing',
+            name: 'recommendation-provider-loaded',
+            type: 'recommendation'
+        });
+
+        expect(getPtvDiagnosticStore().getSnapshot().recommendations).toMatchObject({
+            active: false,
+            health: { status: 'healthy' },
+            lastErrorCategory: 'source-partial',
+            runDurationMs: 7460,
+            sourceCount: 2
+        });
     });
 });

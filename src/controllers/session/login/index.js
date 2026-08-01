@@ -3,6 +3,7 @@ import markdownIt from 'markdown-it';
 
 import { AppFeature } from 'constants/appFeature';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { appRouter } from '../../../components/router/appRouter';
 
 import { appHost } from '../../../components/apphost';
 import appSettings from '../../../scripts/settings/appSettings';
@@ -20,18 +21,23 @@ import dialogHelper from '../../../components/dialogHelper/dialogHelper';
 import baseAlert from '../../../components/alert';
 import { getDefaultBackgroundClass } from '../../../components/cardbuilder/cardBuilderUtils';
 import { enhanceLoginPage } from '../../../ptv/modules/login';
+import {
+    createPtvPostLoginNavigationGuard,
+    getPtvPostLoginRouteWithHashFallback,
+    PTV_CURRENT_SETTINGS_REDIRECT
+} from '../../../ptv/shell/authenticationRoutes';
 
 import './login.scss';
 
 const enableFocusTransform = !browser.slow && !browser.edge;
 
-function authenticateUserByName(page, apiClient, url, username, password) {
+function authenticateUserByName(page, apiClient, url, username, password, commitNavigation) {
     loading.show();
     apiClient.authenticateUserByName(username, password).then(function (result) {
         const user = result.User;
         loading.hide();
 
-        onLoginSuccessful(user.Id, result.AccessToken, apiClient, url);
+        onLoginSuccessful(user.Id, result.AccessToken, apiClient, url, commitNavigation);
     }, function (response) {
         page.querySelector('#txtManualPassword').value = '';
         loading.hide();
@@ -49,7 +55,7 @@ function authenticateUserByName(page, apiClient, url, username, password) {
     });
 }
 
-function authenticateQuickConnect(apiClient, targetUrl) {
+function authenticateQuickConnect(apiClient, targetUrl, commitNavigation) {
     const url = apiClient.getUrl('/QuickConnect/Initiate');
     apiClient.ajax({ type: 'POST', url }, true).then(res => res.json()).then(function (json) {
         if (!json.Secret || !json.Code) {
@@ -82,7 +88,7 @@ function authenticateQuickConnect(apiClient, targetUrl) {
                 }
 
                 const result = await apiClient.quickConnect(data.Secret);
-                onLoginSuccessful(result.User.Id, result.AccessToken, apiClient, targetUrl);
+                onLoginSuccessful(result.User.Id, result.AccessToken, apiClient, targetUrl, commitNavigation);
             }, function (e) {
                 clearInterval(interval);
 
@@ -113,9 +119,11 @@ function authenticateQuickConnect(apiClient, targetUrl) {
     });
 }
 
-function onLoginSuccessful(id, accessToken, apiClient, url) {
-    Dashboard.onServerChanged(id, accessToken, apiClient);
-    Dashboard.navigate(url || 'home');
+function onLoginSuccessful(id, accessToken, apiClient, url, commitNavigation) {
+    commitNavigation(() => {
+        Dashboard.onServerChanged(id, accessToken, apiClient);
+        return appRouter.replace(url || 'home');
+    });
 }
 
 function showManualForm(context, showCancel, focusPassword) {
@@ -186,6 +194,7 @@ function loadUserList(context, apiClient, users) {
 }
 
 export default function (view, params) {
+    const commitPostLoginNavigation = createPtvPostLoginNavigationGuard();
     function getApiClient() {
         const serverId = params.serverid;
 
@@ -197,15 +206,13 @@ export default function (view, params) {
     }
 
     function getTargetUrl() {
-        if (params.url) {
-            try {
-                return decodeURIComponent(params.url);
-            } catch (err) {
-                console.warn('[LoginPage] unable to decode url param', params.url, err);
+        return getPtvPostLoginRouteWithHashFallback(
+            params.url,
+            globalThis.location?.hash,
+            {
+                allowCurrentSettings: params.ptvredirect === PTV_CURRENT_SETTINGS_REDIRECT
             }
-        }
-
-        return '/home';
+        );
     }
 
     function showVisualForm() {
@@ -233,7 +240,7 @@ export default function (view, params) {
                 context.querySelector('#txtManualName').value = '';
                 showManualForm(context, true);
             } else if (haspw == 'false') {
-                authenticateUserByName(context, getApiClient(), getTargetUrl(), name, '');
+                authenticateUserByName(context, getApiClient(), getTargetUrl(), name, '', commitPostLoginNavigation);
             } else {
                 context.querySelector('#txtManualName').value = name;
                 context.querySelector('#txtManualPassword').value = '';
@@ -243,7 +250,7 @@ export default function (view, params) {
     });
     view.querySelector('.manualLoginForm').addEventListener('submit', function (e) {
         appSettings.enableAutoLogin(view.querySelector('.chkRememberLogin').checked);
-        authenticateUserByName(view, getApiClient(), getTargetUrl(), view.querySelector('#txtManualName').value, view.querySelector('#txtManualPassword').value);
+        authenticateUserByName(view, getApiClient(), getTargetUrl(), view.querySelector('#txtManualName').value, view.querySelector('#txtManualPassword').value, commitPostLoginNavigation);
         e.preventDefault();
         return false;
     });
@@ -252,7 +259,7 @@ export default function (view, params) {
     });
     view.querySelector('.btnCancel').addEventListener('click', showVisualForm);
     view.querySelector('.btnQuick').addEventListener('click', function () {
-        authenticateQuickConnect(getApiClient(), getTargetUrl());
+        authenticateQuickConnect(getApiClient(), getTargetUrl(), commitPostLoginNavigation);
         return false;
     });
     view.querySelector('.btnManual').addEventListener('click', function () {

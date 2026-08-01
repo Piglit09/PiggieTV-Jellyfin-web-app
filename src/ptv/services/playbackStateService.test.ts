@@ -9,6 +9,8 @@ const playbackMocks = vi.hoisted(() => ({
     eventOn: vi.fn(),
     eventHandlers: new Map<string, () => void>(),
     incrementCounter: vi.fn(),
+    mediaSessionUpdate: vi.fn(),
+    openMusicQueue: vi.fn(),
     pauseMusic: vi.fn(async () => undefined),
     playbackCommandHandler: null as ((command: string) => boolean) | null,
     playbackCommandUnregister: vi.fn(),
@@ -22,6 +24,10 @@ vi.mock('../../scripts/inputManager', () => ({
         playbackMocks.playbackCommandHandler = handler;
         return playbackMocks.playbackCommandUnregister;
     })
+}));
+
+vi.mock('../../apps/stable/features/playback/utils/mediaSessionSubscriber', () => ({
+    updatePtvExternalMediaSession: playbackMocks.mediaSessionUpdate
 }));
 
 vi.mock('../../components/playback/playbackmanager', () => ({
@@ -56,8 +62,10 @@ vi.mock('../core/observability', () => ({
 vi.mock('../modules/music/musicQueue', () => ({
     nextPtvMusicTrack: vi.fn(),
     openPtvMusicPlayer: vi.fn(),
+    openPtvMusicQueuePanel: playbackMocks.openMusicQueue,
     pausePtvMusicPlayback: playbackMocks.pauseMusic,
     previousPtvMusicTrack: vi.fn(),
+    seekPtvMusicPercent: vi.fn(),
     stopPtvMusicPlayback: vi.fn(),
     subscribeToPtvMusicQueue: vi.fn((listener: (snapshot: PtvMusicQueueSnapshot) => void) => {
         playbackMocks.queueListener = listener;
@@ -76,6 +84,7 @@ vi.mock('./performanceMonitor', () => ({
 import {
     disposePtvPlaybackStateServiceForTests,
     getPtvGlobalPlaybackState,
+    openPtvGlobalPlaybackQueue,
     startPtvPlaybackStateService
 } from './playbackStateService';
 
@@ -94,10 +103,16 @@ function createMusicSnapshot(
         isShuffled: false,
         playlist: currentItem ? [currentItem] : [],
         positionTicks: 0,
+        queueSourceLabel: 'Active session',
         repeatMode: 'RepeatNone',
         runtimeTicks: currentItem?.RunTimeTicks || 0,
         volumeLevel: 50
     };
+}
+
+async function startPlaybackStateServiceWithMusicOwner() {
+    startPtvPlaybackStateService();
+    await vi.dynamicImportSettled();
 }
 
 describe('global playback state reconciliation', () => {
@@ -110,7 +125,9 @@ describe('global playback state reconciliation', () => {
         });
         playbackMocks.eventHandlers.clear();
         playbackMocks.incrementCounter.mockClear();
+        playbackMocks.mediaSessionUpdate.mockClear();
         playbackMocks.pauseMusic.mockClear();
+        playbackMocks.openMusicQueue.mockClear();
         playbackMocks.playbackCommandHandler = null;
         playbackMocks.playbackCommandUnregister.mockClear();
         playbackMocks.queueUnsubscribe.mockClear();
@@ -126,10 +143,10 @@ describe('global playback state reconciliation', () => {
         vi.useRealTimers();
     });
 
-    it('uses queue events as authoritative and retires global playback listeners', () => {
+    it('uses queue events as authoritative and retires global playback listeners', async () => {
         const intervalSpy = vi.spyOn(window, 'setInterval');
 
-        startPtvPlaybackStateService();
+        await startPlaybackStateServiceWithMusicOwner();
         expect(intervalSpy).not.toHaveBeenCalled();
         expect(playbackMocks.eventOn).toHaveBeenCalledTimes(5);
 
@@ -161,7 +178,7 @@ describe('global playback state reconciliation', () => {
         expect(playbackMocks.eventOff).toHaveBeenCalledTimes(5);
     });
 
-    it('routes hardware play and pause through the existing input owner exactly once for PTV music', () => {
+    it('routes hardware play and pause through the existing input owner exactly once for PTV music', async () => {
         const track = {
             Id: 'track',
             MediaType: 'Audio',
@@ -170,16 +187,19 @@ describe('global playback state reconciliation', () => {
             Type: 'Audio'
         };
 
-        startPtvPlaybackStateService();
+        await startPlaybackStateServiceWithMusicOwner();
         playbackMocks.queueListener?.(createMusicSnapshot(track, true));
         playbackMocks.playbackCommandHandler?.('pause');
+        await Promise.resolve();
         expect(playbackMocks.toggleMusic).toHaveBeenCalledTimes(1);
 
         playbackMocks.queueListener?.(createMusicSnapshot(track, false));
         playbackMocks.playbackCommandHandler?.('play');
+        await Promise.resolve();
         expect(playbackMocks.toggleMusic).toHaveBeenCalledTimes(2);
 
         playbackMocks.playbackCommandHandler?.('play');
+        await Promise.resolve();
         expect(playbackMocks.toggleMusic).toHaveBeenCalledTimes(3);
 
         playbackMocks.queueListener?.(createMusicSnapshot(track, true));
@@ -187,8 +207,8 @@ describe('global playback state reconciliation', () => {
         expect(playbackMocks.toggleMusic).toHaveBeenCalledTimes(3);
     });
 
-    it('classifies the authoritative PTV music queue as audio when Jellyfin metadata is incomplete', () => {
-        startPtvPlaybackStateService();
+    it('classifies the authoritative PTV music queue as audio when Jellyfin metadata is incomplete', async () => {
+        await startPlaybackStateServiceWithMusicOwner();
         playbackMocks.queueListener?.(createMusicSnapshot({
             Id: 'album-shaped-audio',
             Name: 'Queue item',
@@ -205,10 +225,50 @@ describe('global playback state reconciliation', () => {
         });
     });
 
-    it('polls only while a Jellyfin playback source is active', () => {
+    it('projects the existing queue source and favorite state and opens that queue owner', async () => {
+        await startPlaybackStateServiceWithMusicOwner();
+        const snapshot = createMusicSnapshot({
+            Id: 'track',
+            MediaType: 'Audio',
+            Name: 'Track',
+            Type: 'Audio',
+            UserData: {
+                IsFavorite: true
+            }
+        }, false);
+
+        playbackMocks.queueListener?.({
+            ...snapshot,
+            queueSourceLabel: 'Artist Mix'
+        });
+
+        const state = getPtvGlobalPlaybackState();
+
+        expect(state).toMatchObject({
+            isFavorite: true,
+            queueLength: 1,
+            queueSourceLabel: 'Artist Mix'
+        });
+        openPtvGlobalPlaybackQueue(state);
+        await vi.dynamicImportSettled();
+        expect(playbackMocks.openMusicQueue).toHaveBeenCalledWith('global-media-dock');
+        expect(playbackMocks.mediaSessionUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                active: true,
+                name: 'Track',
+                paused: true
+            }),
+            expect.objectContaining({
+                next: expect.any(Function),
+                seekTo: expect.any(Function)
+            })
+        );
+    });
+
+    it('polls only while a Jellyfin playback source is active', async () => {
         const intervalSpy = vi.spyOn(window, 'setInterval');
 
-        startPtvPlaybackStateService();
+        await startPlaybackStateServiceWithMusicOwner();
         playbackMocks.currentPlayer = {};
         playbackMocks.currentItem = {
             Id: 'video',
@@ -248,7 +308,7 @@ describe('global playback state reconciliation', () => {
             Type: 'Audio'
         };
 
-        startPtvPlaybackStateService();
+        await startPlaybackStateServiceWithMusicOwner();
         playbackMocks.queueListener?.(createMusicSnapshot(track));
         expect(getPtvGlobalPlaybackState()).toMatchObject({
             paused: false,
@@ -258,6 +318,7 @@ describe('global playback state reconciliation', () => {
 
         window.location.hash = '#/video';
         window.dispatchEvent(new HashChangeEvent('hashchange'));
+        await Promise.resolve();
 
         expect(playbackMocks.pauseMusic).toHaveBeenCalledTimes(1);
         expect(playbackMocks.pauseMusic).toHaveBeenCalledWith('playback-route-change');

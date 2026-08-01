@@ -30,6 +30,11 @@ export type PtvRouteControllerState = {
     routeKey: string;
 };
 
+export type PtvRouteGenerationToken = Readonly<{
+    routeGeneration: number;
+    routeKey: string;
+}>;
+
 type PtvRouteLike = {
     features?: string[];
     full?: string;
@@ -527,6 +532,22 @@ export function getPtvRouteControllerState(): PtvRouteControllerState {
     if (currentState?.full === full && !shouldForceRecommendationRoute) return currentState;
 
     return synchronizePtvRouteOwnership();
+}
+
+export function capturePtvRouteGeneration(): PtvRouteGenerationToken {
+    const state = getPtvRouteControllerState();
+
+    return {
+        routeGeneration: state.routeGeneration,
+        routeKey: state.routeKey
+    };
+}
+
+export function isPtvRouteGenerationCurrent(token: PtvRouteGenerationToken) {
+    const state = getPtvRouteControllerState();
+
+    return state.routeGeneration === token.routeGeneration
+        && state.routeKey === token.routeKey;
 }
 
 export function navigatePtvRoute(href: string, options: {

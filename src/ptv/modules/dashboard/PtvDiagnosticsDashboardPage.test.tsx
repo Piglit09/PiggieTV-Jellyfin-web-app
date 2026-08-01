@@ -39,6 +39,7 @@ describe('PTV diagnostics dashboard', () => {
         container.remove();
         resetPtvDiagnosticStoreForTests();
         resetPtvDiagnosticPreferencesForTests();
+        vi.useRealTimers();
     });
 
     it('renders the protected dashboard overview and cleans its store subscription', () => {
@@ -88,5 +89,31 @@ describe('PTV diagnostics dashboard', () => {
         expect(container.textContent).toContain('never emits keys or moves focus');
         expect(container.textContent).toContain('Safe focus graph inspector');
         expect(container.textContent).toContain('Input Timeline');
+    });
+
+    it('coalesces a burst of store events into one bounded snapshot refresh', () => {
+        vi.useFakeTimers();
+        const store = getPtvDiagnosticStore();
+        const getSnapshot = vi.spyOn(store, 'getSnapshot');
+
+        flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
+        const baseline = getSnapshot.mock.calls.length;
+
+        for (let index = 0; index < 25; index += 1) {
+            store.recordImage({
+                cacheClassification: 'browser-managed',
+                decodeDurationMs: null,
+                durationMs: index,
+                fallbackUsed: false,
+                occurredAt: new Date().toISOString(),
+                role: 'logo',
+                routeFamily: 'dashboard/piggietv/diagnostics',
+                status: 'loaded'
+            });
+        }
+
+        expect(getSnapshot.mock.calls.length).toBe(baseline);
+        flushSync(() => vi.advanceTimersByTime(1000));
+        expect(getSnapshot.mock.calls.length).toBe(baseline + 1);
     });
 });

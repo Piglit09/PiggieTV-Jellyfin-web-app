@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+    createPtvPostLoginNavigationGuard,
     getPtvAuthenticationRouteKind,
+    getPtvLoginRedirectDecision,
+    getPtvPostLoginRoute,
+    getPtvPostLoginRouteWithHashFallback,
     isPtvAuthenticationRoute,
     isPtvLoginRoute,
     shouldMountPtvAuthenticatedHeader
@@ -111,5 +115,71 @@ describe('PTV authentication route ownership', () => {
             '#/login',
             '#/home'
         ].map(shouldMountPtvAuthenticatedHeader)).toEqual([true, false, false, true]);
+    });
+
+    it.each([
+        [undefined, '/home'],
+        ['', '/home'],
+        ['/home', '/home'],
+        ['/details?id=item-one', '/details?id=item-one'],
+        ['%2Fmusic%3Ftab%3Dalbums', '/music?tab=albums'],
+        ['/search?query=music', '/search?query=music']
+    ])('resolves the post-login route %s to %s', (target, expected) => {
+        expect(getPtvPostLoginRoute(target)).toBe(expected);
+    });
+
+    it('uses a safe current hash when same-origin login has no redirect parameter', () => {
+        expect(getPtvPostLoginRouteWithHashFallback(
+            undefined,
+            '#/details?id=item-one'
+        )).toBe('/details?id=item-one');
+        expect(getPtvPostLoginRouteWithHashFallback(
+            '/search?query=music',
+            '#/details?id=item-one'
+        )).toBe('/search?query=music');
+        expect(getPtvPostLoginRouteWithHashFallback(
+            undefined,
+            '#/mypreferencesmenu'
+        )).toBe('/home');
+    });
+
+    it.each([
+        '/login',
+        '/logout',
+        '/selectserver',
+        '/queue',
+        '/video',
+        '/dashboard',
+        '/dashboard/piggietv',
+        '/diagnostics',
+        '/definitely-not-a-route',
+        'https://example.invalid/settings'
+    ])('rejects unsafe, transient, administrative, or invalid target %s', target => {
+        expect(getPtvPostLoginRoute(target)).toBe('/home');
+    });
+
+    it('rejects stale Settings while allowing a Settings request made in the current navigation attempt', () => {
+        expect(getPtvLoginRedirectDecision('/mypreferencesmenu')).toMatchObject({
+            reason: 'rejected-stale-settings',
+            restoresCurrentSettings: false,
+            route: '/home'
+        });
+        expect(getPtvLoginRedirectDecision('/mypreferencesmenu', {
+            explicitCurrentAttempt: true
+        })).toMatchObject({
+            reason: 'explicit-current-settings',
+            restoresCurrentSettings: true,
+            route: '/mypreferencesmenu'
+        });
+    });
+
+    it('commits exactly one post-login navigation across duplicate auth callbacks', () => {
+        const navigate = vi.fn();
+        const commit = createPtvPostLoginNavigationGuard();
+
+        commit(() => navigate('/home'));
+        commit(() => navigate('/mypreferencesmenu'));
+
+        expect(navigate).toHaveBeenCalledExactlyOnceWith('/home');
     });
 });

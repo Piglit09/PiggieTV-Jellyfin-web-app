@@ -1,4 +1,5 @@
 export type PtvAuthenticationRouteKind = 'login' | 'signup';
+export const PTV_CURRENT_SETTINGS_REDIRECT = 'current-settings';
 
 type PtvAuthenticationLocation = string | {
     full?: string;
@@ -25,6 +26,52 @@ const SIGNUP_ROUTE_PATHS = new Set([
     '/signup'
 ]);
 
+const SAFE_CONTENT_ROUTE_PATHS = new Set([
+    '/books',
+    '/comics',
+    '/details',
+    '/home',
+    '/homevideos',
+    '/list',
+    '/livetv',
+    '/maga',
+    '/manga',
+    '/movies',
+    '/music',
+    '/reading',
+    '/recommendations',
+    '/recomendations',
+    '/search',
+    '/tv'
+]);
+
+const TRANSIENT_ROUTE_PATHS = new Set([
+    '/lyrics',
+    '/logout',
+    '/music/player',
+    '/queue',
+    '/video'
+]);
+
+const BLOCKED_ROUTE_PREFIXES = [
+    '/configurationpage',
+    '/dashboard',
+    '/devices',
+    '/diagnostics',
+    '/logs',
+    '/plugins',
+    '/ptv/diagnostics',
+    '/scheduledtasks',
+    '/serveractivity',
+    '/users'
+];
+
+const SETTINGS_ROUTE_PREFIXES = [
+    '/mypreferences',
+    '/settings',
+    '/userprofile'
+];
+
 function decodeRoutePath(value: string): string {
     try {
         return decodeURIComponent(value);
@@ -50,6 +97,121 @@ function normalizeRoutePath(value: string): string {
     const normalized = path.startsWith('/') ? path : `/${path}`;
 
     return normalized.replace(/\.html$/, '');
+}
+
+function matchesRoute(path: string, candidate: string) {
+    return path === candidate || path.startsWith(`${candidate}/`);
+}
+
+function isSettingsRoute(path: string) {
+    return SETTINGS_ROUTE_PREFIXES.some(prefix => (
+        path === prefix || path.startsWith(prefix)
+    ));
+}
+
+function isSafeContentRoute(path: string) {
+    return [...SAFE_CONTENT_ROUTE_PATHS].some(candidate => matchesRoute(path, candidate));
+}
+
+function normalizePostLoginTarget(value?: string | null) {
+    if (!value) return null;
+
+    let decoded = String(value).trim();
+    try {
+        decoded = decodeURIComponent(decoded);
+    } catch {
+        return null;
+    }
+
+    if (
+        !decoded
+        || decoded.includes('\\')
+        || decoded.includes('\0')
+        || /^[a-z][a-z\d+.-]*:/i.test(decoded)
+        || decoded.startsWith('//')
+    ) {
+        return null;
+    }
+
+    const hashIndex = decoded.indexOf('#');
+    if (hashIndex >= 0) decoded = decoded.slice(hashIndex + 1);
+    decoded = decoded.replace(/^!/, '');
+    if (!decoded.startsWith('/')) decoded = `/${decoded}`;
+
+    const queryIndex = decoded.indexOf('?');
+    const rawPath = queryIndex >= 0 ? decoded.slice(0, queryIndex) : decoded;
+    const search = queryIndex >= 0 ? decoded.slice(queryIndex) : '';
+    const path = normalizeRoutePath(rawPath);
+
+    return {
+        full: `${path}${search}`,
+        path
+    };
+}
+
+export function getPtvPostLoginRoute(
+    value?: string | null,
+    options: Readonly<{ allowCurrentSettings?: boolean }> = {}
+) {
+    const target = normalizePostLoginTarget(value);
+
+    if (!target) return '/home';
+    if (target.path === '/home') return target.full;
+    if (isSettingsRoute(target.path)) {
+        return options.allowCurrentSettings ? target.full : '/home';
+    }
+    if (LOGIN_ROUTE_PATHS.has(target.path) || SIGNUP_ROUTE_PATHS.has(target.path)) return '/home';
+    if (TRANSIENT_ROUTE_PATHS.has(target.path)) return '/home';
+    if (BLOCKED_ROUTE_PREFIXES.some(prefix => matchesRoute(target.path, prefix))) return '/home';
+
+    return isSafeContentRoute(target.path) ? target.full : '/home';
+}
+
+export function getPtvPostLoginRouteWithHashFallback(
+    value?: string | null,
+    currentHash?: string | null,
+    options: Readonly<{ allowCurrentSettings?: boolean }> = {}
+) {
+    return getPtvPostLoginRoute(value || currentHash, options);
+}
+
+export function getPtvLoginRedirectDecision(
+    value?: string | null,
+    options: Readonly<{ explicitCurrentAttempt?: boolean }> = {}
+) {
+    const target = normalizePostLoginTarget(value);
+    const restoresCurrentSettings = Boolean(
+        target
+        && isSettingsRoute(target.path)
+        && options.explicitCurrentAttempt
+    );
+    const route = getPtvPostLoginRoute(value, {
+        allowCurrentSettings: restoresCurrentSettings
+    });
+    let reason = 'safe-content-route';
+
+    if (!target) reason = 'invalid-or-empty-route';
+    else if (restoresCurrentSettings) reason = 'explicit-current-settings';
+    else if (isSettingsRoute(target.path)) reason = 'rejected-stale-settings';
+    else if (route === '/home' && target.path !== '/home') reason = 'rejected-protected-or-unknown-route';
+    else if (target.path === '/home') reason = 'home-default';
+
+    return {
+        reason,
+        restoresCurrentSettings,
+        route
+    } as const;
+}
+
+export function createPtvPostLoginNavigationGuard() {
+    let committed = false;
+
+    return <T>(navigate: () => T): T | undefined => {
+        if (committed) return undefined;
+
+        committed = true;
+        return navigate();
+    };
 }
 
 function collectRoutePaths(location: PtvAuthenticationLocation): string[] {
