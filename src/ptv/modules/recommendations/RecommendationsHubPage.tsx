@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import Page from 'components/Page';
 
@@ -6,7 +6,10 @@ import {
     getPtvCurrentUser,
     getPtvItemImageCandidates,
     getPtvItemImageUrl,
-    isPtvAdminUser
+    getPtvServerId,
+    isPtvAdminUser,
+    markPtvImageCandidateFailed,
+    type PtvItemImageCandidate
 } from '../../api';
 import { PTV_ROUTES } from '../../core/config';
 import {
@@ -177,39 +180,88 @@ function getScoreHref(score: PtvRecommendationScore) {
     });
 }
 
-function getScoreImageUrl(score: PtvRecommendationScore) {
-    const candidates = getPtvItemImageCandidates(score.item, {
-        baseOptions: {
-            fillHeight: 360,
-            fillWidth: 240,
-            quality: 88
-        },
-        order: ['Primary', 'ParentPrimary', 'Thumb', 'Backdrop', 'SeriesPrimary']
-    });
-    const tagged = candidates.find(candidate => candidate.tag);
-
-    return tagged?.url
-        || candidates[0]?.url
-        || getPtvItemImageUrl(score.item, {
-            fillHeight: 360,
-            fillWidth: 240,
-            imageType: 'Primary',
-            quality: 88
-        });
-}
-
 function RecommendationCard({ score }: Readonly<{ score: PtvRecommendationScore }>) {
+    const itemId = String(score.item.Id || '');
+    const imageCandidates = useMemo(() => {
+        const serverId = getPtvServerId() || undefined;
+        const order: Array<'Primary' | 'ParentPrimary' | 'Thumb' | 'Backdrop' | 'SeriesPrimary'> = [
+            'Primary',
+            'ParentPrimary',
+            'Thumb',
+            'Backdrop',
+            'SeriesPrimary'
+        ];
+        const candidates: PtvItemImageCandidate[] = getPtvItemImageCandidates(score.item, {
+            baseOptions: {
+                fillHeight: 360,
+                fillWidth: 240,
+                quality: 88,
+                serverId
+            },
+            order
+        });
+        const usedUrls = new Set(candidates.map(candidate => candidate.url));
+
+        for (const imageType of order) {
+            const candidate = imageType === 'Backdrop' ? {
+                imageItemId: String(score.item.Id || ''),
+                imageType,
+                requestedType: 'Backdrop',
+                tag: '',
+                tagMode: 'fallback-without-tag',
+                url: getPtvItemImageUrl(score.item, {
+                    fillHeight: 360,
+                    fillWidth: 240,
+                    imageIndex: 0,
+                    imageType,
+                    quality: 88,
+                    serverId
+                })
+            } : {
+                imageItemId: String(score.item.Id || ''),
+                imageType,
+                requestedType: imageType,
+                tag: '',
+                tagMode: 'fallback-without-tag',
+                url: getPtvItemImageUrl(score.item, {
+                    fillHeight: 360,
+                    fillWidth: 240,
+                    imageType,
+                    quality: 88,
+                    serverId
+                })
+            };
+
+            if (candidate.url && !usedUrls.has(candidate.url) && itemId) {
+                candidates.push(candidate);
+                usedUrls.add(candidate.url);
+            }
+        }
+
+        return candidates;
+    }, [ score.item, itemId ]);
+    const [imageAttemptIndex, setImageAttemptIndex] = useState(0);
+    const imageCandidate = imageCandidates[imageAttemptIndex];
+    const handleImageError = useCallback(() => {
+        if (!imageCandidate) return;
+
+        markPtvImageCandidateFailed(imageCandidate);
+        setImageAttemptIndex(previous => previous + 1);
+    }, [imageCandidate]);
+    useEffect(() => {
+        setImageAttemptIndex(0);
+    }, [itemId, score.item]);
+    const imageUrl = imageCandidate?.url || '';
     const title = getRecommendationTitle(score.item);
-    const imageUrl = getScoreImageUrl(score);
     const reasons = score.reasons.map(reason => reason.label).slice(0, 3).join(', ');
     const route = getScoreHref(score);
-    const handleClick = () => {
+    const handleClick = useCallback(() => {
         recordPtvItemRouteClick(score.item, route, {
             action: 'open-card',
             mediaType: score.mediaType,
             source: 'recommendations-hub'
         });
-    };
+    }, [score.item, route, score.mediaType]);
 
     return (
         <a
@@ -220,7 +272,14 @@ function RecommendationCard({ score }: Readonly<{ score: PtvRecommendationScore 
             onClick={handleClick}
         >
             <span className='ptv-recommendations-card-art'>
-                {imageUrl ? <img alt='' loading='lazy' src={imageUrl} /> : <span>{title.slice(0, 1)}</span>}
+                {imageUrl ? (
+                    <img
+                        alt=''
+                        loading='lazy'
+                        src={imageUrl}
+                        onError={handleImageError}
+                    />
+                ) : <span>{title.slice(0, 1)}</span>}
             </span>
             <strong>{title}</strong>
             <small>{getMediaTypeLabel(score.mediaType)} - Score {Math.round(score.score)}</small>
@@ -236,7 +295,6 @@ function RecommendationRowView({ row }: Readonly<{ row: PtvRecommendationRow }>)
                 <div>
                     <p>{getMediaTypeLabel(row.mediaType)}</p>
                     <h3>{row.title}</h3>
-                    <span>{row.explanation}</span>
                 </div>
             </div>
             <div className='ptv-recommendations-rail'>

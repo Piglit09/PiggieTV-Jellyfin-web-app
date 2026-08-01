@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import {
+    afterEach,
+    describe,
+    expect,
+    it,
+    vi
+} from 'vitest';
 
 vi.mock('lib/jellyfin-apiclient', () => ({
     ServerConnections: {
@@ -16,8 +22,31 @@ vi.mock('../../api', () => ({
     isPtvAdminUser: () => false
 }));
 
-import { dedupeNativeHomeItems, getNativeHomeItemVersionKey } from './hooks';
+import {
+    createNativeRowFetch,
+    dedupeNativeHomeItems,
+    getNativeHomeItemVersionKey
+} from './hooks';
+import { createPtvAbortController } from '../../core/abortController';
 import { resolveNativeHomeDerivedRowSourceValue } from './rowSourceValue';
+
+function createAbortableHomeTask(captureSignal: (signal: AbortSignal) => void) {
+    return (signal: AbortSignal) => {
+        captureSignal(signal);
+
+        return new Promise<string>((_resolve, reject) => {
+            signal.addEventListener('abort', () => {
+                const error = new Error('aborted');
+                error.name = 'AbortError';
+                reject(error);
+            }, { once: true });
+        });
+    };
+}
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 describe('resolveNativeHomeDerivedRowSourceValue', () => {
     it('keeps expanded genre titles paired with their derived source values', () => {
@@ -82,5 +111,41 @@ describe('native home item dedupe', () => {
         };
 
         expect(dedupeNativeHomeItems([firstMovie, secondMovie])).toHaveLength(2);
+    });
+});
+
+describe('native home route-owned requests', () => {
+    it('aborts the transport and returns the bounded fallback at the hard deadline', async () => {
+        vi.useFakeTimers();
+        const onTimeout = vi.fn();
+        let transportSignal: AbortSignal | undefined;
+        const request = createNativeRowFetch('slow-home-row', createAbortableHomeTask(signal => {
+            transportSignal = signal;
+        }), 'fallback', {
+            onTimeout,
+            timeoutMs: 50
+        });
+
+        await vi.advanceTimersByTimeAsync(50);
+
+        await expect(request).resolves.toBe('fallback');
+        expect(transportSignal?.aborted).toBe(true);
+        expect(onTimeout).toHaveBeenCalledWith('slow-home-row');
+    });
+
+    it('retires a pending row immediately when the route owner leaves', async () => {
+        const routeController = createPtvAbortController();
+        let transportSignal: AbortSignal | undefined;
+        const request = createNativeRowFetch('leaving-home-row', signal => {
+            transportSignal = signal;
+            return new Promise<string>(() => undefined);
+        }, 'retired', {
+            signal: routeController.signal
+        });
+
+        routeController.abort();
+
+        await expect(request).resolves.toBe('retired');
+        expect(transportSignal?.aborted).toBe(true);
     });
 });

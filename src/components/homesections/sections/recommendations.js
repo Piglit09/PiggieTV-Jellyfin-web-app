@@ -3,6 +3,8 @@ import escapeHtml from 'escape-html';
 import cardBuilder from 'components/cardbuilder/cardBuilder';
 import imageLoader from 'components/images/imageLoader';
 import globalize from 'lib/globalize';
+import { recordPtvEvent } from 'ptv/core/observability';
+import { runBoundedHomeWork } from 'ptv/pages/home/homeWorkPlan';
 import { getBackdropShape } from 'utils/card';
 
 const BECAUSE_SECTION_COUNT = 3;
@@ -10,6 +12,9 @@ const GENRE_SECTION_COUNT = 3;
 const MIN_ITEMS_PER_SECTION = 3;
 const SECTION_ITEM_LIMIT = 14;
 const REQUEST_SECTION_LIMIT = 16;
+const DEFERRED_RECOMMENDATION_DELAY_MS = 250;
+const recommendationRuns = new WeakMap();
+let recommendationGeneration = 0;
 const RELATED_RECOMMENDATION_TYPES = new Set([
     'SimilarToRecentlyPlayed',
     'SimilarToLikedItem',
@@ -239,7 +244,11 @@ function loadGenreItems(apiClient, userId, genre) {
 
 function loadGenreSections(apiClient, userId) {
     return loadCandidateGenres(apiClient, userId)
-        .then(genres => Promise.all(genres.map(genre => loadGenreItems(apiClient, userId, genre))))
+        .then(genres => runBoundedHomeWork(
+            genres,
+            2,
+            genre => loadGenreItems(apiClient, userId, genre)
+        ))
         .then(sections => sections.filter(section => section.items.length >= MIN_ITEMS_PER_SECTION));
 }
 
@@ -261,50 +270,146 @@ function loadRequestSection(apiClient, userId) {
                 title: 'My Requests',
                 items: requestItems
             };
-        })
-        .catch(() => null);
+        });
+}
+
+function renderRecommendationSections(elem, sections, options) {
+    const html = sections
+        .map(section => getSectionHtml(section, options))
+        .filter(Boolean)
+        .join('');
+
+    elem.innerHTML = html;
+    elem.classList.toggle('hide', !html);
+
+    if (html) imageLoader.lazyChildren(elem);
+}
+
+function retireRecommendationRun(elem, run) {
+    if (run.cancelled) return;
+
+    run.cancelled = true;
+    if (run.timer) window.clearTimeout(run.timer);
+    window.removeEventListener('hashchange', run.retire);
+
+    if (recommendationRuns.get(elem) === run) {
+        recommendationRuns.delete(elem);
+        delete elem.dataset.ptvRouteCriticalPending;
+    }
+}
+
+function createRecommendationRun(elem) {
+    const previous = recommendationRuns.get(elem);
+
+    if (previous) retireRecommendationRun(elem, previous);
+
+    const run = {
+        cancelled: false,
+        generation: ++recommendationGeneration,
+        retire: null,
+        timer: 0
+    };
+
+    run.retire = () => retireRecommendationRun(elem, run);
+    recommendationRuns.set(elem, run);
+    window.addEventListener('hashchange', run.retire);
+
+    return run;
+}
+
+function isCurrentRecommendationRun(elem, run) {
+    return !run.cancelled && elem.isConnected && recommendationRuns.get(elem) === run;
 }
 
 export function loadRecommendations(elem, apiClient, user, options) {
     if (!elem) return Promise.resolve();
 
     const userId = user.Id || apiClient.getCurrentUserId();
+    const run = createRecommendationRun(elem);
+    const startedAt = performance.now();
+    let criticalFailures = 0;
 
     elem.classList.add('ptvRecommendationsMount');
     elem.classList.add('hide');
+    elem.dataset.ptvRouteCriticalPending = 'true';
+    recordPtvEvent('recommendation', 'movies-recommendation-generation-started', {
+        generation: run.generation,
+        sourceCount: 3
+    });
 
     return Promise.all([
-        loadRequestSection(apiClient, userId),
-        loadBecauseYouWatchedSections(apiClient, userId),
-        loadGenreSections(apiClient, userId)
+        loadRequestSection(apiClient, userId).catch(() => {
+            criticalFailures += 1;
+            recordPtvEvent('recommendation', 'movies-recommendation-source-failed', {
+                failureCategory: 'request-source',
+                sourceCount: 1
+            });
+            return null;
+        }),
+        loadBecauseYouWatchedSections(apiClient, userId).catch(() => {
+            criticalFailures += 1;
+            recordPtvEvent('recommendation', 'movies-recommendation-source-failed', {
+                failureCategory: 'related-source',
+                sourceCount: 1
+            });
+            return [];
+        })
     ])
-        .then(([requestSection, becauseSections, genreSections]) => {
-            const sections = [
+        .then(([requestSection, becauseSections]) => {
+            if (!isCurrentRecommendationRun(elem, run)) return;
+
+            const criticalSections = [
                 ...(requestSection ? [requestSection] : []),
-                ...shuffle([
-                    ...becauseSections.slice(0, BECAUSE_SECTION_COUNT),
-                    ...genreSections.slice(0, GENRE_SECTION_COUNT)
-                ])
+                ...becauseSections.slice(0, BECAUSE_SECTION_COUNT)
             ];
 
-            const html = sections
-                .map(section => getSectionHtml(section, options))
-                .filter(Boolean)
-                .join('');
+            renderRecommendationSections(elem, criticalSections, options);
+            delete elem.dataset.ptvRouteCriticalPending;
+            recordPtvEvent('recommendation', 'movies-recommendation-critical-completed', {
+                durationMs: Math.round(performance.now() - startedAt),
+                failedSourceCount: criticalFailures,
+                generatedRows: criticalSections.length,
+                sourceCount: 2
+            });
 
-            if (!html) {
-                elem.innerHTML = '';
-                elem.classList.add('hide');
-                return;
-            }
+            run.timer = window.setTimeout(() => {
+                run.timer = 0;
+                if (!isCurrentRecommendationRun(elem, run)) return;
 
-            elem.innerHTML = html;
-            elem.classList.remove('hide');
-            imageLoader.lazyChildren(elem);
-        })
-        .catch(err => {
-            console.warn('[PTV Home] Failed loading recommendations', err);
-            elem.innerHTML = '';
-            elem.classList.add('hide');
+                const deferredStartedAt = performance.now();
+
+                void loadGenreSections(apiClient, userId)
+                    .then(genreSections => {
+                        if (!isCurrentRecommendationRun(elem, run)) return;
+
+                        const sections = [
+                            ...criticalSections,
+                            ...genreSections.slice(0, GENRE_SECTION_COUNT)
+                        ];
+
+                        renderRecommendationSections(elem, sections, options);
+                        recordPtvEvent('recommendation', 'movies-recommendation-generation-completed', {
+                            clientProcessingMs: Math.round(performance.now() - deferredStartedAt),
+                            failedSourceCount: criticalFailures,
+                            generatedRows: sections.length,
+                            sourceCount: 3
+                        });
+                        retireRecommendationRun(elem, run);
+                    })
+                    .catch(() => {
+                        if (!isCurrentRecommendationRun(elem, run)) return;
+
+                        recordPtvEvent('recommendation', 'movies-recommendation-source-failed', {
+                            failureCategory: 'genre-source',
+                            sourceCount: 1
+                        });
+                        recordPtvEvent('recommendation', 'movies-recommendation-generation-completed', {
+                            failedSourceCount: criticalFailures + 1,
+                            generatedRows: criticalSections.length,
+                            sourceCount: 3
+                        });
+                        retireRecommendationRun(elem, run);
+                    });
+            }, DEFERRED_RECOMMENDATION_DELAY_MS);
         });
 }

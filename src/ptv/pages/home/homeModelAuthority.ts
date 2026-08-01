@@ -1,6 +1,9 @@
 import type { FeaturedContentCompleteness } from '../../modules/cache/featuredContentSemantics';
 
-type HomeModelRowLike = { items?: unknown[] };
+type HomeModelRowLike = {
+    id?: string;
+    items?: unknown[];
+};
 
 export type NativeHomeModelLike = {
     completeness?: FeaturedContentCompleteness;
@@ -9,6 +12,43 @@ export type NativeHomeModelLike = {
     rows?: HomeModelRowLike[];
     sectionCount?: number;
 };
+
+function hasPopulatedHomeRow(row: HomeModelRowLike | undefined) {
+    return Boolean(row && Array.isArray(row.items) && row.items.length);
+}
+
+/**
+ * Background Home work is additive. Once a shelf has visible content, a late
+ * partial model may update it, but it may not erase it by omitting the row or
+ * returning an empty/failed equivalent.
+ */
+export function mergeSettledNativeHomeRows<TRow extends HomeModelRowLike>(
+    currentRows: readonly TRow[],
+    incomingRows: readonly TRow[]
+): TRow[] {
+    const currentById = new Map(
+        currentRows
+            .filter(row => row.id)
+            .map(row => [row.id as string, row])
+    );
+    const incomingIds = new Set<string>();
+    const merged = incomingRows.map(row => {
+        if (!row.id) return row;
+
+        incomingIds.add(row.id);
+        const current = currentById.get(row.id);
+
+        return current && hasPopulatedHomeRow(current) && !hasPopulatedHomeRow(row) ? current : row;
+    });
+
+    for (const row of currentRows) {
+        if (row.id && !incomingIds.has(row.id) && hasPopulatedHomeRow(row)) {
+            merged.push(row);
+        }
+    }
+
+    return merged;
+}
 
 export function summarizeNativeHomeModel(model: NativeHomeModelLike) {
     const rows = Array.isArray(model.rows) ? model.rows : [];

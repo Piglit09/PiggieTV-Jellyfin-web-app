@@ -24,6 +24,10 @@ import { getPtvQualityTags } from 'ptv/modules/cards/qualityTags';
 import { loadSharedHeroItems } from 'ptv/modules/hero/useHeroItems';
 import { getBackdropShape, getPortraitShape, getSquareShape } from 'utils/card';
 import {
+    getProgressiveHomeRowPlan,
+    runBoundedHomeWork
+} from './homeWorkPlan';
+import {
     isAnimeItem,
     isFamilyAnimationItem,
     mediaBrandMatchers
@@ -1633,37 +1637,17 @@ function fetchSectionItems(currentApiClient, userId, row, lookupMaps, userViews,
         ]);
 }
 
-function mapWithConcurrency(items, concurrency, mapper) {
-    const results = new Array(items.length);
-    let nextIndex = 0;
-
-    function runNext() {
-        const index = nextIndex;
-        nextIndex++;
-
-        if (index >= items.length) {
-            return Promise.resolve();
-        }
-
-        return Promise.resolve(mapper(items[index], index))
-            .then(result => {
-                results[index] = result;
-            })
-            .then(runNext);
-    }
-
-    const workerCount = Math.max(1, Math.min(concurrency || items.length || 1, items.length || 1));
-    const workers = Array.from({ length: workerCount }, () => runNext());
-
-    return Promise.all(workers).then(() => results);
-}
-
 export function createFeaturedContentFetcher(apiClient, userId, rows, lookupMaps, userViews, options = {}) {
     const serverId = apiClient.serverId();
     const performanceProfile = getHomePerformanceProfile(options);
     const contentRows = rows
         .filter(row => row.type !== 'libraries' && row.type !== 'continue' && !row.userScoped)
         .slice(0, performanceProfile.featuredRowLimit || rows.length);
+    const { criticalRows, deferredRows } = getProgressiveHomeRowPlan(
+        contentRows,
+        performanceProfile.homeInitialRowCount || 4
+    );
+    const fetchConcurrency = Math.min(2, performanceProfile.featuredFetchConcurrency || 2);
 
     return function () {
         const currentApiClient = ServerConnections.getApiClient(serverId) || apiClient;
@@ -1673,7 +1657,7 @@ export function createFeaturedContentFetcher(apiClient, userId, rows, lookupMaps
             'featured-content-batch',
             () => Promise.all([
                 loadSharedHeroItems(currentApiClient, userId).catch(() => []),
-                mapWithConcurrency(contentRows, performanceProfile.featuredFetchConcurrency, row =>
+                runBoundedHomeWork(criticalRows, fetchConcurrency, row =>
                     fetchSectionItems(currentApiClient, userId, row, lookupMaps, userViews, options)
                         .catch(() => [
                             row.id,
@@ -1707,7 +1691,9 @@ export function createFeaturedContentFetcher(apiClient, userId, rows, lookupMaps
                     sectionItems
                 })),
             {
+                deferredRows: deferredRows.length,
                 renderProfile: performanceProfile.renderProfile?.id,
+                routeCriticalRows: criticalRows.length,
                 rows: contentRows.length
             }
         );

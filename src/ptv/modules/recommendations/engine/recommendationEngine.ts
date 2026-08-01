@@ -17,6 +17,11 @@ import { getPtvRecommendationDataBundle } from '../providers/jellyfinRecommendat
 import { buildPtvRecommendationDebugReport } from '../debug/recommendationDebug';
 import { buildPtvRecommendationMixes, buildPtvRecommendationRowsWithQuality } from '../rows/recommendationRows';
 import { getPtvRecommendationScoreModel, scorePtvRecommendationCandidates } from '../scoring/scoringModel';
+import {
+    filterAndDedupePtvRecommendationRows,
+    filterPtvRecommendationCandidates,
+    getPtvAdjacentRecommendationRowOverlapPercentage
+} from '../feedback/recommendationFeedback';
 import type {
     PtvRecommendationDashboardData,
     PtvRecommendationDataBundle,
@@ -63,7 +68,38 @@ function assertCanRunRecommendationGeneration() {
 }
 
 function getCurrentCacheKey(includeHomeScans = false) {
-    return `${getPtvServerId() || 'server'}:${getPtvCurrentUserId() || 'user'}:${includeHomeScans ? 'home-scans' : 'primary-sources'}`;
+    const serverId = String(getPtvServerId() || '').trim();
+    const userId = String(getPtvCurrentUserId() || '').trim();
+
+    if (!serverId || !userId) {
+        throw new Error('Recommendation caching requires an authenticated server user.');
+    }
+
+    return `${serverId}:${userId}:${includeHomeScans ? 'home-scans' : 'primary-sources'}`;
+}
+
+export function invalidatePtvRecommendationCache(scope: {
+    serverId?: string | null;
+    userId?: string | null;
+} = {}) {
+    const serverId = String(scope.serverId || getPtvServerId() || '').trim();
+    const userId = String(scope.userId || getPtvCurrentUserId() || '').trim();
+
+    if (!serverId || !userId) return 0;
+
+    const cachePrefix = `${serverId}:${userId}:`;
+    let invalidatedEntries = 0;
+
+    [dashboardCache, homeCache].forEach(cache => {
+        [...cache.keys()].forEach(cacheKey => {
+            if (!cacheKey.startsWith(cachePrefix)) return;
+
+            cache.delete(cacheKey);
+            invalidatedEntries += 1;
+        });
+    });
+
+    return invalidatedEntries;
 }
 
 function uniqueCandidates(items: PtvRecommendationItem[]) {
@@ -181,19 +217,28 @@ export async function buildPtvRecommendationEngineResult(
             const now = options.now || Date.now();
             const profile = getProfile(dataBundle, { now });
             throwIfRecommendationAborted(options.signal);
+            const filteredCandidateItems = filterPtvRecommendationCandidates(
+                uniqueCandidates(dataBundle.candidates.map(input => input.item)),
+                options.feedback
+            );
             const candidates = scorePtvRecommendationCandidates(
                 profile,
-                uniqueCandidates(dataBundle.candidates.map(input => input.item)),
+                filteredCandidateItems,
                 { now }
             );
             throwIfRecommendationAborted(options.signal);
             const rowResult = buildPtvRecommendationRowsWithQuality(profile, candidates);
-            const rows = rowResult.rows;
+            const rows = filterAndDedupePtvRecommendationRows(rowResult.rows, options.feedback);
+            const rowItemCountBeforeFeedback = rowResult.rows.reduce((total, row) => total + row.items.length, 0);
+            const rowItemCountAfterFeedback = rows.reduce((total, row) => total + row.items.length, 0);
+            const rowFilteringRemovals = Math.max(0, rowItemCountBeforeFeedback - rowItemCountAfterFeedback);
             const mixes = buildPtvRecommendationMixes(candidates);
             const debug = buildPtvRecommendationDebugReport(profile, candidates, rows, {
-                duplicateItemsRemoved: rowResult.duplicateItemsRemoved,
-                rowDiagnostics: rowResult.rowDiagnostics,
-                rowOverlapPercentage: rowResult.rowOverlapPercentage
+                duplicateItemsRemoved: rowResult.duplicateItemsRemoved + rowFilteringRemovals,
+                rowDiagnostics: rows
+                    .map(row => row.diagnostics)
+                    .filter((diagnostic): diagnostic is NonNullable<typeof diagnostic> => Boolean(diagnostic)),
+                rowOverlapPercentage: getPtvAdjacentRecommendationRowOverlapPercentage(rows)
             }, undefined, {
                 now,
                 sourceFailures: dataBundle.sourceFailures,
@@ -306,7 +351,12 @@ export async function getPtvRecommendationDashboardData(options: { forceRefresh?
     return data;
 }
 
-export async function getPtvRecommendationHomeData(options: { forceRefresh?: boolean; includeHomeScans?: boolean; signal?: AbortSignal } = {}): Promise<PtvRecommendationHomeData> {
+export async function getPtvRecommendationHomeData(options: {
+    feedback?: PtvRecommendationRunOptions['feedback'];
+    forceRefresh?: boolean;
+    includeHomeScans?: boolean;
+    signal?: AbortSignal;
+} = {}): Promise<PtvRecommendationHomeData> {
     const now = Date.now();
     const cacheKey = getCurrentCacheKey(options.includeHomeScans === true);
     const cached = homeCache.get(cacheKey);
@@ -319,6 +369,7 @@ export async function getPtvRecommendationHomeData(options: { forceRefresh?: boo
     }
 
     const result = await buildPtvRecommendationEngineResult(undefined, {
+        feedback: options.feedback,
         includeHomeScans: options.includeHomeScans,
         now,
         signal: options.signal

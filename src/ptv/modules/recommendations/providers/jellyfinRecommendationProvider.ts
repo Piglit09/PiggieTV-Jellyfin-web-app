@@ -60,6 +60,7 @@ const PRIMARY_SOURCE_LIMIT = 48;
 const RESUME_SOURCE_LIMIT = 48;
 const BROAD_SOURCE_LIMIT = 48;
 const HOME_SCAN_SOURCE_LIMIT = 48;
+const RECOMMENDATION_SOURCE_CONCURRENCY = 2;
 const SLOW_SOURCE_MS = 5500;
 
 type PtvRecommendationSourceResult = {
@@ -68,11 +69,21 @@ type PtvRecommendationSourceResult = {
     timing: PtvRecommendationSourceTiming;
 };
 
+type PtvRecommendationSourceTask = () => Promise<PtvRecommendationSourceResult>;
+
+type PtvRecommendationSourcePool = {
+    nextIndex: number;
+    results: PtvRecommendationSourceResult[];
+    signal?: AbortSignal;
+    tasks: PtvRecommendationSourceTask[];
+};
+
 type PtvRecommendationProviderContext = {
     musicLibraryDetectionReason?: string | null;
     musicLibraryId?: string | null;
     musicLibraryName?: string | null;
     serverId: string;
+    signal?: AbortSignal;
     userId: string;
 };
 
@@ -272,6 +283,7 @@ async function requestRecommendationJson<T>(
     query: PtvItemQuery,
     context: PtvRecommendationProviderContext
 ): Promise<{ payload: T; timing: PtvRecommendationSourceRequestTiming }> {
+    throwIfRecommendationAborted(context.signal);
     requireRecommendationUserId(context, source);
 
     const cleanedQuery = cleanPtvQuery(query);
@@ -279,8 +291,10 @@ async function requestRecommendationJson<T>(
     let url = '';
 
     try {
-        url = redactRecommendationDiagnosticText(getPtvApiUrl(endpoint, cleanedQuery));
+        url = redactRecommendationDiagnosticText(getPtvApiUrl(endpoint, cleanedQuery, context.serverId));
     } catch (error) {
+        throwIfRecommendationCancelled(error, context.signal);
+
         throw createRecommendationSourceError(
             `url build failure: ${getRecommendationErrorMessage(error)}`,
             {
@@ -305,8 +319,12 @@ async function requestRecommendationJson<T>(
 
     try {
         const payload = await requestPtvJson<T>(endpoint, {
-            params: cleanedQuery
+            params: cleanedQuery,
+            serverId: context.serverId,
+            signal: context.signal
         });
+        throwIfRecommendationAborted(context.signal);
+
         const timing: PtvRecommendationSourceRequestTiming = {
             endpoint,
             libraryId: context.musicLibraryId || null,
@@ -330,6 +348,8 @@ async function requestRecommendationJson<T>(
             timing
         };
     } catch (error) {
+        throwIfRecommendationCancelled(error, context.signal);
+
         const responseBodySummary = getApiErrorResponseBody(error);
         const statusCode = getApiErrorStatus(error);
         const message = getRecommendationErrorMessage(error);
@@ -421,11 +441,25 @@ function getLatestItemsResultItems(
 
 function createRecommendationAbortError(message = 'Recommendation generation was cancelled.') {
     return Object.assign(new Error(message), {
+        name: 'AbortError',
         kind: 'abort'
     });
 }
 
+function isRecommendationAbortError(error: unknown) {
+    if (!error || typeof error !== 'object') return false;
+
+    const candidate = error as { kind?: unknown; name?: unknown };
+
+    return candidate.name === 'AbortError' || candidate.kind === 'abort';
+}
+
 function throwIfRecommendationAborted(signal?: AbortSignal) {
+    if (signal?.aborted) throw createRecommendationAbortError();
+}
+
+function throwIfRecommendationCancelled(error: unknown, signal?: AbortSignal) {
+    if (isRecommendationAbortError(error)) throw error;
     if (signal?.aborted) throw createRecommendationAbortError();
 }
 
@@ -454,6 +488,42 @@ function rejectOnRecommendationAbort<T>(promise: Promise<T>, signal?: AbortSigna
                 reject(error);
             });
     });
+}
+
+async function runRecommendationSourceWorker(pool: PtvRecommendationSourcePool) {
+    while (pool.nextIndex < pool.tasks.length) {
+        throwIfRecommendationAborted(pool.signal);
+
+        const taskIndex = pool.nextIndex;
+
+        pool.nextIndex += 1;
+        pool.results[taskIndex] = await pool.tasks[taskIndex]();
+    }
+}
+
+async function runRecommendationSourceTasks(
+    tasks: PtvRecommendationSourceTask[],
+    signal?: AbortSignal
+) {
+    throwIfRecommendationAborted(signal);
+
+    const pool: PtvRecommendationSourcePool = {
+        nextIndex: 0,
+        results: new Array<PtvRecommendationSourceResult>(tasks.length),
+        signal,
+        tasks
+    };
+    const workers: Promise<void>[] = [];
+    const workerCount = Math.min(RECOMMENDATION_SOURCE_CONCURRENCY, tasks.length);
+
+    for (let workerIndex = 0; workerIndex < workerCount; workerIndex += 1) {
+        workers.push(runRecommendationSourceWorker(pool));
+    }
+
+    await Promise.all(workers);
+    throwIfRecommendationAborted(signal);
+
+    return pool.results;
 }
 
 function uniqueInputs(items: PtvRecommendationInputItem[]) {
@@ -540,7 +610,7 @@ function fetchRecommendationSource(
             };
         })
         .catch(error => {
-            if (options.signal?.aborted) throw error;
+            throwIfRecommendationCancelled(error, options.signal);
 
             const durationMs = Date.now() - startedAt;
             const sourceErrorContext = getRecommendationSourceErrorContext(error);
@@ -689,6 +759,8 @@ async function getItemsWithFallbacks(
     let lastError: unknown = null;
 
     for (const variant of variants) {
+        throwIfRecommendationAborted(context.signal);
+
         const variantSource = getVariantSourceName(source, variant);
 
         try {
@@ -726,6 +798,8 @@ async function getItemsWithFallbacks(
                 }))
             });
         } catch (error) {
+            throwIfRecommendationCancelled(error, context.signal);
+
             lastError = error;
             const failedSubquery = getFailedSourceSubqueryTiming(source, variant, error);
 
@@ -815,6 +889,8 @@ async function getRecentlyAddedItems(context: PtvRecommendationProviderContext, 
             source: 'recently-added'
         });
     } catch (error) {
+        throwIfRecommendationCancelled(error, context.signal);
+
         const primaryContext = getRecommendationSourceErrorContext(error);
         const primaryError = getRecommendationErrorMessage(error);
 
@@ -993,6 +1069,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
         musicLibraryId: musicLibrary?.id || null,
         musicLibraryName: musicLibrary?.name || null,
         serverId,
+        signal: options.signal,
         userId
     };
 
@@ -1023,18 +1100,23 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
     });
 
     try {
+        const sourceTasks: PtvRecommendationSourceTask[] = [
+            () => fetchRecommendationSource('favorites', () => getFavoriteItems(providerContext), options),
+            () => fetchRecommendationSource('history', () => getHistoryItems(providerContext), options),
+            () => fetchRecommendationSource('recently-added', () => getRecentlyAddedItems(providerContext), options),
+            () => fetchRecommendationSource('resume', () => getResumeItems(providerContext), options),
+            () => fetchRecommendationSource('broad-candidates', () => getBroadCandidateItems(providerContext), options)
+        ];
+
+        if (includeHomeScans) {
+            sourceTasks.push(
+                () => fetchRecommendationSource('music-home', () => getMusicHomeItems(providerContext), options),
+                () => fetchRecommendationSource('reading-home', () => getReadingHomeItems(providerContext), options)
+            );
+        }
+
         const results = await rejectOnRecommendationAbort(
-            Promise.all([
-                fetchRecommendationSource('favorites', () => getFavoriteItems(providerContext), options),
-                fetchRecommendationSource('history', () => getHistoryItems(providerContext), options),
-                fetchRecommendationSource('recently-added', () => getRecentlyAddedItems(providerContext), options),
-                fetchRecommendationSource('resume', () => getResumeItems(providerContext), options),
-                fetchRecommendationSource('broad-candidates', () => getBroadCandidateItems(providerContext), options),
-                ...(includeHomeScans ? [
-                    fetchRecommendationSource('music-home', () => getMusicHomeItems(providerContext), options),
-                    fetchRecommendationSource('reading-home', () => getReadingHomeItems(providerContext), options)
-                ] : [])
-            ]),
+            runRecommendationSourceTasks(sourceTasks, options.signal),
             options.signal
         );
         const [

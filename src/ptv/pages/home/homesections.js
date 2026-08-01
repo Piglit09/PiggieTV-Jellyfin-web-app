@@ -31,6 +31,7 @@ import {
     renderLibraryRow,
     renderMediaRow
 } from './ptvRows';
+import { runBoundedHomeWork } from './homeWorkPlan';
 
 import 'elements/emby-button/paper-icon-button-light';
 import 'elements/emby-itemscontainer/emby-itemscontainer';
@@ -39,7 +40,7 @@ import 'elements/emby-button/emby-button';
 
 import 'components/homesections/homesections.scss';
 
-const VIRTUAL_ROW_MOUNT_BATCH_SIZE = 3;
+const VIRTUAL_ROW_WORK_CONCURRENCY = 2;
 const VIRTUAL_ROW_IDLE_CLEANUP_MS = 2600;
 const VIRTUAL_ROW_UNMOUNT_HYSTERESIS_MS = 2400;
 const VIRTUAL_ROW_RECENT_MOUNT_GRACE_MS = 3200;
@@ -273,7 +274,12 @@ function scheduleDeferredResume(elem, sections, options) {
         void timePtvAsync(
             'render',
             'home-sections-resume-deferred',
-            () => Promise.all(connectedSections.map(section => section.resume(options))),
+            () => runBoundedHomeWork(
+                connectedSections,
+                VIRTUAL_ROW_WORK_CONCURRENCY,
+                section => resumeSection(section, options),
+                () => elem.isConnected
+            ),
             {
                 sections: connectedSections.length
             }
@@ -835,18 +841,15 @@ function mountInitialRows(elem, rows, context, scrollRoot = null) {
     ], targetCount);
 
     elem.ptvLastHydrationReason = 'initial';
-    for (let i = 0; i < initialRows.length; i += VIRTUAL_ROW_MOUNT_BATCH_SIZE) {
-        const batch = initialRows.slice(i, i + VIRTUAL_ROW_MOUNT_BATCH_SIZE);
-        const delayMs = i === 0 ? 0 : 80 * (i / VIRTUAL_ROW_MOUNT_BATCH_SIZE);
 
-        window.setTimeout(() => {
-            batch.forEach(entry => {
-                void mountAndResumeVirtualRow(elem, entry, context, 'initial');
-            });
-        }, delayMs);
-    }
-
-    recordVirtualizationMetrics(elem, rows, 'initial', scrollRoot);
+    return runBoundedHomeWork(
+        initialRows,
+        VIRTUAL_ROW_WORK_CONCURRENCY,
+        entry => mountAndResumeVirtualRow(elem, entry, context, 'initial'),
+        () => elem.isConnected
+    ).finally(() => {
+        recordVirtualizationMetrics(elem, rows, 'initial', scrollRoot);
+    });
 }
 
 function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
@@ -861,6 +864,7 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
     let observer = null;
     const observedSlots = new Set();
     const entriesBySlot = new WeakMap();
+    const fallbackTimers = new Set();
 
     const observeSlot = (entry) => {
         if (!observer || !entry.slot || entry.slot.dataset.ptvRowMounted === 'true') return;
@@ -971,7 +975,7 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
             ...overscanRows,
             ...nearRows,
             ...fallbackRows
-        ], VIRTUAL_ROW_MOUNT_BATCH_SIZE);
+        ], VIRTUAL_ROW_WORK_CONCURRENCY);
     };
 
     const getRowsToResume = (origin = 'scan') => {
@@ -989,7 +993,7 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
             ...overscanRows,
             ...nearRows,
             ...fallbackRows
-        ], VIRTUAL_ROW_MOUNT_BATCH_SIZE);
+        ], VIRTUAL_ROW_WORK_CONCURRENCY);
     };
 
     const pumpRows = (origin = 'scan') => {
@@ -1017,10 +1021,19 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
             unobserveSlot(entry.slot);
         });
 
-        return Promise.all([
-            ...rowsToResume.map(entry => resumeMountedVirtualRow(elem, entry, origin)),
-            ...rowsToMount.map(entry => mountAndResumeVirtualRow(elem, entry, context, origin))
-        ])
+        const rowWork = [
+            ...rowsToResume.map(entry => ({ entry, type: 'resume' })),
+            ...rowsToMount.map(entry => ({ entry, type: 'mount' }))
+        ];
+
+        return runBoundedHomeWork(
+            rowWork,
+            VIRTUAL_ROW_WORK_CONCURRENCY,
+            work => work.type === 'resume' ?
+                resumeMountedVirtualRow(elem, work.entry, origin) :
+                mountAndResumeVirtualRow(elem, work.entry, context, origin),
+            () => elem.isConnected
+        )
             .then(() => {
                 enhancePtvCards(elem);
                 scheduleIdleCleanup(`${origin}-idle`);
@@ -1071,21 +1084,12 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
 
     if (typeof IntersectionObserver === 'function') {
         observer = new IntersectionObserver((entries) => {
-            entries
-                .filter(entry => entry.isIntersecting)
-                .forEach(entry => {
-                    const slotEntry = entriesBySlot.get(entry.target);
-                    if (!slotEntry) return;
+            const visibleEntries = entries.filter(entry => entry.isIntersecting && entriesBySlot.has(entry.target));
 
-                    elem.ptvRowObserverTriggerCount = (elem.ptvRowObserverTriggerCount || 0) + 1;
-                    unobserveSlot(entry.target);
-                    void mountAndResumeVirtualRow(elem, slotEntry, context, 'observer')
-                        .then(() => {
-                            enhancePtvCards(elem);
-                            scheduleIdleCleanup('observer-idle');
-                            recordVirtualizationMetrics(elem, rows, 'observer', scrollRoot);
-                        });
-                });
+            if (!visibleEntries.length) return;
+
+            elem.ptvRowObserverTriggerCount = (elem.ptvRowObserverTriggerCount || 0) + visibleEntries.length;
+            schedulePump('observer');
         }, {
             root: scrollRoot,
             rootMargin: getRowMountRootMargin(context.performanceProfile),
@@ -1140,17 +1144,32 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
             cleanupTimer = 0;
         }
 
+        fallbackTimers.forEach(timer => {
+            window.clearTimeout(timer);
+        });
+        fallbackTimers.clear();
+
         observedSlots.clear();
     };
 
     schedulePump('initial-scan');
-    window.setTimeout(() => schedulePump('fallback-early'), 420);
-    window.setTimeout(() => schedulePump('fallback-late'), 780);
-    window.setTimeout(() => schedulePump('layout-settle'), 250);
-    window.setTimeout(() => schedulePump('layout-settle-late'), 1000);
+    [
+        [ 'layout-settle', 250 ],
+        [ 'fallback-early', 420 ],
+        [ 'fallback-late', 780 ],
+        [ 'layout-settle-late', 1000 ]
+    ].forEach(([ origin, delayMs ]) => {
+        const timer = window.setTimeout(() => {
+            fallbackTimers.delete(timer);
+            schedulePump(origin);
+        }, delayMs);
+
+        fallbackTimers.add(timer);
+    });
 }
 
 export function loadSections(elem, apiClient, user) {
+    elem.dataset.ptvRouteCriticalPending = 'true';
     window.__PTV_HOME_INITIALIZED__ = true;
     unmountPtvHomeHero(elem);
     cleanupPtvRowBackdrops(elem);
@@ -1168,7 +1187,7 @@ export function loadSections(elem, apiClient, user) {
     trimPtvImageManagerMemory();
 
     const userId = user.Id || apiClient.getCurrentUserId();
-    return timePtvAsync('render', 'home-sections-load', () => queryClient
+    const loadPromise = timePtvAsync('render', 'home-sections-load', () => queryClient
         .fetchQuery(getUserViewsQuery(toApi(apiClient), userId))
         .then(result => result.Items || [])
         .then(function (userViews) {
@@ -1281,19 +1300,15 @@ export function loadSections(elem, apiClient, user) {
                         const rowScrollRoot = getRowScrollRoot(elem);
                         elem.ptvVirtualRows = rows;
                         elem.ptvVirtualRowContext = rowMountContext;
-                        mountInitialRows(elem, rows, rowMountContext, rowScrollRoot);
-                        observeVirtualRowSlots(elem, rows, rowMountContext, rowScrollRoot);
-
                         // Timeout for polyfilled CustomElements (webOS 1.2)
                         return new Promise(resolve => window.setTimeout(resolve, 0))
+                            .then(() => mountInitialRows(elem, rows, rowMountContext, rowScrollRoot))
                             .then(() => {
                                 enhancePtvCards(elem);
-
-                                void resume(elem, {
-                                    deferContinue: true,
-                                    refresh: true
-                                }).catch(err => {
-                                    console.warn('[PTV Home] Failed resuming background sections', err);
+                                observeVirtualRowSlots(elem, rows, rowMountContext, rowScrollRoot);
+                                recordPtvEvent('render', 'home-route-critical-shelves-settled', {
+                                    deferredRows: Math.max(0, rows.length - getResumedVirtualRowCount(elem, rows)),
+                                    routeCriticalRows: getResumedVirtualRowCount(elem, rows)
                                 });
                             });
                     });
@@ -1319,9 +1334,14 @@ export function loadSections(elem, apiClient, user) {
                 }
             }
         }));
+
+    return loadPromise.finally(() => {
+        delete elem.dataset.ptvRouteCriticalPending;
+    });
 }
 
 export function destroySections(elem) {
+    delete elem.dataset.ptvRouteCriticalPending;
     clearDeferredResumeTimers(elem);
     cleanupViewportResumeObserver(elem);
     cleanupRowMountObserver(elem);
@@ -1397,11 +1417,22 @@ function getDeferredResumeSections(sections, options, performanceProfile) {
 }
 
 function resumeSection(section, options) {
-    return section.resume(options)
+    if (section.ptvResumePromise) return section.ptvResumePromise;
+
+    const resumePromise = section.resume(options)
         .then(result => {
             markSectionResumed(section);
             return result;
+        })
+        .finally(() => {
+            if (section.ptvResumePromise === resumePromise) {
+                section.ptvResumePromise = null;
+            }
         });
+
+    section.ptvResumePromise = resumePromise;
+
+    return resumePromise;
 }
 
 function observeDeferredResumeSections(elem, sections, options, performanceProfile) {

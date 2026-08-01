@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { decideNativeHomeModelReplacement } from './homeModelAuthority';
+import {
+    decideNativeHomeModelReplacement,
+    mergeSettledNativeHomeRows
+} from './homeModelAuthority';
 
 const populated = { heroItems: [ {} ], rows: [ { items: [ {}, {} ] } ] };
 
@@ -44,5 +47,34 @@ describe('native Home model authority', () => {
     it('rejects stale configuration and recommendation hashes', () => {
         expect(decideNativeHomeModelReplacement({ configurationMatches: false, current: populated, currentGeneration: 11, incoming: populated, incomingGeneration: 11 }).reason).toBe('configuration-hash-mismatch');
         expect(decideNativeHomeModelReplacement({ current: populated, currentGeneration: 11, incoming: populated, incomingGeneration: 11, recommendationMatches: false }).reason).toBe('recommendation-hash-mismatch');
+    });
+
+    it('preserves a settled shelf omitted by a late partial model', () => {
+        const current = [
+            { id: 'continue', items: [ 'continue-a' ] },
+            { id: 'recent', items: [ 'recent-a' ] }
+        ];
+        const incoming = [
+            { id: 'continue', items: [ 'continue-b' ] }
+        ];
+
+        expect(mergeSettledNativeHomeRows(current, incoming)).toEqual([
+            { id: 'continue', items: [ 'continue-b' ] },
+            { id: 'recent', items: [ 'recent-a' ] }
+        ]);
+    });
+
+    it('does not let an empty late recommendation erase its settled shelf', () => {
+        const current = [ { id: 'because-you-watched', items: [ 'movie-a' ] } ];
+        const incoming = [ { id: 'because-you-watched', items: [] } ];
+
+        expect(mergeSettledNativeHomeRows(current, incoming)).toEqual(current);
+    });
+
+    it('accepts a populated same-shelf refresh without duplicating its identity', () => {
+        const current = [ { id: 'recent', items: [ 'old' ] } ];
+        const incoming = [ { id: 'recent', items: [ 'new' ] } ];
+
+        expect(mergeSettledNativeHomeRows(current, incoming)).toEqual(incoming);
     });
 });

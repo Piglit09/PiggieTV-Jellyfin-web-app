@@ -7,12 +7,13 @@ import {
     getPtvRecentlyAdded,
     getPtvResumeItems,
     isPtvAdminUser,
-    type PtvApiClientLike,
+    requestPtvJson,
     type PtvItem,
     type PtvLibrary,
     type PtvUser
 } from '../../api';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
+import { createPtvAbortController } from '../../core/abortController';
 import { getCurrentPtvPluginApiClient, normalizePtvApiError } from '../../core/pluginApi';
 import {
     getCachedFeaturedContentPayload,
@@ -46,9 +47,11 @@ import {
     setPtvShellError,
     setPtvShellLoading
 } from '../../shell/foundation';
+import { PtvIdentityScopedCache } from '../../services/displayIdentity';
 import { buildNativeHomeProfile } from './services/homeProfileService';
 import {
     decideNativeHomeModelReplacement,
+    mergeSettledNativeHomeRows,
     summarizeNativeHomeModel,
     type NativeHomeModelLike
 } from './homeModelAuthority';
@@ -184,7 +187,7 @@ export type NativeHomePerformanceDebug = {
     slowFetchesAborted: string[];
 };
 
-let lastUsableNativeHomeState: NativeHomeState | null = null;
+const lastUsableNativeHomeStates = new PtvIdentityScopedCache<NativeHomeState>(4);
 
 const ITEM_FIELDS = [
     'Overview',
@@ -296,13 +299,6 @@ type PtvRowBuilderRule = {
     sourceValue?: string;
     sourceType?: string;
     subgenreRowCount?: number;
-};
-
-type NativeHomeStudioApiClient = PtvApiClientLike & {
-    getStudios?: (
-        userId: string,
-        query?: Record<string, unknown>
-    ) => Promise<{ Items?: Array<{ Id?: string; Name?: string }> }>;
 };
 
 type NativeHomeStudioRowTarget = {
@@ -601,6 +597,7 @@ async function hydrateNativeHomeRecommendationItems(
     rows: NativeHomeRow[],
     options: {
         shouldContinue?: () => boolean;
+        signal?: AbortSignal;
         source: string;
     }
 ): Promise<NativeHomeRow[]> {
@@ -638,6 +635,8 @@ async function hydrateNativeHomeRecommendationItems(
             Ids: ids.join(','),
             ImageTypeLimit: 1,
             Limit: ids.length
+        }, {
+            signal: options.signal
         });
 
         hydratedItems = getItems(result);
@@ -1427,17 +1426,17 @@ export function dedupeNativeHomeItems<TItem extends PtvItem | PtvLibrary>(items:
     return deduped;
 }
 
-function loadNativeHomeStudioMap(userId: string) {
-    const apiClient = getCurrentPtvApiClient() as NativeHomeStudioApiClient | null;
-
-    if (!apiClient?.getStudios) return Promise.resolve(new Map<string, string>());
-
-    return apiClient.getStudios(userId, {
-        IncludeItemTypes: 'Movie,Series',
-        Limit: 500,
-        Recursive: true,
-        SortBy: 'SortName',
-        SortOrder: 'Ascending'
+function loadNativeHomeStudioMap(userId: string, signal?: AbortSignal) {
+    return requestPtvJson<{ Items?: Array<{ Id?: string; Name?: string }> }>('Studios', {
+        params: {
+            IncludeItemTypes: 'Movie,Series',
+            Limit: 500,
+            Recursive: true,
+            SortBy: 'SortName',
+            SortOrder: 'Ascending',
+            UserId: userId
+        },
+        signal
     })
         .then(result => new Map((result.Items || [])
             .filter(studio => studio.Id && studio.Name)
@@ -1448,7 +1447,8 @@ function loadNativeHomeStudioMap(userId: string) {
 function expandNativeHomeStudioRow(
     row: NativeHomeRow,
     userId: string,
-    studioMap: Map<string, string>
+    studioMap: Map<string, string>,
+    signal?: AbortSignal
 ): Promise<NativeHomeRow> {
     const target = getNativeHomeStudioRowTarget(row, studioMap);
 
@@ -1467,6 +1467,7 @@ function expandNativeHomeStudioRow(
         StudioIds: target.studioId
     }, {
         serverId: target.serverId,
+        signal,
         userId
     })
         .then(result => {
@@ -1510,13 +1511,14 @@ function expandNativeHomeStudioRow(
 function expandNativeHomeStudioRows(
     rows: NativeHomeRow[],
     userId: string,
-    studioMap: Map<string, string>
+    studioMap: Map<string, string>,
+    signal?: AbortSignal
 ) {
     if (!rows.some(row => isNativeHomeStudioSource(row.sourceType))) {
         return Promise.resolve(rows);
     }
 
-    return Promise.all(rows.map(row => expandNativeHomeStudioRow(row, userId, studioMap)));
+    return Promise.all(rows.map(row => expandNativeHomeStudioRow(row, userId, studioMap, signal)));
 }
 
 function isRuleMatchForSection(
@@ -1814,8 +1816,8 @@ function finalizeNativeHomeRows(stage: string, rows: NativeHomeRow[]) {
     return rowsWithReasons.filter(row => !row.filteredReason);
 }
 
-async function fetchRowsEndpointSettings(): Promise<PtvRowsEndpointSettings | null> {
-    const currentUser = await getPtvCurrentUser().catch(() => null);
+async function fetchRowsEndpointSettings(signal?: AbortSignal): Promise<PtvRowsEndpointSettings | null> {
+    const currentUser = await getPtvCurrentUser(undefined, signal).catch(() => null);
 
     if (!isPtvAdminUser(currentUser)) {
         recordPtvEvent('row-fetch', 'native-home-rows-endpoint-skipped', {
@@ -2189,19 +2191,39 @@ function hasRenderableNativeHomeRows(rows: NativeHomeRow[]) {
     return rows.some(row => row.items.length > 0);
 }
 
-function rememberUsableNativeHomeState(state: NativeHomeState, reason: string) {
+type NativeHomeDisplayIdentity = Readonly<{
+    serverId: string;
+    userId: string;
+}>;
+
+function getNativeHomeDisplayIdentity(): NativeHomeDisplayIdentity {
+    const apiClient = getCurrentPtvApiClient();
+
+    return {
+        serverId: apiClient?.serverId?.() || '',
+        userId: apiClient?.getCurrentUserId?.() || ''
+    };
+}
+
+function rememberUsableNativeHomeState(
+    state: NativeHomeState,
+    reason: string,
+    identity: NativeHomeDisplayIdentity
+) {
     if (!hasRenderableNativeHomeRows(state.rows)) return;
 
-    lastUsableNativeHomeState = state;
+    const stored = lastUsableNativeHomeStates.set(identity.serverId, identity.userId, state);
+
     recordPtvEvent('render', 'native-home-last-good-state-updated', {
         heroItemId: state.heroItem?.Id || null,
         reason,
-        rowCount: state.rows.length
+        rowCount: state.rows.length,
+        stored
     });
 }
 
-function getLastUsableNativeHomeState() {
-    return lastUsableNativeHomeState;
+function getLastUsableNativeHomeState(identity: NativeHomeDisplayIdentity) {
+    return lastUsableNativeHomeStates.get(identity.serverId, identity.userId) || null;
 }
 
 function getAdaptiveNativeHomeLayout(
@@ -3085,50 +3107,71 @@ function recordRowRulesDebug(
 
 type NativeRowFetchOptions = {
     onTimeout?: (name: string) => void;
+    signal?: AbortSignal;
     timeoutMs?: number;
 };
 
-function createNativeRowFetch<T>(
+export function createNativeRowFetch<T>(
     name: string,
-    task: () => Promise<T>,
+    task: (signal: AbortSignal) => Promise<T>,
     fallback: T,
     options: NativeRowFetchOptions = {}
 ): Promise<T> {
     const timeoutMs = options.timeoutMs || 0;
-    const request = timePtvAsync('row-fetch', name, task)
+    const requestController = createPtvAbortController();
+    const run = () => timePtvAsync('row-fetch', name, () => task(requestController.signal))
         .catch(() => fallback);
 
-    if (!timeoutMs) return request;
+    if (options.signal?.aborted) {
+        requestController.abort();
+        return Promise.resolve(fallback);
+    }
+
+    if (!timeoutMs && !options.signal) return run();
 
     return new Promise(resolve => {
         let settled = false;
-        const timeoutId = window.setTimeout(() => {
+        let timeoutId: number | null = null;
+        const cleanup = () => {
+            if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            options.signal?.removeEventListener('abort', onParentAbort);
+        };
+        const finish = (value: T) => {
             if (settled) return;
 
             settled = true;
-            options.onTimeout?.(name);
-            recordPtvEvent('row-fetch', 'native-home-slow-fetch-aborted', {
-                fetchName: name,
-                timeoutMs
-            });
-            resolve(fallback);
-        }, timeoutMs);
+            cleanup();
+            resolve(value);
+        };
+        const onParentAbort = () => {
+            requestController.abort();
+            finish(fallback);
+        };
+
+        options.signal?.addEventListener('abort', onParentAbort, { once: true });
+
+        const request = run();
+
+        if (timeoutMs) {
+            timeoutId = window.setTimeout(() => {
+                if (settled) return;
+
+                requestController.abort();
+                options.onTimeout?.(name);
+                recordPtvEvent('row-fetch', 'native-home-slow-fetch-aborted', {
+                    fetchName: name,
+                    timeoutMs
+                });
+                finish(fallback);
+            }, timeoutMs);
+        }
 
         request
-            .then(value => {
-                if (settled) return;
-
-                settled = true;
-                window.clearTimeout(timeoutId);
-                resolve(value);
-            })
-            .catch(() => {
-                if (settled) return;
-
-                settled = true;
-                window.clearTimeout(timeoutId);
-                resolve(fallback);
-            });
+            .then(finish)
+            .catch(() => finish(fallback));
     });
 }
 
@@ -3149,12 +3192,12 @@ function fetchNativeHomeResumeFallback(
         return emptyPtvItemsResult();
     }
 
-    return createNativeRowFetch('native-home-resume', () => getPtvResumeItems<PtvItem>({
+    return createNativeRowFetch('native-home-resume', signal => getPtvResumeItems<PtvItem>({
         EnableImageTypes: VIDEO_IMAGE_TYPES,
         Fields: ITEM_FIELDS,
         Limit: 16,
         MediaTypes: 'Video'
-    }, { userId }), { Items: [] }, options);
+    }, { signal, userId }), { Items: [] }, options);
 }
 
 function fetchNativeHomeReadingFallback(
@@ -3164,12 +3207,12 @@ function fetchNativeHomeReadingFallback(
 ) {
     if (shouldRenderConfiguredRows(rowSettings)) return emptyPtvItemsResult();
 
-    return createNativeRowFetch('native-home-continue-reading', () => getPtvResumeItems<PtvItem>({
+    return createNativeRowFetch('native-home-continue-reading', signal => getPtvResumeItems<PtvItem>({
         EnableImageTypes: VIDEO_IMAGE_TYPES,
         Fields: ITEM_FIELDS,
         IncludeItemTypes: 'Book',
         Limit: 16
-    }, { userId }), { Items: [] }, options);
+    }, { signal, userId }), { Items: [] }, options);
 }
 
 function fetchNativeHomeListeningFallback(
@@ -3179,13 +3222,13 @@ function fetchNativeHomeListeningFallback(
 ) {
     if (shouldRenderConfiguredRows(rowSettings)) return emptyPtvItemsResult();
 
-    return createNativeRowFetch('native-home-continue-listening', () => getPtvResumeItems<PtvItem>({
+    return createNativeRowFetch('native-home-continue-listening', signal => getPtvResumeItems<PtvItem>({
         EnableImageTypes: VIDEO_IMAGE_TYPES,
         Fields: ITEM_FIELDS,
         IncludeItemTypes: 'Audio',
         Limit: 16,
         Recursive: true
-    }, { userId }), { Items: [] }, options);
+    }, { signal, userId }), { Items: [] }, options);
 }
 
 function fetchNativeHomeRecentlyAddedFallback(
@@ -3195,12 +3238,12 @@ function fetchNativeHomeRecentlyAddedFallback(
 ) {
     if (shouldRenderConfiguredRows(rowSettings)) return emptyPtvItemsArray();
 
-    return createNativeRowFetch('native-home-recently-added', () => getPtvRecentlyAdded<PtvItem>({
+    return createNativeRowFetch('native-home-recently-added', signal => getPtvRecentlyAdded<PtvItem>({
         EnableImageTypes: VIDEO_IMAGE_TYPES,
         Fields: ITEM_FIELDS,
         IncludeItemTypes: RECENT_ITEM_TYPES,
         Limit: 20
-    }, { userId }), [], options);
+    }, { signal, userId }), [], options);
 }
 
 function getNativeHomeElementLabel(element: Element | null) {
@@ -3394,10 +3437,22 @@ export function useNativeHomeData(): NativeHomeState {
 
     useEffect(() => {
         const generation = ++nativeHomeRouteGeneration;
+        const displayIdentity = getNativeHomeDisplayIdentity();
+        const routeAbortController = createPtvAbortController();
+        const deferredFrameIds = new Set<number>();
+        const deferredTimerIds = new Set<number>();
         let disposed = false;
         let backgroundRefreshStartedAt: number | null = null;
         let cacheRowsForSupplemental: NativeHomeRow[] = [];
         let renderedFromCache = false;
+        const isRouteWorkCurrent = () => {
+            const currentIdentity = getNativeHomeDisplayIdentity();
+
+            return !disposed
+                && generation === nativeHomeRouteGeneration
+                && currentIdentity.serverId === displayIdentity.serverId
+                && currentIdentity.userId === displayIdentity.userId;
+        };
         const startedAt = performance.now();
         const recordTimeline = (
             milestone: string,
@@ -3497,7 +3552,7 @@ export function useNativeHomeData(): NativeHomeState {
         setPtvShellLoading(true);
         clearPtvShellStatus();
         setState(previous => {
-            const lastUsableState = getLastUsableNativeHomeState();
+            const lastUsableState = getLastUsableNativeHomeState(displayIdentity);
 
             if (lastUsableState && !hasRenderableNativeHomeRows(previous.rows)) {
                 const restoredAt = Math.round(performance.now() - startedAt);
@@ -3545,6 +3600,7 @@ export function useNativeHomeData(): NativeHomeState {
         };
         const getFetchOptions = (timeoutMs: number) => ({
             onTimeout: markSlowFetchAborted,
+            signal: routeAbortController.signal,
             timeoutMs
         });
         const skipFallbackFetches = (fetchNames: string[]) => {
@@ -3576,11 +3632,15 @@ export function useNativeHomeData(): NativeHomeState {
             }
 
             markBackgroundRefreshStarted('supplemental-rows');
-            window.requestAnimationFrame(() => {
+            const frameId = window.requestAnimationFrame(() => {
+                deferredFrameIds.delete(frameId);
+                if (!isRouteWorkCurrent()) return;
+
                 // Wait until after the first paint before starting non-critical Jellyfin row fetches.
                 // eslint-disable-next-line sonarjs/no-nested-functions
-                window.setTimeout(() => {
-                    if (disposed) return;
+                const timerId = window.setTimeout(() => {
+                    deferredTimerIds.delete(timerId);
+                    if (!isRouteWorkCurrent()) return;
 
                     const supplementalSlowFetches = new Set<string>();
                     const markSupplementalSlowFetch = (name: string) => {
@@ -3589,38 +3649,39 @@ export function useNativeHomeData(): NativeHomeState {
                     };
                     const supplementalOptions = {
                         onTimeout: markSupplementalSlowFetch,
+                        signal: routeAbortController.signal,
                         timeoutMs: NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS
                     };
 
                     void Promise.all([
-                        createNativeRowFetch('native-home-resume', () => getPtvResumeItems<PtvItem>({
+                        createNativeRowFetch('native-home-resume', signal => getPtvResumeItems<PtvItem>({
                             EnableImageTypes: VIDEO_IMAGE_TYPES,
                             Fields: ITEM_FIELDS,
                             Limit: 16,
                             MediaTypes: 'Video'
-                        }, { userId: user.Id }), { Items: [] }, supplementalOptions),
-                        createNativeRowFetch('native-home-continue-reading', () => getPtvResumeItems<PtvItem>({
+                        }, { signal, userId: user.Id }), { Items: [] }, supplementalOptions),
+                        createNativeRowFetch('native-home-continue-reading', signal => getPtvResumeItems<PtvItem>({
                             EnableImageTypes: VIDEO_IMAGE_TYPES,
                             Fields: ITEM_FIELDS,
                             IncludeItemTypes: 'Book',
                             Limit: 16
-                        }, { userId: user.Id }), { Items: [] }, supplementalOptions),
-                        createNativeRowFetch('native-home-continue-listening', () => getPtvResumeItems<PtvItem>({
+                        }, { signal, userId: user.Id }), { Items: [] }, supplementalOptions),
+                        createNativeRowFetch('native-home-continue-listening', signal => getPtvResumeItems<PtvItem>({
                             EnableImageTypes: VIDEO_IMAGE_TYPES,
                             Fields: ITEM_FIELDS,
                             IncludeItemTypes: 'Audio',
                             Limit: 16,
                             Recursive: true
-                        }, { userId: user.Id }), { Items: [] }, supplementalOptions),
-                        createNativeRowFetch('native-home-recently-added', () => getPtvRecentlyAdded<PtvItem>({
+                        }, { signal, userId: user.Id }), { Items: [] }, supplementalOptions),
+                        createNativeRowFetch('native-home-recently-added', signal => getPtvRecentlyAdded<PtvItem>({
                             EnableImageTypes: VIDEO_IMAGE_TYPES,
                             Fields: ITEM_FIELDS,
                             IncludeItemTypes: RECENT_ITEM_TYPES,
                             Limit: 20
-                        }, { userId: user.Id }), [], supplementalOptions)
+                        }, { signal, userId: user.Id }), [], supplementalOptions)
                     ])
                         .then(([resumeResult, readingResult, listeningResult, recentResult]) => {
-                            if (disposed) return;
+                            if (!isRouteWorkCurrent()) return;
 
                             const rows = createRows(
                                 getItems(resumeResult),
@@ -3651,7 +3712,10 @@ export function useNativeHomeData(): NativeHomeState {
                                     insertNativeHomeRecommendationRows(mergedRows, existingRecommendationRows) :
                                     orderFocusedNativeHomeRows(mergedRows);
                                 const adaptiveSupplemental = getAdaptiveNativeHomeLayout(rowsWithRecommendations, user, performance.now());
-                                const adaptiveRows = adaptiveSupplemental.rows;
+                                const adaptiveRows = mergeSettledNativeHomeRows(
+                                    previous.rows,
+                                    adaptiveSupplemental.rows
+                                );
                                 const safeRows = hasRenderableNativeHomeRows(adaptiveRows) ?
                                     adaptiveRows :
                                     previous.rows;
@@ -3685,7 +3749,7 @@ export function useNativeHomeData(): NativeHomeState {
                                     });
                                 }
 
-                                rememberUsableNativeHomeState(nextState, 'supplemental-rows');
+                                rememberUsableNativeHomeState(nextState, 'supplemental-rows', displayIdentity);
 
                                 return nextState;
                             });
@@ -3696,14 +3760,16 @@ export function useNativeHomeData(): NativeHomeState {
                             });
                         });
                 }, 0);
+                deferredTimerIds.add(timerId);
             });
+            deferredFrameIds.add(frameId);
         };
         const renderFromFeaturedCache = async (
             featuredPayload: FeaturedPayload | null,
             rowSettings: PtvRowsEndpointSettings | null = null,
             options: { mode?: 'cache-only' | 'settings-validated' } = {}
         ) => {
-            if (disposed || renderedFromCache || !hasUsableFeaturedPayload(featuredPayload)) return false;
+            if (!isRouteWorkCurrent() || renderedFromCache || !hasUsableFeaturedPayload(featuredPayload)) return false;
             const cacheResponseReceivedAt = Math.round(performance.now() - startedAt);
             const cacheRenderMode = options.mode || 'settings-validated';
             const cacheOnly = cacheRenderMode === 'cache-only';
@@ -3729,7 +3795,7 @@ export function useNativeHomeData(): NativeHomeState {
             });
             const settingsRecommendationRows = cacheOnly ? [] : createUserSpecificRecommendationRows(rowSettings);
 
-            if (disposed || renderedFromCache) return false;
+            if (!isRouteWorkCurrent() || renderedFromCache) return false;
 
             const focusedCacheRows = settingsRecommendationRows.length ?
                 insertNativeHomeRecommendationRows(cacheRowsResult.rows, settingsRecommendationRows) :
@@ -3843,7 +3909,7 @@ export function useNativeHomeData(): NativeHomeState {
                 user: null
             };
 
-            rememberUsableNativeHomeState(nextState, 'featured-cache');
+            rememberUsableNativeHomeState(nextState, 'featured-cache', displayIdentity);
             recordTimeline('home-cache-model-committed', 'plugin-file', nextState, {
                 adoptionReason: 'populated-cache-accepted',
                 adopted: true
@@ -3860,7 +3926,8 @@ export function useNativeHomeData(): NativeHomeState {
         const featuredPayloadPromise = createNativeRowFetch(
             'native-home-featured-cache',
             () => getCachedFeaturedContentPayload({ allowStale: false }),
-            null
+            null,
+            getFetchOptions(0)
         );
         recordTimeline('memory-cache-read-started', 'memory-cache');
         recordTimeline('browser-cache-read-skipped', 'browser-cache', {}, {
@@ -3869,14 +3936,15 @@ export function useNativeHomeData(): NativeHomeState {
         recordTimeline('plugin-cache-read-started', 'plugin-file');
         const rowSettingsPromise = createNativeRowFetch(
             'native-home-rows-endpoint',
-            fetchRowsEndpointSettings,
+            signal => fetchRowsEndpointSettings(signal),
             null,
             getFetchOptions(NATIVE_HOME_CRITICAL_FETCH_TIMEOUT_MS)
         );
         const currentUserPromise = createNativeRowFetch(
             'native-home-current-user',
-            getPtvCurrentUser,
-            null
+            signal => getPtvCurrentUser(undefined, signal),
+            null,
+            getFetchOptions(0)
         );
 
         void featuredPayloadPromise
@@ -3922,7 +3990,7 @@ export function useNativeHomeData(): NativeHomeState {
                 const userId = user.Id;
                 const studioMapPromise = createNativeRowFetch(
                     'native-home-studio-map',
-                    () => loadNativeHomeStudioMap(userId),
+                    signal => loadNativeHomeStudioMap(userId, signal),
                     new Map<string, string>(),
                     getFetchOptions(NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS)
                 );
@@ -3964,7 +4032,7 @@ export function useNativeHomeData(): NativeHomeState {
                         fetchNativeHomeReadingFallback(userId, rowSettings, getFetchOptions(NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS)),
                         fetchNativeHomeListeningFallback(userId, rowSettings, getFetchOptions(NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS)),
                         fetchNativeHomeRecentlyAddedFallback(userId, rowSettings, getFetchOptions(NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS)),
-                        createNativeRowFetch('native-home-hero-fallback', () => getPtvItems<PtvItem>({
+                        createNativeRowFetch('native-home-hero-fallback', signal => getPtvItems<PtvItem>({
                             EnableImageTypes: VIDEO_IMAGE_TYPES,
                             Fields: ITEM_FIELDS,
                             ImageTypes: 'Backdrop',
@@ -3972,7 +4040,10 @@ export function useNativeHomeData(): NativeHomeState {
                             Limit: 8,
                             Recursive: true,
                             SortBy: 'Random'
-                        }, { userId }), { Items: [] }, getFetchOptions(NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS))
+                        }, {
+                            signal,
+                            userId
+                        }), { Items: [] }, getFetchOptions(NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS))
                     ]));
                 }
 
@@ -4009,7 +4080,8 @@ export function useNativeHomeData(): NativeHomeState {
                 const cachedRows = await expandNativeHomeStudioRows(
                     orderFocusedNativeHomeRows(preferredFeaturedRowsResult.rows),
                     userId,
-                    studioMap
+                    studioMap,
+                    routeAbortController.signal
                 );
                 const preferredHeroItems = getItems(
                     (
@@ -4021,7 +4093,8 @@ export function useNativeHomeData(): NativeHomeState {
                 const userRecommendationRows = await hydrateNativeHomeRecommendationItems(
                     createUserSpecificRecommendationRows(rowSettings),
                     {
-                        shouldContinue: () => !disposed,
+                        shouldContinue: isRouteWorkCurrent,
+                        signal: routeAbortController.signal,
                         source: 'recommendation-settings-background'
                     }
                 );
@@ -4063,7 +4136,7 @@ export function useNativeHomeData(): NativeHomeState {
                 };
             })
             .then(payload => {
-                if (disposed) return;
+                if (!isRouteWorkCurrent()) return;
 
                 if (renderedFromCache) {
                     const supplementalCachedRows = payload.cachedRows.length ?
@@ -4082,8 +4155,12 @@ export function useNativeHomeData(): NativeHomeState {
                         shouldLoadSupplementalRows: payload.shouldLoadSupplementalRows
                     });
                     setState(previous => {
-                        const safeRows = hasRenderableNativeHomeRows(adaptiveBackground.rows) ?
-                            adaptiveBackground.rows :
+                        const settledRows = mergeSettledNativeHomeRows(
+                            previous.rows,
+                            adaptiveBackground.rows
+                        );
+                        const safeRows = hasRenderableNativeHomeRows(settledRows) ?
+                            settledRows :
                             previous.rows;
                         const nextState = {
                             ...previous,
@@ -4110,7 +4187,7 @@ export function useNativeHomeData(): NativeHomeState {
                             });
                         }
 
-                        rememberUsableNativeHomeState(nextState, 'background-refresh');
+                        rememberUsableNativeHomeState(nextState, 'background-refresh', displayIdentity);
 
                         return nextState;
                     });
@@ -4237,14 +4314,20 @@ export function useNativeHomeData(): NativeHomeState {
                 };
 
                 setState(previous => {
+                    const settledNextState = {
+                        ...nextState,
+                        heroItem: nextState.heroItem || previous.heroItem,
+                        heroItems: nextState.heroItems.length ? nextState.heroItems : previous.heroItems,
+                        rows: mergeSettledNativeHomeRows(previous.rows, nextState.rows)
+                    };
                     const decision = decideNativeHomeModelReplacement({
                         current: previous,
                         currentGeneration: generation,
-                        incoming: nextState,
+                        incoming: settledNextState,
                         incomingGeneration: generation
                     });
 
-                    recordTimeline('final-home-model-commit', 'jellyfin-live', nextState, {
+                    recordTimeline('final-home-model-commit', 'jellyfin-live', settledNextState, {
                         adoptionReason: decision.reason,
                         adopted: decision.allow,
                         replacesPopulatedModel: decision.replacesPopulatedModel
@@ -4259,18 +4342,18 @@ export function useNativeHomeData(): NativeHomeState {
                         };
                     }
 
-                    if (heroItems.length) recordTimeline('first-hero-committed', 'jellyfin-live', nextState);
-                    if (adaptiveRows.length) recordTimeline('first-shelf-committed', 'jellyfin-live', nextState);
-                    rememberUsableNativeHomeState(nextState, 'fresh-home');
+                    if (settledNextState.heroItems.length) recordTimeline('first-hero-committed', 'jellyfin-live', settledNextState);
+                    if (settledNextState.rows.length) recordTimeline('first-shelf-committed', 'jellyfin-live', settledNextState);
+                    rememberUsableNativeHomeState(settledNextState, 'fresh-home', displayIdentity);
 
-                    return nextState;
+                    return settledNextState;
                 });
                 if (payload.shouldLoadSupplementalRows) {
                     scheduleSupplementalRows(payload.user, payload.rowSettings, payload.cachedRows);
                 }
             })
             .catch(error => {
-                if (disposed) return;
+                if (!isRouteWorkCurrent()) return;
 
                 const message = error instanceof Error ? error.message : 'PiggieTV native home could not load.';
 
@@ -4284,7 +4367,7 @@ export function useNativeHomeData(): NativeHomeState {
                     return;
                 }
 
-                const lastUsableState = getLastUsableNativeHomeState();
+                const lastUsableState = getLastUsableNativeHomeState(displayIdentity);
 
                 if (lastUsableState) {
                     recordPtvEvent('render', 'native-home-fallback-preserved-last-good-state', {
@@ -4340,6 +4423,15 @@ export function useNativeHomeData(): NativeHomeState {
 
         return () => {
             disposed = true;
+            routeAbortController.abort();
+            deferredFrameIds.forEach(frameId => {
+                window.cancelAnimationFrame(frameId);
+            });
+            deferredTimerIds.forEach(timerId => {
+                window.clearTimeout(timerId);
+            });
+            deferredFrameIds.clear();
+            deferredTimerIds.clear();
             recordTimeline('home-route-retired', 'route');
             setPtvShellLoading(false);
         };

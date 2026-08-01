@@ -1,21 +1,17 @@
 import type { NativeHomeProfile } from './homeProfileService';
 import { rankNativeHomeRows, type NativeHomeRowScore } from './homeRankingService';
 import { getNativeHomeEditorialDescription } from './recommendationReasonService';
+import {
+    DEFAULT_NATIVE_HOME_LAYOUT_PREFERENCES,
+    loadNativeHomePreferenceDocument,
+    stageNativeHomePreferenceDocument,
+    type NativeHomeLayoutMode,
+    type NativeHomeLayoutPreferences
+} from './homePreferenceService';
 import type { NativeHomeRow } from '../hooks';
 
-export type NativeHomeLayoutMode = 'balanced' | 'cinematic' | 'compact' | 'focused' | 'minimal';
-
-export type NativeHomePersonalizationSettings = {
-    adaptiveRows: boolean;
-    autoReorder: boolean;
-    crossMediaRecommendations: boolean;
-    experimentalRecommendations: boolean;
-    layoutMode: NativeHomeLayoutMode;
-    moodRecommendations: boolean;
-    pinnedRows: string[];
-    recentlyReleasedRows: boolean;
-    seasonalRows: boolean;
-};
+export type { NativeHomeLayoutMode } from './homePreferenceService';
+export type NativeHomePersonalizationSettings = NativeHomeLayoutPreferences;
 
 export type NativeHomeAdaptiveDebug = {
     currentMood: string;
@@ -34,53 +30,45 @@ export type NativeHomeAdaptiveDebug = {
     topStudios: string[];
 };
 
-const HOME_LAYOUT_STORAGE_KEY = 'ptv.home.layout.v1';
-
 export const DEFAULT_NATIVE_HOME_PERSONALIZATION_SETTINGS: NativeHomePersonalizationSettings = {
-    adaptiveRows: true,
-    autoReorder: true,
-    crossMediaRecommendations: true,
-    experimentalRecommendations: false,
-    layoutMode: 'balanced',
-    moodRecommendations: true,
+    ...DEFAULT_NATIVE_HOME_LAYOUT_PREFERENCES,
     pinnedRows: [],
-    recentlyReleasedRows: true,
-    seasonalRows: true
+    rowOrder: [],
+    rowVisibility: {}
 };
 
-function getStoredSettings(): Partial<NativeHomePersonalizationSettings> {
-    try {
-        const raw = window.localStorage?.getItem(HOME_LAYOUT_STORAGE_KEY);
-
-        return raw ? JSON.parse(raw) as Partial<NativeHomePersonalizationSettings> : {};
-    } catch {
-        return {};
-    }
-}
-
 export function loadNativeHomePersonalizationSettings(): NativeHomePersonalizationSettings {
-    const stored = getStoredSettings();
-
-    return {
-        ...DEFAULT_NATIVE_HOME_PERSONALIZATION_SETTINGS,
-        ...stored,
-        pinnedRows: Array.isArray(stored.pinnedRows) ? stored.pinnedRows.filter(Boolean) : []
-    };
+    try {
+        return loadNativeHomePreferenceDocument().layout;
+    } catch {
+        return {
+            ...DEFAULT_NATIVE_HOME_PERSONALIZATION_SETTINGS,
+            pinnedRows: [],
+            rowOrder: [],
+            rowVisibility: {}
+        };
+    }
 }
 
 export function saveNativeHomePersonalizationSettings(settings: NativeHomePersonalizationSettings) {
     try {
-        window.localStorage?.setItem(HOME_LAYOUT_STORAGE_KEY, JSON.stringify(settings));
+        const document = loadNativeHomePreferenceDocument();
+
+        stageNativeHomePreferenceDocument({
+            ...document,
+            layout: settings
+        });
     } catch {
-        // Home layout preferences are client-side convenience state.
+        // The scoped settings owner may not be ready during startup. Unscoped
+        // fallback persistence is intentionally avoided to prevent leakage.
     }
 }
 
 export function toggleNativeHomePinnedRow(rowId: string) {
     const settings = loadNativeHomePersonalizationSettings();
-    const pinnedRows = settings.pinnedRows.includes(rowId)
-        ? settings.pinnedRows.filter(id => id !== rowId)
-        : [...settings.pinnedRows, rowId];
+    const pinnedRows = settings.pinnedRows.includes(rowId) ?
+        settings.pinnedRows.filter(id => id !== rowId) :
+        [...settings.pinnedRows, rowId];
     const next = {
         ...settings,
         pinnedRows
@@ -112,8 +100,15 @@ export function moveNativeHomePinnedRow(rowId: string, direction: 'down' | 'up')
 }
 
 export function resetNativeHomeLayoutPreferences() {
-    saveNativeHomePersonalizationSettings(DEFAULT_NATIVE_HOME_PERSONALIZATION_SETTINGS);
-    return DEFAULT_NATIVE_HOME_PERSONALIZATION_SETTINGS;
+    const defaults = {
+        ...DEFAULT_NATIVE_HOME_PERSONALIZATION_SETTINGS,
+        pinnedRows: [],
+        rowOrder: [],
+        rowVisibility: {}
+    };
+
+    saveNativeHomePersonalizationSettings(defaults);
+    return defaults;
 }
 
 function rowText(row: NativeHomeRow) {
@@ -159,13 +154,11 @@ function isNativeHomeSeasonalRow(row: NativeHomeRow, settings: NativeHomePersona
 }
 
 function shouldKeepNativeHomeRow(row: NativeHomeRow, settings: NativeHomePersonalizationSettings) {
-    if (isNativeHomePinnedRow(row, settings)) return true;
-    if (isNativeHomeRecommendationRow(row)) return true;
-    if (isNativeHomeContinueRow(row)) return true;
-    if (isNativeHomeLatestRow(row)) return true;
-    if (isNativeHomeSeasonalRow(row, settings)) return true;
-
-    return false;
+    return isNativeHomePinnedRow(row, settings)
+        || isNativeHomeRecommendationRow(row)
+        || isNativeHomeContinueRow(row)
+        || isNativeHomeLatestRow(row)
+        || isNativeHomeSeasonalRow(row, settings);
 }
 
 function applyNativeHomeInformationArchitecture(rows: NativeHomeRow[], settings: NativeHomePersonalizationSettings) {
@@ -246,8 +239,10 @@ export function applyNativeHomeAdaptiveLayout(
 
 export function decorateNativeHomeRowsForCurrentLayout(rows: NativeHomeRow[], settings = loadNativeHomePersonalizationSettings()) {
     const pinnedSet = new Set(settings.pinnedRows);
+    const rowOrder = new Map(settings.rowOrder.map((rowId, index) => [rowId, index]));
 
     return rows
+        .filter(row => settings.rowVisibility[row.id] !== false)
         .map((row, index) => ({
             index,
             row: {
@@ -256,6 +251,13 @@ export function decorateNativeHomeRowsForCurrentLayout(rows: NativeHomeRow[], se
             }
         }))
         .sort((left, right) => {
+            const leftOrder = rowOrder.get(left.row.id);
+            const rightOrder = rowOrder.get(right.row.id);
+
+            if (leftOrder != null && rightOrder != null) return leftOrder - rightOrder;
+            if (leftOrder != null) return -1;
+            if (rightOrder != null) return 1;
+
             const leftPinnedIndex = settings.pinnedRows.indexOf(left.row.id);
             const rightPinnedIndex = settings.pinnedRows.indexOf(right.row.id);
             const leftPinned = leftPinnedIndex >= 0;

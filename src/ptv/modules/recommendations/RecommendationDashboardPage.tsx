@@ -202,9 +202,6 @@ const RecommendationDashboardPage = () => {
                                 {rows.length ? rows.map(row => (
                                     <Box key={row.id} sx={{ borderTop: theme => `1px solid ${theme.palette.divider}`, pt: 1.25 }}>
                                         <Typography variant='subtitle1'>{row.title}</Typography>
-                                        <Typography variant='body2' color='text.secondary'>
-                                            {row.items.length} items - {row.explanation}
-                                        </Typography>
                                     </Box>
                                 )) : (
                                     <Typography variant='body2' color='text.secondary'>

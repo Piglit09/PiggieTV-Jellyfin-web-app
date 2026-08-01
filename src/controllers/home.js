@@ -4,21 +4,19 @@ import '../elements/emby-tabs/emby-tabs';
 import '../elements/emby-button/emby-button';
 import '../elements/emby-scroller/emby-scroller';
 import LibraryMenu from '../scripts/libraryMenu';
+import {
+    cancelPendingPtvRequestActivation,
+    openPtvRequestPortal as openOwnedPtvRequestPortal
+} from '../ptv/modules/request/requestLoader';
 
 function openPtvRequestPortal() {
-    window.PTV?.openRequestPortal?.();
-
-    const event = document.createEvent('CustomEvent');
-    // Older TV WebViews may not support the CustomEvent constructor.
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    event.initCustomEvent('ptv:request:open', false, false, null);
-    window.dispatchEvent(event);
+    void openOwnedPtvRequestPortal();
 }
 
 function createRequestTabController() {
     return {
         destroy: () => undefined,
-        onPause: () => undefined,
+        onPause: cancelPendingPtvRequestActivation,
         onResume() {
             openPtvRequestPortal();
         }

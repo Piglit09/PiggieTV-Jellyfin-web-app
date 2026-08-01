@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+    lazy,
+    Suspense,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState
+} from 'react';
 
 import Page from 'components/Page';
 
@@ -12,10 +20,12 @@ import {
     queuePtvItems,
     recordPtvImageFallback,
     setPtvFavorite,
+    getPtvServerId,
     type PtvItemImageCandidate,
     type PtvImageOptions,
     type PtvItem,
-    type PtvLibrary
+    type PtvLibrary,
+    type PtvUser
 } from '../../api';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES } from '../../core/config';
@@ -34,7 +44,16 @@ import {
     getPtvQualityPillClass,
     getPtvQualityTags
 } from '../../modules/cards/qualityTags';
+import { showPtvItemActionMenu } from '../../modules/cards/itemActionMenu';
 import { PtvIcon } from '../../modules/icons';
+import {
+    getPtvRecommendationFeedbackTerms,
+    isPtvRecommendationItemCompleted
+} from '../../modules/recommendations/feedback/recommendationFeedback';
+import type {
+    PtvRecommendationFeedbackAction,
+    PtvRecommendationItem
+} from '../../modules/recommendations/types/recommendationTypes';
 import {
     getNativeHomeRowDiagnostics,
     dedupeNativeHomeItems,
@@ -44,14 +63,33 @@ import {
     useNativeHomeVirtualRows
 } from './hooks';
 import {
+    DEFAULT_NATIVE_HOME_PERSONALIZATION_SETTINGS,
     decorateNativeHomeRowsForCurrentLayout,
-    loadNativeHomePersonalizationSettings,
-    moveNativeHomePinnedRow,
-    resetNativeHomeLayoutPreferences,
-    toggleNativeHomePinnedRow,
     type NativeHomeAdaptiveDebug
 } from './services/homeLayoutService';
+import {
+    applyNativeHomeRecommendationFeedback,
+    createDefaultNativeHomePreferenceDocument,
+    getCurrentNativeHomePreferenceScope,
+    loadNativeHomePreferenceDocument,
+    resetNativeHomeRecommendationFeedback,
+    saveNativeHomePreferenceDocument,
+    undoNativeHomeRecommendationFeedback,
+    type NativeHomeLayoutPreferences,
+    type NativeHomePreferenceDocument
+} from './services/homePreferenceService';
+import {
+    filterNativeHomeHeroItems,
+    filterNativeHomeRecommendationRows
+} from './services/homeFeedbackFilterService';
 import { openNativeHomeDetails } from './nativeHomeDetailsNavigation';
+import {
+    mergeNativeHomePersonalizedRows,
+    prioritizeNativeHomePersonalizedHeroItems
+} from './personalizedHomeRows';
+import { useNativeHomePersonalization } from './useNativeHomePersonalization';
+
+const HomeCustomizationDialog = lazy(() => import('./HomeCustomizationDialog'));
 
 const POSTER_IMAGE_OPTIONS = {
     fillHeight: 480,
@@ -67,16 +105,36 @@ const LIBRARY_IMAGE_OPTIONS = {
     quality: 84
 };
 
-const failedNativeHomeImageUrls = new Set<string>();
 const reportedNativeHomeFallbackKeys = new Set<string>();
 const reportedNativeHomeImageAttemptUrls = new Set<string>();
+const PTV_NATIVE_HOME_DIAGNOSTIC_KEY_LIMIT = 600;
 const PTV_READING_LIBRARY_CARD_PATTERN = /\b(?:book|books|comic|comics|manga|maga|manhwa|manhua|reader|reading)\b/i;
 const LOW_POWER_IMAGE_SCALE = 0.76;
 const MOBILE_IMAGE_SCALE = 0.86;
+const NATIVE_HOME_IMAGE_CANDIDATE_LIMIT = 4;
+const NATIVE_HOME_HERO_LOGO_CANDIDATE_LIMIT = 4;
+
+function rememberBoundedNativeHomeDiagnosticKey(keys: Set<string>, key: string) {
+    if (keys.has(key)) return false;
+
+    keys.add(key);
+    while (keys.size > PTV_NATIVE_HOME_DIAGNOSTIC_KEY_LIMIT) {
+        const oldestKey = keys.values().next().value;
+
+        if (oldestKey === undefined) break;
+        keys.delete(oldestKey);
+    }
+
+    return true;
+}
 
 type NativeHomeAnyItem = PtvItem | PtvLibrary;
 type NativeHomeMaybeItem = NativeHomeAnyItem | null | undefined;
 type NativeHomeIntelligenceFocusSource = 'cancel' | 'clear' | 'focus' | 'hero' | 'mouse' | 'row' | 'select';
+type NativeHomeRecommendationFeedbackHandler = (
+    item: PtvItem,
+    action: PtvRecommendationFeedbackAction
+) => Promise<void>;
 type NativeHomeActiveItemHandler = (
     item: PtvItem | null,
     source: NativeHomeIntelligenceFocusSource,
@@ -94,18 +152,24 @@ type NativeHomeHeroProps = Readonly<{
 type NativeHomeCardProps = Readonly<{
     item: NativeHomeAnyItem;
     onActivate: (item: NativeHomeAnyItem | null, source: NativeHomeIntelligenceFocusSource) => void;
+    onRecommendationFeedback: NativeHomeRecommendationFeedbackHandler | null;
     row: NativeHomeRow;
+    user: PtvUser | null;
 }>;
 type NativeHomeRowScrollerProps = Readonly<{
     onActiveItemChange: (item: NativeHomeAnyItem | null, source: NativeHomeIntelligenceFocusSource) => void;
+    onRecommendationFeedback: NativeHomeRecommendationFeedbackHandler | null;
     row: NativeHomeRow;
+    user: PtvUser | null;
 }>;
 type NativeHomeRowViewProps = Readonly<{
     canShowDebug: boolean;
     isMounted: boolean;
     onActiveBackdropItemChange: NativeHomeActiveItemHandler;
     onLayoutAction: NativeHomeRowLayoutActionHandler;
+    onRecommendationFeedback: NativeHomeRecommendationFeedbackHandler | null;
     row: NativeHomeRow;
+    user: PtvUser | null;
 }>;
 type NativeHomeFallbackProps = Readonly<{ message: string }>;
 type NativeHomeCinematicBackdropProps = Readonly<{
@@ -138,8 +202,57 @@ const NATIVE_HOME_SMART_HERO_MIN_COMMIT_GAP_MS = 980;
 const NATIVE_HOME_SCROLL_SUPPRESSION_MS = 720;
 const NATIVE_HOME_IMAGE_PREFETCH_CACHE_LIMIT = 90;
 const NATIVE_HOME_FAILED_ARTWORK_CACHE_LIMIT = 70;
+const NATIVE_HOME_FEEDBACK_COMMANDS = [
+    {
+        icon: 'block',
+        id: 'ptv:not-interested',
+        name: 'Not Interested',
+        secondaryText: 'Stop recommending this title on Home'
+    },
+    {
+        icon: 'visibility_off',
+        id: 'ptv:hide-from-home',
+        name: 'Hide From Home',
+        secondaryText: 'Keep this title in normal library browsing'
+    },
+    {
+        icon: 'tune',
+        id: 'ptv:show-fewer-like-this',
+        name: 'Show Fewer Like This',
+        secondaryText: 'Reduce similar recommendations'
+    }
+] as const;
 const prefetchedNativeHomeImageUrls = new Map<string, number>();
 const failedNativeHomeHeroArtworkUrls = new Map<string, string>();
+
+function getNativeHomeFeedbackAction(commandId: string): PtvRecommendationFeedbackAction | null {
+    if (commandId === 'ptv:not-interested') return 'not-interested';
+    if (commandId === 'ptv:hide-from-home') return 'hide-from-home';
+    if (commandId === 'ptv:show-fewer-like-this') return 'show-fewer-like-this';
+
+    return null;
+}
+
+function getNativeHomeFeedbackNotice(action: PtvRecommendationFeedbackAction) {
+    if (action === 'show-fewer-like-this') {
+        return 'PiggieTV will show fewer recommendations like this.';
+    }
+    if (action === 'hide-from-home') {
+        return 'Hidden from Home. It remains available in your library.';
+    }
+
+    return 'Thanks. This title will no longer be recommended on Home.';
+}
+
+function getNativeHomeAmbientColorSource(
+    focusedItem: PtvItem | null,
+    fallbackItem: PtvItem | null
+) {
+    if (focusedItem) return getItemTitle(focusedItem);
+    if (fallbackItem) return getItemTitle(fallbackItem);
+
+    return 'hero';
+}
 
 function getNativeHomeDebugImageType(candidate: PtvItemImageCandidate) {
     return candidate.requestedType;
@@ -395,13 +508,15 @@ function preloadNativeHomeImageUrl(url: string) {
 
 function preloadNativeHomeHeroAssets(item: NativeHomeMaybeItem, profile: ReturnType<typeof getPtvPerformanceProfile>) {
     if (!item || profile.isFireTv || profile.isLowPower) return;
+    const serverId = getItemServerId(item) || getPtvServerId() || undefined;
 
     const backdropUrl = getNativeHomeHeroBackdropUrl(item as PtvItem, profile);
-    const logoUrl = getItemImageTags(item).Logo ? getPtvItemImageUrl(item as PtvItem, {
+    const logoUrl = getPtvItemImageUrl(item as PtvItem, {
+        serverId,
         imageType: 'Logo',
         maxWidth: profile.heroLogoMaxWidth,
         quality: profile.clientKind === 'mobile' ? 88 : 94
-    }) : '';
+    });
 
     preloadNativeHomeImageUrl(backdropUrl);
     preloadNativeHomeImageUrl(logoUrl);
@@ -524,7 +639,12 @@ function getNativeHomeCardSpotlightSynopsis(item: NativeHomeMaybeItem, fallback 
 function isNativeHomeRecommendationRow(row: NativeHomeRow) {
     return row.source === 'recommendation'
         || row.rowType === 'generated-recommendation'
-        || row.renderedSource === 'recommendation-settings';
+        || row.renderedSource === 'recommendation-settings'
+        || isBecauseYouLikeRecommendationRow(row);
+}
+
+function isBecauseYouLikeRecommendationRow(row: NativeHomeRow) {
+    return /^because\s+you\s+like\s*/i.test(row.title);
 }
 
 function getTopNativeHomeRowGenres(row: NativeHomeRow) {
@@ -563,9 +683,9 @@ function getNativeHomeRecommendationLead(row: NativeHomeRow) {
     const genrePhrase = genres.slice(0, 2).join(' and ');
 
     if (/\bbecause-you-watched|watched\b/.test(key)) {
-        return genres.length
-            ? `More stories that match your recent ${genrePhrase} favorites.`
-            : 'Shaped by what you recently watched.';
+        return genres.length ?
+            `More stories that match your recent ${genrePhrase} favorites.` :
+            'Shaped by what you recently watched.';
     }
 
     if (/\bbecause-you-like-music|made-for-you-music|music\b/.test(key)) return 'Tracks and artists close to your recent listening.';
@@ -990,12 +1110,12 @@ function cacheNativeHomeImageFailure(
 ) {
     if (!candidate?.url) return;
 
+    const alreadyFailed = hasPtvImageCandidateFailed(candidate);
     markPtvImageCandidateFailed(candidate);
 
-    if (failedNativeHomeImageUrls.has(candidate.url)) return;
-
-    failedNativeHomeImageUrls.add(candidate.url);
-    recordNativeHomeImageFailure(item, candidate, usedFallback);
+    if (!alreadyFailed) {
+        recordNativeHomeImageFailure(item, candidate, usedFallback);
+    }
 }
 
 function recordNativeHomeImageFallback(
@@ -1029,9 +1149,11 @@ function recordNativeHomeImageAttempt(
     item: NativeHomeAnyItem,
     candidate: PtvItemImageCandidate
 ) {
-    if (!shouldCollectDiagnostics() || !candidate.url || reportedNativeHomeImageAttemptUrls.has(candidate.url)) return;
-
-    reportedNativeHomeImageAttemptUrls.add(candidate.url);
+    if (
+        !shouldCollectDiagnostics()
+        || !candidate.url
+        || !rememberBoundedNativeHomeDiagnosticKey(reportedNativeHomeImageAttemptUrls, candidate.url)
+    ) return;
     const detail = {
         attemptedUrl: candidate.url,
         imageTag: candidate.tag || null,
@@ -1055,8 +1177,7 @@ function recordNativeHomeNoImageCandidate(
     const itemId = getItemId(item);
     const key = `${itemId || getItemTitle(item)}:${kind}:${reason}`;
 
-    if (reportedNativeHomeFallbackKeys.has(key)) return;
-    reportedNativeHomeFallbackKeys.add(key);
+    if (!rememberBoundedNativeHomeDiagnosticKey(reportedNativeHomeFallbackKeys, key)) return;
 
     const availability = getImageAvailability(item);
 
@@ -1096,7 +1217,7 @@ function getNativeHomeImageCandidates(item: NativeHomeAnyItem, row: NativeHomeRo
     ];
 
     if (row.kind === 'libraries') {
-        order = ['Thumb', 'Primary', 'Backdrop'];
+        order = ['Thumb', 'Primary', 'ParentPrimary', 'Backdrop'];
     } else if (isContinueWatchingRow(row)) {
         order = ['Primary', 'SeriesPrimary', 'ParentPrimary', 'Thumb', 'Backdrop'];
 
@@ -1105,12 +1226,74 @@ function getNativeHomeImageCandidates(item: NativeHomeAnyItem, row: NativeHomeRo
         }
     }
 
+    const serverId = getItemServerId(item) || getPtvServerId() || undefined;
+
     return getPtvItemImageCandidates(item as PtvItem, {
-        baseOptions: getNativeHomeScaledImageOptions(row.kind === 'libraries' ? LIBRARY_IMAGE_OPTIONS : POSTER_IMAGE_OPTIONS),
+        baseOptions: {
+            ...getNativeHomeScaledImageOptions(row.kind === 'libraries' ? LIBRARY_IMAGE_OPTIONS : POSTER_IMAGE_OPTIONS),
+            serverId
+        },
+        includeUntagged: true,
         order
     })
-        .filter(candidate => !failedNativeHomeImageUrls.has(candidate.url) && !hasPtvImageCandidateFailed(candidate))
-        .slice(0, 2);
+        .filter(candidate => !hasPtvImageCandidateFailed(candidate))
+        .slice(0, NATIVE_HOME_IMAGE_CANDIDATE_LIMIT);
+}
+
+function getNativeHomeHeroLogoCandidates(item: NativeHomeAnyItem, profile: ReturnType<typeof getPtvPerformanceProfile>) {
+    if (!item) return [];
+
+    const serverId = getItemServerId(item) || getPtvServerId() || undefined;
+    const imageTags = getItemValue<Record<string, string>>(item, 'ImageTags', 'imageTags') || {};
+    const logoTag = imageTags.Logo || imageTags.logo || getItemString(item, 'LogoImageTag', 'logoImageTag');
+    const parentLogoItemId = getItemString(item, 'ParentLogoItemId', 'parentLogoItemId');
+    const parentLogoTag = getItemString(item, 'ParentLogoImageTag', 'parentLogoImageTag');
+    const candidates: PtvItemImageCandidate[] = [];
+    const seen = new Set<string>();
+    const quality = profile.clientKind === 'mobile' ? 88 : 94;
+
+    const addCandidate = (candidateItemId: string, tag: string, tagMode: string) => {
+        const url = getPtvItemImageUrl(candidateItemId, {
+            serverId,
+            imageType: 'Logo',
+            maxWidth: profile.heroLogoMaxWidth,
+            quality,
+            ...(tag ? { tag } : {})
+        });
+
+        if (!url || seen.has(url)) return;
+        seen.add(url);
+
+        candidates.push({
+            imageItemId: candidateItemId,
+            imageType: 'Logo',
+            requestedType: 'Logo',
+            tag,
+            tagMode,
+            url
+        });
+    };
+
+    if (parentLogoItemId) {
+        addCandidate(parentLogoItemId, parentLogoTag, 'tagged-parent-logo');
+
+        if (parentLogoTag) {
+            addCandidate(parentLogoItemId, '', 'untagged-parent-logo');
+        }
+    }
+
+    const itemId = getItemId(item);
+    if (itemId) {
+        addCandidate(itemId, logoTag, 'tagged-item-logo');
+
+        if (logoTag) {
+            addCandidate(itemId, '', 'untagged-item-logo');
+        }
+    }
+
+    return candidates
+        .filter(candidate => !hasPtvImageCandidateFailed(candidate))
+        .slice(0, NATIVE_HOME_HERO_LOGO_CANDIDATE_LIMIT);
 }
 
 function titleCaseGroupId(value: string) {
@@ -1169,11 +1352,13 @@ function getNativeHomeRowGroups(rows: NativeHomeRow[]) {
 
 function getNativeHomeBackdropImageUrl(item: NativeHomeAnyItem, profile: ReturnType<typeof getPtvPerformanceProfile>) {
     const availability = getImageAvailability(item);
+    const serverId = getItemServerId(item) || getPtvServerId() || undefined;
     const quality = profile.clientKind === 'mobile' ? 72 : 78;
     const maxWidth = profile.clientKind === 'mobile' ? 1000 : 1800;
 
     if (availability.hasBackdrop) {
         return getPtvItemImageUrl(item as PtvItem, {
+            serverId,
             imageIndex: 0,
             imageType: 'Backdrop',
             maxWidth,
@@ -1183,6 +1368,7 @@ function getNativeHomeBackdropImageUrl(item: NativeHomeAnyItem, profile: ReturnT
 
     if (availability.hasThumb) {
         return getPtvItemImageUrl(item as PtvItem, {
+            serverId,
             imageType: 'Thumb',
             maxWidth,
             quality
@@ -1190,6 +1376,7 @@ function getNativeHomeBackdropImageUrl(item: NativeHomeAnyItem, profile: ReturnT
     }
 
     return getPtvItemImageUrl(item as PtvItem, {
+        serverId,
         imageType: 'Primary',
         maxWidth: Math.min(maxWidth, 900),
         quality: Math.min(quality, 74)
@@ -1214,6 +1401,7 @@ function getNativeHomeRowBackdropUrl(row: NativeHomeRow, profile: ReturnType<typ
 
 function getNativeHomeHeroBackdropUrl(heroItem: PtvItem | null, profile: ReturnType<typeof getPtvPerformanceProfile>) {
     if (profile.isFireTv || profile.isLowPower) return '';
+    const serverId = getItemServerId(heroItem) || getPtvServerId() || undefined;
 
     const quality = profile.clientKind === 'mobile' ? 84 : 92;
 
@@ -1223,6 +1411,7 @@ function getNativeHomeHeroBackdropUrl(heroItem: PtvItem | null, profile: ReturnT
 
     if (getImageAvailability(heroItem).hasBackdrop) {
         return getPtvItemImageUrl(heroItem, {
+            serverId,
             imageIndex: 0,
             imageType: 'Backdrop',
             maxWidth: profile.heroBackdropMaxWidth,
@@ -1231,6 +1420,7 @@ function getNativeHomeHeroBackdropUrl(heroItem: PtvItem | null, profile: ReturnT
     }
 
     return getPtvItemImageUrl(heroItem, {
+        serverId,
         imageType: 'Primary',
         maxWidth: profile.heroBackdropMaxWidth,
         quality
@@ -1570,12 +1760,18 @@ function NativeHomeHero({
         [rotationItems]
     );
     const [heroIndex, setHeroIndex] = useState(0);
-    const [failedLogoUrl, setFailedLogoUrl] = useState('');
     const rotationHeroItem = rotationItems[heroIndex] || fallbackHeroItem;
     const focusedHeroItem = activeItem && getItemId(activeItem) ? activeItem : null;
     const heroItem = focusedHeroItem || rotationHeroItem;
     const heroSource = focusedHeroItem ? 'focus' : 'rotation';
     const heroRenderKey = `${heroSource}:${getNativeHomeHeroKey(heroItem)}`;
+    const logoCandidates = useMemo(
+        () => getNativeHomeHeroLogoCandidates(heroItem, performanceProfile),
+        [heroItem, performanceProfile]
+    );
+    const [logoAttemptIndex, setLogoAttemptIndex] = useState(0);
+    const currentLogoCandidate = logoCandidates[logoAttemptIndex];
+    const logoUrl = currentLogoCandidate?.url || '';
 
     useEffect(() => {
         setHeroIndex(0);
@@ -1596,6 +1792,8 @@ function NativeHomeHero({
         if (rotationItems.length <= 1) return undefined;
 
         const timer = window.setInterval(() => {
+            if (document.hidden) return;
+
             setHeroIndex(previousIndex => {
                 const nextIndex = (previousIndex + 1) % rotationItems.length;
                 const nextItem = rotationItems[nextIndex];
@@ -1618,18 +1816,6 @@ function NativeHomeHero({
         () => getNativeHomeHeroBackdropUrl(heroItem, performanceProfile),
         [heroItem, performanceProfile]
     );
-    const logoUrl = useMemo(() => {
-        if (!getItemImageTags(heroItem).Logo) {
-            return '';
-        }
-
-        return getPtvItemImageUrl(heroItem, {
-            imageType: 'Logo',
-            maxWidth: performanceProfile.heroLogoMaxWidth,
-            quality: performanceProfile.clientKind === 'mobile' ? 88 : 94
-        });
-    }, [heroItem, performanceProfile.clientKind, performanceProfile.heroLogoMaxWidth]);
-    const displayLogoUrl = logoUrl && logoUrl !== failedLogoUrl ? logoUrl : '';
     const appLogoUrl = resolvePtvStaticAssetUrl(PTV_ASSETS.logos.bannerLight);
     const heroMetaGroups = useMemo(() => getHeroMetaGroups(heroItem), [heroItem]);
     const heroRoute = useMemo(
@@ -1648,10 +1834,8 @@ function NativeHomeHero({
     }, [heroIndex, heroItem, performanceProfile, rotationItems]);
 
     useEffect(() => {
-        if (logoUrl && failedLogoUrl && logoUrl !== failedLogoUrl) {
-            setFailedLogoUrl('');
-        }
-    }, [failedLogoUrl, logoUrl]);
+        setLogoAttemptIndex(0);
+    }, [logoCandidates]);
 
     useEffect(() => {
         recordPtvEvent('render', 'native-home-smart-hero-selected', {
@@ -1705,6 +1889,28 @@ function NativeHomeHero({
         });
     }, [heroItem, heroRoute]);
 
+    const handleLogoError = useCallback(() => {
+        setLogoAttemptIndex(previous => {
+            const failedCandidate = logoCandidates[previous];
+            const next = previous + 1;
+            const finalFallbackUsed = next >= logoCandidates.length;
+
+            cacheNativeHomeImageFailure(heroItem as NativeHomeAnyItem, failedCandidate, finalFallbackUsed);
+            if (failedCandidate && !finalFallbackUsed) {
+                recordNativeHomeImageFallback(failedCandidate, logoCandidates[next], getItemId(heroItem), getItemTitle(heroItem));
+                recordPtvEvent('render', 'native-home-hero-logo-failed', {
+                    imageItemId: failedCandidate.imageItemId,
+                    imageTag: failedCandidate.tag || null,
+                    itemId: getItemId(heroItem),
+                    logoUrl: failedCandidate.url
+                });
+                return next;
+            }
+
+            return finalFallbackUsed ? previous : next;
+        });
+    }, [heroItem, logoCandidates]);
+
     return (
         <section
             className='ptv-cinematic-hero ptv-cinematic-hero--home ptv-native-home-hero'
@@ -1733,19 +1939,13 @@ function NativeHomeHero({
                     src={appLogoUrl}
                 />
 
-                {displayLogoUrl ? (
+                {logoUrl ? (
                     <img
                         alt={getItemTitle(heroItem || {})}
                         className='ptv-native-home-title-logo'
                         decoding='async'
-                        onError={() => {
-                            setFailedLogoUrl(displayLogoUrl);
-                            recordPtvEvent('render', 'native-home-hero-logo-failed', {
-                                itemId: getItemId(heroItem),
-                                logoUrl: displayLogoUrl
-                            });
-                        }}
-                        src={displayLogoUrl}
+                        onError={handleLogoError}
+                        src={logoUrl}
                     />
                 ) : (
                     <h1>{heroItem ? getItemTitle(heroItem) : PTV_BRANDING.appName}</h1>
@@ -1806,7 +2006,13 @@ function NativeHomeHero({
     );
 }
 
-function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
+function NativeHomeCard({
+    item,
+    onActivate,
+    onRecommendationFeedback,
+    row,
+    user
+}: NativeHomeCardProps) {
     const kind = row.kind;
     const itemId = getItemId(item);
     const [imageAttemptIndex, setImageAttemptIndex] = useState(0);
@@ -2036,6 +2242,43 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
             trailerHref
         });
     }, [itemId, row.id, row.title, title, trailerHref]);
+    const handleItemActionMenu = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+        if (!itemId || !user) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        const positionTo = event.currentTarget;
+
+        void showPtvItemActionMenu({
+            extraCommands: onRecommendationFeedback ? NATIVE_HOME_FEEDBACK_COMMANDS : [],
+            item: item as PtvItem,
+            onExtraCommand: onRecommendationFeedback ? (commandId, menuItem) => {
+                const action = getNativeHomeFeedbackAction(commandId);
+
+                if (!action) throw new Error('Unknown Home feedback command.');
+
+                return onRecommendationFeedback(menuItem, action).then(() => ({
+                    updated: true
+                }));
+            } : undefined,
+            positionTo,
+            user
+        })
+            .then(result => {
+                if (!result || typeof result !== 'object' || !('command' in result)) return;
+
+                const command = String(result.command || '');
+
+                if (command === 'favorite') setIsFavorite(true);
+                if (command === 'unfavorite') setIsFavorite(false);
+            })
+            .catch(error => {
+                recordPtvEvent('render', 'native-home-card-menu-failed', {
+                    errorName: error instanceof Error ? error.name : 'unknown',
+                    rowId: row.id
+                });
+            });
+    }, [item, itemId, onRecommendationFeedback, row.id, user]);
 
     const handleImageError = useCallback(() => {
         setImageAttemptIndex(previous => {
@@ -2122,6 +2365,18 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
                             </span>
                         ))}
                     </div>
+                ) : null}
+
+                {itemId && user ? (
+                    <button
+                        aria-label={`More actions for ${title}`}
+                        className='ptv-native-card-menu'
+                        data-ptv-focus-key={`home-card-menu:${itemId}`}
+                        onClick={handleItemActionMenu}
+                        type='button'
+                    >
+                        <span aria-hidden='true'>•••</span>
+                    </button>
                 ) : null}
 
                 {isPlayableItem(item) ? (
@@ -2260,7 +2515,12 @@ function NativeHomeCard({ item, onActivate, row }: NativeHomeCardProps) {
     );
 }
 
-function NativeHomeRowScroller({ onActiveItemChange, row }: NativeHomeRowScrollerProps) {
+function NativeHomeRowScroller({
+    onActiveItemChange,
+    onRecommendationFeedback,
+    row,
+    user
+}: NativeHomeRowScrollerProps) {
     const scrollerRef = useRef<HTMLDivElement | null>(null);
     const frameRef = useRef<number | null>(null);
     const timeoutRef = useRef<number | null>(null);
@@ -2401,7 +2661,13 @@ function NativeHomeRowScroller({ onActiveItemChange, row }: NativeHomeRowScrolle
                         className='ptv-native-home-card-cell'
                         role='listitem'
                     >
-                        <NativeHomeCard item={item} onActivate={onActiveItemChange} row={row} />
+                        <NativeHomeCard
+                            item={item}
+                            onActivate={onActiveItemChange}
+                            onRecommendationFeedback={onRecommendationFeedback}
+                            row={row}
+                            user={user}
+                        />
                     </div>
                 ))}
             </div>
@@ -2665,11 +2931,14 @@ function NativeHomeRowView({
     isMounted,
     onActiveBackdropItemChange,
     onLayoutAction,
-    row
+    onRecommendationFeedback,
+    row,
+    user
 }: NativeHomeRowViewProps) {
     const moreHref = row.moreUrl
         || (row.sourceValue ? `#/search?query=${encodeURIComponent(row.sourceValue)}` : PTV_ROUTES.search);
     const rowBackdropItem = useMemo(() => getNativeHomeRowBackdropItem(row), [row]);
+    const isRecommendationRow = isNativeHomeRecommendationRow(row);
     const [activeRowItem, setActiveRowItem] = useState<NativeHomeAnyItem | null>(null);
     const rowAccentStyle = useMemo(() => getNativeHomeRowAccentStyle(row, activeRowItem), [activeRowItem, row]);
     const editorialDescription = useMemo(() => getNativeHomeRowEditorialDescription(row), [row]);
@@ -2723,10 +2992,14 @@ function NativeHomeRowView({
         >
             <div className='ptv-native-home-row-heading'>
                 <div>
-                    <span>{row.subtitle}</span>
                     <h2>{row.title}</h2>
-                    {editorialDescription ? (
-                        <p>{editorialDescription}</p>
+                    {!isRecommendationRow ? (
+                        <>
+                            <span>{row.subtitle}</span>
+                            {editorialDescription ? (
+                                <p>{editorialDescription}</p>
+                            ) : null}
+                        </>
                     ) : null}
                 </div>
                 <div className='ptv-native-home-row-heading-actions'>
@@ -2770,14 +3043,21 @@ function NativeHomeRowView({
                 </div>
             </div>
 
-            <NativeHomeRecommendationExplanationPanel canShowDebug={canShowDebug} row={row} />
+            {isRecommendationRow ? null : (
+                <NativeHomeRecommendationExplanationPanel canShowDebug={canShowDebug} row={row} />
+            )}
 
             {canShowDebug ? (
                 <NativeHomeRowDiagnosticsPanel row={row} />
             ) : null}
 
             {isMounted ? (
-                <NativeHomeRowScroller onActiveItemChange={handleActiveItemChange} row={row} />
+                <NativeHomeRowScroller
+                    onActiveItemChange={handleActiveItemChange}
+                    onRecommendationFeedback={onRecommendationFeedback}
+                    row={row}
+                    user={user}
+                />
             ) : (
                 <div
                     aria-label={`${row.title} is waiting to load`}
@@ -2816,6 +3096,11 @@ function NativeHome() {
     const heroInactivityTimerRef = useRef<number | null>(null);
     const lastHeroCommitAtRef = useRef(0);
     const lastScrollAtRef = useRef(0);
+    const customizeTriggerRef = useRef<HTMLButtonElement | null>(null);
+    const preferenceDocumentRef = useRef<NativeHomePreferenceDocument | null>(null);
+    const preferenceSaveGenerationRef = useRef(0);
+    const retryPreferenceDocumentRef = useRef<NativeHomePreferenceDocument | null>(null);
+    const retryPreferenceReasonRef = useRef<'feedback' | 'layout'>('layout');
     const smartHeroRequestTokenRef = useRef(0);
     const [activeBackdropItem, setActiveBackdropItem] = useState<PtvItem | null>(null);
     const [focusedHeroItem, setFocusedHeroItem] = useState<PtvItem | null>(null);
@@ -2830,7 +3115,11 @@ function NativeHome() {
     const [heroTransitionSampleCount, setHeroTransitionSampleCount] = useState(0);
     const [hoverDelayTotalMs, setHoverDelayTotalMs] = useState(0);
     const [hoverDelaySampleCount, setHoverDelaySampleCount] = useState(0);
-    const [layoutRevision, setLayoutRevision] = useState(0);
+    const [isCustomizationOpen, setIsCustomizationOpen] = useState(false);
+    const [preferenceDocument, setPreferenceDocument] = useState<NativeHomePreferenceDocument | null>(null);
+    const [preferenceSaveError, setPreferenceSaveError] = useState('');
+    const [isPreferenceSaving, setIsPreferenceSaving] = useState(false);
+    const [feedbackNotice, setFeedbackNotice] = useState('');
     const { canShowDebug } = usePtvAdminDebugVisibility();
     const {
         debug,
@@ -2838,16 +3127,96 @@ function NativeHome() {
         heroItem,
         heroItems,
         isLoading,
-        rows: rawRows
+        rows: rawRows,
+        user
     } = useNativeHomeData();
-    const personalizationSettings = useMemo(
-        () => loadNativeHomePersonalizationSettings(),
-        [layoutRevision]
+    const preferenceScope = useMemo(() => {
+        const userId = String(user?.Id || '');
+        const currentScope = getCurrentNativeHomePreferenceScope();
+
+        if (!userId || !currentScope || currentScope.userId !== userId) return null;
+
+        return currentScope;
+    }, [user?.Id]);
+
+    useEffect(() => {
+        preferenceSaveGenerationRef.current += 1;
+        retryPreferenceDocumentRef.current = null;
+        setPreferenceSaveError('');
+        setIsPreferenceSaving(false);
+
+        if (!preferenceScope) {
+            preferenceDocumentRef.current = null;
+            setPreferenceDocument(null);
+            return;
+        }
+
+        let nextDocument: NativeHomePreferenceDocument;
+
+        try {
+            nextDocument = loadNativeHomePreferenceDocument(preferenceScope);
+        } catch {
+            nextDocument = createDefaultNativeHomePreferenceDocument(preferenceScope);
+        }
+
+        preferenceDocumentRef.current = nextDocument;
+        setPreferenceDocument(nextDocument);
+    }, [preferenceScope]);
+
+    const personalizationSettings = preferenceDocument?.layout
+        || DEFAULT_NATIVE_HOME_PERSONALIZATION_SETTINGS;
+    const personalizedHome = useNativeHomePersonalization({
+        enabled: personalizationSettings.experimentalRecommendations,
+        feedback: preferenceDocument?.feedback,
+        isPrimaryHomeLoading: isLoading,
+        userId: String(user?.Id || '')
+    });
+    const unfilteredMergedRows = useMemo(
+        () => mergeNativeHomePersonalizedRows(rawRows, personalizedHome.rows),
+        [personalizedHome.rows, rawRows]
+    );
+    const mergedRows = useMemo(
+        () => preferenceDocument ?
+            filterNativeHomeRecommendationRows(unfilteredMergedRows, preferenceDocument.feedback) :
+            unfilteredMergedRows,
+        [preferenceDocument, unfilteredMergedRows]
     );
     const rows = useMemo(
-        () => decorateNativeHomeRowsForCurrentLayout(rawRows, personalizationSettings),
-        [personalizationSettings, rawRows]
+        () => decorateNativeHomeRowsForCurrentLayout(mergedRows, personalizationSettings),
+        [mergedRows, personalizationSettings]
     );
+    const resolvedHeroItems = useMemo(
+        () => {
+            const existingItems = heroItem ? [...heroItems, heroItem] : heroItems;
+            const prioritizedItems = prioritizeNativeHomePersonalizedHeroItems(
+                personalizedHome.rows,
+                existingItems
+            );
+
+            const feedbackFilteredItems = preferenceDocument ?
+                filterNativeHomeHeroItems(prioritizedItems, preferenceDocument.feedback) :
+                prioritizedItems;
+
+            return feedbackFilteredItems.filter(
+                item => !isPtvRecommendationItemCompleted(item as PtvRecommendationItem)
+            );
+        },
+        [heroItem, heroItems, personalizedHome.rows, preferenceDocument]
+    );
+    const resolvedHeroItem = resolvedHeroItems[0] || null;
+    const customizationRows = useMemo(() => {
+        const seen = new Set<string>();
+
+        return unfilteredMergedRows.flatMap(row => {
+            if (!row.id || seen.has(row.id)) return [];
+
+            seen.add(row.id);
+            return [{
+                id: row.id,
+                title: row.title
+            }];
+        });
+    }, [unfilteredMergedRows]);
     const homeInsightsDebug = useMemo(
         () => ({
             ...debug.home,
@@ -2864,34 +3233,192 @@ function NativeHome() {
     const rowGroups = useMemo(() => getNativeHomeRowGroups(rows), [rows]);
     const performanceProfile = useMemo(() => getPtvPerformanceProfile(), []);
     const pageAccentStyle = useMemo(
-        () => getNativeHomePageAccentStyle(focusedHeroItem || heroItem),
-        [focusedHeroItem, heroItem]
+        () => getNativeHomePageAccentStyle(focusedHeroItem || resolvedHeroItem),
+        [focusedHeroItem, resolvedHeroItem]
     );
     const shellBackdropUrl = useMemo(
         () => getNativeHomeHeroBackdropUrl(activeBackdropItem, performanceProfile)
-            || getNativeHomeHeroBackdropUrl(heroItem, performanceProfile)
+            || getNativeHomeHeroBackdropUrl(resolvedHeroItem, performanceProfile)
             || getNativeHomeFallbackBackdropUrls(rows, performanceProfile)[0]
             || '',
-        [activeBackdropItem, heroItem, performanceProfile, rows]
+        [activeBackdropItem, performanceProfile, resolvedHeroItem, rows]
     );
     const averageHeroTransitionMs = heroTransitionSampleCount ? heroTransitionTotalMs / heroTransitionSampleCount : 0;
     const averageHoverDelayMs = hoverDelaySampleCount ? hoverDelayTotalMs / hoverDelaySampleCount : 0;
-    const ambientColorSource = focusedHeroItem ? getItemTitle(focusedHeroItem) : heroItem ? getItemTitle(heroItem) : 'hero';
+    const ambientColorSource = getNativeHomeAmbientColorSource(
+        focusedHeroItem,
+        resolvedHeroItem
+    );
     const canAutoRotateHero = !focusedHeroItem && !isMediaNavOpen;
-    const handleRowLayoutAction = useCallback<NativeHomeRowLayoutActionHandler>((rowId, action) => {
-        if (action === 'pin' || action === 'unpin') {
-            toggleNativeHomePinnedRow(rowId);
-        } else if (action === 'up' || action === 'down') {
-            moveNativeHomePinnedRow(rowId, action);
-        } else {
-            resetNativeHomeLayoutPreferences();
+    const retryPersonalizedHome = personalizedHome.retry;
+    const persistPreferenceDocument = useCallback(async (
+        nextDocument: NativeHomePreferenceDocument,
+        reason: 'feedback' | 'layout'
+    ) => {
+        const generation = preferenceSaveGenerationRef.current + 1;
+
+        preferenceSaveGenerationRef.current = generation;
+        preferenceDocumentRef.current = nextDocument;
+        retryPreferenceDocumentRef.current = nextDocument;
+        retryPreferenceReasonRef.current = reason;
+        setPreferenceDocument(nextDocument);
+        setPreferenceSaveError('');
+        setIsPreferenceSaving(true);
+
+        let savedDocument: NativeHomePreferenceDocument;
+
+        try {
+            savedDocument = await saveNativeHomePreferenceDocument(nextDocument, nextDocument.scope);
+        } catch (saveError) {
+            if (preferenceSaveGenerationRef.current === generation) {
+                setIsPreferenceSaving(false);
+                setPreferenceSaveError('Changes could not be saved to this profile.');
+            }
+
+            recordPtvEvent('render', 'native-home-preference-save-failed', {
+                reason,
+                failureName: saveError instanceof Error ? saveError.name : 'unknown'
+            });
+            throw saveError;
         }
 
-        setLayoutRevision(previous => previous + 1);
+        if (preferenceSaveGenerationRef.current === generation) {
+            preferenceDocumentRef.current = savedDocument;
+            retryPreferenceDocumentRef.current = null;
+            setPreferenceDocument(savedDocument);
+            setIsPreferenceSaving(false);
+            setPreferenceSaveError('');
+        }
+
+        if (reason === 'feedback') {
+            try {
+                const { invalidatePtvRecommendationCache } = await import(
+                    '../../modules/recommendations/engine/recommendationEngine'
+                );
+
+                invalidatePtvRecommendationCache(savedDocument.scope);
+            } catch {
+                // Presentation filtering already removed the feedback item.
+                // The next normal recommendation refresh will use persisted feedback.
+            }
+
+            retryPersonalizedHome();
+        }
+    }, [retryPersonalizedHome]);
+    const handleLayoutChange = useCallback((layout: NativeHomeLayoutPreferences) => {
+        const currentDocument = preferenceDocumentRef.current;
+
+        if (!currentDocument) return;
+
+        void persistPreferenceDocument({
+            ...currentDocument,
+            layout
+        }, 'layout').catch(() => undefined);
+    }, [persistPreferenceDocument]);
+    const handleRowLayoutAction = useCallback<NativeHomeRowLayoutActionHandler>((rowId, action) => {
+        const currentDocument = preferenceDocumentRef.current;
+
+        if (!currentDocument) return;
+
+        const currentLayout = currentDocument.layout;
+        let nextLayout = currentLayout;
+
+        if (action === 'pin' || action === 'unpin') {
+            nextLayout = {
+                ...currentLayout,
+                pinnedRows: currentLayout.pinnedRows.includes(rowId) ?
+                    currentLayout.pinnedRows.filter(id => id !== rowId) :
+                    [...currentLayout.pinnedRows, rowId]
+            };
+        } else if (action === 'up' || action === 'down') {
+            const currentIndex = currentLayout.pinnedRows.indexOf(rowId);
+
+            if (currentIndex >= 0) {
+                const nextIndex = action === 'up' ?
+                    Math.max(0, currentIndex - 1) :
+                    Math.min(currentLayout.pinnedRows.length - 1, currentIndex + 1);
+                const pinnedRows = [...currentLayout.pinnedRows];
+                const [movedRowId] = pinnedRows.splice(currentIndex, 1);
+
+                pinnedRows.splice(nextIndex, 0, movedRowId);
+                nextLayout = {
+                    ...currentLayout,
+                    pinnedRows
+                };
+            }
+        } else {
+            nextLayout = createDefaultNativeHomePreferenceDocument(currentDocument.scope).layout;
+        }
+
+        handleLayoutChange(nextLayout);
         recordPtvEvent('render', 'native-home-row-layout-action', {
-            action,
-            rowId
+            action
         });
+    }, [handleLayoutChange]);
+    const handleRecommendationFeedback = useCallback<NativeHomeRecommendationFeedbackHandler>((
+        item,
+        action
+    ) => {
+        const currentDocument = preferenceDocumentRef.current;
+        const itemId = String(item.Id || '');
+
+        if (!currentDocument || !itemId) {
+            return Promise.reject(new Error('Recommendation feedback is not ready.'));
+        }
+
+        const nextDocument = applyNativeHomeRecommendationFeedback(currentDocument, {
+            action,
+            itemId,
+            terms: getPtvRecommendationFeedbackTerms(item as PtvRecommendationItem)
+        });
+        setFeedbackNotice(getNativeHomeFeedbackNotice(action));
+        return persistPreferenceDocument(nextDocument, 'feedback');
+    }, [persistPreferenceDocument]);
+    const handleUndoFeedback = useCallback(() => {
+        const currentDocument = preferenceDocumentRef.current;
+
+        if (!currentDocument?.feedback.undoStack.length) return;
+
+        setFeedbackNotice('Recommendation feedback was restored.');
+        void persistPreferenceDocument(
+            undoNativeHomeRecommendationFeedback(currentDocument),
+            'feedback'
+        ).catch(() => undefined);
+    }, [persistPreferenceDocument]);
+    const handleResetFeedback = useCallback(() => {
+        const currentDocument = preferenceDocumentRef.current;
+
+        if (!currentDocument?.feedback.entries.length) return;
+
+        setFeedbackNotice('Recommendation feedback was reset.');
+        void persistPreferenceDocument(
+            resetNativeHomeRecommendationFeedback(currentDocument),
+            'feedback'
+        ).catch(() => undefined);
+    }, [persistPreferenceDocument]);
+    const handleResetLayout = useCallback(() => {
+        const currentDocument = preferenceDocumentRef.current;
+
+        if (!currentDocument) return;
+
+        handleLayoutChange(createDefaultNativeHomePreferenceDocument(currentDocument.scope).layout);
+    }, [handleLayoutChange]);
+    const handleRetryPreferenceSave = useCallback(() => {
+        const retryDocument = retryPreferenceDocumentRef.current;
+
+        if (!retryDocument) return;
+
+        void persistPreferenceDocument(
+            retryDocument,
+            retryPreferenceReasonRef.current
+        ).catch(() => undefined);
+    }, [persistPreferenceDocument]);
+    const handleOpenCustomization = useCallback(() => {
+        setIsCustomizationOpen(true);
+    }, []);
+    const handleCloseCustomization = useCallback(() => {
+        setIsCustomizationOpen(false);
+        window.requestAnimationFrame(() => customizeTriggerRef.current?.focus());
     }, []);
     const handleMediaNavOpenChange = useCallback((open: boolean) => {
         setIsMediaNavOpen(open);
@@ -2908,9 +3435,9 @@ function NativeHome() {
         setPendingHeroItem(null);
         setCancelledHeroTransitions(previous => previous + 1);
         recordPtvEvent('render', 'native-home-smart-hero-paused-for-nav', {
-            committedHeroItemId: getItemId(focusedHeroItem) || getItemId(heroItem) || null
+            committedHeroItemId: getItemId(focusedHeroItem) || getItemId(resolvedHeroItem) || null
         });
-    }, [focusedHeroItem, heroItem]);
+    }, [focusedHeroItem, resolvedHeroItem]);
 
     const handleFocusedBackdropItemChange = useCallback((
         item: PtvItem | null,
@@ -2966,7 +3493,7 @@ function NativeHome() {
         if (source === 'row') {
             setPendingHeroItem(null);
             recordPtvEvent('render', 'native-home-smart-hero-row-backdrop-only', {
-                currentHeroItemId: getItemId(focusedHeroItem) || getItemId(heroItem) || null,
+                currentHeroItemId: getItemId(focusedHeroItem) || getItemId(resolvedHeroItem) || null,
                 rowId: row?.id || null,
                 rowTitle: row?.title || null
             });
@@ -2974,9 +3501,9 @@ function NativeHome() {
         }
 
         const requestToken = smartHeroRequestTokenRef.current;
-        const baseDelay = source === 'mouse'
-            ? NATIVE_HOME_SMART_HERO_MOUSE_DELAY_MS
-            : NATIVE_HOME_SMART_HERO_FOCUS_DELAY_MS;
+        const baseDelay = source === 'mouse' ?
+            NATIVE_HOME_SMART_HERO_MOUSE_DELAY_MS :
+            NATIVE_HOME_SMART_HERO_FOCUS_DELAY_MS;
         const queuedAt = performance.now();
         const quietDelay = Math.max(0, NATIVE_HOME_SMART_HERO_MIN_COMMIT_GAP_MS - (queuedAt - lastHeroCommitAtRef.current));
         const delay = baseDelay + quietDelay;
@@ -3023,7 +3550,7 @@ function NativeHome() {
                 transitionMs
             });
         }, delay);
-    }, [focusedHeroItem, heroItem, isMediaNavOpen, performanceProfile]);
+    }, [focusedHeroItem, isMediaNavOpen, performanceProfile, resolvedHeroItem]);
 
     useEffect(() => () => {
         smartHeroRequestTokenRef.current += 1;
@@ -3115,9 +3642,14 @@ function NativeHome() {
             shouldAutoFocus={false}
         >
             <main
-                className='ptv-native-home'
+                className={[
+                    'ptv-native-home',
+                    `is-density-${personalizationSettings.density}`,
+                    personalizationSettings.heroEnabled ? '' : 'is-hero-disabled'
+                ].filter(Boolean).join(' ')}
                 data-ptv-layout-node='home-root'
                 data-ptv-mounted-rows={mountedRowCount}
+                data-ptv-shelf-density={personalizationSettings.density}
                 style={pageAccentStyle}
             >
                 <PTVShell
@@ -3131,13 +3663,57 @@ function NativeHome() {
                         <NativeHomeFallback message={error} />
                     ) : (
                         <>
-                            <NativeHomeHero
-                                activeItem={focusedHeroItem}
-                                canAutoRotate={canAutoRotateHero}
-                                heroItem={heroItem}
-                                heroItems={heroItems}
-                                onActiveBackdropItemChange={setActiveBackdropItem}
-                            />
+                            <div className='ptv-native-home-controls' aria-label='Home controls'>
+                                <button
+                                    ref={customizeTriggerRef}
+                                    aria-haspopup='dialog'
+                                    className='ptv-native-home-customize-trigger'
+                                    disabled={!preferenceDocument}
+                                    onClick={handleOpenCustomization}
+                                    type='button'
+                                >
+                                    <PtvIcon name='settings' />
+                                    <span>Customize Home</span>
+                                </button>
+                                <div
+                                    className='ptv-native-home-personalization-status'
+                                    aria-atomic='true'
+                                    aria-live='polite'
+                                    role='status'
+                                >
+                                    {personalizedHome.status === 'loading' ?
+                                        <span>Personalizing shelves…</span> :
+                                        null}
+                                    {personalizedHome.status === 'error' ? (
+                                        <>
+                                            <span>{personalizedHome.error}</span>
+                                            <button onClick={personalizedHome.retry} type='button'>Try again</button>
+                                        </>
+                                    ) : null}
+                                    {feedbackNotice ? (
+                                        <>
+                                            <span>{feedbackNotice}</span>
+                                            <button
+                                                disabled={!preferenceDocument?.feedback.undoStack.length}
+                                                onClick={handleUndoFeedback}
+                                                type='button'
+                                            >
+                                                Undo
+                                            </button>
+                                        </>
+                                    ) : null}
+                                </div>
+                            </div>
+
+                            {personalizationSettings.heroEnabled ? (
+                                <NativeHomeHero
+                                    activeItem={focusedHeroItem}
+                                    canAutoRotate={canAutoRotateHero}
+                                    heroItem={resolvedHeroItem}
+                                    heroItems={resolvedHeroItems}
+                                    onActiveBackdropItemChange={setActiveBackdropItem}
+                                />
+                            ) : null}
 
                             {isLoading ? (
                                 <section className='ptv-native-home-loading' aria-live='polite'>
@@ -3225,7 +3801,11 @@ function NativeHome() {
                                                             isMounted={isRowMounted(row.id)}
                                                             onActiveBackdropItemChange={handleFocusedBackdropItemChange}
                                                             onLayoutAction={handleRowLayoutAction}
+                                                            onRecommendationFeedback={
+                                                                preferenceDocument ? handleRecommendationFeedback : null
+                                                            }
                                                             row={row}
+                                                            user={user}
                                                         />
                                                     </div>
                                                 );
@@ -3237,6 +3817,29 @@ function NativeHome() {
                         </>
                     )}
                 </PTVShell>
+
+                {isCustomizationOpen && preferenceDocument ? (
+                    <Suspense fallback={(
+                        <div className='ptv-home-customize-loading' aria-live='polite' role='status'>
+                            Loading Home controls…
+                        </div>
+                    )}>
+                        <HomeCustomizationDialog
+                            canUndoFeedback={Boolean(preferenceDocument.feedback.undoStack.length)}
+                            feedbackCount={preferenceDocument.feedback.entries.length}
+                            isSaving={isPreferenceSaving}
+                            onClose={handleCloseCustomization}
+                            onLayoutChange={handleLayoutChange}
+                            onResetFeedback={handleResetFeedback}
+                            onResetLayout={handleResetLayout}
+                            onRetrySave={handleRetryPreferenceSave}
+                            onUndoFeedback={handleUndoFeedback}
+                            rows={customizationRows}
+                            saveError={preferenceSaveError}
+                            settings={personalizationSettings}
+                        />
+                    </Suspense>
+                ) : null}
             </main>
         </Page>
     );

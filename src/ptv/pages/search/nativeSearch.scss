@@ -54,6 +54,11 @@
     backdrop-filter: blur(18px) saturate(1.2);
 }
 
+.ptv-search-hero-form:focus-within {
+    outline: 0.2rem solid rgb(142 234 255 / 92%);
+    outline-offset: 0.2rem;
+}
+
 .ptv-search-hero-form .ptv-icon {
     width: 1.3rem;
     height: 1.3rem;
@@ -75,6 +80,53 @@
     color: rgb(255 255 255 / 54%);
 }
 
+.ptv-search-filters {
+    display: flex;
+    width: min(100%, 58rem);
+    gap: 0.55rem;
+    overflow-x: auto;
+    padding: 0.15rem 0.1rem 0.3rem;
+    scrollbar-width: thin;
+}
+
+.ptv-search-filters button,
+.ptv-search-suggestion-chips button,
+.ptv-search-result-state-actions button,
+.ptv-search-partial-error button {
+    min-height: 2.75rem;
+    padding: 0 1rem;
+    border: 1px solid rgb(255 255 255 / 14%);
+    border-radius: 999px;
+    background: rgb(255 255 255 / 8%);
+    color: #fff;
+    font: inherit;
+    font-weight: 800;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ptv-search-filters button.is-active {
+    border-color: rgb(188 123 255 / 72%);
+    background:
+        linear-gradient(135deg, rgb(172 89 255 / 46%), rgb(89 52 170 / 36%)),
+        rgb(255 255 255 / 9%);
+    box-shadow: 0 0.7rem 1.8rem rgb(105 45 185 / 24%);
+}
+
+.ptv-search-filters button:hover,
+.ptv-search-filters button:focus-visible,
+.ptv-search-suggestion-chips button:hover,
+.ptv-search-suggestion-chips button:focus-visible,
+.ptv-search-result-state-actions button:hover,
+.ptv-search-result-state-actions button:focus-visible,
+.ptv-search-partial-error button:hover,
+.ptv-search-partial-error button:focus-visible {
+    border-color: rgb(211 167 255 / 60%);
+    outline: 2px solid rgb(189 123 255 / 42%);
+    outline-offset: 2px;
+    background-color: rgb(163 92 255 / 20%);
+}
+
 .ptv-search-summary,
 .ptv-search-suggestions {
     margin: 0;
@@ -83,17 +135,33 @@
 }
 
 .ptv-search-suggestions {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
     gap: 0.7rem;
-    align-items: center;
 }
 
-.ptv-search-suggestions a {
+.ptv-search-suggestions p {
+    margin: 0;
+}
+
+.ptv-search-suggestions-label {
+    color: #8eeaff;
+    font-size: 0.78rem;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.ptv-search-suggestion-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.ptv-search-suggestion-chips a {
     display: inline-flex;
     align-items: center;
-    min-height: 2.35rem;
-    padding: 0 0.9rem;
+    min-height: 2.75rem;
+    padding: 0 1rem;
     border: 1px solid rgb(255 255 255 / 12%);
     border-radius: 999px;
     background: rgb(255 255 255 / 8%);
@@ -101,9 +169,74 @@
     text-decoration: none;
 }
 
+.ptv-search-suggestion-chips a:hover,
+.ptv-search-suggestion-chips a:focus-visible {
+    border-color: rgb(211 167 255 / 60%);
+    outline: 2px solid rgb(189 123 255 / 42%);
+    outline-offset: 2px;
+    background: rgb(163 92 255 / 20%);
+}
+
 .ptv-search-groups {
     display: grid;
     gap: 1.5rem;
+}
+
+.ptv-search-result-state,
+.ptv-search-partial-error {
+    border: 1px solid rgb(210 190 255 / 16%);
+    border-radius: 1.4rem;
+    background:
+        linear-gradient(135deg, rgb(84 55 128 / 28%), rgb(24 18 43 / 40%)),
+        rgb(10 8 22 / 28%);
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 8%),
+        0 1.1rem 2.8rem rgb(0 0 0 / 24%);
+    backdrop-filter: blur(14px) saturate(1.08);
+}
+
+.ptv-search-result-state {
+    display: grid;
+    justify-items: start;
+    gap: 0.65rem;
+    max-width: 48rem;
+    padding: clamp(1.25rem, 2vw, 1.8rem);
+}
+
+.ptv-search-result-state .ptv-icon {
+    width: 1.6rem;
+    height: 1.6rem;
+    color: #8eeaff;
+}
+
+.ptv-search-result-state.is-error .ptv-icon {
+    color: #ffd38e;
+}
+
+.ptv-search-result-state h2,
+.ptv-search-result-state p {
+    margin: 0;
+}
+
+.ptv-search-result-state p,
+.ptv-search-partial-error {
+    color: rgb(255 255 255 / 72%);
+    font-weight: 700;
+}
+
+.ptv-search-result-state-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    padding-top: 0.25rem;
+}
+
+.ptv-search-partial-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
 }
 
 .ptv-search-group,
@@ -182,8 +315,8 @@
 }
 
 .ptv-search-card {
+    position: relative;
     display: grid;
-    gap: 0.5rem;
     min-width: 0;
     padding: 0.55rem;
     border: 1px solid rgb(255 255 255 / 12%);
@@ -201,7 +334,7 @@
 }
 
 .ptv-search-card:hover,
-.ptv-search-card:focus-visible {
+.ptv-search-card:focus-within {
     z-index: 3;
     border-color: rgb(211 167 255 / 48%);
     box-shadow:
@@ -211,6 +344,54 @@
     filter: brightness(1.06);
     outline: none;
     transform: translateY(-0.48rem) scale(1.035);
+}
+
+.ptv-search-card-link {
+    display: grid;
+    gap: 0.5rem;
+    min-width: 0;
+    border-radius: 0.74rem;
+    color: inherit;
+    text-decoration: none;
+}
+
+.ptv-search-card-link:focus-visible {
+    outline: 0.2rem solid rgb(142 234 255 / 92%);
+    outline-offset: 0.22rem;
+}
+
+.ptv-search-card-action {
+    position: absolute;
+    z-index: 4;
+    top: 0.85rem;
+    right: 0.85rem;
+    display: grid;
+    width: 2.6rem;
+    height: 2.6rem;
+    padding: 0;
+    place-items: center;
+    border: 1px solid rgb(255 255 255 / 25%);
+    border-radius: 999px;
+    background: rgb(19 12 32 / 88%);
+    box-shadow: 0 0.55rem 1.2rem rgb(0 0 0 / 42%);
+    color: #fff;
+    cursor: pointer;
+    opacity: 0.9;
+    transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    backdrop-filter: blur(12px) saturate(1.2);
+}
+
+.ptv-search-card-action:hover,
+.ptv-search-card-action:focus-visible {
+    border-color: rgb(142 234 255 / 76%);
+    background: rgb(75 38 112 / 94%);
+    opacity: 1;
+    outline: none;
+}
+
+.ptv-search-card-action:disabled {
+    cursor: wait;
+    opacity: 0.62;
 }
 
 .ptv-search-card-art {
@@ -277,6 +458,7 @@
 }
 
 .ptv-search-card-skeleton {
+    gap: 0.5rem;
     pointer-events: none;
 }
 
@@ -336,20 +518,88 @@
 
 @media (max-width: 760px) {
     .ptv-search-page {
-        padding-top: 7rem;
+        padding: 7rem 0.75rem 3rem;
+    }
+
+    .ptv-search-hero {
+        padding-inline: 0;
+    }
+
+    .ptv-search-hero h1 {
+        font-size: clamp(3rem, 17vw, 4.6rem);
+    }
+
+    .ptv-search-filters {
+        flex-wrap: nowrap;
+        margin-inline: -0.15rem;
+        padding-inline: 0.15rem;
+    }
+
+    .ptv-search-suggestion-chips {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding: 0.15rem 0.1rem 0.35rem;
     }
 
     .ptv-search-card-rail {
         grid-auto-columns: 9rem;
     }
+
+    .ptv-search-card-action {
+        top: 0.78rem;
+        right: 0.78rem;
+        width: 2.75rem;
+        height: 2.75rem;
+    }
+
+    .ptv-search-partial-error {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+    .ptv-search-page {
+        gap: 1rem;
+        padding-top: 5.75rem;
+    }
+
+    .ptv-search-hero {
+        gap: 0.65rem;
+    }
+
+    .ptv-search-hero h1 {
+        font-size: clamp(2.6rem, 11vw, 4rem);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-search-card,
+    .ptv-search-card-action,
+    .ptv-search-card-skeleton .ptv-search-card-art,
+    .ptv-search-skeleton-line {
+        animation: none;
+        transition: none;
+    }
+
+    .ptv-search-card:hover,
+    .ptv-search-card:focus-within {
+        transform: none;
+    }
 }
 
 html.ptv-client-firetv .ptv-search-card,
 html.ptv-client-low-power .ptv-search-card,
+html.ptv-client-firetv .ptv-search-card-action,
+html.ptv-client-low-power .ptv-search-card-action,
 html.ptv-client-firetv .ptv-search-group,
 html.ptv-client-low-power .ptv-search-group,
 html.ptv-client-firetv .ptv-search-hero-form,
-html.ptv-client-low-power .ptv-search-hero-form {
+html.ptv-client-low-power .ptv-search-hero-form,
+html.ptv-client-firetv .ptv-search-result-state,
+html.ptv-client-low-power .ptv-search-result-state,
+html.ptv-client-firetv .ptv-search-partial-error,
+html.ptv-client-low-power .ptv-search-partial-error {
     backdrop-filter: none;
 }
 

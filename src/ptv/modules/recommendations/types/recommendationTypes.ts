@@ -20,6 +20,28 @@ export type PtvRecommendationSourceType =
     | 'recently-viewed'
     | 'resume';
 
+export type PtvRecommendationFeedbackAction =
+    | 'hide-from-home'
+    | 'not-interested'
+    | 'show-fewer-like-this';
+
+export type PtvRecommendationFeedbackEntry = {
+    action: PtvRecommendationFeedbackAction;
+    createdAt: number;
+    itemId: string;
+    terms: string[];
+};
+
+export type PtvRecommendationFeedbackUndoEntry = {
+    itemId: string;
+    previous: PtvRecommendationFeedbackEntry | null;
+};
+
+export type PtvRecommendationFeedbackState = {
+    entries: PtvRecommendationFeedbackEntry[];
+    undoStack: PtvRecommendationFeedbackUndoEntry[];
+};
+
 export type PtvTasteCategory =
     | 'actors'
     | 'artists'
@@ -287,6 +309,7 @@ export type PtvRecommendationDataBundle = {
 };
 
 export type PtvRecommendationRunOptions = {
+    feedback?: PtvRecommendationFeedbackState;
     includeHomeScans?: boolean;
     now?: number;
     signal?: AbortSignal;
