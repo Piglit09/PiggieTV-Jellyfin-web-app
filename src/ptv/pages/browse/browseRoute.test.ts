@@ -3,6 +3,22 @@ import { describe, expect, it } from 'vitest';
 import { buildPtvBrowseHref, parsePtvBrowseRoute } from './browseRoute';
 
 describe('browseRoute', () => {
+    it('includes Collection view, genre, details identity, and ordering in the canonical route key', () => {
+        const details = parsePtvBrowseRoute('/collections', '?view=details&collectionId=jellyfin%3Aset-1&sort=TimelineOrder');
+        const all = parsePtvBrowseRoute('/collections', '?view=all');
+        const genre = parsePtvBrowseRoute('/collections', '?view=genre&genre=Animation');
+
+        expect(details).toMatchObject({
+            collectionId: 'jellyfin:set-1',
+            sortBy: 'TimelineOrder',
+            view: 'details'
+        });
+        expect(all.view).toBe('all');
+        expect(genre).toMatchObject({ genre: 'Animation', view: 'genre' });
+        expect(details.canonicalRouteKey).not.toBe(all.canonicalRouteKey);
+        expect(genre.canonicalRouteKey).not.toBe(all.canonicalRouteKey);
+    });
+
     it('preserves the existing base landing routes', () => {
         const route = parsePtvBrowseRoute('/movies');
 

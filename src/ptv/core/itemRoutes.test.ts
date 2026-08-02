@@ -73,8 +73,8 @@ describe('resolvePtvItemRoute', () => {
             name: 'Manga Open'
         },
         {
-            expectedHref: '#/details?id=collection%201',
-            expectedSource: 'jellyfin-fallback',
+            expectedHref: '#/collections?view=details&collectionId=jellyfin%3Acollection%201',
+            expectedSource: 'ptv-collections',
             item: { Id: 'collection 1', Type: 'BoxSet' },
             name: 'Collection Open'
         }

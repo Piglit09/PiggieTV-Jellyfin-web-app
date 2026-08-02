@@ -78,8 +78,7 @@ describe('native Search details navigation adoption', () => {
     it.each([
         ['Series', 'show-1', 'shows'],
         ['Season', 'season-1', 'seasons'],
-        ['Episode', 'episode-1', 'episodes'],
-        ['BoxSet', 'collection-1', 'collections']
+        ['Episode', 'episode-1', 'episodes']
     ])('adopts the existing generic details route for %s', async (type, id, sourceGroup) => {
         const item = { Id: id, Type: type };
         const route = resolvePtvItemRoute(item, {
@@ -95,6 +94,23 @@ describe('native Search details navigation adoption', () => {
 
         expect(appRouter.show).toHaveBeenCalledTimes(1);
         expect(appRouter.show).toHaveBeenCalledWith(`#/details?id=${id}`);
+    });
+
+    it('keeps BoxSet navigation on the premium Collections anchor owner', async () => {
+        const item = { Id: 'collection-1', Type: 'BoxSet' };
+        const route = resolvePtvItemRoute(item);
+        const event = createActivationEvent();
+
+        await activateNativeSearchCard({
+            event,
+            item,
+            route,
+            sourceGroup: 'collections'
+        });
+
+        expect(route.href).toBe('#/collections?view=details&collectionId=jellyfin%3Acollection-1');
+        expect(event.preventDefault).not.toHaveBeenCalled();
+        expect(appRouter.show).not.toHaveBeenCalled();
     });
 
     it('preserves parent scope, extra query state, and encoded opaque IDs', async () => {

@@ -348,7 +348,9 @@ function renderFixtureSearchGroup(
         card.dataset.ptvSearchItemId = item.id;
         card.dataset.ptvSearchItemType = item.type;
         card.dataset.ptvSearchSourceGroup = groupId;
-        card.href = `#/details?id=${encodeURIComponent(item.id)}`;
+        card.href = item.type === 'BoxSet' ?
+            `#/collections?view=details&collectionId=${encodeURIComponent(`jellyfin:${item.id}`)}` :
+            `#/details?id=${encodeURIComponent(item.id)}`;
         addElement(card, 'span', {
             className: 'ptv-search-card-art',
             text: item.name.slice(0, 1)
@@ -2239,6 +2241,225 @@ function renderDiagnosticsDashboard() {
     };
 }
 
+type FixtureCollection = Readonly<{
+    key: string;
+    members: readonly string[];
+    source: 'cross-library' | 'curated' | 'jellyfin';
+    title: string;
+}>;
+
+type FixtureCollectionPreferences = {
+    hidden: string[];
+    pinned: string[];
+};
+
+const FIXTURE_COLLECTIONS: readonly FixtureCollection[] = [
+    { key: 'jellyfin:saga', members: ['First Chapter', 'Second Chapter', 'Final Chapter'], source: 'jellyfin', title: 'The Great Saga' },
+    { key: 'jellyfin:animation', members: ['Animated Movie', 'Animated Series'], source: 'jellyfin', title: 'Animation Worlds' },
+    { key: 'curated:seasonal', members: ['Autumn Story', 'Winter Story'], source: 'curated', title: 'Seasonal Stories' },
+    { key: 'cross:aurora', members: ['Aurora Movie', 'Aurora Series', 'Aurora Soundtrack', 'Aurora Book'], source: 'cross-library', title: 'Aurora Across Libraries' }
+];
+
+function getFixtureCollectionPreferences() {
+    const scope = window.localStorage.getItem('ptv:e2e:collection-scope') || 'server-a:user-a';
+    const key = `ptv:e2e:collections:${scope}`;
+    let preferences: FixtureCollectionPreferences = { hidden: [], pinned: [] };
+
+    try {
+        preferences = {
+            ...preferences,
+            ...JSON.parse(window.localStorage.getItem(key) || '{}') as Partial<FixtureCollectionPreferences>
+        };
+    } catch {
+        // Invalid validation-only state retires to defaults.
+    }
+
+    return {
+        key,
+        preferences,
+        save(next: FixtureCollectionPreferences) {
+            window.localStorage.setItem(key, JSON.stringify(next));
+        }
+    };
+}
+
+function addFixtureCollectionCard(
+    container: HTMLElement,
+    collection: FixtureCollection,
+    preferences: ReturnType<typeof getFixtureCollectionPreferences>,
+    initialFocus = false
+) {
+    const article = addElement(container, 'article', { className: 'ptv-collection-card' });
+
+    article.dataset.collectionKey = collection.key;
+    article.dataset.ptvCollectionSource = collection.source;
+    const link = addElement(article, 'a', { text: collection.title });
+
+    link.href = `#/collections?view=details&collectionId=${encodeURIComponent(collection.key)}`;
+    link.dataset.ptvFocusKey = `collections-card-${collection.key.replace(/[^a-z0-9]/gi, '-')}`;
+    if (initialFocus) link.dataset.ptvInitialFocus = 'true';
+    addElement(article, 'span', { text: `${collection.members.length} members | ${collection.source}` });
+    const pin = addElement(article, 'button', {
+        text: preferences.preferences.pinned.includes(collection.key) ? 'Unpin' : 'Pin'
+    });
+
+    pin.type = 'button';
+    pin.addEventListener('click', () => {
+        const pinned = preferences.preferences.pinned.filter(key => key !== collection.key);
+
+        if (!preferences.preferences.pinned.includes(collection.key)) pinned.unshift(collection.key);
+        preferences.save({ ...preferences.preferences, pinned });
+        renderRoute();
+    });
+    const hide = addElement(article, 'button', { text: 'Hide' });
+
+    hide.type = 'button';
+    hide.addEventListener('click', () => {
+        preferences.save({
+            ...preferences.preferences,
+            hidden: [...new Set([...preferences.preferences.hidden, collection.key])]
+        });
+        renderRoute();
+    });
+}
+
+function renderFixtureCollectionDetails(params: URLSearchParams) {
+    const collectionKey = params.get('collectionId') || '';
+    const collection = FIXTURE_COLLECTIONS.find(candidate => candidate.key === collectionKey)
+        || { ...FIXTURE_COLLECTIONS[0], key: collectionKey || FIXTURE_COLLECTIONS[0].key };
+    const page = addElement(root, 'main', { className: 'ptv-collections ptv-collection-details' });
+
+    page.dataset.ptvCollectionsView = 'details';
+    page.dataset.ptvDuplicateRequestKeys = '0';
+    page.dataset.ptvRuntimeCount = '1';
+    page.dataset.ptvShellCount = '1';
+    page.dataset.collectionKey = collection.key;
+    page.style.paddingTop = '6rem';
+    const back = addElement(page, 'a', { text: 'Collections' });
+
+    back.href = '#/collections';
+    back.dataset.ptvFocusKey = 'collection-back-to-browse';
+    addElement(page, 'span', { text: `${collection.source} collection` });
+    addElement(page, 'h1', { text: collection.title });
+    addElement(page, 'p', { text: 'A cinematic destination with explicit, explainable library relationships.' });
+    const primary = addElement(page, 'a', { text: 'Start next chapter' });
+
+    primary.href = '#/details?id=fixture-member-1';
+    primary.dataset.ptvFocusKey = 'collection-primary-action';
+    primary.dataset.ptvInitialFocus = 'true';
+    const ordering = addElement(page, 'nav', { className: 'ptv-collection-ordering' });
+
+    ordering.setAttribute('aria-label', 'Collection ordering modes');
+    ['Collection order', 'Release order', 'Title'].forEach(label => addElement(ordering, 'button', { text: label }));
+    const section = addElement(page, 'section', { className: 'ptv-collection-members' });
+
+    addElement(section, 'h2', { text: collection.source === 'cross-library' ? 'Cross-Library Worlds' : 'Main Timeline' });
+    const grid = addElement(section, 'div', { className: 'ptv-collection-memberGrid' });
+
+    collection.members.forEach((member, index) => {
+        const card = addElement(grid, 'a', { text: member });
+
+        card.href = `#/details?id=fixture-member-${index + 1}`;
+        card.dataset.ptvFocusKey = `collection-member-${index + 1}`;
+    });
+}
+
+function renderCollections(search: string) {
+    const params = new URLSearchParams(search);
+    const view = params.get('view') || 'landing';
+
+    if (view === 'details') {
+        renderFixtureCollectionDetails(params);
+        return;
+    }
+
+    const preferences = getFixtureCollectionPreferences();
+    const visible = FIXTURE_COLLECTIONS.filter(collection => !preferences.preferences.hidden.includes(collection.key));
+    const page = addElement(root, 'main', { className: 'ptv-collections ptv-collections-page' });
+
+    page.dataset.ptvCollectionsView = view;
+    page.dataset.ptvDeferredConcurrency = '1';
+    page.dataset.ptvDuplicateRequestKeys = '0';
+    page.dataset.ptvRuntimeCount = '1';
+    page.dataset.ptvShellCount = '1';
+    page.style.paddingTop = '6rem';
+    const header = addElement(page, 'header', { className: 'ptv-collections-masthead' });
+
+    addElement(header, 'h1', { text: 'Collections' });
+    const navigation = addElement(header, 'nav');
+
+    navigation.setAttribute('aria-label', 'Collection views');
+    for (const [label, href] of [
+        ['Featured', '#/collections?view=featured'],
+        ['All', '#/collections?view=all'],
+        ['Genres', '#/collections?view=genres']
+    ]) {
+        const link = addElement(navigation, 'a', { text: label });
+
+        link.href = href;
+    }
+
+    if (view === 'genres') {
+        const genres = addElement(page, 'section', { className: 'ptv-collection-genreDirectory' });
+
+        addElement(genres, 'h2', { text: 'Browse collection genres' });
+        for (const name of ['Adventure', 'Animation', 'Seasonal']) {
+            const link = addElement(genres, 'a', { text: name });
+
+            link.href = `#/collections?view=genre&genre=${encodeURIComponent(name)}`;
+            link.dataset.ptvFocusKey = `collections-genre-${name.toLocaleLowerCase('en-US')}`;
+        }
+    } else {
+        if (view !== 'all' && view !== 'genre' && visible[0]) {
+            const hero = addElement(page, 'section', { className: 'ptv-collection-hero' });
+
+            addElement(hero, 'h2', { text: visible[0].title });
+            const link = addElement(hero, 'a', { text: 'Explore collection' });
+
+            link.href = `#/collections?view=details&collectionId=${encodeURIComponent(visible[0].key)}`;
+            link.dataset.ptvFocusKey = 'collections-hero-open';
+            link.dataset.ptvInitialFocus = 'true';
+        }
+
+        const pinned = visible.filter(collection => preferences.preferences.pinned.includes(collection.key));
+        const sections = view === 'featured' ?
+            [['Featured Collections', visible.slice(0, 3)] as const] :
+            view === 'all' || view === 'genre' ?
+                [['All Collections', visible] as const] :
+                [
+                    ...(pinned.length ? [['Pinned Collections', pinned] as const] : []),
+                    ['Featured Collections', visible.slice(0, 3)] as const,
+                    ['Your Jellyfin Collections', visible.filter(collection => collection.source === 'jellyfin')] as const,
+                    ['Cross-Library Worlds', visible.filter(collection => collection.source === 'cross-library')] as const
+                ];
+
+        sections.filter(([, collections]) => collections.length > 0).forEach(([title, collections], sectionIndex) => {
+            const section = addElement(page, 'section', { className: 'ptv-collection-section' });
+
+            addElement(section, 'h2', { text: title });
+            const row = addElement(section, 'div', { className: 'ptv-collection-row' });
+
+            collections.forEach((collection, index) => addFixtureCollectionCard(
+                row,
+                collection,
+                preferences,
+                view === 'all' && sectionIndex === 0 && index === 0
+            ));
+        });
+    }
+
+    if (params.get('sourceFailure') === '1') {
+        addElement(page, 'p', { className: 'ptv-collection-deferred', text: 'Optional cross-library source unavailable. Jellyfin Collections remain ready.' });
+    }
+    const reset = addElement(page, 'button', { text: 'Reset hidden collections' });
+
+    reset.type = 'button';
+    reset.addEventListener('click', () => {
+        preferences.save({ hidden: [], pinned: [] });
+        renderRoute();
+    });
+}
+
 function renderRoute() {
     if (activeHash) scrollPositions.set(activeHash, window.scrollY);
     activeHash = window.location.hash || '#/home';
@@ -2273,6 +2494,8 @@ function renderRoute() {
         renderMusicHeaderLayout();
     } else if (path === '/movies' || path === '/shows') {
         renderBrowse(path, search);
+    } else if (path === '/collections') {
+        renderCollections(search);
     } else if (path === '/search') {
         renderSearch(search);
     } else if (path === '/details' || path.startsWith('/item/')) {

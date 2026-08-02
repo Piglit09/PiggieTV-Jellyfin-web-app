@@ -25,7 +25,7 @@ describe('details discovery model', () => {
             ['genre', 'Mystery']
         ]);
         expect(links[0]).toEqual(expect.objectContaining({
-            href: '#/search?query=Example%20Franchise&ptvGrouped=true',
+            href: '#/collections?view=all&query=Example%20Franchise',
             label: 'Explore Example Franchise'
         }));
     });
@@ -38,6 +38,7 @@ describe('details discovery model', () => {
 
         expect(links).toEqual([
             expect.objectContaining({
+                href: '#/collections?view=all&query=Example%20Series',
                 kind: 'franchise',
                 label: 'Explore Example Series',
                 meta: 'Series context',

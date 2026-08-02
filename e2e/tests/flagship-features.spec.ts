@@ -222,7 +222,7 @@ test.describe('Phase F1 flagship discovery slice', () => {
         await expect(results).toHaveAttribute('aria-busy', 'false');
     });
 
-    test('lazy-renders semantic Details discovery links and routes them back to Search', async ({ page }) => {
+    test('routes explicit Details franchises to Collections and other discovery links to Search', async ({ page }) => {
         const apiRequests: string[] = [];
 
         page.on('request', request => {
@@ -244,7 +244,8 @@ test.describe('Phase F1 flagship discovery slice', () => {
         await expect(links.locator('.ptv-details-discovery-link--creator')).toHaveCount(1);
         await expect(links.locator('.ptv-details-discovery-link--studio')).toHaveCount(1);
         await expect(links.locator('.ptv-details-discovery-link--genre')).toHaveCount(2);
-        await expect(links.getByRole('link').first()).toHaveAttribute('href', /#\/search\?query=.+&ptvGrouped=true$/);
+        await expect(links.getByRole('link').first()).toHaveAttribute('href', /#\/collections\?view=all&query=.+$/);
+        await expect(links.locator('.ptv-details-discovery-link--creator')).toHaveAttribute('href', /#\/search\?query=.+&ptvGrouped=true$/);
 
         const sectionOrder = await page.locator('.detailPageContent').evaluate(container => (
             Array.from(container.children).map(element => element.id || element.className)
@@ -260,7 +261,17 @@ test.describe('Phase F1 flagship discovery slice', () => {
         await expect(firstDiscoveryLink).toBeFocused();
         await firstDiscoveryLink.press('Enter');
 
-        await expect(page.getByRole('searchbox', { name: 'Search PiggieTV' })).toHaveValue('Fixture Collection');
+        await expect(page.locator('.ptv-collections')).toHaveAttribute('data-ptv-collections-view', 'all');
+        await page.goBack();
+
+        const creatorLink = links.locator('.ptv-details-discovery-link--creator');
+        const creatorHref = await creatorLink.getAttribute('href');
+        const creatorQuery = new URLSearchParams(creatorHref?.split('?')[1] || '').get('query') || '';
+
+        await creatorLink.focus();
+        await creatorLink.press('Enter');
+
+        await expect(page.getByRole('searchbox', { name: 'Search PiggieTV' })).toHaveValue(creatorQuery);
         await expect(page.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
         await expect(page.getByRole('region', { name: 'All search results' })).toBeVisible();
     });
