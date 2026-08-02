@@ -22,12 +22,15 @@ import {
     PtvCollectionPreferenceStaleError,
     createDefaultPtvCollectionPreferenceDocument,
     loadPtvCollectionPreferenceDocument,
+    movePtvCollectionSection,
     normalizePtvCollectionPreferenceDocument,
     resetPtvCollectionVisibility,
     setPtvCollectionHidden,
     setPtvCollectionPinned,
+    setPtvCollectionShowFewer,
     stagePtvCollectionPreferenceDocument,
-    undoPtvCollectionHidden
+    undoPtvCollectionHidden,
+    undoPtvCollectionVisibility
 } from './collectionPreferences';
 
 describe('Collection preferences', () => {
@@ -61,6 +64,28 @@ describe('Collection preferences', () => {
         expect(hidden.preferences.hiddenCollectionKeys).toEqual(['jellyfin:set']);
         expect(undone.preferences.hiddenCollectionKeys).toEqual([]);
         expect(reset.preferences.hiddenCollectionKeys).toEqual([]);
+    });
+
+    it('offers one visible Undo for Show Fewer through the same scoped preference owner', () => {
+        const initial = createDefaultPtvCollectionPreferenceDocument(scope);
+        const reduced = setPtvCollectionShowFewer(initial, 'shared-tag', true);
+        const undone = undoPtvCollectionVisibility(reduced);
+
+        expect(reduced.preferences.showFewerReasonCategories).toEqual(['shared-tag']);
+        expect(reduced.preferences.undoShowFewerReasonCategories).toEqual(['shared-tag']);
+        expect(undone.preferences.showFewerReasonCategories).toEqual([]);
+        expect(undone.preferences.undoShowFewerReasonCategories).toEqual([]);
+    });
+
+    it('moves against the next rendered section instead of an empty intervening section', () => {
+        const initial = createDefaultPtvCollectionPreferenceDocument(scope).preferences.sectionOrder;
+        const moved = movePtvCollectionSection(initial, 'featured', -1, ['continue', 'featured', 'jellyfin']);
+
+        expect(moved.filter(id => ['continue', 'featured', 'jellyfin'].includes(id))).toEqual([
+            'featured',
+            'continue',
+            'jellyfin'
+        ]);
     });
 
     it('rejects stale writes and remains scoped to the active server user', () => {

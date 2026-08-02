@@ -295,6 +295,7 @@
     color: inherit;
     cursor: pointer;
     min-height: 2.5rem;
+    min-width: 2rem;
     padding: 0.55rem 0.7rem;
 }
 
@@ -416,6 +417,15 @@
     min-height: 2.75rem;
 }
 
+.ptv-collection-preferences input[type='checkbox'] {
+    block-size: 32px;
+    flex: 0 0 32px;
+    inline-size: 32px;
+    margin: 0;
+    min-height: 32px;
+    min-width: 32px;
+}
+
 .ptv-collection-preferences select {
     background: #142529;
     border: 1px solid rgba(255, 255, 255, 0.15);
@@ -444,6 +454,10 @@
     padding: 0.8rem 1rem;
     position: fixed;
     z-index: 20;
+}
+
+.ptv-collection-undo {
+    inset-inline-end: 5rem;
 }
 
 .ptv-collection-empty,

@@ -15,6 +15,7 @@ import {
     type PtvUser
 } from '../../api';
 import { createPtvAbortController } from '../../core/abortController';
+import { createPtvRetryGate } from '../../core/retryGate';
 import { getPtvClientProfile, getPtvPerformanceProfile } from '../../core/clientProfile';
 import { PTV_BRANDING, PTV_ROUTES } from '../../core/config';
 import { resolvePtvItemRoute } from '../../core/itemRoutes';
@@ -57,6 +58,7 @@ import {
     type PtvGroupedSearchHints
 } from './searchHintService';
 import { useNativeSearchCurrentUser } from './useNativeSearchCurrentUser';
+import { usePtvAuthenticatedIdentity } from '../../api/usePtvAuthenticatedIdentity';
 
 import './nativeSearch.scss';
 
@@ -802,8 +804,11 @@ export default function NativeSearchPage() {
     const routeGrouped = searchParams.get('ptvGrouped') || '';
     const activeFilter = normalizePtvSearchFilter(routeFilter);
     const activeFilterConfig = getPtvSearchFilterConfig(activeFilter);
-    const serverId = getPtvServerId();
-    const userId = getPtvCurrentUserId(serverId);
+    const {
+        serverId,
+        status: identityStatus,
+        userId
+    } = usePtvAuthenticatedIdentity();
     const { user } = useNativeSearchCurrentUser(serverId, userId);
     const searchHistoryScope = getPtvSearchHistoryKey(serverId, userId) || '';
     const shouldAutoFocusSearch = useMemo(() => {
@@ -822,6 +827,7 @@ export default function NativeSearchPage() {
     }));
     const recentSearches = recentHistory.scope === searchHistoryScope ? recentHistory.items : [];
     const requestIdRef = useRef(0);
+    const retryGateRef = useRef(createPtvRetryGate());
     const backdropUrl = useMemo(() => getSearchBackdrop(groups), [groups]);
     const visibleSearchGroups = useMemo(() => PTV_SEARCH_GROUPS.filter(
         group => activeFilterConfig.groups.includes(group.id)
@@ -879,6 +885,7 @@ export default function NativeSearchPage() {
         const query = debouncedQuery.trim();
 
         if (query.length < 2) {
+            retryGateRef.current.release();
             setGroups(getInitialGroups('idle'));
             setCacheHit(false);
             return undefined;
@@ -893,6 +900,7 @@ export default function NativeSearchPage() {
         });
 
         if (cached) {
+            retryGateRef.current.release();
             setGroups(cached.groups);
             setCacheHit(true);
             recordPtvEvent('route', 'ptv-search-cache-hit', {
@@ -901,8 +909,9 @@ export default function NativeSearchPage() {
             return undefined;
         }
 
-        if (!serverId || !userId) {
-            setGroups(getFailedHintGroups(0, 'Sign in to search your libraries.', 'error'));
+        if (identityStatus !== 'ready') {
+            retryGateRef.current.release();
+            setGroups(getInitialGroups('queued'));
             setCacheHit(false);
             return undefined;
         }
@@ -959,6 +968,7 @@ export default function NativeSearchPage() {
                 const firstResultGroup = PTV_SEARCH_GROUPS.find(group => nextGroups[group.id].items.length);
 
                 setGroups(nextGroups);
+                retryGateRef.current.release();
 
                 if (cacheKey && isSearchCacheable(nextGroups)) {
                     rememberSearchCache(cacheKey, {
@@ -1001,6 +1011,7 @@ export default function NativeSearchPage() {
                 const nextGroups = getFailedHintGroups(durationMs, message, failureKind);
 
                 setGroups(nextGroups);
+                retryGateRef.current.release();
                 recordPtvEvent('api', 'ptv-search-hints-request-failed', {
                     durationMs,
                     exceptionName: error instanceof Error ? error.name : 'UnknownError',
@@ -1034,6 +1045,7 @@ export default function NativeSearchPage() {
         activeFilter,
         activeFilterConfig.groups,
         debouncedQuery,
+        identityStatus,
         retryGeneration,
         searchHistoryScope,
         serverId,
@@ -1063,6 +1075,7 @@ export default function NativeSearchPage() {
         setSearchParams(buildPtvSearchParams('', activeFilter), { replace: true });
     }, [activeFilter, setSearchParams]);
     const retrySearch = useCallback(() => {
+        if (!retryGateRef.current.claim()) return;
         setRetryGeneration(generation => generation + 1);
     }, []);
     const updateInputQuery = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {

@@ -16,7 +16,10 @@ import {
     recordPtvImageFallback
 } from '../../api/images';
 import { createPtvAbortController } from '../../core/abortController';
+import { createPtvRetryGate } from '../../core/retryGate';
 import { recordPtvEvent } from '../../core/observability';
+import { focusPtvTvElement } from '../../core/tvFocus';
+import { usePtvAuthenticatedIdentity } from '../../api/usePtvAuthenticatedIdentity';
 import { parsePtvBrowseRoute } from '../../pages/browse/browseRoute';
 import PTVShell from '../../shell/PTVShell';
 import {
@@ -33,14 +36,23 @@ import {
     orderPtvCollectionMembers
 } from './collectionModel';
 import {
+    getPtvCollectionRouteMemoryKey,
+    getPtvCollectionRetryHref,
+    getPtvCollectionSurfaceFocusKey,
+    loadPtvCollectionRouteMemory,
+    observePtvCollectionRouteMemory
+} from './collectionRoutes';
+import {
     flushPtvCollectionPreferenceDocument,
     getCurrentPtvCollectionPreferenceScope,
     loadPtvCollectionPreferenceDocument,
+    movePtvCollectionSection,
     resetPtvCollectionVisibility,
     setPtvCollectionHidden,
     setPtvCollectionPinned,
+    setPtvCollectionShowFewer,
     stagePtvCollectionPreferenceDocument,
-    undoPtvCollectionHidden,
+    undoPtvCollectionVisibility,
     updatePtvCollectionPreferenceDocument,
     type PtvCollectionPreferenceDocument,
     type PtvCollectionPreferences
@@ -69,7 +81,8 @@ const FALLBACK_PREFERENCES: PtvCollectionPreferences = {
         PTV_COLLECTION_SECTION_IDS.map(id => [id, true])
     ) as Record<PtvCollectionSectionId, boolean>,
     showFewerReasonCategories: [],
-    undoHiddenKeys: []
+    undoHiddenKeys: [],
+    undoShowFewerReasonCategories: []
 };
 const MEMBER_PAGE_SIZE = 24;
 
@@ -183,6 +196,7 @@ function CollectionArtwork({
 
 function CollectionCard({
     collection,
+    focusScope,
     initialFocus,
     onHide,
     onPin,
@@ -190,13 +204,17 @@ function CollectionCard({
     pinned
 }: Readonly<{
     collection: PtvPortableCollection;
+    focusScope: string;
     initialFocus?: boolean;
     onHide: (collection: PtvPortableCollection) => void;
     onPin: (collection: PtvPortableCollection, pinned: boolean) => void;
     onShowFewer: (collection: PtvPortableCollection) => void;
     pinned: boolean;
 }>) {
-    const focusKey = `collections-card-${getPtvCollectionFocusKey(collection.key)}`;
+    const focusKey = getPtvCollectionSurfaceFocusKey(
+        focusScope,
+        getPtvCollectionFocusKey(collection.key)
+    );
 
     return (
         <article className='ptv-collection-card' data-ptv-collection-source={collection.sourceType}>
@@ -284,6 +302,7 @@ function CollectionSection({
                 {section.collections.map((collection, index) => (
                     <CollectionCard
                         collection={collection}
+                        focusScope={section.id}
                         initialFocus={initialFocus && index === 0}
                         key={collection.key}
                         onHide={onHide}
@@ -298,10 +317,12 @@ function CollectionSection({
 }
 
 function CollectionPreferencesPanel({
+    availableSectionIds,
     document,
     onChange,
     onReset
 }: Readonly<{
+    availableSectionIds: readonly PtvCollectionSectionId[];
     document: PtvCollectionPreferenceDocument | null;
     onChange: (changes: Partial<PtvCollectionPreferences>) => void;
     onReset: () => void;
@@ -310,14 +331,14 @@ function CollectionPreferencesPanel({
 
     const preferences = document.preferences;
     const moveSection = (id: PtvCollectionSectionId, direction: -1 | 1) => {
-        const order = [...preferences.sectionOrder];
-        const index = order.indexOf(id);
-        const destination = index + direction;
-
-        if (index < 0 || destination < 0 || destination >= order.length) return;
-
-        [order[index], order[destination]] = [order[destination], order[index]];
-        onChange({ sectionOrder: order });
+        onChange({
+            sectionOrder: movePtvCollectionSection(
+                preferences.sectionOrder,
+                id,
+                direction,
+                availableSectionIds
+            )
+        });
     };
 
     return (
@@ -428,12 +449,21 @@ function CollectionHero({ collection }: Readonly<{ collection: PtvPortableCollec
     );
 }
 
-function MemberCard({ member }: Readonly<{ member: PtvCollectionMemberSummary }>) {
+function MemberCard({
+    member,
+    surface
+}: Readonly<{
+    member: PtvCollectionMemberSummary;
+    surface: string;
+}>) {
     return (
         <article className='ptv-collection-memberCard'>
             <a
                 aria-label={`Open ${member.title}`}
-                data-ptv-focus-key={`collection-member-${getPtvCollectionFocusKey(member.key)}`}
+                data-ptv-focus-key={getPtvCollectionSurfaceFocusKey(
+                    `members-${surface}`,
+                    getPtvCollectionFocusKey(member.key)
+                )}
                 href={getMemberHref(member)}
             >
                 <span className='ptv-collection-memberIndex'>{member.collectionOrder + 1}</span>
@@ -491,7 +521,14 @@ function CollectionDetails({
                 <div className='ptv-collection-detailsBackdrop'><CollectionArtwork collection={collection} presentation='backdrop' /></div>
                 <div className='ptv-collection-detailsGradient' />
                 <div className='ptv-collection-detailsCopy'>
-                    <a className='ptv-collection-backLink' data-ptv-focus-key='collection-back-to-browse' href='#/collections'>Collections</a>
+                    <a
+                        className='ptv-collection-backLink'
+                        data-ptv-focus-key='collection-back-to-browse'
+                        data-ptv-initial-focus={!nextMember ? 'true' : undefined}
+                        href='#/collections'
+                    >
+                        Collections
+                    </a>
                     <span>{formatSource(collection.sourceType)} · {formatSource(collection.relationshipReason)}</span>
                     <h1 id='ptv-collection-details-title'>{collection.title}</h1>
                     {collection.tagline ? <p className='ptv-collection-tagline'>{collection.tagline}</p> : null}
@@ -537,7 +574,7 @@ function CollectionDetails({
                 <section className='ptv-collection-members' aria-labelledby={`ptv-collection-members-${getPtvCollectionFocusKey(section)}`} key={section}>
                     <h2 id={`ptv-collection-members-${getPtvCollectionFocusKey(section)}`}>{formatSource(section)}</h2>
                     <div className='ptv-collection-memberGrid' data-ptv-focus-group={`collection-members-${getPtvCollectionFocusKey(section)}`}>
-                        {members.map(member => <MemberCard key={member.key} member={member} />)}
+                        {members.map(member => <MemberCard key={member.key} member={member} surface={section} />)}
                     </div>
                 </section>
             ))}
@@ -570,11 +607,17 @@ function getPreferenceDocument() {
 
 // eslint-disable-next-line sonarjs/cognitive-complexity -- one route component coordinates bounded critical, deferred, preference, and render states
 export default function CollectionsPage() {
+    const authenticatedIdentity = usePtvAuthenticatedIdentity();
     const location = useLocation();
     const route = useMemo(
         () => parsePtvBrowseRoute(location.pathname, location.search),
         [location.pathname, location.search]
     );
+    const routeMemoryKey = useMemo(() => getPtvCollectionRouteMemoryKey(
+        authenticatedIdentity.identityKey,
+        location.pathname,
+        location.search
+    ), [authenticatedIdentity.identityKey, location.pathname, location.search]);
     const generation = useRef(0);
     const routeStartedAt = useRef(performance.now());
     const [critical, setCritical] = useState<readonly PtvPortableCollection[]>([]);
@@ -583,13 +626,42 @@ export default function CollectionsPage() {
     const [loading, setLoading] = useState(true);
     const [deferredLoading, setDeferredLoading] = useState(false);
     const [routeError, setRouteError] = useState('');
+    const [retryGeneration, setRetryGeneration] = useState(0);
+    const retryGate = useRef(createPtvRetryGate());
     const [preferenceError, setPreferenceError] = useState('');
     const [preferenceDocument, setPreferenceDocument] = useState<PtvCollectionPreferenceDocument | null>(getPreferenceDocument);
     const preferences = preferenceDocument?.preferences || FALLBACK_PREFERENCES;
 
     useEffect(() => {
+        if (authenticatedIdentity.status !== 'ready') {
+            setPreferenceDocument(null);
+            return;
+        }
+
+        const scope = getCurrentPtvCollectionPreferenceScope();
+        setPreferenceDocument(scope ? loadPtvCollectionPreferenceDocument(scope) : null);
+    }, [authenticatedIdentity.identityKey, authenticatedIdentity.status]);
+
+    useEffect(() => {
+        if (authenticatedIdentity.status !== 'ready' || !routeMemoryKey) return undefined;
+
+        const page = document.getElementById('ptvCollectionsPage');
+        if (!page) return undefined;
+
+        return observePtvCollectionRouteMemory(routeMemoryKey, page);
+    }, [authenticatedIdentity.status, routeMemoryKey]);
+
+    useEffect(() => {
+        if (authenticatedIdentity.status !== 'ready') {
+            retryGate.current.release();
+            setLoading(true);
+            setRouteError('');
+            return undefined;
+        }
+
         const ownedGeneration = ++generation.current;
         const controller = createPtvAbortController();
+        const ownedRetryGate = retryGate.current;
         const startedAt = performance.now();
 
         routeStartedAt.current = startedAt;
@@ -658,13 +730,22 @@ export default function CollectionsPage() {
             setLoading(false);
             setRouteError(error instanceof Error ? 'Collections could not be loaded. Try again.' : 'Collections are unavailable.');
             recordPtvEvent('route', 'collections-primary-failed', { category: 'source' });
-        });
+        }).finally(() => ownedRetryGate.release());
 
         return () => {
             controller.abort();
+            ownedRetryGate.release();
             recordPtvEvent('route', 'collections-work-retired', { view: route.view });
         };
-    }, [location.pathname, location.search, route.collectionId, route.view]);
+    }, [
+        authenticatedIdentity.identityKey,
+        authenticatedIdentity.status,
+        location.pathname,
+        location.search,
+        retryGeneration,
+        route.collectionId,
+        route.view
+    ]);
 
     const persistDocument = useCallback((next: PtvCollectionPreferenceDocument) => {
         setPreferenceDocument(next);
@@ -697,14 +778,11 @@ export default function CollectionsPage() {
 
     const showFewer = useCallback((collection: PtvPortableCollection) => {
         if (!preferenceDocument) return;
-        persistDocument(updatePtvCollectionPreferenceDocument(preferenceDocument, {
-            showFewerReasonCategories: [
-                ...new Set([
-                    ...preferenceDocument.preferences.showFewerReasonCategories,
-                    collection.relationshipReason
-                ])
-            ]
-        }));
+        persistDocument(setPtvCollectionShowFewer(
+            preferenceDocument,
+            collection.relationshipReason,
+            true
+        ));
     }, [persistDocument, preferenceDocument]);
 
     const resetVisibility = useCallback(() => {
@@ -731,6 +809,29 @@ export default function CollectionsPage() {
     );
     const genres = useMemo(() => getPtvCollectionGenres(allCollections), [allCollections]);
     const order = getOrderFromRoute(route.sortBy || 'CollectionOrder');
+
+    useEffect(() => {
+        if (loading || !routeMemoryKey) return undefined;
+
+        const memory = loadPtvCollectionRouteMemory(routeMemoryKey);
+        if (!memory.scrollTop && !memory.focusKey) return undefined;
+
+        const frame = window.requestAnimationFrame(() => {
+            const page = document.getElementById('ptvCollectionsPage');
+            if (!page) return;
+
+            page.scrollTop = memory.scrollTop;
+
+            if (memory.focusKey) {
+                const target = Array.from(page.querySelectorAll<HTMLElement>('[data-ptv-focus-key]'))
+                    .find(element => element.dataset.ptvFocusKey === memory.focusKey);
+
+                if (target) focusPtvTvElement(target, 'collections-back-forward-restore');
+            }
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [details?.key, loading, routeMemoryKey, sections.length]);
 
     return (
         <Page
@@ -760,7 +861,17 @@ export default function CollectionsPage() {
                         <div className='ptv-collection-empty' role='alert'>
                             <h1>Collections are taking a break</h1>
                             <p>{routeError}</p>
-                            <a href={location.pathname + location.search}>Try again</a>
+                            <a
+                                href={getPtvCollectionRetryHref(location.pathname, location.search)}
+                                onClick={event => {
+                                    event.preventDefault();
+                                    if (!retryGate.current.claim()) return;
+                                    setRouteError('');
+                                    setRetryGeneration(value => value + 1);
+                                }}
+                            >
+                                Try again
+                            </a>
                         </div>
                     ) : null}
                     {loading && !routeError ? (
@@ -818,13 +929,21 @@ export default function CollectionsPage() {
                                 </div>
                             ) : null}
                             {deferredLoading ? <p className='ptv-collection-deferred' role='status'>Discovering more connected worlds…</p> : null}
-                            <CollectionPreferencesPanel document={preferenceDocument} onChange={updatePreferences} onReset={resetVisibility} />
-                            {preferenceDocument?.preferences.undoHiddenKeys.length ? (
-                                <div className='ptv-collection-undo' role='status'>
-                                    Collection hidden. Member items remain visible elsewhere.
-                                    <button type='button' onClick={() => persistDocument(undoPtvCollectionHidden(preferenceDocument))}>Undo</button>
-                                </div>
-                            ) : null}
+                            <CollectionPreferencesPanel
+                                availableSectionIds={sections.map(section => section.id)}
+                                document={preferenceDocument}
+                                onChange={updatePreferences}
+                                onReset={resetVisibility}
+                            />
+                            {preferenceDocument && (
+                                preferenceDocument.preferences.undoHiddenKeys.length
+                                || preferenceDocument.preferences.undoShowFewerReasonCategories.length
+                            ) ? (
+                                    <div className='ptv-collection-undo' role='status'>
+                                        Collection visibility updated. Member items remain visible elsewhere.
+                                        <button type='button' onClick={() => persistDocument(undoPtvCollectionVisibility(preferenceDocument))}>Undo</button>
+                                    </div>
+                                ) : null}
                         </main>
                     ) : null}
                 </div>

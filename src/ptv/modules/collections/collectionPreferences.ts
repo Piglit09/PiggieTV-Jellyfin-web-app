@@ -54,6 +54,7 @@ export type PtvCollectionPreferences = Readonly<{
     sectionVisibility: Readonly<Record<PtvCollectionSectionId, boolean>>;
     showFewerReasonCategories: readonly PtvCollectionRelationshipReason[];
     undoHiddenKeys: readonly string[];
+    undoShowFewerReasonCategories: readonly PtvCollectionRelationshipReason[];
 }>;
 
 export type PtvCollectionPreferenceDocument = Readonly<{
@@ -127,7 +128,8 @@ export function createDefaultPtvCollectionPreferenceDocument(
             sectionOrder: [...PTV_COLLECTION_SECTION_IDS],
             sectionVisibility: getDefaultSectionVisibility(),
             showFewerReasonCategories: [],
-            undoHiddenKeys: []
+            undoHiddenKeys: [],
+            undoShowFewerReasonCategories: []
         },
         revision: 0,
         schemaVersion: PTV_COLLECTION_PREFERENCE_SCHEMA_VERSION,
@@ -177,6 +179,11 @@ function normalizePreferences(value: unknown): PtvCollectionPreferences {
             (reason): reason is PtvCollectionRelationshipReason => VALID_REASON_CATEGORIES.has(reason)
         ) :
         [];
+    const undoReasons = Array.isArray(candidate.undoShowFewerReasonCategories) ?
+        candidate.undoShowFewerReasonCategories.filter(
+            (reason): reason is PtvCollectionRelationshipReason => VALID_REASON_CATEGORIES.has(reason)
+        ) :
+        [];
 
     return {
         crossLibraryEnabled: candidate.crossLibraryEnabled !== false,
@@ -189,7 +196,8 @@ function normalizePreferences(value: unknown): PtvCollectionPreferences {
         sectionOrder: normalizeSectionOrder(candidate.sectionOrder),
         sectionVisibility: normalizeSectionVisibility(candidate.sectionVisibility),
         showFewerReasonCategories: [...new Set(reasons)],
-        undoHiddenKeys: normalizeKeyList(candidate.undoHiddenKeys, MAX_UNDO_KEYS)
+        undoHiddenKeys: normalizeKeyList(candidate.undoHiddenKeys, MAX_UNDO_KEYS),
+        undoShowFewerReasonCategories: [...new Set(undoReasons)].slice(0, MAX_UNDO_KEYS)
     };
 }
 
@@ -313,7 +321,8 @@ export function setPtvCollectionHidden(
 
     return updatePtvCollectionPreferenceDocument(document, {
         hiddenCollectionKeys: hiddenKeys,
-        undoHiddenKeys: undoHiddenKeys.slice(0, MAX_UNDO_KEYS)
+        undoHiddenKeys: undoHiddenKeys.slice(0, MAX_UNDO_KEYS),
+        undoShowFewerReasonCategories: hidden ? [] : document.preferences.undoShowFewerReasonCategories
     });
 }
 
@@ -325,6 +334,57 @@ export function undoPtvCollectionHidden(document: PtvCollectionPreferenceDocumen
     return updatePtvCollectionPreferenceDocument(document, {
         hiddenCollectionKeys: document.preferences.hiddenCollectionKeys.filter(existing => existing !== key),
         undoHiddenKeys
+    });
+}
+
+export function setPtvCollectionShowFewer(
+    document: PtvCollectionPreferenceDocument,
+    reason: PtvCollectionRelationshipReason,
+    showFewer: boolean
+) {
+    const reasons = document.preferences.showFewerReasonCategories.filter(existing => existing !== reason);
+
+    if (showFewer && VALID_REASON_CATEGORIES.has(reason)) reasons.unshift(reason);
+
+    return updatePtvCollectionPreferenceDocument(document, {
+        showFewerReasonCategories: reasons,
+        undoHiddenKeys: showFewer ? [] : document.preferences.undoHiddenKeys,
+        undoShowFewerReasonCategories: showFewer ? [reason] : []
+    });
+}
+
+export function undoPtvCollectionVisibility(document: PtvCollectionPreferenceDocument) {
+    const [reason, ...undoShowFewerReasonCategories] = document.preferences.undoShowFewerReasonCategories;
+
+    if (!reason) return undoPtvCollectionHidden(document);
+
+    return updatePtvCollectionPreferenceDocument(document, {
+        showFewerReasonCategories: document.preferences.showFewerReasonCategories.filter(existing => existing !== reason),
+        undoShowFewerReasonCategories
+    });
+}
+
+export function movePtvCollectionSection(
+    order: readonly PtvCollectionSectionId[],
+    sectionId: PtvCollectionSectionId,
+    direction: -1 | 1,
+    availableSectionIds: readonly PtvCollectionSectionId[] = PTV_COLLECTION_SECTION_IDS
+) {
+    const nextOrder = normalizeSectionOrder(order);
+    const available = new Set(availableSectionIds);
+    const visibleOrder = nextOrder.filter(id => available.has(id));
+    const visibleIndex = visibleOrder.indexOf(sectionId);
+    const targetId = visibleOrder[visibleIndex + direction];
+
+    if (visibleIndex < 0 || !targetId) return nextOrder;
+
+    const sourceIndex = nextOrder.indexOf(sectionId);
+    const targetIndex = nextOrder.indexOf(targetId);
+
+    return nextOrder.map((id, index) => {
+        if (index === sourceIndex) return targetId;
+        if (index === targetIndex) return sectionId;
+        return id;
     });
 }
 
@@ -347,6 +407,7 @@ export function resetPtvCollectionVisibility(document: PtvCollectionPreferenceDo
     return updatePtvCollectionPreferenceDocument(document, {
         hiddenCollectionKeys: [],
         showFewerReasonCategories: [],
-        undoHiddenKeys: []
+        undoHiddenKeys: [],
+        undoShowFewerReasonCategories: []
     });
 }
