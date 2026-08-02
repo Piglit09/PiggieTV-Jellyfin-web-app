@@ -1291,3 +1291,7 @@ authenticated browser, so no cold/warm discovery report was written. Do not use
 another account, raise timeouts, or call this production-ready. Reauthenticate
 the same user, gather read-only server evidence, require 13/13, rerun cold/warm
 discovery, and complete physical webOS. See `ITEMS_PIPELINE_REPORT.md`.
+
+## F3 implementation handoff
+
+Phase F3 Premium Collections is implemented locally after the approved H1 boundary. Product source is route-lazy and plugin-independent. Final phase approval remains gated on the requested automated, authenticated development, frozen-production, bundle, privacy, and clean-worktree evidence. No production deployment or native application expansion is part of this phase.

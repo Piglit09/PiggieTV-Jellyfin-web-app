@@ -377,3 +377,7 @@ Useful upstream links:
 ## License
 
 Jellyfin Web is licensed under the GPL 2.0 license. PiggieTV modifications in this repository follow the same repository licensing unless otherwise noted in a specific file.
+
+## Premium Collections (Phase F3)
+
+PiggieTV now includes a route-lazy Collections destination with Jellyfin BoxSets, conservative curated and cross-library discovery, cinematic Collection Details, progress-aware ordering, and server/user-scoped presentation preferences. See [Phase F3 Premium Collections](docs/collections/phase-f3-premium-collections.md).

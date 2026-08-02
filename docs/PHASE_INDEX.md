@@ -43,3 +43,7 @@ with operational context in [Handoff](../HANDOFF.md) and ownership rules in
 - [Phase H1 summary](repository-hygiene/phase-h1-summary.md)
 - [Phase H1 dirty-path ledger](repository-hygiene/phase-h1-dirty-path-ledger.json)
 - [Phase H1 intentionally uncommitted ledger](repository-hygiene/phase-h1-uncommitted-ledger.json)
+
+## Product phase F3
+
+- [Phase F3: Premium Collections and Cross-Library Discovery](collections/phase-f3-premium-collections.md) - route-lazy Collections landing and Details, explicit cross-library relationships, scoped personalization, integration boundaries, and rollback notes.

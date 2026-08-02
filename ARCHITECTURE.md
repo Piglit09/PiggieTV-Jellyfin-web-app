@@ -996,3 +996,7 @@ schema-field validation. Raw source equality is supplementary. This is partial
 adoption: credential/login, route/focus execution, playback engines, Android
 Auto, notifications, lock-screen controls, featured cache v7, and other cache
 or recommendation boundaries remain legacy.
+
+## F3 Collections ownership boundary
+
+Premium Collections extends the native browse route, shared item/request APIs, `currentSettings`, item router, image pipeline, diagnostics, and global focus graph. The lazy F3 module owns only Collection normalization, explicit relationship resolution, bounded source composition, Collection preferences, and presentation. It does not own routing, requests, caching, playback, metadata, settings transport, feedback storage, or focus. See [docs/collections/phase-f3-premium-collections.md](docs/collections/phase-f3-premium-collections.md).

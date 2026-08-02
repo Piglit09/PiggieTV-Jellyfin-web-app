@@ -1286,3 +1286,7 @@ route reruns, and physical webOS.
 - Clean warm discovery passed 21/23; Reading Books had six functional failed requests and Preferences missed required content. Responsive geometry passed.
 - The clean cold attempt filtered the dev-only overlay but lost same-account authentication after reload, so no authoritative cold result exists.
 - Final source still needs unit/type/build validation. Physical webOS and read-only server/host investigation remain outstanding.
+
+## Phase F3 current state
+
+Premium Collections and cross-library discovery implementation is present on the local branch. Existing router, request coordinator, cache, settings transport, recommendation, playback, authentication, and focus owners remain authoritative. Acceptance status must be taken from the final F3 validation report; implementation alone is not an approval claim.
