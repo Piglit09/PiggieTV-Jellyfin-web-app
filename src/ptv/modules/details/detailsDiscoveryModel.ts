@@ -71,9 +71,15 @@ function getLink(
     label: string,
     meta: string
 ): PtvDetailsDiscoveryLink {
+    const collectionLink = kind === 'franchise';
+
     return {
-        ariaLabel: `Search PiggieTV for ${query} (${meta.toLowerCase()})`,
-        href: getSearchHref(query),
+        ariaLabel: collectionLink ?
+            `Open the ${query} collection (${meta.toLowerCase()})` :
+            `Search PiggieTV for ${query} (${meta.toLowerCase()})`,
+        href: collectionLink ?
+            `#/collections?view=all&query=${encodeURIComponent(query)}` :
+            getSearchHref(query),
         key: `${kind}:${query.toLowerCase()}`,
         kind,
         label,

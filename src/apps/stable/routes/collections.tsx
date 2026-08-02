@@ -1,3 +1,3 @@
-import NativeBrowsePage from 'ptv/pages/browse/NativeBrowsePage';
+import CollectionsPage from 'ptv/modules/collections/CollectionsPage';
 
-export const Component = NativeBrowsePage;
+export const Component = CollectionsPage;

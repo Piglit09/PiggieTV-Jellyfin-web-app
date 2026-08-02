@@ -8,7 +8,9 @@ import {
 export type PtvBrowseMediaKind = 'collections' | 'movies' | 'shows';
 
 export type PtvBrowseView =
+    | 'all'
     | 'continue'
+    | 'details'
     | 'featured'
     | 'genre'
     | 'genres'
@@ -61,15 +63,17 @@ export type PtvBrowseRouteUpdates = Partial<Pick<PtvBrowseRoute,
 const PTV_BROWSE_PAGE_SIZE = 50;
 const PTV_BROWSE_MAX_PAGE = 200;
 const PTV_BROWSE_SORTS = new Set([
+    'CollectionOrder',
     'CommunityRating',
     'DateCreated',
     'DatePlayed',
     'PremiereDate',
-    'SortName'
+    'SortName',
+    'TimelineOrder'
 ]);
 
 const SUPPORTED_VIEWS: Record<PtvBrowseMediaKind, ReadonlySet<PtvBrowseView>> = {
-    collections: new Set(['featured', 'genres', 'landing']),
+    collections: new Set(['all', 'details', 'featured', 'genre', 'genres', 'landing']),
     movies: new Set(['genre', 'genres', 'landing', 'latest', 'studio', 'studios', 'trending']),
     shows: new Set(['continue', 'genre', 'genres', 'landing', 'latest', 'network', 'networks', 'season', 'trending'])
 };
@@ -115,6 +119,7 @@ function getBrowseViewPath(kind: PtvBrowseMediaKind, view: PtvBrowseView) {
 }
 
 function getDefaultSort(view: PtvBrowseView) {
+    if (view === 'details') return { sortBy: 'CollectionOrder', sortOrder: 'Ascending' as const };
     if (view === 'latest') return { sortBy: 'DateCreated', sortOrder: 'Descending' as const };
     if (view === 'continue') return { sortBy: 'DatePlayed', sortOrder: 'Descending' as const };
     if (view === 'trending') return { sortBy: 'CommunityRating', sortOrder: 'Descending' as const };

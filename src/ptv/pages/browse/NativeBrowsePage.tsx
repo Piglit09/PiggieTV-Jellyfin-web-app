@@ -3068,7 +3068,17 @@ registerPtvNativeRoute('/shows', NativeBrowsePage, 'native');
 registerPtvNativeRoute('/shows/*', NativeBrowsePage, 'native');
 registerPtvNativeRoute('/tv', NativeBrowsePage, 'native');
 registerPtvNativeRoute('/tv/*', NativeBrowsePage, 'native');
-registerPtvNativeRoute('/collections', NativeBrowsePage, 'native');
-registerPtvNativeRoute('/collections/*', NativeBrowsePage, 'native');
+const PremiumCollectionsPage = React.lazy(() => import('../../modules/collections/CollectionsPage'));
+
+function NativeCollectionsPage() {
+    return (
+        <React.Suspense fallback={<div className='ptv-nativeBrowseLoading' aria-busy='true'>Loading Collections…</div>}>
+            <PremiumCollectionsPage />
+        </React.Suspense>
+    );
+}
+
+registerPtvNativeRoute('/collections', NativeCollectionsPage, 'native');
+registerPtvNativeRoute('/collections/*', NativeCollectionsPage, 'native');
 
 export default NativeBrowsePage;

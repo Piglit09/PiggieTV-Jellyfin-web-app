@@ -463,7 +463,11 @@ class AppRouter {
             }
         }
 
-        const itemTypes = ['Playlist', 'TvChannel', 'Program', 'BoxSet', 'MusicAlbum', 'MusicGenre', 'Person', 'Recording', 'MusicArtist'];
+        if (itemType === 'BoxSet') {
+            return '#/collections?view=details&collectionId=' + encodeURIComponent('jellyfin:' + id);
+        }
+
+        const itemTypes = ['Playlist', 'TvChannel', 'Program', 'MusicAlbum', 'MusicGenre', 'Person', 'Recording', 'MusicArtist'];
 
         if (itemTypes.indexOf(itemType) >= 0) {
             return '#/details?id=' + id + '&serverId=' + serverId;

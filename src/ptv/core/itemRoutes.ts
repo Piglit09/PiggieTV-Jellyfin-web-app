@@ -4,7 +4,7 @@ import {
     shouldCollectDiagnostics
 } from './observability';
 
-export type PtvItemRouteSource = 'jellyfin-fallback' | 'ptv-music' | 'ptv-reading' | 'ptv-video';
+export type PtvItemRouteSource = 'jellyfin-fallback' | 'ptv-collections' | 'ptv-music' | 'ptv-reading' | 'ptv-video';
 
 export type PtvItemRouteResult = {
     fallbackReason: string;
@@ -143,6 +143,15 @@ function makeRouteResult(
     };
 }
 
+function getPtvMusicHref(item: PtvRouteItem, itemId: string, context: PtvItemRouteContext) {
+    if (isMusicAlbum(item)) return `#/music/album/${encodeURIComponent(itemId)}`;
+    if (isMusicArtist(item, context)) return `#/music/artist/${encodeURIComponent(itemId)}`;
+    if (isMusicPlaylist(item)) return `#/music/playlist/${encodeURIComponent(itemId)}`;
+    if (isAudioItem(item, context)) return `#/music/item/${encodeURIComponent(itemId)}`;
+
+    return '';
+}
+
 export function resolvePtvItemRoute(
     item: PtvRouteItem,
     context: PtvItemRouteContext = {}
@@ -154,28 +163,19 @@ export function resolvePtvItemRoute(
         return makeRouteResult(fallbackHref, 'jellyfin-fallback', 'missing-item-id');
     }
 
-    if (isMusicAlbum(item)) {
-        if (context.enablePtvMusic === false) return makeRouteResult(fallbackHref, 'jellyfin-fallback', 'ptv-music-disabled');
-
-        return makeRouteResult(`#/music/album/${encodeURIComponent(itemId)}`, 'ptv-music');
+    if (getRecordString(item, 'Type', 'type').toLocaleLowerCase('en-US') === 'boxset') {
+        return makeRouteResult(
+            '#/collections?view=details&collectionId=' + encodeURIComponent('jellyfin:' + itemId),
+            'ptv-collections'
+        );
     }
 
-    if (isMusicArtist(item, context)) {
+    const musicHref = getPtvMusicHref(item, itemId, context);
+
+    if (musicHref) {
         if (context.enablePtvMusic === false) return makeRouteResult(fallbackHref, 'jellyfin-fallback', 'ptv-music-disabled');
 
-        return makeRouteResult(`#/music/artist/${encodeURIComponent(itemId)}`, 'ptv-music');
-    }
-
-    if (isMusicPlaylist(item)) {
-        if (context.enablePtvMusic === false) return makeRouteResult(fallbackHref, 'jellyfin-fallback', 'ptv-music-disabled');
-
-        return makeRouteResult(`#/music/playlist/${encodeURIComponent(itemId)}`, 'ptv-music');
-    }
-
-    if (isAudioItem(item, context)) {
-        if (context.enablePtvMusic === false) return makeRouteResult(fallbackHref, 'jellyfin-fallback', 'ptv-music-disabled');
-
-        return makeRouteResult(`#/music/item/${encodeURIComponent(itemId)}`, 'ptv-music');
+        return makeRouteResult(musicHref, 'ptv-music');
     }
 
     if (isReadingItem(item, context)) {

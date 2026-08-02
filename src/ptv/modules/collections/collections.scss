@@ -1,0 +1,553 @@
+.ptv-collections-page {
+    --ptv-collection-ink: #f6f1e7;
+    --ptv-collection-muted: #b9c4bf;
+    --ptv-collection-accent: #efb84f;
+    --ptv-collection-teal: #2eb5a5;
+    --ptv-collection-surface: rgba(16, 27, 30, 0.88);
+    background:
+        radial-gradient(circle at 14% 4%, rgba(46, 181, 165, 0.14), transparent 32rem),
+        radial-gradient(circle at 92% 20%, rgba(239, 184, 79, 0.1), transparent 34rem),
+        #081013;
+    color: var(--ptv-collection-ink);
+    min-height: 100%;
+}
+
+.ptv-collections {
+    overflow: clip;
+    padding: clamp(1rem, 2vw, 2.5rem) 0 5rem;
+}
+
+.ptv-collections-masthead,
+.ptv-collection-section,
+.ptv-collection-ordering,
+.ptv-collection-members,
+.ptv-collection-preferences,
+.ptv-collection-genreDirectory {
+    margin-inline: auto;
+    max-width: 112rem;
+    width: calc(100% - clamp(2rem, 7vw, 8rem));
+}
+
+.ptv-collections-masthead {
+    align-items: end;
+    display: flex;
+    gap: 2rem;
+    justify-content: space-between;
+    margin-bottom: 1.6rem;
+}
+
+.ptv-collections-masthead span,
+.ptv-collection-section header span,
+.ptv-collection-heroCopy > span {
+    color: var(--ptv-collection-accent);
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.ptv-collections-masthead h1 {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: clamp(2.8rem, 7vw, 6.7rem);
+    font-weight: 500;
+    letter-spacing: -0.055em;
+    line-height: 0.92;
+    margin: 0.25rem 0 0.55rem;
+}
+
+.ptv-collections-masthead p {
+    color: var(--ptv-collection-muted);
+    margin: 0;
+    max-width: 45rem;
+}
+
+.ptv-collections-masthead nav,
+.ptv-collection-ordering div,
+.ptv-collection-detailsActions,
+.ptv-collection-chipRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+}
+
+.ptv-collections-masthead nav a,
+.ptv-collection-ordering a,
+.ptv-collection-detailsActions a,
+.ptv-collection-backLink,
+.ptv-collection-primaryAction {
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 999px;
+    color: inherit;
+    min-height: 2.75rem;
+    padding: 0.72rem 1.1rem;
+    text-decoration: none;
+}
+
+.ptv-collections-masthead nav a[aria-current='page'],
+.ptv-collection-ordering a[aria-current='true'],
+.ptv-collection-primaryAction {
+    background: var(--ptv-collection-accent);
+    border-color: var(--ptv-collection-accent);
+    color: #101719;
+    font-weight: 800;
+}
+
+.ptv-collection-hero,
+.ptv-collection-detailsHero {
+    isolation: isolate;
+    min-height: clamp(27rem, 64vh, 54rem);
+    overflow: hidden;
+    position: relative;
+}
+
+.ptv-collection-hero {
+    margin-bottom: clamp(2.5rem, 6vw, 5.5rem);
+}
+
+.ptv-collection-heroArtwork,
+.ptv-collection-detailsBackdrop,
+.ptv-collection-heroShade,
+.ptv-collection-detailsGradient {
+    inset: 0;
+    position: absolute;
+}
+
+.ptv-collection-artworkImage,
+.ptv-collection-artworkFallback {
+    display: block;
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
+.ptv-collection-artworkFallback {
+    align-items: center;
+    background:
+        linear-gradient(135deg, rgba(46, 181, 165, 0.65), rgba(9, 21, 25, 0.96) 55%, rgba(239, 184, 79, 0.45));
+    color: rgba(255, 255, 255, 0.22);
+    display: flex;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 9rem;
+    justify-content: center;
+}
+
+.ptv-collection-heroShade,
+.ptv-collection-detailsGradient {
+    background:
+        linear-gradient(90deg, rgba(4, 10, 12, 0.96) 0%, rgba(4, 10, 12, 0.72) 44%, rgba(4, 10, 12, 0.08) 78%),
+        linear-gradient(0deg, #081013 0%, transparent 55%);
+    z-index: 1;
+}
+
+.ptv-collection-heroCopy,
+.ptv-collection-detailsCopy {
+    display: flex;
+    flex-direction: column;
+    justify-content: end;
+    margin-inline: auto;
+    min-height: inherit;
+    padding: clamp(2rem, 6vw, 7rem) 0;
+    position: relative;
+    width: calc(100% - clamp(2rem, 7vw, 8rem));
+    z-index: 2;
+}
+
+.ptv-collection-heroCopy h1,
+.ptv-collection-detailsCopy h1 {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: clamp(2.8rem, 7vw, 7rem);
+    font-weight: 500;
+    letter-spacing: -0.05em;
+    line-height: 0.94;
+    margin: 0.45rem 0 1rem;
+    max-width: 62rem;
+}
+
+.ptv-collection-heroCopy p,
+.ptv-collection-detailsCopy p {
+    color: #d5ded9;
+    font-size: clamp(1rem, 1.35vw, 1.3rem);
+    line-height: 1.55;
+    max-width: 48rem;
+}
+
+.ptv-collection-chipRow span {
+    background: rgba(5, 15, 18, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 999px;
+    color: #dce5e0;
+    padding: 0.43rem 0.75rem;
+}
+
+.ptv-collection-primaryAction {
+    align-self: flex-start;
+    margin-top: 1.2rem;
+}
+
+.ptv-collection-section {
+    margin-bottom: clamp(2.5rem, 5vw, 5rem);
+}
+
+.ptv-collection-section h2,
+.ptv-collection-ordering h2,
+.ptv-collection-members h2,
+.ptv-collection-genreDirectory h2 {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: clamp(1.7rem, 3vw, 3rem);
+    font-weight: 500;
+    letter-spacing: -0.035em;
+    margin: 0.2rem 0 1.15rem;
+}
+
+.ptv-collection-row {
+    display: grid;
+    gap: 1rem;
+    grid-auto-columns: minmax(17rem, 24vw);
+    grid-auto-flow: column;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding: 0.35rem 0.2rem 1rem;
+    scroll-snap-type: inline proximity;
+}
+
+.ptv-collections-density-compact .ptv-collection-row {
+    grid-auto-columns: minmax(14rem, 19vw);
+}
+
+.ptv-collection-card {
+    min-width: 0;
+    position: relative;
+    scroll-snap-align: start;
+}
+
+.ptv-collection-cardLink {
+    color: inherit;
+    display: block;
+    text-decoration: none;
+}
+
+.ptv-collection-cardArtwork {
+    aspect-ratio: 16 / 10;
+    background: #142227;
+    border-radius: 1rem;
+    box-shadow: 0 1.3rem 2.7rem rgba(0, 0, 0, 0.28);
+    display: block;
+    overflow: hidden;
+    position: relative;
+}
+
+.ptv-collection-cardShade {
+    background: linear-gradient(0deg, rgba(4, 12, 14, 0.8), transparent 60%);
+    inset: 0;
+    position: absolute;
+}
+
+.ptv-collection-progress {
+    background: rgba(255, 255, 255, 0.24);
+    bottom: 0;
+    height: 0.28rem;
+    inset-inline: 0;
+    position: absolute;
+}
+
+.ptv-collection-progress span {
+    background: var(--ptv-collection-teal);
+    display: block;
+    height: 100%;
+}
+
+.ptv-collection-cardCopy {
+    display: grid;
+    gap: 0.22rem;
+    padding: 0.8rem 0.2rem 0.45rem;
+}
+
+.ptv-collection-cardCopy strong {
+    font-size: 1.04rem;
+}
+
+.ptv-collection-cardCopy > span {
+    color: var(--ptv-collection-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-collection-cardMeta {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+}
+
+.ptv-collection-cardActions {
+    display: flex;
+    gap: 0.35rem;
+    opacity: 0.78;
+}
+
+.ptv-collection-cardActions button,
+.ptv-collection-loadMore,
+.ptv-collection-undo button,
+.ptv-collection-preferences button,
+.ptv-collection-preferences summary {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 0.6rem;
+    color: inherit;
+    cursor: pointer;
+    min-height: 2.5rem;
+    padding: 0.55rem 0.7rem;
+}
+
+.ptv-collection-cardActions button:nth-child(2) {
+    flex: 1;
+}
+
+.ptv-collection-cardLink:focus-visible .ptv-collection-cardArtwork,
+.ptv-collection-cardLink:hover .ptv-collection-cardArtwork,
+.ptv-collections a:focus-visible,
+.ptv-collections button:focus-visible,
+.ptv-collections summary:focus-visible,
+.ptv-collections select:focus-visible {
+    box-shadow: 0 0 0 0.22rem #071013, 0 0 0 0.42rem var(--ptv-collection-accent);
+    outline: none;
+}
+
+.ptv-collection-detailsHero {
+    margin-top: -2.5rem;
+}
+
+.ptv-collection-detailsCopy {
+    justify-content: center;
+    max-width: 112rem;
+}
+
+.ptv-collection-backLink {
+    align-self: flex-start;
+    margin-bottom: 2rem;
+}
+
+.ptv-collection-ordering {
+    margin-bottom: 2.5rem;
+    margin-top: 1rem;
+}
+
+.ptv-collection-members {
+    margin-bottom: 3rem;
+}
+
+.ptv-collection-memberGrid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+
+.ptv-collection-memberCard a {
+    background:
+        linear-gradient(135deg, rgba(46, 181, 165, 0.08), transparent 55%),
+        var(--ptv-collection-surface);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 0.85rem;
+    color: inherit;
+    display: grid;
+    gap: 0.35rem;
+    min-height: 8.8rem;
+    padding: 1rem;
+    text-decoration: none;
+}
+
+.ptv-collection-memberCard a > span:not(.ptv-collection-memberIndex) {
+    color: var(--ptv-collection-muted);
+}
+
+.ptv-collection-memberIndex {
+    color: var(--ptv-collection-accent);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 1.8rem;
+}
+
+.ptv-collection-loadMore {
+    display: block;
+    margin: 0 auto 4rem;
+}
+
+.ptv-collection-genreDirectory > div {
+    display: grid;
+    gap: 0.8rem;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+}
+
+.ptv-collection-genreDirectory a {
+    background: var(--ptv-collection-surface);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.85rem;
+    color: inherit;
+    display: grid;
+    gap: 0.3rem;
+    min-height: 5.25rem;
+    padding: 1rem;
+    text-decoration: none;
+}
+
+.ptv-collection-genreDirectory a span,
+.ptv-collection-preferences p {
+    color: var(--ptv-collection-muted);
+}
+
+.ptv-collection-preferences {
+    background: rgba(10, 23, 27, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1rem;
+    margin-bottom: 4rem;
+    padding: 1rem;
+}
+
+.ptv-collection-preferencesGrid,
+.ptv-collection-sectionControls {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    margin-top: 1rem;
+}
+
+.ptv-collection-preferences label {
+    align-items: center;
+    display: flex;
+    gap: 0.55rem;
+    min-height: 2.75rem;
+}
+
+.ptv-collection-preferences select {
+    background: #142529;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0.45rem;
+    color: inherit;
+    min-height: 2.5rem;
+    padding: 0.45rem;
+}
+
+.ptv-collection-sectionControls > div {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.7rem;
+    padding: 0.6rem;
+}
+
+.ptv-collection-notice,
+.ptv-collection-undo {
+    background: #173c3a;
+    border: 1px solid #2eb5a5;
+    border-radius: 0.75rem;
+    bottom: 1rem;
+    display: flex;
+    gap: 1rem;
+    inset-inline-end: 1rem;
+    max-width: 32rem;
+    padding: 0.8rem 1rem;
+    position: fixed;
+    z-index: 20;
+}
+
+.ptv-collection-empty,
+.ptv-collection-skeletons {
+    margin: 4rem auto;
+    max-width: 72rem;
+    padding: 2rem;
+    text-align: center;
+}
+
+.ptv-collection-skeletons {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(4, 1fr);
+}
+
+.ptv-collection-skeletons span {
+    animation: ptv-collections-pulse 1.5s ease-in-out infinite alternate;
+    aspect-ratio: 16 / 10;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+}
+
+.ptv-collection-deferred {
+    color: var(--ptv-collection-muted);
+    margin: -2rem auto 3rem;
+    max-width: 112rem;
+    width: calc(100% - clamp(2rem, 7vw, 8rem));
+}
+
+@keyframes ptv-collections-pulse {
+    from { opacity: 0.5; }
+    to { opacity: 1; }
+}
+
+@media (max-width: 52rem) {
+    .ptv-collections-masthead {
+        align-items: start;
+        flex-direction: column;
+    }
+
+    .ptv-collection-row {
+        grid-auto-columns: minmax(15rem, 78vw);
+    }
+
+    .ptv-collection-cardActions {
+        opacity: 1;
+    }
+
+    .ptv-collection-hero,
+    .ptv-collection-detailsHero {
+        min-height: 34rem;
+    }
+
+    .ptv-collection-heroShade,
+    .ptv-collection-detailsGradient {
+        background:
+            linear-gradient(0deg, #081013 4%, rgba(4, 10, 12, 0.74) 62%, rgba(4, 10, 12, 0.15)),
+            linear-gradient(90deg, rgba(4, 10, 12, 0.75), transparent);
+    }
+
+    .ptv-collection-memberGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 34rem) {
+    .ptv-collections-masthead,
+    .ptv-collection-section,
+    .ptv-collection-ordering,
+    .ptv-collection-members,
+    .ptv-collection-preferences,
+    .ptv-collection-genreDirectory,
+    .ptv-collection-heroCopy,
+    .ptv-collection-detailsCopy {
+        width: calc(100% - 1.5rem);
+    }
+
+    .ptv-collection-memberGrid,
+    .ptv-collection-skeletons {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-collection-cardActions {
+        flex-wrap: wrap;
+    }
+
+    .ptv-collection-cardActions button {
+        min-height: 2.75rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-collection-skeletons span {
+        animation: none;
+    }
+
+    .ptv-collection-row {
+        scroll-behavior: auto;
+    }
+}
+
+@media (min-width: 100rem) and (min-resolution: 1.5dppx) {
+    .ptv-collection-row {
+        grid-auto-columns: minmax(20rem, 22vw);
+    }
+}
