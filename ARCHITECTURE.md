@@ -1000,3 +1000,7 @@ or recommendation boundaries remain legacy.
 ## F3 Collections ownership boundary
 
 Premium Collections extends the native browse route, shared item/request APIs, `currentSettings`, item router, image pipeline, diagnostics, and global focus graph. The lazy F3 module owns only Collection normalization, explicit relationship resolution, bounded source composition, Collection preferences, and presentation. It does not own routing, requests, caching, playback, metadata, settings transport, feedback storage, or focus. See [docs/collections/phase-f3-premium-collections.md](docs/collections/phase-f3-premium-collections.md).
+
+## F3A2 validation boundary
+
+Phase F3A2 adds credential-blind authenticated Collections evidence tooling only. It attaches to the existing browser, router, request coordinator, ApiClient, runtime, settings, and focus owners; it does not create a product runtime or transport owner. Exact request identities are hashed in memory, failed-request handoff is separated from concurrent duplication, and persisted evidence rejects URLs, private addresses, credentials, identifiers, titles, and local paths. See `docs/collections/phase-f3a2-authenticated-latency-recovery.md`.

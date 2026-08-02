@@ -1295,3 +1295,7 @@ discovery, and complete physical webOS. See `ITEMS_PIPELINE_REPORT.md`.
 ## F3 implementation handoff
 
 Phase F3 Premium Collections is implemented locally after the approved H1 boundary. Product source is route-lazy and plugin-independent. Final phase approval remains gated on the requested automated, authenticated development, frozen-production, bundle, privacy, and clean-worktree evidence. No production deployment or native application expansion is part of this phase.
+
+## F3A2 handoff
+
+F3A2 is HOLD. Authenticated development and frozen-production sessions preserved one bootstrap, runtime application, ApiClient, and Jellyfin socket, and the controlled visible retry recovered without a retry loop. Three-cycle acceptance did not pass because the approved test server repeatedly timed out or failed collection sources and returned no Collection Search result for a usable Jellyfin collection. Production deep-scroll restoration and real second-user isolation also remain unproven. Continue only with Phase F3A3 - Collection Search Capability and Backend Latency Closure. Do not start F4.

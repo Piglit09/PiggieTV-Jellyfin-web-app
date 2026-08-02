@@ -1290,3 +1290,7 @@ route reruns, and physical webOS.
 ## Phase F3 current state
 
 Premium Collections and cross-library discovery implementation is present on the local branch. Existing router, request coordinator, cache, settings transport, recommendation, playback, authentication, and focus owners remain authoritative. Acceptance status must be taken from the final F3 validation report; implementation alone is not an approval claim.
+
+## Current status: F3A2 HOLD
+
+Authenticated latency attribution shows fast frontend route recognition and request admission, with backend/proxy transport dominating slow Collections settlement. A one-shot browser transport failure recovered through one visible retry. Browser-TV focus passed in development and frozen production, but three-cycle acceptance, live Collection Search capability, production deep-scroll proof, and real second-user isolation are incomplete. Product source is unchanged; only validation tooling, tests, and documentation were added. The sole next phase is F3A3 - Collection Search Capability and Backend Latency Closure.
