@@ -195,7 +195,8 @@
     "webos:inspect": "node scripts/ptv-webos.mjs inspect",
     "webos:logs": "node scripts/ptv-webos.mjs logs",
     "webos:install": "node scripts/ptv-webos.mjs install",
-    "webos:launch": "node scripts/ptv-webos.mjs launch"
+    "webos:launch": "node scripts/ptv-webos.mjs launch",
+    "test:e2e:authenticated:f3a2": "node scripts/ptv-f3a2-collections-acceptance.cjs"
   },
   "engines": {
     "node": ">=20.0.0",
