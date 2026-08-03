@@ -292,24 +292,6 @@ const UserSettingsPage: FC = () => {
                             </LinkButton>
                         )}
 
-                        {isLoggedInUser && (
-                            <LinkButton
-                                href='#/tv-navigation-debug'
-                                className='listItem-border ptv-tv-navigation-debug-link'
-                                style={{
-                                    display: 'block',
-                                    margin: 0,
-                                    padding: 0
-                                }}
-                            >
-                                <div className='listItem'>
-                                    <LegacyMaterialIcon icon='keyboard' ptvIcon='controls' />
-                                    <div className='listItemBody'>
-                                        <div className='listItemBodyText'>TV Navigation Debug</div>
-                                    </div>
-                                </div>
-                            </LinkButton>
-                        )}
                     </div>
 
                     {isLoggedInUser && user.Policy?.IsAdministrator && !layoutManager.tv && (
@@ -338,23 +320,6 @@ const UserSettingsPage: FC = () => {
                                         <div className='listItemBodyText'>
                                             {globalize.translate('TabDashboard')}
                                         </div>
-                                    </div>
-                                </div>
-                            </LinkButton>
-
-                            <LinkButton
-                                href='#/dashboard/piggietv/diagnostics'
-                                className='listItem-border'
-                                style={{
-                                    display: 'block',
-                                    margin: 0,
-                                    padding: 0
-                                }}
-                            >
-                                <div className='listItem'>
-                                    <LegacyMaterialIcon icon='monitor_heart' ptvIcon='dashboard' />
-                                    <div className='listItemBody'>
-                                        <div className='listItemBodyText'>PiggieTV Diagnostics</div>
                                     </div>
                                 </div>
                             </LinkButton>

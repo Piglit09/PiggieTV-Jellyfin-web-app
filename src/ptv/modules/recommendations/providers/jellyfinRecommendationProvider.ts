@@ -1030,11 +1030,16 @@ function getReadingHomeItems(context: PtvRecommendationProviderContext, limit = 
     });
 }
 
-export async function getPtvRecommendationDataBundle(options: { includeHomeScans?: boolean; signal?: AbortSignal } = {}): Promise<PtvRecommendationDataBundle> {
+export async function getPtvRecommendationDataBundle(options: {
+    includeHomeScans?: boolean;
+    serverId?: string | null;
+    signal?: AbortSignal;
+    userId?: string | null;
+} = {}): Promise<PtvRecommendationDataBundle> {
     throwIfRecommendationAborted(options.signal);
 
-    const serverId = getPtvServerId() || 'server';
-    const userId = getPtvCurrentUserId();
+    const serverId = String(options.serverId || getPtvServerId() || 'server').trim();
+    const userId = String(options.userId || getPtvCurrentUserId() || '').trim();
     const includeHomeScans = options.includeHomeScans === true;
     const sources = [
         'favorites',

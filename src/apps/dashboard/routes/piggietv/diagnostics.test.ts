@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('ptv/modules/dashboard/RemoteDiagnosticsPanel', () => ({
+    RemoteDiagnosticsPanel: () => null
+}));
+
 vi.mock('ptv/services/diagnostics/webDiagnosticPlatform', () => ({
     refreshPtvWebDiagnosticExternalStatus: vi.fn(() => Promise.resolve())
 }));

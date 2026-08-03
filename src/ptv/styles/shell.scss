@@ -17,10 +17,45 @@
     --ptv-shell-z-toast: calc(var(--ptv-shell-z-overlay) + 40);
     --ptv-shell-overlay-motion-duration: var(--ptv-motion-medium);
     --ptv-shell-overlay-motion-ease: var(--ptv-motion-ease-emphasized);
+    --ptv-content-edge: var(--ptv-layout-content-edge);
+    --ptv-shell-header-top: var(--ptv-shell-header-safe-y, 34px);
+
+    --ptv-utility-safe-top: calc(var(--ptv-shell-header-top, 34px) + var(--ptv-shell-header-clearance-height, var(--ptv-shell-header-height, 68px)) + 0.75rem);
 
     min-height: 100vh;
     color: var(--ptv-color-text-primary);
     background: var(--ptv-shell-route-surface, var(--ptv-elevation-1-surface));
+
+    @media (max-width: 64rem) {
+        --ptv-content-edge: var(--ptv-layout-content-edge-tablet);
+        --ptv-shell-header-top: 20px;
+    }
+
+    @media (max-width: 37.5rem) {
+        --ptv-content-edge: var(--ptv-layout-content-edge-phone);
+        --ptv-shell-header-top: 16px;
+    }
+}
+
+@media (min-width: 45.0625rem) and (max-width: 77.5rem) {
+    html:not(.ptv-render-tv) .ptv-app-shell {
+        --ptv-shell-header-clearance-height: 126px;
+    }
+}
+
+:where(
+.ptv-native-home-page,
+.ptv-native-browse-page,
+.ptv-native-search-page,
+.ptv-collections-page,
+.ptv-detail-page,
+.ptv-music-page,
+.ptv-books-page
+) {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
 }
 
 .ptv-app-shell .backgroundContainer,

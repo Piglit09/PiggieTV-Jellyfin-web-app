@@ -171,7 +171,6 @@ const CACHE_ITEM_FIELDS = new Set([
     'PrimaryImageTag',
     'ProductionYear',
     'PtvQualityTags',
-    'PtvHeroRecommendationLabel',
     'PtvHeroSource',
     'RecursiveItemCount',
     'RunTimeTicks',
@@ -189,8 +188,7 @@ const CACHE_ITEM_FIELDS = new Set([
     'VideoCodec',
     'VideoRange',
     'Height',
-    'Width',
-    'UserData'
+    'Width'
 ]);
 
 const CACHE_MEDIA_SOURCE_FIELDS = new Set([
@@ -376,6 +374,26 @@ function compactCacheItem(item: unknown): unknown {
     }, {});
 }
 
+const SHARED_PAYLOAD_USER_FIELDS = new Set([
+    'PtvHeroRecommendationLabel',
+    'PtvRecommendationExplanation',
+    'RecommendationReason',
+    'UserData'
+]);
+
+function sanitizeSharedPayloadValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(sanitizeSharedPayloadValue);
+    if (!isRecord(value)) return value;
+
+    return Object.keys(value).reduce<Record<string, unknown>>((sanitized, key) => {
+        if (!SHARED_PAYLOAD_USER_FIELDS.has(key)) {
+            sanitized[key] = sanitizeSharedPayloadValue(value[key]);
+        }
+
+        return sanitized;
+    }, {});
+}
+
 function compactRecord(value: unknown, allowedFields: Set<string>) {
     if (!isRecord(value)) return null;
 
@@ -420,8 +438,8 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
         rowConfigApplied: normalizedPayload.rowConfigApplied,
         rowConfigHash: normalizedPayload.rowConfigHash,
         rowConfigVersion: normalizedPayload.rowConfigVersion,
-        rowDiagnostics: normalizedPayload.rowDiagnostics,
-        sections: normalizedPayload.sections,
+        rowDiagnostics: sanitizeSharedPayloadValue(normalizedPayload.rowDiagnostics) as unknown[],
+        sections: sanitizeSharedPayloadValue(normalizedPayload.sections) as unknown[],
         sectionItems: Object.keys(normalizedPayload.sectionItems).reduce<Record<string, unknown[]>>(
             (sectionItems, sectionId) => {
                 sectionItems[sectionId] = normalizedPayload.sectionItems[sectionId].map(compactCacheItem);
@@ -431,6 +449,10 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
             {}
         )
     };
+}
+
+export function sanitizeFeaturedPayloadForSharedCache(payload: FeaturedPayload) {
+    return compactPayload(payload);
 }
 
 function getPayloadItemCount(payload: FeaturedPayload) {
@@ -723,7 +745,7 @@ function parseCacheEntryValue(value: unknown): FeaturedCacheEntry | null {
         version: FEATURED_CACHE_VERSION,
         createdAt,
         expiresAt,
-        payload: normalizePayload(payload)
+        payload: compactPayload(normalizePayload(payload))
     };
 }
 

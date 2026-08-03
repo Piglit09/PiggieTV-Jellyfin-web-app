@@ -1,4 +1,5 @@
 import Dashboard from '../../utils/dashboard';
+import { getPtvCurrentUserId, getPtvServerId } from '../api';
 
 let logoutInFlight: Promise<void> | null = null;
 
@@ -6,6 +7,23 @@ function clearLogoutInFlight(promise: Promise<void>) {
     if (logoutInFlight === promise) {
         logoutInFlight = null;
     }
+}
+
+async function retirePtvIdentityState(serverId: string, userId: string) {
+    await Promise.allSettled([
+        import('../modules/music/musicQueue')
+            .then(module => module.retirePtvMusicIdentityState('logout')),
+        import('../modules/recommendations/engine/recommendationEngine')
+            .then(module => {
+                if (serverId && userId) {
+                    module.invalidatePtvRecommendationCache({ serverId, userId });
+                }
+            }),
+        import('../pages/home/hooks')
+            .then(module => module.retireNativeHomeIdentityState(serverId, userId)),
+        import('../modules/cache/featuredContentCache')
+            .then(module => module.invalidateFeaturedContentMemoryCache('identity-retired'))
+    ]);
 }
 
 /**
@@ -16,19 +34,23 @@ function clearLogoutInFlight(promise: Promise<void>) {
  * choose the post-logout route here. Those remain owned by Dashboard.logout.
  */
 export function requestJellyfinLogout(): Promise<void> {
+    return requestJellyfinSessionExit(false);
+}
+
+export function requestJellyfinUserSwitch(): Promise<void> {
+    return requestJellyfinSessionExit(true);
+}
+
+function requestJellyfinSessionExit(switchUser: boolean): Promise<void> {
     if (logoutInFlight) return logoutInFlight;
 
-    const promise = Promise.resolve(Dashboard.logout())
-        .then(async () => {
-            try {
-                const { retirePtvMusicIdentityState } = await import('../modules/music/musicQueue');
-
-                retirePtvMusicIdentityState('logout');
-            } catch {
-                // Logout remains authoritative even when the optional Music
-                // feature chunk was unavailable or had never been loaded.
-            }
-        });
+    const serverId = String(getPtvServerId() || '');
+    const userId = String(getPtvCurrentUserId(serverId) || '');
+    const retirement = retirePtvIdentityState(serverId, userId);
+    const authoritativeLogout = Promise.resolve(
+        switchUser ? Dashboard.switchUser() : Dashboard.logout()
+    );
+    const promise = Promise.all([ authoritativeLogout, retirement ]).then(() => undefined);
 
     logoutInFlight = promise;
     void promise.then(

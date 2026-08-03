@@ -21,6 +21,10 @@ import {
     getPtvFeaturedRowConfigHash,
     type FeaturedPayload
 } from '../../modules/cache/featuredContentCache';
+import {
+    getPtvFeaturedPayloadItemIds,
+    reconcilePtvFeaturedPayloadForUser
+} from './featuredPayloadIdentity';
 import { summarizeFeaturedContentPayload } from '../../modules/cache/featuredContentSemantics';
 import { getPtvQualityTags } from '../../modules/cards/qualityTags';
 import type {
@@ -47,7 +51,7 @@ import {
     setPtvShellError,
     setPtvShellLoading
 } from '../../shell/foundation';
-import { PtvIdentityScopedCache } from '../../services/displayIdentity';
+import { getPtvDisplayIdentityKey, PtvIdentityScopedCache } from '../../services/displayIdentity';
 import { buildNativeHomeProfile } from './services/homeProfileService';
 import {
     decideNativeHomeModelReplacement,
@@ -188,6 +192,54 @@ export type NativeHomePerformanceDebug = {
 };
 
 const lastUsableNativeHomeStates = new PtvIdentityScopedCache<NativeHomeState>(4);
+const FEATURED_IDENTITY_BATCH_SIZE = 100;
+const FEATURED_IDENTITY_MAX_CONCURRENCY = 2;
+
+export function retireNativeHomeIdentityState(serverId: unknown, userId: unknown) {
+    return lastUsableNativeHomeStates.delete(serverId, userId);
+}
+
+async function revalidateFeaturedPayloadForIdentity(
+    payload: FeaturedPayload | null,
+    options: {
+        serverId: string;
+        signal: AbortSignal;
+        userId: string;
+    }
+) {
+    if (!payload || !options.serverId || !options.userId) return null;
+
+    const ids = getPtvFeaturedPayloadItemIds(payload);
+    if (!ids.length) return payload;
+
+    const batches = Array.from(
+        { length: Math.ceil(ids.length / FEATURED_IDENTITY_BATCH_SIZE) },
+        (_, index) => ids.slice(
+            index * FEATURED_IDENTITY_BATCH_SIZE,
+            (index + 1) * FEATURED_IDENTITY_BATCH_SIZE
+        )
+    );
+    const currentItems: PtvItem[] = [];
+
+    for (let index = 0; index < batches.length; index += FEATURED_IDENTITY_MAX_CONCURRENCY) {
+        if (options.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+        const results = await Promise.all(
+            batches
+                .slice(index, index + FEATURED_IDENTITY_MAX_CONCURRENCY)
+                .map(batch => getPtvItems<PtvItem>({
+                    Fields: 'PrimaryImageAspectRatio,Overview,Genres,Studios,MediaSources,UserData',
+                    Ids: batch.join(','),
+                    Limit: batch.length
+                }, options))
+        );
+        results.forEach(result => {
+            currentItems.push(...(result.Items || []));
+        });
+    }
+
+    return reconcilePtvFeaturedPayloadForUser(payload, currentItems);
+}
 
 const ITEM_FIELDS = [
     'Overview',
@@ -2076,54 +2128,14 @@ function createUserSpecificRecommendationRows(rowSettings: PtvRowsEndpointSettin
     const settingsHash = getRecommendationRowsSettingsHash(rowSettings);
     const settingsRows = getRecommendationSettingsRows(rowSettings);
 
-    if (!settingsRows.length) {
-        recordPtvEvent('recommendation', 'native-home-recommendation-settings-empty', {
-            enabled: areRecommendationsEnabled(rowSettings),
-            recommendationConfigHash: settingsHash || null,
-            savedRowCount: rowSettings?.recommendations?.rows?.length || 0
-        });
+    recordPtvEvent('recommendation', 'native-home-persisted-recommendations-retired', {
+        enabled: areRecommendationsEnabled(rowSettings),
+        reason: 'identity-scoped-engine-required',
+        recommendationConfigHash: settingsHash || null,
+        savedRowCount: settingsRows.length
+    });
 
-        return [];
-    }
-
-    return settingsRows.map((row, index) => {
-        const rawItems = row.items as unknown as PtvItem[];
-        const items = dedupeNativeHomeRecommendationItems(rawItems);
-        const localDedupeRemovals = Math.max(0, rawItems.length - items.length);
-        const diagnostics = row.diagnostics;
-        const configHash = row.recommendationConfigHash || settingsHash || undefined;
-        const rowConfigHash = row.rowConfigHash || rowSettings?.recommendations?.rowConfigHash || undefined;
-
-        return {
-            accepted: true,
-            cacheHash: configHash,
-            candidateCount: diagnostics?.candidateCount ?? rawItems.length,
-            configHash,
-            dedupeRemovals: (diagnostics?.dedupeRemovals || 0) + localDedupeRemovals,
-            enabled: row.enabled !== false,
-            finalRenderedCount: diagnostics?.finalRenderedCount ?? items.length,
-            generatedAt: row.generatedAt ?? rowSettings?.recommendations?.generatedAt ?? null,
-            hydrationRemovals: diagnostics?.hydrationRemovals ?? 0,
-            id: row.id,
-            items,
-            kind: 'items' as const,
-            mediaType: row.mediaType,
-            persisted: true,
-            recommendationConfigHash: configHash,
-            renderedSource: 'recommendation-settings' as const,
-            rowConfigHash,
-            rowType: 'generated-recommendation' as const,
-            source: 'recommendation' as const,
-            sourceConfigHash: configHash,
-            sourceGroupId: 'recommendation-settings',
-            sourceGroupTitle: 'Recommendation Settings',
-            sourceRecommendationId: row.id,
-            sourceSortIndex: index,
-            sourceType: 'recommendation-settings',
-            subtitle: row.explanation || 'Accepted recommendation row',
-            title: row.title
-        };
-    }).filter(row => row.items.length >= PTV_MIN_RECOMMENDATION_ROW_ITEMS);
+    return [];
 }
 
 function getRecommendationSettingsDropReason(row: PtvPersistedRecommendationRow) {
@@ -2132,7 +2144,7 @@ function getRecommendationSettingsDropReason(row: PtvPersistedRecommendationRow)
     if (row.draft === true) return 'draft-recommendation-row';
     if (!Array.isArray(row.items) || row.items.length < PTV_MIN_RECOMMENDATION_ROW_ITEMS) return 'below-minimum-items';
 
-    return 'filtered-before-render';
+    return 'identity-scoped-engine-required';
 }
 
 function createUserSpecificRecommendationDebug(
@@ -3420,7 +3432,12 @@ function getNativeHomeRowViewportPosition(
     };
 }
 
-export function useNativeHomeData(): NativeHomeState {
+export function useNativeHomeData(): NativeHomeState & { identityKey: string | null } {
+    const currentDisplayIdentity = getNativeHomeDisplayIdentity();
+    const currentDisplayIdentityKey = getPtvDisplayIdentityKey(
+        currentDisplayIdentity.serverId,
+        currentDisplayIdentity.userId
+    );
     const [state, setState] = useState<NativeHomeState>({
         debug: {
             home: getEmptyNativeHomeAdaptiveDebug(),
@@ -3434,8 +3451,10 @@ export function useNativeHomeData(): NativeHomeState {
         rows: [],
         user: null
     });
+    const [stateIdentityKey, setStateIdentityKey] = useState(currentDisplayIdentityKey);
 
     useEffect(() => {
+        setStateIdentityKey(currentDisplayIdentityKey);
         const generation = ++nativeHomeRouteGeneration;
         const displayIdentity = getNativeHomeDisplayIdentity();
         const routeAbortController = createPtvAbortController();
@@ -3551,10 +3570,10 @@ export function useNativeHomeData(): NativeHomeState {
         });
         setPtvShellLoading(true);
         clearPtvShellStatus();
-        setState(previous => {
+        setState(() => {
             const lastUsableState = getLastUsableNativeHomeState(displayIdentity);
 
-            if (lastUsableState && !hasRenderableNativeHomeRows(previous.rows)) {
+            if (lastUsableState) {
                 const restoredAt = Math.round(performance.now() - startedAt);
 
                 recordPtvEvent('render', 'native-home-last-good-state-restored', {
@@ -3582,14 +3601,17 @@ export function useNativeHomeData(): NativeHomeState {
             }
 
             return {
-                ...previous,
                 debug: {
                     home: getEmptyNativeHomeAdaptiveDebug(),
                     performance: getEmptyNativeHomePerformanceDebug(),
                     recommendations: getEmptyRecommendationDebug()
                 },
                 error: null,
-                isLoading: true
+                heroItem: null,
+                heroItems: [],
+                isLoading: true,
+                rows: [],
+                user: null
             };
         });
 
@@ -3767,7 +3789,10 @@ export function useNativeHomeData(): NativeHomeState {
         const renderFromFeaturedCache = async (
             featuredPayload: FeaturedPayload | null,
             rowSettings: PtvRowsEndpointSettings | null = null,
-            options: { mode?: 'cache-only' | 'settings-validated' } = {}
+            options: {
+                mode?: 'cache-only' | 'settings-validated';
+                user?: PtvUser | null;
+            } = {}
         ) => {
             if (!isRouteWorkCurrent() || renderedFromCache || !hasUsableFeaturedPayload(featuredPayload)) return false;
             const cacheResponseReceivedAt = Math.round(performance.now() - startedAt);
@@ -3804,7 +3829,7 @@ export function useNativeHomeData(): NativeHomeState {
             const adaptiveCache = cacheOnly ? {
                 debug: getEmptyNativeHomeAdaptiveDebug(),
                 rows: focusedCacheRows
-            } : getAdaptiveNativeHomeLayout(focusedCacheRows, null, startedAt);
+            } : getAdaptiveNativeHomeLayout(focusedCacheRows, options.user || null, startedAt);
             const adaptiveCacheRows = adaptiveCache.rows;
 
             if (!focusedCacheRows.length) {
@@ -3906,7 +3931,7 @@ export function useNativeHomeData(): NativeHomeState {
                 heroItems,
                 isLoading: false,
                 rows: adaptiveCacheRows,
-                user: null
+                user: options.user || null
             };
 
             rememberUsableNativeHomeState(nextState, 'featured-cache', displayIdentity);
@@ -3946,9 +3971,20 @@ export function useNativeHomeData(): NativeHomeState {
             null,
             getFetchOptions(0)
         );
+        const userScopedFeaturedPayloadPromise = Promise.all([
+            featuredPayloadPromise,
+            currentUserPromise
+        ]).then(async ([ featuredPayload, user ]) => ({
+            featuredPayload: await revalidateFeaturedPayloadForIdentity(featuredPayload, {
+                serverId: displayIdentity.serverId,
+                signal: routeAbortController.signal,
+                userId: user?.Id || ''
+            }),
+            user
+        }));
 
-        void featuredPayloadPromise
-            .then(featuredPayload => {
+        void userScopedFeaturedPayloadPromise
+            .then(({ featuredPayload, user }) => {
                 const semanticSummary = summarizeFeaturedContentPayload(featuredPayload);
                 const cacheStatus = getFeaturedContentCacheStatus();
 
@@ -3969,15 +4005,21 @@ export function useNativeHomeData(): NativeHomeState {
                     { reason: semanticSummary.reason }
                 );
 
-                return renderFromFeaturedCache(featuredPayload, null, { mode: 'cache-only' });
+                return renderFromFeaturedCache(featuredPayload, null, {
+                    mode: 'cache-only',
+                    user
+                });
             })
             .catch(() => undefined);
 
         void Promise.all([
-            featuredPayloadPromise,
+            userScopedFeaturedPayloadPromise,
             rowSettingsPromise
         ])
-            .then(([featuredPayload, rowSettings]) => renderFromFeaturedCache(featuredPayload, rowSettings, { mode: 'settings-validated' }))
+            .then(([{ featuredPayload, user }, rowSettings]) => renderFromFeaturedCache(featuredPayload, rowSettings, {
+                mode: 'settings-validated',
+                user
+            }))
             .catch(() => undefined);
 
         recordTimeline('live-jellyfin-requests-started', 'jellyfin-live');
@@ -3996,7 +4038,7 @@ export function useNativeHomeData(): NativeHomeState {
                 );
                 const [rowSettings, featuredPayload, studioMap] = await Promise.all([
                     rowSettingsPromise,
-                    featuredPayloadPromise,
+                    userScopedFeaturedPayloadPromise.then(result => result.featuredPayload),
                     studioMapPromise
                 ]);
                 const savedRowRulesActive = shouldRenderConfiguredRows(rowSettings);
@@ -4045,6 +4087,15 @@ export function useNativeHomeData(): NativeHomeState {
                             userId
                         }), { Items: [] }, getFetchOptions(NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS))
                     ]));
+
+                    featuredEndpointPayload = await revalidateFeaturedPayloadForIdentity(
+                        featuredEndpointPayload,
+                        {
+                            serverId: displayIdentity.serverId,
+                            signal: routeAbortController.signal,
+                            userId
+                        }
+                    );
                 }
 
                 if (!areRecommendationsEnabled(rowSettings)) {
@@ -4053,7 +4104,7 @@ export function useNativeHomeData(): NativeHomeState {
                     });
                 } else {
                     recordPtvEvent('recommendation', 'native-home-user-recommendations-skipped', {
-                        reason: 'home-uses-accepted-recommendation-settings'
+                        reason: 'home-uses-identity-scoped-engine'
                     });
                 }
 
@@ -4435,9 +4486,12 @@ export function useNativeHomeData(): NativeHomeState {
             recordTimeline('home-route-retired', 'route');
             setPtvShellLoading(false);
         };
-    }, []);
+    }, [currentDisplayIdentityKey]);
 
-    return state;
+    return {
+        ...state,
+        identityKey: stateIdentityKey
+    };
 }
 
 export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {

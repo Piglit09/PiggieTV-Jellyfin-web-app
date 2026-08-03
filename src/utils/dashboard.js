@@ -165,15 +165,30 @@ export function onServerChanged(_userId, _accessToken, apiClient) {
     ServerConnections.setLocalApiClient(apiClient);
 }
 
-export function logout() {
+function logoutAndNavigate(getNextRoute) {
     return ServerConnections.logout().then(function () {
         // Clear the query cache
         queryClient.clear();
         // Reset cached views
         viewContainer.reset();
-        appHost.supports(AppFeature.MultiServer) ?
-            navigate('selectserver') : navigate('login');
+        navigate(getNextRoute());
     });
+}
+
+export function logout() {
+    return logoutAndNavigate(() => appHost.supports(AppFeature.MultiServer) ? 'selectserver' : 'login');
+}
+
+export function switchUser() {
+    let currentServerId = '';
+
+    try {
+        currentServerId = ServerConnections.currentApiClient()?.serverId?.() || '';
+    } catch {
+        currentServerId = '';
+    }
+
+    return logoutAndNavigate(() => currentServerId ? `login?serverid=${encodeURIComponent(currentServerId)}` : 'login');
 }
 
 export function getPluginUrl(name) {
@@ -315,6 +330,7 @@ const Dashboard = {
     selectServer,
     serverAddress,
     showLoadingMsg,
+    switchUser,
     datetime,
     DirectoryBrowser,
     dialogHelper,

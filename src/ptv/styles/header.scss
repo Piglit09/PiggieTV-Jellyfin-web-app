@@ -1,7 +1,36 @@
-/* PiggieTV native header theme. Settings page styles intentionally untouched. */
+/* PiggieTV header theme shared by native, Settings, and dashboard surfaces. */
 
 .ptv-app-header-root {
     z-index: 1200;
+}
+
+.skinHeader,
+.ptv-legacy-skinHeader,
+.ptv-shell-header {
+    transition:
+        background-color var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        border-color var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        box-shadow var(--ptv-motion-medium) var(--ptv-motion-ease-standard),
+        backdrop-filter var(--ptv-motion-medium) var(--ptv-motion-ease-standard) !important;
+}
+
+html.ptv-header-over-home-hero :is(.skinHeader, .ptv-legacy-skinHeader, .ptv-shell-header):not(.osdHeader) {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+
+html.ptv-header-over-home-hero :is(.skinHeader, .ptv-legacy-skinHeader):not(.osdHeader)::after {
+    opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skinHeader,
+    .ptv-legacy-skinHeader,
+    .ptv-shell-header {
+        transition: none !important;
+    }
 }
 
 .skinHeader,

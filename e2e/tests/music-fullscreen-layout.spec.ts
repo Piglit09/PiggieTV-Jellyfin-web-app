@@ -244,7 +244,7 @@ test.describe('WebOS full-screen Music layout', () => {
         expect(geometry.context.top).toBe(124);
         expect(geometry.context.top).toBeGreaterThanOrEqual(geometry.header.bottom + 8);
         expect(geometry.bodyPaddingTop).toBe('164px');
-        expect(geometry.mainScroll.width).toBeLessThanOrEqual(1760);
+        expect(geometry.mainScroll.width).toBe(1920);
         expect(geometry.mainScrollPaddingTop).toBe('28px');
         expect(geometry.refresh.top).toBeGreaterThan(geometry.context.bottom);
         expect(geometry.contextOverlapsHeader).toBe(false);

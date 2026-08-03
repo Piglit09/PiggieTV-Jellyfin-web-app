@@ -12,6 +12,7 @@ import Page from 'components/Page';
 
 import {
     getPtvImageFailureDiagnostics,
+    getPtvCurrentUserId,
     getPtvItemImageCandidates,
     getPtvItemImageUrl,
     hasPtvImageCandidateFailed,
@@ -28,6 +29,7 @@ import {
     type PtvUser
 } from '../../api';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
+import { getPtvDisplayIdentityKey } from '../../services/displayIdentity';
 import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES } from '../../core/config';
 import {
     recordPtvItemRouteClick,
@@ -3123,21 +3125,42 @@ function NativeHome() {
     const { canShowDebug } = usePtvAdminDebugVisibility();
     const {
         debug,
-        error,
-        heroItem,
-        heroItems,
-        isLoading,
-        rows: rawRows,
-        user
+        error: unsafeError,
+        heroItem: unsafeHeroItem,
+        heroItems: unsafeHeroItems,
+        identityKey: stateIdentityKey,
+        isLoading: unsafeIsLoading,
+        rows: unsafeRawRows,
+        user: unsafeUser
     } = useNativeHomeData();
+    const activeServerId = String(getPtvServerId() || '');
+    const activeUserId = String(getPtvCurrentUserId(activeServerId) || '');
+    const activeIdentityKey = getPtvDisplayIdentityKey(activeServerId, activeUserId);
+    const ownsActiveIdentity = Boolean(
+        activeIdentityKey
+        && activeIdentityKey === stateIdentityKey
+        && unsafeUser?.Id === activeUserId
+    );
+    const error = ownsActiveIdentity ? unsafeError : null;
+    const heroItem = ownsActiveIdentity ? unsafeHeroItem : null;
+    const heroItems = useMemo(
+        () => ownsActiveIdentity ? unsafeHeroItems : [],
+        [ownsActiveIdentity, unsafeHeroItems]
+    );
+    const isLoading = ownsActiveIdentity ? unsafeIsLoading : true;
+    const rawRows = useMemo(
+        () => ownsActiveIdentity ? unsafeRawRows : [],
+        [ownsActiveIdentity, unsafeRawRows]
+    );
+    const user = ownsActiveIdentity ? unsafeUser : null;
     const preferenceScope = useMemo(() => {
         const userId = String(user?.Id || '');
         const currentScope = getCurrentNativeHomePreferenceScope();
 
-        if (!userId || !currentScope || currentScope.userId !== userId) return null;
+        if (!activeServerId || !userId || !currentScope || currentScope.serverId !== activeServerId || currentScope.userId !== userId) return null;
 
         return currentScope;
-    }, [user?.Id]);
+    }, [activeServerId, user?.Id]);
 
     useEffect(() => {
         preferenceSaveGenerationRef.current += 1;
@@ -3169,6 +3192,7 @@ function NativeHome() {
         enabled: personalizationSettings.experimentalRecommendations,
         feedback: preferenceDocument?.feedback,
         isPrimaryHomeLoading: isLoading,
+        serverId: activeServerId,
         userId: String(user?.Id || '')
     });
     const unfilteredMergedRows = useMemo(
@@ -3663,7 +3687,11 @@ function NativeHome() {
                         <NativeHomeFallback message={error} />
                     ) : (
                         <>
-                            <div className='ptv-native-home-controls' aria-label='Home controls'>
+                            <div
+                                aria-label='Home controls'
+                                className='ptv-native-home-controls'
+                                data-ptv-utility-row='home'
+                            >
                                 <button
                                     ref={customizeTriggerRef}
                                     aria-haspopup='dialog'

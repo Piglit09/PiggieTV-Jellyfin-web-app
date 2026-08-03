@@ -19,7 +19,6 @@ import { useNavigate } from 'react-router-dom';
 import Page from 'components/Page';
 import { getUserViewsQuery } from 'hooks/useUserViews';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
-import Events from 'utils/events';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 
@@ -29,12 +28,10 @@ import { PTV_CACHE, PTV_PLUGIN_API } from '../../core/config';
 import {
     getPtvFeatureSettings,
     isPtvPlaybackMode,
-    PTV_FEATURE_SETTINGS_CHANGE_EVENT,
     setPtvFeatureSetting,
-    type PtvFeatureSettings,
     type PtvPlaybackMode
 } from '../../core/featureSettings';
-import { getPtvDebugReport, isPtvDebugEnabled, setPtvDebug } from '../../core/observability';
+import { getPtvDebugReport, isPtvDebugEnabled } from '../../core/observability';
 import { getPtvPerformanceReport } from '../../services/performanceMonitor';
 import {
     getCurrentPtvPluginApiClient,
@@ -42,12 +39,10 @@ import {
     getPtvPluginApiResolvedUrl,
     isPtvPluginApiCoolingDown,
     normalizePtvApiError,
-    resetPtvPluginApiAvailability,
-    waitForCurrentPtvPluginApiClient
+    resetPtvPluginApiAvailability
 } from '../../core/pluginApi';
 import {
     clearFeaturedContentCache,
-    FEATURED_CACHE_UPDATED_EVENT,
     forceRefreshFeaturedContentCache,
     getFeaturedContentCacheStatus,
     setFeaturedContentCacheTtlMs,
@@ -63,7 +58,6 @@ import { clearPtvIntegrationSettingsCache } from '../integrations/integrationsCo
 import { normalizePtvRecommendationRowSettings } from '../recommendations/recommendationSettings';
 import { serializeSanitizedPtvDebugExport } from './debugExportSanitizer';
 import { getPtvDashboardRuntimeDiagnostics } from './dashboardRuntimeDiagnostics';
-import { RemoteDiagnosticsPanel } from './RemoteDiagnosticsPanel';
 import { getPtvShellFoundationStatus } from '../../shell/foundation';
 
 type PtvPluginFeaturedStatus = {
@@ -342,9 +336,7 @@ type PtvSettingsSection =
     | 'tmdbSettings';
 
 const PTV_ROW_BUILDER_HASH = '#/dashboard/piggietv/rows';
-const PTV_RECOMMENDATIONS_HASH = '#/dashboard/piggietv/recommendations';
 const PTV_ROW_BUILDER_PATH = '/dashboard/piggietv/rows';
-const PTV_RECOMMENDATIONS_PATH = '/dashboard/piggietv/recommendations';
 
 type ApplyPluginSettingsStateOptions = {
     forceDraftHydration?: boolean;
@@ -1382,22 +1374,6 @@ function getDashboardDebugStateMessage(state: DashboardDebugState, report: unkno
     }[state];
 }
 
-function getDashboardDebugStateColor(state: DashboardDebugState): 'default' | 'error' | 'info' | 'success' | 'warning' {
-    return {
-        active: 'success',
-        degraded: 'warning',
-        disabled: 'default',
-        disconnected: 'error',
-        initializing: 'info'
-    }[state] as 'default' | 'error' | 'info' | 'success' | 'warning';
-}
-
-function getDashboardDebugAlertSeverity(state: DashboardDebugState): 'error' | 'info' | 'success' | 'warning' {
-    const color = getDashboardDebugStateColor(state);
-
-    return color === 'default' ? 'info' : color;
-}
-
 function getDashboardDebugSectionSources(
     report: unknown,
     pluginState: PluginState,
@@ -1477,18 +1453,6 @@ function mergeDashboardDebugReport(options: {
     };
 }
 
-function getDebugSectionSourceText(sources: unknown, key: string) {
-    const source = getNestedRecord(sources, key);
-
-    if (!source) return 'source: n/a';
-
-    const label = typeof source.source === 'string' ? source.source : 'n/a';
-    const timestamp = typeof source.timestamp === 'string' ? source.timestamp : 'n/a';
-    const note = typeof source.note === 'string' && source.note ? `, ${source.note}` : '';
-
-    return `source: ${label}, captured: ${timestamp}${note}`;
-}
-
 function getPerformanceSnapshot() {
     const browserReport = getPtvGlobal()?.performance?.report?.();
     const runtimeReport = getPtvPerformanceReport();
@@ -1509,33 +1473,6 @@ function getPerformanceSnapshot() {
         largestLongTaskMs: runtimeReport.largestLongTaskMs,
         runtimeMonitor: runtimeReport
     };
-}
-
-function getMemoryLabel(performanceReport: unknown) {
-    const memory = getNestedRecord(performanceReport, 'memory');
-
-    if (!memory) return 'n/a';
-
-    const usedJsHeap = getNumberValue(memory, 'usedJsHeap');
-    const jsHeapLimit = getNumberValue(memory, 'jsHeapLimit');
-    const deviceMemory = getNumberValue(memory, 'deviceMemory');
-
-    if (usedJsHeap) {
-        const limitLabel = jsHeapLimit ? ` / ${formatBytes(jsHeapLimit)}` : '';
-
-        return `${formatBytes(usedJsHeap)}${limitLabel}`;
-    }
-
-    return deviceMemory ? `${deviceMemory} GB device` : 'n/a';
-}
-
-function getCacheTimingLabel(debugReport: unknown) {
-    const cache = getNestedRecord(debugReport, 'cache');
-    const timings = getNestedRecord(cache, 'timings');
-    const count = getNumberValue(timings, 'count') || 0;
-    const averageMs = getNumberValue(timings, 'averageMs') || 0;
-
-    return count ? `${count} samples / ${averageMs} ms avg` : 'n/a';
 }
 
 function isDebugLoggingEnabled() {
@@ -1559,10 +1496,6 @@ function copyTextToClipboard(text: string) {
     textarea.remove();
 
     return Promise.resolve();
-}
-
-function isPerformanceOverlayActive() {
-    return document.documentElement.classList.contains('ptv-performance-overlay-active');
 }
 
 function getPtvGlobal() {
@@ -1697,12 +1630,6 @@ function getPluginHelpSeverity(state: PluginConnectionState) {
     return state === 'connected' ? 'info' : 'warning';
 }
 
-function getFpsLabel(currentFps: number | null, averageFps: number | null) {
-    if (!averageFps) return currentFps === null ? 'n/a' : String(currentFps);
-
-    return `${currentFps ?? 'n/a'} avg ${averageFps}`;
-}
-
 function StatusMessageAlert({ message }: Readonly<{ message: string }>) {
     if (!message) return null;
 
@@ -1800,27 +1727,15 @@ function WarningAlert({ message }: Readonly<{ message: string }>) {
     return <Alert severity='warning'>{message}</Alert>;
 }
 
-function DebugReportPreview({ text }: Readonly<{ text: string }>) {
-    if (!text) return null;
-
-    return (
-        <Box component='pre' className='ptv-debug-report-preview'>
-            {text}
-        </Box>
-    );
-}
-
 // eslint-disable-next-line sonarjs/cognitive-complexity
 const PiggieTvDashboardPage = () => {
     const navigate = useNavigate();
     const [pluginState, setPluginState] = useState<PluginState>(EMPTY_PLUGIN_STATE);
     const [cacheStatus, setCacheStatus] = useState(getFeaturedContentCacheStatus);
     const [debugEnabled, setDebugEnabledState] = useState(isPtvDebugEnabled);
-    const [overlayEnabled, setOverlayEnabled] = useState(isPerformanceOverlayActive);
     const [featureSettings, setFeatureSettingsState] = useState(getPtvFeatureSettings);
     const [statusMessage, setStatusMessage] = useState('');
     const [debugReport, setDebugReport] = useState<unknown>(null);
-    const [performanceReport, setPerformanceReport] = useState<unknown>(getPerformanceSnapshot);
     const [persistedRecommendationRows, setPersistedRecommendationRows] = useState(0);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [featuredRefreshState, setFeaturedRefreshState] = useState<FeaturedRefreshState>('idle');
@@ -1867,7 +1782,6 @@ const PiggieTvDashboardPage = () => {
     const integrationTestAbortRef = useRef<Partial<Record<PtvIntegrationTestKey, AbortController>>>({});
     const settingsDirtyRef = useRef(settingsDirty);
     const hydratedRef = useRef(false);
-    const initialHydrationStartedRef = useRef(false);
     const pluginSettingsLoadedRef = useRef(false);
 
     const openPtvDashboardRoute = useCallback((
@@ -1904,10 +1818,6 @@ const PiggieTvDashboardPage = () => {
         openPtvDashboardRoute(PTV_ROW_BUILDER_PATH, PTV_ROW_BUILDER_HASH, event);
     }, [openPtvDashboardRoute]);
 
-    const openPtvRecommendations = useCallback((event?: React.MouseEvent<HTMLElement>) => {
-        openPtvDashboardRoute(PTV_RECOMMENDATIONS_PATH, PTV_RECOMMENDATIONS_HASH, event);
-    }, [openPtvDashboardRoute]);
-
     const setSettingsDirty = useCallback((nextValue: boolean) => {
         settingsDirtyRef.current = nextValue;
         setSettingsDirtyState(nextValue);
@@ -1940,10 +1850,6 @@ const PiggieTvDashboardPage = () => {
 
     const syncCacheStatus = useCallback(() => {
         setCacheStatus(getFeaturedContentCacheStatus());
-    }, []);
-
-    const syncPerformanceReport = useCallback(() => {
-        setPerformanceReport(getPerformanceSnapshot());
     }, []);
 
     const applyPluginSettingsState = useCallback((
@@ -2167,7 +2073,6 @@ const PiggieTvDashboardPage = () => {
             const status = await fetchFullPluginStatus();
             latestStatus = status;
             syncCacheStatus();
-            syncPerformanceReport();
             debugFeaturedRefresh('poll status', {
                 elapsedMs: Date.now() - startedAt,
                 featuredCacheExists: status.featuredCacheExists,
@@ -2206,15 +2111,14 @@ const PiggieTvDashboardPage = () => {
         throw Object.assign(new Error('Featured cache refresh did not finish before the polling timeout.'), {
             code: 'PTV_FEATURED_REFRESH_POLL_TIMEOUT'
         });
-    }, [fetchFullPluginStatus, syncCacheStatus, syncPerformanceReport]);
+    }, [fetchFullPluginStatus, syncCacheStatus]);
 
     const refreshCacheWithClientFallback = useCallback(() => forceRefreshFeaturedContentCache(fetchDashboardFeaturedContent)
         .then(() => {
             syncCacheStatus();
-            syncPerformanceReport();
             void refreshPluginStatus();
             setStatusMessage('Featured cache refresh finished.');
-        }), [refreshPluginStatus, syncCacheStatus, syncPerformanceReport]);
+        }), [refreshPluginStatus, syncCacheStatus]);
 
     const refreshCache = useCallback(() => {
         const backendRefreshBlocking = Boolean(pluginState.status?.refreshInProgress && !hasUsableFeaturedCache(pluginState.status));
@@ -2300,7 +2204,6 @@ const PiggieTvDashboardPage = () => {
         })()
             .then(() => {
                 syncCacheStatus();
-                syncPerformanceReport();
                 void refreshPluginStatus();
             })
             .catch((err: unknown) => {
@@ -2326,7 +2229,6 @@ const PiggieTvDashboardPage = () => {
         refreshPluginStatus,
         setFeaturedRefreshStateValue,
         syncCacheStatus,
-        syncPerformanceReport,
         waitForFeaturedRefreshCompletion
     ]);
 
@@ -2337,12 +2239,11 @@ const PiggieTvDashboardPage = () => {
 
         window.setTimeout(() => {
             syncCacheStatus();
-            syncPerformanceReport();
             void refreshPluginStatus();
             setIsClearing(false);
             setStatusMessage('Featured cache clear requested.');
         }, 250);
-    }, [refreshPluginStatus, syncCacheStatus, syncPerformanceReport]);
+    }, [refreshPluginStatus, syncCacheStatus]);
 
     const savePluginSettings = useCallback((
         settingsPatch: PtvPluginSettingsPatch,
@@ -2408,7 +2309,6 @@ const PiggieTvDashboardPage = () => {
                 }
 
                 syncCacheStatus();
-                syncPerformanceReport();
                 debugPluginSettingsSave('plugin settings save finished', {
                     dirtyAfterSave: settingsDirtyRef.current,
                     section,
@@ -2433,8 +2333,7 @@ const PiggieTvDashboardPage = () => {
     }, [
         applyPluginSettingsState,
         loadPluginSettings,
-        syncCacheStatus,
-        syncPerformanceReport
+        syncCacheStatus
     ]);
 
     const resetPluginSettings = useCallback(() => {
@@ -2456,7 +2355,6 @@ const PiggieTvDashboardPage = () => {
                 pluginSettingsLoadedRef.current = true;
                 hydratedRef.current = true;
                 syncCacheStatus();
-                syncPerformanceReport();
                 setStatusMessage('PiggieTV plugin settings reset.');
             })
             .catch((err: unknown) => {
@@ -2465,7 +2363,7 @@ const PiggieTvDashboardPage = () => {
             .finally(() => {
                 setSettingsResetting(false);
             });
-    }, [applyPluginSettingsState, syncCacheStatus, syncPerformanceReport]);
+    }, [applyPluginSettingsState, syncCacheStatus]);
 
     const saveFeatureSettings = useCallback(() => {
         const nextSettings = normalizePluginSettings({
@@ -3146,20 +3044,6 @@ const PiggieTvDashboardPage = () => {
         setSettingsDirty(true);
     }, [setSettingsDirty]);
 
-    const toggleDebug = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-        const enabled = event.target.checked;
-
-        setPtvDebug(enabled);
-        setDebugEnabledState(enabled);
-    }, []);
-
-    const togglePerformanceOverlay = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-        const enabled = event.target.checked;
-
-        getPtvGlobal()?.performanceOverlay?.(enabled);
-        setOverlayEnabled(isPerformanceOverlayActive());
-    }, []);
-
     const getMergedDebugReport = useCallback((report?: unknown, overrides: {
         cacheStatus?: ReturnType<typeof getFeaturedContentCacheStatus>;
         pluginApi?: ReturnType<typeof getPtvPluginApiDiagnostics>;
@@ -3181,17 +3065,6 @@ const PiggieTvDashboardPage = () => {
         persistedRecommendationRows,
         pluginState
     ]);
-
-    const runDebugReport = useCallback(() => {
-        const report = getMergedDebugReport();
-
-        setDebugReport(report);
-        setPerformanceReport(getPerformanceSnapshot());
-
-        if (isDebugLoggingEnabled()) {
-            console.info('[PTV Debug Report]', report);
-        }
-    }, [getMergedDebugReport]);
 
     const buildDebugSnapshot = useCallback(() => {
         const liveCacheStatus = getFeaturedContentCacheStatus();
@@ -3229,18 +3102,6 @@ const PiggieTvDashboardPage = () => {
             });
     }, [buildDebugSnapshot]);
 
-    const copyDebugReport = useCallback(() => {
-        const report = getMergedDebugReport(debugReport);
-
-        copyTextToClipboard(serializeSanitizedPtvDebugExport(report))
-            .then(() => {
-                setStatusMessage('Debug report copied.');
-            })
-            .catch((err: unknown) => {
-                setStatusMessage(`Debug report copy failed: ${getErrorMessage(err)}`);
-            });
-    }, [debugReport, getMergedDebugReport]);
-
     const copyPluginInstallNote = useCallback(() => {
         copyTextToClipboard(PTV_PLUGIN_INSTALL_NOTE)
             .then(() => {
@@ -3266,94 +3127,10 @@ const PiggieTvDashboardPage = () => {
     }, [pluginState]);
 
     useEffect(() => {
-        const clientWaitController = createDashboardAbortController();
-        const hydratePluginState = (origin: string) => {
-            void waitForCurrentPtvPluginApiClient({ signal: clientWaitController?.signal })
-                .then(() => {
-                    resetPtvPluginApiAvailability();
-                    return Promise.all([
-                        refreshPluginStatus(),
-                        loadPluginSettings({
-                            hydrateDrafts: true,
-                            origin
-                        })
-                    ]);
-                })
-                .catch((err: unknown) => {
-                    if (clientWaitController?.signal.aborted) return;
-
-                    setPluginState({
-                        connected: false,
-                        connectionState: 'endpoint-unreachable',
-                        error: getErrorMessage(err),
-                        loading: false,
-                        status: null
-                    });
-                });
-        };
-        const handleLocalUserSignedIn = () => hydratePluginState('authenticated client ready');
-
-        Events.on(ServerConnections, 'localusersignedin', handleLocalUserSignedIn);
-
-        if (!initialHydrationStartedRef.current) {
-            initialHydrationStartedRef.current = true;
-            hydratePluginState('dashboard mount');
-        }
-
-        syncCacheStatus();
-        syncPerformanceReport();
-
-        const handleCacheUpdate = () => {
-            syncCacheStatus();
-            syncPerformanceReport();
-        };
-
-        const handleDebugChange = () => {
-            setDebugEnabledState(isPtvDebugEnabled());
-            setOverlayEnabled(isPerformanceOverlayActive());
-            syncPerformanceReport();
-        };
-
-        const handleFeatureSettingsChange = (event: Event) => {
-            const nextSettings = (event as CustomEvent<PtvFeatureSettings>).detail;
-
-            setFeatureSettingsState(nextSettings || getPtvFeatureSettings());
-        };
-        const handleVisibilityChange = () => {
-            if (document.hidden) return;
-
-            syncCacheStatus();
-            syncPerformanceReport();
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, handleCacheUpdate);
-        window.addEventListener('ptv:debug:change', handleDebugChange);
-        window.addEventListener(PTV_FEATURE_SETTINGS_CHANGE_EVENT, handleFeatureSettingsChange);
-
-        return () => {
-            clientWaitController?.abort();
-            Object.values(integrationTestAbortRef.current).forEach(controller => {
-                controller?.abort();
-            });
-            integrationTestAbortRef.current = {};
-            integrationTestRequestRef.current = {};
-            Events.off(ServerConnections, 'localusersignedin', handleLocalUserSignedIn);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleCacheUpdate);
-            window.removeEventListener('ptv:debug:change', handleDebugChange);
-            window.removeEventListener(PTV_FEATURE_SETTINGS_CHANGE_EVENT, handleFeatureSettingsChange);
-        };
-    // The dashboard bootstraps plugin settings once; explicit reloads go through save/reset handlers.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    useEffect(() => {
         if (pluginState.loading) return undefined;
 
         const timeoutId = window.setTimeout(() => {
             setDebugReport(getMergedDebugReport());
-            setPerformanceReport(getPerformanceSnapshot());
         }, 0);
 
         return () => {
@@ -3399,27 +3176,6 @@ const PiggieTvDashboardPage = () => {
     const itemCount = cacheStatus.itemCount || pluginFeaturedStatus?.itemCount || 0;
     const sectionCount = cacheStatus.sectionCount || pluginFeaturedStatus?.sectionCount || 0;
     const lastRefreshDurationMs = pluginStatus?.lastRefreshDurationMs || cacheStatus.lastRefreshDurationMs;
-    const mergedDebugReport = getMergedDebugReport(debugReport || getPtvDebugReport());
-    const dashboardDebugState = getDashboardDebugState(mergedDebugReport, pluginState, cacheStatus, debugEnabled);
-    const dashboardDebugMessage = getDashboardDebugStateMessage(dashboardDebugState, mergedDebugReport, pluginState);
-    const debugSectionSources = getNestedRecord(mergedDebugReport, 'sectionSources');
-    const debugRecommendations = getNestedRecord(mergedDebugReport, 'recommendations');
-    const recommendationEngineLoaded = getNestedBoolean(debugRecommendations, 'recommendationEngineLoaded') === true;
-    const performanceDebug = getNestedRecord(performanceReport, 'debug') || mergedDebugReport;
-    const imageManagerMetrics = getNestedRecord(performanceReport, 'imageManager');
-    const currentFps = getNumberValue(performanceReport, 'currentFps');
-    const averageFps = getNumberValue(performanceReport, 'averageFps');
-    const droppedFrames = getNumberValue(performanceReport, 'droppedFrameCount');
-    const longTaskCount = getNumberValue(performanceReport, 'longTaskCount');
-    const longTaskTotalMs = getNumberValue(performanceReport, 'longTaskTotalMs');
-    const largestLongTaskMs = getNumberValue(performanceReport, 'largestLongTaskMs');
-    const activeImageRequests = getNumberValue(imageManagerMetrics, 'activeRequests');
-    const queuedImageRequests = getNumberValue(imageManagerMetrics, 'queuedRequests');
-    const imageCacheHits = getNumberValue(imageManagerMetrics, 'cacheHits');
-    const imageCacheMisses = getNumberValue(imageManagerMetrics, 'cacheMisses');
-    const imageDedupeHits = getNumberValue(imageManagerMetrics, 'dedupeHits');
-    const imageFailedSuppressions = getNumberValue(imageManagerMetrics, 'failedImageSuppressions');
-    const debugReportText = mergedDebugReport ? JSON.stringify(mergedDebugReport, null, 2) : '';
     const canEditPluginSettings = pluginState.connected && pluginStatus?.canWriteFeaturedContent !== false;
     const settingsActionDisabled = settingsSaving || settingsLoading || !canEditPluginSettings || !pluginSettings;
 
@@ -3439,9 +3195,6 @@ const PiggieTvDashboardPage = () => {
                         <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap sx={{ mt: 1 }}>
                             <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} variant='outlined' className='ptv-button'>
                                 Open Row Builder
-                            </Button>
-                            <Button href={PTV_RECOMMENDATIONS_HASH} onClick={openPtvRecommendations} variant='outlined' className='ptv-button'>
-                                Open Recommendations
                             </Button>
                         </Stack>
                     </Box>
@@ -3619,119 +3372,6 @@ const PiggieTvDashboardPage = () => {
                                                 Copy Debug Snapshot
                                             </Button>
                                         </Stack>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card ptv-control-card-compact ptv-control-card-debug'>
-                                <CardContent>
-                                    <Stack className='ptv-control-stack ptv-control-stack-compact' spacing={1.25}>
-                                        <Stack direction='row' justifyContent='space-between' alignItems='center'>
-                                            <Typography variant='h2'>Performance / Debug</Typography>
-                                            <Stack direction='row' spacing={1} flexWrap='wrap' justifyContent='flex-end'>
-                                                <Chip
-                                                    className='ptv-live-status-chip'
-                                                    color={getDashboardDebugStateColor(dashboardDebugState)}
-                                                    label={dashboardDebugState}
-                                                    size='small'
-                                                />
-                                                <Chip
-                                                    className='ptv-render-profile-badge'
-                                                    data-ptv-render-profile={performanceProfile.renderProfile.id}
-                                                    label={performanceProfile.renderProfile.id}
-                                                    size='small'
-                                                />
-                                            </Stack>
-                                        </Stack>
-                                        <Divider />
-                                        <Alert severity={getDashboardDebugAlertSeverity(dashboardDebugState)}>
-                                            {dashboardDebugMessage}
-                                        </Alert>
-                                        <Box className='ptv-badge-row'>
-                                            <Chip className='ptv-status-badge ptv-status-badge-info' label={`client: ${clientProfile.kind}`} size='small' />
-                                            <Chip className='ptv-status-badge ptv-status-badge-backend' label={`cache: ${getCacheTimingLabel(performanceDebug)}`} size='small' />
-                                            <Chip className='ptv-status-badge ptv-status-badge-info' label={`persisted rec rows: ${persistedRecommendationRows}`} size='small' />
-                                        </Box>
-                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
-                                            <Typography>Debug state: {dashboardDebugState}</Typography>
-                                            <Typography>Debug collector active: {String(getNestedBoolean(mergedDebugReport, 'active') === true)}</Typography>
-                                            <Typography>Runtime connected: {String(pluginState.connected)}</Typography>
-                                            <Typography>Plugin state source: {getDebugSectionSourceText(debugSectionSources, 'pluginState')}</Typography>
-                                            <Typography>Plugin API source: {getDebugSectionSourceText(debugSectionSources, 'pluginApi')}</Typography>
-                                            <Typography>Cache source: {getDebugSectionSourceText(debugSectionSources, 'cache')}</Typography>
-                                            <Typography>Client profile source: {getDebugSectionSourceText(debugSectionSources, 'clientProfile')}</Typography>
-                                            <Typography>Render profile source: {getDebugSectionSourceText(debugSectionSources, 'renderProfile')}</Typography>
-                                            <Typography>Shell source: {getDebugSectionSourceText(debugSectionSources, 'shell')}</Typography>
-                                            <Typography>Recommendation engine loaded: {String(recommendationEngineLoaded)}</Typography>
-                                            <Typography>Persisted recommendation rows: {persistedRecommendationRows}</Typography>
-                                        </Stack>
-                                        <Typography>Render profile: {performanceProfile.renderProfile.id}</Typography>
-                                        <Typography>Render profile reason: {performanceProfile.renderProfile.matchReason || 'n/a'}</Typography>
-                                        <Typography>Render profile selection: {performanceProfile.renderProfile.selectionReason || 'n/a'}</Typography>
-                                        <Typography>Client profile: {clientProfile.kind}</Typography>
-                                        <Typography>
-                                            Low-power decision: {performanceProfile.lowPowerProfileDecision}
-                                            {' | '}
-                                            {performanceProfile.lowPowerProfileDecisionReason}
-                                        </Typography>
-                                        <Typography>
-                                            TV: platform={clientProfile.tvPlatform}, reason={clientProfile.tvDetectionReason}, tv={String(clientProfile.isTv)}, tenFoot={String(clientProfile.isTenFootClient)}
-                                        </Typography>
-                                        <Typography>
-                                            Flags: androidTv={String(clientProfile.isAndroidTv)}, fireTv={String(clientProfile.isFireTv)}, webOs={String(clientProfile.isWebOs)}, tizen={String(clientProfile.isTizen)}, roku={String(clientProfile.isRoku)}, coarsePointer={String(clientProfile.isCoarsePointer)}, hover={String(clientProfile.hasHover)}, mobile={String(clientProfile.isMobile)}, lowPower={String(performanceProfile.isLowPower)}
-                                        </Typography>
-                                        <Typography>
-                                            CSS capabilities: backdropFilter={String(clientProfile.supportsBackdropFilter)}, containerQueries={String(clientProfile.supportsContainerQueries)}, aspectRatio={String(clientProfile.supportsAspectRatio)}, contentVisibility={String(clientProfile.supportsContentVisibility)}
-                                        </Typography>
-                                        <Typography>FPS: {getFpsLabel(currentFps, averageFps)}</Typography>
-                                        <Typography>Dropped frames: {droppedFrames ?? 'n/a'}</Typography>
-                                        <Typography>Long tasks: {longTaskCount ?? 0} ({formatDuration(longTaskTotalMs)}, largest {formatDuration(largestLongTaskMs)})</Typography>
-                                        <Typography>Memory: {getMemoryLabel(performanceReport)}</Typography>
-                                        <Typography>
-                                            Image requests: {activeImageRequests ?? 0} active / {queuedImageRequests ?? 0} queued
-                                        </Typography>
-                                        <Typography>
-                                            Image cache: {imageCacheHits ?? 0} hits / {imageCacheMisses ?? 0} misses / {imageDedupeHits ?? 0} deduped
-                                        </Typography>
-                                        <Typography>
-                                            Failed image suppressions: {imageFailedSuppressions ?? 0}
-                                        </Typography>
-                                        <FormControlLabel
-                                            control={<Switch checked={debugEnabled} onChange={toggleDebug} />}
-                                            label='Enable PTV_DEBUG'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={overlayEnabled} onChange={togglePerformanceOverlay} />}
-                                            label='Enable performance overlay'
-                                        />
-                                        <Button
-                                            type='button'
-                                            variant='outlined'
-                                            onClick={runDebugReport}
-                                        >
-                                            Run Debug Report
-                                        </Button>
-                                        <Button
-                                            type='button'
-                                            variant='outlined'
-                                            onClick={copyDebugReport}
-                                        >
-                                            Copy Debug Report
-                                        </Button>
-                                        {debugEnabled || debugReport ? (
-                                            <DebugReportPreview text={debugReportText} />
-                                        ) : (
-                                            <Typography color='text.secondary'>Enable PTV_DEBUG to collect detailed event history. Live plugin, cache, profile, and persisted recommendation state is shown above.</Typography>
-                                        )}
-                                        {statusSupportsFeature(pluginStatus, 'remoteDiagnostics') ? (
-                                            <RemoteDiagnosticsPanel />
-                                        ) : (
-                                            <Typography color='text.secondary'>
-                                                Remote client diagnostics require a connected PiggieTV plugin that advertises the remoteDiagnostics capability.
-                                            </Typography>
-                                        )}
                                     </Stack>
                                 </CardContent>
                             </Card>
@@ -4027,7 +3667,7 @@ const PiggieTvDashboardPage = () => {
                                         <Typography variant='h2'>Rows</Typography>
                                         <Divider />
                                         <Typography variant='body2' color='text.secondary'>
-                                            Row categories, random generation, recommendation rows, preview, and diagnostics live in the dedicated Row Builder.
+                                            Row categories, random generation, recommendation tuning, exclusions, ordering, visibility, and preview live in the dedicated Row Builder.
                                         </Typography>
                                         <FormControlLabel
                                             control={<Switch checked={rowSettingsDraft.enableRecommendedRows} disabled={settingsActionDisabled} onChange={handleRecommendedRowsChange} />}
@@ -4036,9 +3676,6 @@ const PiggieTvDashboardPage = () => {
                                         <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
                                             <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
                                                 Open Row Builder
-                                            </Button>
-                                            <Button href={PTV_RECOMMENDATIONS_HASH} onClick={openPtvRecommendations} type='button' variant='outlined'>
-                                                Open Recommendations
                                             </Button>
                                             <Button
                                                 type='button'

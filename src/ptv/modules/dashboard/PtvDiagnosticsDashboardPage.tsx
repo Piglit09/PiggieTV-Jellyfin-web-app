@@ -34,6 +34,7 @@ import {
 } from '../../services/diagnostics/diagnosticPreferences';
 import { getPtvDiagnosticStore } from '../../services/diagnostics/diagnosticStore';
 import { refreshPtvWebDiagnosticExternalStatus } from '../../services/diagnostics/webDiagnosticPlatform';
+import { RemoteDiagnosticsPanel } from './RemoteDiagnosticsPanel';
 
 import './ptvDiagnosticsDashboard.scss';
 
@@ -41,6 +42,7 @@ const SECTIONS = [
     'Overview',
     'Performance',
     'Requests',
+    'Remote',
     'Navigation & Focus',
     'Routes',
     'Images & Shelves',
@@ -643,6 +645,9 @@ export default function PtvDiagnosticsDashboardPage() {
             break;
         case 'Requests':
             content = <Requests snapshot={snapshot} />;
+            break;
+        case 'Remote':
+            content = <RemoteDiagnosticsPanel />;
             break;
         case 'Navigation & Focus':
             content = <NavigationFocus snapshot={snapshot} />;

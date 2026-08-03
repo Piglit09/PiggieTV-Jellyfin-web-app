@@ -4,11 +4,13 @@ import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const logoutMocks = vi.hoisted(() => ({
-    request: vi.fn<() => Promise<void>>()
+    request: vi.fn<() => Promise<void>>(),
+    switchUser: vi.fn<() => Promise<void>>()
 }));
 
 vi.mock('../services/jellyfinLogoutAction', () => ({
-    requestJellyfinLogout: logoutMocks.request
+    requestJellyfinLogout: logoutMocks.request,
+    requestJellyfinUserSwitch: logoutMocks.switchUser
 }));
 
 vi.mock('../services/notificationService', () => ({
@@ -68,6 +70,8 @@ describe('PTV shell logout control', () => {
         resetPtvRuntimeOverlayOcclusionsForTests();
         logoutMocks.request.mockReset();
         logoutMocks.request.mockResolvedValue(undefined);
+        logoutMocks.switchUser.mockReset();
+        logoutMocks.switchUser.mockResolvedValue(undefined);
         window.location.hash = '#/home';
         container = document.createElement('div');
         document.body.appendChild(container);
@@ -80,10 +84,10 @@ describe('PTV shell logout control', () => {
         resetPtvRuntimeOverlayOcclusionsForTests();
     });
 
-    function renderUserMenu(onPanelToggle = vi.fn()) {
+    function renderUserMenu(onPanelToggle = vi.fn(), isAdmin = false) {
         flushSync(() => root.render(
             <PtvShellActions
-                isAdmin={false}
+                isAdmin={isAdmin}
                 onPanelToggle={onPanelToggle}
                 openPanel='user'
                 searchExpanded={false}
@@ -118,6 +122,29 @@ describe('PTV shell logout control', () => {
         expect(onPanelToggle).toHaveBeenCalledWith(null);
         expect(onPanelToggle.mock.invocationCallOrder[0])
             .toBeLessThan(logoutMocks.request.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
+    });
+
+    it('renders the premium user-menu order and routes Profile to the actual profile page', () => {
+        renderUserMenu();
+
+        const items = Array.from(container.querySelectorAll<HTMLElement>('#ptv-shell-user-panel [role="menuitem"]'));
+
+        expect(items.map(item => item.textContent?.trim())).toEqual([
+            'Profile',
+            'Quick Connect',
+            'Settings',
+            'Sign Out'
+        ]);
+        expect(items[0]?.getAttribute('href')).toBe('#/userprofile');
+    });
+
+    it('keeps the same focused menu for administrators', () => {
+        renderUserMenu(vi.fn(), true);
+
+        const labels = Array.from(container.querySelectorAll<HTMLElement>('#ptv-shell-user-panel [role="menuitem"]'))
+            .map(item => item.textContent?.trim());
+
+        expect(labels).toEqual(['Profile', 'Quick Connect', 'Settings', 'Sign Out']);
     });
 
     it('acquires and releases runtime occlusion with a real shell panel lifecycle', () => {

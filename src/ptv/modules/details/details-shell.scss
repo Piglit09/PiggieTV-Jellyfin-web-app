@@ -111,10 +111,11 @@
 
     display: block !important;
     box-sizing: border-box;
-    width: min(100%, 1840px);
-    margin: 0 auto !important;
+    width: 100%;
+    max-width: none;
+    margin: 0 !important;
     min-height: 0 !important;
-    padding: calc(var(--ptv-header-safe-height, 88px) + 42px) 28px 56px !important;
+    padding: calc(var(--ptv-header-safe-height, 88px) + 42px) var(--ptv-content-edge, 24px) 56px !important;
 }
 
 .ptv-detail-page .ptv-details-glass {

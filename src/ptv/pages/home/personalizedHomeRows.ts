@@ -8,12 +8,13 @@ import type { NativeHomeRow } from './hooks';
 const PTV_HOME_PERSONALIZED_ROW_IDS = [
     'recommended-for-you',
     'because-you-watched',
-    'rediscover'
+    'ptv-discovery',
+    'rediscover',
+    'hidden-gems'
 ] as const;
 
-const PTV_HOME_DISCOVERY_ROW_ID = 'ptv-discovery';
 const PTV_HOME_PERSONALIZED_ROW_PREFIX = 'personalized-';
-const PTV_HOME_PERSONALIZED_ROW_LIMIT = 3;
+const PTV_HOME_PERSONALIZED_ROW_LIMIT = 8;
 const PTV_HOME_PERSONALIZED_ITEM_LIMIT = 18;
 const PTV_HOME_HERO_ITEM_LIMIT = 8;
 
@@ -72,15 +73,15 @@ function toNativeHomePersonalizedRow(row: PtvRecommendationRow, index: number): 
 
 function selectPersonalizedRows(rows: readonly PtvRecommendationRow[]) {
     const byId = new Map(rows.map(row => [row.id, row]));
-    const selected = PTV_HOME_PERSONALIZED_ROW_IDS
-        .map(id => byId.get(id))
+    const watchedSubjectRows = rows
+        .filter(row => row.id.startsWith('because-you-watched-'))
+        .slice(0, 4);
+    const selectedIds = watchedSubjectRows.length ?
+        PTV_HOME_PERSONALIZED_ROW_IDS.filter(id => id !== 'because-you-watched') :
+        PTV_HOME_PERSONALIZED_ROW_IDS;
+    const selected = selectedIds
+        .flatMap(id => id === 'ptv-discovery' ? [ ...watchedSubjectRows, byId.get(id) ] : [ byId.get(id) ])
         .filter((row): row is PtvRecommendationRow => Boolean(row));
-
-    if (!byId.has('rediscover')) {
-        const discovery = byId.get(PTV_HOME_DISCOVERY_ROW_ID);
-
-        if (discovery) selected.push(discovery);
-    }
 
     return selected.slice(0, PTV_HOME_PERSONALIZED_ROW_LIMIT);
 }

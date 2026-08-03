@@ -19,12 +19,7 @@ import Page from 'components/Page';
 
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import {
-    clearPtvDebugReport,
-    getPtvDebugPersistenceState,
-    getPtvDebugReport,
-    isPtvDebugEnabled,
     recordPtvEvent,
-    setPtvDebug,
     shouldCollectDiagnostics
 } from '../../core/observability';
 import {
@@ -32,20 +27,17 @@ import {
 } from '../../core/config';
 import {
     getCurrentPtvPluginApiClient,
-    getPtvPluginApiResolvedUrl,
     getPtvPluginApiDiagnostics,
-    normalizePtvApiError,
-    type PtvPluginApiDiagnostics
+    getPtvPluginApiResolvedUrl,
+    normalizePtvApiError
 } from '../../core/pluginApi';
 import {
-    FEATURED_CACHE_UPDATED_EVENT,
     getFeaturedContentCacheStatus,
     getPtvFeaturedRowConfigHash,
     hydrateFeaturedContentCacheFromDocument,
     invalidateFeaturedContentMemoryCache,
     primeFeaturedContentCacheStatus
 } from '../cache/featuredContentCache';
-import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import { getPtvIntegrationSettings } from '../integrations/integrationsConfig';
 import { getRecommendationTitle } from '../recommendations/scoring/metadata';
 import {
@@ -1111,14 +1103,6 @@ function localValidation(settings: PtvRowBuilderSettings, seerrConfigured = fals
     return { errors, warnings };
 }
 
-function redactedDebugReport() {
-    return {
-        cacheStatus: getFeaturedContentCacheStatus(),
-        debugReport: getPtvDebugReport(),
-        pluginApi: getPtvPluginApiDiagnostics()
-    };
-}
-
 function createRowBuilderTimeoutError(message: string) {
     return Object.assign(new Error(message), {
         kind: 'timeout'
@@ -1226,26 +1210,6 @@ function getRecommendationReasonSummary(item: PtvRecommendationScore) {
         .slice(0, 4)
         .map(reason => reason.label)
         .join(' / ');
-}
-
-function getRecommendationRowDebugPayload(data: PtvRecommendationDashboardData | null) {
-    if (!data) return null;
-
-    return {
-        generatedAt: data.generatedAt,
-        metrics: data.metrics,
-        profileUpdatedAt: data.profile.updatedAt,
-        rows: data.rows.map(row => ({
-            diagnostics: row.diagnostics,
-            id: row.id,
-            itemCount: row.items.length,
-            mediaType: row.mediaType,
-            title: row.title
-        })),
-        sourceCounts: data.debug.sourceCounts,
-        sourceFailures: data.metrics.sourceFailures,
-        sourceTimings: data.metrics.sourceTimings
-    };
 }
 
 function getRowBuilderConfigHash(settings: PtvRowBuilderSettings) {
@@ -1499,17 +1463,6 @@ function getPluginValidationError(error: ReturnType<typeof normalizePtvApiError>
 function getLazyPtvRecommendationDashboardData(options: { forceRefresh?: boolean; includeHomeScans?: boolean; signal?: AbortSignal } = {}) {
     return import('../recommendations/engine/recommendationEngine')
         .then(module => module.getPtvRecommendationDashboardData(options));
-}
-
-function formatMemory(usedRatio?: number) {
-    return usedRatio ? `${Math.round(usedRatio * 1000) / 10}%` : 'n/a';
-}
-
-function getDebugStateLabel(isAdmin: boolean, enabled: boolean) {
-    if (!isAdmin) return 'Debug unavailable for non-admin';
-    if (!enabled) return 'Debug Off';
-
-    return getPtvDebugPersistenceState().persisted ? 'Debug On' : 'Debug On but not persisted';
 }
 
 function makeNewRule(index: number): PtvRowBuilderRule {
@@ -1930,7 +1883,6 @@ function RecommendationRowsPanel({
     );
 }
 
-// eslint-disable-next-line sonarjs/cognitive-complexity
 const PiggieTvRowsPage = () => {
     const hydratedRef = useRef(false);
     const loadRequestRef = useRef<Promise<void> | null>(null);
@@ -1941,8 +1893,6 @@ const PiggieTvRowsPage = () => {
     const refreshRequestRef = useRef<Promise<void> | null>(null);
     const saveRequestRef = useRef<Promise<void> | null>(null);
     const importInputRef = useRef<HTMLInputElement | null>(null);
-    const { debugEnabled: adminDebugEnabled, isAdmin } = usePtvAdminDebugVisibility();
-    const [debugEnabled, setDebugEnabledState] = useState(isPtvDebugEnabled());
     const [form, setForm] = useState<PtvRowBuilderSettings>(() => cloneSettings(DEFAULT_SETTINGS));
     const [groupDraft, setGroupDraft] = useState('');
     const [saved, setSaved] = useState<PtvRowBuilderSettings>(() => cloneSettings(DEFAULT_SETTINGS));
@@ -1951,9 +1901,6 @@ const PiggieTvRowsPage = () => {
     const [recommendationSettings, setRecommendationSettings] = useState<PtvRecommendationRowSettings | null>(null);
     const [recommendationError, setRecommendationError] = useState('');
     const [recommendationLoading, setRecommendationLoading] = useState(false);
-    const [cacheStatus, setCacheStatus] = useState(() => getFeaturedContentCacheStatus());
-    const [debugReport, setDebugReport] = useState(() => getPtvDebugReport());
-    const [pluginDiagnostics, setPluginDiagnostics] = useState<PtvPluginApiDiagnostics>(() => getPtvPluginApiDiagnostics());
     const [seerrConfigured, setSeerrConfigured] = useState(false);
     const [statusMessage, setStatusMessage] = useState<PtvStatusMessage | null>(null);
     const [loading, setLoading] = useState(true);
@@ -1961,9 +1908,7 @@ const PiggieTvRowsPage = () => {
     const [refreshing, setRefreshing] = useState(false);
     const [saving, setSaving] = useState(false);
 
-    const canUseDebug = isAdmin;
     const canShowDiagnostics = shouldCollectDiagnostics();
-    const debugStateLabel = useMemo(() => getDebugStateLabel(canUseDebug, debugEnabled), [canUseDebug, debugEnabled]);
     const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(saved), [form, saved]);
     const rowGroups = useMemo(() => getRowGroups(form), [form]);
     const persistedRecommendationRows = useMemo(() => recommendationSettings?.rows || [], [recommendationSettings]);
@@ -1976,15 +1921,6 @@ const PiggieTvRowsPage = () => {
     const estimatedConfiguredHomeRows = configuredRowsOnHomeEnabled ? estimate.configuredRowCount : 0;
     const totalEstimatedHomeRows = estimatedConfiguredHomeRows + enabledRecommendationRows.length;
     const validation = useMemo(() => localValidation(form, seerrConfigured), [form, seerrConfigured]);
-    const imageTrackerResetCount = useMemo(() => (
-        debugReport.events || []
-    ).filter(event => event.name === 'image-tracker-reset').length, [debugReport.events]);
-    const refreshState = useMemo(() => {
-        if (refreshing) return 'refreshing';
-        if (cacheStatus.readInProgress) return 'reading cache';
-
-        return 'idle';
-    }, [cacheStatus.readInProgress, refreshing]);
     const configuredPreviewRows = useMemo(() => (preview?.rows || [])
         .filter(row => row.itemCount > 0)
         .map(row => ({
@@ -2013,12 +1949,6 @@ const PiggieTvRowsPage = () => {
         () => [...configuredHomePreviewRows, ...recommendationPreviewRows],
         [configuredHomePreviewRows, recommendationPreviewRows]
     );
-
-    const refreshDiagnostics = useCallback(() => {
-        setCacheStatus(getFeaturedContentCacheStatus());
-        setDebugReport(getPtvDebugReport());
-        setPluginDiagnostics(getPtvPluginApiDiagnostics());
-    }, []);
 
     const savePersistedRecommendationSettings = useCallback(async (
         settings: PtvRecommendationRowSettings,
@@ -2154,10 +2084,6 @@ const PiggieTvRowsPage = () => {
         }
     }, []);
 
-    useEffect(() => {
-        setDebugEnabledState(adminDebugEnabled);
-    }, [adminDebugEnabled]);
-
     const loadRows = useCallback(() => {
         if (loadRequestRef.current) return loadRequestRef.current;
 
@@ -2254,31 +2180,26 @@ const PiggieTvRowsPage = () => {
                 hydratedRef.current = true;
                 loadRequestRef.current = null;
                 setLoading(false);
-                refreshDiagnostics();
             });
 
         loadRequestRef.current = request;
 
         return request;
-    }, [loadPersistedRecommendationRows, refreshDiagnostics]);
+    }, [loadPersistedRecommendationRows]);
 
     useEffect(() => {
         if (!hydratedRef.current) {
             void loadRows();
         }
 
-        const onCacheUpdated = () => refreshDiagnostics();
-        window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, onCacheUpdated);
-
         return () => {
-            window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, onCacheUpdated);
             recommendationAbortRef.current?.abort();
             recommendationAbortRef.current = null;
             recommendationRequestRef.current = null;
             recommendationRequestTokenRef.current = null;
             previewAbortRef.current?.abort();
         };
-    }, [loadRows, refreshDiagnostics]);
+    }, [loadRows]);
 
     const updateForm = useCallback((updater: (settings: PtvRowBuilderSettings) => PtvRowBuilderSettings) => {
         setForm(current => updater(cloneSettings(current)));
@@ -2416,9 +2337,8 @@ const PiggieTvRowsPage = () => {
         } finally {
             if (previewAbortRef.current === abortController) previewAbortRef.current = null;
             setPreviewing(false);
-            refreshDiagnostics();
         }
-    }, [form, previewing, refreshDiagnostics, validation.errors.length]);
+    }, [form, previewing, validation.errors.length]);
 
     const previewRecommendationRows = useCallback(async (forceRefresh = false, manual = false) => {
         if (!manual) {
@@ -2540,10 +2460,9 @@ const PiggieTvRowsPage = () => {
                 recommendationRequestTokenRef.current = null;
                 if (recommendationAbortRef.current === abortController) recommendationAbortRef.current = null;
                 setRecommendationLoading(false);
-                refreshDiagnostics();
             }
         }
-    }, [form, recommendationLoading, refreshDiagnostics, savePersistedRecommendationSettings]);
+    }, [form, recommendationLoading, savePersistedRecommendationSettings]);
 
     const toggleRecommendationRow = useCallback(async (rowId: string, enabled: boolean) => {
         if (!recommendationSettings?.rows?.length) return;
@@ -2576,10 +2495,8 @@ const PiggieTvRowsPage = () => {
 
             setRecommendationSettings(previousSettings);
             setStatusMessage({ severity: 'error', text: message });
-        } finally {
-            refreshDiagnostics();
         }
-    }, [recommendationSettings, refreshDiagnostics, savePersistedRecommendationSettings]);
+    }, [recommendationSettings, savePersistedRecommendationSettings]);
 
     const acceptRecommendationRows = useCallback(async () => {
         if (!recommendationSettings?.rows?.length) return;
@@ -2617,10 +2534,8 @@ const PiggieTvRowsPage = () => {
 
             setRecommendationSettings(previousSettings);
             setStatusMessage({ severity: 'error', text: message });
-        } finally {
-            refreshDiagnostics();
         }
-    }, [recommendationSettings, refreshDiagnostics, savePersistedRecommendationSettings]);
+    }, [recommendationSettings, savePersistedRecommendationSettings]);
 
     const deleteRecommendationRow = useCallback(async (rowId: string) => {
         if (!recommendationSettings?.rows?.length) return;
@@ -2646,10 +2561,8 @@ const PiggieTvRowsPage = () => {
 
             setRecommendationSettings(previousSettings);
             setStatusMessage({ severity: 'error', text: message });
-        } finally {
-            refreshDiagnostics();
         }
-    }, [recommendationSettings, refreshDiagnostics, savePersistedRecommendationSettings]);
+    }, [recommendationSettings, savePersistedRecommendationSettings]);
 
     const saveRows = useCallback(async () => {
         if (saving || saveRequestRef.current || validation.errors.length) return;
@@ -2720,9 +2633,8 @@ const PiggieTvRowsPage = () => {
         } finally {
             if (saveRequestRef.current === request) saveRequestRef.current = null;
             setSaving(false);
-            refreshDiagnostics();
         }
-    }, [canShowDiagnostics, estimate.health, form, refreshDiagnostics, saving, validation.errors.length]);
+    }, [canShowDiagnostics, estimate.health, form, saving, validation.errors.length]);
 
     const refreshCache = useCallback(async () => {
         if (refreshing || refreshRequestRef.current) return;
@@ -2787,25 +2699,8 @@ const PiggieTvRowsPage = () => {
             if (refreshRequestRef.current === request) refreshRequestRef.current = null;
             setRefreshing(false);
             setSaving(false);
-            refreshDiagnostics();
         }
-    }, [dirty, estimate.health, form, refreshDiagnostics, refreshing, validation.errors.length]);
-
-    const toggleDebug = useCallback(() => {
-        if (!canUseDebug) {
-            setStatusMessage({ severity: 'warning', text: 'Debug is only available to Jellyfin administrators.' });
-            return;
-        }
-
-        const next = setPtvDebug(!debugEnabled);
-        setDebugEnabledState(next);
-        refreshDiagnostics();
-    }, [canUseDebug, debugEnabled, refreshDiagnostics]);
-
-    const clearDebug = useCallback(() => {
-        clearPtvDebugReport();
-        refreshDiagnostics();
-    }, [refreshDiagnostics]);
+    }, [dirty, estimate.health, form, refreshing, validation.errors.length]);
 
     const exportObject = useCallback((value: unknown, filename: string) => {
         const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
@@ -2822,15 +2717,6 @@ const PiggieTvRowsPage = () => {
     const exportConfig = useCallback(() => {
         exportObject(form, `piggietv-row-rules-${Date.now()}.json`);
     }, [exportObject, form]);
-
-    const exportDebug = useCallback(() => {
-        exportObject({
-            ...redactedDebugReport(),
-            persistedRecommendationRows: recommendationSettings?.rows?.length || 0,
-            recommendationSettings,
-            recommendationRows: getRecommendationRowDebugPayload(recommendationData)
-        }, `piggietv-row-debug-${Date.now()}.json`);
-    }, [exportObject, recommendationData, recommendationSettings]);
 
     const importConfig = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -2893,31 +2779,6 @@ const PiggieTvRowsPage = () => {
                                         <Typography>Cache generation: {estimate.estimatedCacheCost}</Typography>
                                         <Typography>Frontend render cost: {estimate.estimatedFrontendCost}</Typography>
                                         {!!estimate.reasons.length && <Typography color='warning.main'>{estimate.reasons.join(', ')}</Typography>}
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-                        <Grid size={{ xs: 12, md: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={1}>
-                                        <Typography variant='h2'>Real World Monitor</Typography>
-                                        {canShowDiagnostics ? (
-                                            <>
-                                                <Stack direction='row' spacing={1} flexWrap='wrap'>
-                                                    <Chip label={`refresh ${cacheStatus.lastRefreshDurationMs ?? 'n/a'} ms`} />
-                                                    <Chip label={`render p95 ${debugReport.render?.p95Ms ?? 'n/a'} ms`} />
-                                                    <Chip label={`images ${debugReport.images?.timings?.count ?? 0}`} />
-                                                    <Chip label={`memory ${formatMemory(debugReport.memory?.usedRatio)}`} />
-                                                </Stack>
-                                                <Typography>API requests: {pluginDiagnostics.attemptedUrls.length}</Typography>
-                                                <Typography>Cache hits/misses: {debugReport.cache?.hits ?? 0}/{debugReport.cache?.misses ?? 0}</Typography>
-                                                <Typography>Provider errors: {Object.values(preview?.providerStatus || {}).filter(value => JSON.stringify(value).includes('error')).length}</Typography>
-                                                <Typography>Image tracker resets: {imageTrackerResetCount}</Typography>
-                                            </>
-                                        ) : (
-                                            <Typography color='text.secondary'>Enable Debug to view live diagnostics.</Typography>
-                                        )}
                                     </Stack>
                                 </CardContent>
                             </Card>
@@ -3172,84 +3033,6 @@ const PiggieTvRowsPage = () => {
                             </Card>
                         </Grid>
 
-                        <Grid size={{ xs: 12, lg: 5 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={1.25}>
-                                        <Typography variant='h2'>Diagnostics / Integrations</Typography>
-                                        <Stack direction='row' spacing={1} flexWrap='wrap'>
-                                            <Button variant='outlined' disabled={!canUseDebug} onClick={toggleDebug}>{debugEnabled ? 'Disable Debug' : 'Enable Debug'}</Button>
-                                            <Chip label={debugStateLabel} color={canShowDiagnostics ? 'success' : 'default'} />
-                                            <Button variant='outlined' disabled={!canUseDebug} onClick={clearDebug}>Clear Events</Button>
-                                            <Button variant='outlined' disabled={!canUseDebug} onClick={exportDebug}>Export Debug JSON</Button>
-                                            <Button variant='outlined' onClick={refreshDiagnostics}>Refresh Status</Button>
-                                        </Stack>
-                                        <Divider />
-                                        <Typography>Cache: {cacheStatus.storage} / {cacheStatus.isFresh ? 'fresh' : 'stale'}</Typography>
-                                        <Typography>Configured rows: {cacheStatus.configuredRowCount ?? configuredPreviewRows.length}</Typography>
-                                        <Typography>Recommendation rows: {cacheStatus.recommendationRowCount ?? recommendationPreviewRows.length}</Typography>
-                                        <Typography>Total Home rows: {cacheStatus.totalRenderedRowCount ?? homeOutputPreviewRows.length}</Typography>
-                                        <Typography>Cached sections: {cacheStatus.sectionCount}</Typography>
-                                        <Typography>Items: {cacheStatus.itemCount}</Typography>
-                                        <Typography>Heroes: {cacheStatus.heroCount}</Typography>
-                                        <Typography>Last refresh: {cacheStatus.lastRefreshDurationMs ?? 'n/a'} ms</Typography>
-                                        <Typography>Refresh state: {refreshState}</Typography>
-                                        {cacheStatus.skippedRows?.length ? (
-                                            <Typography color='warning.main'>Skipped rows: {cacheStatus.skippedRows.length}</Typography>
-                                        ) : null}
-                                        {canShowDiagnostics ? (
-                                            <>
-                                                {cacheStatus.skippedRows?.length ? (
-                                                    <>
-                                                        {(cacheStatus.skippedRows || []).slice(0, 8).map(row => (
-                                                            <Typography key={`${row.rowId}-${row.reason}`} variant='body2' color='warning.main'>
-                                                                {row.rowTitle || row.rowId}: {row.reason} ({row.rowType})
-                                                            </Typography>
-                                                        ))}
-                                                        {cacheStatus.skippedRows.length > 8 ? (
-                                                            <Typography variant='body2' color='warning.main'>
-                                                                +{cacheStatus.skippedRows.length - 8} more skipped row(s)
-                                                            </Typography>
-                                                        ) : null}
-                                                        <Divider />
-                                                    </>
-                                                ) : null}
-                                                <Typography>API requests: {pluginDiagnostics.attemptedUrls.length}</Typography>
-                                                <Typography>Image p95: {debugReport.images?.timings?.p95Ms ?? 'n/a'} ms</Typography>
-                                                <Divider />
-                                                <Typography variant='h3'>API Origins</Typography>
-                                                {(pluginDiagnostics.attemptedOrigins || []).slice(-8).map(originEntry => (
-                                                    <Typography key={`${originEntry.originKind}-${originEntry.url}`} variant='body2'>
-                                                        {originEntry.originKind}: {originEntry.origin}
-                                                    </Typography>
-                                                ))}
-                                            </>
-                                        ) : (
-                                            <Typography color='text.secondary'>Enable Debug to view request diagnostics.</Typography>
-                                        )}
-                                        <Divider />
-                                        <Typography variant='h3'>Provider Status</Typography>
-                                        <Typography variant='body2'>API keys are saved and tested in the PiggieTV Integrations dashboard. Row generation uses Jellyfin metadata first and only enriches when providers are configured.</Typography>
-                                        {Object.entries(preview?.providerStatus || {}).map(([provider, value]) => (
-                                            <Typography key={provider} variant='body2'>
-                                                {provider}: {JSON.stringify(value)}
-                                            </Typography>
-                                        ))}
-                                        {canShowDiagnostics ? (
-                                            <>
-                                                <Divider />
-                                                <Typography variant='h3'>Recent Events</Typography>
-                                                {(debugReport.events || []).slice(-8).map((event, index) => (
-                                                    <Typography key={`${event.name}-${index}`} variant='body2'>
-                                                        {event.type}:{event.name}
-                                                    </Typography>
-                                                ))}
-                                            </>
-                                        ) : null}
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
                     </Grid>
                 </Stack>
             </Box>

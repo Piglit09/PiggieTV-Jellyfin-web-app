@@ -1,9 +1,13 @@
+export function normalizePtvDisplayIdentityPart(value: unknown): string {
+    return String(value || '').trim().toLocaleLowerCase();
+}
+
 export function getPtvDisplayIdentityKey(
     serverId: unknown,
     userId: unknown
 ): string | null {
-    const normalizedServerId = String(serverId || '').trim();
-    const normalizedUserId = String(userId || '').trim();
+    const normalizedServerId = normalizePtvDisplayIdentityPart(serverId);
+    const normalizedUserId = normalizePtvDisplayIdentityPart(userId);
 
     if (!normalizedServerId || !normalizedUserId) return null;
 
@@ -49,6 +53,15 @@ export class PtvIdentityScopedCache<TValue> {
         }
 
         return true;
+    }
+
+    delete(serverId: unknown, userId: unknown): boolean {
+        const key = getPtvDisplayIdentityKey(serverId, userId);
+        return key ? this.entries.delete(key) : false;
+    }
+
+    clear(): void {
+        this.entries.clear();
     }
 
     get size() {

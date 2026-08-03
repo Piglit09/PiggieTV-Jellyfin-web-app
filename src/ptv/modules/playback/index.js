@@ -1711,6 +1711,7 @@ function init({ scope } = {}) {
     Events.on(document, EventType.SHOW_VIDEO_OSD, onShowVideoOsd);
     Events.on(document, 'mousemove', onPlayerActivity);
     Events.on(document, 'touchstart', onPlayerActivity);
+    Events.on(document, 'keydown', onPlayerActivity);
     Events.on(window, 'hashchange', onPlaybackRouteChanged);
     Events.on(window, 'popstate', onPlaybackRouteChanged);
     scope?.add(() => Events.off(playbackManager, 'playbackstart', onPlaybackStart), {
@@ -1739,6 +1740,10 @@ function init({ scope } = {}) {
     });
     scope?.add(() => Events.off(document, 'touchstart', onPlayerActivity), {
         label: 'player-touchstart',
+        type: 'listener'
+    });
+    scope?.add(() => Events.off(document, 'keydown', onPlayerActivity), {
+        label: 'player-keydown',
         type: 'listener'
     });
     scope?.add(() => Events.off(window, 'hashchange', onPlaybackRouteChanged), {
@@ -1779,6 +1784,7 @@ function destroy() {
     Events.off(document, EventType.SHOW_VIDEO_OSD, onShowVideoOsd);
     Events.off(document, 'mousemove', onPlayerActivity);
     Events.off(document, 'touchstart', onPlayerActivity);
+    Events.off(document, 'keydown', onPlayerActivity);
     Events.off(window, 'hashchange', onPlaybackRouteChanged);
     Events.off(window, 'popstate', onPlaybackRouteChanged);
     setPlayerOsdVisible(false);

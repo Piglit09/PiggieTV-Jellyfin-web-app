@@ -78,8 +78,17 @@ export type PTVShellProps = Readonly<{
 }>;
 
 const PTV_SHELL_DASHBOARD_HREF = '#/dashboard/piggietv';
-const PTV_SHELL_SERVER_HREF = '#/selectserver';
 const PTV_SHELL_SEARCH_DRAFT_KEY = 'ptv:shell:search-draft';
+
+function getPtvShellProfileHref() {
+    try {
+        const userId = window.ApiClient?.getCurrentUserId?.();
+
+        return userId ? `${PTV_ROUTES.userProfile}?userId=${encodeURIComponent(userId)}` : PTV_ROUTES.userProfile;
+    } catch {
+        return PTV_ROUTES.userProfile;
+    }
+}
 
 type PtvShellDebugStatus = {
     activeSecondaryNav: string;
@@ -766,10 +775,12 @@ export function PtvShellActions({
     const notificationSnapshot = usePtvNotificationSnapshot();
     const notificationsOpen = openPanel === 'notifications';
     const userOpen = openPanel === 'user';
+    const profileHref = getPtvShellProfileHref();
     const handleLogout = useCallback(() => {
         onPanelToggle(null);
         void requestJellyfinLogout();
     }, [onPanelToggle]);
+    const handlePanelClose = useCallback(() => onPanelToggle(null), [onPanelToggle]);
 
     useEffect(() => {
         updatePtvShellDebugStatus({
@@ -813,26 +824,6 @@ export function PtvShellActions({
                     onClose={() => onPanelToggle(null)}
                 />
             ) : null}
-            {isAdmin ? (
-                <a
-                    aria-label='PiggieTV dashboard'
-                    className='ptv-shell-icon-button'
-                    href={PTV_SHELL_DASHBOARD_HREF}
-                    onClick={() => onPanelToggle(null)}
-                    title='PiggieTV dashboard'
-                >
-                    <PtvIcon name='dashboard' />
-                </a>
-            ) : null}
-            <a
-                aria-label='Settings'
-                className='ptv-shell-icon-button'
-                href={PTV_ROUTES.profilePreferences}
-                onClick={() => onPanelToggle(null)}
-                title='Settings'
-            >
-                <PtvIcon name='settings' />
-            </a>
             <div className={`ptv-shell-user-menu${userOpen ? ' is-open' : ''}`}>
                 <button
                     aria-controls='ptv-shell-user-panel'
@@ -852,13 +843,17 @@ export function PtvShellActions({
                         id='ptv-shell-user-panel'
                         role='menu'
                     >
-                        <a href={PTV_ROUTES.profilePreferences} onClick={() => onPanelToggle(null)} role='menuitem'>
+                        <a href={profileHref} onClick={handlePanelClose} role='menuitem'>
                             <PtvIcon name='profile' />
                             <span>Profile</span>
                         </a>
-                        <a href={PTV_SHELL_SERVER_HREF} onClick={() => onPanelToggle(null)} role='menuitem'>
-                            <PtvIcon name='server' />
-                            <span>Select Server</span>
+                        <a href={PTV_ROUTES.quickConnect} onClick={handlePanelClose} role='menuitem'>
+                            <PtvIcon name='display' />
+                            <span>Quick Connect</span>
+                        </a>
+                        <a href={PTV_ROUTES.settings} onClick={handlePanelClose} role='menuitem'>
+                            <PtvIcon name='settings' />
+                            <span>Settings</span>
                         </a>
                         <button data-ptv-action='logout' onClick={handleLogout} role='menuitem' type='button'>
                             <PtvIcon name='signout' />

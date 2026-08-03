@@ -14,6 +14,10 @@ import {
     logPtvRecommendationStage
 } from '../debug/recommendationRuntimeDebug';
 import { getPtvRecommendationDataBundle } from '../providers/jellyfinRecommendationProvider';
+import {
+    createPtvRecommendationIdentity,
+    getPtvRecommendationCacheScopePrefix
+} from '../recommendationIdentity';
 import { buildPtvRecommendationDebugReport } from '../debug/recommendationDebug';
 import { buildPtvRecommendationMixes, buildPtvRecommendationRowsWithQuality } from '../rows/recommendationRows';
 import { getPtvRecommendationScoreModel, scorePtvRecommendationCandidates } from '../scoring/scoringModel';
@@ -67,15 +71,18 @@ function assertCanRunRecommendationGeneration() {
     }
 }
 
-function getCurrentCacheKey(includeHomeScans = false) {
-    const serverId = String(getPtvServerId() || '').trim();
-    const userId = String(getPtvCurrentUserId() || '').trim();
-
-    if (!serverId || !userId) {
-        throw new Error('Recommendation caching requires an authenticated server user.');
-    }
-
-    return `${serverId}:${userId}:${includeHomeScans ? 'home-scans' : 'primary-sources'}`;
+function getCurrentRecommendationIdentity(options: {
+    feedback?: PtvRecommendationRunOptions['feedback'];
+    includeHomeScans?: boolean;
+    serverId?: string | null;
+    userId?: string | null;
+} = {}) {
+    return createPtvRecommendationIdentity({
+        feedback: options.feedback,
+        includeHomeScans: options.includeHomeScans,
+        serverId: options.serverId ?? getPtvServerId(),
+        userId: options.userId ?? getPtvCurrentUserId()
+    });
 }
 
 export function invalidatePtvRecommendationCache(scope: {
@@ -87,7 +94,7 @@ export function invalidatePtvRecommendationCache(scope: {
 
     if (!serverId || !userId) return 0;
 
-    const cachePrefix = `${serverId}:${userId}:`;
+    const cachePrefix = getPtvRecommendationCacheScopePrefix({ serverId, userId });
     let invalidatedEntries = 0;
 
     [dashboardCache, homeCache].forEach(cache => {
@@ -211,7 +218,9 @@ export async function buildPtvRecommendationEngineResult(
             assertCanRunRecommendationGeneration();
             const dataBundle = bundle || await getPtvRecommendationDataBundle({
                 includeHomeScans: options.includeHomeScans,
-                signal: options.signal
+                serverId: options.serverId,
+                signal: options.signal,
+                userId: options.userId
             });
             throwIfRecommendationAborted(options.signal);
             const now = options.now || Date.now();
@@ -227,7 +236,11 @@ export async function buildPtvRecommendationEngineResult(
                 { now }
             );
             throwIfRecommendationAborted(options.signal);
-            const rowResult = buildPtvRecommendationRowsWithQuality(profile, candidates);
+            const rowResult = buildPtvRecommendationRowsWithQuality(profile, candidates, {
+                historyItems: dataBundle.profileSignals
+                    .filter(signal => signal.source === 'history')
+                    .map(signal => signal.item)
+            });
             const rows = filterAndDedupePtvRecommendationRows(rowResult.rows, options.feedback);
             const rowItemCountBeforeFeedback = rowResult.rows.reduce((total, row) => total + row.items.length, 0);
             const rowItemCountAfterFeedback = rows.reduce((total, row) => total + row.items.length, 0);
@@ -305,9 +318,16 @@ export async function buildPtvRecommendationEngineResult(
     });
 }
 
-export async function getPtvRecommendationDashboardData(options: { forceRefresh?: boolean; includeHomeScans?: boolean; signal?: AbortSignal } = {}): Promise<PtvRecommendationDashboardData> {
+export async function getPtvRecommendationDashboardData(options: {
+    forceRefresh?: boolean;
+    includeHomeScans?: boolean;
+    serverId?: string | null;
+    signal?: AbortSignal;
+    userId?: string | null;
+} = {}): Promise<PtvRecommendationDashboardData> {
     const now = Date.now();
-    const cacheKey = getCurrentCacheKey(options.includeHomeScans === true);
+    const identity = getCurrentRecommendationIdentity(options);
+    const cacheKey = identity.cacheKey;
     const cached = dashboardCache.get(cacheKey);
 
     throwIfRecommendationAborted(options.signal);
@@ -320,7 +340,9 @@ export async function getPtvRecommendationDashboardData(options: { forceRefresh?
     const result = await buildPtvRecommendationEngineResult(undefined, {
         includeHomeScans: options.includeHomeScans,
         now,
-        signal: options.signal
+        serverId: identity.serverId,
+        signal: options.signal,
+        userId: identity.userId
     });
     throwIfRecommendationAborted(options.signal);
     const scoreModel = getPtvRecommendationScoreModel();
@@ -355,10 +377,13 @@ export async function getPtvRecommendationHomeData(options: {
     feedback?: PtvRecommendationRunOptions['feedback'];
     forceRefresh?: boolean;
     includeHomeScans?: boolean;
+    serverId?: string | null;
     signal?: AbortSignal;
+    userId?: string | null;
 } = {}): Promise<PtvRecommendationHomeData> {
     const now = Date.now();
-    const cacheKey = getCurrentCacheKey(options.includeHomeScans === true);
+    const identity = getCurrentRecommendationIdentity(options);
+    const cacheKey = identity.cacheKey;
     const cached = homeCache.get(cacheKey);
 
     throwIfRecommendationAborted(options.signal);
@@ -372,7 +397,9 @@ export async function getPtvRecommendationHomeData(options: {
         feedback: options.feedback,
         includeHomeScans: options.includeHomeScans,
         now,
-        signal: options.signal
+        serverId: identity.serverId,
+        signal: options.signal,
+        userId: identity.userId
     });
     throwIfRecommendationAborted(options.signal);
     const data: PtvRecommendationHomeData = {

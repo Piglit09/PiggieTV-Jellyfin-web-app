@@ -73,7 +73,7 @@ const ServerDrawerSection = () => {
                     <ListItemIcon>
                         <Dashboard />
                     </ListItemIcon>
-                    <ListItemText primary='PiggieTV' />
+                    <ListItemText primary='PTV Dashboard' />
                 </ListItemLink>
             </ListItem>
             <ListItem disablePadding>
@@ -81,15 +81,7 @@ const ServerDrawerSection = () => {
                     <ListItemIcon>
                         <Dashboard />
                     </ListItemIcon>
-                    <ListItemText primary='PiggieTV Row Builder' />
-                </ListItemLink>
-            </ListItem>
-            <ListItem disablePadding>
-                <ListItemLink to='/dashboard/piggietv/recommendations'>
-                    <ListItemIcon>
-                        <Dashboard />
-                    </ListItemIcon>
-                    <ListItemText primary='PiggieTV Recommendations' />
+                    <ListItemText primary='Rows' />
                 </ListItemLink>
             </ListItem>
             <ListItem disablePadding>
@@ -97,7 +89,7 @@ const ServerDrawerSection = () => {
                     <ListItemIcon>
                         <Dashboard />
                     </ListItemIcon>
-                    <ListItemText primary='PiggieTV Diagnostics' />
+                    <ListItemText primary='Diagnostics' />
                 </ListItemLink>
             </ListItem>
             <ListItem disablePadding>

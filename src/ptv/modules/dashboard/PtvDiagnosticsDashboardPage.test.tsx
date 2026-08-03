@@ -13,6 +13,11 @@ vi.mock('../../services/diagnostics/webDiagnosticPlatform', () => ({
     refreshPtvWebDiagnosticExternalStatus: vi.fn(() => Promise.resolve())
 }));
 
+vi.mock('./RemoteDiagnosticsPanel', () => ({
+    default: () => <section>Remote diagnostics</section>,
+    RemoteDiagnosticsPanel: () => <section>Remote diagnostics</section>
+}));
+
 import {
     resetPtvDiagnosticPreferencesForTests
 } from '../../services/diagnostics/diagnosticPreferences';

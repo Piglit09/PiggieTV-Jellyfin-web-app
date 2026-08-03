@@ -139,8 +139,8 @@ describe('WebOS regular Music header layout', () => {
         expect(contextRule).toMatch(/left:\s*66px/);
         expect(bodyRule).toMatch(/padding-top:\s*164px/);
         expect(scrollRule).toMatch(/width:\s*100%/);
-        expect(scrollRule).toMatch(/max-width:\s*1760px/);
-        expect(scrollRule).toMatch(/padding:\s*28px 46px 120px/);
+        expect(scrollRule).toMatch(/max-width:\s*none/);
+        expect(scrollRule).toMatch(/padding:\s*28px var\(--ptv-content-edge[^;]*120px/);
         expect(contextRule).not.toMatch(/clamp\(|min\(/);
         expect(bodyRule).not.toMatch(/clamp\(|min\(/);
         expect(scrollRule).not.toMatch(/clamp\(|min\(/);

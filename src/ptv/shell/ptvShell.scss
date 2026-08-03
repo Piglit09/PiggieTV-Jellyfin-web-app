@@ -177,7 +177,7 @@ body.ptv-native-shell-mounted .appFooter {
     pointer-events: none;
     position: absolute;
     right: clamp(20px, 2.4vw, 52px);
-    top: clamp(16px, 2vw, 34px);
+    top: var(--ptv-shell-header-top, 34px);
     z-index: 9000;
     backdrop-filter: none;
 }
@@ -561,6 +561,7 @@ html.ptv-layout-mobile .ptv-shell-dropdown-panel {
 .ptv-shell-user-panel a,
 .ptv-shell-user-panel button {
     align-items: center;
+    min-block-size: var(--ptv-touch-target-min);
     background: transparent;
     border: 0;
     border-radius: 12px;

@@ -475,9 +475,10 @@ body.ptv-route-music-mounted .skinHeader {
 }
 
 .ptv-music-main-scroll {
-    width: min(100%, 1760px);
-    margin: 0 auto;
-    padding: 28px clamp(18px, 4vw, 46px) calc(var(--ptv-music-mini-height) + 42px);
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 28px var(--ptv-content-edge, 24px) calc(var(--ptv-music-mini-height) + 42px);
 }
 
 .ptv-music-main-toolbar {
@@ -3160,8 +3161,8 @@ html.ptv-render-tv.ptv-platform-webos .ptv-music-shell:not(.ptv-shell-frame-full
 
 html.ptv-render-tv.ptv-platform-webos .ptv-music-shell:not(.ptv-shell-frame-fullscreen-music) .ptv-music-main-scroll {
     width: 100%;
-    max-width: 1760px;
-    padding: 28px 46px 120px;
+    max-width: none;
+    padding: 28px var(--ptv-content-edge, 24px) 120px;
 }
 
 /*

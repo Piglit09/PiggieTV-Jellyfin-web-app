@@ -614,9 +614,10 @@ body.ptv-route-reading-mounted .skinHeader {
 }
 
 .ptv-books-main-scroll {
-    width: min(100%, 1800px);
-    margin: 0 auto;
-    padding: 28px clamp(18px, 3vw, 46px) 46px;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 28px var(--ptv-content-edge, 24px) 46px;
 }
 
 .ptv-books-main-toolbar {
