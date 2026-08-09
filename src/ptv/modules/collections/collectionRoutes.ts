@@ -68,6 +68,15 @@ export function clearPtvCollectionRouteMemory() {
     collectionRouteMemory.clear();
 }
 
+export function restorePtvCollectionRouteMemory(
+    page: HTMLElement,
+    memory: PtvCollectionRouteMemory
+) {
+    // Focus restoration may scroll the nearest container. Apply the canonical
+    // route position last so Back/Forward returns to the exact saved viewport.
+    page.scrollTop = memory.scrollTop;
+}
+
 export function observePtvCollectionRouteMemory(
     key: string,
     page: HTMLElement

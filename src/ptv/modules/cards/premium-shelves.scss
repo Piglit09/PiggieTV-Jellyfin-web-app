@@ -1,0 +1,386 @@
+:root {
+    --ptv-premium-shelf-gutter: clamp(0.55rem, 1.1vw, 1.25rem);
+    --ptv-premium-shelf-radius: clamp(1rem, 1.45vw, 1.4rem);
+    --ptv-premium-card-radius: 0.9rem;
+    --ptv-premium-card-shift: clamp(1rem, 1.6vw, 1.75rem);
+}
+
+@mixin premium-shelf-surface {
+    position: relative;
+    isolation: isolate;
+    box-sizing: border-box;
+    width: calc(100vw - (var(--ptv-premium-shelf-gutter) * 2));
+    max-width: none;
+    margin-block: clamp(0.8rem, 1.8vw, 1.6rem);
+    margin-inline: calc(50% - 50vw + var(--ptv-premium-shelf-gutter));
+    padding: clamp(1.15rem, 2.1vw, 2rem) clamp(0.8rem, 2.25vw, 2.6rem) clamp(1.3rem, 2.4vw, 2.25rem);
+    border: 1px solid rgb(198 139 255 / 24%);
+    border-radius: var(--ptv-premium-shelf-radius);
+    background:
+        radial-gradient(circle at 16% 0%, rgb(216 182 255 / 16%), transparent 33%),
+        radial-gradient(circle at 79% 105%, rgb(50 118 255 / 12%), transparent 37%),
+        linear-gradient(118deg, rgb(82 67 101 / 72%), rgb(31 20 43 / 88%) 46%, rgb(37 38 58 / 78%));
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 12%),
+        inset 0 -1px 0 rgb(120 71 181 / 10%),
+        0 1.3rem 3.5rem rgb(8 4 18 / 23%);
+}
+
+.ptv-native-cards .homeSectionsContainer .verticalSection,
+.ptv-native-cards .ptv-cinematic-shelf,
+.ptv-native-cards [data-ptv-shelf] {
+    @include premium-shelf-surface;
+}
+
+@supports selector(:has(*)) {
+    .ptv-native-cards :where(.verticalSection, .detailVerticalSection):has(.itemsContainer > .card) {
+        @include premium-shelf-surface;
+    }
+}
+
+.ptv-native-cards :where(.verticalSection, .detailVerticalSection, .ptv-cinematic-shelf, [data-ptv-shelf]) :where(.sectionTitle, .sectionTitleTextButton) {
+    position: relative;
+    margin: 0;
+    color: rgb(255 255 255 / 96%);
+    font-size: clamp(1.35rem, 1.7vw, 2rem);
+    font-weight: 760;
+    letter-spacing: -0.025em;
+    text-shadow: 0 0.2rem 1.2rem rgb(0 0 0 / 32%);
+}
+
+.ptv-native-cards :where(.verticalSection, .detailVerticalSection, .ptv-cinematic-shelf, [data-ptv-shelf]) :where(.sectionTitle, .sectionTitleTextButton)::after {
+    display: block;
+    width: clamp(3.5rem, 5vw, 5rem);
+    height: 2px;
+    margin-top: 0.65rem;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #78c8ff, #e268d6 72%, transparent);
+    content: '';
+}
+
+.ptv-native-cards :where(.itemsContainer.scrollSlider, .itemsContainer.focuscontainer-x, .ptv-cinematic-shelf__rail, [data-ptv-shelf-rail]) {
+    gap: clamp(0.7rem, 1vw, 1.15rem);
+    padding-block: 0.65rem 0.9rem;
+    padding-inline: 0.25rem;
+    scroll-padding-inline: clamp(1rem, 2vw, 2.5rem);
+}
+
+.ptv-native-cards .itemsContainer > .card {
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    overflow: visible;
+    padding: clamp(0.24rem, 0.35vw, 0.42rem);
+    transition:
+        transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        filter 220ms ease;
+}
+
+.ptv-native-cards .ptv-card > .cardBox,
+.ptv-native-cards .itemsContainer > .card > .cardBox {
+    position: relative;
+    isolation: isolate;
+    box-sizing: border-box;
+    overflow: visible;
+    padding: clamp(0.34rem, 0.45vw, 0.5rem);
+    border: 1px solid rgb(206 158 255 / 26%);
+    border-radius: var(--ptv-premium-card-radius);
+    background:
+        linear-gradient(145deg, rgb(121 93 148 / 44%), rgb(42 25 61 / 88%)),
+        rgb(28 18 40 / 92%);
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 13%),
+        0 0.8rem 1.8rem rgb(7 3 16 / 22%);
+}
+
+.ptv-native-cards :where(.ptv-native-card, .ptv-browse-card, .ptv-cinematic-card, .ptv-collection-card, .ptv-music-card) {
+    border: 1px solid rgb(206 158 255 / 24%);
+    border-radius: var(--ptv-premium-card-radius);
+    background: linear-gradient(145deg, rgb(109 80 137 / 42%), rgb(35 21 51 / 90%));
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 11%),
+        0 0.8rem 1.8rem rgb(7 3 16 / 20%);
+    transition:
+        transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        filter 220ms ease;
+}
+
+.ptv-native-cards .ptv-card :where(.cardScalable, .cardContent, .cardImageContainer, .cardImage, .cardImageIcon) {
+    border-radius: calc(var(--ptv-premium-card-radius) - 0.28rem);
+}
+
+.ptv-native-cards .ptv-card .cardContent {
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 9%);
+    background-color: rgb(12 8 20 / 68%);
+}
+
+.ptv-native-cards .ptv-card :where(.cardText, .cardText-secondary) {
+    box-sizing: border-box;
+    padding-inline: 0.18rem;
+    overflow: hidden;
+    color: rgb(255 255 255 / 94%);
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-native-cards .ptv-card .cardText-secondary {
+    color: rgb(220 210 231 / 68%);
+    font-size: 0.82em;
+    font-weight: 520;
+}
+
+.ptv-native-cards :where(
+.ptv-card-play-pill,
+.cardOverlayButton[data-action='play'],
+.cardOverlayButton[data-action='resume'],
+.cardOverlayFab-primary[data-action='resume']
+) {
+    display: none !important;
+}
+
+.ptv-native-cards .card-hoverable:is(:hover, :focus-within) > .cardBox {
+    transform: none !important;
+}
+
+.ptv-native-cards .cardBox > .ptv-card-overlay-container {
+    position: absolute;
+    z-index: 12;
+    inset: 0;
+    display: block;
+    overflow: visible;
+    border-radius: inherit;
+    background: none;
+    opacity: 1;
+    pointer-events: none;
+}
+
+.ptv-native-cards .ptv-card-menu-button {
+    position: absolute !important;
+    z-index: 16;
+    inset: 0.65rem 0.65rem auto auto !important;
+    display: grid !important;
+    width: 2.35rem !important;
+    min-width: 2.35rem !important;
+    height: 2.35rem !important;
+    min-height: 2.35rem !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    place-items: center;
+    border: 1px solid rgb(255 255 255 / 20%) !important;
+    border-radius: 50% !important;
+    background: rgb(20 12 31 / 88%) !important;
+    box-shadow: 0 0.45rem 1rem rgb(0 0 0 / 35%);
+    color: #fff !important;
+    opacity: 1 !important;
+    transform: none !important;
+    pointer-events: auto;
+}
+
+.ptv-native-cards .ptv-card-menu-button:is(:hover, :focus-visible) {
+    border-color: rgb(142 204 255 / 76%) !important;
+    background: rgb(60 35 82 / 96%) !important;
+    outline: 2px solid rgb(126 199 255 / 56%);
+    outline-offset: 2px;
+}
+
+.ptv-native-cards .ptv-card-hover-panel {
+    position: absolute;
+    z-index: 14;
+    top: 50%;
+    left: 50%;
+    box-sizing: border-box;
+    display: flex;
+    visibility: hidden;
+    width: clamp(15rem, calc(100% + 4rem), 23rem);
+    max-width: calc(100vw - 2rem);
+    max-height: calc(100% + 5.5rem);
+    padding: clamp(0.8rem, 1vw, 1.05rem);
+    overflow: hidden;
+    flex-direction: column;
+    gap: 0.55rem;
+    border: 1px solid rgb(215 172 255 / 46%);
+    border-radius: 1rem;
+    background:
+        radial-gradient(circle at 85% 0%, rgb(221 91 190 / 20%), transparent 38%),
+        linear-gradient(145deg, rgb(83 65 96 / 95%), rgb(32 20 46 / 97%) 58%, rgb(24 20 40 / 98%));
+    box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 17%),
+        0 1.2rem 3rem rgb(2 0 8 / 50%),
+        0 0 2rem rgb(154 85 229 / 15%);
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.96);
+    transition:
+        opacity 180ms ease,
+        transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        visibility 0s linear 220ms;
+    pointer-events: none;
+    backdrop-filter: blur(16px) saturate(128%);
+}
+
+.ptv-native-cards .card-hoverable:is(:hover, :focus-within) .ptv-card-hover-panel {
+    visibility: visible;
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    transition-delay: 90ms, 90ms, 0s;
+    pointer-events: auto;
+}
+
+.ptv-native-cards .ptv-card-hover-panel__title {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    color: #fff;
+    font-size: clamp(1rem, 1.1vw, 1.22rem);
+    font-weight: 760;
+    line-height: 1.2;
+    text-shadow: 0 0.2rem 0.8rem rgb(0 0 0 / 42%);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.ptv-native-cards .ptv-card-hover-panel__metadata {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.32rem;
+}
+
+.ptv-native-cards .ptv-card-hover-panel__metadata > span {
+    padding: 0.22rem 0.46rem;
+    border: 1px solid rgb(255 255 255 / 15%);
+    border-radius: 999px;
+    background: rgb(255 255 255 / 10%);
+    color: rgb(248 244 252 / 88%);
+    font-size: clamp(0.66rem, 0.72vw, 0.78rem);
+    font-weight: 650;
+    line-height: 1.15;
+}
+
+.ptv-native-cards .ptv-card-hover-panel__overview {
+    display: -webkit-box;
+    margin: 0;
+    overflow: hidden;
+    color: rgb(240 232 245 / 82%);
+    font-size: clamp(0.73rem, 0.8vw, 0.88rem);
+    line-height: 1.38;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+}
+
+.ptv-native-cards .ptv-card-hover-panel__actions {
+    display: flex;
+    margin-top: auto;
+    flex-wrap: wrap;
+    gap: 0.38rem;
+}
+
+.ptv-native-cards .ptv-card-hover-action,
+.ptv-native-cards .ptv-card-hover-action.cardOverlayButton {
+    position: static !important;
+    box-sizing: border-box;
+    display: inline-flex !important;
+    visibility: visible !important;
+    width: auto !important;
+    min-width: 0 !important;
+    height: 2rem !important;
+    min-height: 2rem !important;
+    margin: 0 !important;
+    padding: 0.34rem 0.62rem !important;
+    align-items: center;
+    justify-content: center;
+    gap: 0.28rem;
+    border: 1px solid rgb(255 255 255 / 17%) !important;
+    border-radius: 999px !important;
+    background: rgb(255 255 255 / 12%) !important;
+    box-shadow: none !important;
+    color: #fff !important;
+    font-size: 0.73rem !important;
+    font-weight: 700;
+    line-height: 1;
+    text-decoration: none;
+    opacity: 1 !important;
+    transform: none !important;
+    pointer-events: auto;
+}
+
+.ptv-native-cards .ptv-card-hover-action :where(.material-icons, .cardOverlayButtonIcon) {
+    width: auto;
+    height: auto;
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.ptv-native-cards .ptv-card-hover-action:is(:hover, :focus-visible) {
+    border-color: rgb(122 201 255 / 72%) !important;
+    background: linear-gradient(135deg, rgb(65 163 227 / 88%), rgb(143 76 201 / 90%)) !important;
+    outline: 2px solid rgb(126 199 255 / 58%);
+    outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 50em) {
+    .ptv-native-cards .itemsContainer > .card-hoverable:is(:hover, :focus-within) {
+        z-index: 30;
+        transform: translateY(-0.35rem) scale(1.025) !important;
+    }
+
+    .ptv-native-cards .itemsContainer > .card-hoverable:is(:hover, :focus-within) ~ .card-hoverable {
+        transform: translateX(var(--ptv-premium-card-shift)) !important;
+    }
+
+    .ptv-native-cards .itemsContainer:has(> .card-hoverable:is(:hover, :focus-within)) > .card-hoverable:has(~ .card-hoverable:is(:hover, :focus-within)) {
+        transform: translateX(calc(var(--ptv-premium-card-shift) * -1)) !important;
+    }
+
+    .ptv-native-cards :where(.ptv-native-card, .ptv-browse-card, .ptv-cinematic-card, .ptv-collection-card, .ptv-music-card):hover {
+        z-index: 20;
+        transform: translateY(-0.3rem) scale(1.02);
+    }
+}
+
+@media (max-width: 48em) {
+    :root {
+        --ptv-premium-shelf-gutter: 0.38rem;
+        --ptv-premium-shelf-radius: 0.85rem;
+    }
+
+    .ptv-native-cards .homeSectionsContainer .verticalSection,
+    .ptv-native-cards .ptv-cinematic-shelf,
+    .ptv-native-cards [data-ptv-shelf] {
+        padding: 0.95rem 0.6rem 1.1rem;
+    }
+
+    .ptv-native-cards .itemsContainer > .card {
+        padding: 0.22rem;
+    }
+
+    .ptv-native-cards .ptv-card > .cardBox {
+        padding: 0.3rem;
+    }
+}
+
+@media (hover: none), (pointer: coarse) {
+    .ptv-native-cards .ptv-card-hover-panel {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-native-cards .itemsContainer > .card,
+    .ptv-native-cards .ptv-card-hover-panel,
+    .ptv-native-cards :where(.ptv-native-card, .ptv-browse-card, .ptv-cinematic-card, .ptv-collection-card, .ptv-music-card) {
+        transition: none !important;
+    }
+
+    .ptv-native-cards .itemsContainer > .card-hoverable,
+    .ptv-native-cards .itemsContainer > .card-hoverable ~ .card-hoverable {
+        transform: none !important;
+    }
+
+    .ptv-native-cards .card-hoverable:is(:hover, :focus-within) .ptv-card-hover-panel {
+        transform: translate(-50%, -50%);
+    }
+}

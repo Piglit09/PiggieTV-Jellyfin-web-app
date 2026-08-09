@@ -28,8 +28,10 @@ const detailsMocks = vi.hoisted(() => ({
     getApiClient: vi.fn(),
     getImageCandidates: vi.fn(() => []),
     prepareLayout: vi.fn(),
+    rememberRouteOrigin: vi.fn(),
     registeredModule: null as DetailsModule | null,
     releaseLayout: vi.fn(),
+    restoreRouteOrigin: vi.fn(),
     resetBackdrop: vi.fn(),
     setBackdropCandidates: vi.fn(),
     setShellSection: vi.fn()
@@ -89,8 +91,17 @@ vi.mock('../../core/clientProfile', () => ({
     }))
 }));
 
+vi.mock('../../core/tvFocus', () => ({
+    rememberPtvRouteOrigin: detailsMocks.rememberRouteOrigin,
+    restorePtvRouteOrigin: detailsMocks.restoreRouteOrigin
+}));
+
 vi.mock('../../services/coordinatedLegacyItemDetail', () => ({
     getCoordinatedLegacyItemDetail: detailsMocks.coordinatedDetail
+}));
+
+vi.mock('../../services/requestCoordinator', () => ({
+    recordPtvRequestLedgerStaleRejected: vi.fn()
 }));
 
 vi.mock('./detailsShell', () => ({
@@ -133,8 +144,16 @@ function createScope() {
         callback: () => void;
         cancelled: boolean;
     }> = [];
+    const listeners: Array<{
+        callback: (event: Event) => void;
+        eventName: string;
+    }> = [];
     const scope = {
         add: vi.fn((disposer?: () => void) => disposer),
+        listen: vi.fn((_target: EventTarget, eventName: string, callback: (event: Event) => void) => {
+            listeners.push({ callback, eventName });
+            return vi.fn();
+        }),
         timeout: vi.fn((callback: () => void) => {
             const entry = {
                 callback,
@@ -151,6 +170,12 @@ function createScope() {
     };
 
     return {
+        dispatch(eventName: string, event: Event) {
+            listeners.filter(listener => listener.eventName === eventName)
+                .forEach(listener => {
+                    listener.callback(event);
+                });
+        },
         runInspection() {
             const entry = scheduled.find(candidate => !candidate.cancelled);
 
@@ -274,6 +299,25 @@ describe('details enhancement module lifecycle', () => {
         expect(page.dataset.ptvDetailsItemId).toBeUndefined();
         expect(page.dataset.ptvDetailsHydratedItemId).toBeUndefined();
         expect(page.querySelector('.ptv-reader-detail-actions')).toBeNull();
+    });
+
+    it('captures a Details child origin before navigation and restores only through the existing focus owner', () => {
+        const page = renderDetailsPage();
+        const scope = createScope();
+        const module = getRegisteredModule();
+        const origin = document.createElement('a');
+        const label = document.createElement('span');
+
+        origin.className = 'itemAction';
+        origin.href = '#/details?id=child';
+        origin.append(label);
+        page.append(origin);
+
+        module.init({ scope: scope.scope });
+        scope.dispatch('click', { target: label } as unknown as Event);
+
+        expect(detailsMocks.rememberRouteOrigin).toHaveBeenCalledWith(origin);
+        expect(detailsMocks.restoreRouteOrigin).toHaveBeenCalledWith(page);
     });
 
     it('lets the authoritative rendered item supersede the slow inspection consumer', async () => {

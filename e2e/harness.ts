@@ -344,12 +344,13 @@ function renderFixtureSearchGroup(
     heading.tabIndex = -1;
     getFixtureSearchItems(query, groupId).forEach(item => {
         const card = addElement(rail, 'a', { className: 'ptv-search-card' });
+        const collectionId = `jellyfin:${item.id}`;
 
         card.dataset.ptvSearchItemId = item.id;
         card.dataset.ptvSearchItemType = item.type;
         card.dataset.ptvSearchSourceGroup = groupId;
         card.href = item.type === 'BoxSet' ?
-            `#/collections?view=details&collectionId=${encodeURIComponent(`jellyfin:${item.id}`)}` :
+            `#/collections?view=details&collectionId=${encodeURIComponent(collectionId)}` :
             `#/details?id=${encodeURIComponent(item.id)}`;
         addElement(card, 'span', {
             className: 'ptv-search-card-art',
@@ -1682,23 +1683,108 @@ function renderDetails() {
     renderFixtureDetailsDiscovery(page);
 }
 
-function renderMusicFullscreenLayout() {
-    document.documentElement.classList.add('ptv-render-tv', 'ptv-platform-webos', 'ptv-route-music-mounted');
+function closeFixtureQueueMenu(trigger?: HTMLButtonElement) {
+    document.querySelector('[data-ptv-e2e-queue-menu]')?.remove();
+    if (trigger) {
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.focus();
+    }
+}
+
+function openFixtureQueueMenu(
+    trigger: HTMLButtonElement,
+    trackNumber: number,
+    queueCount: number,
+    currentIndex: number
+) {
+    closeFixtureQueueMenu();
+    const itemIndex = trackNumber - 1;
+    const menu = addElement(document.body, 'div', {
+        className: 'ptv-music-item-menu-popover ptv-music-item-menu-overlay'
+    });
+
+    menu.dataset.ptvE2eQueueMenu = 'true';
+    menu.dataset.ptvMusicFixtureExternal = 'true';
+    menu.id = `ptv-e2e-queue-menu-${trackNumber}`;
+    menu.setAttribute('aria-label', `Queue track ${trackNumber} actions`);
+    menu.setAttribute('role', 'menu');
+    trigger.setAttribute('aria-controls', menu.id);
+    trigger.setAttribute('aria-expanded', 'true');
+    const menuWidth = Math.min(260, Math.max(188, window.innerWidth - 28));
+
+    menu.style.left = `${Math.max(14, window.innerWidth - menuWidth - 14)}px`;
+    menu.style.maxHeight = `${Math.max(120, window.innerHeight - 28)}px`;
+    menu.style.top = '14px';
+    menu.style.width = `${menuWidth}px`;
+    const actions = [
+        ...(document.documentElement.classList.contains('ptv-render-tv') ? [{
+            disabled: itemIndex === currentIndex,
+            label: 'Play this item'
+        }] : []),
+        { disabled: itemIndex <= currentIndex + 1, label: 'Move earlier' },
+        { disabled: itemIndex >= queueCount - 1 || itemIndex === currentIndex, label: 'Move later' },
+        { disabled: itemIndex <= currentIndex + 1, label: 'Move to top' },
+        { disabled: itemIndex >= queueCount - 1 || itemIndex === currentIndex, label: 'Move to bottom' },
+        { disabled: itemIndex <= currentIndex + 1, label: 'Play next' },
+        { disabled: false, label: 'Add to playlist' },
+        { disabled: itemIndex === currentIndex, label: 'Remove from queue' }
+    ];
+
+    actions.forEach(action => {
+        const button = addElement(menu, 'button');
+
+        button.disabled = action.disabled;
+        button.setAttribute('role', 'menuitem');
+        button.type = 'button';
+        addFixtureIcon(button, 16);
+        addElement(button, 'span', { text: action.label });
+        button.addEventListener('click', () => closeFixtureQueueMenu(trigger));
+    });
+    menu.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        closeFixtureQueueMenu(trigger);
+    });
+    window.requestAnimationFrame(() => {
+        menu.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();
+    });
+}
+
+function renderMusicFullscreenLayout(search: string) {
+    const params = new URLSearchParams(search);
+    const requestedCount = Number(params.get('count') || 100);
+    const queueCount = [50, 100, 500].includes(requestedCount) ? requestedCount : 100;
+    const requestedCurrentIndex = Number(params.get('current'));
+    const currentIndex = Number.isFinite(requestedCurrentIndex) ?
+        Math.max(0, Math.min(queueCount - 1, Math.trunc(requestedCurrentIndex))) :
+        Math.floor(queueCount * 0.72);
+    const isTv = params.get('profile') === 'tv';
+
+    if (isTv) {
+        document.documentElement.classList.add('ptv-render-tv', 'ptv-platform-webos');
+    }
+    document.documentElement.dataset.ptvPlaybackSurface = 'full-screen-player';
+    document.documentElement.classList.add('ptv-route-music-mounted');
     document.body.classList.add('ptv-route-music-mounted');
     const page = addElement(root, 'main', {
         className: 'mainAnimatedPage ptv-music-page',
         id: 'ptvMusicPage'
     });
 
-    page.style.height = '1080px';
+    page.dataset.ptvE2eProfile = isTv ? 'tv' : 'browser';
+    page.style.height = '100vh';
     page.style.inset = '0';
-    page.style.overflowY = 'auto';
+    page.style.overflow = 'hidden';
     page.style.position = 'absolute';
+    page.style.width = '100vw';
     const shell = addElement(page, 'div', {
         className: 'ptv-shell-frame ptv-shell-frame-music ptv-shell-frame-fullscreen-music'
     });
 
-    shell.style.minHeight = '1185px';
+    shell.style.height = '100%';
+    shell.style.minHeight = '0';
     const header = addElement(shell, 'header', { className: 'ptv-shell-header' });
 
     addElement(header, 'a', { className: 'ptv-shell-brand', text: 'PiggieTV' });
@@ -1710,10 +1796,17 @@ function renderMusicFullscreenLayout() {
     for (const label of ['Home', 'Explore', 'Library']) {
         addElement(contextNav, 'a', { className: 'ptv-shell-context-link', text: label });
     }
-    const shellMain = addElement(shell, 'div', { className: 'ptv-shell-main ptv-shell-page-content' });
-    const player = addElement(shellMain, 'div', {
+    const appShell = addElement(shell, 'main', { className: 'ptv-music-app ptv-music-app-shell' });
+    const musicBody = addElement(appShell, 'div', { className: 'ptv-music-body' });
+    const musicMain = addElement(musicBody, 'section', { className: 'ptv-music-main' });
+    const mainScroll = addElement(musicMain, 'div', { className: 'ptv-music-main-scroll' });
+    const player = addElement(mainScroll, 'div', {
         className: 'ptv-music-view ptv-music-now-playing-view ptv-music-fullscreen-player'
     });
+
+    player.dataset.ptvPlaybackSurface = 'full-screen-player';
+    player.dataset.ptvQueueCount = String(queueCount);
+    player.dataset.ptvQueueCurrentIndex = String(currentIndex);
     const backdrop = addElement(player, 'div', { className: 'ptv-music-now-playing-backdrop' });
     const backdropImage = addElement(backdrop, 'img');
 
@@ -1781,19 +1874,34 @@ function renderMusicFullscreenLayout() {
         tab.setAttribute('role', 'tab');
         tab.setAttribute('tabindex', label === 'Up Next' ? '0' : '-1');
     }
-    const panelActions = addElement(panel, 'div', { className: 'ptv-music-player-panel-actions' });
+    const status = addElement(panel, 'div', { className: 'ptv-music-player-status', text: 'Queue ready' });
+
+    status.setAttribute('aria-live', 'polite');
+    status.setAttribute('role', 'status');
+    const tabPanel = addElement(panel, 'section', {
+        className: 'ptv-music-list ptv-music-list-up-next'
+    });
+
+    tabPanel.id = 'ptv-e2e-up-next-panel';
+    tabPanel.setAttribute('aria-label', 'Up Next');
+    tabPanel.setAttribute('role', 'tabpanel');
+    const panelActions = addElement(tabPanel, 'div', { className: 'ptv-music-player-panel-actions' });
     const panelCopy = addElement(panelActions, 'div');
 
     addElement(panelCopy, 'strong', { text: 'Playing from' });
     addElement(panelCopy, 'span', { text: 'Album' });
     addElement(panelActions, 'button', { text: 'Save queue' });
-    const queueNote = addElement(panel, 'div', { className: 'ptv-music-related-queue-note' });
+    const queueNote = addElement(tabPanel, 'div', { className: 'ptv-music-related-queue-note' });
 
     addElement(queueNote, 'strong', { text: 'Related queue' });
-    const queue = addElement(panel, 'ol', { className: 'ptv-music-queue-list' });
+    addElement(queueNote, 'span', { text: `${queueCount} items` });
+    const queue = addElement(tabPanel, 'ol', { className: 'ptv-music-queue-list' });
 
-    for (let index = 0; index < 24; index += 1) {
-        const current = index === 0;
+    queue.setAttribute('aria-label', 'Playback queue');
+    let currentRow: HTMLLIElement | null = null;
+    for (let index = 0; index < queueCount; index += 1) {
+        const current = index === currentIndex;
+        const trackNumber = index + 1;
         const item = addElement(queue, 'li', {
             className: current
                 ? 'ptv-music-queue-item ptv-music-queue-item-current'
@@ -1801,24 +1909,122 @@ function renderMusicFullscreenLayout() {
         });
         const button = addElement(item, 'button', { className: 'ptv-music-queue-item-main' });
 
-        if (current) button.setAttribute('disabled', '');
-        addElement(button, 'span', { text: current ? '●' : String(index + 1) });
+        item.dataset.playlistItem = `queue-track-${trackNumber}`;
+        if (current) {
+            item.setAttribute('aria-current', 'true');
+            currentRow = item;
+        }
+        button.dataset.ptvFocusKey = `queue-track-${trackNumber}:primary`;
+        button.setAttribute('aria-label', current ? `Playing Queue track ${trackNumber}` : `Play Queue track ${trackNumber}`);
+        button.type = 'button';
+        addElement(button, 'span', { text: current ? '*' : String(trackNumber) });
         const copy = addElement(button, 'span');
 
-        addElement(copy, 'strong', { text: `Queue track ${index + 1}` });
-        addElement(copy, 'small', { text: 'Artist' });
+        addElement(copy, 'strong', { text: `Queue track ${trackNumber} with a deliberately long title for truncation` });
+        addElement(copy, 'small', { text: 'Artist - Album' });
         if (current) {
             addElement(button, 'em', { text: 'Playing' });
+        }
+
+        if (isTv) {
+            button.setAttribute('aria-haspopup', 'menu');
+            button.addEventListener('click', () => {
+                openFixtureQueueMenu(button, trackNumber, queueCount, currentIndex);
+            });
+            button.addEventListener('keydown', event => {
+                if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+
+                event.preventDefault();
+                openFixtureQueueMenu(button, trackNumber, queueCount, currentIndex);
+            });
         } else {
             const actions = addElement(item, 'span', { className: 'ptv-music-queue-item-actions' });
+            const quickAction = addElement(actions, 'button', { className: 'ptv-music-queue-quick-action' });
+            const overflow = addElement(actions, 'button', { className: 'ptv-music-queue-overflow' });
 
-            addElement(actions, 'button', { text: '↑' });
-            addElement(actions, 'button', { text: '↓' });
-            addElement(actions, 'button', { text: '×' });
+            quickAction.disabled = current || index <= currentIndex + 1;
+            quickAction.setAttribute('aria-label', `Play Queue track ${trackNumber} next`);
+            quickAction.title = 'Play next';
+            quickAction.type = 'button';
+            addFixtureIcon(quickAction, 18);
+            overflow.dataset.ptvFocusKey = `queue-track-${trackNumber}:actions`;
+            overflow.setAttribute('aria-expanded', 'false');
+            overflow.setAttribute('aria-haspopup', 'menu');
+            overflow.setAttribute('aria-label', `Open actions for Queue track ${trackNumber}`);
+            overflow.title = 'More actions';
+            overflow.type = 'button';
+            addFixtureIcon(overflow, 18);
+            overflow.addEventListener('click', () => {
+                openFixtureQueueMenu(overflow, trackNumber, queueCount, currentIndex);
+            });
         }
     }
 
-    page.scrollTop = 105;
+    window.requestAnimationFrame(() => {
+        currentRow?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+}
+
+function renderMusicDockLayout(search: string) {
+    const params = new URLSearchParams(search);
+    const isTv = params.get('profile') === 'tv';
+
+    if (isTv) {
+        document.documentElement.classList.add('ptv-render-tv', 'ptv-platform-webos');
+    }
+    document.documentElement.dataset.ptvPlaybackSurface = 'mini-player';
+    const route = addElement(root, 'main', { className: 'browse-page ptv-e2e-music-dock-route' });
+
+    route.style.margin = '0';
+    route.style.minHeight = '280vh';
+    route.style.padding = '8rem 2rem 12rem';
+    route.style.width = '100%';
+    addElement(route, 'h1', { text: 'Scrollable route with active audio' });
+    for (let index = 0; index < 12; index += 1) {
+        const section = addElement(route, 'section');
+
+        section.style.minHeight = '22vh';
+        addElement(section, 'h2', { text: `Route content ${index + 1}` });
+        addElement(section, 'button', { text: `Route action ${index + 1}` });
+    }
+
+    const host = addElement(document.body, 'div');
+
+    host.dataset.ptvMusicFixtureExternal = 'true';
+    host.dataset.ptvRuntimeRootHost = 'true';
+    const runtime = addElement(host, 'div', { className: 'ptv-runtime-root' });
+    const slot = addElement(runtime, 'div', { className: 'ptv-runtime-media-dock-slot' });
+    const dock = addElement(slot, 'aside', { className: 'ptv-media-dock ptv-media-dock-ptv-music' });
+
+    dock.dataset.ptvPlaybackSurface = 'mini-player';
+    dock.dataset.ptvDockSource = 'ptv-music';
+    dock.setAttribute('aria-label', 'Now playing');
+    const art = addElement(dock, 'button', { className: 'ptv-media-dock-art' });
+    const image = addElement(art, 'img');
+
+    art.setAttribute('aria-label', 'Open now playing');
+    art.type = 'button';
+    image.alt = '';
+    image.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22480%22 height=%22480%22%3E%3Crect width=%22480%22 height=%22480%22 fill=%22%237336a8%22/%3E%3C/svg%3E';
+    const copy = addElement(dock, 'div', { className: 'ptv-media-dock-copy' });
+
+    addElement(copy, 'strong', { text: 'Viewport anchored track' });
+    addElement(copy, 'small', { text: 'Fixture artist - Fixture album' });
+    addElement(copy, 'span', { className: 'ptv-media-dock-time', text: '0:30 / 3:20' });
+    const progress = addElement(copy, 'span', { className: 'ptv-media-dock-progress' });
+
+    addElement(progress, 'span').style.width = '15%';
+    const actions = addElement(dock, 'div', { className: 'ptv-media-dock-actions' });
+
+    for (const label of ['Previous', 'Pause', 'Next', 'Player']) {
+        const action = addElement(actions, 'button', {
+            className: label === 'Pause' ? 'ptv-media-dock-primary' : ''
+        });
+
+        action.setAttribute('aria-label', label);
+        action.type = 'button';
+        addFixtureIcon(action, 18);
+    }
 }
 
 function renderMusicHeaderLayout() {
@@ -2261,8 +2467,8 @@ const FIXTURE_COLLECTIONS: readonly FixtureCollection[] = [
 ];
 
 function getFixtureCollectionPreferences() {
-    const scope = window.localStorage.getItem('ptv:e2e:collection-scope') || 'server-a:user-a';
-    const key = `ptv:e2e:collections:${scope}`;
+    const preferenceScope = window.localStorage.getItem('ptv:e2e:collection-scope') || 'server-a:user-a';
+    const key = `ptv:e2e:collections:${preferenceScope}`;
     let preferences: FixtureCollectionPreferences = { hidden: [], pinned: [] };
 
     try {
@@ -2350,7 +2556,9 @@ function renderFixtureCollectionDetails(params: URLSearchParams) {
     const ordering = addElement(page, 'nav', { className: 'ptv-collection-ordering' });
 
     ordering.setAttribute('aria-label', 'Collection ordering modes');
-    ['Collection order', 'Release order', 'Title'].forEach(label => addElement(ordering, 'button', { text: label }));
+    ['Collection order', 'Release order', 'Title'].forEach(label => {
+        addElement(ordering, 'button', { text: label });
+    });
     const section = addElement(page, 'section', { className: 'ptv-collection-members' });
 
     addElement(section, 'h2', { text: collection.source === 'cross-library' ? 'Cross-Library Worlds' : 'Main Timeline' });
@@ -2439,12 +2647,14 @@ function renderCollections(search: string) {
             addElement(section, 'h2', { text: title });
             const row = addElement(section, 'div', { className: 'ptv-collection-row' });
 
-            collections.forEach((collection, index) => addFixtureCollectionCard(
-                row,
-                collection,
-                preferences,
-                view === 'all' && sectionIndex === 0 && index === 0
-            ));
+            collections.forEach((collection, index) => {
+                addFixtureCollectionCard(
+                    row,
+                    collection,
+                    preferences,
+                    view === 'all' && sectionIndex === 0 && index === 0
+                );
+            });
         });
     }
 
@@ -2467,8 +2677,12 @@ function renderRoute() {
     cleanupDiagnosticsDashboard();
     cleanupSearch();
     cleanupHome();
+    document.querySelectorAll<HTMLElement>('[data-ptv-music-fixture-external]').forEach(element => {
+        element.remove();
+    });
     document.body.classList.remove('ptv-e2e-details');
     document.body.classList.remove('ptv-route-music-mounted');
+    delete document.documentElement.dataset.ptvPlaybackSurface;
     document.documentElement.classList.remove('ptv-render-tv', 'ptv-platform-webos', 'ptv-route-music-mounted');
     root.classList.remove('ptv-music-page', 'ptv-music-shell', 'ptv-shell-frame-music', 'ptv-shell-frame-fullscreen-music');
     root.replaceChildren();
@@ -2489,7 +2703,9 @@ function renderRoute() {
     if (path === '/dashboard/piggietv/diagnostics') {
         renderDiagnosticsDashboard();
     } else if (path === '/e2e/music-fullscreen-layout') {
-        renderMusicFullscreenLayout();
+        renderMusicFullscreenLayout(search);
+    } else if (path === '/e2e/music-dock-layout') {
+        renderMusicDockLayout(search);
     } else if (path === '/e2e/music-header-layout') {
         renderMusicHeaderLayout();
     } else if (path === '/movies' || path === '/shows') {

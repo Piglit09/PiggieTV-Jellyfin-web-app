@@ -69,6 +69,14 @@
             Versioned plugin settings reset route.
             </summary>
         </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1Relationships">
+            <summary>
+            Versioned authoritative relationship route.
+            </summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V2RecommendationRank">
+            <summary>Versioned authoritative recommendation ranking route.</summary>
+        </member>
         <member name="F:Jellyfin.Plugin.PiggieTV.Api.PtvApiRoutes.V1ImageDiagnostics">
             <summary>
             Versioned item image diagnostics route.
@@ -106,6 +114,60 @@
             <summary>
             Legacy unversioned featured-content refresh route.
             </summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvRecommendationController">
+            <summary>Versioned PiggieTV recommendation policy endpoints.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRecommendationController.#ctor(Jellyfin.Plugin.PiggieTV.Services.IPtvRecommendationPolicyService,MediaBrowser.Controller.IServerApplicationHost)">
+            <summary>Initializes a new instance of the controller.</summary>
+            <param name="policyService">Shared recommendation policy.</param>
+            <param name="applicationHost">Current Jellyfin server identity.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRecommendationController.Rank(Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest)">
+            <summary>Ranks client-supplied candidates with the shared premium policy.</summary>
+            <param name="request">Versioned candidate request.</param>
+            <returns>Ordered ids and policy evidence.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRecommendationController.GetPersistedRecommendations(System.String,System.String)">
+            <summary>Exposes persisted v1 recommendation rows for existing clients.</summary>
+            <param name="serverId">Server scope.</param>
+            <param name="userId">User scope.</param>
+            <returns>v1 compatibility response.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvRelationshipController">
+            <summary>
+            Authenticated reads and administrator writes for authoritative cross-library relationships.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRelationshipController.#ctor(Jellyfin.Plugin.PiggieTV.Services.IPtvRelationshipMappingService,Microsoft.AspNetCore.Authorization.IAuthorizationService,Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Api.PtvRelationshipController})">
+            <summary>Initializes a new instance of the relationship controller.</summary>
+            <param name="relationshipService">Authoritative relationship owner.</param>
+            <param name="authorizationService">Jellyfin authorization service.</param>
+            <param name="logger">Logger.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRelationshipController.GetRelationships(System.String)">
+            <summary>Gets enabled authoritative relationships visible to the current user.</summary>
+            <param name="sourceItemId">Source Jellyfin item identity.</param>
+            <returns>Visible relationships.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRelationshipController.CreateRelationship(Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest,System.Threading.CancellationToken)">
+            <summary>Creates one administrator-defined authoritative relationship.</summary>
+            <param name="request">Create request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Created relationship.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRelationshipController.UpdateRelationship(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingUpdateRequest,System.Threading.CancellationToken)">
+            <summary>Updates mutable properties of one authoritative relationship.</summary>
+            <param name="mappingId">Mapping identity.</param>
+            <param name="request">Update request.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Updated relationship.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Api.PtvRelationshipController.DeleteRelationship(System.String,System.Threading.CancellationToken)">
+            <summary>Deletes one authoritative relationship.</summary>
+            <param name="mappingId">Mapping identity.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>No content after deletion.</returns>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Api.PtvRemoteDiagnosticsController">
             <summary>
@@ -574,6 +636,11 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.ReadingSeriesOverrides">
             <summary>
             Gets or sets administrator Reading series corrections shared by every client.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.RelationshipMappings">
+            <summary>
+            Gets or sets administrator-defined authoritative cross-library relationships.
             </summary>
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PiggieTVPluginConfiguration.SeerrSettings">
@@ -1438,6 +1505,54 @@
         </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvDiagnosticsStorageSettings.IncludeItemIds">
             <summary>Gets or sets whether content and account identifiers are retained in disk diagnostics.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingSettings">
+            <summary>
+            Server-persisted authoritative cross-library relationship mappings.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingSettings.SchemaVersion">
+            <summary>Gets or sets the persistence schema version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingSettings.Mappings">
+            <summary>Gets or sets the deterministic XML-safe mapping representation.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingSettings.GetMappings">
+            <summary>Gets a defensive, deterministic snapshot of all mappings.</summary>
+            <returns>Persisted mappings.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingSettings.SetMappings(System.Collections.Generic.IEnumerable{Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition})">
+            <summary>Replaces all mappings with a defensive, deterministic snapshot.</summary>
+            <param name="mappings">Mappings to persist.</param>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition">
+            <summary>
+            One administrator-defined relationship between two stable Jellyfin item identities.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition.MappingId">
+            <summary>Gets or sets the mapping identity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition.SourceItemId">
+            <summary>Gets or sets the source Jellyfin item identity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition.TargetItemId">
+            <summary>Gets or sets the target Jellyfin item identity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition.Category">
+            <summary>Gets or sets the allowlisted relationship category.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition.Direction">
+            <summary>Gets or sets the relationship direction.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition.DisplayOrder">
+            <summary>Gets or sets deterministic display ordering.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition.Enabled">
+            <summary>Gets or sets whether the relationship is active.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Configuration.PtvRelationshipMappingDefinition.SchemaVersion">
+            <summary>Gets or sets the mapping schema version.</summary>
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Configuration.SignupSettings">
             <summary>
@@ -3213,6 +3328,272 @@
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverrideDto.VolumeNumber">
             <summary>Gets or sets the corrected volume number.</summary>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationSurface">
+            <summary>Recommendation surfaces with distinct familiarity and discovery intent.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationSurface.Home">
+            <summary>General Home recommendations.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationSurface.MadeForYou">
+            <summary>Personalized, mostly familiar listening.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationSurface.Radio">
+            <summary>Seed-focused radio.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationSurface.Related">
+            <summary>Related content for a selected item.</summary>
+        </member>
+        <member name="F:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationSurface.Discovery">
+            <summary>Novel discovery listening.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicySeed">
+            <summary>Seed metadata used only for bounded affinity scoring.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicySeed.Id">
+            <summary>Gets or sets the opaque seed item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicySeed.ArtistIds">
+            <summary>Gets or sets opaque artist ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicySeed.AlbumId">
+            <summary>Gets or sets the opaque album id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicySeed.Genres">
+            <summary>Gets or sets normalized genre labels.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate">
+            <summary>Candidate supplied by a PiggieTV client for authoritative sequencing.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.Id">
+            <summary>Gets or sets the item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.Title">
+            <summary>Gets or sets the item title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.MediaType">
+            <summary>Gets or sets the normalized media type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.Source">
+            <summary>Gets or sets the candidate source.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.Classification">
+            <summary>Gets or sets affinity, discovery, or mixed classification.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.BaseScore">
+            <summary>Gets or sets the client candidate score.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.ArtistIds">
+            <summary>Gets or sets opaque artist ids.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.AlbumId">
+            <summary>Gets or sets the opaque album id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.Genres">
+            <summary>Gets or sets normalized genre labels.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyCandidate.Familiar">
+            <summary>Gets or sets a value indicating whether the item is familiar to the user.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest">
+            <summary>Versioned policy request.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.ContractVersion">
+            <summary>Gets or sets the additive contract version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.PolicyVersion">
+            <summary>Gets or sets the policy version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.AlgorithmId">
+            <summary>Gets or sets the requested algorithm id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.RequestId">
+            <summary>Gets or sets the request correlation id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.Cohort">
+            <summary>Gets or sets the deterministic rollout cohort.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.Surface">
+            <summary>Gets or sets the recommendation surface.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.ServerId">
+            <summary>Gets or sets the server scope.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.UserId">
+            <summary>Gets or sets the user scope.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.Limit">
+            <summary>Gets or sets the requested result limit.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.Seed">
+            <summary>Gets or sets optional seed metadata.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest.Candidates">
+            <summary>Gets or sets candidate items.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyConstraints">
+            <summary>Policy constraints returned to every client for diagnostics and parity tests.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyConstraints.DiscoveryTarget">
+            <summary>Gets or sets the target discovery share.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyConstraints.FamiliarTarget">
+            <summary>Gets or sets the target familiar share.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyConstraints.MaxItemsPerArtist">
+            <summary>Gets or sets the artist cap.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyConstraints.MaxItemsPerAlbum">
+            <summary>Gets or sets the album cap.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyConstraints.MaxConsecutiveArtist">
+            <summary>Gets or sets the artist run cap.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyConstraints.MaxConsecutiveAlbum">
+            <summary>Gets or sets the album run cap.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem">
+            <summary>Ranked recommendation item with stable policy evidence.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.Id">
+            <summary>Gets or sets the item id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.Title">
+            <summary>Gets or sets the title.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.MediaType">
+            <summary>Gets or sets the media type.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.Source">
+            <summary>Gets or sets the source.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.Classification">
+            <summary>Gets or sets the classification.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.Rank">
+            <summary>Gets or sets one-based sequence rank.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.Score">
+            <summary>Gets or sets final score.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.TransitionScore">
+            <summary>Gets or sets transition contribution.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRankedRecommendationPolicyItem.Reasons">
+            <summary>Gets or sets stable reason codes.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse">
+            <summary>Versioned authoritative ranking response.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.ContractVersion">
+            <summary>Gets or sets the contract version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.PolicyVersion">
+            <summary>Gets or sets the policy version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.AlgorithmId">
+            <summary>Gets or sets the algorithm id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.RequestId">
+            <summary>Gets or sets request correlation id.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.Cohort">
+            <summary>Gets or sets rollout cohort.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.Surface">
+            <summary>Gets or sets surface.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.GeneratedAt">
+            <summary>Gets or sets generation timestamp.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.GenerationLatencyMs">
+            <summary>Gets or sets generation latency.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.FallbackReason">
+            <summary>Gets or sets a bounded fallback reason.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.Constraints">
+            <summary>Gets or sets applied policy constraints.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyResponse.Items">
+            <summary>Gets or sets ranked items.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingsResponse">
+            <summary>
+            Authenticated relationship lookup response for one source item.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingsResponse.SchemaVersion">
+            <summary>Gets or sets the response schema version.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingsResponse.Relationships">
+            <summary>Gets or sets visible, enabled relationships in deterministic order.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingDto">
+            <summary>
+            One visible authoritative relationship. It intentionally contains no media metadata.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingDto.MappingId">
+            <summary>Gets or sets the stable mapping identity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingDto.TargetItemId">
+            <summary>Gets or sets the destination Jellyfin item identity relative to the requested source.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingDto.Category">
+            <summary>Gets or sets the allowlisted relationship category.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingDto.Direction">
+            <summary>Gets or sets the relationship direction.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingDto.DisplayOrder">
+            <summary>Gets or sets deterministic display ordering.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingDto.Enabled">
+            <summary>Gets or sets whether the relationship is enabled.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingDto.SchemaVersion">
+            <summary>Gets or sets the mapping schema version.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest">
+            <summary>
+            Administrator request to create an authoritative relationship.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest.SourceItemId">
+            <summary>Gets or sets the source Jellyfin item identity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest.TargetItemId">
+            <summary>Gets or sets the target Jellyfin item identity.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest.Category">
+            <summary>Gets or sets the allowlisted relationship category.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest.Direction">
+            <summary>Gets or sets optional relationship direction.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest.DisplayOrder">
+            <summary>Gets or sets optional deterministic display ordering.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest.Enabled">
+            <summary>Gets or sets optional enabled state.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingUpdateRequest">
+            <summary>
+            Administrator request to update mutable relationship properties.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingUpdateRequest.Category">
+            <summary>Gets or sets an updated allowlisted category.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingUpdateRequest.Direction">
+            <summary>Gets or sets an updated relationship direction.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingUpdateRequest.DisplayOrder">
+            <summary>Gets or sets updated deterministic display ordering.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingUpdateRequest.Enabled">
+            <summary>Gets or sets updated enabled state.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Models.PtvRemoteDiagnosticsPresence">
             <summary>
             Minimal, privacy-safe client presence sent while PiggieTV is running.
@@ -4118,6 +4499,46 @@
             Gets or sets the current versioned API path.
             </summary>
         </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ContractVersion">
+            <summary>
+            Gets or sets the cross-platform PTV Core contract version.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.CacheVersion">
+            <summary>
+            Gets or sets the featured-content cache schema accepted by this plugin.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.RecommendationSchemaVersion">
+            <summary>
+            Gets or sets the recommendation response schema version.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.DiagnosticsSchemaVersion">
+            <summary>
+            Gets or sets the safe diagnostics event/report schema version.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.DiagnosticsCapable">
+            <summary>
+            Gets or sets a value indicating whether safe remote diagnostics are supported.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ServerCapabilities">
+            <summary>
+            Gets or sets server capabilities relevant to PTV Core clients.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.SupportedFeatureFlags">
+            <summary>
+            Gets or sets feature-flag names supported by this plugin build.
+            </summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ClientCompatibilityWarnings">
+            <summary>
+            Gets or sets optional non-fatal compatibility warnings for clients.
+            </summary>
+        </member>
         <member name="P:Jellyfin.Plugin.PiggieTV.Models.PtvStatusResponse.ServerTime">
             <summary>
             Gets or sets the server timestamp as Unix epoch milliseconds.
@@ -4798,6 +5219,57 @@
             <param name="update">Incoming override document.</param>
             <returns>Saved, sanitized Reading series overrides.</returns>
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvRecommendationPolicyService">
+            <summary>Applies the shared PiggieTV recommendation policy.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRecommendationPolicyService.Rank(Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest)">
+            <summary>Ranks and sequences client-supplied candidates.</summary>
+            <param name="request">Versioned request.</param>
+            <returns>Versioned policy response.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvRelationshipMappingService">
+            <summary>
+            Owns authoritative PiggieTV cross-library relationship mappings.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRelationshipMappingService.GetForSource(System.Guid,System.Guid)">
+            <summary>Gets enabled mappings whose endpoints are visible to one authenticated user.</summary>
+            <param name="sourceItemId">Requested source Jellyfin item identity.</param>
+            <param name="userId">Authenticated Jellyfin user identity.</param>
+            <returns>A response, or <see langword="null"/> when the source is not visible.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRelationshipMappingService.Create(Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest)">
+            <summary>Creates and persists one validated mapping.</summary>
+            <param name="request">Administrator create request.</param>
+            <returns>The created mapping relative to its source.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRelationshipMappingService.Update(System.Guid,Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingUpdateRequest)">
+            <summary>Updates mutable fields on one mapping.</summary>
+            <param name="mappingId">Mapping identity.</param>
+            <param name="request">Administrator update request.</param>
+            <returns>The updated mapping relative to its source.</returns>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.IPtvRelationshipMappingService.Delete(System.Guid)">
+            <summary>Deletes one mapping from persisted plugin configuration.</summary>
+            <param name="mappingId">Mapping identity.</param>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingException">
+            <summary>
+            Safe validation failure surfaced by the relationship API.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingException.#ctor(System.Int32,System.String,System.String)">
+            <summary>Initializes a new instance of the exception.</summary>
+            <param name="statusCode">HTTP status appropriate for the failure.</param>
+            <param name="code">Stable non-sensitive error code.</param>
+            <param name="message">Non-sensitive error message.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingException.Code">
+            <summary>Gets the stable non-sensitive error code.</summary>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingException.StatusCode">
+            <summary>Gets the HTTP status appropriate for the failure.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.IPtvRemoteDiagnosticsStore">
             <summary>
             Ephemeral, server-local coordination for client diagnostics.
@@ -5111,6 +5583,17 @@
             <returns>Validated and normalized document.</returns>
             <exception cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidationException">Thrown when the document is invalid.</exception>
         </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentValidator.GetSemanticStatus(System.Text.Json.Nodes.JsonObject)">
+            <summary>Classifies whether a generated payload contains semantic Home content.</summary>
+            <param name="payload">Featured payload object.</param>
+            <returns>Count-only semantic status.</returns>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentSemanticStatus">
+            <summary>Count-only semantic classification for a featured-content payload.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvFeaturedContentSemanticStatus.#ctor(System.String,System.Int32,System.Int32,System.Int32,System.Int32,System.Boolean)">
+            <summary>Count-only semantic classification for a featured-content payload.</summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvGoogleBooksMetadataLookupService">
             <summary>
             Native server-side Google Books metadata lookup for reading items.
@@ -5297,6 +5780,45 @@
             <inheritdoc />
         </member>
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvPluginSettingsService.SaveReadingSeriesOverrides(System.String,Jellyfin.Plugin.PiggieTV.Models.PtvReadingSeriesOverridesUpdate)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvRecommendationPolicyService">
+            <summary>Deterministic, bounded, cross-client recommendation sequencer.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRecommendationPolicyService.Rank(Jellyfin.Plugin.PiggieTV.Models.PtvRecommendationPolicyRequest)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvRecommendationPolicyValidationException">
+            <summary>Represents a rejected recommendation policy request.</summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRecommendationPolicyValidationException.#ctor(System.String,System.String)">
+            <summary>Initializes a new instance of the <see cref="T:Jellyfin.Plugin.PiggieTV.Services.PtvRecommendationPolicyValidationException"/> class.</summary>
+            <param name="code">Stable client-facing validation code.</param>
+            <param name="message">Human-readable validation message.</param>
+        </member>
+        <member name="P:Jellyfin.Plugin.PiggieTV.Services.PtvRecommendationPolicyValidationException.Code">
+            <summary>Gets the stable validation code.</summary>
+        </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingService">
+            <summary>
+            Plugin-configuration owner for authoritative cross-library relationships.
+            </summary>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingService.#ctor(MediaBrowser.Controller.Library.ILibraryManager,Microsoft.Extensions.Logging.ILogger{Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingService})">
+            <summary>Initializes a production relationship mapping service.</summary>
+            <param name="libraryManager">Jellyfin library owner.</param>
+            <param name="logger">Logger.</param>
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingService.GetForSource(System.Guid,System.Guid)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingService.Create(Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingCreateRequest)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingService.Update(System.Guid,Jellyfin.Plugin.PiggieTV.Models.PtvRelationshipMappingUpdateRequest)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvRelationshipMappingService.Delete(System.Guid)">
             <inheritdoc />
         </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvRemoteDiagnosticsStore">

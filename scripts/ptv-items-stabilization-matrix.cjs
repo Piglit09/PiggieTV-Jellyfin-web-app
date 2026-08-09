@@ -858,7 +858,7 @@ async function collectProvenance(page, browser) {
         backendVersion: runtime.backendVersion,
         browserVersion: browser.version(),
         firstRunCacheClassification: 'warm',
-        frontendBuildId: require('../package.json').version,
+        frontendBuildId: `ptv-web-${require('../ptv-version.json').version}`,
         frontendOriginCategory: classifyOrigin(runtime.frontendOrigin),
         plugin: {
             apiVersion: 1,

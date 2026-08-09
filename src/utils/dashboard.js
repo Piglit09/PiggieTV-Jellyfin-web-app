@@ -26,6 +26,7 @@ import {
 import { isPtvWebpackDevServerOrigin } from 'ptv/core/urlOrigins';
 
 const SERVER_DISCOVERY_TIMEOUT_MS = 2200;
+const SERVER_DISCOVERY_HEDGE_DELAY_MS = 150;
 
 function getCurrentApiClientForDiscovery() {
     try {
@@ -89,13 +90,52 @@ export async function serverAddress() {
 
     console.debug(`[PTV] Discovering Jellyfin server from ${urls.length} candidate(s).`);
 
-    for (const url of urls) {
-        const response = await fetchServerInfoWithTimeout(url);
+    const response = await findFirstResponsiveServer(urls);
 
-        if (response?.config) return response.url;
-    }
+    if (response?.config) return response.url;
 
     return getFallbackServerUrl(urls);
+}
+
+function findFirstResponsiveServer(urls) {
+    if (!urls.length) return Promise.resolve(undefined);
+
+    return new Promise(resolve => {
+        let remaining = urls.length;
+        let settled = false;
+        const hedgeTimers = [];
+        const finish = response => {
+            if (settled) return;
+
+            if (response?.config) {
+                settled = true;
+                hedgeTimers.forEach(timerId => {
+                    window.clearTimeout(timerId);
+                });
+                resolve(response);
+                return;
+            }
+
+            remaining -= 1;
+            if (!remaining) {
+                settled = true;
+                resolve(undefined);
+            }
+        };
+
+        urls.forEach((url, index) => {
+            const startProbe = () => {
+                if (settled) return;
+                void fetchServerInfoWithTimeout(url).then(finish, () => finish(undefined));
+            };
+
+            if (index === 0) {
+                startProbe();
+            } else {
+                hedgeTimers.push(window.setTimeout(startProbe, index * SERVER_DISCOVERY_HEDGE_DELAY_MS));
+            }
+        });
+    });
 }
 
 function fetchServerInfo(url) {
@@ -122,15 +162,19 @@ function fetchServerInfo(url) {
 }
 
 function fetchServerInfoWithTimeout(url) {
+    let timeoutId;
+
     return Promise.race([
         fetchServerInfo(url),
         new Promise(resolve => {
-            window.setTimeout(() => {
+            timeoutId = window.setTimeout(() => {
                 console.debug('[PTV] Jellyfin server discovery candidate timed out.');
                 resolve(undefined);
             }, SERVER_DISCOVERY_TIMEOUT_MS);
         })
-    ]);
+    ]).finally(() => {
+        window.clearTimeout(timeoutId);
+    });
 }
 
 function getFallbackServerUrl(urls) {

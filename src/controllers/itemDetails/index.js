@@ -61,6 +61,12 @@ import {
     renderPtvDetailLoadFailure
 } from './detailLoadRecovery';
 import { normalizeItemMediaSources } from './mediaSourceDeduplication';
+import {
+    PTV_RELATED_VIDEO_CANDIDATE_LIMIT,
+    PTV_RELATED_VIDEO_DISPLAY_LIMIT,
+    PTV_RELATED_VIDEO_FIELDS,
+    rankPtvRelatedVideoItems
+} from '../../ptv/modules/details/detailsRelatedRecommendations';
 
 import 'elements/emby-itemscontainer/emby-itemscontainer';
 import 'elements/emby-checkbox/emby-checkbox';
@@ -1528,8 +1534,8 @@ function renderSimilarItems(page, item, context, signal) {
         const apiClient = ServerConnections.getApiClient(item.ServerId);
         const options = {
             userId: apiClient.getCurrentUserId(),
-            limit: 12,
-            fields: 'PrimaryImageAspectRatio,CanDelete'
+            limit: PTV_RELATED_VIDEO_CANDIDATE_LIMIT,
+            fields: PTV_RELATED_VIDEO_FIELDS
         };
 
         if (item.Type == 'MusicAlbum' && item.AlbumArtists && item.AlbumArtists.length) {
@@ -1543,7 +1549,13 @@ function renderSimilarItems(page, item, context, signal) {
         }).then(function (result) {
             if (!isDetailItemCurrent(page, item)) return;
 
-            if (!result.Items.length) {
+            const similarItems = rankPtvRelatedVideoItems(
+                item,
+                result.Items,
+                PTV_RELATED_VIDEO_DISPLAY_LIMIT
+            );
+
+            if (!similarItems.length) {
                 similarCollapsible.classList.add('hide');
                 return;
             }
@@ -1551,7 +1563,7 @@ function renderSimilarItems(page, item, context, signal) {
             similarCollapsible.classList.remove('hide');
             let html = '';
             html += cardBuilder.getCardsHtml({
-                items: result.Items,
+                items: similarItems,
                 shape: 'autooverflow',
                 showParentTitle: item.Type == 'MusicAlbum',
                 centerText: true,

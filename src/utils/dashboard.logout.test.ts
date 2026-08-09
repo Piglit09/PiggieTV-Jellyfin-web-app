@@ -109,6 +109,7 @@ describe('stock Jellyfin Dashboard lifecycle', () => {
     });
 
     afterEach(() => {
+        vi.useRealTimers();
         vi.unstubAllGlobals();
     });
 
@@ -142,6 +143,47 @@ describe('stock Jellyfin Dashboard lifecycle', () => {
             'https://media.example.test/System/Info/Public',
             { cache: 'no-cache' }
         );
+    });
+
+    it('hedges a slow preferred server without waiting for its full timeout', async () => {
+        vi.useFakeTimers();
+        const preferred = deferred<Response>();
+        const fetchMock = vi.fn((url: string) => {
+            if (url.startsWith('https://preferred.example.test')) return preferred.promise;
+
+            return Promise.resolve({
+                json: vi.fn().mockResolvedValue({ ProductName: 'Jellyfin' }),
+                ok: true
+            } as unknown as Response);
+        });
+
+        vi.stubGlobal('fetch', fetchMock);
+        logoutMocks.buildServerCandidates.mockReturnValue([
+            'https://preferred.example.test',
+            'https://fallback.example.test'
+        ]);
+
+        const discovery = serverAddress();
+        await vi.advanceTimersByTimeAsync(150);
+
+        await expect(discovery).resolves.toBe('https://fallback.example.test');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps later candidates idle when the preferred server responds promptly', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            json: vi.fn().mockResolvedValue({ ProductName: 'Jellyfin' }),
+            ok: true
+        });
+
+        vi.stubGlobal('fetch', fetchMock);
+        logoutMocks.buildServerCandidates.mockReturnValue([
+            'https://preferred.example.test',
+            'https://fallback.example.test'
+        ]);
+
+        await expect(serverAddress()).resolves.toBe('https://preferred.example.test');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('returns the authoritative asynchronous logout and routes multi-server clients to Select Server', async () => {

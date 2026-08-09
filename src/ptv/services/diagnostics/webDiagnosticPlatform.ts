@@ -910,7 +910,7 @@ function initializeContext() {
             buildTimestamp: build.frontendBuildDate,
             commitSha: build.frontendCommitSha,
             environment: build.environment,
-            packageVersion: build.jellyfinWebVersion
+            packageVersion: build.ptvWebVersion
         },
         core: {
             ...store.getSnapshot().core,

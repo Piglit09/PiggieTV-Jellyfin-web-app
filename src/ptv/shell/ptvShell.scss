@@ -902,7 +902,7 @@ html.ptv-render-tv.ptv-platform-webos.ptv-runtime-overlay-occluded [data-ptv-run
 
 .ptv-runtime-media-dock-slot .ptv-media-dock {
     pointer-events: auto;
-    position: absolute;
+    position: fixed;
 }
 
 html[data-ptv-playback-surface='mini-player'] .nowPlayingBar,
@@ -943,6 +943,13 @@ html[data-ptv-playback-surface='full-screen-player'] .nowPlayingBar {
     transition: opacity 200ms ease, transform 220ms ease, box-shadow 200ms ease;
     width: min(48rem, calc(100vw - 2rem));
     z-index: 8500;
+}
+
+html.ptv-render-tv .ptv-media-dock {
+    bottom: var(--ptv-tv-safe-y);
+    max-width: calc(100vw - var(--ptv-tv-safe-x) - var(--ptv-tv-safe-x));
+    right: var(--ptv-tv-safe-x);
+    width: min(48rem, calc(100vw - var(--ptv-tv-safe-x) - var(--ptv-tv-safe-x)));
 }
 
 .ptv-media-dock:hover,
@@ -1187,9 +1194,10 @@ html[data-ptv-playback-surface='full-screen-player'] .nowPlayingBar {
         box-shadow: none;
         column-gap: 8px;
         grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: 48px 52px;
         left: 14px;
         margin: 0;
-        min-height: 0;
+        min-height: 126px;
         padding: 8px 0 10px;
         pointer-events: auto;
         position: sticky;
@@ -1319,9 +1327,9 @@ html[data-ptv-playback-surface='full-screen-player'] .nowPlayingBar {
     }
 
     .ptv-media-dock {
-        right: max(0.7rem, env(safe-area-inset-right));
-        bottom: max(0.7rem, env(safe-area-inset-bottom));
-        left: max(0.7rem, env(safe-area-inset-left));
+        right: calc(0.7rem + env(safe-area-inset-right));
+        bottom: calc(0.7rem + env(safe-area-inset-bottom));
+        left: calc(0.7rem + env(safe-area-inset-left));
         grid-template-columns: 3rem minmax(0, 1fr);
         max-width: none;
         width: auto;
@@ -1348,9 +1356,10 @@ html[data-ptv-playback-surface='full-screen-player'] .nowPlayingBar {
 
 @media (max-height: 32rem) and (orientation: landscape) {
     .ptv-media-dock {
-        right: max(0.6rem, env(safe-area-inset-right));
-        bottom: max(0.6rem, env(safe-area-inset-bottom));
-        max-width: min(42rem, calc(100vw - 1.2rem));
+        right: calc(0.6rem + env(safe-area-inset-right));
+        bottom: calc(0.6rem + env(safe-area-inset-bottom));
+        left: calc(0.6rem + env(safe-area-inset-left));
+        max-width: min(42rem, calc(100vw - 1.2rem - env(safe-area-inset-left) - env(safe-area-inset-right)));
     }
 
     .ptv-media-dock-copy small,

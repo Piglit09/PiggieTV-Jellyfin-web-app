@@ -35,13 +35,23 @@ vi.mock('../../api', async () => {
 
 import {
     getPtvCurrentUserId,
+    getPtvFavoriteItems,
     getPtvItems,
-    requestPtvJson
+    getPtvRecentlyAdded,
+    getPtvResumeItems,
+    getPtvServerId,
+    getPtvUserViews,
+    requestPtvJson,
+    type PtvItemsResult,
+    type PtvLibrary
 } from '../../api';
 import { serializePtvItemFieldProfile } from '../../api/itemFieldProfiles';
 import {
     fetchPtvMusicLyrics,
     fetchPtvMusicPlaylists,
+    fetchPtvMusicTracks,
+    getPtvMusicHome,
+    invalidatePtvMusicHomeCache,
     PTV_MUSIC_PLAYLIST_PROBE_CONCURRENCY
 } from './musicApi';
 import type { PtvMusicItem } from './musicTypes';
@@ -63,8 +73,14 @@ function createAbortError() {
 describe('PiggieTV Music list requests', () => {
     beforeEach(() => {
         vi.mocked(getPtvCurrentUserId).mockReturnValue('user-1');
+        vi.mocked(getPtvServerId).mockReturnValue('server-1');
+        vi.mocked(getPtvFavoriteItems).mockReset();
         vi.mocked(getPtvItems).mockReset();
+        vi.mocked(getPtvRecentlyAdded).mockReset();
+        vi.mocked(getPtvResumeItems).mockReset();
+        vi.mocked(getPtvUserViews).mockReset();
         vi.mocked(requestPtvJson).mockReset();
+        invalidatePtvMusicHomeCache();
     });
 
     it('uses the lean card profile and bounds playlist content probes', async () => {
@@ -209,5 +225,70 @@ describe('PiggieTV Music list requests', () => {
         await expect(fetchPtvMusicLyrics(item)).resolves.toEqual({ Lyrics: null });
         await expect(fetchPtvMusicLyrics(item)).rejects.toBe(timeout);
         expect(requestPtvJson).toHaveBeenCalledTimes(2);
+    });
+
+    it('deduplicates identical in-flight track shelves', async () => {
+        let resolveItems!: (value: { Items: PtvMusicItem[]; TotalRecordCount: number }) => void;
+
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        vi.mocked(getPtvItems).mockImplementation(() => new Promise(resolve => {
+            resolveItems = resolve;
+        }));
+
+        const first = fetchPtvMusicTracks({ SortBy: 'SortName' }, 12);
+        const second = fetchPtvMusicTracks({ SortBy: 'SortName' }, 12);
+
+        await vi.waitFor(() => {
+            expect(getPtvItems).toHaveBeenCalledTimes(1);
+        });
+        resolveItems({
+            Items: [{ Id: 'deduped-track', Name: 'Deduped Track', Type: 'Audio' }],
+            TotalRecordCount: 1
+        });
+
+        await expect(Promise.all([ first, second ])).resolves.toEqual([
+            [ expect.objectContaining({ Id: 'deduped-track' }) ],
+            [ expect.objectContaining({ Id: 'deduped-track' }) ]
+        ]);
+    });
+
+    it('publishes the first usable shelf before library discovery completes', async () => {
+        let resolveViews!: (value: PtvItemsResult<PtvLibrary>) => void;
+        let homeSettled = false;
+        const onProgress = vi.fn();
+
+        vi.mocked(getPtvUserViews).mockImplementation(() => new Promise(resolve => {
+            resolveViews = resolve;
+        }));
+        vi.mocked(getPtvItems).mockResolvedValue({
+            Items: [{ Id: 'recent-track', Name: 'Recent Track', Type: 'Audio' }],
+            TotalRecordCount: 1
+        });
+        vi.mocked(getPtvRecentlyAdded).mockResolvedValue([]);
+        vi.mocked(getPtvResumeItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        vi.mocked(getPtvFavoriteItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+
+        const homeRequest = getPtvMusicHome({
+            forceRefresh: true,
+            initialOnly: true,
+            onProgress
+        }).finally(() => {
+            homeSettled = true;
+        });
+
+        await vi.waitFor(() => {
+            expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
+                completeness: 'initial-usable',
+                isPartial: true,
+                sections: [ expect.objectContaining({ id: 'recently-played' }) ]
+            }));
+        });
+        expect(homeSettled).toBe(false);
+
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        resolveViews({ Items: [], TotalRecordCount: 0 });
+        await expect(homeRequest).resolves.toEqual(expect.objectContaining({
+            completeness: 'initial-usable'
+        }));
     });
 });

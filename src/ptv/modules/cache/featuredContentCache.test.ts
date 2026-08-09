@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const featuredCacheMocks = vi.hoisted(() => ({
+    getPluginApiClient: vi.fn()
+}));
+
 vi.mock('lib/jellyfin-apiclient', () => ({
     ServerConnections: {
         currentApiClient: vi.fn(() => null)
@@ -14,7 +18,7 @@ vi.mock('../../core/observability', () => ({
 }));
 
 vi.mock('../../core/pluginApi', () => ({
-    getCurrentPtvPluginApiClient: vi.fn(() => null),
+    getCurrentPtvPluginApiClient: featuredCacheMocks.getPluginApiClient,
     normalizePtvApiError: vi.fn((error: unknown) => ({
         message: error instanceof Error ? error.message : 'Unknown plugin API error'
     })),
@@ -65,14 +69,61 @@ function createCacheEntry(version: number | string | undefined = 7) {
         payload: createPayload()
     };
 
-    if (version !== undefined) entry.version = version;
+    if (version) entry.version = version;
 
     return entry;
+}
+
+function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>(resolvePromise => {
+        resolve = resolvePromise;
+    });
+
+    return { promise, resolve };
 }
 
 describe('featuredContentCache server document adoption', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
+        featuredCacheMocks.getPluginApiClient.mockReset();
+        featuredCacheMocks.getPluginApiClient.mockReturnValue(null);
+    });
+
+    it('reads featured content without waiting for the diagnostic status request', async () => {
+        const pendingStatus = deferred<Record<string, unknown>>();
+        const pluginApi = {
+            getFeaturedContentCacheDocument: vi.fn().mockResolvedValue({
+                featuredContent: createCacheEntry(7),
+                version: 1
+            }),
+            getStatus: vi.fn(() => pendingStatus.promise)
+        };
+
+        featuredCacheMocks.getPluginApiClient.mockReturnValue(pluginApi);
+        const cache = await loadFeaturedCache();
+
+        cache.invalidateFeaturedContentMemoryCache('test');
+        const payloadPromise = cache.getCachedFeaturedContentPayload();
+        const earlyResult = await Promise.race([
+            payloadPromise.then(payload => ({ payload, source: 'featured' })),
+            new Promise(resolve => window.setTimeout(() => resolve({ payload: null, source: 'deadline' }), 100))
+        ]);
+
+        pendingStatus.resolve({
+            featureFlags: { featuredContent: true },
+            ok: true
+        });
+
+        expect(earlyResult).toMatchObject({
+            source: 'featured'
+        });
+        await expect(payloadPromise).resolves.toMatchObject({
+            heroItems: expect.any(Array),
+            sectionItems: expect.any(Object)
+        });
+        expect(pluginApi.getFeaturedContentCacheDocument).toHaveBeenCalledTimes(1);
+        expect(pluginApi.getStatus).toHaveBeenCalledTimes(1);
     });
 
     it('adopts numeric featured cache version 7 from the plugin document', async () => {

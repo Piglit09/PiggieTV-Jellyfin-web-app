@@ -329,6 +329,26 @@ export default class ConnectionManager {
             });
         };
 
+        function settleRemoteLogout(apiClient) {
+            return new Promise((resolve) => {
+                let settled = false;
+                const finish = () => {
+                    if (settled) {
+                        return;
+                    }
+
+                    settled = true;
+                    clearTimeout(timeoutId);
+                    resolve();
+                };
+                const timeoutId = setTimeout(finish, 10000);
+
+                Promise.resolve()
+                    .then(() => apiClient.logout())
+                    .then(finish, finish);
+            });
+        }
+
         function logoutOfServer(apiClient) {
             const serverInfo = apiClient.serverInfo() || {};
 
@@ -336,14 +356,9 @@ export default class ConnectionManager {
                 serverId: serverInfo.Id
             };
 
-            return apiClient.logout().then(
-                () => {
-                    events.trigger(self, 'localusersignedout', [logoutInfo]);
-                },
-                () => {
-                    events.trigger(self, 'localusersignedout', [logoutInfo]);
-                }
-            );
+            return settleRemoteLogout(apiClient).then(() => {
+                events.trigger(self, 'localusersignedout', [logoutInfo]);
+            });
         }
 
         self.getSavedServers = () => {

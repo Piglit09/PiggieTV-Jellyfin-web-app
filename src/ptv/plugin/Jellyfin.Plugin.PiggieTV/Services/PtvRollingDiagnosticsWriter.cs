@@ -25,6 +25,7 @@ public sealed class PtvRollingDiagnosticsWriter : IPtvRollingDiagnosticsWriter, 
     private readonly Channel<PtvRollingDiagnosticEvent> _channel;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly object _aggregationGate = new();
+    private readonly object _disposeGate = new();
     private readonly Dictionary<string, Aggregation> _aggregations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _duplicateSignatures = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _fileGate = new(1, 1);
@@ -48,6 +49,7 @@ public sealed class PtvRollingDiagnosticsWriter : IPtvRollingDiagnosticsWriter, 
     private DateTimeOffset? _lastRotationUtc;
     private long _rotationsCompleted;
     private long _writeFailures;
+    private Task? _disposeTask;
 
     /// <summary>Initializes the production writer in the plugin configuration directory.</summary>
     public PtvRollingDiagnosticsWriter(IApplicationPaths applicationPaths, ILogger<PtvRollingDiagnosticsWriter> logger)
@@ -322,7 +324,16 @@ public sealed class PtvRollingDiagnosticsWriter : IPtvRollingDiagnosticsWriter, 
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
+    {
+        lock (_disposeGate)
+        {
+            _disposeTask ??= DisposeCoreAsync();
+            return new ValueTask(_disposeTask);
+        }
+    }
+
+    private async Task DisposeCoreAsync()
     {
         _channel.Writer.TryComplete();
         if (_consumerTask is not null) await _consumerTask.ConfigureAwait(false);

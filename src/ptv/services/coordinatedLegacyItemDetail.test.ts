@@ -7,7 +7,12 @@ import {
 } from 'vitest';
 
 const coordinatorState = vi.hoisted(() => ({
-    inFlight: new Map<string, Promise<unknown>>()
+    inFlight: new Map<string, {
+        promise: Promise<unknown>;
+        reuseSuccessfulForMs: number;
+        settled: boolean;
+    }>(),
+    options: [] as Array<{ reuseSuccessfulForMs?: number }>
 }));
 
 vi.mock('../api/client', () => ({
@@ -18,17 +23,31 @@ vi.mock('./requestCoordinator', () => ({
     coordinatePtvJsonRequest<T>(
         key: string,
         task: (signal: AbortSignal) => Promise<T>,
-        options: { signal?: AbortSignal } = {}
+        options: { reuseSuccessfulForMs?: number; signal?: AbortSignal } = {}
     ): Promise<T> {
-        const existing = coordinatorState.inFlight.get(key) as Promise<T> | undefined;
-        if (existing) return existing;
+        coordinatorState.options.push(options);
+        const existing = coordinatorState.inFlight.get(key);
+        if (existing && (!existing.settled || existing.reuseSuccessfulForMs > 0)) {
+            return existing.promise as Promise<T>;
+        }
 
-        const promise = task(options.signal as AbortSignal).finally(() => {
-            if (coordinatorState.inFlight.get(key) === promise) {
+        const entry = {
+            promise: undefined as unknown as Promise<T>,
+            reuseSuccessfulForMs: Number(options.reuseSuccessfulForMs || 0),
+            settled: false
+        };
+        const promise = task(options.signal as AbortSignal).then(value => {
+            entry.settled = true;
+            if (!entry.reuseSuccessfulForMs && coordinatorState.inFlight.get(key) === entry) {
                 coordinatorState.inFlight.delete(key);
             }
+            return value;
+        }, error => {
+            if (coordinatorState.inFlight.get(key) === entry) coordinatorState.inFlight.delete(key);
+            throw error;
         });
-        coordinatorState.inFlight.set(key, promise);
+        entry.promise = promise;
+        coordinatorState.inFlight.set(key, entry);
 
         return promise;
     },
@@ -56,6 +75,7 @@ function createDeferred<T>() {
 describe('coordinated legacy item-detail reads', () => {
     beforeEach(() => {
         coordinatorState.inFlight.clear();
+        coordinatorState.options.length = 0;
         vi.clearAllMocks();
     });
 
@@ -80,7 +100,7 @@ describe('coordinated legacy item-detail reads', () => {
         await expect(second).resolves.toEqual({ Id: 'item-a' });
     });
 
-    it('starts a new request after the shared request settles', async () => {
+    it('reuses a settled item detail through the existing coordinator validity window', async () => {
         const getItem = vi.fn(async (_userId: string, itemId: string) => ({
             Id: itemId
         }));
@@ -93,7 +113,11 @@ describe('coordinated legacy item-detail reads', () => {
         await getCoordinatedLegacyItemDetail(apiClient, 'item-b');
         await getCoordinatedLegacyItemDetail(apiClient, 'item-b');
 
-        expect(getItem).toHaveBeenCalledTimes(2);
+        expect(getItem).toHaveBeenCalledTimes(1);
+        expect(coordinatorState.options).toEqual([
+            expect.objectContaining({ reuseSuccessfulForMs: 3000 }),
+            expect.objectContaining({ reuseSuccessfulForMs: 3000 })
+        ]);
     });
 
     it('isolates requests by item and account scope', async () => {

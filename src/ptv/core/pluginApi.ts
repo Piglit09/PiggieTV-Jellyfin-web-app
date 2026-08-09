@@ -6,6 +6,10 @@ import {
     type PtvCoreRecommendationResponse
 } from './recommendations/recommendationContracts';
 import { normalizePtvPluginRecommendationResponse } from './recommendations/pluginRecommendationBoundary';
+import type {
+    PtvRecommendationPolicyRequest,
+    PtvRecommendationPolicyResponse
+} from './recommendations/recommendationPolicyContracts';
 import {
     classifyPtvRequestUrl,
     isPtvWebpackDevServerOrigin,
@@ -32,6 +36,7 @@ type PtvJellyfinApiClient = {
     getSessions?: (options?: unknown) => Promise<unknown>;
     getUrl?: (name: string, params?: Record<string, unknown>) => string;
     serverAddress?: () => string;
+    serverId?: () => string | null | undefined;
 };
 
 type JsonResponseLike = {
@@ -697,11 +702,11 @@ function setAuthoritativePluginApiRoot(root: string, source: string) {
     authoritativePluginApiRoot = normalizedRoot;
     resolvedPluginApiRoot = normalizedRoot;
     updatePluginApiDiagnostics({
-        authoritativePluginApiRoot,
+        authoritativePluginApiRoot: getPrivacySafePluginDiagnosticOrigin(authoritativePluginApiRoot),
         originDriftWarning: rootChanged ?
             `Plugin API root updated after ${source}.` :
             pluginApiDiagnostics.originDriftWarning,
-        resolvedRoot: resolvedPluginApiRoot
+        resolvedRoot: getPrivacySafePluginDiagnosticOrigin(resolvedPluginApiRoot)
     });
 
     return authoritativePluginApiRoot;
@@ -715,6 +720,16 @@ function getEndpointName(path: string) {
     if (normalizedPath.endsWith('/settings')) return 'settings';
     if (normalizedPath.endsWith('/featured/refresh') || normalizedPath.endsWith('/featuredcontent/refresh')) return 'featuredContentRefresh';
     if (normalizedPath.endsWith('/featured') || normalizedPath.endsWith('/featuredcontent')) return 'featuredContent';
+
+    const configuredEndpoint = Object.entries(PTV_PLUGIN_API.endpoints)
+        .sort((left, right) => right[1].length - left[1].length)
+        .find(([, endpointPath]) => {
+            const normalizedEndpoint = normalizePluginPath(endpointPath).toLowerCase();
+
+            return normalizedPath === normalizedEndpoint || normalizedPath.startsWith(`${normalizedEndpoint}/`);
+        });
+
+    if (configuredEndpoint) return configuredEndpoint[0];
 
     return normalizedPath;
 }
@@ -878,8 +893,9 @@ function updatePluginApiDiagnostics(nextDiagnostics: Partial<PtvPluginApiDiagnos
     };
 }
 
-function notePluginApiAttempt(url: string, candidates: string[]) {
-    const attemptedUrls = [...pluginApiDiagnostics.attemptedUrls, url].slice(-40);
+function notePluginApiAttempt(url: string, candidates: string[], path: string) {
+    const diagnosticUrl = getSanitizedPluginDiagnosticUrl(url, path);
+    const attemptedUrls = [...pluginApiDiagnostics.attemptedUrls, diagnosticUrl].slice(-40);
     const originDetail = classifyPtvRequestUrl(url, {
         jellyfinRoot: authoritativePluginApiRoot || resolvedPluginApiRoot || getConfiguredJellyfinRoot(),
         pluginRoot: authoritativePluginApiRoot || resolvedPluginApiRoot || getConfiguredJellyfinRoot()
@@ -888,9 +904,9 @@ function notePluginApiAttempt(url: string, candidates: string[]) {
     const attemptedOrigins = [
         ...pluginApiDiagnostics.attemptedOrigins,
         {
-            origin: originDetail.origin,
+            origin: getPrivacySafePluginDiagnosticOrigin(originDetail.origin) || '',
             originKind,
-            url
+            url: diagnosticUrl
         }
     ].slice(-40);
     const pluginApiOrigins = Array.from(new Set(attemptedOrigins
@@ -911,30 +927,49 @@ function notePluginApiAttempt(url: string, candidates: string[]) {
 
     const allCandidates = [...pluginApiDiagnostics.candidates];
 
-    candidates.forEach(candidate => {
-        if (!allCandidates.includes(candidate)) {
-            allCandidates.push(candidate);
+    candidates.forEach(() => {
+        if (!allCandidates.includes(diagnosticUrl)) {
+            allCandidates.push(diagnosticUrl);
         }
     });
 
     updatePluginApiDiagnostics({
         attemptedOrigins,
-        attemptedUrl: url,
+        attemptedUrl: diagnosticUrl,
         attemptedUrls,
-        authoritativePluginApiRoot,
+        authoritativePluginApiRoot: getPrivacySafePluginDiagnosticOrigin(authoritativePluginApiRoot),
         candidates: allCandidates.slice(-40),
         originDriftWarning
     });
 
-    debugLog('trying plugin endpoint', { originKind, url });
+    debugLog('trying plugin endpoint', { endpoint: getEndpointName(path), originKind });
 }
 
-function getSanitizedPluginDiagnosticUrl(url: string) {
-    try {
-        return getAnchorUrl(url).pathname || `/${normalizePluginPath(url)}`;
-    } catch {
-        return `/${normalizePluginPath(url)}`;
+function getPrivacySafePluginDiagnosticOrigin(origin: string | null) {
+    if (!origin) return null;
+
+    let hash = 0x811c9dc5;
+
+    for (let index = 0; index < origin.length; index += 1) {
+        hash ^= origin.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
     }
+
+    return `origin#${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function getSanitizedPluginDiagnosticUrl(_url: string, path: string) {
+    return `endpoint:${getEndpointName(path)}`;
+}
+
+function getPrivacySafePluginDiagnosticError(error: PtvNormalizedApiError, endpoint: string) {
+    return {
+        endpoint,
+        kind: error.kind,
+        message: `Plugin request failed (${error.kind}).`,
+        status: error.status,
+        url: `endpoint:${endpoint}`
+    } satisfies PtvNormalizedApiError;
 }
 
 function getPluginRequestDuration(startedAt: number) {
@@ -950,6 +985,7 @@ function notePluginApiSuccess(
 ) {
     const resolvedRoot = getRootForResolvedPath(url, path);
     const endpoint = getEndpointName(path);
+    const diagnosticUrl = getSanitizedPluginDiagnosticUrl(url, path);
     const attemptedResponses = [
         ...pluginApiDiagnostics.attemptedResponses,
         {
@@ -958,7 +994,7 @@ function notePluginApiSuccess(
             ok: true,
             responseBody: null,
             status,
-            url: getSanitizedPluginDiagnosticUrl(url)
+            url: diagnosticUrl
         }
     ].slice(-40);
 
@@ -969,17 +1005,17 @@ function notePluginApiSuccess(
     }
 
     updatePluginApiDiagnostics({
-        authoritativePluginApiRoot,
+        authoritativePluginApiRoot: getPrivacySafePluginDiagnosticOrigin(authoritativePluginApiRoot),
         attemptedResponses,
-        attemptedUrl: url,
-        candidates: [...candidates],
+        attemptedUrl: diagnosticUrl,
+        candidates: candidates.length ? [diagnosticUrl] : [],
         lastError: null,
         lastFailedEndpoint: null,
         lastFailedStatusCode: null,
         lastSuccessfulEndpoint: endpoint,
         originDriftWarning: null,
-        resolvedRoot: resolvedPluginApiRoot,
-        resolvedUrl: url
+        resolvedRoot: getPrivacySafePluginDiagnosticOrigin(resolvedPluginApiRoot),
+        resolvedUrl: diagnosticUrl
     });
 
     debugLog('resolved plugin endpoint', pluginApiDiagnostics);
@@ -994,33 +1030,34 @@ function notePluginApiFailure(
 ) {
     const endpoint = getEndpointName(path);
     const normalizedError = withEndpointErrorDetail(err, endpoint, url);
+    const diagnosticError = getPrivacySafePluginDiagnosticError(normalizedError, endpoint);
+    const diagnosticUrl = getSanitizedPluginDiagnosticUrl(url, path);
     const attemptedResponses = [
         ...pluginApiDiagnostics.attemptedResponses,
         {
             durationMs,
             endpoint,
             ok: false,
-            responseBody: normalizedError.responseBody || null,
+            responseBody: null,
             status: normalizedError.status || null,
-            url: getSanitizedPluginDiagnosticUrl(url)
+            url: diagnosticUrl
         }
     ].slice(-40);
 
     updatePluginApiDiagnostics({
         attemptedResponses,
-        authoritativePluginApiRoot,
-        candidates: [...candidates],
-        lastError: normalizedError,
-        lastFailedEndpoint: normalizedError.endpoint || null,
+        authoritativePluginApiRoot: getPrivacySafePluginDiagnosticOrigin(authoritativePluginApiRoot),
+        candidates: candidates.length ? [diagnosticUrl] : [],
+        lastError: diagnosticError,
+        lastFailedEndpoint: endpoint,
         lastFailedStatusCode: normalizedError.status || null,
-        lastResponseBody: normalizedError.responseBody || null
+        lastResponseBody: null
     });
 
     debugLog('plugin endpoint failed', {
-        error: normalizedError.message,
-        responseBody: normalizedError.responseBody || null,
+        errorCategory: normalizedError.kind,
         status: normalizedError.status || null,
-        url
+        endpoint
     });
 }
 
@@ -1059,13 +1096,34 @@ export function recordPtvPluginApiRetryState(retryCount: number, retryBackoffMs:
 export function getPtvPluginApiDiagnostics(): PtvPluginApiDiagnostics {
     return {
         ...pluginApiDiagnostics,
-        attemptedOrigins: [...pluginApiDiagnostics.attemptedOrigins],
-        attemptedResponses: [...pluginApiDiagnostics.attemptedResponses],
-        attemptedUrls: [...pluginApiDiagnostics.attemptedUrls],
-        candidates: [...pluginApiDiagnostics.candidates],
-        lastError: pluginApiDiagnostics.lastError ? { ...pluginApiDiagnostics.lastError } : null,
+        attemptedOrigins: pluginApiDiagnostics.attemptedOrigins.map(attempt => ({
+            origin: attempt.origin.startsWith('origin#') ? attempt.origin : getPrivacySafePluginDiagnosticOrigin(attempt.origin) || '',
+            originKind: attempt.originKind,
+            url: attempt.url.startsWith('endpoint:') ? attempt.url : 'endpoint:unknown'
+        })),
+        attemptedResponses: pluginApiDiagnostics.attemptedResponses.map(attempt => ({
+            ...attempt,
+            responseBody: null,
+            url: attempt.url.startsWith('endpoint:') ? attempt.url : 'endpoint:unknown'
+        })),
+        attemptedUrl: pluginApiDiagnostics.attemptedUrl?.startsWith('endpoint:') ? pluginApiDiagnostics.attemptedUrl : null,
+        attemptedUrls: pluginApiDiagnostics.attemptedUrls
+            .filter(value => value.startsWith('endpoint:')),
+        authoritativePluginApiRoot: pluginApiDiagnostics.authoritativePluginApiRoot ? 'state:resolved' : null,
+        candidates: pluginApiDiagnostics.candidates.filter(value => value.startsWith('endpoint:')),
+        lastError: pluginApiDiagnostics.lastError ? getPrivacySafePluginDiagnosticError(
+            pluginApiDiagnostics.lastError,
+            pluginApiDiagnostics.lastError.endpoint || 'unknown'
+        ) : null,
+        lastResponseBody: null,
+        resolvedRoot: pluginApiDiagnostics.resolvedRoot ? 'state:resolved' : null,
+        resolvedUrl: pluginApiDiagnostics.resolvedUrl?.startsWith('endpoint:') ? pluginApiDiagnostics.resolvedUrl : null,
         startupReasonCounts: { ...pluginApiDiagnostics.startupReasonCounts }
     };
+}
+
+export function getPtvPluginApiResolvedRoot() {
+    return authoritativePluginApiRoot || resolvedPluginApiRoot;
 }
 
 export function getPtvPluginApiResolvedUrl(
@@ -1216,7 +1274,7 @@ function requestPluginJson<T>(
         const startedAt = performance.now();
         let responseStatus = 200;
 
-        notePluginApiAttempt(url, candidates);
+        notePluginApiAttempt(url, candidates, path);
 
         let request: Promise<unknown> | undefined;
 
@@ -1491,6 +1549,26 @@ function createRowsValidationCompatibilityResponse(settings: unknown) {
     };
 }
 
+const pluginStatusListeners = new Set<(status: unknown) => void>();
+
+function publishPtvPluginStatus(status: unknown) {
+    pluginStatusListeners.forEach(listener => {
+        try {
+            listener(status);
+        } catch {
+            // A presentation consumer must never fail the authoritative request.
+        }
+    });
+}
+
+export function subscribePtvPluginStatus(listener: (status: unknown) => void) {
+    pluginStatusListeners.add(listener);
+
+    return () => {
+        pluginStatusListeners.delete(listener);
+    };
+}
+
 export function resetPtvPluginApiAvailability() {
     pluginUnavailableUntil = 0;
     authoritativePluginApiRoot = null;
@@ -1531,6 +1609,9 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
     if (!apiClient?.getUrl) return null;
 
     return {
+        getCurrentServerId() {
+            return typeof apiClient.serverId === 'function' ? apiClient.serverId() : null;
+        },
         getCurrentUserId() {
             return typeof apiClient.getCurrentUserId === 'function' ? apiClient.getCurrentUserId() : null;
         },
@@ -1573,6 +1654,20 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 userId: apiClient.getCurrentUserId?.() || 'current-user'
             }) as T);
         },
+        rankRecommendations(
+            request: PtvRecommendationPolicyRequest,
+            options?: PtvPluginRequestOptions
+        ) {
+            return requestPluginJson<PtvRecommendationPolicyResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.recommendationPolicyRank,
+                {
+                    ...options,
+                    body: request,
+                    method: 'POST'
+                }
+            );
+        },
         searchMusicMetadata<T = unknown>(params: Record<string, unknown>, options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
                 apiClient,
@@ -1611,8 +1706,51 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 }
             );
         },
+        getItemRelationships<T = unknown>(sourceItemId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.relationships}/${encodeURIComponent(sourceItemId)}`,
+                options
+            );
+        },
+        createItemRelationship<TResponse = unknown, TBody = unknown>(body: TBody, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.relationships,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        updateItemRelationship<TResponse = unknown, TBody = unknown>(mappingId: string, body: TBody, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.relationships}/${encodeURIComponent(mappingId)}`,
+                {
+                    ...options,
+                    body,
+                    method: 'PUT'
+                }
+            );
+        },
+        deleteItemRelationship(mappingId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<void>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.relationships}/${encodeURIComponent(mappingId)}`,
+                {
+                    ...options,
+                    method: 'DELETE'
+                }
+            );
+        },
         getStatus<T = unknown>(options?: PtvPluginRequestOptions) {
-            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.status, options);
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.status, options)
+                .then(status => {
+                    publishPtvPluginStatus(status);
+                    return status;
+                });
         },
         checkInRemoteDiagnostics<TResponse = unknown, TPresence = unknown>(presence: TPresence, options?: PtvPluginRequestOptions) {
             return requestPluginJson<TResponse>(

@@ -181,6 +181,7 @@ export type PtvPhysicalLayoutSnapshot = {
         frontendBuildId: string;
         frontendCommitSha: string;
         jellyfinWebVersion: string;
+        ptvWebVersion: string;
     };
     capability: 'physicalLayoutSnapshot';
     cssOwnership: {

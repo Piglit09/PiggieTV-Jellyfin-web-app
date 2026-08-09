@@ -38,6 +38,12 @@ type PlaybackReportContext = {
     runtimeTicks: number;
     volumeLevel: number;
 };
+type PreloadedMusicTrack = {
+    audio: HTMLAudioElement;
+    format: string;
+    itemKey: string;
+    playSessionId: string;
+};
 
 const TICKS_PER_SECOND = 10000000;
 const MUSIC_PLAYER_HASH = '#/music/player';
@@ -45,6 +51,7 @@ const MUSIC_QUEUE_ACTIVITY_EVENT = 'ptv:music-queue-activity';
 const DEFAULT_PTV_MUSIC_VOLUME_LEVEL = 50;
 const DEFAULT_PTV_MUSIC_VOLUME = DEFAULT_PTV_MUSIC_VOLUME_LEVEL / 100;
 const MUSIC_QUEUE_PROGRESS_PUBLISH_INTERVAL_MS = 1000;
+const MUSIC_NEXT_TRACK_PRELOAD_DELAY_MS = 180;
 const DIRECT_AUDIO_CONTAINERS = [
     'mp3',
     'flac',
@@ -65,6 +72,8 @@ const noisyQueueUpdateActions = new Set([
 type QueueNextOutcome = 'repeat-one' | 'playlist-next' | 'virtual-next' | 'none';
 
 let audioElement: HTMLAudioElement | null = null;
+let cachedPlaylistSnapshot: ReadonlyArray<PtvMusicQueueItem> = [];
+let cachedPlaylistSnapshotRevision = -1;
 let autoQueueSeedItem: PtvMusicItem | null = null;
 let autoQueueSeedRevision = 0;
 let currentIndex = -1;
@@ -73,6 +82,7 @@ let currentPlayPromise: Promise<unknown> | null = null;
 let currentPlaySessionId = '';
 let currentStreamMode: StreamMode = 'universal';
 let hasTriedDownloadFallback = false;
+let isLoading = false;
 let isShuffled = false;
 let lastProgressReportAt = 0;
 let lastQueueProgressPublishAt = 0;
@@ -96,6 +106,9 @@ let lastContinuityRestoreIdentityKey = '';
 let lastPlaybackError: string | null = null;
 let pendingContinuityIdentityKey = '';
 let pendingContinuitySnapshot: PtvMusicQueueSnapshot | null = null;
+let playlistRevision = 0;
+let preloadedMusicTrack: PreloadedMusicTrack | null = null;
+let preloadTimerId = 0;
 
 type MusicPlaybackNavigationContext = {
     index: number;
@@ -150,32 +163,191 @@ function isSameMusicItem(left: PtvMusicItem | null | undefined, right: PtvMusicI
     return getMusicItemKey(left) === getMusicItemKey(right);
 }
 
+function cloneQueueSnapshotItem<T extends PtvMusicItem | PtvMusicQueueItem>(item: T): T {
+    const mediaSources = item.MediaSources?.map(mediaSource => Object.freeze({ ...mediaSource }));
+    const userData = item.UserData ? Object.freeze({ ...item.UserData }) : item.UserData;
+
+    return Object.freeze({
+        ...item,
+        MediaSources: mediaSources,
+        UserData: userData
+    }) as T;
+}
+
+function invalidatePlaylistSnapshot() {
+    playlistRevision += 1;
+}
+
+function getPlaylistSnapshot() {
+    if (cachedPlaylistSnapshotRevision !== playlistRevision) {
+        cachedPlaylistSnapshot = playlist.map(cloneQueueSnapshotItem);
+        cachedPlaylistSnapshotRevision = playlistRevision;
+    }
+
+    return cachedPlaylistSnapshot.slice() as PtvMusicQueueItem[];
+}
+
+function getMusicPlaybackFormat(item: PtvMusicItem | null | undefined) {
+    const audioStream = item?.MediaSources
+        ?.flatMap(source => source.MediaStreams || [])
+        .find(stream => String(stream.Type || '').toLowerCase() === 'audio');
+
+    return String(
+        audioStream?.Codec
+        || item?.Container
+        || item?.MediaSources?.[0]?.Container
+        || ''
+    ).split(',')[0].trim().toLowerCase();
+}
+
+function areGaplessMusicTracksCompatible(left: PtvMusicItem | null, right: PtvMusicItem) {
+    const leftFormat = getMusicPlaybackFormat(left);
+    const rightFormat = getMusicPlaybackFormat(right);
+
+    return leftFormat === rightFormat;
+}
+
+function clearPreloadedMusicTrack() {
+    if (preloadTimerId) {
+        window.clearTimeout(preloadTimerId);
+        preloadTimerId = 0;
+    }
+
+    const preload = preloadedMusicTrack;
+
+    preloadedMusicTrack = null;
+    if (!preload) return;
+
+    try {
+        preload.audio.pause();
+        preload.audio.removeAttribute('src');
+        preload.audio.remove();
+    } catch {
+        // Preloading is opportunistic and must never interrupt playback.
+    }
+}
+
+function setPlaybackLoading(nextLoading: boolean) {
+    if (isLoading === nextLoading) return false;
+
+    isLoading = nextLoading;
+
+    return true;
+}
+
+function publishPlaybackLoading(nextLoading: boolean, action: string) {
+    if (nextLoading && (!currentItem || !audioElement?.getAttribute('src'))) return;
+
+    if (setPlaybackLoading(nextLoading)) {
+        emitQueueUpdated(action);
+    }
+}
+
+function isActiveAudioEvent(event: Event) {
+    return event.currentTarget === audioElement;
+}
+
+function onActiveAudioDurationChange(event: Event) {
+    if (isActiveAudioEvent(event)) emitQueueUpdated('duration');
+}
+
+function onActiveAudioCanPlay(event: Event) {
+    if (isActiveAudioEvent(event)) publishPlaybackLoading(false, 'canplay');
+}
+
+function onActiveAudioLoadStart(event: Event) {
+    if (isActiveAudioEvent(event)) publishPlaybackLoading(true, 'loadstart');
+}
+
+function onActiveAudioPause(event: Event) {
+    if (!isActiveAudioEvent(event)) return;
+
+    setPlaybackLoading(false);
+    emitQueueUpdated('pause');
+}
+
+function onActiveAudioPlay(event: Event) {
+    if (isActiveAudioEvent(event)) emitQueueUpdated('play');
+}
+
+function onActiveAudioPlaying(event: Event) {
+    if (!isActiveAudioEvent(event)) return;
+
+    setPlaybackLoading(false);
+    emitQueueUpdated('playing');
+}
+
+function onActiveAudioStalled(event: Event) {
+    if (isActiveAudioEvent(event)) publishPlaybackLoading(true, 'stalled');
+}
+
+function onActiveAudioTimeUpdate(event: Event) {
+    if (!isActiveAudioEvent(event)) return;
+
+    reportPlaybackProgressThrottled();
+    const now = Date.now();
+
+    if (now - lastQueueProgressPublishAt >= MUSIC_QUEUE_PROGRESS_PUBLISH_INTERVAL_MS) {
+        lastQueueProgressPublishAt = now;
+        emitQueueUpdated('timeupdate');
+    }
+}
+
+function onActiveAudioVolumeChange(event: Event) {
+    if (isActiveAudioEvent(event)) emitQueueUpdated('volume');
+}
+
+function onActiveAudioWaiting(event: Event) {
+    if (isActiveAudioEvent(event)) publishPlaybackLoading(true, 'waiting');
+}
+
+function bindActiveAudioEvents(audio: HTMLAudioElement) {
+    audio.addEventListener('durationchange', onActiveAudioDurationChange);
+    audio.addEventListener('canplay', onActiveAudioCanPlay);
+    audio.addEventListener('ended', onNativeEnded);
+    audio.addEventListener('error', onNativeError);
+    audio.addEventListener('loadstart', onActiveAudioLoadStart);
+    audio.addEventListener('pause', onActiveAudioPause);
+    audio.addEventListener('play', onActiveAudioPlay);
+    audio.addEventListener('playing', onActiveAudioPlaying);
+    audio.addEventListener('stalled', onActiveAudioStalled);
+    audio.addEventListener('timeupdate', onActiveAudioTimeUpdate);
+    audio.addEventListener('volumechange', onActiveAudioVolumeChange);
+    audio.addEventListener('waiting', onActiveAudioWaiting);
+}
+
+function unbindActiveAudioEvents(audio: HTMLAudioElement) {
+    audio.removeEventListener('durationchange', onActiveAudioDurationChange);
+    audio.removeEventListener('canplay', onActiveAudioCanPlay);
+    audio.removeEventListener('ended', onNativeEnded);
+    audio.removeEventListener('error', onNativeError);
+    audio.removeEventListener('loadstart', onActiveAudioLoadStart);
+    audio.removeEventListener('pause', onActiveAudioPause);
+    audio.removeEventListener('play', onActiveAudioPlay);
+    audio.removeEventListener('playing', onActiveAudioPlaying);
+    audio.removeEventListener('stalled', onActiveAudioStalled);
+    audio.removeEventListener('timeupdate', onActiveAudioTimeUpdate);
+    audio.removeEventListener('volumechange', onActiveAudioVolumeChange);
+    audio.removeEventListener('waiting', onActiveAudioWaiting);
+}
+
+function createHiddenMusicAudioElement() {
+    const audio = document.createElement('audio');
+
+    audio.preload = 'auto';
+    audio.volume = DEFAULT_PTV_MUSIC_VOLUME;
+    audio.style.display = 'none';
+    document.body.append(audio);
+
+    return audio;
+}
+
 function getAudioElement() {
     if (audioElement) return audioElement;
 
-    audioElement = document.createElement('audio');
+    audioElement = createHiddenMusicAudioElement();
     audioElement.dataset.ptvMusicNativePlayer = 'true';
-    audioElement.preload = 'auto';
-    audioElement.volume = DEFAULT_PTV_MUSIC_VOLUME;
-    audioElement.style.display = 'none';
-    document.body.append(audioElement);
-
-    audioElement.addEventListener('durationchange', () => emitQueueUpdated('duration'));
-    audioElement.addEventListener('ended', onNativeEnded);
-    audioElement.addEventListener('error', onNativeError);
-    audioElement.addEventListener('pause', () => emitQueueUpdated('pause'));
-    audioElement.addEventListener('play', () => emitQueueUpdated('play'));
-    audioElement.addEventListener('playing', () => emitQueueUpdated('playing'));
-    audioElement.addEventListener('timeupdate', () => {
-        reportPlaybackProgressThrottled();
-        const now = Date.now();
-
-        if (now - lastQueueProgressPublishAt >= MUSIC_QUEUE_PROGRESS_PUBLISH_INTERVAL_MS) {
-            lastQueueProgressPublishAt = now;
-            emitQueueUpdated('timeupdate');
-        }
-    });
-    audioElement.addEventListener('volumechange', () => emitQueueUpdated('volume'));
+    bindActiveAudioEvents(audioElement);
 
     recordPtvEvent('render', 'music-native-player-created', {
         engine: 'html-audio'
@@ -222,6 +394,7 @@ function getCurrentQueueIdentityKey() {
 }
 
 function resetQueueState() {
+    clearPreloadedMusicTrack();
     autoQueueSeedItem = null;
     autoQueueSeedRevision += 1;
     currentIndex = -1;
@@ -230,6 +403,7 @@ function resetQueueState() {
     currentPlaySessionId = '';
     currentStreamMode = 'universal';
     hasTriedDownloadFallback = false;
+    isLoading = false;
     isShuffled = false;
     lastEndedAt = 0;
     lastEndedNavigationToken = 0;
@@ -244,6 +418,7 @@ function resetQueueState() {
     virtualQueueCursor = 0;
     virtualQueueSeedId = '';
     activePlaybackContext = null;
+    invalidatePlaylistSnapshot();
 }
 
 function retireQueueForIdentityChange(reason: string) {
@@ -444,6 +619,7 @@ async function restorePtvMusicQueueContinuity() {
 
         playlist = restoredItems.map((item, index) => normalizeQueueItem(item, index));
         sourcePlaylist = playlist.slice();
+        invalidatePlaylistSnapshot();
         const restoredCurrentIndex = playlist.findIndex(item => item.Id === restoredQueue.currentItemId);
 
         currentIndex = restoredCurrentIndex >= 0 ?
@@ -507,7 +683,16 @@ function getCurrentRuntimeTicks() {
     return Number(currentItem?.RunTimeTicks || 0);
 }
 
-function getAudioStreamUrl(item: PtvMusicItem, startTicks = 0, mode: StreamMode = 'universal') {
+function createNativePlaySessionId() {
+    return String(++nativePlaySessionSeed);
+}
+
+function getAudioStreamUrl(
+    item: PtvMusicItem,
+    startTicks = 0,
+    mode: StreamMode = 'universal',
+    playSessionId = currentPlaySessionId || createNativePlaySessionId()
+) {
     if (!item.Id) {
         throw new Error('Cannot play a Jellyfin music item without an Id.');
     }
@@ -522,8 +707,6 @@ function getAudioStreamUrl(item: PtvMusicItem, startTicks = 0, mode: StreamMode 
         return apiClient.getItemDownloadUrl(item.Id);
     }
 
-    currentPlaySessionId = String(++nativePlaySessionSeed);
-
     return apiClient.getUrl(`Audio/${item.Id}/universal`, {
         ApiKey: apiClient.accessToken?.() || '',
         AudioCodec: 'mp3,aac,opus,flac',
@@ -533,12 +716,115 @@ function getAudioStreamUrl(item: PtvMusicItem, startTicks = 0, mode: StreamMode 
         EnableRedirection: true,
         EnableRemoteMedia: true,
         MaxStreamingBitrate: 140000000,
-        PlaySessionId: currentPlaySessionId,
+        PlaySessionId: playSessionId,
         StartTimeTicks: Math.max(0, Math.round(startTicks)),
         TranscodingContainer: 'mp3',
         TranscodingProtocol: 'http',
         UserId: apiClient.getCurrentUserId?.() || getPtvCurrentUserId(item.ServerId)
     });
+}
+
+function getNextMusicPreloadItem() {
+    if (repeatMode === 'RepeatOne') return null;
+
+    const nextIndex = getNextPlaylistIndex();
+
+    if (nextIndex >= 0) return playlist[nextIndex] || null;
+
+    return virtualQueue[virtualQueueCursor] || null;
+}
+
+function prepareNextMusicTrack() {
+    preloadTimerId = 0;
+    const nextItem = getNextMusicPreloadItem();
+
+    if (!currentItem || !nextItem?.Id || currentStreamMode !== 'universal') {
+        clearPreloadedMusicTrack();
+        return;
+    }
+
+    const itemKey = getMusicItemKey(nextItem);
+
+    if (preloadedMusicTrack?.itemKey === itemKey) return;
+
+    clearPreloadedMusicTrack();
+    const preloadAudio = createHiddenMusicAudioElement();
+    const playSessionId = createNativePlaySessionId();
+
+    preloadAudio.dataset.ptvMusicNativePreload = 'true';
+    preloadAudio.muted = true;
+
+    try {
+        preloadAudio.src = getAudioStreamUrl(nextItem, 0, 'universal', playSessionId);
+        preloadedMusicTrack = {
+            audio: preloadAudio,
+            format: getMusicPlaybackFormat(nextItem),
+            itemKey,
+            playSessionId
+        };
+        preloadAudio.load();
+        recordPtvEvent('playback', 'music-next-track-preload-started', {
+            format: preloadedMusicTrack.format || null,
+            surface: 'music-native-player'
+        });
+    } catch (error) {
+        preloadAudio.remove();
+        preloadedMusicTrack = null;
+        recordPtvEvent('playback', 'music-next-track-preload-failed', {
+            reason: error instanceof Error ? error.name : 'unknown-error',
+            surface: 'music-native-player'
+        });
+    }
+}
+
+function scheduleNextMusicTrackPreload() {
+    if (preloadTimerId) window.clearTimeout(preloadTimerId);
+
+    preloadTimerId = window.setTimeout(prepareNextMusicTrack, MUSIC_NEXT_TRACK_PRELOAD_DELAY_MS);
+}
+
+function takePreloadedMusicTrack(item: PtvMusicItem, outgoingItem: PtvMusicItem | null) {
+    const preload = preloadedMusicTrack;
+
+    if (!preload || preload.itemKey !== getMusicItemKey(item)) return null;
+    if (
+        preload.audio.error
+        || preload.audio.readyState < 2
+        || !areGaplessMusicTracksCompatible(outgoingItem, item)
+    ) {
+        clearPreloadedMusicTrack();
+        return null;
+    }
+
+    preloadedMusicTrack = null;
+    const previousAudio = audioElement;
+    const previousVolume = previousAudio?.volume ?? DEFAULT_PTV_MUSIC_VOLUME;
+    const previousMuted = previousAudio?.muted ?? false;
+
+    if (previousAudio && previousAudio !== preload.audio) {
+        unbindActiveAudioEvents(previousAudio);
+        try {
+            previousAudio.pause();
+            previousAudio.removeAttribute('src');
+            previousAudio.remove();
+        } catch {
+            // The prepared element remains usable if the old element is already gone.
+        }
+    }
+
+    audioElement = preload.audio;
+    delete audioElement.dataset.ptvMusicNativePreload;
+    audioElement.dataset.ptvMusicNativePlayer = 'true';
+    audioElement.muted = previousMuted;
+    audioElement.volume = previousVolume;
+    bindActiveAudioEvents(audioElement);
+    currentPlaySessionId = preload.playSessionId;
+    recordPtvEvent('playback', 'music-next-track-preload-promoted', {
+        format: preload.format || null,
+        surface: 'music-native-player'
+    });
+
+    return audioElement;
 }
 
 function emitQueueUpdated(action: string) {
@@ -688,6 +974,7 @@ function appendVirtualQueueToPlaylist(item: PtvMusicItem) {
     ];
     sourcePlaylist = playlist.slice();
     currentIndex = Math.max(0, currentIndex + 1);
+    invalidatePlaylistSnapshot();
 }
 
 function promoteVirtualQueueToAutoplay(seedItem: PtvMusicItem | null, source: string) {
@@ -706,6 +993,7 @@ function promoteVirtualQueueToAutoplay(seedItem: PtvMusicItem | null, source: st
     currentIndex = 0;
     queueSourceLabel = 'Related autoplay';
     virtualQueueCursor = virtualQueue.length;
+    invalidatePlaylistSnapshot();
 
     recordPtvEvent('render', 'music-related-autoplay-queue-set', {
         count: Math.max(0, playlist.length - 1),
@@ -719,15 +1007,22 @@ function promoteVirtualQueueToAutoplay(seedItem: PtvMusicItem | null, source: st
 
 function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'universal', options: PlayOptions = {}): Promise<unknown> {
     const item = playlist[currentIndex];
-    const audio = getAudioElement();
+    let audio = getAudioElement();
     const playToken = ++playbackRunToken;
+    const playbackRequestedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ?
+        performance.now() :
+        Date.now();
+    let usedPreloadedTrack = false;
+    const outgoingItem = currentItem;
     const outgoingContext = currentItem && item && !isSameMusicItem(currentItem, item) ?
         capturePlaybackReportContext(currentItem) :
         null;
 
     if (!item) {
+        clearPreloadedMusicTrack();
         currentItem = null;
         lastPlaybackError = null;
+        setPlaybackLoading(false);
         audio.pause();
         audio.removeAttribute('src');
         audio.load();
@@ -746,9 +1041,22 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
     lastProgressReportAt = 0;
 
     try {
-        audio.pause();
-        audio.src = getAudioStreamUrl(item, startTicks, mode);
-        audio.load();
+        const preparedAudio = startTicks === 0 && mode === 'universal' ?
+            takePreloadedMusicTrack(item, outgoingItem) :
+            null;
+
+        if (preparedAudio) {
+            audio = preparedAudio;
+            usedPreloadedTrack = true;
+            setPlaybackLoading(false);
+        } else {
+            clearPreloadedMusicTrack();
+            currentPlaySessionId = createNativePlaySessionId();
+            audio.pause();
+            audio.src = getAudioStreamUrl(item, startTicks, mode, currentPlaySessionId);
+            setPlaybackLoading(true);
+            audio.load();
+        }
     } catch (error) {
         return handleNativePlaybackError(error, 'load', options, playToken, item, autoplay);
     }
@@ -766,6 +1074,7 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
                 return emitQueueUpdated('play-start-ignored');
             }
 
+            setPlaybackLoading(false);
             reportPlayback('reportPlaybackStart', item);
             recordPtvEvent('render', 'music-player-started', {
                 codec: String(item.Container || ''),
@@ -773,6 +1082,19 @@ function loadCurrentItem(autoplay = true, startTicks = 0, mode: StreamMode = 'un
                 itemId: item.Id || null,
                 queueCount: playlist.length
             });
+            const playbackStartedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ?
+                performance.now() :
+                Date.now();
+
+            recordPtvEvent('playback', 'music-premium-playback-started', {
+                fallbackReason: mode === 'download' ? 'download-fallback' : 'none',
+                itemCount: playlist.length,
+                latencyMs: Number((playbackStartedAt - playbackRequestedAt).toFixed(1)),
+                playbackPolicyId: 'ptv-music-preload-v1',
+                preloadPromoted: usedPreloadedTrack,
+                surface: 'music-native-player'
+            });
+            scheduleNextMusicTrackPreload();
             return emitQueueUpdated('play-started');
         })
         .catch(error => handleNativePlaybackError(error, 'play', options, playToken, item))
@@ -803,6 +1125,8 @@ function handleNativePlaybackError(
         });
         return Promise.resolve();
     }
+
+    setPlaybackLoading(false);
 
     const item = currentItem;
     const message = error instanceof Error ? error.message : String(error);
@@ -876,6 +1200,7 @@ function onNativeEnded() {
         return;
     }
 
+    setPlaybackLoading(false);
     lastEndedNavigationToken = endedRunToken;
     lastEndedAt = now;
 
@@ -998,17 +1323,19 @@ export function getPtvMusicQueueSnapshot(): PtvMusicQueueSnapshot {
         currentIndex,
         currentItem: cloneItem(currentItem),
         isAudio: Boolean(currentItem),
+        isLoading,
         isMuted: audio.muted,
         isPlaying: Boolean(currentItem && !audio.paused && !audio.ended),
         isShuffled,
         playbackError: lastPlaybackError,
-        playlist: playlist.map(item => cloneItem(item)),
+        playlist: getPlaylistSnapshot(),
         positionTicks: getCurrentPositionTicks(),
+        queueRevision: playlistRevision,
         queueSourceLabel,
         repeatMode,
         runtimeTicks: getCurrentRuntimeTicks(),
         volumeLevel: Math.round(audio.volume * 100)
-    };
+    } as PtvMusicQueueSnapshot & { queueRevision: number };
 }
 
 export function getPtvMusicVirtualQueue() {
@@ -1034,6 +1361,7 @@ export function setPtvMusicVirtualQueue(seedItem: PtvMusicItem | null, items: Pt
     });
 
     promoteVirtualQueueToAutoplay(seedItem, source);
+    scheduleNextMusicTrackPreload();
 
     return getVirtualQueueRemaining();
 }
@@ -1097,6 +1425,7 @@ export function playPtvMusicTracks(items: PtvMusicItem[], startIndex = 0, option
     sourcePlaylist = normalizedItems.slice();
     currentIndex = safeStartIndex;
     queueSourceLabel = options.queueSourceLabel?.trim() || 'Now Playing';
+    invalidatePlaylistSnapshot();
 
     if (!options.preserveVirtualQueue) {
         autoQueueSeedItem = normalizedItems[safeStartIndex] || null;
@@ -1134,6 +1463,8 @@ export function playPtvMusicNext(item: PtvMusicItem) {
 
     playlist.splice(currentIndex + 1, 0, normalizeQueueItem(item));
     if (isShuffled) sourcePlaylist = playlist.slice();
+    invalidatePlaylistSnapshot();
+    scheduleNextMusicTrackPreload();
 
     return Promise.resolve(emitQueueUpdated('play-next'));
 }
@@ -1143,6 +1474,8 @@ export function addPtvMusicToQueue(item: PtvMusicItem) {
     bindQueueIdentity();
     playlist.push(normalizeQueueItem(item, playlist.length));
     if (isShuffled) sourcePlaylist = playlist.slice();
+    invalidatePlaylistSnapshot();
+    scheduleNextMusicTrackPreload();
 
     return Promise.resolve(emitQueueUpdated('add'));
 }
@@ -1156,6 +1489,8 @@ export function addPtvMusicItemsToQueue(items: PtvMusicItem[]) {
 
     playlist.push(...playableItems.map((item, index) => normalizeQueueItem(item, playlist.length + index)));
     if (isShuffled) sourcePlaylist = playlist.slice();
+    invalidatePlaylistSnapshot();
+    scheduleNextMusicTrackPreload();
 
     return Promise.resolve(emitQueueUpdated('add-many'));
 }
@@ -1178,6 +1513,8 @@ export function playPtvMusicItemsNext(items: PtvMusicItem[]) {
         ...playableItems.map((item, index) => normalizeQueueItem(item, currentIndex + 1 + index))
     );
     if (isShuffled) sourcePlaylist = playlist.slice();
+    invalidatePlaylistSnapshot();
+    scheduleNextMusicTrackPreload();
 
     return Promise.resolve(emitQueueUpdated('play-next-many'));
 }
@@ -1197,6 +1534,8 @@ export function removePtvMusicQueueItem(playlistItemId: string) {
     playlist.splice(removeIndex, 1);
     if (removeIndex < currentIndex) currentIndex -= 1;
     if (isShuffled) sourcePlaylist = playlist.slice();
+    invalidatePlaylistSnapshot();
+    scheduleNextMusicTrackPreload();
 
     return Promise.resolve(emitQueueUpdated('remove'));
 }
@@ -1223,6 +1562,8 @@ export function movePtvMusicQueueItem(playlistItemId: string, newIndex: number) 
     }
 
     if (isShuffled) sourcePlaylist = playlist.slice();
+    invalidatePlaylistSnapshot();
+    scheduleNextMusicTrackPreload();
 
     return Promise.resolve(emitQueueUpdated('reorder'));
 }
@@ -1232,6 +1573,8 @@ export function clearPtvMusicQueue() {
     playlist = currentItem ? [normalizeQueueItem(currentItem)] : [];
     currentIndex = currentItem ? 0 : -1;
     sourcePlaylist = playlist.slice();
+    invalidatePlaylistSnapshot();
+    scheduleNextMusicTrackPreload();
 
     return Promise.resolve(emitQueueUpdated('clear'));
 }
@@ -1325,6 +1668,7 @@ export function setPtvMusicRepeatMode(mode: string) {
     ]);
 
     repeatMode = supportedModes.has(mode) ? mode : 'RepeatNone';
+    scheduleNextMusicTrackPreload();
 
     return emitQueueUpdated('repeat');
 }
@@ -1351,6 +1695,9 @@ export function togglePtvMusicShuffle() {
         currentIndex = Math.max(0, playlist.findIndex(item => item.PlaylistItemId === currentKey));
         isShuffled = false;
     }
+
+    invalidatePlaylistSnapshot();
+    scheduleNextMusicTrackPreload();
 
     return emitQueueUpdated('shuffle');
 }
@@ -1508,6 +1855,8 @@ export function updatePtvMusicQueueItemUserData(
     virtualQueue = virtualQueue.map(updateItem);
     currentItem = currentItem ? updateItem(currentItem) : null;
     autoQueueSeedItem = autoQueueSeedItem ? updateItem(autoQueueSeedItem) : null;
+
+    if (changed) invalidatePlaylistSnapshot();
 
     return changed ? emitQueueUpdated('user-data') : getPtvMusicQueueSnapshot();
 }

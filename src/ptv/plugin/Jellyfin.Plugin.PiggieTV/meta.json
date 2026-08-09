@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "Advertises and verifies durable Reading series overrides while preserving PiggieTV API v1 and featured cache v7 compatibility.",
+  "changelog": "Starts the canonical PiggieTV 0.5 release line with recommendation policy v2 and authoritative cross-library relationships while preserving PiggieTV API v1 and featured cache v7 compatibility.",
   "description": "Server-side cache and integration endpoints for the PiggieTV web client.",
   "guid": "27c90ee7-7d56-4591-98f8-b0ebcda8c5fd",
   "name": "PiggieTV",
   "overview": "PiggieTV server companion plugin",
   "owner": "PiggieTV",
   "targetAbi": "10.11.8.0",
-  "timestamp": "2026-07-15T00:00:00Z",
-  "version": "10.11.8.2",
+  "timestamp": "2026-08-09T11:33:43Z",
+  "version": "0.5.0.0",
   "status": 0,
   "autoUpdate": false,
   "assemblies": [

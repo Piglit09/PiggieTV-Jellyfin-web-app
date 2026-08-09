@@ -81,9 +81,9 @@ describe('plugin API authentication startup', () => {
         });
         expect(diagnostics.attemptedResponses.every(entry => entry.status !== 401)).toBe(true);
         expect(diagnostics.attemptedResponses.slice(-3)).toEqual([
-            expect.objectContaining({ endpoint: 'status', ok: true, status: 200, url: '/Ptv/v1/status' }),
-            expect.objectContaining({ endpoint: 'settings', ok: true, status: 200, url: '/Ptv/v1/settings' }),
-            expect.objectContaining({ endpoint: 'featuredContent', ok: true, status: 200, url: '/Ptv/v1/featured' })
+            expect.objectContaining({ endpoint: 'status', ok: true, status: 200, url: 'endpoint:status' }),
+            expect.objectContaining({ endpoint: 'settings', ok: true, status: 200, url: 'endpoint:settings' }),
+            expect.objectContaining({ endpoint: 'featuredContent', ok: true, status: 200, url: 'endpoint:featuredContent' })
         ]);
         expect(diagnostics.attemptedResponses.slice(-3).every(entry => entry.durationMs >= 0)).toBe(true);
     });
@@ -105,6 +105,35 @@ describe('plugin API authentication startup', () => {
         await pluginApi!.getStatus({ bypassCache: true });
         expect(getJSON).toHaveBeenCalledTimes(1);
         expect(getJSON.mock.calls[0]?.[0]).toBe('http://localhost:8096/Ptv/v1/status');
+    });
+
+    it('exports relationship diagnostics as categories without origins or item identities', async () => {
+        const privateOrigin = 'https://private-media.example.test';
+        const sourceItemId = 'source-item-private';
+        const targetItemId = 'target-item-private';
+        const getJSON = vi.fn(async () => ({
+            relationships: [{ targetItemId }],
+            schemaVersion: 1
+        }));
+        const client = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'user',
+            getJSON,
+            getUrl: (path: string) => `${privateOrigin}/${path}`
+        };
+
+        await getCurrentPtvPluginApiClient(client)!.getItemRelationships(sourceItemId, { bypassCache: true });
+
+        const serializedDiagnostics = JSON.stringify(getPtvPluginApiDiagnostics());
+
+        expect(getJSON).toHaveBeenCalledWith(
+            `${privateOrigin}/Ptv/v1/relationships/${sourceItemId}`,
+            true
+        );
+        expect(serializedDiagnostics).toContain('endpoint:relationships');
+        expect(serializedDiagnostics).not.toContain(privateOrigin);
+        expect(serializedDiagnostics).not.toContain(sourceItemId);
+        expect(serializedDiagnostics).not.toContain(targetItemId);
     });
 
     it('prefers an authenticated window client over a stale unauthenticated connection client', async () => {
@@ -173,6 +202,6 @@ describe('plugin API authentication startup', () => {
 
         expect(firstGetJSON).toHaveBeenCalledWith('https://old-media.example.test/Ptv/v1/status', true);
         expect(nextGetJSON).toHaveBeenCalledWith('https://media.example.test/Ptv/v1/status', true);
-        expect(getPtvPluginApiDiagnostics().resolvedRoot).toBe('https://media.example.test');
+        expect(getPtvPluginApiDiagnostics().resolvedRoot).toBe('state:resolved');
     });
 });

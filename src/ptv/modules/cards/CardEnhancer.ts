@@ -1,4 +1,10 @@
-const CARD_SELECTOR = '.homeSectionsContainer .itemsContainer .card';
+const CARD_SELECTOR = '.itemsContainer .card, .scrollSlider .card, .card.ptv-card';
+const INLINE_PLAYBACK_SELECTOR = [
+    '.ptv-card-play-pill',
+    '.cardOverlayButton[data-action="play"]',
+    '.cardOverlayButton[data-action="resume"]',
+    '.cardOverlayFab-primary[data-action="resume"]'
+].join(', ');
 
 function isLibraryTile(card: Element) {
     const type = card.getAttribute('data-type')?.toLowerCase();
@@ -15,18 +21,9 @@ function isLibraryTile(card: Element) {
     );
 }
 
-function removePlayPill(card: Element) {
-    card.querySelectorAll('.ptv-card-play-pill').forEach(pill => {
-        pill.remove();
-    });
-}
-
-function normalizeOverlayButtons(card: Element) {
-    card.querySelectorAll<HTMLElement>(
-        '.cardOverlayButton[data-action="play"], .cardOverlayButton[data-action="resume"], .cardOverlayFab-primary[data-action="resume"]'
-    ).forEach((button) => {
-        button.removeAttribute('title');
-        button.setAttribute('aria-label', 'Play');
+function removeInlinePlaybackControls(card: Element) {
+    card.querySelectorAll(INLINE_PLAYBACK_SELECTOR).forEach(control => {
+        control.remove();
     });
 }
 
@@ -101,8 +98,9 @@ function applyImageAccent(card: HTMLElement) {
 }
 
 function enhanceCard(card: Element) {
+    removeInlinePlaybackControls(card);
+
     if (isLibraryTile(card)) {
-        removePlayPill(card);
         return;
     }
     if (card.classList.contains('ptv-card-enhanced')) return;
@@ -114,8 +112,6 @@ function enhanceCard(card: Element) {
 
     card.classList.add('ptv-card-enhanced');
     card.classList.add('ptv-card');
-    normalizeOverlayButtons(card);
-    removePlayPill(card);
 
     htmlCard.style.setProperty('--ptv-card-accent', '168, 85, 247');
 
@@ -123,5 +119,9 @@ function enhanceCard(card: Element) {
 }
 
 export function enhancePtvCards(parent: Element = document.body) {
+    if (parent.matches(CARD_SELECTOR)) {
+        enhanceCard(parent);
+    }
+
     parent.querySelectorAll(CARD_SELECTOR).forEach(enhanceCard);
 }

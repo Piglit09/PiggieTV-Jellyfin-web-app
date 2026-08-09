@@ -81,6 +81,8 @@ const MUSIC_HOME_CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_TRACK_LIMIT = 28;
 const DEFAULT_ALBUM_SAMPLE_LIMIT = 32;
 const DEFAULT_ARTIST_SAMPLE_LIMIT = 32;
+const MUSIC_HOME_INITIAL_REQUEST_CONCURRENCY = 6;
+const MUSIC_HOME_FULL_REQUEST_CONCURRENCY = 6;
 const MUSIC_LIBRARY_PAGE_SIZE = 48;
 const MUSIC_LIBRARY_FETCH_CAP = PTV_MUSIC_LIBRARY_RETAIN_LIMIT;
 const MUSIC_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 2;
@@ -128,6 +130,12 @@ type MusicDataCoordinatorRequest<T> = {
 type PtvMusicRouteRequestOptions = {
     isCurrent?: () => boolean;
     signal?: AbortSignal;
+};
+
+type PtvMusicHomeRequestOptions = PtvMusicRouteRequestOptions & {
+    initialOnly?: boolean;
+    forceRefresh?: boolean;
+    onProgress?: (data: PtvMusicHomeData) => void;
 };
 
 type PtvMusicLibraryScope = {
@@ -208,6 +216,19 @@ function getMusicDataScopeKey(libraryId = 'pending') {
         getPtvCurrentUserId() || 'user',
         libraryId || 'unscoped'
     ].join(':');
+}
+
+function getStableMusicRequestValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(getStableMusicRequestValue);
+    if (!value || typeof value !== 'object') return value;
+
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, getStableMusicRequestValue(entry)]));
+}
+
+function getMusicListRequestKey(kind: string, query: PtvItemQuery, limit: number) {
+    return `music-list:${getMusicDataScopeKey()}:${kind}:${limit}:${JSON.stringify(getStableMusicRequestValue(query))}`;
 }
 
 function getMusicHomeStorageKey(cacheKey: string, initialOnly = false) {
@@ -1242,29 +1263,53 @@ export function fetchPtvMusicTracks(
     limit = DEFAULT_TRACK_LIMIT,
     signal?: AbortSignal
 ): Promise<PtvMusicItem[]> {
-    return getScopedItemsWithUnscopedFallback<PtvMusicItem>({
+    const requestQuery: PtvItemQuery = {
         IncludeItemTypes: 'Audio',
         Limit: limit,
         ...query
-    }, 'tracks', signal).then(result => uniquePtvMusicItems(result.Items || []));
+    };
+
+    return runMusicCoordinatorRequest(
+        getMusicListRequestKey('tracks', requestQuery, limit),
+        'music-track-list',
+        () => getScopedItemsWithUnscopedFallback<PtvMusicItem>(requestQuery, 'tracks', signal)
+            .then(result => uniquePtvMusicItems(result.Items || [])),
+        { signal }
+    );
 }
 
 export function fetchPtvMusicAlbums(limit = DEFAULT_ALBUM_SAMPLE_LIMIT, signal?: AbortSignal): Promise<PtvMusicItem[]> {
-    return getScopedItemsWithUnscopedFallback<PtvMusicItem>({
+    const query: PtvItemQuery = {
         IncludeItemTypes: 'MusicAlbum',
         Limit: limit,
         SortBy: 'DatePlayed,SortName',
         SortOrder: 'Descending'
-    }, 'albums', signal).then(result => uniquePtvMusicItems(result.Items || []).sort(byName));
+    };
+
+    return runMusicCoordinatorRequest(
+        getMusicListRequestKey('albums', query, limit),
+        'music-album-list',
+        () => getScopedItemsWithUnscopedFallback<PtvMusicItem>(query, 'albums', signal)
+            .then(result => uniquePtvMusicItems(result.Items || []).sort(byName)),
+        { signal }
+    );
 }
 
 export function fetchPtvMusicArtists(limit = DEFAULT_ARTIST_SAMPLE_LIMIT, signal?: AbortSignal): Promise<PtvMusicItem[]> {
-    return fetchPtvMusicArtistsResult({
+    const query: PtvItemQuery = {
         IncludeItemTypes: 'MusicArtist',
         Limit: limit,
         SortBy: 'SortName',
         SortOrder: 'Ascending'
-    }, signal).then(result => uniquePtvMusicItems(result.Items || []).sort(byName));
+    };
+
+    return runMusicCoordinatorRequest(
+        getMusicListRequestKey('artists', query, limit),
+        'music-artist-list',
+        () => fetchPtvMusicArtistsResult(query, signal)
+            .then(result => uniquePtvMusicItems(result.Items || []).sort(byName)),
+        { signal }
+    );
 }
 
 async function fetchPtvMusicArtistsEndpoint(
@@ -2212,6 +2257,77 @@ function getSection(id: string, title: string, items: PtvMusicItem[], options: P
     };
 }
 
+function fetchUnscopedMusicTracks(
+    query: PtvItemQuery,
+    limit: number,
+    signal?: AbortSignal
+) {
+    return getItems<PtvMusicItem>({
+        IncludeItemTypes: 'Audio',
+        Limit: limit,
+        ...query
+    }, signal).then(result => uniquePtvMusicItems(result.Items || []));
+}
+
+function fetchUnscopedRecentlyAddedMusic(limit: number, signal?: AbortSignal) {
+    return getPtvRecentlyAdded<PtvMusicItem>({
+        Fields: MUSIC_LIST_FIELDS,
+        IncludeItemTypes: 'Audio',
+        Limit: limit
+    }, { signal }).then(uniquePtvMusicItems);
+}
+
+function createInitialMusicProgressPublisher(
+    options: PtvMusicHomeRequestOptions,
+    sectionTimings: PtvMusicSectionTiming[],
+    getLibrary: () => PtvMusicLibraryScope | null
+) {
+    const completedSections = new Map<string, PtvMusicSection>();
+    const sectionOrder = [
+        'recently-played',
+        'recently-added-music'
+    ];
+
+    return (section: PtvMusicSection) => {
+        if (!section.items.length || !options.onProgress || options.signal?.aborted || options.isCurrent?.() === false) return;
+
+        completedSections.set(section.id, section);
+        const sections = sectionOrder
+            .map(id => completedSections.get(id))
+            .filter((entry): entry is PtvMusicSection => Boolean(entry));
+        const data: PtvMusicHomeData = {
+            completeness: 'initial-usable',
+            generatedAt: Date.now(),
+            isPartial: true,
+            library: getLibrary(),
+            nextEligibleRefreshAt: Date.now() + MUSIC_HOME_CACHE_TTL_MS,
+            refreshReason: 'progressive-first-shelf',
+            sectionTimings: sectionTimings.slice(),
+            sections,
+            stats: {
+                albumCount: 0,
+                artistCount: 0,
+                trackCount: uniquePtvMusicItems(sections.flatMap(entry => entry.items)).length
+            }
+        };
+
+        recordPtvEvent('render', 'music-home-progressive-shelf-ready', {
+            itemCount: section.items.length,
+            sectionCount: sections.length,
+            sectionId: section.id
+        });
+
+        try {
+            options.onProgress(data);
+        } catch {
+            recordPtvEvent('render', 'music-home-progress-callback-failed', {
+                reason: 'callback-threw',
+                sectionId: section.id
+            });
+        }
+    };
+}
+
 function getGenreCounts(items: PtvMusicItem[]) {
     const counts = new Map<string, number>();
 
@@ -2276,12 +2392,7 @@ export function invalidatePtvMusicHomeCache() {
 }
 
 // eslint-disable-next-line sonarjs/cognitive-complexity -- Cache precedence and retirement checks stay explicit to prevent stale route data from winning.
-export async function getPtvMusicHome(options: {
-    initialOnly?: boolean;
-    forceRefresh?: boolean;
-    isCurrent?: () => boolean;
-    signal?: AbortSignal;
-} = {}): Promise<PtvMusicHomeData> {
+export async function getPtvMusicHome(options: PtvMusicHomeRequestOptions = {}): Promise<PtvMusicHomeData> {
     throwIfPtvMusicRouteWorkRetired(options);
     const cacheKey = getCacheKey();
     const activeCache = options.initialOnly ? musicHomeSummaryCache : musicHomeCache;
@@ -2370,7 +2481,8 @@ export async function getPtvMusicHome(options: {
             options
         );
         const sectionTimings: PtvMusicSectionTiming[] = [];
-        const musicLibrary = await getPtvMusicLibrary(options.signal).catch(error => {
+        let musicLibrary: PtvMusicLibraryScope | null = null;
+        const musicLibraryPromise = getPtvMusicLibrary(options.signal).catch(error => {
             if (isPtvMusicAbortError(error)) throw error;
 
             recordMusicApiSectionFailure('library', error);
@@ -2378,27 +2490,46 @@ export async function getPtvMusicHome(options: {
             return null;
         });
 
-        throwIfPtvMusicRouteWorkRetired({
-            isCurrent,
-            signal: options.signal
-        });
-        const libraryScope = musicLibrary?.id ? { ParentId: musicLibrary.id } : {};
-
         if (options.initialOnly) {
+            const publishProgress = createInitialMusicProgressPublisher(
+                options,
+                sectionTimings,
+                () => musicLibrary
+            );
+            const recentlyPlayedPromise = timeMusicSection('recently-played', fetchUnscopedMusicTracks({
+                SortBy: 'DatePlayed',
+                SortOrder: 'Descending'
+            }, 24, options.signal), sectionTimings).then(items => {
+                publishProgress(getSection('recently-played', 'Recently Played', items, {
+                    seed: { kind: 'recent', label: 'Recently Played' }
+                }));
+                return items;
+            });
+            const recentlyAddedPromise = timeMusicSection(
+                'recently-added',
+                fetchUnscopedRecentlyAddedMusic(24, options.signal),
+                sectionTimings
+            ).then(items => {
+                publishProgress(getSection('recently-added-music', 'Recently Added Music', items, {
+                    seed: { kind: 'recent', label: 'Recently Added Music' }
+                }));
+                return items;
+            });
+
+            musicLibrary = await musicLibraryPromise;
+            throwIfPtvMusicRouteWorkRetired({
+                isCurrent,
+                signal: options.signal
+            });
+            const libraryScope = musicLibrary?.id ? { ParentId: musicLibrary.id } : {};
             const [
-                recentlyPlayed,
                 continueListening,
                 favorites,
-                recentlyAdded,
                 albumSample,
                 artistSample,
                 trackSample
             ] = await runPtvScheduledRequests(
                 [
-                    () => timeMusicSection('recently-played', fetchPtvMusicTracks({
-                        SortBy: 'DatePlayed',
-                        SortOrder: 'Descending'
-                    }, 24, options.signal), sectionTimings),
                     () => timeMusicSection('continue-listening', getPtvResumeItems<PtvMusicItem>({
                         Fields: MUSIC_LIST_FIELDS,
                         IncludeItemTypes: 'Audio',
@@ -2414,12 +2545,6 @@ export async function getPtvMusicHome(options: {
                         SortBy: 'SortName',
                         ...libraryScope
                     }, { signal: options.signal }).then(result => uniquePtvMusicItems(result.Items || [])), sectionTimings),
-                    () => timeMusicSection('recently-added', fetchPtvRecentlyAddedMusic(
-                        libraryScope,
-                        24,
-                        'recently-added',
-                        options.signal
-                    ), sectionTimings),
                     () => timeMusicSection('album-sample', fetchPtvMusicAlbums(20, options.signal), sectionTimings),
                     () => timeMusicSection('artist-sample', fetchPtvMusicArtists(20, options.signal), sectionTimings),
                     () => timeMusicSection('track-sample', fetchPtvMusicTracks({
@@ -2428,8 +2553,12 @@ export async function getPtvMusicHome(options: {
                     }, 20, options.signal), sectionTimings)
                 ],
                 task => task(),
-                { concurrency: 2, signal: options.signal }
+                { concurrency: MUSIC_HOME_INITIAL_REQUEST_CONCURRENCY, signal: options.signal }
             );
+            const [recentlyPlayed, recentlyAdded] = await Promise.all([
+                recentlyPlayedPromise,
+                recentlyAddedPromise
+            ]);
             throwIfPtvMusicRouteWorkRetired({
                 isCurrent,
                 signal: options.signal
@@ -2534,6 +2663,13 @@ export async function getPtvMusicHome(options: {
             return data;
         }
 
+        musicLibrary = await musicLibraryPromise;
+        throwIfPtvMusicRouteWorkRetired({
+            isCurrent,
+            signal: options.signal
+        });
+        const libraryScope = musicLibrary?.id ? { ParentId: musicLibrary.id } : {};
+
         const [
             recentlyPlayed,
             continueListening,
@@ -2582,7 +2718,7 @@ export async function getPtvMusicHome(options: {
                 () => timeMusicSection('artists', fetchPtvMusicArtists(DEFAULT_ARTIST_SAMPLE_LIMIT, options.signal), sectionTimings)
             ],
             task => task(),
-            { concurrency: 3, signal: options.signal }
+            { concurrency: MUSIC_HOME_FULL_REQUEST_CONCURRENCY, signal: options.signal }
         );
         throwIfPtvMusicRouteWorkRetired({
             isCurrent,

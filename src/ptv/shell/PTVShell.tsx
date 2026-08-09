@@ -73,6 +73,7 @@ export type PTVShellProps = Readonly<{
     contextualLinks?: readonly PtvShellNavLink[];
     headerOnly?: boolean;
     onNavigationOpenChange?: (open: boolean) => void;
+    searchQuery?: string;
     section?: PtvShellSection;
     title?: string;
 }>;
@@ -574,7 +575,7 @@ function PtvShellSearch({
                 autoComplete='off'
                 inputMode='search'
                 onChange={event => setQuery(event.currentTarget.value)}
-                placeholder='Search movies, shows, music, reading'
+                placeholder='Search titles, music, genres, studios'
                 type='search'
                 value={query}
             />
@@ -902,6 +903,7 @@ export default function PTVShell({
     contextualLinks,
     headerOnly = false,
     onNavigationOpenChange,
+    searchQuery: syncedSearchQuery,
     section = 'home',
     title
 }: PTVShellProps) {
@@ -967,10 +969,18 @@ export default function PTVShell({
     }, [onNavigationOpenChange]);
 
     useEffect(() => {
+        if (syncedSearchQuery === undefined) return;
+
+        setSearchQuery(syncedSearchQuery);
+    }, [syncedSearchQuery]);
+
+    useEffect(() => {
         const syncFromRoute = () => {
             const routeQuery = getPtvShellSearchRouteQuery();
 
-            if (routeQuery) setSearchQuery(routeQuery);
+            if (getPtvShellHashPath(window.location.hash) === '#/search') {
+                setSearchQuery(routeQuery);
+            }
             closeHeaderTransientState();
         };
 

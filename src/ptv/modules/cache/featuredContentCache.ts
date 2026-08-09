@@ -904,6 +904,40 @@ function readPluginStatusForCache() {
     return inflightPluginStatus;
 }
 
+function recordPluginCacheCapabilities(status: PtvPluginStatusForCache | null) {
+    const isFeaturedContentAdvertised = hasPluginFeature(status, 'featuredContent');
+    const hasStatusCapabilities = Boolean(
+        status
+        && (
+            status.featureFlags
+            || status.features
+        )
+    );
+
+    recordPtvEvent('cache', 'featured-cache-feature-advertised', {
+        featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
+        features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
+        hasStatusCapabilities,
+        isFeaturedContentAdvertised,
+        statusOk: status?.ok ?? null
+    });
+
+    if (hasStatusCapabilities && !isFeaturedContentAdvertised) {
+        recordPtvEvent('cache', 'featured-cache-feature-not-advertised', {
+            action: 'try-featured-directly',
+            featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
+            features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
+            statusOk: status?.ok ?? null
+        });
+    }
+
+    if (!hasStatusCapabilities) {
+        recordPtvEvent('cache', 'featured-cache-status-unavailable', {
+            action: 'try-featured-directly'
+        });
+    }
+}
+
 function readPluginDocument() {
     const pluginApi = getCurrentPtvPluginApiClient();
 
@@ -911,75 +945,44 @@ function readPluginDocument() {
         return Promise.reject(new Error('PTV plugin API client is unavailable.'));
     }
 
-    return readPluginStatusForCache()
-        .then(status => {
-            const isFeaturedContentAdvertised = hasPluginFeature(status, 'featuredContent');
-            const hasStatusCapabilities = Boolean(
-                status
-                && (
-                    status.featureFlags
-                    || status.features
-                )
-            );
+    // Status is diagnostic only: the cache endpoint is attempted regardless of
+    // the advertised capability. Do not serialize these independent requests.
+    void readPluginStatusForCache().then(recordPluginCacheCapabilities);
 
-            recordPtvEvent('cache', 'featured-cache-feature-advertised', {
-                featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
-                features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
-                hasStatusCapabilities,
-                isFeaturedContentAdvertised,
-                statusOk: status?.ok ?? null
+    return runPluginRequestWithTimeout(
+        signal => pluginApi.getFeaturedContentCacheDocument({ signal }),
+        SERVER_CACHE_READ_TIMEOUT_MS,
+        'PiggieTV featured cache read timed out.'
+    )
+        .then(document => {
+            const rawResponseByteSize = getSerializedByteSize(document);
+            const rawTopLevelKeys = getTopLevelKeys(document);
+            const normalizedDocument = normalizeServerDocument(document);
+            const entry = parseCacheEntryValue(normalizedDocument.featuredContent);
+            const normalizedTopLevelKeys = getTopLevelKeys(normalizedDocument);
+            const rejectionReason = entry ? null : explainServerDocumentRejection(document, normalizedDocument);
+
+            lastServerCacheRawByteSize = rawResponseByteSize;
+            lastServerCacheRawTopLevelKeys = rawTopLevelKeys;
+            lastServerCacheNormalizedTopLevelKeys = normalizedTopLevelKeys;
+            lastServerCacheRejectionReason = rejectionReason;
+
+            recordPtvEvent('cache', 'featured-cache-document-read', {
+                cacheVersion: entry?.version ?? null,
+                hasFeaturedContent: Boolean(entry),
+                heroCount: entry?.payload.heroItems.length || 0,
+                itemCount: entry ? getPayloadItemCount(entry.payload) : 0,
+                normalizedTopLevelKeys,
+                payloadSize: getSerializedByteSize(normalizedDocument.featuredContent),
+                rawResponseByteSize,
+                rawTopLevelKeys,
+                rejectionReason,
+                sectionCount: entry ? Object.keys(entry.payload.sectionItems).length : 0,
+                storage: getSuccessfulServerStorage(),
+                updatedAt: normalizedDocument.updatedAt ?? null
             });
 
-            if (hasStatusCapabilities && !isFeaturedContentAdvertised) {
-                recordPtvEvent('cache', 'featured-cache-feature-not-advertised', {
-                    action: 'try-featured-directly',
-                    featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
-                    features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
-                    statusOk: status?.ok ?? null
-                });
-            }
-
-            if (!hasStatusCapabilities) {
-                recordPtvEvent('cache', 'featured-cache-status-unavailable', {
-                    action: 'try-featured-directly'
-                });
-            }
-
-            return runPluginRequestWithTimeout(
-                signal => pluginApi.getFeaturedContentCacheDocument({ signal }),
-                SERVER_CACHE_READ_TIMEOUT_MS,
-                'PiggieTV featured cache read timed out.'
-            )
-                .then(document => {
-                    const rawResponseByteSize = getSerializedByteSize(document);
-                    const rawTopLevelKeys = getTopLevelKeys(document);
-                    const normalizedDocument = normalizeServerDocument(document);
-                    const entry = parseCacheEntryValue(normalizedDocument.featuredContent);
-                    const normalizedTopLevelKeys = getTopLevelKeys(normalizedDocument);
-                    const rejectionReason = entry ? null : explainServerDocumentRejection(document, normalizedDocument);
-
-                    lastServerCacheRawByteSize = rawResponseByteSize;
-                    lastServerCacheRawTopLevelKeys = rawTopLevelKeys;
-                    lastServerCacheNormalizedTopLevelKeys = normalizedTopLevelKeys;
-                    lastServerCacheRejectionReason = rejectionReason;
-
-                    recordPtvEvent('cache', 'featured-cache-document-read', {
-                        cacheVersion: entry?.version ?? null,
-                        hasFeaturedContent: Boolean(entry),
-                        heroCount: entry?.payload.heroItems.length || 0,
-                        itemCount: entry ? getPayloadItemCount(entry.payload) : 0,
-                        normalizedTopLevelKeys,
-                        payloadSize: getSerializedByteSize(normalizedDocument.featuredContent),
-                        rawResponseByteSize,
-                        rawTopLevelKeys,
-                        rejectionReason,
-                        sectionCount: entry ? Object.keys(entry.payload.sectionItems).length : 0,
-                        storage: getSuccessfulServerStorage(),
-                        updatedAt: normalizedDocument.updatedAt ?? null
-                    });
-
-                    return normalizedDocument;
-                });
+            return normalizedDocument;
         });
 }
 
@@ -1677,10 +1680,17 @@ function resolveCachedFeaturedContent(cached: FeaturedCacheEntry | null, fetcher
 export function getFeaturedContent(fetcher: () => Promise<FeaturedPayload>): Promise<FeaturedPayload> {
     lastFeaturedContentFetcher = fetcher;
 
-    if (memoryCacheEntry && Date.now() < memoryCacheEntry.expiresAt) {
-        recordPtvEvent('cache', 'hit', {
+    if (memoryCacheEntry) {
+        const isFresh = Date.now() < memoryCacheEntry.expiresAt;
+
+        recordPtvEvent('cache', isFresh ? 'hit' : 'stale-hit', {
             source: 'memory'
         });
+
+        if (!isFresh && !inflightFeaturedContent) {
+            void refreshFeaturedContent(fetcher, memoryCacheEntry.payload, true);
+        }
+
         return Promise.resolve(memoryCacheEntry.payload);
     }
 

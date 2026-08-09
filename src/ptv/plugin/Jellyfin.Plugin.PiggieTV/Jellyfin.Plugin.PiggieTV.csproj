@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PtvPluginVersion>10.11.8.2</PtvPluginVersion>
+    <PtvPluginVersion>0.5.0.0</PtvPluginVersion>
     <PtvJellyfinPackageVersion>10.11.8</PtvJellyfinPackageVersion>
     <Version>$(PtvPluginVersion)</Version>
     <AssemblyVersion>$(PtvPluginVersion)</AssemblyVersion>
@@ -18,5 +18,9 @@
     <PackageReference Include="Jellyfin.Controller" Version="$(PtvJellyfinPackageVersion)" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Model" Version="$(PtvJellyfinPackageVersion)" ExcludeAssets="runtime" />
     <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.PiggieTV.Tests" />
   </ItemGroup>
 </Project>

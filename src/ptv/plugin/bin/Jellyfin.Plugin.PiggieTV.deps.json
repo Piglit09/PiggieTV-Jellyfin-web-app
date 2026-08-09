@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v9.0": {
-      "Jellyfin.Plugin.PiggieTV/10.11.8.2": {
+      "Jellyfin.Plugin.PiggieTV/0.5.0.0": {
         "dependencies": {
           "Jellyfin.Controller": "10.11.8",
           "Jellyfin.Model": "10.11.8"
@@ -181,7 +181,7 @@
     }
   },
   "libraries": {
-    "Jellyfin.Plugin.PiggieTV/10.11.8.2": {
+    "Jellyfin.Plugin.PiggieTV/0.5.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

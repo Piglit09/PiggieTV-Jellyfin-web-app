@@ -123,6 +123,23 @@ public sealed class RollingDiagnosticsWriterTests : IAsyncLifetime
         Assert.DoesNotContain(Directory.GetFiles(_root, "*.tmp"), path => Path.GetFileName(path).Contains("diagnostics", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task DisposeAsyncIsSafeWhenCalledConcurrentlyAndRepeatedly()
+    {
+        var writer = CreateWriter();
+        writer.Enqueue(Event("plugin", "shutdown", new { ok = true }));
+
+        var disposals = Enumerable.Range(0, 8)
+            .Select(_ => writer.DisposeAsync().AsTask())
+            .ToArray();
+
+        await Task.WhenAll(disposals);
+        await writer.DisposeAsync();
+
+        Assert.All(disposals, disposal => Assert.True(disposal.IsCompletedSuccessfully));
+        Assert.Contains("shutdown", await File.ReadAllTextAsync(Path.Combine(_root, "ptv-diagnostics.log")), StringComparison.Ordinal);
+    }
+
     private PtvRollingDiagnosticsWriter CreateWriter(PtvDiagnosticsStorageSettings? settings = null) => new(
         _root,
         () => settings ?? new PtvDiagnosticsStorageSettings(),

@@ -107,6 +107,7 @@ public sealed class PtvStatusResponse
         ["pluginApi"] = true,
         ["featuredContentCache"] = true,
         ["recommendations"] = true,
+        ["detailsRelationships"] = true,
         ["remoteDiagnostics"] = true
     };
 
@@ -117,6 +118,7 @@ public sealed class PtvStatusResponse
     public string[] SupportedFeatureFlags { get; set; } = [
         "featuredContent",
         "featuredContentRefresh",
+        "detailsRelationships",
         "physicalLayoutSnapshot",
         "readingSeriesOverrides",
         "remoteDiagnostics",
@@ -156,6 +158,7 @@ public sealed class PtvStatusResponse
         "status",
         "featuredContent",
         "featuredContentRefresh",
+        "detailsRelationships",
         "readingSeriesOverrides",
         "settings",
         "rows",
@@ -176,6 +179,7 @@ public sealed class PtvStatusResponse
         ["status"] = true,
         ["featuredContent"] = true,
         ["featuredContentRefresh"] = true,
+        ["detailsRelationships"] = true,
         ["readingSeriesOverrides"] = true,
         ["settings"] = true,
         ["rows"] = true,

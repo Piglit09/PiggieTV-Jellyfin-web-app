@@ -14,7 +14,7 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
     /// <summary>
     /// Gets the build timestamp stamped into this diagnostic plugin build.
     /// </summary>
-    public const string BuildTimestampUtc = "2026-05-25T17:43:32Z";
+    public const string BuildTimestampUtc = "2026-08-09T11:33:43Z";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.

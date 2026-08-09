@@ -717,6 +717,7 @@ export class PlaybackManager {
 
         this._playNextAfterEnded = true;
         const playerStates = {};
+        const bitrateRefreshes = new WeakMap();
 
         this._playQueueManager = new PlayQueueManager();
 
@@ -2572,27 +2573,48 @@ export class PlaybackManager {
             }
         }
 
-        function detectBitrate(apiClient, item, mediaType) {
-            // FIXME: This is gnarly, but don't want to change too much here in a bugfix
-            return Promise.resolve()
-                .then(() => {
-                    if (!isServerItem(item) || itemHelper.isLocalItem(item)) {
-                        return Promise.reject(new Error('skip bitrate detection'));
-                    }
+        function refreshBitrateInBackground(apiClient, item, mediaType) {
+            if (!isServerItem(item) || itemHelper.isLocalItem(item)) return;
+            if (mediaType !== 'Video' && mediaType !== 'Audio') return;
 
-                    return apiClient.getEndpointInfo()
-                        .then((endpointInfo) => {
-                            if ((mediaType === 'Video' || mediaType === 'Audio') && appSettings.enableAutomaticBitrateDetection(endpointInfo.IsInNetwork, mediaType)) {
-                                return apiClient.detectBitrate().then((bitrate) => {
-                                    appSettings.maxStreamingBitrate(endpointInfo.IsInNetwork, mediaType, bitrate);
-                                    return bitrate;
-                                });
-                            }
+            let clientRefreshes = bitrateRefreshes.get(apiClient);
 
-                            return Promise.reject(new Error('skip bitrate detection'));
-                        });
+            if (!clientRefreshes) {
+                clientRefreshes = new Map();
+                bitrateRefreshes.set(apiClient, clientRefreshes);
+            }
+            if (clientRefreshes.has(mediaType)) return;
+
+            const refresh = apiClient.getEndpointInfo()
+                .then((endpointInfo) => {
+                    if (!appSettings.enableAutomaticBitrateDetection(endpointInfo.IsInNetwork, mediaType)) return null;
+
+                    return apiClient.detectBitrate().then((bitrate) => {
+                        appSettings.maxStreamingBitrate(endpointInfo.IsInNetwork, mediaType, bitrate);
+                        return bitrate;
+                    });
                 })
-                .catch(() => getSavedMaxStreamingBitrate(apiClient, mediaType));
+                .catch((error) => {
+                    console.debug('Background bitrate refresh failed; retaining the last-known playback bitrate.', error);
+                    return null;
+                })
+                .finally(() => {
+                    if (clientRefreshes.get(mediaType) === refresh) {
+                        clientRefreshes.delete(mediaType);
+                    }
+                });
+
+            clientRefreshes.set(mediaType, refresh);
+        }
+
+        function detectBitrate(apiClient, item, mediaType) {
+            const savedBitrate = getSavedMaxStreamingBitrate(apiClient, mediaType);
+
+            // Startup uses the last-known safe value. Network detection refreshes
+            // the next request without blocking this playback negotiation.
+            refreshBitrateInBackground(apiClient, item, mediaType);
+
+            return Promise.resolve(savedBitrate);
         }
 
         function playAfterBitrateDetect(maxBitrate, item, playOptions, onPlaybackStartedFn, prevSource) {
@@ -2747,27 +2769,27 @@ export class PlaybackManager {
             const player = getPlayer(item, options);
             const apiClient = ServerConnections.getApiClient(item.ServerId);
 
-            // Call this just to ensure the value is recorded, it is needed with getSavedMaxStreamingBitrate
-            return apiClient.getEndpointInfo().then(function () {
-                const maxBitrate = getSavedMaxStreamingBitrate(ServerConnections.getApiClient(item.ServerId), mediaType);
+            // Refresh endpoint classification opportunistically; the cached value
+            // is sufficient to negotiate this request without another waterfall.
+            void apiClient.getEndpointInfo().catch(() => null);
+            const maxBitrate = getSavedMaxStreamingBitrate(ServerConnections.getApiClient(item.ServerId), mediaType);
 
-                return player.getDeviceProfile(item).then(function (deviceProfile) {
-                    const mediaOptions = {
-                        maxBitrate,
-                        startPosition,
-                        isPlayback: null,
-                        audioStreamIndex: options.audioStreamIndex,
-                        subtitleStreamIndex: options.subtitleStreamIndex,
-                        startIndex: null,
-                        enableDirectPlay: null,
-                        enableDirectStream: null,
-                        allowVideoStreamCopy: null,
-                        allowAudioStreamCopy: null
-                    };
+            return player.getDeviceProfile(item).then(function (deviceProfile) {
+                const mediaOptions = {
+                    maxBitrate,
+                    startPosition,
+                    isPlayback: null,
+                    audioStreamIndex: options.audioStreamIndex,
+                    subtitleStreamIndex: options.subtitleStreamIndex,
+                    startIndex: null,
+                    enableDirectPlay: null,
+                    enableDirectStream: null,
+                    allowVideoStreamCopy: null,
+                    allowAudioStreamCopy: null
+                };
 
-                    return getPlaybackMediaSource(player, apiClient, deviceProfile, item, options.mediaSourceId, mediaOptions).then(function (mediaSource) {
-                        return createStreamInfo(apiClient, item.MediaType, item, mediaSource, startPosition, player);
-                    });
+                return getPlaybackMediaSource(player, apiClient, deviceProfile, item, options.mediaSourceId, mediaOptions).then(function (mediaSource) {
+                    return createStreamInfo(apiClient, item.MediaType, item, mediaSource, startPosition, player);
                 });
             });
         };
@@ -2780,26 +2802,24 @@ export class PlaybackManager {
             const player = getPlayer(item, options, true);
             const apiClient = ServerConnections.getApiClient(item.ServerId);
 
-            // Call this just to ensure the value is recorded, it is needed with getSavedMaxStreamingBitrate
-            return apiClient.getEndpointInfo().then(function () {
-                const maxBitrate = getSavedMaxStreamingBitrate(ServerConnections.getApiClient(item.ServerId), mediaType);
+            void apiClient.getEndpointInfo().catch(() => null);
+            const maxBitrate = getSavedMaxStreamingBitrate(ServerConnections.getApiClient(item.ServerId), mediaType);
 
-                return player.getDeviceProfile(item).then(function (deviceProfile) {
-                    const mediaOptions = {
-                        maxBitrate,
-                        startPosition,
-                        isPlayback: true,
-                        audioStreamIndex: null,
-                        subtitleStreamIndex: null,
-                        enableDirectPlay: null,
-                        enableDirectStream: null,
-                        allowVideoStreamCopy: null,
-                        allowAudioStreamCopy: null
-                    };
+            return player.getDeviceProfile(item).then(function (deviceProfile) {
+                const mediaOptions = {
+                    maxBitrate,
+                    startPosition,
+                    isPlayback: true,
+                    audioStreamIndex: null,
+                    subtitleStreamIndex: null,
+                    enableDirectPlay: null,
+                    enableDirectStream: null,
+                    allowVideoStreamCopy: null,
+                    allowAudioStreamCopy: null
+                };
 
-                    return getPlaybackInfo(player, apiClient, item, deviceProfile, null, null, mediaOptions).then(function (playbackInfoResult) {
-                        return playbackInfoResult.MediaSources;
-                    });
+                return getPlaybackInfo(player, apiClient, item, deviceProfile, null, null, mediaOptions).then(function (playbackInfoResult) {
+                    return playbackInfoResult.MediaSources;
                 });
             });
         };

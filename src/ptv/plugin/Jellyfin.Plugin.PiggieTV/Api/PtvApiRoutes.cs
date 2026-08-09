@@ -61,6 +61,14 @@ public static class PtvApiRoutes
     public const string V1SettingsReset = $"{V1}/settings/reset";
 
     /// <summary>
+    /// Versioned authoritative relationship route.
+    /// </summary>
+    public const string V1Relationships = $"{V1}/relationships";
+
+    /// <summary>Versioned authoritative recommendation ranking route.</summary>
+    public const string V2RecommendationRank = "v2/recommendations/rank";
+
+    /// <summary>
     /// Versioned item image diagnostics route.
     /// </summary>
     public const string V1ImageDiagnostics = $"{V1}/diagnostics/images";

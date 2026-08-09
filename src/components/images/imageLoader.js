@@ -38,6 +38,10 @@ function drawBlurhash(target, pixels, width, height) {
     ctx.putImageData(imgData, 0, 0);
 
     requestAnimationFrame(() => {
+        if (!target.isConnected || !target.parentNode) {
+            return;
+        }
+
         // This class is just an utility class, so users can customize the canvas using their own CSS.
         canvas.classList.add('blurhash-canvas');
 
@@ -69,7 +73,7 @@ function itemBlurhashing(target, hash) {
     }
 }
 
-export function fillImage(entry) {
+export function fillImage(entry, observer) {
     if (!entry) {
         throw new Error('entry cannot be null');
     }
@@ -84,7 +88,7 @@ export function fillImage(entry) {
 
     if (entry.isIntersecting) {
         if (source) {
-            fillImageElement(target, source);
+            fillImageElement(target, source, observer);
         }
     } else if (!source) {
         emptyImageElement(target);
@@ -105,7 +109,7 @@ function onAnimationEnd(event) {
     elem.removeEventListener('animationend', onAnimationEnd);
 }
 
-function fillImageElement(elem, url) {
+function fillImageElement(elem, url, observer) {
     if (url === undefined) {
         throw new TypeError('url cannot be undefined');
     }
@@ -116,8 +120,16 @@ function fillImageElement(elem, url) {
     elem.classList.add('lazy-hidden');
     elem.addEventListener('animationend', onAnimationEnd);
 
-    preloaderImg.addEventListener('load', () => {
+    const stopObserving = () => {
+        observer?.unobserve?.(elem);
+    };
+    const onLoad = () => {
         requestAnimationFrame(() => {
+            if (!elem.isConnected) {
+                stopObserving();
+                return;
+            }
+
             if (elem.tagName !== 'IMG') {
                 elem.style.backgroundImage = "url('" + url + "')";
             } else {
@@ -131,8 +143,16 @@ function fillImageElement(elem, url) {
                 elem.classList.add('lazy-image-fadein');
             }
             elem.classList.remove('lazy-hidden');
+            stopObserving();
         });
-    });
+    };
+    const onError = () => {
+        elem.removeEventListener('animationend', onAnimationEnd);
+        stopObserving();
+    };
+
+    preloaderImg.addEventListener('load', onLoad, { once: true });
+    preloaderImg.addEventListener('error', onError, { once: true });
 }
 
 function emptyImageElement(elem) {
@@ -235,7 +255,7 @@ export function getPrimaryImageAspectRatio(items) {
 
 export function fillImages(elems) {
     for (let i = 0, length = elems.length; i < length; i++) {
-        const elem = elems[0];
+        const elem = elems[i];
         fillImage(elem);
     }
 }

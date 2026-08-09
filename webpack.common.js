@@ -7,6 +7,7 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const { DefinePlugin, IgnorePlugin } = require('webpack');
 const packageJson = require('./package.json');
+const { readPtvVersion } = require('./scripts/ptv-version.cjs');
 
 const Assets = [
     'native-promise-only/npo.js',
@@ -21,8 +22,10 @@ const Assets = [
 ];
 
 const DEV_MODE = process.env.NODE_ENV !== 'production';
+const PTV_ACCEPTANCE_LEDGER = !!JSON.parse(process.env.PTV_ACCEPTANCE_LEDGER || '0');
 const PTV_BUILD_DATE = process.env.PTV_BUILD_DATE || new Date().toISOString();
-const PTV_BUILD_ID = process.env.PTV_BUILD_ID || packageJson.version;
+const PTV_VERSION = readPtvVersion();
+const PTV_BUILD_ID = process.env.PTV_BUILD_ID || `ptv-web-${PTV_VERSION}`;
 let COMMIT_SHA = '';
 try {
     COMMIT_SHA = require('child_process')
@@ -65,10 +68,12 @@ const config = {
                     process.env.JELLYFIN_VERSION || 'Release'),
             __PACKAGE_JSON_NAME__: JSON.stringify(packageJson.name),
             __PACKAGE_JSON_VERSION__: JSON.stringify(packageJson.version),
+            __PTV_ACCEPTANCE_LEDGER__: PTV_ACCEPTANCE_LEDGER,
             __PTV_BUILD_DATE__: JSON.stringify(PTV_BUILD_DATE),
             __PTV_BUILD_ID__: JSON.stringify(PTV_BUILD_ID),
             __PTV_BUILD_MODE__: JSON.stringify(DEV_MODE ? 'development' : 'production'),
             __PTV_DEV_JELLYFIN_URL__: JSON.stringify(DEV_MODE ? process.env.PTV_DEV_JELLYFIN_URL || '' : ''),
+            __PTV_VERSION__: JSON.stringify(PTV_VERSION),
             __USE_SYSTEM_FONTS__: !!JSON.parse(process.env.USE_SYSTEM_FONTS || '0'),
             __WEBPACK_SERVE__: !!JSON.parse(process.env.WEBPACK_SERVE || '0')
         }),
@@ -79,8 +84,7 @@ const config = {
             // Append file hashes to bundle urls for cache busting
             hash: true,
             chunks: [
-                'main.jellyfin',
-                'serviceworker'
+                'main.jellyfin'
             ]
         }),
         new CopyPlugin({
@@ -147,7 +151,9 @@ const config = {
         removeAvailableModules: false,
         removeEmptyChunks: false,
         splitChunks: {
-            chunks: 'all',
+            // A registered service worker executes in its own global scope and
+            // cannot consume page runtime/vendor chunks. Keep it standalone.
+            chunks: chunk => chunk.name !== 'serviceworker',
             maxInitialRequests: Infinity,
             cacheGroups: {
                 node_modules: {

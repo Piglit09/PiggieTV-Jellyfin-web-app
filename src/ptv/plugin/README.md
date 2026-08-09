@@ -14,6 +14,10 @@ Primary endpoints include:
 - `POST /Ptv/v1/settings/reset`
 - `GET /Ptv/v1/reading/series-overrides/{routeKind}`
 - `PUT /Ptv/v1/reading/series-overrides/{routeKind}`
+- `GET /Ptv/v1/relationships/{sourceItemId}`
+- `POST /Ptv/v1/relationships`
+- `PUT /Ptv/v1/relationships/{mappingId}`
+- `DELETE /Ptv/v1/relationships/{mappingId}`
 - `POST /Ptv/v1/diagnostics/clients/check-in`
 - `POST /Ptv/v1/diagnostics/clients/report`
 - `GET /Ptv/v1/diagnostics/clients`
@@ -34,9 +38,11 @@ Temporary compatibility aliases are also available:
 - `DELETE /Ptv/FeaturedContent`
 - `POST /Ptv/FeaturedContent/Refresh`
 
-All endpoints require an authenticated Jellyfin user. Featured-content reads and minimal diagnostic client check-in/report publication are available to authenticated clients. `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, Reading override writes, all settings endpoints, and all diagnostic client listing/command/report reads require Jellyfin admin/elevated permissions. Remote diagnostics state is bounded, memory-only, automatically expires, and is described in [Remote client diagnostics](../docs/remote-diagnostics.md).
+All endpoints require an authenticated Jellyfin user. Featured-content reads, authoritative relationship reads, and minimal diagnostic client check-in/report publication are available to authenticated clients. Relationship reads omit mappings when either endpoint is not visible to the current user. `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, all relationship mutations, Reading override writes, all settings endpoints, and all diagnostic client listing/command/report reads require Jellyfin admin/elevated permissions. Remote diagnostics state is bounded, memory-only, automatically expires, and is described in [Remote client diagnostics](../docs/remote-diagnostics.md).
 
-Release `10.11.8.2` is the minimum plugin that advertises the `readingSeriesOverrides` capability. Older API-v1/cache-v7 plugins remain connected, but the frontend marks server-persisted Reading corrections as upgrade-required and truthfully identifies browser storage as a local cache fallback.
+Release `0.5.0.0` starts the canonical PiggieTV companion version line. PiggieTV release numbers are independent of the Jellyfin ABI: this release still targets Jellyfin `10.11.8.0` and keeps plugin API v1 and featured cache v7 compatibility.
+
+Release `0.5.0.0` advertises `readingSeriesOverrides`, `detailsRelationships`, and recommendation policy v2. Relationship mappings use stable Jellyfin item identities, an allowlisted relationship category, optional direction and display order, and plugin-configuration persistence. The API returns no titles or raw metadata, and the service keeps no relationship cache.
 
 The cache write endpoint validates payload version, required fields, timestamps, unsafe client fields, and serialized size before saving. The plugin writes only to its fixed PiggieTV cache file and never accepts client-provided storage paths or file names. Validation errors use structured JSON:
 

@@ -113,15 +113,20 @@ describe('playback presentation ownership', () => {
     });
 
     it.each([
-        '#/home',
-        '#/music',
-        '#/music/artists',
-        '#/music/albums',
-        '#/music/songs',
-        '#/music/playlists',
-        '#/search',
-        '#/mypreferencesmenu'
-    ])('keeps one mini-player invariant on %s', routeHash => {
+        { category: 'Home', routeHash: '#/home' },
+        { category: 'Movies', routeHash: '#/movies' },
+        { category: 'Shows', routeHash: '#/shows' },
+        { category: 'Music', routeHash: '#/music' },
+        { category: 'Music Artists', routeHash: '#/music/artists' },
+        { category: 'Music Albums', routeHash: '#/music/albums' },
+        { category: 'Music Songs', routeHash: '#/music/songs' },
+        { category: 'Music Playlists', routeHash: '#/music/playlists' },
+        { category: 'Reading', routeHash: '#/reading' },
+        { category: 'Search', routeHash: '#/search' },
+        { category: 'Details', routeHash: '#/details?id=route-fixture' },
+        { category: 'Settings', routeHash: '#/mypreferencesmenu' },
+        { category: 'Dashboard', routeHash: '#/dashboard/piggietv' }
+    ])('keeps one mini-player invariant on $category', ({ routeHash }) => {
         expect(derivePtvPlaybackPresentation(musicState(), {
             routeHash
         })).toMatchObject({

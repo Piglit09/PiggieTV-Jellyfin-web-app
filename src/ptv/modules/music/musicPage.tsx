@@ -2445,11 +2445,11 @@ function SmartPlaylistPanel({ generated, onGenerated }: SmartPlaylistPanelProps)
                         </button>
                     </div>
                     <div className='ptv-music-generated-list'>
-                        {generated.items.slice(0, 9).map((item, index) => (
+                        {generated.items.map((item, index) => (
                             <TrackCompactRow
                                 key={getMusicItemDomKey(item, generated.name)}
                                 contextIndex={index}
-                                contextItems={generated.items.slice(0, 9)}
+                                contextItems={generated.items}
                                 item={item}
                             />
                         ))}
@@ -3723,7 +3723,7 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
     const progress = getProgressPercent(snapshot);
     const [relatedItems, setRelatedItems] = useState<PtvMusicItem[]>([]);
     const [isRelatedLoading, setIsRelatedLoading] = useState(false);
-    const [isPlaylistModalOpen, setPlaylistModalOpen] = useState(false);
+    const [playlistModalItem, setPlaylistModalItem] = useState<PtvMusicItem | null>(null);
     const { isLiked, toggleLiked } = useLikedMusicItem(item, 'player-page-favorite');
     const relatedPool = useMemo(() => getAllHomeTracks(homeData), [homeData]);
     const visibleRelatedItems = relatedItems.filter(relatedItem => relatedItem.Id !== item?.Id);
@@ -3898,7 +3898,7 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
                     <MusicActionButton
                         className='ptv-music-action-add'
                         label='Add to playlist'
-                        onClick={() => setPlaylistModalOpen(true)}
+                        onClick={() => setPlaylistModalItem(item)}
                     >
                         +
                     </MusicActionButton>
@@ -3926,16 +3926,17 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
                 <LazyMusicPlayerPanel
                     isRelatedLoading={isRelatedLoading}
                     item={item}
+                    onAddToPlaylist={setPlaylistModalItem}
                     relatedItems={visibleRelatedItems}
                     snapshot={snapshot}
                 />
             </React.Suspense>
-            {isPlaylistModalOpen ? (
+            {playlistModalItem ? (
                 <React.Suspense fallback={null}>
                     <LazyPtvMusicPlaylistModal
                         isOpen
-                        item={item}
-                        onClose={() => setPlaylistModalOpen(false)}
+                        item={playlistModalItem}
+                        onClose={() => setPlaylistModalItem(null)}
                     />
                 </React.Suspense>
             ) : null}
@@ -4630,6 +4631,7 @@ export default function PiggieTvMusicPage() {
         const requestId = ++musicRequestIdRef.current;
         const activeRouteView = routeViewRef.current;
         const shouldLoadLibraryIndex = isPtvMusicCatalogView(activeRouteView);
+        let hasPublishedFirstVisibleContent = false;
 
         setLibraryIndexLoadState('scheduled');
 
@@ -4745,26 +4747,40 @@ export default function PiggieTvMusicPage() {
                     });
             }, isIntentionalInitialSnapshot ? 500 : 350);
         };
+        const publishVisibleHomeData = (nextHomeData: PtvMusicHomeData, delivery: 'progressive' | 'snapshot') => {
+            if (!isCurrentRequest()) return;
+
+            setHomeData(previous => mergeMusicHomeDataWithLibraryState(previous, nextHomeData));
+            setLoading(false);
+
+            if (hasPublishedFirstVisibleContent) return;
+
+            hasPublishedFirstVisibleContent = true;
+            const visibleAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+            const visibleDurationMs = Number((visibleAt - routeEnteredAt).toFixed(1));
+
+            recordPtvEvent('render', 'music-first-visible-content', {
+                cacheAgeMs: Math.max(0, Date.now() - nextHomeData.generatedAt),
+                delivery,
+                musicCachedRenderMs: visibleDurationMs,
+                musicFirstInteractiveMs: visibleDurationMs,
+                musicFirstVisibleContentMs: visibleDurationMs,
+                musicRouteEnteredAt: routeEnteredAt,
+                sectionCount: nextHomeData.sections.length
+            });
+        };
 
         return musicDataCoordinator.loadHomeSnapshot({
             forceRefresh,
             initialOnly: true,
             isCurrent: isCurrentRequest,
+            onProgress: progressiveHomeData => publishVisibleHomeData(progressiveHomeData, 'progressive'),
             signal: routeSignal
         })
             .then(nextHomeData => {
                 if (!isCurrentRequest()) return;
 
-                setHomeData(previous => mergeMusicHomeDataWithLibraryState(previous, nextHomeData));
-                setLoading(false);
-                recordPtvEvent('render', 'music-first-visible-content', {
-                    cacheAgeMs: Math.max(0, Date.now() - nextHomeData.generatedAt),
-                    musicCachedRenderMs: Number(((typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()) - routeEnteredAt).toFixed(1)),
-                    musicFirstInteractiveMs: Number(((typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()) - routeEnteredAt).toFixed(1)),
-                    musicFirstVisibleContentMs: Number(((typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()) - routeEnteredAt).toFixed(1)),
-                    musicRouteEnteredAt: routeEnteredAt,
-                    sectionCount: nextHomeData.sections.length
-                });
+                publishVisibleHomeData(nextHomeData, 'snapshot');
                 loadMusicVideos();
                 scheduleBackgroundHomeRefresh(nextHomeData);
             })

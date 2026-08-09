@@ -76,6 +76,8 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 _logger.LogInformation("Advertising feature: rows");
                 _logger.LogInformation("Advertising feature: featuredContent");
                 _logger.LogInformation("Advertising feature: featuredContentRefresh");
+                _logger.LogInformation("Advertising feature: detailsRelationships");
+                _logger.LogInformation("Advertising feature: recommendationPolicyV2");
                 _logger.LogInformation("Advertising feature: readingSeriesOverrides");
                 _logger.LogInformation("Advertising feature: integrations");
                 _logger.LogInformation("Advertising feature: tags");
@@ -96,6 +98,8 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         ["rows"] = true,
                         ["featuredContent"] = true,
                         ["featuredContentRefresh"] = true,
+                        ["detailsRelationships"] = true,
+                        ["recommendationPolicyV2"] = true,
                         ["readingSeriesOverrides"] = true,
                         ["musicMetadata"] = true,
                         ["readingMetadata"] = true,
@@ -112,6 +116,8 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         "rows",
                         "featuredContent",
                         "featuredContentRefresh",
+                        "detailsRelationships",
+                        "recommendationPolicyV2",
                         "readingSeriesOverrides",
                         "musicMetadata",
                         "readingMetadata",

@@ -192,8 +192,9 @@ export type NativeHomePerformanceDebug = {
 };
 
 const lastUsableNativeHomeStates = new PtvIdentityScopedCache<NativeHomeState>(4);
-const FEATURED_IDENTITY_BATCH_SIZE = 100;
-const FEATURED_IDENTITY_MAX_CONCURRENCY = 2;
+const FEATURED_IDENTITY_ITEM_LIMIT = 120;
+const FEATURED_IDENTITY_BATCH_SIZE = FEATURED_IDENTITY_ITEM_LIMIT;
+const FEATURED_IDENTITY_MAX_CONCURRENCY = 1;
 
 export function retireNativeHomeIdentityState(serverId: unknown, userId: unknown) {
     return lastUsableNativeHomeStates.delete(serverId, userId);
@@ -209,7 +210,7 @@ async function revalidateFeaturedPayloadForIdentity(
 ) {
     if (!payload || !options.serverId || !options.userId) return null;
 
-    const ids = getPtvFeaturedPayloadItemIds(payload);
+    const ids = getPtvFeaturedPayloadItemIds(payload, FEATURED_IDENTITY_ITEM_LIMIT);
     if (!ids.length) return payload;
 
     const batches = Array.from(
@@ -228,7 +229,7 @@ async function revalidateFeaturedPayloadForIdentity(
             batches
                 .slice(index, index + FEATURED_IDENTITY_MAX_CONCURRENCY)
                 .map(batch => getPtvItems<PtvItem>({
-                    Fields: 'PrimaryImageAspectRatio,Overview,Genres,Studios,MediaSources,UserData',
+                    Fields: ITEM_FIELDS,
                     Ids: batch.join(','),
                     Limit: batch.length
                 }, options))
@@ -252,9 +253,6 @@ const ITEM_FIELDS = [
     'Container',
     'Height',
     'LocationType',
-    'MediaSourceCount',
-    'MediaSources',
-    'MediaStreams',
     'MediaType',
     'ParentId',
     'Album',
@@ -270,7 +268,6 @@ const ITEM_FIELDS = [
     'ParentPrimaryImageTag',
     'ParentThumbImageTag',
     'ParentThumbItemId',
-    'Path',
     'ProductionYear',
     'ProviderIds',
     'DateCreated',
@@ -334,6 +331,7 @@ function getEmptyRecommendationScoreDistribution(): PtvRecommendationScoreDistri
     };
 }
 const NATIVE_HOME_CRITICAL_FETCH_TIMEOUT_MS = 1800;
+const NATIVE_HOME_FEATURED_ADOPTION_TIMEOUT_MS = 900;
 const NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS = 2600;
 const NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS = 3200;
 
@@ -1571,6 +1569,42 @@ function expandNativeHomeStudioRows(
     }
 
     return Promise.all(rows.map(row => expandNativeHomeStudioRow(row, userId, studioMap, signal)));
+}
+
+function createNativeHomeFeaturedRowResults(
+    featuredPayload: FeaturedPayload | null,
+    featuredEndpointPayload: FeaturedPayload | null,
+    rowSettings: PtvRowsEndpointSettings | null,
+    userId: string,
+    options: NativeRowFetchOptions
+) {
+    const createResults = (studioMap: Map<string, string>) => ({
+        cachedRowsResult: createRowsFromFeaturedPayload(featuredPayload, {
+            rowSettings,
+            source: 'featured-cache',
+            studioMap
+        }),
+        endpointRowsResult: createRowsFromFeaturedPayload(featuredEndpointPayload, {
+            rowSettings,
+            source: 'featured-endpoint',
+            studioMap
+        }),
+        studioMap
+    });
+    const initialResults = createResults(new Map<string, string>());
+    const hasStudioRows = [
+        ...initialResults.cachedRowsResult.rows,
+        ...initialResults.endpointRowsResult.rows
+    ].some(row => isNativeHomeStudioSource(row.sourceType));
+
+    if (!hasStudioRows) return Promise.resolve(initialResults);
+
+    return createNativeRowFetch(
+        'native-home-studio-map',
+        signal => loadNativeHomeStudioMap(userId, signal),
+        new Map<string, string>(),
+        options
+    ).then(createResults);
 }
 
 function isRuleMatchForSection(
@@ -3950,9 +3984,9 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
         });
         const featuredPayloadPromise = createNativeRowFetch(
             'native-home-featured-cache',
-            () => getCachedFeaturedContentPayload({ allowStale: false }),
+            () => getCachedFeaturedContentPayload({ allowStale: true }),
             null,
-            getFetchOptions(0)
+            getFetchOptions(NATIVE_HOME_FEATURED_ADOPTION_TIMEOUT_MS)
         );
         recordTimeline('memory-cache-read-started', 'memory-cache');
         recordTimeline('browser-cache-read-skipped', 'browser-cache', {}, {
@@ -3971,17 +4005,26 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
             null,
             getFetchOptions(0)
         );
-        const userScopedFeaturedPayloadPromise = Promise.all([
-            featuredPayloadPromise,
-            currentUserPromise
-        ]).then(async ([ featuredPayload, user ]) => ({
-            featuredPayload: await revalidateFeaturedPayloadForIdentity(featuredPayload, {
-                serverId: displayIdentity.serverId,
-                signal: routeAbortController.signal,
-                userId: user?.Id || ''
-            }),
-            user
-        }));
+        const userScopedFeaturedPayloadPromise = createNativeRowFetch(
+            'native-home-featured-adoption',
+            async signal => {
+                const [featuredPayload, user] = await Promise.all([
+                    featuredPayloadPromise,
+                    currentUserPromise
+                ]);
+
+                return {
+                    featuredPayload: await revalidateFeaturedPayloadForIdentity(featuredPayload, {
+                        serverId: displayIdentity.serverId,
+                        signal,
+                        userId: user?.Id || ''
+                    }),
+                    user
+                };
+            },
+            { featuredPayload: null, user: null },
+            getFetchOptions(NATIVE_HOME_FEATURED_ADOPTION_TIMEOUT_MS)
+        );
 
         void userScopedFeaturedPayloadPromise
             .then(({ featuredPayload, user }) => {
@@ -4030,16 +4073,9 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 }
 
                 const userId = user.Id;
-                const studioMapPromise = createNativeRowFetch(
-                    'native-home-studio-map',
-                    signal => loadNativeHomeStudioMap(userId, signal),
-                    new Map<string, string>(),
-                    getFetchOptions(NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS)
-                );
-                const [rowSettings, featuredPayload, studioMap] = await Promise.all([
+                const [rowSettings, featuredPayload] = await Promise.all([
                     rowSettingsPromise,
-                    userScopedFeaturedPayloadPromise.then(result => result.featuredPayload),
-                    studioMapPromise
+                    userScopedFeaturedPayloadPromise.then(result => result.featuredPayload)
                 ]);
                 const savedRowRulesActive = shouldRenderConfiguredRows(rowSettings);
                 const hasFeaturedCache = hasUsableFeaturedPayload(featuredPayload)
@@ -4115,16 +4151,17 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                     sectionItemCount: Object.keys(featuredEndpointPayload?.sectionItems || {}).length
                 });
 
-                const cachedRowsResult = createRowsFromFeaturedPayload(featuredPayload, {
-                    rowSettings,
-                    source: 'featured-cache',
+                const {
+                    cachedRowsResult,
+                    endpointRowsResult,
                     studioMap
-                });
-                const endpointRowsResult = createRowsFromFeaturedPayload(featuredEndpointPayload, {
+                } = await createNativeHomeFeaturedRowResults(
+                    featuredPayload,
+                    featuredEndpointPayload,
                     rowSettings,
-                    source: 'featured-endpoint',
-                    studioMap
-                });
+                    userId,
+                    getFetchOptions(NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS)
+                );
                 const preferredFeaturedRowsResult = cachedRowsResult.rows.length ?
                     cachedRowsResult :
                     endpointRowsResult;

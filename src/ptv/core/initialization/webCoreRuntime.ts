@@ -149,7 +149,7 @@ export function createPtvWebCoreRuntime(dependencies: PtvWebCoreRuntimeDependenc
             initializePtvWebDiagnosticPlatform();
             const capabilityReport = snapshot.capabilityReport || getPtvWebCapabilityReport();
             snapshot.diagnosticEvent = createPtvDiagnosticEvent({
-                appVersion: typeof __PACKAGE_JSON_VERSION__ === 'string' ? __PACKAGE_JSON_VERSION__ : 'unknown',
+                appVersion: typeof __PTV_VERSION__ === 'string' ? __PTV_VERSION__ : 'unknown',
                 category: 'startup',
                 deviceClass: capabilityReport.deviceClass,
                 metadata: {

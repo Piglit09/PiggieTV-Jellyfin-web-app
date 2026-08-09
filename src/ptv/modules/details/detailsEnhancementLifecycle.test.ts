@@ -83,6 +83,8 @@ describe('PTV details render lifecycle', () => {
             "import { getCoordinatedLegacyItemDetail } from '../../services/coordinatedLegacyItemDetail'"
         );
         expect(integrationSource).toContain('getCoordinatedLegacyItemDetail(apiClient, itemId)');
+        expect(integrationSource).toContain('getCacheKey(serverId, userId, itemId)');
+        expect(integrationSource).toContain('getApiClient(serverId)?.getCurrentUserId?.() !== userId');
     });
 
     it('retires enhancement work and item-local state when the details module exits', () => {
@@ -95,6 +97,7 @@ describe('PTV details render lifecycle', () => {
         expect(destroy).toContain('resetDetailEnhancementState(page)');
         expect(enhancementSource).toContain("image.removeEventListener('load', handleDetailImageLoad)");
         expect(enhancementSource).toContain("image.removeEventListener('error', handleDetailImageError)");
+        expect(integrationSource).toContain('itemCache.clear()');
     });
 
     it('rehydrates the same type-specific progressive pipeline on restore without resetting primary content', () => {

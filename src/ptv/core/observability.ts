@@ -7,7 +7,7 @@ import {
     type PtvPerformanceProfile
 } from './clientProfile';
 import { dispatchPtvCustomEvent } from './events';
-import { getPtvPluginApiDiagnostics } from './pluginApi';
+import { getPtvPluginApiDiagnostics, getPtvPluginApiResolvedRoot } from './pluginApi';
 import { getPtvRuntimeDiagnostics } from './runtime';
 import { resetRuntimeScope } from './scope';
 import { classifyPtvRequestUrl } from './urlOrigins';
@@ -981,11 +981,11 @@ function getImageEventDetail(image: HTMLImageElement, url: string) {
 }
 
 function getRequestOriginDetail(url: string) {
-    const pluginApi = getPtvPluginApiDiagnostics();
+    const pluginApiRoot = getPtvPluginApiResolvedRoot();
 
     return classifyPtvRequestUrl(url, {
-        jellyfinRoot: pluginApi.resolvedRoot,
-        pluginRoot: pluginApi.resolvedRoot
+        jellyfinRoot: pluginApiRoot,
+        pluginRoot: pluginApiRoot
     });
 }
 

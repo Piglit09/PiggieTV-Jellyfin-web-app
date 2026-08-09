@@ -51,6 +51,14 @@ describe('PiggieTV shell surface hierarchy', () => {
         expect(detailsStyles).toContain('.ptv-details-glass');
     });
 
+    it('reserves separate mobile rows for utility actions and navigation', () => {
+        const mobileHeaderRule = getRuleBodies(shellStyles, '.ptv-shell-header')
+            .find(rule => rule.includes('grid-template-rows: 48px 52px'));
+
+        expect(mobileHeaderRule).toBeDefined();
+        expect(mobileHeaderRule).toContain('min-height: 126px');
+    });
+
     it('neutralizes the global icon margin inside every shell utility button', () => {
         expect(iconStyles).toMatch(/\.ptv-shell-icon-button \.ptv-icon,[\s\S]*?margin:\s*0 !important/);
         expect(iconStyles).toContain('.ptv-shell-search-trigger .ptv-icon');

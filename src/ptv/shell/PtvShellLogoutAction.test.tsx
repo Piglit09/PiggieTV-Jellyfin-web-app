@@ -183,6 +183,26 @@ describe('PTV shell logout control', () => {
         expect(container.querySelector('.ptv-shell-frame-fullscreen-music')).not.toBeNull();
     });
 
+    it('keeps the shell search field synchronized with the active Search page query', async () => {
+        const renderShellSearch = (searchQuery: string) => flushSync(() => root.render(
+            <PTVShell headerOnly searchQuery={searchQuery}>
+                <div />
+            </PTVShell>
+        ));
+        const getSearchInput = () => container.querySelector<HTMLInputElement>(
+            'input[aria-label="Search PiggieTV"]'
+        );
+
+        renderShellSearch('Digimon');
+        await vi.waitFor(() => expect(getSearchInput()?.value).toBe('Digimon'));
+
+        renderShellSearch('Marvel');
+        await vi.waitFor(() => expect(getSearchInput()?.value).toBe('Marvel'));
+
+        renderShellSearch('');
+        await vi.waitFor(() => expect(getSearchInput()?.value).toBe(''));
+    });
+
     it.each([
         ['mouse click', (button: HTMLButtonElement) => {
             button.dispatchEvent(new MouseEvent('click', { bubbles: true }));

@@ -39,7 +39,8 @@ import {
     getPtvPluginApiResolvedUrl,
     isPtvPluginApiCoolingDown,
     normalizePtvApiError,
-    resetPtvPluginApiAvailability
+    resetPtvPluginApiAvailability,
+    subscribePtvPluginStatus
 } from '../../core/pluginApi';
 import {
     clearFeaturedContentCache,
@@ -1988,6 +1989,16 @@ const PiggieTvDashboardPage = () => {
         }
     }, [setFeaturedRefreshStateValue]);
 
+    useEffect(() => subscribePtvPluginStatus(status => {
+        if (
+            pluginStatusRequestRef.current
+            || !status
+            || typeof status !== 'object'
+        ) return;
+
+        applyPluginStatus(status as PtvPluginStatus);
+    }), [applyPluginStatus]);
+
     const refreshPluginStatus = useCallback(() => {
         if (pluginStatusRequestRef.current) return pluginStatusRequestRef.current;
 
@@ -3238,6 +3249,7 @@ const PiggieTvDashboardPage = () => {
                                             <Typography>Frontend build: {buildInfo.frontendBuildId}</Typography>
                                             <Typography>Frontend commit: {buildInfo.frontendCommitSha}</Typography>
                                             <Typography>Built: {buildInfo.frontendBuildDate}</Typography>
+                                            <Typography>PTV Web: {buildInfo.ptvWebVersion}</Typography>
                                             <Typography>Jellyfin Web: {buildInfo.jellyfinWebVersion}</Typography>
                                             <Typography>Build mode: {buildInfo.environment}</Typography>
                                             <Typography>Compatibility: {buildInfo.compatibility}</Typography>
