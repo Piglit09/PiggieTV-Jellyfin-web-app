@@ -26,7 +26,7 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
     private const int BusyTimeoutMilliseconds = 5000;
     private const int ImportBatchSize = 500;
     private const long MinimumFreeSpaceReserveBytes = 256L * 1024 * 1024;
-    private static readonly TimeSpan InitializationTimeout = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan InitializationInactivityTimeout = TimeSpan.FromMinutes(10);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
@@ -185,10 +185,10 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
 
     private async Task InitializeOwnedAsync()
     {
-        using var timeout = new CancellationTokenSource(InitializationTimeout);
+        using var timeout = new InitializationInactivityDeadline(InitializationInactivityTimeout);
         try
         {
-            await InitializeCoreAsync(timeout.Token).ConfigureAwait(false);
+            await InitializeCoreAsync(timeout.Token, timeout.ReportProgress).ConfigureAwait(false);
             _errorCode = null;
         }
         catch (Exception ex)
@@ -211,15 +211,19 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
         }
     }
 
-    private async Task InitializeCoreAsync(CancellationToken cancellationToken)
+    private async Task InitializeCoreAsync(
+        CancellationToken cancellationToken,
+        Action reportProgress)
     {
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            reportProgress();
             Directory.CreateDirectory(_directory);
             await using var connection = await OpenWriteConnectionAsync(cancellationToken).ConfigureAwait(false);
             await CreateSchemaAsync(connection, cancellationToken).ConfigureAwait(false);
             await RecoverInterruptedBuildsAsync(connection, cancellationToken).ConfigureAwait(false);
+            reportProgress();
 
             var active = await ReadActiveGenerationAsync(connection, cancellationToken).ConfigureAwait(false);
             var hasValidatingGeneration = await HasGenerationInStateAsync(
@@ -240,6 +244,7 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
             var legacyHash = File.Exists(_legacyStore.ResultsPath)
                 ? await ComputeFileHashAsync(_legacyStore.ResultsPath, cancellationToken).ConfigureAwait(false)
                 : null;
+            reportProgress();
             legacyHash = await RecoverPendingSnapshotsAsync(
                 connection,
                 legacyHash,
@@ -248,6 +253,7 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
                 connection,
                 legacyHash,
                 cancellationToken).ConfigureAwait(false);
+            reportProgress();
             active = await ReadActiveGenerationAsync(connection, cancellationToken).ConfigureAwait(false);
 
             if (legacyHash is not null)
@@ -314,7 +320,8 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
                         source,
                         legacyHash,
                         source.Length,
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken,
+                        reportProgress).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -340,7 +347,9 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
                 }
             }
 
+            reportProgress();
             await ActivateGenerationAsync(connection, generationId, cancellationToken).ConfigureAwait(false);
+            reportProgress();
         }
         catch (SqliteException ex)
         {
@@ -793,7 +802,8 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
         Stream source,
         string sourceHash,
         long sourceLength,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action reportProgress)
     {
         var generationId = Guid.NewGuid();
         using (var transaction = connection.BeginTransaction())
@@ -827,6 +837,7 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
                     batch,
                     callbackCancellation).ConfigureAwait(false);
                 batch.Clear();
+                reportProgress();
             },
             cancellationToken).ConfigureAwait(false);
 
@@ -838,6 +849,7 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
                 batch,
                 cancellationToken).ConfigureAwait(false);
             batch.Clear();
+            reportProgress();
         }
 
         var schemaVersion = header.SchemaVersion <= 0
@@ -902,8 +914,11 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        reportProgress();
         await ValidateGenerationAsync(connection, generationId, cancellationToken).ConfigureAwait(false);
+        reportProgress();
         var fingerprint = await ComputeGenerationFingerprintAsync(connection, generationId, cancellationToken).ConfigureAwait(false);
+        reportProgress();
         using (var transaction = connection.BeginTransaction())
         {
             await using var command = connection.CreateCommand();
@@ -936,6 +951,40 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
         }
 
         return generationId;
+    }
+
+    /// <summary>
+    /// Cancels initialization only after a complete interval without reported progress.
+    /// Long, productive first imports can therefore outlive one interval, while a stalled
+    /// filesystem or database operation remains bounded.
+    /// </summary>
+    internal sealed class InitializationInactivityDeadline : IDisposable
+    {
+        private readonly CancellationTokenSource _source = new();
+        private readonly TimeSpan _inactivityTimeout;
+
+        public InitializationInactivityDeadline(TimeSpan inactivityTimeout)
+        {
+            if (inactivityTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(inactivityTimeout));
+            }
+
+            _inactivityTimeout = inactivityTimeout;
+            ReportProgress();
+        }
+
+        public CancellationToken Token => _source.Token;
+
+        public void ReportProgress()
+        {
+            if (!_source.IsCancellationRequested)
+            {
+                _source.CancelAfter(_inactivityTimeout);
+            }
+        }
+
+        public void Dispose() => _source.Dispose();
     }
 
     private static async Task InsertImportResultBatchAsync(

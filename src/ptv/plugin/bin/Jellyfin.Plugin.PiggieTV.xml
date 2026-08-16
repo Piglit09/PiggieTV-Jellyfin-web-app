@@ -7197,6 +7197,13 @@
         <member name="M:Jellyfin.Plugin.PiggieTV.Services.PtvMetadataQualityIndexedStore.RebuildFromLegacyAsync(System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
+        <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvMetadataQualityIndexedStore.InitializationInactivityDeadline">
+            <summary>
+            Cancels initialization only after a complete interval without reported progress.
+            Long, productive first imports can therefore outlive one interval, while a stalled
+            filesystem or database operation remains bounded.
+            </summary>
+        </member>
         <member name="T:Jellyfin.Plugin.PiggieTV.Services.PtvMetadataQualityJsonHeader">
             <summary>
             Root metadata read from a Metadata Quality document without materializing its item-results dictionary.

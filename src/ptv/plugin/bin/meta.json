@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "Starts the canonical PiggieTV 0.5 release line with recommendation policy v2 and authoritative cross-library relationships while preserving PiggieTV API v1 and featured cache v7 compatibility.",
+  "changelog": "Allows large Metadata Quality indexed-store migrations to finish while retaining a bounded inactivity watchdog for stalled initialization.",
   "description": "Server-side cache and integration endpoints for the PiggieTV web client.",
   "guid": "27c90ee7-7d56-4591-98f8-b0ebcda8c5fd",
   "name": "PiggieTV",
   "overview": "PiggieTV server companion plugin",
   "owner": "PiggieTV",
   "targetAbi": "10.11.11.0",
-  "timestamp": "2026-08-09T11:33:43Z",
-  "version": "0.5.11.0",
+  "timestamp": "2026-08-16T04:00:32Z",
+  "version": "0.5.12.0",
   "status": 0,
   "autoUpdate": false,
   "assemblies": [

@@ -45,6 +45,46 @@ public sealed class PtvMetadataQualityIndexedStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializationDeadlineRenewsWhileImportReportsProgress()
+    {
+        var inactivityTimeout = TimeSpan.FromSeconds(1);
+        using var deadline = new PtvMetadataQualityIndexedStore.InitializationInactivityDeadline(inactivityTimeout);
+
+        for (var step = 0; step < 5; step++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250));
+            deadline.ReportProgress();
+            Assert.False(deadline.Token.IsCancellationRequested);
+        }
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => Task.Delay(Timeout.InfiniteTimeSpan, deadline.Token));
+    }
+
+    [Fact]
+    public async Task CallerCancellationStopsWaitingWithoutCancellingSharedInitialization()
+    {
+        var legacy = CreateLegacyStore();
+        await legacy.WriteAsync(CreateDocument(
+            Enumerable.Range(0, 501)
+                .Select(index => CreateResult($"Shared import {index:D3}", PtvMetadataQualityStatuses.Review, index % 100))
+                .ToArray()));
+        var indexed = CreateIndexedStore(legacy);
+        using var callerCancellation = new CancellationTokenSource();
+        callerCancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => indexed.EnsureReadyAsync(callerCancellation.Token));
+        await indexed.EnsureReadyAsync();
+
+        var summary = await indexed.ReadSummaryAsync();
+        Assert.Equal(501, summary.Counts.TotalScanned);
+        await using var connection = OpenDatabase(indexed.DatabasePath);
+        await connection.OpenAsync();
+        Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM mq_generation WHERE state = 'ACTIVE';"));
+    }
+
+    [Fact]
     public async Task MalformedLegacyJsonFailsClosedWithoutQuarantiningOrReplacingTheMigrationSource()
     {
         var legacy = CreateLegacyStore();
