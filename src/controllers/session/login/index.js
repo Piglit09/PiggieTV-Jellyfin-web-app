@@ -26,6 +26,7 @@ import {
     getPtvPostLoginRouteWithHashFallback,
     PTV_CURRENT_SETTINGS_REDIRECT
 } from '../../../ptv/shell/authenticationRoutes';
+import { ptvSafeConsole } from '../../../ptv/core/safeConsole';
 
 import './login.scss';
 
@@ -59,7 +60,10 @@ function authenticateQuickConnect(apiClient, targetUrl, commitNavigation) {
     const url = apiClient.getUrl('/QuickConnect/Initiate');
     apiClient.ajax({ type: 'POST', url }, true).then(res => res.json()).then(function (json) {
         if (!json.Secret || !json.Code) {
-            console.error('Malformed quick connect response', json);
+            ptvSafeConsole.error('Malformed quick connect response', {
+                codePresent: Boolean(json.Code),
+                secretPresent: Boolean(json.Secret)
+            });
             return false;
         }
 
@@ -103,7 +107,7 @@ function authenticateQuickConnect(apiClient, targetUrl, commitNavigation) {
                     title: globalize.translate('HeaderError')
                 });
 
-                console.error('Unable to login with quick connect', e);
+                ptvSafeConsole.error('Unable to login with quick connect', e);
             });
         }, 5000, connectUrl);
 
@@ -114,7 +118,7 @@ function authenticateQuickConnect(apiClient, targetUrl, commitNavigation) {
             title: globalize.translate('HeaderError')
         });
 
-        console.error('Quick connect error: ', e);
+        ptvSafeConsole.error('Quick connect error', e);
         return false;
     });
 }

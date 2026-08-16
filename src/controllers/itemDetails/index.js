@@ -62,11 +62,10 @@ import {
 } from './detailLoadRecovery';
 import { normalizeItemMediaSources } from './mediaSourceDeduplication';
 import {
-    PTV_RELATED_VIDEO_CANDIDATE_LIMIT,
     PTV_RELATED_VIDEO_DISPLAY_LIMIT,
-    PTV_RELATED_VIDEO_FIELDS,
     rankPtvRelatedVideoItems
 } from '../../ptv/modules/details/detailsRelatedRecommendations';
+import { loadPtvDetailRelatedItems } from '../../ptv/modules/details/detailsRelatedSource';
 
 import 'elements/emby-itemscontainer/emby-itemscontainer';
 import 'elements/emby-checkbox/emby-checkbox';
@@ -1525,33 +1524,21 @@ function renderSimilarItems(page, item, context, signal) {
     const similarCollapsible = page.querySelector('#similarCollapsible');
 
     if (similarCollapsible) {
-        if (item.Type != 'Movie' && item.Type != 'Trailer' && item.Type != 'Series' && item.Type != 'Program' && item.Type != 'Recording' && item.Type != 'MusicAlbum' && item.Type != 'MusicArtist' && item.Type != 'Playlist' && item.Type != 'Audio') {
+        if (item.Type != 'Movie' && item.Type != 'Trailer' && item.Type != 'Series' && item.Type != 'Episode' && item.Type != 'Program' && item.Type != 'Recording' && item.Type != 'MusicAlbum' && item.Type != 'MusicArtist' && item.Type != 'Playlist' && item.Type != 'Audio') {
             similarCollapsible.classList.add('hide');
             return;
         }
 
         similarCollapsible.classList.remove('hide');
-        const apiClient = ServerConnections.getApiClient(item.ServerId);
-        const options = {
-            userId: apiClient.getCurrentUserId(),
-            limit: PTV_RELATED_VIDEO_CANDIDATE_LIMIT,
-            fields: PTV_RELATED_VIDEO_FIELDS
-        };
-
-        if (item.Type == 'MusicAlbum' && item.AlbumArtists && item.AlbumArtists.length) {
-            options.ExcludeArtistIds = item.AlbumArtists[0].Id;
-        }
-
-        requestPtvJson(`Items/${encodeURIComponent(item.Id)}/Similar`, {
-            params: options,
+        loadPtvDetailRelatedItems(item, {
             serverId: item.ServerId,
             signal
-        }).then(function (result) {
+        }).then(function (relatedItems) {
             if (!isDetailItemCurrent(page, item)) return;
 
             const similarItems = rankPtvRelatedVideoItems(
                 item,
-                result.Items,
+                relatedItems,
                 PTV_RELATED_VIDEO_DISPLAY_LIMIT
             );
 

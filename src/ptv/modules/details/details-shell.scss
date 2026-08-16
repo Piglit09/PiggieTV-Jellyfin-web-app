@@ -326,3 +326,83 @@ html.ptv-client-low-power .ptv-detail-page .ptv-details-backdrop__image {
         transition: none;
     }
 }
+
+/* Episode details use an open cinematic composition instead of stacked panels. */
+.ptv-detail-page.ptv-details--episode {
+    --ptv-details-focus-core: rgba(226, 145, 255, 0.96);
+    --ptv-details-focus-glow: rgba(179, 76, 255, 0.34);
+}
+
+html .ptv-detail-page.ptv-details--episode .ptv-details-backdrop__image {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+
+    object-position: center 24%;
+    opacity: 0;
+    filter: saturate(1.06) brightness(0.9) contrast(1.04);
+    transform: scale(1.01);
+}
+
+html .ptv-detail-page.ptv-details--episode .ptv-details-backdrop--image .ptv-details-backdrop__image {
+    opacity: 1;
+    transform: scale(1.018);
+}
+
+.ptv-detail-page.ptv-details--episode .ptv-details-backdrop::before {
+    z-index: 1;
+
+    background:
+        linear-gradient(180deg, rgba(5, 3, 11, 0.5) 0%, rgba(5, 3, 11, 0.08) 22%, transparent 54%, rgba(6, 3, 12, 0.72) 88%, #07040d 100%),
+        linear-gradient(90deg, rgba(5, 3, 12, 0.98) 0%, rgba(7, 4, 15, 0.9) 23%, rgba(8, 5, 17, 0.58) 42%, rgba(8, 5, 17, 0.16) 66%, rgba(5, 3, 11, 0.06) 100%);
+}
+
+.ptv-detail-page.ptv-details--episode .ptv-details-backdrop::after {
+    z-index: 2;
+
+    background:
+        radial-gradient(ellipse at 19% 49%, rgba(179, 76, 255, 0.09), transparent 36%),
+        linear-gradient(180deg, transparent 62%, rgba(9, 4, 17, 0.34));
+    mix-blend-mode: normal;
+    opacity: 1;
+}
+
+.ptv-detail-page.ptv-details--episode::before {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode .detailPageWrapperContainer {
+    padding: calc(var(--ptv-header-safe-height, 88px) + 132px) clamp(28px, 3vw, 58px) 64px !important;
+}
+
+.ptv-detail-page.ptv-details--episode .detailPagePrimaryContainer {
+    grid-template-columns: clamp(360px, 27vw, 520px) minmax(0, 760px);
+    gap: clamp(30px, 3.2vw, 62px);
+    align-content: center;
+    max-width: 1420px;
+    min-height: clamp(540px, calc(100vh - 270px), 690px);
+}
+
+.ptv-detail-page.ptv-details--episode .detailRibbon,
+.ptv-detail-page.ptv-details--episode .detailPagePrimaryContent > .detailSection {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+
+.ptv-detail-page.ptv-details--episode .detailRibbon::before,
+.ptv-detail-page.ptv-details--episode .detailPagePrimaryContent > .detailSection::before {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .ptv-detail-page.ptv-details--episode .detailPageWrapperContainer {
+        padding: calc(var(--ptv-header-safe-height, 126px) + 20px) 18px 42px !important;
+    }
+
+    .ptv-detail-page.ptv-details--episode .detailPagePrimaryContainer {
+        gap: 12px;
+        min-height: 0;
+    }
+}

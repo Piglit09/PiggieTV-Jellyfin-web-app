@@ -3,6 +3,7 @@ import loading from '../components/loading/loading';
 import focusManager from '../components/focusManager';
 import homeSections from '../components/homesections/homesections';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 import '../elements/emby-itemscontainer/emby-itemscontainer';
 
@@ -37,7 +38,7 @@ class HomeTab {
                     focusManager.autoFocus(view);
                 }
             }).catch(err => {
-                console.error(err);
+                ptvSafeConsole.error('[HomeTab] failed to load home sections', err);
             }).finally(() => {
                 loading.hide();
             });

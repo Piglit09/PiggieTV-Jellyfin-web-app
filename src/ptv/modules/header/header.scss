@@ -291,3 +291,10 @@
     visibility: hidden !important;
     pointer-events: none !important;
 }
+
+.ptv-app-header-root > .ptv-mainDrawer,
+.ptv-app-header-root > .ptv-legacy-skinHeader {
+    display: none !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+}

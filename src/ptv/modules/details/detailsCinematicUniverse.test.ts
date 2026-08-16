@@ -104,6 +104,32 @@ describe('F4A media universe model', () => {
         expect(entities?.items.map(card => card.entityType)).toEqual(['Person', 'Studio']);
     });
 
+    it('places strongly connected library titles ahead of people and places', () => {
+        const director = { Id: 'nolan', Name: 'Christopher Nolan', Type: 'Director' };
+        const studio = { Id: 'dc', Name: 'DC' };
+        const seed = {
+            Id: 'dark-knight',
+            Name: 'The Dark Knight',
+            People: [director],
+            Studios: [studio],
+            Type: 'Movie'
+        };
+        const model = buildPtvCinematicDetailsModel(seed, data([
+            score({
+                Id: 'batman-begins',
+                Name: 'Batman Begins',
+                People: [director],
+                Studios: ['DC'],
+                Type: 'Movie'
+            })
+        ]));
+
+        expect(model.shelves[0]?.id).toBe('explicit-connections');
+        expect(model.shelves[0]?.items.map(card => card.itemId)).toEqual(['batman-begins']);
+        expect(model.shelves[1]?.id).toBe('universe-entities');
+        expect(model.shelves[1]?.title).toBe('People and places');
+    });
+
     it('converts existing canonical metadata destinations into visual entity cards', () => {
         const model = buildPtvCinematicDetailsModel({ Id: 'seed', Name: 'Origin', Type: 'Movie' }, data([]), [{
             ariaLabel: 'Open collection',

@@ -4,6 +4,7 @@ import { getLibraryApi } from '@jellyfin/sdk/lib/utils/api/library-api';
 
 import { getItemQuery } from 'hooks/useItem';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import { currentSettings as userSettings } from 'scripts/settings/userSettings';
 import { ItemKind } from 'types/base/models/item-kind';
 import Events from 'utils/events.ts';
@@ -112,7 +113,7 @@ async function loadThemeMedia(serverId, itemId) {
             playThemeMedia(result.Items, result.OwnerId);
         }
     } catch (err) {
-        console.error('[ThemeMediaPlayer] failed to load theme media', err);
+        ptvSafeConsole.error('[ThemeMediaPlayer] failed to load theme media', err);
     }
 }
 

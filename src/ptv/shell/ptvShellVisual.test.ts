@@ -59,6 +59,22 @@ describe('PiggieTV shell surface hierarchy', () => {
         expect(mobileHeaderRule).toContain('min-height: 126px');
     });
 
+    it('compacts media labels without removing their accessible text on phone widths', () => {
+        const labelRule = getRuleBodies(shellStyles, '.ptv-shell-nav-label')
+            .find(rule => rule.includes('clip-path: inset(50%)'));
+
+        expect(shellStyles).toContain('@media (max-width: 520px)');
+        expect(labelRule).toBeDefined();
+        expect(labelRule).toContain('position: absolute');
+        expect(labelRule).toContain('width: 1px');
+    });
+
+    it('restores pointer input for the update notice inside the click-through runtime root', () => {
+        const updateNoticeRule = getRuleBodies(shellStyles, '.ptv-update-notice')[0];
+
+        expect(updateNoticeRule).toContain('pointer-events: auto');
+    });
+
     it('neutralizes the global icon margin inside every shell utility button', () => {
         expect(iconStyles).toMatch(/\.ptv-shell-icon-button \.ptv-icon,[\s\S]*?margin:\s*0 !important/);
         expect(iconStyles).toContain('.ptv-shell-search-trigger .ptv-icon');

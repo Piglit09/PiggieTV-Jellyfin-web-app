@@ -6,9 +6,9 @@
   "name": "PiggieTV",
   "overview": "PiggieTV server companion plugin",
   "owner": "PiggieTV",
-  "targetAbi": "10.11.8.0",
+  "targetAbi": "10.11.11.0",
   "timestamp": "2026-08-09T11:33:43Z",
-  "version": "0.5.0.0",
+  "version": "0.5.11.0",
   "status": 0,
   "autoUpdate": false,
   "assemblies": [

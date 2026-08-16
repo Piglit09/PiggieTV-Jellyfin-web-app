@@ -50,7 +50,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         _serviceProvider = serviceProvider;
 
         _logger.LogInformation(
-            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET/PUT /Ptv/v1/reading/series-overrides/{{routeKind}}, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET /Ptv/v1/reading/metadata/googlebooks/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
+            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET/PUT /Ptv/v1/reading/series-overrides/{{routeKind}}, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET /Ptv/v1/reading/metadata/googlebooks/search, GET /Ptv/v1/reading/metadata/providers, POST /Ptv/v1/reading/metadata/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
     }
 
     /// <summary>
@@ -526,13 +526,22 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         {
             var settingsService = GetOptionalService<IPtvPluginSettingsService>(PtvApiRoutes.V1Settings);
 
-            return Ok(settingsService?.GetSettings() ?? PtvPluginSettingsDto.FromConfiguration(new Configuration.PluginConfiguration()));
+            if (settingsService is null)
+            {
+                return StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    Error("PTV_SETTINGS_UNAVAILABLE", "PiggieTV settings are temporarily unavailable."));
+            }
+
+            return Ok(settingsService.GetSettings());
         }
         catch (Exception ex)
         {
             LogEndpointFailure(PtvApiRoutes.V1Settings, ex);
 
-            return Ok(PtvPluginSettingsDto.FromConfiguration(new Configuration.PluginConfiguration()));
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                Error("PTV_SETTINGS_READ_FAILED", "PiggieTV settings could not be loaded."));
         }
     }
 
@@ -833,9 +842,27 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 Error("PTV_ROWS_READ_FORBIDDEN", "Only Jellyfin administrators can read PiggieTV row settings."));
         }
 
-        var settingsService = GetOptionalService<IPtvPluginSettingsService>("rows");
+        try
+        {
+            var settingsService = GetOptionalService<IPtvPluginSettingsService>("rows");
 
-        return Ok(settingsService?.GetSettings().Rows ?? RowBuilderSettings.CreateDefault());
+            if (settingsService is null)
+            {
+                return StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    Error("PTV_ROWS_UNAVAILABLE", "PiggieTV Home Row settings are temporarily unavailable."));
+            }
+
+            return Ok(settingsService.GetSettings().Rows);
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure("rows", ex);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                Error("PTV_ROWS_READ_FAILED", "PiggieTV Home Row settings could not be loaded."));
+        }
     }
 
     /// <summary>
@@ -1063,7 +1090,12 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                     signupPasswordResetConfirm = "/Ptv/v1/signup/password-reset/confirm",
                     signupAdminInvites = "/Ptv/v1/signup/admin/invites",
                     signupAdminSettings = "/Ptv/v1/signup/admin/settings",
-                    signupAdminTestEmail = "/Ptv/v1/signup/admin/email/test"
+                    signupAdminTestEmail = "/Ptv/v1/signup/admin/email/test",
+                    accountProfile = "/Ptv/v1/account/profile",
+                    accountEmailVerification = "/Ptv/v1/account/email/verification",
+                    accountEmailVerify = "/Ptv/v1/account/email/verify",
+                    accountAdminHealth = "/Ptv/v1/account/admin/health",
+                    accountAdminBackups = "/Ptv/v1/account/admin/backups"
                 },
                 signup = PtvStatusSignup.Create(configuration.SignupSettings),
                 tags = configuration.TagSettings,

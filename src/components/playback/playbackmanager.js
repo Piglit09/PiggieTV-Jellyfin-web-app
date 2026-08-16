@@ -28,6 +28,7 @@ import { bindMediaSegmentManager } from 'apps/stable/features/playback/utils/med
 import { bindMediaSessionSubscriber } from 'apps/stable/features/playback/utils/mediaSessionSubscriber';
 import { AppFeature } from 'constants/appFeature';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import { MediaError } from 'types/mediaError';
 import { getMediaError } from 'utils/mediaError';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
@@ -1492,7 +1493,7 @@ export class PlaybackManager {
                     return player.getSecondarySubtitleStreamIndex();
                 }
             } catch (e) {
-                console.error('[playbackmanager] Failed to get secondary stream index:', e);
+                ptvSafeConsole.error('[playbackmanager] Failed to get secondary stream index', e);
             }
 
             return getPlayerData(player).secondarySubtitleStreamIndex;
@@ -1573,7 +1574,7 @@ export class PlaybackManager {
                 try {
                     return player.setSecondarySubtitleStreamIndex(index);
                 } catch (e) {
-                    console.error('[playbackmanager] AutoSet - Failed to set secondary track:', e);
+                    ptvSafeConsole.error('[playbackmanager] AutoSet - Failed to set secondary track', e);
                 }
             }
 
@@ -1595,7 +1596,7 @@ export class PlaybackManager {
                 player.setSecondarySubtitleStreamIndex(index);
                 getPlayerData(player).secondarySubtitleStreamIndex = index;
             } catch (e) {
-                console.error('[playbackmanager] AutoSet - Failed to set secondary track:', e);
+                ptvSafeConsole.error('[playbackmanager] AutoSet - Failed to set secondary track', e);
             }
         };
 
@@ -2569,7 +2570,7 @@ export class PlaybackManager {
                     rankStreamType(prevSource.DefaultSecondarySubtitleStreamIndex, prevSource, mediaStreams, trackOptions, 'Subtitle', true);
                 }
             } catch (e) {
-                console.error(`AutoSet - Caught unexpected error: ${e}`);
+                ptvSafeConsole.error('AutoSet - Caught unexpected error', e);
             }
         }
 
@@ -2595,7 +2596,7 @@ export class PlaybackManager {
                     });
                 })
                 .catch((error) => {
-                    console.debug('Background bitrate refresh failed; retaining the last-known playback bitrate.', error);
+                    ptvSafeConsole.debug('Background bitrate refresh failed; retaining the last-known playback bitrate.', error);
                     return null;
                 })
                 .finally(() => {
@@ -2637,7 +2638,7 @@ export class PlaybackManager {
                 return promise.then(() => {
                     cancelPlayback();
                     loading.hide();
-                    console.error(`No player found for the requested media: ${item.Url}`);
+                    ptvSafeConsole.error('No player found for the requested media');
                     showPlaybackInfoErrorMessage(self, 'ErrorPlayerNotFound');
                 });
             }
@@ -3439,7 +3440,7 @@ export class PlaybackManager {
 
             const errorType = error.type;
 
-            console.warn('[playbackmanager] onPlaybackError:', e, error);
+            ptvSafeConsole.warn('[playbackmanager] onPlaybackError', e, error);
 
             const streamInfo = error.streamInfo || getPlayerData(player).streamInfo;
 
@@ -4349,6 +4350,6 @@ window.addEventListener('beforeunload', function () {
     try {
         playbackManager.onAppClose();
     } catch (err) {
-        console.error('error in onAppClose: ' + err);
+        ptvSafeConsole.error('error in onAppClose', err);
     }
 });

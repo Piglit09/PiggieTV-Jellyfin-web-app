@@ -20,6 +20,7 @@ import itemShortcuts from 'components/shortcuts';
 import MultiSelect from 'components/multiSelect/multiSelect';
 import loading from 'components/loading/loading';
 import focusManager from 'components/focusManager';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import type { ParentId } from 'types/library';
 import type { PlaybackStopInfo } from 'types/playbackStopInfo';
 
@@ -145,7 +146,7 @@ const ItemsContainer: FC<PropsWithChildren<ItemsContainerProps>> = ({
                 });
                 loading.hide();
             } catch (error) {
-                console.error('[Drag-Drop] error playlists Move Item: ' + error);
+                ptvSafeConsole.error('[Drag-Drop] error playlists Move Item', error);
                 loading.hide();
                 if (!reloadItems) return;
                 reloadItems();

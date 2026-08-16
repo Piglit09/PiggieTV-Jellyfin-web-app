@@ -20,14 +20,14 @@ Shared taste terms flow into `crossMediaTerms`. The scorer expands strong terms 
 
 ## Row Builder And Debug
 
-Recommendation row preview lives inside Row Builder at `#/dashboard/piggietv/rows`. Runtime recommendation diagnostics live at `#/dashboard/piggietv/recommendations`, which mounts `RecommendationDashboardPage` and initializes the engine directly. The Row Builder page shows configured row rules, recommendation rows, top recommendation sources, generated rows, top picks, recommendation count, cross-media match count, discovery percentage, and per-item debug reasons.
+Recommendation row preview and runtime recommendation diagnostics live inside the native Home Rows workspace at `#/settings/admin/piggietv/rows`. The Row Builder page shows configured row rules, recommendation rows, top recommendation sources, generated rows, top picks, recommendation count, cross-media match count, discovery percentage, and per-item debug reasons. The former `#/dashboard/piggietv/recommendations` URL is a compatibility-only replacement redirect to Home Rows; it is not an independent administration destination.
 
 ## Manual Testing Checklist
 
-- Open `#/dashboard/piggietv/rows`.
+- Open `#/settings/admin/piggietv/rows`.
 - Confirm the page loads without console errors.
-- Open `#/dashboard/piggietv/recommendations`.
-- Confirm the dashboard route reports `routeId=recommendations` and the engine initialized.
+- Open `#/dashboard/piggietv/recommendations` once and confirm it replacement-redirects to `#/settings/admin/piggietv/rows`.
+- Confirm the native Home Rows workspace remains selected in Administration after the redirect.
 - Click `Generate Recommendation Rows`.
 - Confirm rows include mixed-media labels such as `Recommended For You`, `PTV Discovery`, and `Because You Like ...`.
 - Confirm top picks show score, media type, and reasons.

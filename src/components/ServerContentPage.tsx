@@ -6,8 +6,48 @@ import globalize from 'lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import type { RestoreViewFailResponse } from 'types/viewManager';
 
+import { qualifyPluginConfigurationResourceUrls } from './serverContentResources';
+
 interface ServerContentPageProps {
     view: string
+}
+
+type ServerContentViewOptions = Parameters<typeof viewManager.tryRestoreView>[0];
+
+async function loadServerContent(
+    view: string,
+    search: string,
+    viewOptions: ServerContentViewOptions
+) {
+    const apiClient = ServerConnections.currentApiClient();
+    if (!apiClient) return;
+
+    const html = await apiClient.get(apiClient.getUrl(view + search));
+    const translatedViewHtml = globalize.translateHtml(html);
+    const viewHtml = translatedViewHtml && view === '/web/configurationpage' ?
+        qualifyPluginConfigurationResourceUrls(
+            translatedViewHtml,
+            path => apiClient.getUrl(path)
+        ) : translatedViewHtml;
+
+    viewManager.loadView({
+        ...viewOptions,
+        view: viewHtml
+    });
+}
+
+async function restoreOrLoadServerContent(
+    view: string,
+    search: string,
+    viewOptions: ServerContentViewOptions
+) {
+    try {
+        await viewManager.tryRestoreView(viewOptions);
+    } catch (result) {
+        if (!(result as RestoreViewFailResponse | undefined)?.cancelled) {
+            await loadServerContent(view, search, viewOptions);
+        }
+    }
 }
 
 /**
@@ -29,21 +69,7 @@ const ServerContentPage: FunctionComponent<ServerContentPageProps> = ({ view }) 
                 }
             };
 
-            viewManager.tryRestoreView(viewOptions)
-                .catch(async (result?: RestoreViewFailResponse) => {
-                    if (!result?.cancelled) {
-                        const apiClient = ServerConnections.currentApiClient();
-
-                        // Fetch the view html from the server and translate it
-                        const viewHtml = await apiClient?.get(apiClient.getUrl(view + location.search))
-                            .then((html: string) => globalize.translateHtml(html));
-
-                        viewManager.loadView({
-                            ...viewOptions,
-                            view: viewHtml
-                        });
-                    }
-                });
+            void restoreOrLoadServerContent(view, location.search, viewOptions);
         };
 
         loadPage();

@@ -124,7 +124,7 @@ describe('playback presentation ownership', () => {
         { category: 'Reading', routeHash: '#/reading' },
         { category: 'Search', routeHash: '#/search' },
         { category: 'Details', routeHash: '#/details?id=route-fixture' },
-        { category: 'Settings', routeHash: '#/mypreferencesmenu' },
+        { category: 'Settings', routeHash: '#/settings' },
         { category: 'Dashboard', routeHash: '#/dashboard/piggietv' }
     ])('keeps one mini-player invariant on $category', ({ routeHash }) => {
         expect(derivePtvPlaybackPresentation(musicState(), {

@@ -1,4 +1,5 @@
 import { watchDom, watchElement } from './observer';
+import { ptvSafeConsole } from './safeConsole';
 
 const runtimeScopes = new Map();
 const eventTargetIds = new WeakMap();
@@ -19,13 +20,13 @@ function isRuntimeDebugEnabled() {
 function debugWarn(message, detail) {
     if (!isRuntimeDebugEnabled()) return;
 
-    console.warn(`[PiggieTV Runtime] ${message}`, detail);
+    ptvSafeConsole.warn(`[PiggieTV Runtime] ${message}`, detail);
 }
 
 function debugLog(message, detail) {
     if (!isRuntimeDebugEnabled()) return;
 
-    console.debug(`[PiggieTV Runtime] ${message}`, detail);
+    ptvSafeConsole.debug(`[PiggieTV Runtime] ${message}`, detail);
 }
 
 function normalizeDisposer(disposer) {
@@ -161,7 +162,7 @@ export function createRuntimeScope(name) {
                 try {
                     disposer();
                 } catch (err) {
-                    console.error(`[PiggieTV] Failed to dispose runtime scope: ${name}`, err);
+                    ptvSafeConsole.error(`[PiggieTV] Failed to dispose runtime scope: ${name}`, err);
                 }
             });
         },
@@ -363,7 +364,7 @@ export function getRuntimeDiagnostics() {
 export function logRuntimeDiagnostics() {
     const diagnostics = getRuntimeDiagnostics();
 
-    console.info('[PiggieTV Runtime] diagnostics', diagnostics);
+    ptvSafeConsole.info('[PiggieTV Runtime] diagnostics', diagnostics);
 
     return diagnostics;
 }

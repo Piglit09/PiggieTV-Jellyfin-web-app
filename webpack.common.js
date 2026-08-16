@@ -198,6 +198,14 @@ const config = {
     module: {
         rules: [
             {
+                test: /\.js$/,
+                include: [require.resolve('jellyfin-apiclient')],
+                enforce: 'pre',
+                use: [{
+                    loader: path.resolve(__dirname, 'scripts/ptv-jellyfin-apiclient-security-loader.cjs')
+                }]
+            },
+            {
                 test: /\.(html)$/,
                 use: {
                     loader: 'html-loader'

@@ -8,6 +8,10 @@ const logoutMocks = vi.hoisted(() => ({
     switchUser: vi.fn<() => Promise<void>>()
 }));
 
+const runtimeMocks = vi.hoisted(() => ({
+    registerShell: vi.fn(() => vi.fn())
+}));
+
 vi.mock('../services/jellyfinLogoutAction', () => ({
     requestJellyfinLogout: logoutMocks.request,
     requestJellyfinUserSwitch: logoutMocks.switchUser
@@ -36,7 +40,7 @@ vi.mock('../services/performanceMonitor', () => ({
 }));
 
 vi.mock('../services/runtimeStability', () => ({
-    registerPtvNativeShellInstance: vi.fn(() => vi.fn()),
+    registerPtvNativeShellInstance: runtimeMocks.registerShell,
     runPtvClientCacheMigration: vi.fn()
 }));
 
@@ -72,6 +76,8 @@ describe('PTV shell logout control', () => {
         logoutMocks.request.mockResolvedValue(undefined);
         logoutMocks.switchUser.mockReset();
         logoutMocks.switchUser.mockResolvedValue(undefined);
+        runtimeMocks.registerShell.mockClear();
+        runtimeMocks.registerShell.mockImplementation(() => vi.fn());
         window.location.hash = '#/home';
         container = document.createElement('div');
         document.body.appendChild(container);
@@ -135,7 +141,7 @@ describe('PTV shell logout control', () => {
             'Settings',
             'Sign Out'
         ]);
-        expect(items[0]?.getAttribute('href')).toBe('#/userprofile');
+        expect(items[0]?.getAttribute('href')).toBe('#/settings/profile');
     });
 
     it('keeps the same focused menu for administrators', () => {
@@ -169,6 +175,26 @@ describe('PTV shell logout control', () => {
         expect(getPtvRuntimeOverlayOcclusionCount()).toBe(0);
         expect(document.documentElement.classList.contains('ptv-runtime-overlay-occluded')).toBe(false);
         shellContainer.remove();
+    });
+
+    it('supports the shared fallback header without claiming native route ownership', () => {
+        const onMenuClick = vi.fn();
+
+        flushSync(() => root.render(
+            <PTVShell
+                headerOnly
+                menuLabel='Open dashboard navigation'
+                onMenuClick={onMenuClick}
+                registerRuntimeShell={false}
+            >
+                <div />
+            </PTVShell>
+        ));
+
+        container.querySelector<HTMLButtonElement>('[aria-label="Open dashboard navigation"]')?.click();
+
+        expect(onMenuClick).toHaveBeenCalledTimes(1);
+        expect(runtimeMocks.registerShell).not.toHaveBeenCalled();
     });
 
     it('marks the full-screen Music route so physical TV navigation can stay pinned', () => {

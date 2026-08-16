@@ -260,6 +260,9 @@ export function normalizePtvDiagnosticRouteFamily(value = '') {
     if (segments[0] === 'dashboard' && segments[1] === 'piggietv') {
         return `dashboard/piggietv/${segments[2] || 'overview'}`;
     }
+    if (segments[0] === 'settings' && segments[1] === 'admin' && segments[2] === 'piggietv') {
+        return `settings/admin/piggietv/${segments[3] || 'overview'}`;
+    }
 
     const known = [
         'home', 'movies', 'shows', 'tv', 'music', 'reading', 'books', 'comics',

@@ -20,6 +20,7 @@ import Dashboard from '../../../utils/dashboard';
 import alert from '../../../components/alert';
 import { getDefaultBackgroundClass } from '../../../components/cardbuilder/cardBuilderUtils';
 import { ConnectionState, ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 const enableFocusTransform = !browser.slow && !browser.edge;
 
@@ -147,7 +148,7 @@ export default function (view, params) {
                 loading.hide();
                 loadServers();
             }).catch(err => {
-                console.error('[selectServer] failed to delete server', err);
+                ptvSafeConsole.error('[selectServer] failed to delete server', err);
             });
         }).catch(() => {
             // confirm dialog closed

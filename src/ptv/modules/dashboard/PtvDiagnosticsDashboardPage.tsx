@@ -21,8 +21,6 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import React, { useEffect, useRef, useState } from 'react';
 
-import Page from 'components/Page';
-
 import type {
     PtvDiagnosticHealth,
     PtvDiagnosticSnapshot
@@ -676,16 +674,16 @@ export default function PtvDiagnosticsDashboardPage() {
     }
 
     return (
-        <Page
+        <section
             id='ptvDiagnosticsDashboardPage'
-            className='mainAnimatedPage ptv-diagnostics-dashboard-page'
-            title='PiggieTV Diagnostics'
+            className='ptv-admin-piggietv-page ptv-diagnostics-dashboard-page'
+            data-testid='ptv-admin-piggietv-diagnostics'
         >
             <Box className='ptv-diagnostics-dashboard'>
-                <header className='ptv-diagnostics-header'>
+                <header className='ptv-admin-piggietv-header ptv-diagnostics-header'>
                     <div>
-                        <Typography component='h1' variant='h4'>PiggieTV Diagnostics</Typography>
-                        <Typography>Local, bounded observability for this PTV Web session.</Typography>
+                        <Typography variant='h1'>PiggieTV Diagnostics</Typography>
+                        <Typography color='text.secondary'>Local, bounded observability for this PTV Web session.</Typography>
                     </div>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                         <FormControlLabel
@@ -729,7 +727,7 @@ export default function PtvDiagnosticsDashboardPage() {
                     {content}
                 </section>
             </Box>
-        </Page>
+        </section>
     );
 }
 

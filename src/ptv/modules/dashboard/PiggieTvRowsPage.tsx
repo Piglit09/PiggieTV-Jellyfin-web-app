@@ -9,19 +9,19 @@ import Divider from '@mui/material/Divider';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Grid from '@mui/material/Grid2';
 import MenuItem from '@mui/material/MenuItem';
+import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import Page from 'components/Page';
-
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import {
     recordPtvEvent,
     shouldCollectDiagnostics
 } from '../../core/observability';
+import { ptvSafeConsole } from '../../core/safeConsole';
 import {
     PTV_PLUGIN_API
 } from '../../core/config';
@@ -38,7 +38,6 @@ import {
     invalidateFeaturedContentMemoryCache,
     primeFeaturedContentCacheStatus
 } from '../cache/featuredContentCache';
-import { getPtvIntegrationSettings } from '../integrations/integrationsConfig';
 import { getRecommendationTitle } from '../recommendations/scoring/metadata';
 import {
     getEnabledPtvPersistedRecommendationRows,
@@ -54,8 +53,23 @@ import type {
     PtvRecommendationDashboardData,
     PtvRecommendationScore
 } from '../recommendations/types/recommendationTypes';
-
-import './dashboard.scss';
+import { useAdminUnsavedChanges } from '../settings/admin/configuration/useAdminUnsavedChanges';
+import {
+    MAX_PTV_ROW_IMPORT_BYTES,
+    parsePtvRowBuilderImport
+} from './rowBuilderImport';
+import {
+    arePtvAdminSnapshotsEqual,
+    getPtvAdminMutationCommitDecision
+} from './piggietvConfigurationData';
+import {
+    PtvRecommendationMutationInProgressError,
+    PtvRecommendationSettingsConflictError,
+    recommendationSettingsMatch,
+    runPtvRecommendationMutationSingleFlight,
+    savePtvRecommendationMutationSafely,
+    type PtvRecommendationSettingsBaseline
+} from './recommendationMutationSafety';
 
 type RowMediaType = 'anime' | 'books' | 'cartoons' | 'liveTv' | 'mixed' | 'movies' | 'music' | 'shows';
 type RowSourceType = 'becauseYouWatched' | 'collection' | 'communityRating' | 'continueWatching' | 'genre' | 'image' | 'latest' | 'library' | 'officialRating' | 'person' | 'premiereDate' | 'productionYear' | 'providerId' | 'requested' | 'seasonal' | 'studio' | 'tag';
@@ -195,7 +209,6 @@ type PerformanceEstimate = {
 
 const CUSTOM_GENRE = '__custom__';
 const SUBGENRES_DISABLED_PROVIDER_HINT = 'ptv-subgenres-disabled';
-const ROW_BUILDER_INTEGRATIONS_TIMEOUT_MS = 8000;
 const ROW_BUILDER_LOAD_TIMEOUT_MS = 15000;
 const STUDIO_SOURCE_HELPER_TEXT = 'Matches Jellyfin item.Studios exactly or by normalized text. Examples: Disney, Pixar, Lucasfilm.';
 
@@ -559,6 +572,7 @@ function getFeaturedCacheDocumentSummary(document: unknown) {
 type FeaturedCacheDocumentSummary = ReturnType<typeof getFeaturedCacheDocumentSummary>;
 type FeaturedCacheReadback = {
     document: unknown | null;
+    error: string | null;
     summary: FeaturedCacheDocumentSummary;
 };
 type FeaturedCacheApiClient = NonNullable<ReturnType<typeof getCurrentPtvPluginApiClient>>;
@@ -642,13 +656,15 @@ async function readFeaturedCacheDocumentReadback(
 
             return {
                 document,
+                error: null,
                 summary
             };
         })
         .catch(error => {
+            const message = normalizePtvApiError(error).message;
             const summary = {
                 configuredRowCount: 0,
-                error: normalizePtvApiError(error).message,
+                error: message,
                 fallbackRowCount: 0,
                 hasFeaturedContent: false,
                 heroCount: 0,
@@ -670,6 +686,7 @@ async function readFeaturedCacheDocumentReadback(
 
             return {
                 document: null,
+                error: message,
                 summary
             };
         });
@@ -714,25 +731,27 @@ async function readFreshFeaturedCacheDocumentReadback(
     return retryReadback;
 }
 
-async function refreshStoredFeaturedCacheDocument(
+async function observeStoredFeaturedCacheDocumentAfterSave(
     reason: string,
+    refreshStartedAt: number,
     eventContext: Record<string, unknown> = {}
 ): Promise<FeaturedCacheRefreshResult> {
     const api = getCurrentPtvPluginApiClient();
 
-    if (!api?.refreshFeaturedContentCacheDocument || !api.getFeaturedContentCacheDocument) {
+    if (!api?.getFeaturedContentCacheDocument) {
         throw new Error('PiggieTV featured cache API is unavailable.');
     }
 
-    const refreshStartedAt = Date.now();
-
-    recordPtvEvent('api', 'row-builder-featured-cache-refresh-start', {
+    recordPtvEvent('api', 'row-builder-featured-cache-observation-start', {
         ...eventContext,
         refreshStartedAt,
         reason
     });
 
-    const response = await api.refreshFeaturedContentCacheDocument<Record<string, unknown>>();
+    // POST /settings with recommendations and POST /rows already rebuild the
+    // Featured cache on the server before resolving. Observe that result with
+    // a read-only request instead of starting a duplicate rebuild.
+    const response: Record<string, unknown> = {};
     const featuredContent = getPayloadRecord(response, 'featuredContent');
     const contentCacheStatus = getPayloadRecord(response, 'contentCacheStatus');
     const storeStatus = getPayloadRecord(response, 'storeStatus');
@@ -762,7 +781,7 @@ async function refreshStoredFeaturedCacheDocument(
         getPayloadStringOrNull(contentCacheStatus, 'writeError') ??
         getPayloadStringOrNull(storeStatus, 'cacheWriteError');
     const lastRefreshError = getPayloadStringOrNull(response, 'lastRefreshError');
-    const responseError = getPayloadStringOrNull(response, 'error');
+    const responseError = getPayloadStringOrNull(response, 'error') ?? readback.error;
     const featuredCacheExists =
         getPayloadBoolean(response, 'featuredCacheExists') ??
         getPayloadBoolean(contentCacheStatus, 'exists') ??
@@ -816,13 +835,13 @@ async function refreshStoredFeaturedCacheDocument(
         cachePayloadBytes,
         cacheWriteError,
         effectiveHasPayload,
-        featuredCacheExists,
-        featuredCacheFresh,
+        featuredCacheExists: featuredCacheExists ?? Boolean(readback.document),
+        featuredCacheFresh: featuredCacheFresh ?? localCache.isFresh,
         heroCount,
         itemCount,
         lastRefreshError,
         localCache,
-        ok,
+        ok: ok ?? (readback.error ? false : Boolean(readback.document)),
         prime: primedSummary,
         readback: readbackSummary,
         responseError,
@@ -830,7 +849,7 @@ async function refreshStoredFeaturedCacheDocument(
         staleReadbackWarning
     };
 
-    recordPtvEvent('api', 'row-builder-featured-cache-refresh-complete', {
+    recordPtvEvent('api', 'row-builder-featured-cache-observation-complete', {
         ...eventContext,
         ...result,
         reason
@@ -990,10 +1009,34 @@ function cloneSettings(settings?: Partial<PtvRowBuilderSettings> | null): PtvRow
     };
 }
 
+class PtvRowsConflictError extends Error {
+    constructor() {
+        super('Home Row settings changed on the server while this page was open.');
+        this.name = 'PtvRowsConflictError';
+    }
+}
+
+class PtvRowsSaveVerificationError extends Error {
+    constructor() {
+        super('The server did not confirm the submitted Home Row settings.');
+        this.name = 'PtvRowsSaveVerificationError';
+    }
+}
+
+function rowSettingsMatch(left: PtvRowBuilderSettings, right: PtvRowBuilderSettings) {
+    return arePtvAdminSnapshotsEqual(cloneSettings(left), cloneSettings(right));
+}
+
 function getRowsFromSettingsPayload(payload: unknown): PtvRowBuilderSettings | null {
     const rows = getPayloadValue(payload, 'rows');
 
     return isRecord(rows) ? rows as PtvRowBuilderSettings : null;
+}
+
+function getSeerrConfiguredFromSettingsPayload(payload: unknown) {
+    const seerrSettings = getPayloadRecord(payload, 'seerrSettings');
+
+    return getPayloadValue(seerrSettings, 'apiKeyConfigured') === true;
 }
 
 function getRuleIds(settings: PtvRowBuilderSettings) {
@@ -1440,26 +1483,6 @@ function getRecommendationRowsLoadedMessage(settings: PtvRecommendationRowSettin
     };
 }
 
-function getPluginValidationError(error: ReturnType<typeof normalizePtvApiError>) {
-    if (!error.responseBody) return null;
-
-    try {
-        const parsed = JSON.parse(error.responseBody);
-
-        if (isRecord(parsed)) {
-            const errors = isRecord(parsed.errors) ? parsed.errors : null;
-            const errorText = typeof parsed.error === 'string' ? parsed.error : '';
-            const message = typeof parsed.message === 'string' ? parsed.message : '';
-
-            return errors ? JSON.stringify(errors).slice(0, 800) : (errorText || message || null);
-        }
-    } catch {
-        return error.responseBody.slice(0, 800);
-    }
-
-    return null;
-}
-
 function getLazyPtvRecommendationDashboardData(options: { forceRefresh?: boolean; includeHomeScans?: boolean; signal?: AbortSignal } = {}) {
     return import('../recommendations/engine/recommendationEngine')
         .then(module => module.getPtvRecommendationDashboardData(options));
@@ -1575,6 +1598,7 @@ type RecommendationRowsPanelProps = {
     canShowDiagnostics: boolean;
     data: PtvRecommendationDashboardData | null;
     error: string;
+    hasConflict: boolean;
     isLoading: boolean;
     onAcceptAll: () => void;
     onDeleteRow: (rowId: string) => void;
@@ -1782,6 +1806,7 @@ function RecommendationRowsPanel({
     canShowDiagnostics,
     data,
     error,
+    hasConflict,
     isLoading,
     onAcceptAll,
     onDeleteRow,
@@ -1805,13 +1830,13 @@ function RecommendationRowsPanel({
                         </Typography>
                     </Box>
                     <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
-                        <Button className='ptv-button' variant='contained' disabled={isLoading} onClick={() => onGenerate(false, true)}>
+                        <Button className='ptv-button' variant='contained' disabled={isLoading || hasConflict} onClick={() => onGenerate(false, true)}>
                             {isLoading ? 'Generating...' : 'Generate Recommendation Rows'}
                         </Button>
                         <Button variant='outlined' disabled={isLoading} onClick={onRefreshSaved}>
                             Refresh Recommendations
                         </Button>
-                        <Button variant='outlined' disabled={isLoading || !rows.length} onClick={onAcceptAll}>
+                        <Button variant='outlined' disabled={isLoading || hasConflict || !rows.length} onClick={onAcceptAll}>
                             Accept Recommendations
                         </Button>
                         <RecommendationSummaryChips data={data} enabledCount={enabledRows.length} itemCount={itemCount} rowCount={rows.length} />
@@ -1851,11 +1876,11 @@ function RecommendationRowsPanel({
                                                     </Stack>
                                                     <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
                                                         <FormControlLabel
-                                                            control={<Switch checked={isEnabled} disabled={isLoading || !validatedRow} onChange={event => onToggleRow(row.id, event.target.checked)} />}
+                                                            control={<Switch checked={isEnabled} disabled={isLoading || hasConflict || !validatedRow} onChange={event => onToggleRow(row.id, event.target.checked)} />}
                                                             label={isEnabled ? 'Enabled' : 'Disabled'}
                                                         />
-                                                        <Button size='small' variant='outlined' disabled={isLoading || !validatedRow} onClick={() => onToggleRow(row.id, true)}>Accept</Button>
-                                                        <Button size='small' color='error' variant='outlined' disabled={isLoading} onClick={() => onDeleteRow(row.id)}>Delete</Button>
+                                                        <Button size='small' variant='outlined' disabled={isLoading || hasConflict || !validatedRow} onClick={() => onToggleRow(row.id, true)}>Accept</Button>
+                                                        <Button size='small' color='error' variant='outlined' disabled={isLoading || hasConflict} onClick={() => onDeleteRow(row.id)}>Delete</Button>
                                                     </Stack>
                                                 </Stack>
                                                 <Typography variant='body2' color='text.secondary'>{row.explanation || 'Generated from your recommendation profile.'}</Typography>
@@ -1883,6 +1908,9 @@ function RecommendationRowsPanel({
     );
 }
 
+// This page coordinates several independent editors and previews; keeping the
+// orchestration together avoids duplicated requests and competing save state.
+// eslint-disable-next-line sonarjs/cognitive-complexity
 const PiggieTvRowsPage = () => {
     const hydratedRef = useRef(false);
     const loadRequestRef = useRef<Promise<void> | null>(null);
@@ -1890,8 +1918,10 @@ const PiggieTvRowsPage = () => {
     const recommendationAbortRef = useRef<AbortController | null>(null);
     const recommendationRequestRef = useRef<Promise<void> | null>(null);
     const recommendationRequestTokenRef = useRef<object | null>(null);
+    const recommendationSaveRequestRef = useRef<Promise<RecommendationSettingsSaveResult> | null>(null);
     const refreshRequestRef = useRef<Promise<void> | null>(null);
     const saveRequestRef = useRef<Promise<void> | null>(null);
+    const draftRevisionRef = useRef(0);
     const importInputRef = useRef<HTMLInputElement | null>(null);
     const [form, setForm] = useState<PtvRowBuilderSettings>(() => cloneSettings(DEFAULT_SETTINGS));
     const [groupDraft, setGroupDraft] = useState('');
@@ -1899,17 +1929,30 @@ const PiggieTvRowsPage = () => {
     const [preview, setPreview] = useState<PtvRowPreviewResponse | null>(null);
     const [recommendationData, setRecommendationData] = useState<PtvRecommendationDashboardData | null>(null);
     const [recommendationSettings, setRecommendationSettings] = useState<PtvRecommendationRowSettings | null>(null);
+    const [confirmedRecommendationSettings, setConfirmedRecommendationSettings] = useState<PtvRecommendationSettingsBaseline>(undefined);
+    const [recommendationConflict, setRecommendationConflict] = useState(false);
     const [recommendationError, setRecommendationError] = useState('');
     const [recommendationLoading, setRecommendationLoading] = useState(false);
+    const [recommendationSaving, setRecommendationSaving] = useState(false);
     const [seerrConfigured, setSeerrConfigured] = useState(false);
     const [statusMessage, setStatusMessage] = useState<PtvStatusMessage | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadSucceeded, setLoadSucceeded] = useState(false);
+    const [rowConflict, setRowConflict] = useState(false);
     const [previewing, setPreviewing] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [saving, setSaving] = useState(false);
 
     const canShowDiagnostics = shouldCollectDiagnostics();
     const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(saved), [form, saved]);
+    const recommendationDirty = useMemo(() => (
+        recommendationSettings !== null || confirmedRecommendationSettings !== undefined
+    ) && !recommendationSettingsMatch(recommendationSettings, confirmedRecommendationSettings), [
+        confirmedRecommendationSettings,
+        recommendationSettings
+    ]);
+    const pageDirty = dirty || recommendationDirty;
+    useAdminUnsavedChanges(pageDirty, 'Leave Home Rows without saving your changes?');
     const rowGroups = useMemo(() => getRowGroups(form), [form]);
     const persistedRecommendationRows = useMemo(() => recommendationSettings?.rows || [], [recommendationSettings]);
     const estimate = useMemo(() => estimatePerformance(form), [form]);
@@ -1952,6 +1995,7 @@ const PiggieTvRowsPage = () => {
 
     const savePersistedRecommendationSettings = useCallback(async (
         settings: PtvRecommendationRowSettings,
+        confirmedBaseline: PtvRecommendationSettingsBaseline,
         reason: string
     ) => {
         const api = getCurrentPtvPluginApiClient();
@@ -1959,75 +2003,99 @@ const PiggieTvRowsPage = () => {
         const requestBody = { recommendations: nextSettings };
         const saveSummary = getRecommendationSavePayloadSummary(nextSettings, requestBody, reason);
 
-        if (!api?.saveSettings) throw new Error('PiggieTV plugin settings API is unavailable.');
+        if (!api?.getSettings || !api.saveSettings) throw new Error('PiggieTV plugin settings API is unavailable.');
+        if (recommendationSaveRequestRef.current) throw new PtvRecommendationMutationInProgressError();
 
         recordPtvEvent('recommendation', 'recommendation-save-start', {
             ...saveSummary
         });
 
-        let response: unknown;
+        setRecommendationSaving(true);
 
         try {
-            response = await api.saveSettings<unknown, { recommendations: PtvRecommendationRowSettings }>(requestBody);
-        } catch (error) {
-            const normalizedError = normalizePtvApiError(error);
-            const diagnostics = getPtvPluginApiDiagnostics();
+            return await runPtvRecommendationMutationSingleFlight(recommendationSaveRequestRef, async () => {
+                let response: unknown;
+                const refreshStartedAt = Date.now();
 
-            recordPtvEvent('recommendation', 'recommendation-save-failure', {
-                ...saveSummary,
-                error: normalizedError.message,
-                httpStatus: normalizedError.status ?? diagnostics.lastFailedStatusCode ?? null,
-                pluginValidationError: getPluginValidationError(normalizedError),
-                responseBody: normalizedError.responseBody ?? diagnostics.lastResponseBody ?? null
+                try {
+                    response = await savePtvRecommendationMutationSafely({
+                        confirmedBaseline,
+                        nextSettings,
+                        normalizeAuthoritative: payload => getRecommendationSettingsMigrationState(
+                            normalizePtvRecommendationRowSettings(payload)
+                        ).finalizedSettings,
+                        readAuthoritative: () => api.getSettings<unknown>({ bypassCache: true }),
+                        write: authoritativeSettings => api.saveSettings<unknown, { recommendations: PtvRecommendationRowSettings }>({
+                            recommendations: authoritativeSettings
+                        })
+                    });
+                } catch (error) {
+                    const normalizedError = normalizePtvApiError(error);
+                    const diagnostics = getPtvPluginApiDiagnostics();
+
+                    recordPtvEvent('recommendation', 'recommendation-save-failure', {
+                        ...saveSummary,
+                        error: normalizedError.message,
+                        httpStatus: normalizedError.status ?? diagnostics.lastFailedStatusCode ?? null
+                    });
+
+                    throw error;
+                }
+
+                const persistedSettings = normalizePtvRecommendationRowSettings(response);
+
+                if (!persistedSettings) {
+                    throw new Error('Recommendation rows were generated but the plugin did not return saved recommendation settings.');
+                }
+
+                const persistedRowCount = persistedSettings.rows?.length || 0;
+                const persistedItemCount = (persistedSettings.rows || []).reduce((total, row) => total + row.items.length, 0);
+
+                recordPtvEvent('recommendation', 'recommendation-save-success', {
+                    ...saveSummary,
+                    persistedItemCount,
+                    persistedPerRowItemCounts: getRecommendationRowItemCounts(persistedSettings),
+                    persistedRowCount,
+                    responsePayloadSize: getSerializedPayloadSize(persistedSettings),
+                    storageWriteResult: 'plugin-settings-response'
+                });
+                invalidateFeaturedContentMemoryCache(`recommendation-${reason}`);
+                setRecommendationSettings(persistedSettings);
+                setConfirmedRecommendationSettings(persistedSettings);
+                setRecommendationConflict(false);
+
+                let cacheRefresh: FeaturedCacheRefreshResult | null = null;
+                let cacheRefreshError = '';
+
+                try {
+                    cacheRefresh = await observeStoredFeaturedCacheDocumentAfterSave(
+                        `recommendation-${reason}`,
+                        refreshStartedAt,
+                        {
+                            itemCount: persistedItemCount,
+                            persistedRowCount,
+                            reason
+                        }
+                    );
+                } catch (error) {
+                    cacheRefreshError = normalizePtvApiError(error).message;
+                    recordPtvEvent('recommendation', 'recommendation-save-cache-refresh-failure', {
+                        error: cacheRefreshError,
+                        itemCount: persistedItemCount,
+                        persistedRowCount,
+                        reason
+                    });
+                }
+
+                return {
+                    cacheRefresh,
+                    cacheRefreshError,
+                    settings: persistedSettings
+                };
             });
-
-            throw error;
+        } finally {
+            if (!recommendationSaveRequestRef.current) setRecommendationSaving(false);
         }
-
-        const persistedSettings = normalizePtvRecommendationRowSettings(response);
-
-        if (!persistedSettings) {
-            throw new Error('Recommendation rows were generated but the plugin did not return saved recommendation settings.');
-        }
-
-        const persistedRowCount = persistedSettings.rows?.length || 0;
-        const persistedItemCount = (persistedSettings.rows || []).reduce((total, row) => total + row.items.length, 0);
-
-        recordPtvEvent('recommendation', 'recommendation-save-success', {
-            ...saveSummary,
-            persistedItemCount,
-            persistedPerRowItemCounts: getRecommendationRowItemCounts(persistedSettings),
-            persistedRowCount,
-            responsePayloadSize: getSerializedPayloadSize(persistedSettings),
-            storageWriteResult: 'plugin-settings-response'
-        });
-        invalidateFeaturedContentMemoryCache(`recommendation-${reason}`);
-        setRecommendationSettings(persistedSettings);
-
-        let cacheRefresh: FeaturedCacheRefreshResult | null = null;
-        let cacheRefreshError = '';
-
-        try {
-            cacheRefresh = await refreshStoredFeaturedCacheDocument(`recommendation-${reason}`, {
-                itemCount: persistedItemCount,
-                persistedRowCount,
-                reason
-            });
-        } catch (error) {
-            cacheRefreshError = normalizePtvApiError(error).message;
-            recordPtvEvent('recommendation', 'recommendation-save-cache-refresh-failure', {
-                error: cacheRefreshError,
-                itemCount: persistedItemCount,
-                persistedRowCount,
-                reason
-            });
-        }
-
-        return {
-            cacheRefresh,
-            cacheRefreshError,
-            settings: persistedSettings
-        };
     }, []);
 
     const loadPersistedRecommendationRows = useCallback(async (source = 'manual-refresh', settingsPayload?: unknown) => {
@@ -2035,11 +2103,12 @@ const PiggieTvRowsPage = () => {
 
         if (!api?.getSettings && !settingsPayload) {
             setRecommendationSettings(null);
+            setConfirmedRecommendationSettings(undefined);
             return null;
         }
 
         try {
-            const payload = settingsPayload ?? await api?.getSettings<unknown>();
+            const payload = settingsPayload ?? await api?.getSettings<unknown>({ bypassCache: true });
             const persistedSettings = normalizePtvRecommendationRowSettings(payload);
             const { finalizedSettings, needsMigration } = getRecommendationSettingsMigrationState(persistedSettings);
             const loadedSettings = finalizedSettings;
@@ -2054,6 +2123,8 @@ const PiggieTvRowsPage = () => {
             }
 
             setRecommendationSettings(loadedSettings);
+            setConfirmedRecommendationSettings(loadedSettings);
+            setRecommendationConflict(false);
             setRecommendationData(null);
             setRecommendationError('');
             recordPtvEvent('recommendation', 'recommendation-rows-loaded-from-storage', {
@@ -2084,8 +2155,30 @@ const PiggieTvRowsPage = () => {
         }
     }, []);
 
+    const reloadPersistedRecommendationRows = useCallback(() => {
+        if (
+            recommendationLoading
+            || recommendationSaving
+            || recommendationRequestRef.current
+            || recommendationSaveRequestRef.current
+        ) return;
+        if (
+            recommendationDirty
+            && !window.confirm('Reload recommendation settings and discard your unsaved recommendation changes?')
+        ) return;
+
+        void loadPersistedRecommendationRows('manual-refresh');
+    }, [
+        loadPersistedRecommendationRows,
+        recommendationDirty,
+        recommendationLoading,
+        recommendationSaving
+    ]);
+
     const loadRows = useCallback(() => {
         if (loadRequestRef.current) return loadRequestRef.current;
+
+        setLoading(true);
 
         const request = (async () => {
             const api = getCurrentPtvPluginApiClient();
@@ -2097,12 +2190,13 @@ const PiggieTvRowsPage = () => {
             let settingsError: unknown = null;
             let rowsError: unknown = null;
             const settingsRequest = withRowBuilderTimeout(
-                    api.getSettings<unknown>(),
-                    ROW_BUILDER_LOAD_TIMEOUT_MS,
-                    'PiggieTV settings request timed out.'
-                )
+                api.getSettings<unknown>(),
+                ROW_BUILDER_LOAD_TIMEOUT_MS,
+                'PiggieTV settings request timed out.'
+            )
                 .then(payload => {
                     settingsPayload = payload;
+                    setSeerrConfigured(getSeerrConfiguredFromSettingsPayload(payload));
 
                     return payload;
                 })
@@ -2116,10 +2210,10 @@ const PiggieTvRowsPage = () => {
                 });
             const settingsRowsRequest = settingsRequest.then(payload => getRowsFromSettingsPayload(payload));
             const endpointRowsRequest = withRowBuilderTimeout(
-                    api.getRows<PtvRowBuilderSettings>(),
-                    ROW_BUILDER_LOAD_TIMEOUT_MS,
-                    'Row settings request timed out.'
-                )
+                api.getRows<PtvRowBuilderSettings>(),
+                ROW_BUILDER_LOAD_TIMEOUT_MS,
+                'Row settings request timed out.'
+            )
                 .then(endpointRows => endpointRows || null)
                 .catch(error => {
                     rowsError = error;
@@ -2133,11 +2227,11 @@ const PiggieTvRowsPage = () => {
 
             rows = await getFirstRowBuilderSettings(settingsRowsRequest, endpointRowsRequest);
 
-            if (!rows && settingsError && rowsError) {
-                throw rowsError;
+            if (!rows) {
+                throw rowsError || settingsError || new Error('Home Row settings were not returned by the server.');
             }
 
-            const normalizedRows = cloneSettings(rows || DEFAULT_SETTINGS);
+            const normalizedRows = cloneSettings(rows);
 
             recordPtvEvent('api', 'row-builder-load-complete', {
                 hasPluginPayload: Boolean(rows),
@@ -2147,6 +2241,8 @@ const PiggieTvRowsPage = () => {
 
             setForm(normalizedRows);
             setSaved(normalizedRows);
+            setRowConflict(false);
+            setLoadSucceeded(true);
             setPreview(null);
             setStatusMessage({ severity: 'success', text: 'Row settings loaded.' });
             void settingsRequest
@@ -2156,25 +2252,20 @@ const PiggieTvRowsPage = () => {
                     }
 
                     setRecommendationSettings(null);
+                    setConfirmedRecommendationSettings(undefined);
 
                     return null;
                 });
-            void withRowBuilderTimeout(
-                getPtvIntegrationSettings(),
-                ROW_BUILDER_INTEGRATIONS_TIMEOUT_MS,
-                'PiggieTV integration settings request timed out.'
-            )
-                .then(integrations => {
-                    setSeerrConfigured(Boolean(integrations.seerr.apiKeyConfigured));
-                })
-                .catch(error => {
-                    recordPtvEvent('api', 'row-builder-integration-status-load-failed', {
-                        error: normalizePtvApiError(error).message
-                    });
-                });
         })()
             .catch(error => {
-                setStatusMessage({ severity: 'error', text: normalizePtvApiError(error).message });
+                setLoadSucceeded(false);
+                const normalizedError = normalizePtvApiError(error);
+                recordPtvEvent('api', 'row-builder-load-failed', {
+                    code: normalizedError.code,
+                    kind: normalizedError.kind,
+                    status: normalizedError.status
+                });
+                setStatusMessage({ severity: 'error', text: 'Home Row settings could not be loaded.' });
             })
             .finally(() => {
                 hydratedRef.current = true;
@@ -2202,6 +2293,7 @@ const PiggieTvRowsPage = () => {
     }, [loadRows]);
 
     const updateForm = useCallback((updater: (settings: PtvRowBuilderSettings) => PtvRowBuilderSettings) => {
+        draftRevisionRef.current += 1;
         setForm(current => updater(cloneSettings(current)));
     }, []);
 
@@ -2302,6 +2394,9 @@ const PiggieTvRowsPage = () => {
     }, [updateForm]);
 
     const restoreDefaults = useCallback(() => {
+        if (!window.confirm('Restore the default Home Row rules? The defaults will remain local until you choose Save.')) return;
+
+        draftRevisionRef.current += 1;
         setForm(cloneSettings(DEFAULT_SETTINGS));
         setPreview(null);
         setStatusMessage({ severity: 'info', text: 'Default row rules restored locally. Save to persist.' });
@@ -2350,7 +2445,14 @@ const PiggieTvRowsPage = () => {
             return;
         }
 
-        if (recommendationLoading || recommendationRequestRef.current) return;
+        if (
+            confirmedRecommendationSettings === undefined
+            || recommendationLoading
+            || recommendationSaving
+            || recommendationConflict
+            || recommendationRequestRef.current
+            || recommendationSaveRequestRef.current
+        ) return;
 
         const performanceProfile = getPtvPerformanceProfile();
 
@@ -2416,7 +2518,11 @@ const PiggieTvRowsPage = () => {
                 recommendationCount: nextData.metrics.recommendationCount
             });
             try {
-                const saveResult = await savePersistedRecommendationSettings(persistedSettings, 'generated');
+                const saveResult = await savePersistedRecommendationSettings(
+                    persistedSettings,
+                    confirmedRecommendationSettings,
+                    'generated'
+                );
 
                 setStatusMessage({
                     severity: saveResult.cacheRefreshError || getFeaturedCacheRefreshWarning(saveResult.cacheRefresh) ? 'warning' : 'success',
@@ -2426,11 +2532,22 @@ const PiggieTvRowsPage = () => {
                     )
                 });
             } catch (saveError) {
-                const message = normalizePtvApiError(saveError).message;
+                if (saveError instanceof PtvRecommendationSettingsConflictError) {
+                    setRecommendationConflict(true);
+                    setStatusMessage({
+                        severity: 'warning',
+                        text: 'Recommendation rows changed on the server. Your generated rows remain unsaved until you reload and try again.'
+                    });
+                    return;
+                }
+
+                const message = saveError instanceof PtvRecommendationMutationInProgressError ?
+                    saveError.message :
+                    normalizePtvApiError(saveError).message;
 
                 setStatusMessage({
                     severity: 'warning',
-                    text: `Recommendation rows generated but not saved: ${message}`
+                    text: `Recommendation rows generated but not saved: ${message}. Your generated rows remain unsaved.`
                 });
                 return;
             }
@@ -2462,12 +2579,26 @@ const PiggieTvRowsPage = () => {
                 setRecommendationLoading(false);
             }
         }
-    }, [form, recommendationLoading, savePersistedRecommendationSettings]);
+    }, [
+        confirmedRecommendationSettings,
+        form,
+        recommendationConflict,
+        recommendationLoading,
+        recommendationSaving,
+        savePersistedRecommendationSettings
+    ]);
 
     const toggleRecommendationRow = useCallback(async (rowId: string, enabled: boolean) => {
-        if (!recommendationSettings?.rows?.length) return;
+        if (
+            !recommendationSettings?.rows?.length
+            || confirmedRecommendationSettings === undefined
+            || recommendationConflict
+            || recommendationLoading
+            || recommendationSaving
+            || recommendationRequestRef.current
+            || recommendationSaveRequestRef.current
+        ) return;
 
-        const previousSettings = recommendationSettings;
         const nextSettings = finalizeRecommendationSettings({
             ...recommendationSettings,
             rows: recommendationSettings.rows.map(row => (
@@ -2484,24 +2615,51 @@ const PiggieTvRowsPage = () => {
         setStatusMessage({ severity: 'info', text: 'Saving recommendation row state...' });
 
         try {
-            const saveResult = await savePersistedRecommendationSettings(nextSettings, 'row-toggle');
+            const saveResult = await savePersistedRecommendationSettings(
+                nextSettings,
+                confirmedRecommendationSettings,
+                'row-toggle'
+            );
 
             setStatusMessage({
                 severity: saveResult.cacheRefreshError || getFeaturedCacheRefreshWarning(saveResult.cacheRefresh) ? 'warning' : 'success',
                 text: getRecommendationSaveSuccessText('Recommendation row state', saveResult)
             });
         } catch (error) {
-            const message = normalizePtvApiError(error).message;
+            if (error instanceof PtvRecommendationSettingsConflictError) {
+                setRecommendationConflict(true);
+                setStatusMessage({
+                    severity: 'warning',
+                    text: 'Recommendation settings changed on the server. Your row change remains unsaved until you reload and try again.'
+                });
+                return;
+            }
 
-            setRecommendationSettings(previousSettings);
-            setStatusMessage({ severity: 'error', text: message });
+            const message = error instanceof PtvRecommendationMutationInProgressError ?
+                error.message :
+                normalizePtvApiError(error).message;
+            setStatusMessage({ severity: 'error', text: `Recommendation row state was not saved: ${message}. Your change remains unsaved.` });
         }
-    }, [recommendationSettings, savePersistedRecommendationSettings]);
+    }, [
+        confirmedRecommendationSettings,
+        recommendationConflict,
+        recommendationLoading,
+        recommendationSaving,
+        recommendationSettings,
+        savePersistedRecommendationSettings
+    ]);
 
     const acceptRecommendationRows = useCallback(async () => {
-        if (!recommendationSettings?.rows?.length) return;
+        if (
+            !recommendationSettings?.rows?.length
+            || confirmedRecommendationSettings === undefined
+            || recommendationConflict
+            || recommendationLoading
+            || recommendationSaving
+            || recommendationRequestRef.current
+            || recommendationSaveRequestRef.current
+        ) return;
 
-        const previousSettings = recommendationSettings;
         const nextSettings = finalizeRecommendationSettings({
             ...recommendationSettings,
             rows: recommendationSettings.rows.map(row => {
@@ -2523,24 +2681,51 @@ const PiggieTvRowsPage = () => {
         setStatusMessage({ severity: 'info', text: 'Saving accepted recommendation rows...' });
 
         try {
-            const saveResult = await savePersistedRecommendationSettings(nextSettings, 'accept-all');
+            const saveResult = await savePersistedRecommendationSettings(
+                nextSettings,
+                confirmedRecommendationSettings,
+                'accept-all'
+            );
 
             setStatusMessage({
                 severity: saveResult.cacheRefreshError || getFeaturedCacheRefreshWarning(saveResult.cacheRefresh) ? 'warning' : 'success',
                 text: getRecommendationSaveSuccessText('Accepted recommendation rows', saveResult)
             });
         } catch (error) {
-            const message = normalizePtvApiError(error).message;
+            if (error instanceof PtvRecommendationSettingsConflictError) {
+                setRecommendationConflict(true);
+                setStatusMessage({
+                    severity: 'warning',
+                    text: 'Recommendation settings changed on the server. Your acceptance changes remain unsaved until you reload and try again.'
+                });
+                return;
+            }
 
-            setRecommendationSettings(previousSettings);
-            setStatusMessage({ severity: 'error', text: message });
+            const message = error instanceof PtvRecommendationMutationInProgressError ?
+                error.message :
+                normalizePtvApiError(error).message;
+            setStatusMessage({ severity: 'error', text: `Recommendation rows were not accepted: ${message}. Your changes remain unsaved.` });
         }
-    }, [recommendationSettings, savePersistedRecommendationSettings]);
+    }, [
+        confirmedRecommendationSettings,
+        recommendationConflict,
+        recommendationLoading,
+        recommendationSaving,
+        recommendationSettings,
+        savePersistedRecommendationSettings
+    ]);
 
     const deleteRecommendationRow = useCallback(async (rowId: string) => {
-        if (!recommendationSettings?.rows?.length) return;
+        if (
+            !recommendationSettings?.rows?.length
+            || confirmedRecommendationSettings === undefined
+            || recommendationConflict
+            || recommendationLoading
+            || recommendationSaving
+            || recommendationRequestRef.current
+            || recommendationSaveRequestRef.current
+        ) return;
 
-        const previousSettings = recommendationSettings;
         const nextSettings = finalizeRecommendationSettings({
             ...recommendationSettings,
             rows: recommendationSettings.rows.filter(row => row.id !== rowId)
@@ -2550,22 +2735,42 @@ const PiggieTvRowsPage = () => {
         setStatusMessage({ severity: 'info', text: 'Deleting recommendation row...' });
 
         try {
-            const saveResult = await savePersistedRecommendationSettings(nextSettings, 'row-delete');
+            const saveResult = await savePersistedRecommendationSettings(
+                nextSettings,
+                confirmedRecommendationSettings,
+                'row-delete'
+            );
 
             setStatusMessage({
                 severity: saveResult.cacheRefreshError || getFeaturedCacheRefreshWarning(saveResult.cacheRefresh) ? 'warning' : 'success',
                 text: getRecommendationSaveSuccessText('Recommendation row deletion', saveResult)
             });
         } catch (error) {
-            const message = normalizePtvApiError(error).message;
+            if (error instanceof PtvRecommendationSettingsConflictError) {
+                setRecommendationConflict(true);
+                setStatusMessage({
+                    severity: 'warning',
+                    text: 'Recommendation settings changed on the server. The row remains removed locally until you reload and try again.'
+                });
+                return;
+            }
 
-            setRecommendationSettings(previousSettings);
-            setStatusMessage({ severity: 'error', text: message });
+            const message = error instanceof PtvRecommendationMutationInProgressError ?
+                error.message :
+                normalizePtvApiError(error).message;
+            setStatusMessage({ severity: 'error', text: `Recommendation row was not deleted: ${message}. The removal remains unsaved.` });
         }
-    }, [recommendationSettings, savePersistedRecommendationSettings]);
+    }, [
+        confirmedRecommendationSettings,
+        recommendationConflict,
+        recommendationLoading,
+        recommendationSaving,
+        recommendationSettings,
+        savePersistedRecommendationSettings
+    ]);
 
     const saveRows = useCallback(async () => {
-        if (saving || saveRequestRef.current || validation.errors.length) return;
+        if (saving || refreshing || saveRequestRef.current || refreshRequestRef.current || validation.errors.length) return;
         if (estimate.health === 'Risky' && !window.confirm('This row plan is estimated as Risky. Save it anyway?')) return;
 
         setSaving(true);
@@ -2577,6 +2782,12 @@ const PiggieTvRowsPage = () => {
             if (!api) throw new Error('PiggieTV plugin API client is unavailable.');
 
             const submittedRows = cloneSettings(form);
+            const submittedRevision = draftRevisionRef.current;
+            const authoritativeRowsResponse = await api.getRows<PtvRowBuilderSettings>();
+
+            if (!authoritativeRowsResponse || !rowSettingsMatch(cloneSettings(authoritativeRowsResponse), saved)) {
+                throw new PtvRowsConflictError();
+            }
             const savedRules = submittedRows.rules.map(rule => ({
                 enabled: rule.enabled,
                 generationMode: rule.generationMode,
@@ -2593,7 +2804,7 @@ const PiggieTvRowsPage = () => {
             }));
 
             if (canShowDiagnostics) {
-                console.debug('[PTV Row Rules] savedRules', savedRules);
+                ptvSafeConsole.debug('[PTV Row Rules] savedRules', savedRules);
             }
 
             recordPtvEvent('api', 'row-builder-save-start', getRowsDebugSummary(submittedRows));
@@ -2604,24 +2815,30 @@ const PiggieTvRowsPage = () => {
             const response = await api.saveRows<PtvRowBuilderSettings, PtvRowBuilderSettings>(submittedRows);
             const responseRows = cloneSettings(response);
             const responseLooksLikeUnexpectedDefaults = !isDefaultRuleSet(submittedRows) && isDefaultRuleSet(responseRows);
-            const normalizedRows = responseLooksLikeUnexpectedDefaults ? submittedRows : responseRows;
+            const verifiedRows = responseLooksLikeUnexpectedDefaults
+                ? cloneSettings(await api.getRows<PtvRowBuilderSettings>())
+                : responseRows;
+            const saveDecision = getPtvAdminMutationCommitDecision({
+                areEqual: rowSettingsMatch,
+                confirmedValue: verifiedRows,
+                currentRevision: draftRevisionRef.current,
+                submittedRevision,
+                submittedValue: submittedRows
+            });
 
             recordPtvEvent('api', 'row-builder-save-complete', {
                 responseLooksLikeUnexpectedDefaults,
                 response: getRowsDebugSummary(responseRows),
-                saved: getRowsDebugSummary(normalizedRows),
+                saveVerified: saveDecision.confirmed,
+                saved: getRowsDebugSummary(verifiedRows),
                 submitted: getRowsDebugSummary(submittedRows)
             });
 
             invalidateFeaturedContentMemoryCache('row-builder-save');
-            setForm(normalizedRows);
-            setSaved(normalizedRows);
-            setStatusMessage(responseLooksLikeUnexpectedDefaults
-                ? {
-                    severity: 'warning',
-                    text: 'Row rules were submitted, but the plugin returned the default plan. Keeping your submitted rules visible; rebuild/deploy the latest plugin if this persists.'
-                }
-                : { severity: 'success', text: 'Row rules saved.' });
+            if (!saveDecision.confirmed) throw new PtvRowsSaveVerificationError();
+            setSaved(verifiedRows);
+            if (saveDecision.applyToDraft) setForm(verifiedRows);
+            setStatusMessage({ severity: 'success', text: 'Row rules saved.' });
         })();
 
         saveRequestRef.current = request;
@@ -2629,15 +2846,33 @@ const PiggieTvRowsPage = () => {
         try {
             await request;
         } catch (error) {
-            setStatusMessage({ severity: 'error', text: normalizePtvApiError(error).message });
+            if (error instanceof PtvRowsConflictError) {
+                setRowConflict(true);
+                setStatusMessage({ severity: 'warning', text: 'Home Row settings were not saved because the server has newer values.' });
+                return;
+            }
+            if (error instanceof PtvRowsSaveVerificationError) {
+                setStatusMessage({
+                    severity: 'warning',
+                    text: 'The server did not confirm the submitted Home Row settings. Your edits remain unsaved.'
+                });
+                return;
+            }
+            const normalizedError = normalizePtvApiError(error);
+            recordPtvEvent('api', 'row-builder-save-failed', {
+                code: normalizedError.code,
+                kind: normalizedError.kind,
+                status: normalizedError.status
+            });
+            setStatusMessage({ severity: 'error', text: 'Home Row settings could not be saved. Review the form and try again.' });
         } finally {
             if (saveRequestRef.current === request) saveRequestRef.current = null;
             setSaving(false);
         }
-    }, [canShowDiagnostics, estimate.health, form, saving, validation.errors.length]);
+    }, [canShowDiagnostics, estimate.health, form, refreshing, saved, saving, validation.errors.length]);
 
     const refreshCache = useCallback(async () => {
-        if (refreshing || refreshRequestRef.current) return;
+        if (refreshing || saving || refreshRequestRef.current || saveRequestRef.current) return;
         if (validation.errors.length) {
             setStatusMessage({ severity: 'error', text: 'Fix row validation errors before refreshing the featured cache.' });
             return;
@@ -2652,27 +2887,55 @@ const PiggieTvRowsPage = () => {
 
             if (!api) throw new Error('PiggieTV plugin API client is unavailable.');
 
-            setSaving(true);
-
             const submittedRows = cloneSettings(form);
-            const responseRows = cloneSettings(await api.saveRows<PtvRowBuilderSettings, PtvRowBuilderSettings>(submittedRows));
-            const responseLooksLikeUnexpectedDefaults = !isDefaultRuleSet(submittedRows) && isDefaultRuleSet(responseRows);
-            const savedRows = responseLooksLikeUnexpectedDefaults ? submittedRows : responseRows;
+            const submittedRevision = draftRevisionRef.current;
+            const refreshStartedAt = Date.now();
+            let savedRows = cloneSettings(saved);
 
-            invalidateFeaturedContentMemoryCache('row-builder-refresh-save');
-            setForm(savedRows);
-            setSaved(savedRows);
-            recordPtvEvent('api', 'row-builder-refresh-saved-current-rules', {
-                dirty,
-                responseLooksLikeUnexpectedDefaults,
-                saved: getRowsDebugSummary(savedRows),
-                submitted: getRowsDebugSummary(submittedRows)
-            });
+            if (dirty) {
+                setSaving(true);
+                const authoritativeRowsResponse = await api.getRows<PtvRowBuilderSettings>();
 
-            const cacheRefresh = await refreshStoredFeaturedCacheDocument('row-builder-manual-refresh', {
-                dirty,
-                saved: getRowsDebugSummary(savedRows)
-            });
+                if (!authoritativeRowsResponse || !rowSettingsMatch(cloneSettings(authoritativeRowsResponse), saved)) {
+                    throw new PtvRowsConflictError();
+                }
+
+                const responseRows = cloneSettings(await api.saveRows<PtvRowBuilderSettings, PtvRowBuilderSettings>(submittedRows));
+                const responseLooksLikeUnexpectedDefaults = !isDefaultRuleSet(submittedRows) && isDefaultRuleSet(responseRows);
+                savedRows = responseLooksLikeUnexpectedDefaults
+                    ? cloneSettings(await api.getRows<PtvRowBuilderSettings>())
+                    : responseRows;
+                const saveDecision = getPtvAdminMutationCommitDecision({
+                    areEqual: rowSettingsMatch,
+                    confirmedValue: savedRows,
+                    currentRevision: draftRevisionRef.current,
+                    submittedRevision,
+                    submittedValue: submittedRows
+                });
+
+                invalidateFeaturedContentMemoryCache('row-builder-refresh-save');
+                if (!saveDecision.confirmed) throw new PtvRowsSaveVerificationError();
+                setSaved(savedRows);
+                if (saveDecision.applyToDraft) setForm(savedRows);
+                recordPtvEvent('api', 'row-builder-refresh-saved-current-rules', {
+                    dirty,
+                    responseLooksLikeUnexpectedDefaults,
+                    saveVerified: saveDecision.confirmed,
+                    saved: getRowsDebugSummary(savedRows),
+                    submitted: getRowsDebugSummary(submittedRows)
+                });
+            } else {
+                await api.refreshFeaturedContentCacheDocument();
+            }
+
+            const cacheRefresh = await observeStoredFeaturedCacheDocumentAfterSave(
+                'row-builder-manual-refresh',
+                refreshStartedAt,
+                {
+                    dirty,
+                    saved: getRowsDebugSummary(savedRows)
+                }
+            );
             const cacheRefreshWarning = getFeaturedCacheRefreshWarning(cacheRefresh);
 
             if (cacheRefreshWarning) {
@@ -2694,13 +2957,31 @@ const PiggieTvRowsPage = () => {
         try {
             await request;
         } catch (error) {
-            setStatusMessage({ severity: 'error', text: normalizePtvApiError(error).message });
+            if (error instanceof PtvRowsConflictError) {
+                setRowConflict(true);
+                setStatusMessage({ severity: 'warning', text: 'The Featured cache was not refreshed because Home Row settings changed on the server.' });
+                return;
+            }
+            if (error instanceof PtvRowsSaveVerificationError) {
+                setStatusMessage({
+                    severity: 'warning',
+                    text: 'The Featured cache was not refreshed because the server did not confirm the submitted Home Row settings. Your edits remain unsaved.'
+                });
+                return;
+            }
+            const normalizedError = normalizePtvApiError(error);
+            recordPtvEvent('api', 'row-builder-refresh-failed', {
+                code: normalizedError.code,
+                kind: normalizedError.kind,
+                status: normalizedError.status
+            });
+            setStatusMessage({ severity: 'error', text: 'The Featured cache could not be refreshed. Try again.' });
         } finally {
             if (refreshRequestRef.current === request) refreshRequestRef.current = null;
             setRefreshing(false);
             setSaving(false);
         }
-    }, [dirty, estimate.health, form, refreshing, validation.errors.length]);
+    }, [dirty, estimate.health, form, refreshing, saved, saving, validation.errors.length]);
 
     const exportObject = useCallback((value: unknown, filename: string) => {
         const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
@@ -2723,274 +3004,363 @@ const PiggieTvRowsPage = () => {
         event.target.value = '';
 
         if (!file) return;
+        if (file.size > MAX_PTV_ROW_IMPORT_BYTES) {
+            setStatusMessage({ severity: 'error', text: 'Row configuration is too large. Choose a JSON file smaller than 512 KiB.' });
+            return;
+        }
 
         const reader = new FileReader();
 
         reader.onload = () => {
             try {
-                const imported = JSON.parse(String(reader.result || '{}')) as PtvRowBuilderSettings;
-                setForm(cloneSettings(imported));
+                const parsed = parsePtvRowBuilderImport(String(reader.result || ''));
+                const imported = cloneSettings(parsed as Partial<PtvRowBuilderSettings>);
+                const importedValidation = localValidation(imported, seerrConfigured);
+                if (importedValidation.errors.length) throw new Error(importedValidation.errors[0]);
+                draftRevisionRef.current += 1;
+                setForm(imported);
                 setPreview(null);
-                setStatusMessage({ severity: 'success', text: 'Row config imported locally. Preview and save to persist.' });
+                setStatusMessage({ severity: 'success', text: `${imported.rules.length} row rules imported locally. Preview and save to persist.` });
             } catch (error) {
                 setStatusMessage({ severity: 'error', text: normalizePtvApiError(error).message });
             }
         };
 
         reader.readAsText(file);
-    }, []);
+    }, [seerrConfigured]);
 
     return (
-        <Page
+        <section
             id='ptvRowsPage'
-            title='PiggieTV Rows'
-            className='mainAnimatedPage type-interior ptv-dashboard-control-page'
+            className='ptv-admin-piggietv-page'
+            data-testid='ptv-admin-piggietv-rows'
         >
-            <Box className='content-primary ptv-dashboard-control-content'>
+            <Box className='ptv-admin-piggietv-content'>
                 <Stack spacing={2}>
-                    <Box>
+                    <Box className='ptv-admin-piggietv-header'>
                         <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
-                            <Typography variant='h1'>Row Builder</Typography>
-                            <Chip className='ptv-status-badge ptv-status-badge-info' label={dirty ? 'unsaved changes' : 'saved'} size='small' />
+                            <Typography variant='h1'>Home Rows</Typography>
+                            <Chip className='ptv-status-badge ptv-status-badge-info' label={pageDirty ? 'unsaved changes' : 'saved'} size='small' />
                         </Stack>
                         <Typography variant='body1' color='text.secondary'>
-                            Build every PiggieTV homepage row from one rule list, preview the plan, then refresh the featured cache when ready.
+                            Build and preview PiggieTV homepage rows, recommendations and featured-content rules.
                         </Typography>
                     </Box>
 
                     {statusMessage && <Alert severity={statusMessage.severity}>{statusMessage.text}</Alert>}
+                    {rowConflict ? (
+                        <Alert
+                            severity='warning'
+                            action={(
+                                <Button
+                                    color='inherit'
+                                    onClick={() => {
+                                        if (!window.confirm('Reload Home Row settings and discard your unsaved changes?')) return;
+                                        setRowConflict(false);
+                                        loadRows().catch(() => undefined);
+                                    }}
+                                >
+                                    Reload Settings
+                                </Button>
+                            )}
+                        >
+                            Home Row settings changed on the server while you were editing.
+                        </Alert>
+                    ) : null}
+                    {recommendationConflict ? (
+                        <Alert
+                            severity='warning'
+                            action={(
+                                <Button color='inherit' onClick={reloadPersistedRecommendationRows}>
+                                    Reload Recommendations
+                                </Button>
+                            )}
+                        >
+                            Recommendation settings changed on the server while you were editing. Your local recommendation changes remain unsaved.
+                        </Alert>
+                    ) : null}
                     {validation.errors.map(error => <Alert key={error} severity='error'>{error}</Alert>)}
                     {validation.warnings.map(warning => <Alert key={warning} severity='warning'>{warning}</Alert>)}
 
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12, md: 6 }}>
+                    {loading ? (
+                        <Grid aria-label='Loading Home Rows' container spacing={2}>
+                            {[0, 1, 2].map(index => (
+                                <Grid key={index} size={{ xs: 12, md: index === 2 ? 12 : 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Skeleton height={36} width='42%' />
+                                            <Skeleton height={24} width='78%' />
+                                            <Skeleton height={96} variant='rounded' />
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            ))}
+                        </Grid>
+                    ) : !loadSucceeded ? (
+                        <Alert
+                            severity='error'
+                            action={<Button color='inherit' onClick={loadRows}>Retry</Button>}
+                        >
+                            Home Row settings could not be loaded. No editable defaults were shown.
+                        </Alert>
+                    ) : (
+                        <>
+                            <Grid container spacing={2}>
+                                <Grid size={{ xs: 12, md: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={1}>
+                                                <Typography variant='h2'>Estimated Performance</Typography>
+                                                <Stack direction='row' spacing={1} flexWrap='wrap'>
+                                                    <Chip label={estimate.health} color={estimate.health === 'Risky' ? 'error' : estimate.health === 'Heavy' ? 'warning' : 'success'} />
+                                                    <Chip label={`Configured rows: ${estimate.configuredRowCount}`} />
+                                                    <Chip label={`Recommendation rows enabled: ${enabledRecommendationRows.length}`} />
+                                                    <Chip label={`Total Home rows: ${totalEstimatedHomeRows}`} />
+                                                    <Chip label={`${estimate.expectedItemCount} items`} />
+                                                    <Chip label={`${estimate.providerCalls} provider checks`} />
+                                                </Stack>
+                                                <Typography>Cache generation: {estimate.estimatedCacheCost}</Typography>
+                                                <Typography>Frontend render cost: {estimate.estimatedFrontendCost}</Typography>
+                                                {!!estimate.reasons.length && <Typography color='warning.main'>{estimate.reasons.join(', ')}</Typography>}
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            </Grid>
+
                             <Card className='ptv-dashboard-card ptv-control-card'>
                                 <CardContent>
-                                    <Stack spacing={1}>
-                                        <Typography variant='h2'>Estimated Performance</Typography>
-                                        <Stack direction='row' spacing={1} flexWrap='wrap'>
-                                            <Chip label={estimate.health} color={estimate.health === 'Risky' ? 'error' : estimate.health === 'Heavy' ? 'warning' : 'success'} />
-                                            <Chip label={`Configured rows: ${estimate.configuredRowCount}`} />
-                                            <Chip label={`Recommendation rows enabled: ${enabledRecommendationRows.length}`} />
-                                            <Chip label={`Total Home rows: ${totalEstimatedHomeRows}`} />
-                                            <Chip label={`${estimate.expectedItemCount} items`} />
-                                            <Chip label={`${estimate.providerCalls} provider checks`} />
+                                    <Stack className='ptv-row-builder-action-groups' spacing={1.5}>
+                                        <Stack direction='row' spacing={1.5} alignItems='center' justifyContent='space-between' flexWrap='wrap'>
+                                            <FormControlLabel
+                                                control={<Switch checked={form.enabled} onChange={event => updateForm(settings => ({ ...settings, enabled: event.target.checked }))} />}
+                                                label='Enable Row Builder'
+                                            />
+                                            <Button href='#/settings/admin/piggietv' variant='text'>PiggieTV Configuration</Button>
                                         </Stack>
-                                        <Typography>Cache generation: {estimate.estimatedCacheCost}</Typography>
-                                        <Typography>Frontend render cost: {estimate.estimatedFrontendCost}</Typography>
-                                        {!!estimate.reasons.length && <Typography color='warning.main'>{estimate.reasons.join(', ')}</Typography>}
+                                        <Box>
+                                            <Typography className='ptv-row-builder-action-label' component='h2' variant='overline'>Primary actions</Typography>
+                                            <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
+                                                <Button className='ptv-button' variant='contained' onClick={addRule}>Add Row</Button>
+                                                <Button className='ptv-button' variant='outlined' disabled={previewing || saving || refreshing || Boolean(validation.errors.length)} onClick={previewRows}>
+                                                    {previewing ? 'Previewing...' : 'Preview'}
+                                                </Button>
+                                                <Button className='ptv-button' variant='contained' disabled={saving || refreshing || !dirty || Boolean(validation.errors.length)} onClick={saveRows}>
+                                                    {saving ? 'Saving...' : 'Save Changes'}
+                                                </Button>
+                                            </Stack>
+                                        </Box>
+                                        <Box>
+                                            <Typography className='ptv-row-builder-action-label' component='h2' variant='overline'>Featured content</Typography>
+                                            <Button className='ptv-button' variant='outlined' disabled={refreshing || saving || Boolean(validation.errors.length)} onClick={refreshCache}>
+                                                {refreshing ? 'Refreshing...' : 'Refresh Featured Cache'}
+                                            </Button>
+                                        </Box>
+                                        <details className='ptv-admin-piggietv-advanced-details'>
+                                            <summary>Import, export and defaults</summary>
+                                            <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
+                                                <Button color='warning' disabled={saving || refreshing} variant='outlined' onClick={restoreDefaults}>Restore Defaults</Button>
+                                                <Button disabled={saving || refreshing} variant='outlined' onClick={exportConfig}>Export Config</Button>
+                                                <Button disabled={saving || refreshing} variant='outlined' onClick={() => importInputRef.current?.click()}>Import Config</Button>
+                                            </Stack>
+                                        </details>
+                                        <input ref={importInputRef} hidden type='file' accept='application/json,.json' onChange={importConfig} />
                                     </Stack>
                                 </CardContent>
                             </Card>
-                        </Grid>
-                    </Grid>
 
-                    <Card className='ptv-dashboard-card ptv-control-card'>
-                        <CardContent>
-                            <Stack spacing={1.5}>
-                                <Stack direction='row' spacing={1.5} alignItems='center' flexWrap='wrap'>
-                                    <FormControlLabel
-                                        control={<Switch checked={form.enabled} onChange={event => updateForm(settings => ({ ...settings, enabled: event.target.checked }))} />}
-                                        label='Enable Row Builder'
-                                    />
-                                    <Button className='ptv-button' variant='contained' onClick={addRule}>Add Rule</Button>
-                                    <Button className='ptv-button' variant='outlined' disabled={previewing || Boolean(validation.errors.length)} onClick={previewRows}>
-                                        {previewing ? 'Previewing...' : 'Preview'}
-                                    </Button>
-                                    <Button className='ptv-button' variant='contained' disabled={saving || !dirty || Boolean(validation.errors.length)} onClick={saveRows}>
-                                        {saving ? 'Saving...' : 'Save'}
-                                    </Button>
-                                    <Button className='ptv-button' variant='outlined' disabled={refreshing || Boolean(validation.errors.length)} onClick={refreshCache}>
-                                        {refreshing ? 'Refreshing...' : 'Refresh Featured Cache'}
-                                    </Button>
-                                    <Button variant='outlined' onClick={restoreDefaults}>Restore Defaults</Button>
-                                    <Button variant='outlined' onClick={exportConfig}>Export Config</Button>
-                                    <Button variant='outlined' onClick={() => importInputRef.current?.click()}>Import Config</Button>
-                                    <Button href='/dashboard/piggietv' variant='text'>Back to Status</Button>
-                                    <input ref={importInputRef} hidden type='file' accept='application/json,.json' onChange={importConfig} />
-                                </Stack>
-                                {loading && <Alert severity='info'>Loading row settings...</Alert>}
-                            </Stack>
-                        </CardContent>
-                    </Card>
+                            <RecommendationRowsPanel
+                                canShowDiagnostics={canShowDiagnostics}
+                                data={recommendationData}
+                                error={recommendationError}
+                                hasConflict={recommendationConflict || confirmedRecommendationSettings === undefined}
+                                isLoading={recommendationLoading || recommendationSaving}
+                                onAcceptAll={acceptRecommendationRows}
+                                onDeleteRow={deleteRecommendationRow}
+                                onGenerate={previewRecommendationRows}
+                                onRefreshSaved={reloadPersistedRecommendationRows}
+                                onToggleRow={toggleRecommendationRow}
+                                persistedRows={persistedRecommendationRows}
+                            />
 
-                    <RecommendationRowsPanel
-                        canShowDiagnostics={canShowDiagnostics}
-                        data={recommendationData}
-                        error={recommendationError}
-                        isLoading={recommendationLoading}
-                        onAcceptAll={acceptRecommendationRows}
-                        onDeleteRow={deleteRecommendationRow}
-                        onGenerate={previewRecommendationRows}
-                        onRefreshSaved={() => {
-                            void loadPersistedRecommendationRows('manual-refresh');
-                        }}
-                        onToggleRow={toggleRecommendationRow}
-                        persistedRows={persistedRecommendationRows}
-                    />
-
-                    <Card className='ptv-dashboard-card ptv-control-card'>
-                        <CardContent>
-                            <Stack spacing={1.5}>
-                                <Box>
-                                    <Typography variant='h2'>Row Groups</Typography>
-                                    <Typography variant='body2' color='text.secondary'>
-                                        Groups keep related rows together on the homepage. A group is saved when at least one row belongs to it.
-                                    </Typography>
-                                </Box>
-
-                                <Grid container spacing={1.25} alignItems='center'>
-                                    <Grid size={{ xs: 12, md: 4 }}>
-                                        <TextField
-                                            fullWidth
-                                            label='New Group Name'
-                                            placeholder='Studios, Featured, Explore Genres'
-                                            value={groupDraft}
-                                            onChange={event => setGroupDraft(event.target.value)}
-                                        />
-                                    </Grid>
-                                    <Grid size={{ xs: 12, md: 8 }}>
-                                        <Stack direction='row' spacing={1} flexWrap='wrap'>
-                                            <Button className='ptv-button' variant='contained' onClick={addGroup}>Add Group</Button>
-                                            <Button variant='outlined' onClick={() => addTemplateRows('studios')}>Add Studios Example</Button>
-                                            <Button variant='outlined' onClick={() => addTemplateRows('featured')}>Add Featured Example</Button>
-                                        </Stack>
-                                    </Grid>
-                                </Grid>
-
-                                {rowGroups.length ? (
-                                    <Grid container spacing={1.25}>
-                                        {rowGroups.map(group => (
-                                            <Grid key={group.title} size={{ xs: 12, md: 6, xl: 4 }}>
-                                                <Box className='ptv-dashboard-list-row'>
-                                                    <Stack spacing={1}>
-                                                        <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
-                                                            <Chip label={`${group.ruleCount} row${group.ruleCount === 1 ? '' : 's'}`} />
-                                                            <Chip label={`${group.enabledCount} enabled`} color={group.enabledCount ? 'success' : 'default'} />
-                                                        </Stack>
-                                                        <TextField
-                                                            fullWidth
-                                                            defaultValue={group.title}
-                                                            label='Group Name'
-                                                            onBlur={event => {
-                                                                const nextTitle = event.target.value.trim();
-
-                                                                if (nextTitle && nextTitle !== group.title) {
-                                                                    renameGroup(group.title, nextTitle);
-                                                                } else {
-                                                                    event.target.value = group.title;
-                                                                }
-                                                            }}
-                                                        />
-                                                        <Stack direction='row' spacing={1} flexWrap='wrap'>
-                                                            <Button variant='outlined' onClick={() => addRuleToGroup(group.title)}>Add Row To Group</Button>
-                                                            <Button color='warning' variant='outlined' onClick={() => clearGroup(group.title)}>Ungroup Rows</Button>
-                                                        </Stack>
-                                                    </Stack>
-                                                </Box>
-                                            </Grid>
-                                        ))}
-                                    </Grid>
-                                ) : (
-                                    <Alert severity='info'>No groups yet. Add a named group or use one of the examples.</Alert>
-                                )}
-                            </Stack>
-                        </CardContent>
-                    </Card>
-
-                    <Card className='ptv-dashboard-card ptv-control-card'>
-                        <CardContent>
-                            <Stack spacing={1.5}>
-                                <Typography variant='h2'>Configured Rules</Typography>
-                                {form.rules.map((rule, index) => {
-                                    return (
-                                        <Box key={`${rule.id}-${index}`} className='ptv-dashboard-list-row ptv-row-rule-line'>
-                                            <Box className='ptv-row-rule-editor'>
-                                                <Box className='ptv-row-rule-cell ptv-row-rule-cell-toggle'>
-                                                    <FormControlLabel
-                                                        control={<Switch checked={rule.enabled} onChange={event => updateRule(index, { enabled: event.target.checked })} />}
-                                                        label='On'
-                                                    />
-                                                </Box>
-                                                <Box className='ptv-row-rule-cell'>
-                                                    <TextField fullWidth label='Row Name' value={rule.name} onChange={event => updateRule(index, { name: event.target.value })} />
-                                                </Box>
-                                                <Box className='ptv-row-rule-cell'>
-                                                    <TextField fullWidth select label='Media' value={rule.mediaType} onChange={event => updateRule(index, { mediaType: event.target.value as RowMediaType })}>
-                                                        {MEDIA_TYPES.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
-                                                    </TextField>
-                                                </Box>
-                                                <Box className='ptv-row-rule-cell'>
-                                                    <TextField fullWidth select label='Source' value={rule.sourceType} onChange={event => updateRule(index, { sourceType: event.target.value as RowSourceType })}>
-                                                        {SOURCE_TYPES.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
-                                                    </TextField>
-                                                </Box>
-                                                <RowSourceValueControls index={index} rule={rule} updateRule={updateRule} />
-                                                <Box className='ptv-row-rule-cell'>
-                                                    <TextField fullWidth select label='Mode' value={rule.generationMode} onChange={event => updateRule(index, { generationMode: event.target.value as RowGenerationMode })}>
-                                                        {GENERATION_MODES.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
-                                                    </TextField>
-                                                </Box>
-                                                <Box className='ptv-row-rule-cell ptv-row-rule-cell-small'>
-                                                    <TextField fullWidth label={rule.generationMode === 'random' && rule.sourceType === 'genre' ? 'Rows' : 'Limit'} type='number' value={rule.generationMode === 'random' && rule.sourceType === 'genre' ? rule.rowCount : rule.itemLimit} onChange={event => updateRule(index, rule.generationMode === 'random' && rule.sourceType === 'genre' ? { rowCount: Number(event.target.value) } : { itemLimit: Number(event.target.value) })} />
-                                                </Box>
-                                                <RowSubgenreControls index={index} rule={rule} updateRule={updateRule} />
-                                                <Box className='ptv-row-rule-cell ptv-row-rule-cell-small'>
-                                                    <TextField fullWidth label='Priority' type='number' value={rule.sortPriority} onChange={event => updateRule(index, { sortPriority: Number(event.target.value) })} />
-                                                </Box>
-                                                <Box className='ptv-row-rule-cell'>
-                                                    <TextField fullWidth select label='Tier' value={rule.tier} onChange={event => updateRule(index, { tier: Number(event.target.value) })}>
-                                                        {ROW_TIERS.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
-                                                    </TextField>
-                                                </Box>
-                                                <Box className='ptv-row-rule-cell'>
-                                                    <TextField fullWidth select label='Presentation' value={rule.presentation} onChange={event => updateRule(index, { presentation: event.target.value as RowPresentation })}>
-                                                        {ROW_PRESENTATIONS.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
-                                                    </TextField>
-                                                </Box>
-                                                <Box className='ptv-row-rule-cell'>
-                                                    <TextField fullWidth select label='Group Label' value={getGroupSelectValue(rule.groupTitle, rowGroups)} onChange={event => updateRule(index, { groupTitle: event.target.value })}>
-                                                        <MenuItem value=''>Ungrouped</MenuItem>
-                                                        {getGroupOptions(rowGroups, rule.groupTitle).map(groupTitle => <MenuItem key={groupTitle} value={groupTitle}>{groupTitle}</MenuItem>)}
-                                                    </TextField>
-                                                </Box>
-                                                <Box className='ptv-row-rule-cell ptv-row-rule-actions'>
-                                                    <Button color='error' variant='outlined' onClick={() => removeRule(index)}>Remove</Button>
-                                                </Box>
-                                            </Box>
-                                            {rule.sourceType === 'studio' && (
-                                                <Typography className='ptv-row-rule-inline-helper' variant='body2'>
-                                                    {STUDIO_SOURCE_HELPER_TEXT}
-                                                </Typography>
-                                            )}
-                                        </Box>
-                                    );
-                                })}
-                            </Stack>
-                        </CardContent>
-                    </Card>
-
-                    <Grid container spacing={2}>
-                        <Grid size={{ xs: 12, lg: 7 }}>
                             <Card className='ptv-dashboard-card ptv-control-card'>
                                 <CardContent>
                                     <Stack spacing={1.5}>
-                                        <Typography variant='h2'>Total Home Output Preview</Typography>
-                                        <Stack direction='row' spacing={1} flexWrap='wrap'>
-                                            <Chip size='small' label={`Configured Preview: ${configuredPreviewRows.length}`} />
-                                            <Chip size='small' label={`Configured On Home: ${configuredHomePreviewRows.length}`} />
-                                            <Chip size='small' label={`Recommendation Rows: ${recommendationPreviewRows.length}`} />
-                                            <Chip size='small' label={`Total Home Output: ${homeOutputPreviewRows.length}`} color={homeOutputPreviewRows.length ? 'success' : 'default'} />
-                                        </Stack>
-                                        {!preview?.rows?.length && !recommendationPreviewRows.length && <Typography color='text.secondary'>No preview generated yet.</Typography>}
-                                        {preview?.validation?.errors?.map(error => <Alert key={error} severity='error'>{error}</Alert>)}
-                                        {preview?.validation?.warnings?.map(warning => <Alert key={warning} severity='warning'>{warning}</Alert>)}
-                                        {!!configuredPreviewRows.length && !configuredRowsOnHomeEnabled && (
-                                            <>
-                                                <Alert severity='info'>Configured Row Builder rows are generating in settings, but hidden from Home until Row Builder is enabled.</Alert>
-                                                <Typography variant='h3'>Configured Row Builder Preview</Typography>
-                                                {configuredPreviewRows.map(row => (
-                                                    <Box key={`configured-preview-${row.id}`} className='ptv-dashboard-list-row'>
+                                        <Box>
+                                            <Typography variant='h2'>Row Groups</Typography>
+                                            <Typography variant='body2' color='text.secondary'>
+                                                Groups keep related rows together on the homepage. A group is saved when at least one row belongs to it.
+                                            </Typography>
+                                        </Box>
+
+                                        <Grid container spacing={1.25} alignItems='center'>
+                                            <Grid size={{ xs: 12, md: 4 }}>
+                                                <TextField
+                                                    fullWidth
+                                                    label='New Group Name'
+                                                    placeholder='Studios, Featured, Explore Genres'
+                                                    value={groupDraft}
+                                                    onChange={event => setGroupDraft(event.target.value)}
+                                                />
+                                            </Grid>
+                                            <Grid size={{ xs: 12, md: 8 }}>
+                                                <Stack direction='row' spacing={1} flexWrap='wrap'>
+                                                    <Button className='ptv-button' variant='contained' onClick={addGroup}>Add Group</Button>
+                                                    <Button variant='outlined' onClick={() => addTemplateRows('studios')}>Add Studios Example</Button>
+                                                    <Button variant='outlined' onClick={() => addTemplateRows('featured')}>Add Featured Example</Button>
+                                                </Stack>
+                                            </Grid>
+                                        </Grid>
+
+                                        {rowGroups.length ? (
+                                            <Grid container spacing={1.25}>
+                                                {rowGroups.map(group => (
+                                                    <Grid key={group.title} size={{ xs: 12, md: 6, xl: 4 }}>
+                                                        <Box className='ptv-dashboard-list-row'>
+                                                            <Stack spacing={1}>
+                                                                <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
+                                                                    <Chip label={`${group.ruleCount} row${group.ruleCount === 1 ? '' : 's'}`} />
+                                                                    <Chip label={`${group.enabledCount} enabled`} color={group.enabledCount ? 'success' : 'default'} />
+                                                                </Stack>
+                                                                <TextField
+                                                                    fullWidth
+                                                                    defaultValue={group.title}
+                                                                    label='Group Name'
+                                                                    onBlur={event => {
+                                                                        const nextTitle = event.target.value.trim();
+
+                                                                        if (nextTitle && nextTitle !== group.title) {
+                                                                            renameGroup(group.title, nextTitle);
+                                                                        } else {
+                                                                            event.target.value = group.title;
+                                                                        }
+                                                                    }}
+                                                                />
+                                                                <Stack direction='row' spacing={1} flexWrap='wrap'>
+                                                                    <Button variant='outlined' onClick={() => addRuleToGroup(group.title)}>Add Row To Group</Button>
+                                                                    <Button color='warning' variant='outlined' onClick={() => clearGroup(group.title)}>Ungroup Rows</Button>
+                                                                </Stack>
+                                                            </Stack>
+                                                        </Box>
+                                                    </Grid>
+                                                ))}
+                                            </Grid>
+                                        ) : (
+                                            <Alert severity='info'>No groups yet. Add a named group or use one of the examples.</Alert>
+                                        )}
+                                    </Stack>
+                                </CardContent>
+                            </Card>
+
+                            <Card className='ptv-dashboard-card ptv-control-card'>
+                                <CardContent>
+                                    <Stack spacing={1.5}>
+                                        <Typography variant='h2'>Configured Rules</Typography>
+                                        {form.rules.map((rule, index) => {
+                                            return (
+                                                <Box key={`${rule.id}-${index}`} className='ptv-dashboard-list-row ptv-row-rule-line'>
+                                                    <Box className='ptv-row-rule-editor'>
+                                                        <Box className='ptv-row-rule-cell ptv-row-rule-cell-toggle'>
+                                                            <FormControlLabel
+                                                                control={<Switch checked={rule.enabled} onChange={event => updateRule(index, { enabled: event.target.checked })} />}
+                                                                label='On'
+                                                            />
+                                                        </Box>
+                                                        <Box className='ptv-row-rule-cell'>
+                                                            <TextField fullWidth label='Row Name' value={rule.name} onChange={event => updateRule(index, { name: event.target.value })} />
+                                                        </Box>
+                                                        <Box className='ptv-row-rule-cell'>
+                                                            <TextField fullWidth select label='Media' value={rule.mediaType} onChange={event => updateRule(index, { mediaType: event.target.value as RowMediaType })}>
+                                                                {MEDIA_TYPES.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
+                                                            </TextField>
+                                                        </Box>
+                                                        <Box className='ptv-row-rule-cell'>
+                                                            <TextField fullWidth select label='Source' value={rule.sourceType} onChange={event => updateRule(index, { sourceType: event.target.value as RowSourceType })}>
+                                                                {SOURCE_TYPES.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
+                                                            </TextField>
+                                                        </Box>
+                                                        <RowSourceValueControls index={index} rule={rule} updateRule={updateRule} />
+                                                        <Box className='ptv-row-rule-cell'>
+                                                            <TextField fullWidth select label='Mode' value={rule.generationMode} onChange={event => updateRule(index, { generationMode: event.target.value as RowGenerationMode })}>
+                                                                {GENERATION_MODES.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
+                                                            </TextField>
+                                                        </Box>
+                                                        <Box className='ptv-row-rule-cell ptv-row-rule-cell-small'>
+                                                            <TextField fullWidth label={rule.generationMode === 'random' && rule.sourceType === 'genre' ? 'Rows' : 'Limit'} type='number' value={rule.generationMode === 'random' && rule.sourceType === 'genre' ? rule.rowCount : rule.itemLimit} onChange={event => updateRule(index, rule.generationMode === 'random' && rule.sourceType === 'genre' ? { rowCount: Number(event.target.value) } : { itemLimit: Number(event.target.value) })} />
+                                                        </Box>
+                                                        <RowSubgenreControls index={index} rule={rule} updateRule={updateRule} />
+                                                        <Box className='ptv-row-rule-cell ptv-row-rule-cell-small'>
+                                                            <TextField fullWidth label='Priority' type='number' value={rule.sortPriority} onChange={event => updateRule(index, { sortPriority: Number(event.target.value) })} />
+                                                        </Box>
+                                                        <Box className='ptv-row-rule-cell'>
+                                                            <TextField fullWidth select label='Tier' value={rule.tier} onChange={event => updateRule(index, { tier: Number(event.target.value) })}>
+                                                                {ROW_TIERS.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
+                                                            </TextField>
+                                                        </Box>
+                                                        <Box className='ptv-row-rule-cell'>
+                                                            <TextField fullWidth select label='Presentation' value={rule.presentation} onChange={event => updateRule(index, { presentation: event.target.value as RowPresentation })}>
+                                                                {ROW_PRESENTATIONS.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}
+                                                            </TextField>
+                                                        </Box>
+                                                        <Box className='ptv-row-rule-cell'>
+                                                            <TextField fullWidth select label='Group Label' value={getGroupSelectValue(rule.groupTitle, rowGroups)} onChange={event => updateRule(index, { groupTitle: event.target.value })}>
+                                                                <MenuItem value=''>Ungrouped</MenuItem>
+                                                                {getGroupOptions(rowGroups, rule.groupTitle).map(groupTitle => <MenuItem key={groupTitle} value={groupTitle}>{groupTitle}</MenuItem>)}
+                                                            </TextField>
+                                                        </Box>
+                                                        <Box className='ptv-row-rule-cell ptv-row-rule-actions'>
+                                                            <Button color='error' variant='outlined' onClick={() => removeRule(index)}>Remove</Button>
+                                                        </Box>
+                                                    </Box>
+                                                    {rule.sourceType === 'studio' && (
+                                                        <Typography className='ptv-row-rule-inline-helper' variant='body2'>
+                                                            {STUDIO_SOURCE_HELPER_TEXT}
+                                                        </Typography>
+                                                    )}
+                                                </Box>
+                                            );
+                                        })}
+                                    </Stack>
+                                </CardContent>
+                            </Card>
+
+                            <Grid container spacing={2}>
+                                <Grid size={{ xs: 12, lg: 7 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={1.5}>
+                                                <Typography variant='h2'>Total Home Output Preview</Typography>
+                                                <Stack direction='row' spacing={1} flexWrap='wrap'>
+                                                    <Chip size='small' label={`Configured Preview: ${configuredPreviewRows.length}`} />
+                                                    <Chip size='small' label={`Configured On Home: ${configuredHomePreviewRows.length}`} />
+                                                    <Chip size='small' label={`Recommendation Rows: ${recommendationPreviewRows.length}`} />
+                                                    <Chip size='small' label={`Total Home Output: ${homeOutputPreviewRows.length}`} color={homeOutputPreviewRows.length ? 'success' : 'default'} />
+                                                </Stack>
+                                                {!preview?.rows?.length && !recommendationPreviewRows.length && <Typography color='text.secondary'>No preview generated yet.</Typography>}
+                                                {preview?.validation?.errors?.map(error => <Alert key={error} severity='error'>{error}</Alert>)}
+                                                {preview?.validation?.warnings?.map(warning => <Alert key={warning} severity='warning'>{warning}</Alert>)}
+                                                {!!configuredPreviewRows.length && !configuredRowsOnHomeEnabled && (
+                                                    <>
+                                                        <Alert severity='info'>Configured Row Builder rows are generating in settings, but hidden from Home until Row Builder is enabled.</Alert>
+                                                        <Typography variant='h3'>Configured Row Builder Preview</Typography>
+                                                        {configuredPreviewRows.map(row => (
+                                                            <Box key={`configured-preview-${row.id}`} className='ptv-dashboard-list-row'>
+                                                                <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
+                                                                    <Typography variant='h3'>{row.title}</Typography>
+                                                                    <Chip size='small' label={`${row.itemCount} items`} color={row.itemCount ? 'success' : 'warning'} />
+                                                                    <Chip size='small' label={row.mediaType || 'mixed'} />
+                                                                    <Chip size='small' label={row.sourceType || 'source'} />
+                                                                    <Chip size='small' label={row.rowType} />
+                                                                    <Chip size='small' label={row.sourceId || 'source'} />
+                                                                </Stack>
+                                                            </Box>
+                                                        ))}
+                                                        <Divider />
+                                                        <Typography variant='h3'>Home Output</Typography>
+                                                    </>
+                                                )}
+                                                {homeOutputPreviewRows.map(row => (
+                                                    <Box key={row.id} className='ptv-dashboard-list-row'>
                                                         <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
                                                             <Typography variant='h3'>{row.title}</Typography>
                                                             <Chip size='small' label={`${row.itemCount} items`} color={row.itemCount ? 'success' : 'warning'} />
@@ -3001,42 +3371,28 @@ const PiggieTvRowsPage = () => {
                                                         </Stack>
                                                     </Box>
                                                 ))}
-                                                <Divider />
-                                                <Typography variant='h3'>Home Output</Typography>
-                                            </>
-                                        )}
-                                        {homeOutputPreviewRows.map(row => (
-                                            <Box key={row.id} className='ptv-dashboard-list-row'>
-                                                <Stack direction='row' spacing={1} alignItems='center' flexWrap='wrap'>
-                                                    <Typography variant='h3'>{row.title}</Typography>
-                                                    <Chip size='small' label={`${row.itemCount} items`} color={row.itemCount ? 'success' : 'warning'} />
-                                                    <Chip size='small' label={row.mediaType || 'mixed'} />
-                                                    <Chip size='small' label={row.sourceType || 'source'} />
-                                                    <Chip size='small' label={row.rowType} />
-                                                    <Chip size='small' label={row.sourceId || 'source'} />
-                                                </Stack>
-                                            </Box>
-                                        ))}
-                                        {canShowDiagnostics && !!preview?.diagnostics?.length && (
-                                            <>
-                                                <Divider />
-                                                <Typography variant='h3'>Row Diagnostics</Typography>
-                                                {preview.diagnostics.slice(0, 16).map((diagnostic, index) => (
-                                                    <Typography key={`${diagnostic.ruleId}-${diagnostic.searchTerm}-${index}`} variant='body2'>
-                                                        {formatDiagnosticSummary(diagnostic)}
-                                                    </Typography>
-                                                ))}
-                                            </>
-                                        )}
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
+                                                {canShowDiagnostics && !!preview?.diagnostics?.length && (
+                                                    <>
+                                                        <Divider />
+                                                        <Typography variant='h3'>Row Diagnostics</Typography>
+                                                        {preview.diagnostics.slice(0, 16).map((diagnostic, index) => (
+                                                            <Typography key={`${diagnostic.ruleId}-${diagnostic.searchTerm}-${index}`} variant='body2'>
+                                                                {formatDiagnosticSummary(diagnostic)}
+                                                            </Typography>
+                                                        ))}
+                                                    </>
+                                                )}
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
 
-                    </Grid>
+                            </Grid>
+                        </>
+                    )}
                 </Stack>
             </Box>
-        </Page>
+        </section>
     );
 };
 

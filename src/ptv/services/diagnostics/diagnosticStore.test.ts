@@ -18,6 +18,7 @@ describe('PTV diagnostic store', () => {
         expect(normalizePtvDiagnosticRequestFamily('/Ptv/v1/Status?token=secret')).toBe('Plugin status');
         expect(normalizePtvDiagnosticRouteFamily('#/details?id=private-media-id')).toBe('details');
         expect(normalizePtvDiagnosticRouteFamily('#/dashboard/piggietv/diagnostics?user=private')).toBe('dashboard/piggietv/diagnostics');
+        expect(normalizePtvDiagnosticRouteFamily('#/settings/admin/piggietv/diagnostics?user=private')).toBe('settings/admin/piggietv/diagnostics');
     });
 
     it('bounds histories and counts dropped events', () => {

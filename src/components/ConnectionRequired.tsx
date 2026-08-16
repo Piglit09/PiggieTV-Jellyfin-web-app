@@ -3,6 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { ApiClient, ConnectResponse } from 'jellyfin-apiclient';
 
 import { ConnectionState, ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import {
     getPtvLoginRedirectDecision,
     PTV_CURRENT_SETTINGS_REDIRECT
@@ -80,7 +81,7 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
         switch (connectionResponse.State) {
             case ConnectionState.SignedIn:
                 // Already logged in, bounce to the home page
-                console.debug('[ConnectionRequired] already logged in, redirecting to home');
+                ptvSafeConsole.debug('[ConnectionRequired] already logged in, redirecting to home');
                 navigate(BounceRoutes.Home, { replace: true });
                 return;
             case ConnectionState.ServerSignIn:
@@ -101,18 +102,18 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
                         params.set('ptvredirect', PTV_CURRENT_SETTINGS_REDIRECT);
                     }
 
-                    console.debug('[ConnectionRequired] redirecting to login', redirect.reason);
+                    ptvSafeConsole.debug('[ConnectionRequired] redirecting to login', redirect.reason);
                     navigate(`${BounceRoutes.Login}?${params.toString()}`, { replace: true });
                 }
                 return;
             case ConnectionState.ServerSelection:
                 // Bounce to select server page
-                console.debug('[ConnectionRequired] redirecting to select server page');
+                ptvSafeConsole.debug('[ConnectionRequired] redirecting to select server page');
                 navigateIfNotThere(BounceRoutes.SelectServer);
                 return;
         }
 
-        console.warn('[ConnectionRequired] unhandled connection state', connectionResponse.State);
+        ptvSafeConsole.warn('[ConnectionRequired] unhandled connection state', connectionResponse.State);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [ navigateIfNotThere, location.key, location.pathname, location.search, navigate ]);
 
@@ -124,7 +125,7 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
 
         const systemInfo = await fetchPublicSystemInfo(apiClient);
         if (systemInfo?.StartupWizardCompleted) {
-            console.info('[ConnectionRequired] startup wizard is complete, redirecting home');
+            ptvSafeConsole.info('[ConnectionRequired] startup wizard is complete, redirecting home');
             navigate(BounceRoutes.Home);
             return;
         }
@@ -144,12 +145,12 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
                     // TODO: Is there a better place to handle this?
                     ServerConnections.setLocalApiClient(firstConnection.ApiClient);
                     // Bounce to the wizard
-                    console.info('[ConnectionRequired] startup wizard is not complete, redirecting there');
+                    ptvSafeConsole.info('[ConnectionRequired] startup wizard is not complete, redirecting there');
                     navigate(BounceRoutes.StartWizard);
                     return;
                 }
             } catch (ex) {
-                console.error('[ConnectionRequired] checking wizard status failed', ex);
+                ptvSafeConsole.error('[ConnectionRequired] checking wizard status failed', ex);
                 return;
             }
         }
@@ -157,7 +158,7 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
         // Bounce to the correct page in the login flow
         bounce(firstConnection)
             .catch(err => {
-                console.error('[ConnectionRequired] failed to bounce', err);
+                ptvSafeConsole.error('[ConnectionRequired] failed to bounce', err);
             });
     }, [bounce, navigate]);
 
@@ -167,13 +168,13 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
         // If this is a user route, ensure a user is logged in
         if ((level === AccessLevel.Admin || level === AccessLevel.User) && !client?.isLoggedIn()) {
             try {
-                console.warn('[ConnectionRequired] unauthenticated user attempted to access user route');
+                ptvSafeConsole.warn('[ConnectionRequired] unauthenticated user attempted to access user route');
                 bounce(await runServerConnectionAttempt(() => ServerConnections.connect()))
                     .catch(err => {
-                        console.error('[ConnectionRequired] failed to bounce', err);
+                        ptvSafeConsole.error('[ConnectionRequired] failed to bounce', err);
                     });
             } catch (ex) {
-                console.warn('[ConnectionRequired] error bouncing from user route', ex);
+                ptvSafeConsole.warn('[ConnectionRequired] error bouncing from user route', ex);
             }
             return;
         }
@@ -183,12 +184,12 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
             try {
                 const user = await client?.getCurrentUser();
                 if (!user?.Policy?.IsAdministrator) {
-                    console.warn('[ConnectionRequired] normal user attempted to access admin route');
+                    ptvSafeConsole.warn('[ConnectionRequired] normal user attempted to access admin route');
                     navigate(BounceRoutes.Home, { replace: true });
                     return;
                 }
             } catch (ex) {
-                console.warn('[ConnectionRequired] error bouncing from admin route', ex);
+                ptvSafeConsole.warn('[ConnectionRequired] error bouncing from admin route', ex);
                 return;
             }
         }
@@ -208,7 +209,7 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
         connection.then(firstConnection => {
             if (!active) return;
 
-            console.debug('[ConnectionRequired] connection state', firstConnection?.State);
+            ptvSafeConsole.debug('[ConnectionRequired] connection state', firstConnection?.State);
             ServerConnections.firstConnection = true;
 
             if (firstConnection && ERROR_STATES.includes(firstConnection.State)) {
@@ -216,24 +217,24 @@ const ConnectionRequired: FunctionComponent<ConnectionRequiredProps> = ({
             } else if (level === AccessLevel.Wizard) {
                 handleWizard(firstConnection)
                     .catch(err => {
-                        console.error('[ConnectionRequired] could not validate wizard status', err);
+                        ptvSafeConsole.error('[ConnectionRequired] could not validate wizard status', err);
                     });
             } else if (
                 firstConnection && firstConnection.State !== ConnectionState.SignedIn && !apiClient?.isLoggedIn()
             ) {
                 handleIncompleteWizard(firstConnection)
                     .catch(err => {
-                        console.error('[ConnectionRequired] could not start wizard', err);
+                        ptvSafeConsole.error('[ConnectionRequired] could not start wizard', err);
                     });
             } else {
                 validateUserAccess()
                     .catch(err => {
-                        console.error('[ConnectionRequired] could not validate user access', err);
+                        ptvSafeConsole.error('[ConnectionRequired] could not validate user access', err);
                     });
             }
         }).catch(err => {
             if (!active) return;
-            console.error('[ConnectionRequired] failed to connect', err);
+            ptvSafeConsole.error('[ConnectionRequired] failed to connect', err);
         });
 
         return () => {

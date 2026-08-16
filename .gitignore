@@ -28,3 +28,25 @@
 /.codex-remote-attachments/
 /test-results.zip
 /tmp/.npm-cache/
+
+# Local environment and credential files. Keep shareable templates trackable.
+.env
+.env.local
+.env.*
+*.env
+*.env.local
+*.env.*
+.envrc
+.envrc.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
+!*.env.example
+!*.env.sample
+!*.env.template
+!.envrc.example
+!.envrc.sample
+!.envrc.template

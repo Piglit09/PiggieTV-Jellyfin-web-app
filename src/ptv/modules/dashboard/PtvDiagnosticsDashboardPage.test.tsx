@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,7 +52,8 @@ describe('PTV diagnostics dashboard', () => {
 
         flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
 
-        expect(container.querySelector('[data-page-title="PiggieTV Diagnostics"]')).not.toBeNull();
+        expect(container.querySelector('[data-testid="ptv-admin-piggietv-diagnostics"]')).not.toBeNull();
+        expect(container.querySelector('h1')?.textContent).toBe('PiggieTV Diagnostics');
         expect(container.textContent).toContain('Overall health');
         expect(container.textContent).toContain('Local, bounded observability');
         expect(store.getSnapshot().self.subscriberCount).toBe(1);
@@ -78,6 +79,43 @@ describe('PTV diagnostics dashboard', () => {
         flushSync(() => resetButton?.click());
         expect(store.getSnapshot().routes).toEqual([]);
         expect(store.getSnapshot().session.resetCount).toBe(1);
+    });
+
+    it('removes injected credential canaries from copied diagnostics', async () => {
+        const store = getPtvDiagnosticStore();
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_TOKEN', 'diagnostics-copy' ].join('_');
+        const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+        (store.updateContext as (changes: Record<string, unknown>) => void)({
+            accessToken: accessCanary,
+            request: {
+                headers: { Authorization: `Bearer ${accessCanary}` },
+                url: `https://server.invalid/socket?api_key=${accessCanary}`
+            },
+            tokenCount: 8
+        });
+        store.recordCoordinatorHit({
+            endpoint: `https://server.invalid/Items?api_key=${accessCanary}`,
+            route: `#/quickconnect?code=${accessCanary}`
+        });
+        store.startRoute(`#/quickconnect?code=${accessCanary}`);
+
+        flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
+        const exportButton = Array.from(container.querySelectorAll('button'))
+            .find(button => button.textContent === 'Export');
+        flushSync(() => exportButton?.click());
+        const copyButton = Array.from(container.querySelectorAll('button'))
+            .find(button => button.textContent === 'Copy diagnostics');
+
+        await act(async () => {
+            copyButton?.click();
+            await Promise.resolve();
+        });
+
+        expect(writeText).toHaveBeenCalledOnce();
+        const copied = String(writeText.mock.calls[0]?.[0] || '');
+        expect(copied).not.toContain(accessCanary);
+        expect(copied).toContain('"privacyClassification": "share-safe"');
     });
 
     it('renders the passive remote tester, safe graph inspector, and explicit recommendation unknown reason', () => {

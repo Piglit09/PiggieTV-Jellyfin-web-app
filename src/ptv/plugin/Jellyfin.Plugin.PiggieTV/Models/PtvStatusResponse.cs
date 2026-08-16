@@ -484,6 +484,10 @@ public sealed class PtvStatusSignup
     [JsonPropertyName("logoUrlConfigured")]
     public bool LogoUrlConfigured { get; set; }
 
+    /// <summary>Gets or sets whether a trusted public link origin is configured.</summary>
+    [JsonPropertyName("publicBaseUrlConfigured")]
+    public bool PublicBaseUrlConfigured { get; set; }
+
     /// <summary>Gets or sets the sender domain only, not the full address.</summary>
     [JsonPropertyName("fromDomain")]
     public string? FromDomain { get; set; }
@@ -627,6 +631,7 @@ public sealed class PtvStatusSignup
             PendingResetCount = activeResetCodes.Count,
             PendingVerificationCount = activePendingVerifications.Count,
             PolicyPresetCount = settings.PolicyPresets?.Count ?? 0,
+            PublicBaseUrlConfigured = !string.IsNullOrWhiteSpace(email.PublicBaseUrl),
             ResetCodeMinutes = email.ResetCodeMinutes,
             Routes = PtvSignupRouteStatus.Create(),
             SmtpHostConfigured = !string.IsNullOrWhiteSpace(email.SmtpHost),

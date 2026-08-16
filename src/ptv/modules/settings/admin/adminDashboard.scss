@@ -1,0 +1,1205 @@
+/* PiggieTV Administration control center */
+/* stylelint-disable no-descending-specificity */
+
+.ptv-admin-application,
+.ptv-admin-shell {
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1fr);
+    gap: clamp(28px, 3.2vw, 54px);
+    align-items: start;
+    width: min(var(--ptv-admin-wide, 1600px), calc(100% - 64px));
+    box-sizing: border-box;
+    padding:
+        max(
+            112px,
+            calc(var(--ptv-header-safe-height, 72px) + 40px),
+            calc(
+                var(--ptv-shell-header-top, 34px)
+                + var(--ptv-shell-header-clearance-height, var(--ptv-shell-header-height, 68px))
+                + 22px
+            )
+        )
+        0 72px;
+    margin: 0 auto;
+}
+
+.ptv-admin-shell-dashboard {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.ptv-admin-sidebar {
+    position: sticky;
+    top:
+        max(
+            96px,
+            calc(var(--ptv-header-safe-height, 72px) + 22px),
+            calc(
+                var(--ptv-shell-header-top, 34px)
+                + var(--ptv-shell-header-clearance-height, var(--ptv-shell-header-height, 68px))
+                + 14px
+            )
+        );
+    max-height: calc(100vh - 120px);
+    box-sizing: border-box;
+    padding: 16px;
+    overflow-y: auto;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 22px);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    backdrop-filter: blur(var(--ptv-elevation-2-blur, 12px)) saturate(1.08);
+}
+
+.ptv-admin-sidebar nav {
+    display: grid;
+    gap: 8px;
+    margin-top: 24px;
+}
+
+.ptv-admin-sidebar h2 {
+    margin: 0 0 8px;
+    color: var(--ptv-color-text-accent-muted);
+    font-size: 0.68rem;
+    font-weight: 900;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+
+.ptv-admin-nav-group {
+    display: grid;
+    gap: 3px;
+}
+
+.ptv-admin-nav-group + .ptv-admin-nav-group {
+    padding-top: 7px;
+    border-top: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-group-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 32px;
+    padding: 3px 7px;
+    border: 0;
+    color: var(--ptv-color-text-accent-muted);
+    background: transparent;
+    font: inherit;
+    font-size: 0.67rem;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    text-align: left;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.ptv-admin-group-toggle .ptv-icon {
+    transition: transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+.ptv-admin-group-toggle[aria-expanded='true'] .ptv-icon {
+    transform: rotate(90deg);
+}
+
+.ptv-admin-group-toggle:focus-visible {
+    color: var(--ptv-state-focus-text);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+.ptv-admin-group-destinations {
+    display: grid;
+    gap: 2px;
+}
+
+.ptv-admin-group-destinations[hidden] {
+    display: none;
+}
+
+.ptv-admin-back-link,
+.ptv-admin-sidebar-link,
+.ptv-admin-mobile-context a,
+.ptv-admin-mobile-context > span {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-height: var(--ptv-touch-target-min, 44px);
+    box-sizing: border-box;
+    padding: 9px 11px;
+    border: 1px solid transparent;
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-muted);
+    font-size: 0.86rem;
+    font-weight: 760;
+    text-decoration: none;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-back-link {
+    color: var(--ptv-color-text-accent);
+}
+
+.ptv-admin-sidebar-link > span:not(.ptv-icon) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+}
+
+.ptv-admin-sidebar-link:hover,
+.ptv-admin-sidebar-link:focus-visible,
+.ptv-admin-sidebar-link[aria-current='page'] {
+    border-color: var(--ptv-state-hover-border);
+    color: var(--ptv-state-hover-text);
+    background: var(--ptv-state-hover);
+    box-shadow: var(--ptv-state-hover-shadow);
+    outline: 0;
+}
+
+.ptv-admin-plugin-nav-note,
+.ptv-admin-plugin-nav-retry {
+    padding: 7px 11px;
+    color: var(--ptv-color-text-disabled);
+    font-size: 0.7rem;
+}
+
+.ptv-admin-plugin-nav-retry {
+    min-height: 36px;
+    border: 0;
+    color: var(--ptv-color-text-accent);
+    background: transparent;
+    font: inherit;
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ptv-admin-plugin-nav-retry:focus-visible {
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+.ptv-admin-sidebar-link[aria-current='page'] {
+    box-shadow: inset 3px 0 var(--ptv-color-accent-secondary), var(--ptv-elevation-2-shadow-muted);
+}
+
+.ptv-admin-main-column {
+    min-width: 0;
+}
+
+.ptv-admin-mobile-context {
+    display: none;
+}
+
+.ptv-admin-mobile-menu-button,
+.ptv-admin-mobile-drawer-backdrop {
+    display: none;
+}
+
+.ptv-admin-dashboard {
+    --ptv-admin-healthy: #8ee8b5;
+    --ptv-admin-healthy-rgb: 142, 232, 181;
+    --ptv-admin-info: var(--ptv-color-focus-soft);
+    --ptv-admin-info-rgb: var(--ptv-color-focus-rgb);
+    --ptv-admin-warning: #f2c878;
+    --ptv-admin-warning-rgb: 242, 200, 120;
+    --ptv-admin-error: #ff9dab;
+    --ptv-admin-error-rgb: 255, 157, 171;
+    --ptv-admin-unknown: var(--ptv-color-text-disabled);
+    --ptv-admin-unknown-rgb: var(--ptv-palette-muted-rgb);
+
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+}
+
+/* The global icon stylesheet carries a legacy margin override; admin grids own their spacing. */
+.ptv-admin-application .ptv-icon,
+.ptv-admin-shell .ptv-icon {
+    margin: 0 !important;
+}
+
+.ptv-admin-dashboard-header {
+    display: flex;
+    gap: 22px;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+
+.ptv-admin-dashboard-header h1 {
+    margin: 0;
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent, inherit);
+    font-size: clamp(2.2rem, 3.5vw, 3.65rem);
+    font-weight: 900;
+    letter-spacing: -0.042em;
+    line-height: 0.98;
+}
+
+.ptv-admin-dashboard-header p {
+    margin: 8px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.96rem;
+    line-height: 1.5;
+}
+
+.ptv-admin-refresh-button {
+    flex: 0 0 auto;
+    min-height: var(--ptv-touch-target-min, 44px);
+    border-radius: 12px;
+}
+
+.ptv-admin-refresh-button[aria-busy='true'] .ptv-icon {
+    animation: ptv-admin-refresh-spin 900ms linear infinite;
+}
+
+.ptv-admin-overall-status {
+    --ptv-admin-status-rgb: var(--ptv-admin-unknown-rgb);
+
+    position: relative;
+    display: flex;
+    gap: 13px;
+    align-items: center;
+    min-height: 54px;
+    box-sizing: border-box;
+    padding: 12px 16px;
+    overflow: hidden;
+    border: 1px solid rgba(var(--ptv-admin-status-rgb), 0.28);
+    border-radius: 15px;
+    color: var(--ptv-admin-unknown);
+    background:
+        linear-gradient(105deg, rgba(var(--ptv-admin-status-rgb), 0.08), transparent 52%),
+        var(--ptv-component-panel-bg-subtle);
+    box-shadow: inset 0 1px rgba(var(--ptv-palette-white-rgb), 0.035);
+    font-weight: 850;
+}
+
+.ptv-admin-overall-status::after {
+    position: absolute;
+    right: -4%;
+    width: 38%;
+    height: 100%;
+    content: '';
+    pointer-events: none;
+    background:
+        linear-gradient(165deg, transparent 36%, rgba(var(--ptv-admin-status-rgb), 0.13) 37% 38%, transparent 39%),
+        linear-gradient(172deg, transparent 55%, rgba(var(--ptv-admin-status-rgb), 0.09) 56% 57%, transparent 58%);
+    opacity: 0.7;
+}
+
+.ptv-admin-overall-status[data-severity='healthy'] {
+    --ptv-admin-status-rgb: var(--ptv-admin-healthy-rgb);
+
+    color: var(--ptv-admin-healthy);
+}
+
+.ptv-admin-overall-status[data-severity='info'] {
+    --ptv-admin-status-rgb: var(--ptv-admin-info-rgb);
+
+    color: var(--ptv-admin-info);
+}
+
+.ptv-admin-overall-status[data-severity='warning'] {
+    --ptv-admin-status-rgb: var(--ptv-admin-warning-rgb);
+
+    color: var(--ptv-admin-warning);
+}
+
+.ptv-admin-overall-status[data-severity='error'] {
+    --ptv-admin-status-rgb: var(--ptv-admin-error-rgb);
+
+    color: var(--ptv-admin-error);
+}
+
+.ptv-admin-overall-icon {
+    display: grid;
+    flex: 0 0 26px;
+    width: 26px;
+    height: 26px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    place-items: center;
+}
+
+.ptv-admin-status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.ptv-admin-status-card {
+    display: flex;
+    min-height: 164px;
+    min-width: 0;
+    box-sizing: border-box;
+    flex-direction: column;
+    gap: 13px;
+    padding: 17px;
+    border-radius: 17px;
+}
+
+.ptv-admin-status-card-header {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+}
+
+.ptv-admin-status-card-icon {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: 14px;
+    color: var(--ptv-color-text-accent);
+    background: var(--ptv-surface-action);
+    place-items: center;
+}
+
+.ptv-admin-status-card-title {
+    min-width: 0;
+}
+
+.ptv-admin-status-card h2,
+.ptv-admin-panel h2,
+.ptv-admin-management h2 {
+    margin: 0;
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent, inherit);
+    font-size: 1rem;
+    font-weight: 850;
+    line-height: 1.2;
+}
+
+.ptv-admin-status-badge {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    max-width: 100%;
+    color: var(--ptv-admin-unknown);
+    font-size: 0.75rem;
+    font-weight: 820;
+    line-height: 1.2;
+}
+
+.ptv-admin-status-card .ptv-admin-status-badge {
+    margin-top: 5px;
+}
+
+.ptv-admin-status-badge[data-severity='healthy'] {
+    color: var(--ptv-admin-healthy);
+}
+
+.ptv-admin-status-badge[data-severity='info'] {
+    color: var(--ptv-admin-info);
+}
+
+.ptv-admin-status-badge[data-severity='warning'] {
+    color: var(--ptv-admin-warning);
+}
+
+.ptv-admin-status-badge[data-severity='error'] {
+    color: var(--ptv-admin-error);
+}
+
+.ptv-admin-status-dot {
+    flex: 0 0 7px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 8px currentColor;
+}
+
+.ptv-admin-status-card-details {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+}
+
+.ptv-admin-status-card-details > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: baseline;
+}
+
+.ptv-admin-status-card-details dt {
+    overflow: hidden;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-status-card-details dd {
+    margin: 0;
+    overflow: hidden;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.77rem;
+    font-weight: 760;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-card-metric {
+    margin-top: auto;
+}
+
+.ptv-admin-card-metric strong {
+    display: block;
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent, inherit);
+    font-size: 2rem;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.ptv-admin-card-metric span {
+    display: block;
+    margin-top: 5px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.77rem;
+}
+
+.ptv-admin-card-action,
+.ptv-admin-panel-action {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    width: fit-content;
+    min-height: var(--ptv-touch-target-min, 44px);
+    margin-top: auto;
+    border-radius: 8px;
+    color: var(--ptv-color-text-accent);
+    font-size: 0.74rem;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.ptv-admin-card-action:hover,
+.ptv-admin-card-action:focus-visible,
+.ptv-admin-panel-action:hover,
+.ptv-admin-panel-action:focus-visible {
+    color: var(--ptv-color-focus-soft);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: var(--ptv-a11y-focus-offset);
+}
+
+.ptv-admin-retry {
+    width: fit-content;
+    min-height: var(--ptv-touch-target-min, 44px);
+    padding: 0 12px;
+    margin-top: auto;
+    border: 1px solid var(--ptv-border-default);
+    border-radius: 9px;
+    color: var(--ptv-color-text-accent);
+    background: transparent;
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.ptv-admin-retry:hover,
+.ptv-admin-retry:focus-visible {
+    border-color: var(--ptv-state-focus-border);
+    color: var(--ptv-state-focus-text);
+    background: var(--ptv-state-hover);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+.ptv-admin-stream-breakdown {
+    display: grid;
+    gap: 5px;
+    margin-top: auto;
+}
+
+.ptv-admin-stream-breakdown > div {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    gap: 7px;
+    align-items: center;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.73rem;
+}
+
+.ptv-admin-stream-breakdown i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--ptv-admin-info);
+}
+
+.ptv-admin-stream-breakdown > div:nth-child(2) i {
+    background: var(--ptv-color-accent-secondary);
+}
+
+.ptv-admin-stream-breakdown > div:nth-child(3) i {
+    background: var(--ptv-color-accent);
+}
+
+.ptv-admin-stream-breakdown strong {
+    color: var(--ptv-color-text-soft);
+}
+
+.ptv-admin-panel {
+    min-width: 0;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 17px;
+}
+
+.ptv-admin-panel-header {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 54px;
+    box-sizing: border-box;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-panel-heading {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.ptv-admin-panel-summary {
+    display: flex;
+    gap: 13px;
+    align-items: center;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.73rem;
+}
+
+.ptv-admin-active-list,
+.ptv-admin-task-list,
+.ptv-admin-warning-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ptv-admin-active-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 0.95fr) minmax(105px, 0.7fr) minmax(190px, 1.35fr) 108px minmax(145px, 0.9fr) 74px;
+    gap: 15px;
+    align-items: center;
+    min-height: 76px;
+    box-sizing: border-box;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-active-row:last-child {
+    border-bottom: 0;
+}
+
+.ptv-admin-active-device,
+.ptv-admin-active-media,
+.ptv-admin-active-progress {
+    min-width: 0;
+}
+
+.ptv-admin-active-device,
+.ptv-admin-active-user,
+.ptv-admin-active-status {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.ptv-admin-active-device > div,
+.ptv-admin-active-media,
+.ptv-admin-active-progress {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-active-row strong,
+.ptv-admin-task-row strong {
+    overflow: hidden;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.8rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-active-row small,
+.ptv-admin-task-row small {
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.7rem;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-playback-method {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    min-height: 28px;
+    box-sizing: border-box;
+    padding: 4px 9px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: 8px;
+    color: var(--ptv-admin-info);
+    background: rgba(var(--ptv-color-focus-rgb), 0.055);
+    font-size: 0.7rem;
+    font-weight: 820;
+    white-space: nowrap;
+}
+
+.ptv-admin-playback-method[data-method='direct-play'] {
+    border-color: rgba(var(--ptv-admin-healthy-rgb), 0.38);
+    color: var(--ptv-admin-healthy);
+}
+
+.ptv-admin-playback-method[data-method='transcoding'] {
+    border-color: var(--ptv-border-accent);
+    color: var(--ptv-color-accent-soft);
+}
+
+.ptv-admin-active-progress progress,
+.ptv-admin-task-progress {
+    width: 100%;
+    height: 6px;
+    margin-top: 7px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 999px;
+    background: var(--ptv-component-field-bg);
+    appearance: none;
+}
+
+.ptv-admin-active-progress progress::-webkit-progress-bar,
+.ptv-admin-task-progress::-webkit-progress-bar {
+    border-radius: 999px;
+    background: var(--ptv-component-field-bg);
+}
+
+.ptv-admin-active-progress progress::-webkit-progress-value,
+.ptv-admin-task-progress::-webkit-progress-value {
+    border-radius: 999px;
+    background: var(--ptv-gradient-brand);
+}
+
+.ptv-admin-active-progress progress::-moz-progress-bar,
+.ptv-admin-task-progress::-moz-progress-bar {
+    border-radius: 999px;
+    background: var(--ptv-gradient-brand);
+}
+
+.ptv-admin-active-status {
+    justify-content: flex-end;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.73rem;
+}
+
+.ptv-admin-empty-state {
+    display: grid;
+    min-height: 132px;
+    padding: 22px;
+    color: var(--ptv-color-text-muted);
+    text-align: center;
+    place-items: center;
+}
+
+.ptv-admin-empty-state strong {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--ptv-color-text-soft);
+}
+
+.ptv-admin-empty-state p {
+    margin: 0;
+    font-size: 0.8rem;
+}
+
+.ptv-admin-system-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+    gap: 14px;
+}
+
+.ptv-admin-task-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, 0.45fr) auto;
+    gap: 16px;
+    align-items: center;
+    min-height: 60px;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-task-row > span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-task-row time {
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.ptv-admin-task-footer {
+    padding: 9px 16px;
+}
+
+.ptv-admin-warning-list {
+    display: grid;
+}
+
+.ptv-admin-warning-item {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-warning-item:last-child {
+    border-bottom: 0;
+}
+
+.ptv-admin-warning-item[data-severity='error'] {
+    color: var(--ptv-admin-error);
+}
+
+.ptv-admin-warning-item[data-severity='warning'] {
+    color: var(--ptv-admin-warning);
+}
+
+.ptv-admin-warning-item[data-severity='info'] {
+    color: var(--ptv-admin-info);
+}
+
+.ptv-admin-warning-item strong {
+    display: block;
+    color: currentColor;
+    font-size: 0.79rem;
+}
+
+.ptv-admin-warning-item p {
+    margin: 4px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.ptv-admin-management {
+    min-width: 0;
+}
+
+.ptv-admin-management > h2 {
+    margin-bottom: 10px;
+}
+
+.ptv-admin-management-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.ptv-admin-management-link {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 70px;
+    box-sizing: border-box;
+    padding: 12px 14px;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: 14px;
+    color: var(--ptv-color-text-soft);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    text-decoration: none;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-management-link:hover,
+.ptv-admin-management-link:focus-visible {
+    border-color: var(--ptv-state-hover-border);
+    color: var(--ptv-state-hover-text);
+    background: var(--ptv-state-hover);
+    box-shadow: var(--ptv-state-hover-shadow);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+    transform: var(--ptv-state-hover-transform);
+}
+
+.ptv-admin-management-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-management-copy strong {
+    overflow: hidden;
+    font-size: 0.78rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-management-copy small {
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.67rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-skeleton-heading,
+.ptv-admin-skeleton-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.ptv-admin-skeleton-heading > div {
+    display: grid;
+    flex: 1;
+    gap: 8px;
+}
+
+.ptv-admin-skeleton-icon,
+.ptv-admin-skeleton-line {
+    display: block;
+    border-radius: 8px;
+    background: linear-gradient(90deg, rgba(var(--ptv-palette-white-rgb), 0.045), rgba(var(--ptv-palette-white-rgb), 0.1), rgba(var(--ptv-palette-white-rgb), 0.045));
+    background-size: 220% 100%;
+    animation: ptv-admin-skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+.ptv-admin-skeleton-icon {
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+}
+
+.ptv-admin-skeleton-line {
+    height: 10px;
+}
+
+.ptv-admin-panel.is-loading {
+    display: grid;
+    gap: 18px;
+    min-height: 176px;
+    padding: 18px;
+}
+
+.ptv-admin-skeleton-row {
+    justify-content: space-between;
+    min-height: 48px;
+    padding-top: 14px;
+    border-top: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-refresh-note {
+    color: var(--ptv-color-text-disabled);
+    font-size: 0.68rem;
+}
+
+@keyframes ptv-admin-skeleton-shimmer {
+    0% { background-position: 160% 0; }
+    100% { background-position: -60% 0; }
+}
+
+@keyframes ptv-admin-refresh-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 1320px) {
+    .ptv-admin-application,
+    .ptv-admin-shell {
+        grid-template-columns: 208px minmax(0, 1fr);
+        gap: 28px;
+    }
+
+    .ptv-admin-status-grid,
+    .ptv-admin-management-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ptv-admin-active-row {
+        grid-template-columns: minmax(135px, 0.9fr) minmax(100px, 0.65fr) minmax(175px, 1.2fr) 104px minmax(130px, 0.85fr);
+    }
+
+    .ptv-admin-active-status {
+        display: none;
+    }
+}
+
+@media (max-width: 1080px) {
+    .ptv-admin-application,
+    .ptv-admin-shell {
+        display: block;
+        width: min(100% - 36px, 900px);
+    }
+
+    .ptv-admin-sidebar {
+        display: none;
+    }
+
+    .ptv-admin-mobile-menu-button {
+        display: inline-flex;
+        gap: 9px;
+        align-items: center;
+        min-height: var(--ptv-touch-target-min, 44px);
+        padding: 8px 13px;
+        margin-bottom: 14px;
+        border: 1px solid var(--ptv-border-strong);
+        border-radius: var(--ptv-radius-md, 12px);
+        color: var(--ptv-color-text-accent);
+        background: var(--ptv-component-panel-bg-subtle);
+        box-shadow: var(--ptv-elevation-2-shadow-muted);
+        font: inherit;
+        font-size: 0.82rem;
+        font-weight: 850;
+        cursor: pointer;
+    }
+
+    .ptv-admin-mobile-menu-button:focus-visible {
+        outline: var(--ptv-a11y-focus-outline);
+        outline-offset: 2px;
+    }
+
+    .ptv-admin-mobile-drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: var(--ptv-shell-z-overlay, 1400);
+        display: block;
+        background: var(--ptv-overlay-strong, rgba(5, 5, 12, 0.78));
+        backdrop-filter: blur(5px);
+    }
+
+    .ptv-admin-mobile-drawer-dismiss {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: default;
+    }
+
+    .ptv-admin-mobile-drawer {
+        position: relative;
+        z-index: 1;
+        width: min(86vw, 330px);
+        height: 100%;
+        box-sizing: border-box;
+        padding: 16px;
+        overflow-y: auto;
+        border-right: 1px solid var(--ptv-border-strong);
+        color: var(--ptv-color-text-primary);
+        background: var(--ptv-elevation-3-surface, #130c1e);
+        box-shadow: 20px 0 54px rgba(0, 0, 0, 0.48);
+    }
+
+    .ptv-admin-mobile-drawer > header {
+        position: sticky;
+        top: -16px;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 54px;
+        padding: 0 0 9px;
+        border-bottom: 1px solid var(--ptv-border-divider);
+        background: var(--ptv-elevation-3-surface, #130c1e);
+    }
+
+    .ptv-admin-mobile-drawer > header strong {
+        font-family: var(--ptv-font-accent, inherit);
+        font-size: 1.05rem;
+    }
+
+    .ptv-admin-mobile-drawer > header button {
+        display: grid;
+        width: var(--ptv-touch-target-min, 44px);
+        height: var(--ptv-touch-target-min, 44px);
+        border: 0;
+        border-radius: var(--ptv-radius-md, 12px);
+        color: var(--ptv-color-text-accent);
+        background: transparent;
+        cursor: pointer;
+        place-items: center;
+    }
+
+    .ptv-admin-mobile-drawer nav {
+        display: grid;
+        gap: 8px;
+        margin-top: 14px;
+    }
+
+    .ptv-admin-mobile-drawer .ptv-admin-sidebar-link {
+        padding-right: 9px;
+        padding-left: 9px;
+    }
+
+    .ptv-admin-mobile-drawer .ptv-admin-group-toggle {
+        min-height: var(--ptv-touch-target-min, 44px);
+    }
+
+    .ptv-admin-mobile-context {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+        border-bottom: 1px solid var(--ptv-border-divider);
+    }
+
+    .ptv-admin-mobile-context a,
+    .ptv-admin-mobile-context > span {
+        padding-right: 2px;
+        padding-left: 2px;
+    }
+
+    .ptv-admin-mobile-context > span {
+        color: var(--ptv-color-text-accent);
+    }
+
+    .ptv-admin-active-row {
+        grid-template-columns: minmax(130px, 0.9fr) minmax(105px, 0.65fr) minmax(180px, 1.25fr) 104px minmax(140px, 0.85fr);
+    }
+}
+
+@media (max-width: 760px) {
+    .ptv-admin-application,
+    .ptv-admin-shell {
+        width: min(100% - 24px, 680px);
+        padding:
+            max(
+                132px,
+                calc(var(--ptv-header-safe-height, 72px) + 48px),
+                calc(
+                    var(--ptv-shell-header-top, 16px)
+                    + var(--ptv-shell-header-clearance-height, var(--ptv-shell-header-height, 68px))
+                    + 28px
+                )
+            )
+            0 48px;
+    }
+
+    .ptv-admin-dashboard {
+        gap: 14px;
+    }
+
+    .ptv-admin-mobile-drawer-backdrop {
+        top: max(126px, var(--ptv-header-safe-height, 72px));
+    }
+
+    .ptv-admin-dashboard-header {
+        align-items: flex-start;
+    }
+
+    .ptv-admin-dashboard-header h1 {
+        max-width: 10ch;
+        font-size: clamp(2rem, 9vw, 2.65rem);
+    }
+
+    .ptv-admin-refresh-button span:last-child {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .ptv-admin-refresh-button {
+        width: var(--ptv-touch-target-min, 44px);
+        padding: 0;
+    }
+
+    .ptv-admin-status-grid,
+    .ptv-admin-system-grid,
+    .ptv-admin-management-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-admin-status-card {
+        min-height: 148px;
+    }
+
+    .ptv-admin-active-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px 16px;
+        min-height: 0;
+        padding: 15px;
+    }
+
+    .ptv-admin-active-device,
+    .ptv-admin-active-user,
+    .ptv-admin-active-media,
+    .ptv-admin-active-progress,
+    .ptv-admin-active-status {
+        grid-column: auto;
+    }
+
+    .ptv-admin-active-user {
+        justify-content: flex-end;
+    }
+
+    .ptv-admin-active-media,
+    .ptv-admin-active-progress {
+        grid-column: 1 / -1;
+    }
+
+    .ptv-admin-active-status {
+        display: flex;
+        grid-column: 2;
+        grid-row: 3;
+    }
+
+    .ptv-admin-playback-method {
+        grid-column: 1;
+        grid-row: 3;
+    }
+
+    .ptv-admin-task-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+    }
+
+    .ptv-admin-task-row > .ptv-admin-status-badge {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .ptv-admin-task-row time {
+        grid-column: 1 / -1;
+    }
+
+    .ptv-admin-management-link {
+        min-height: var(--ptv-touch-target-min, 44px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-admin-skeleton-icon,
+    .ptv-admin-skeleton-line,
+    .ptv-admin-refresh-button[aria-busy='true'] .ptv-icon {
+        animation: none;
+    }
+}

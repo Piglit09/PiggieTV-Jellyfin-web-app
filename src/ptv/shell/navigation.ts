@@ -1,6 +1,7 @@
 import type { PtvIconName } from '../modules/icons';
 import { getRegisteredNavigationSections } from '../core/lifecycle';
 import { PTV_ROUTES } from '../core/config';
+import { getPtvAdminDestination } from '../modules/settings/admin/adminNavigation';
 import { isPtvPlatformNavigationEntryAvailable } from '../core/platformFeatures';
 
 export type PtvNavigationPermission = 'admin' | 'authenticated' | 'guest';
@@ -21,6 +22,31 @@ export type PtvNavigationSection = {
     items: PtvNavigationItem[];
     title?: string;
 };
+
+function createAdminNavigationItem(
+    id: string,
+    destinationId: string
+): PtvNavigationItem | null {
+    const destination = getPtvAdminDestination(destinationId);
+    if (!destination) return null;
+
+    return {
+        href: destination.routeKind === 'router' ? `#${destination.href}` : destination.href,
+        icon: destination.icon,
+        id,
+        label: destination.label,
+        permission: 'admin'
+    };
+}
+
+const ADMIN_NAVIGATION_ITEMS = [
+    createAdminNavigationItem('dashboard', 'overview'),
+    createAdminNavigationItem('piggietv-dashboard', 'piggietv-configuration'),
+    createAdminNavigationItem('piggietv-row-builder', 'home-rows'),
+    createAdminNavigationItem('piggietv-diagnostics', 'diagnostics'),
+    createAdminNavigationItem('signup-invites', 'signup-invites'),
+    createAdminNavigationItem('metadata-manager', 'metadata-manager')
+].filter((item): item is PtvNavigationItem => item !== null);
 
 export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
     {
@@ -50,14 +76,7 @@ export const PTV_NAVIGATION_SECTIONS: PtvNavigationSection[] = [
     {
         id: 'admin',
         title: 'Administration',
-        items: [
-            { id: 'dashboard', label: 'Dashboard', href: '#/dashboard', icon: 'dashboard', permission: 'admin' },
-            { id: 'piggietv-dashboard', label: 'PiggieTV', href: '#/dashboard/piggietv', icon: 'piggieHub', permission: 'admin' },
-            { id: 'piggietv-row-builder', label: 'PiggieTV Row Builder', href: '#/dashboard/piggietv/rows', icon: 'dashboard', permission: 'admin' },
-            { id: 'piggietv-recommendations', label: 'PiggieTV Recommendations', href: '#/dashboard/piggietv/recommendations', icon: 'dashboard', permission: 'admin' },
-            { id: 'signup-invites', label: 'Signup / Invites', href: '#/dashboard/users/signup-invites', icon: 'users', permission: 'admin' },
-            { id: 'metadata-manager', label: 'Metadata Manager', href: '#/metadata', icon: 'metadata', permission: 'admin' }
-        ]
+        items: ADMIN_NAVIGATION_ITEMS
     },
     {
         id: 'user',

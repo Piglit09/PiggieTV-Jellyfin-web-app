@@ -1,3 +1,10 @@
+import {
+    isPtvSensitiveKey,
+    PTV_REDACTED_VALUE,
+    redactPtvSensitiveText,
+    redactPtvSensitiveValue
+} from '../../core/diagnostics/redaction';
+
 type PtvDebugSanitizationReport = {
     omittedFields: number;
     redactedBlobUrls: number;
@@ -26,7 +33,7 @@ const DEFAULT_LIMITS: PtvDebugSanitizationLimits = {
     maxStringLength: 1600
 };
 
-const SECRET_FIELD_PATTERN = /^(?:api[_-]?key|authorization|cookie|credential|credentials|discogsToken|password|refreshToken|secret|set-cookie|smtpHost|smtpPassword|smtpPort|smtpUsername|tmdbApiToken|token|username)$/i;
+const PRIVATE_CONFIGURATION_FIELD_PATTERN = /^(?:smtpHost|smtpPassword|smtpPort|smtpUsername|username)$/i;
 const IDENTIFIER_FIELD_PATTERN = /^(?:deviceId|itemId|parentId|serverId|userId)$/i;
 const LOCAL_PATH_FIELD_PATTERN = /^(?:cacheFilePath|cachePath|filePath|localPath|path)$/i;
 const URL_FIELD_PATTERN = /(?:imageUrl|requestUrl|resolvedUrl|url)$/i;
@@ -120,13 +127,14 @@ function sanitizeString(
     report: PtvDebugSanitizationReport,
     limits: PtvDebugSanitizationLimits
 ) {
-    const normalizedValue = value.trim();
+    const secretSafeValue = redactPtvSensitiveText(value, Number.MAX_SAFE_INTEGER);
+    const normalizedValue = secretSafeValue.trim();
 
     if (DATA_IMAGE_PATTERN.test(normalizedValue) || BLOB_URL_PATTERN.test(normalizedValue)) {
         return sanitizeUrl(normalizedValue, report);
     }
 
-    let sanitized = value.replace(ABSOLUTE_URL_PATTERN, match => sanitizeUrl(match, report));
+    let sanitized = secretSafeValue.replace(ABSOLUTE_URL_PATTERN, match => sanitizeUrl(match, report));
     sanitized = sanitized.replace(/(\/?Users\/)[^/?#\s]+/gi, (_match, prefix: string) => {
         report.redactedIdentifiers += 1;
         return `${prefix}{userId}`;
@@ -137,11 +145,11 @@ function sanitizeString(
     });
     sanitized = sanitized.replace(AUTH_VALUE_PATTERN, () => {
         report.redactedFields += 1;
-        return '[authorization-redacted]';
+        return PTV_REDACTED_VALUE;
     });
     sanitized = sanitized.replace(SECRET_QUERY_PATTERN, (_match, prefix: string) => {
         report.redactedFields += 1;
-        return `${prefix}[redacted]`;
+        return `${prefix}${PTV_REDACTED_VALUE}`;
     });
     PRIVATE_IPV4_PATTERNS.forEach(pattern => {
         sanitized = sanitized.replace(pattern, () => {
@@ -290,9 +298,9 @@ function sanitizeValue(
         return value;
     }
 
-    if (SECRET_FIELD_PATTERN.test(fieldName)) {
+    if (isPtvSensitiveKey(fieldName) || PRIVATE_CONFIGURATION_FIELD_PATTERN.test(fieldName)) {
         report.redactedFields += 1;
-        return '[redacted]';
+        return PTV_REDACTED_VALUE;
     }
 
     if (IDENTIFIER_FIELD_PATTERN.test(fieldName)) {
@@ -311,6 +319,27 @@ function sanitizeValue(
 
     if (seen.has(value)) return '[circular-reference]';
     seen.add(value);
+
+    const isNativeDiagnosticValue = value instanceof Error
+        || value instanceof ArrayBuffer
+        || ArrayBuffer.isView(value)
+        || (typeof Blob !== 'undefined' && value instanceof Blob)
+        || (typeof Headers !== 'undefined' && value instanceof Headers)
+        || (typeof Node !== 'undefined' && value instanceof Node)
+        || (typeof Request !== 'undefined' && value instanceof Request)
+        || (typeof Response !== 'undefined' && value instanceof Response)
+        || (typeof URLSearchParams !== 'undefined' && value instanceof URLSearchParams);
+
+    if (isNativeDiagnosticValue) {
+        const normalized = redactPtvSensitiveValue(value, {
+            maxArrayItems: limits.maxArrayLength,
+            maxDepth: Math.max(1, limits.maxDepth - depth),
+            maxObjectKeys: limits.maxObjectKeys,
+            maxStringLength: limits.maxStringLength
+        });
+
+        return sanitizeValue(normalized, report, limits, seen, depth, fieldName);
+    }
 
     if (Array.isArray(value)) return sanitizeArray(value, fieldName, report, limits, seen, depth);
     return sanitizeRecord(value, report, limits, seen, depth);

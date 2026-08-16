@@ -5,6 +5,7 @@ import { dispatchPtvCustomEvent } from '../../core/events';
 import { ptvLogger } from '../../core/logger';
 import { recordPtvEvent, registerPtvDebugCacheStatusProvider, timePtvAsync } from '../../core/observability';
 import { getCurrentPtvPluginApiClient, normalizePtvApiError, recordPtvPluginApiRetryState } from '../../core/pluginApi';
+import { ptvSafeConsole } from '../../core/safeConsole';
 import { getRuntimeScope } from '../../core/scope';
 import {
     summarizeFeaturedContentPayload,
@@ -225,7 +226,7 @@ function isDebugEnabled() {
 
 function debugLog(message: string, detail?: unknown) {
     if (isDebugEnabled()) {
-        console.debug(`[PTV Featured Cache] ${message}`, detail);
+        ptvSafeConsole.debug(`[PTV Featured Cache] ${message}`, detail);
     }
 }
 

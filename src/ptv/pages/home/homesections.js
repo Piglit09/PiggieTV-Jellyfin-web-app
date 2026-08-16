@@ -14,6 +14,7 @@ import {
 import { getPtvPerformanceProfile } from 'ptv/core/clientProfile';
 import { getPtvFeatureSettings } from 'ptv/core/featureSettings';
 import { recordPtvEvent, timePtvAsync } from 'ptv/core/observability';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import { getUserViewsQuery } from 'hooks/useUserViews';
 import globalize from 'lib/globalize';
 import { DEFAULT_SECTIONS } from 'types/homeSectionType';
@@ -288,7 +289,7 @@ function scheduleDeferredResume(elem, sections, options) {
                 enhancePtvCards(elem);
             })
             .catch(err => {
-                console.warn('[PTV Home] Failed resuming deferred sections', err);
+                ptvSafeConsole.warn('[PTV Home] Failed resuming deferred sections', err);
             });
     }, 450);
 
@@ -743,7 +744,7 @@ function mountAndResumeVirtualRow(elem, entry, context, origin) {
         }
     )
         .catch(err => {
-            console.warn('[PTV Home] Failed mounting viewport row', err);
+            ptvSafeConsole.warn('[PTV Home] Failed mounting viewport row', err);
         })
         .finally(() => {
             delete entry.slot.dataset.ptvRowMounting;
@@ -783,7 +784,7 @@ function resumeMountedVirtualRow(elem, entry, origin) {
         }
     )
         .catch(err => {
-            console.warn('[PTV Home] Failed resuming mounted viewport row', err);
+            ptvSafeConsole.warn('[PTV Home] Failed resuming mounted viewport row', err);
         })
         .finally(() => {
             delete entry.slot.dataset.ptvRowMounting;
@@ -1269,7 +1270,7 @@ export function loadSections(elem, apiClient, user) {
                                     enhancePtvCards(elem);
                                 })
                                 .catch(err => {
-                                    console.warn('[PTV Home] Failed refreshing featured cache content', err);
+                                    ptvSafeConsole.warn('[PTV Home] Failed refreshing featured cache content', err);
                                 });
                         };
 
@@ -1481,7 +1482,7 @@ function observeDeferredResumeSections(elem, sections, options, performanceProfi
                         enhancePtvCards(elem);
                     })
                     .catch(err => {
-                        console.warn('[PTV Home] Failed resuming viewport section', err);
+                        ptvSafeConsole.warn('[PTV Home] Failed resuming viewport section', err);
                     });
             });
     }, {

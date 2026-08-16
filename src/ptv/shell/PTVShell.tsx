@@ -72,23 +72,22 @@ export type PTVShellProps = Readonly<{
     className?: string;
     contextualLinks?: readonly PtvShellNavLink[];
     headerOnly?: boolean;
+    menuLabel?: string;
+    navigationVariant?: 'default' | 'details';
+    onMenuClick?: () => void;
     onNavigationOpenChange?: (open: boolean) => void;
+    registerRuntimeShell?: boolean;
     searchQuery?: string;
     section?: PtvShellSection;
+    showBackButton?: boolean;
     title?: string;
 }>;
 
-const PTV_SHELL_DASHBOARD_HREF = '#/dashboard/piggietv';
+const PTV_SHELL_DASHBOARD_HREF = '#/settings/admin/piggietv';
 const PTV_SHELL_SEARCH_DRAFT_KEY = 'ptv:shell:search-draft';
 
 function getPtvShellProfileHref() {
-    try {
-        const userId = window.ApiClient?.getCurrentUserId?.();
-
-        return userId ? `${PTV_ROUTES.userProfile}?userId=${encodeURIComponent(userId)}` : PTV_ROUTES.userProfile;
-    } catch {
-        return PTV_ROUTES.userProfile;
-    }
+    return PTV_ROUTES.profile;
 }
 
 type PtvShellDebugStatus = {
@@ -154,6 +153,15 @@ const PTV_SHELL_PRIMARY_LINKS: readonly PtvShellNavLink[] = [
     { id: 'request', label: 'Request', href: PTV_ROUTES.request, icon: 'request' }
 ];
 
+const PTV_SHELL_DETAILS_LINKS: readonly PtvShellNavLink[] = [
+    { id: 'home', label: 'Home', href: PTV_ROUTES.home, icon: 'home' },
+    { id: 'movies', label: 'Movies', href: PTV_ROUTES.movies, icon: 'movies' },
+    { id: 'shows', label: 'Shows', href: PTV_ROUTES.shows, icon: 'shows' },
+    { id: 'music', label: 'Music', href: PTV_ROUTES.music, icon: 'music' },
+    { id: 'reading', label: 'Reading', href: PTV_ROUTES.reading, icon: 'books' },
+    { id: 'search', label: 'Search', href: PTV_ROUTES.search, icon: 'search' }
+];
+
 const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[]> = {
     anime: [
         { id: 'anime-latest', label: 'Latest', href: `${PTV_ROUTES.animeShows}&view=latest`, icon: 'activity' },
@@ -173,8 +181,7 @@ const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[
     ],
     dashboard: [
         { id: 'dashboard-home', label: 'Overview', href: PTV_SHELL_DASHBOARD_HREF, icon: 'dashboard' },
-        { id: 'dashboard-rows', label: 'Rows', href: '#/dashboard/piggietv/rows', icon: 'grid' },
-        { id: 'dashboard-recommendations', label: 'Recommendations', href: '#/dashboard/piggietv/recommendations', icon: 'shuffle' }
+        { id: 'dashboard-rows', label: 'Rows', href: '#/settings/admin/piggietv/rows', icon: 'grid' }
     ],
     home: [],
     movies: [
@@ -206,8 +213,8 @@ const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[
     ],
     search: [],
     settings: [
-        { id: 'settings-profile', label: 'Profile', href: PTV_ROUTES.profilePreferences, icon: 'profile' },
-        { id: 'settings-display', label: 'Display', href: PTV_ROUTES.displayPreferences, icon: 'display' }
+        { id: 'settings-profile', label: 'Profile', href: PTV_ROUTES.profile, icon: 'profile' },
+        { id: 'settings-display', label: 'Appearance', href: PTV_ROUTES.displayPreferences, icon: 'display' }
     ],
     shows: [
         { id: 'shows-continue', label: 'Continue', href: `${PTV_ROUTES.shows}/continue`, icon: 'resume' },
@@ -245,7 +252,7 @@ function getPtvShellPrimarySection(hash = window.location.hash || PTV_ROUTES.hom
     if (path.startsWith('#/movies') || path.startsWith('#/collections')) return 'movies';
     if (path.startsWith('#/search')) return 'search';
     if (path.startsWith('#/dashboard')) return 'dashboard';
-    if (path.startsWith('#/mypreferences')) return 'settings';
+    if (path.startsWith('#/settings') || path.startsWith('#/mypreferences')) return 'settings';
     if (path.startsWith('#/home') || path === '#/' || path === '') return 'home';
 
     return 'fallback';
@@ -273,6 +280,7 @@ function isPtvShellRouteAllowed(route?: string) {
         '#/ptv/request',
         '#/calendar',
         '#/dashboard',
+        '#/settings',
         '#/mypreferences',
         '#/selectserver'
     ].some(prefix => path.startsWith(prefix));
@@ -383,16 +391,19 @@ function getPtvShellNavGroups(section: PtvShellSection, hash: string): readonly 
     ];
 }
 
-function PtvShellDirectLink({ href, icon, label, onClick }: PtvShellNavLink & Readonly<{ onClick: () => void }>) {
-    const hash = window.location.hash || PTV_ROUTES.home;
+function isPtvShellDirectLinkActive(link: Pick<PtvShellNavLink, 'active' | 'href' | 'label'>, hash: string) {
+    if (typeof link.active === 'boolean') return link.active;
     const activeSection = getPtvShellPrimarySection(hash);
-    const isActive = label === 'Music' ?
-        activeSection === 'music' :
-        label === 'Reading' ?
-            activeSection === 'reading' :
-            label === 'Request' ?
-                activeSection === 'request' :
-                isPtvShellHrefActive(href, hash);
+
+    if (link.label === 'Music') return activeSection === 'music';
+    if (link.label === 'Reading') return activeSection === 'reading';
+    if (link.label === 'Request') return activeSection === 'request';
+    return isPtvShellHrefActive(link.href, hash);
+}
+
+function PtvShellDirectLink({ active, href, icon, label, onClick }: PtvShellNavLink & Readonly<{ onClick: () => void }>) {
+    const hash = window.location.hash || PTV_ROUTES.home;
+    const isActive = isPtvShellDirectLinkActive({ active, href, label }, hash);
 
     return (
         <a
@@ -402,7 +413,7 @@ function PtvShellDirectLink({ href, icon, label, onClick }: PtvShellNavLink & Re
             onClick={onClick}
         >
             <PtvIcon name={icon} />
-            <span>{label}</span>
+            <span className='ptv-shell-nav-label'>{label}</span>
         </a>
     );
 }
@@ -902,9 +913,14 @@ export default function PTVShell({
     className = '',
     contextualLinks,
     headerOnly = false,
+    menuLabel = 'Open navigation menu',
+    navigationVariant = 'default',
+    onMenuClick,
     onNavigationOpenChange,
+    registerRuntimeShell = true,
     searchQuery: syncedSearchQuery,
     section = 'home',
+    showBackButton = false,
     title
 }: PTVShellProps) {
     const { isAdmin } = usePtvAdminDebugVisibility();
@@ -917,10 +933,15 @@ export default function PTVShell({
     const hasOpenPanel = openPanel !== null;
     const [isSearchExpanded, setSearchExpanded] = useState(false);
     const [searchQuery, setSearchQuery] = useState(() => getPtvShellSearchRouteQuery() || readPtvShellSearchDraft());
-    const navGroups = useMemo(() => getPtvShellNavGroups(section, hash), [hash, section]);
+    const navGroups = useMemo(
+        () => navigationVariant === 'details' ? [] : getPtvShellNavGroups(section, hash),
+        [hash, navigationVariant, section]
+    );
     const primaryLinks = useMemo(
-        () => PTV_SHELL_PRIMARY_LINKS.filter(link => isPtvPlatformNavigationEntryAvailable(link)),
-        []
+        () => (navigationVariant === 'details' ? PTV_SHELL_DETAILS_LINKS : PTV_SHELL_PRIMARY_LINKS)
+            .filter(link => isPtvPlatformNavigationEntryAvailable(link))
+            .map(link => navigationVariant === 'details' ? { ...link, active: link.id === section } : link),
+        [navigationVariant, section]
     );
     const contextLinks = contextualLinks || PTV_SHELL_CONTEXT_LINKS[section] || [];
     const activeSecondaryNav = contextLinks.find(link => link.active || isPtvShellHrefActive(link.href, hash))?.id || '';
@@ -940,6 +961,14 @@ export default function PTVShell({
     const handleSearchClose = useCallback(() => {
         setSearchExpanded(false);
     }, []);
+    const handleBack = useCallback(() => {
+        closeHeaderTransientState();
+        if (window.history.length > 1) {
+            window.history.back();
+        } else {
+            window.location.hash = PTV_ROUTES.home.slice(1);
+        }
+    }, [closeHeaderTransientState]);
 
     headerRenderCountRef.current += 1;
     shellHeaderRenderCount = headerRenderCountRef.current;
@@ -1023,7 +1052,9 @@ export default function PTVShell({
         ensurePtvShellHeaderStatusBridge();
         shellMountedAt = performance.now();
         runPtvClientCacheMigration();
-        const unregisterShellInstance = registerPtvNativeShellInstance(section);
+        const unregisterShellInstance = registerRuntimeShell ?
+            registerPtvNativeShellInstance(section) :
+            () => undefined;
         updatePtvShellDebugStatus({
             mounted: true,
             mountedAt: new Date().toISOString(),
@@ -1055,7 +1086,7 @@ export default function PTVShell({
                 section
             });
         };
-    }, [section]);
+    }, [registerRuntimeShell, section]);
 
     return (
         <div
@@ -1067,6 +1098,17 @@ export default function PTVShell({
 
             <header ref={headerRef} className='ptv-shell-header' aria-label='PiggieTV application shell'>
                 <div className='ptv-shell-header-left'>
+                    {onMenuClick ? (
+                        <button
+                            aria-label={menuLabel}
+                            className='ptv-shell-icon-button ptv-shell-menu-button'
+                            onClick={onMenuClick}
+                            title={menuLabel}
+                            type='button'
+                        >
+                            <PtvIcon name='menu' />
+                        </button>
+                    ) : null}
                     <a className='ptv-shell-brand' data-ptv-owner='shell-brand' href={PTV_ROUTES.home} aria-label='PiggieTV Home' onClick={() => closeHeaderTransientState()}>
                         <img alt={PTV_BRANDING.appName} data-ptv-owner='shell-brand-image' decoding='async' loading='eager' src={appLogoUrl} />
                     </a>
@@ -1103,13 +1145,26 @@ export default function PTVShell({
                         openPanel={openPanel}
                         searchExpanded={isSearchExpanded}
                     />
-                    <PtvShellSearch
-                        isExpanded={isSearchExpanded}
-                        onClose={handleSearchClose}
-                        onOpen={handleSearchOpen}
-                        query={searchQuery}
-                        setQuery={setSearchQuery}
-                    />
+                    {navigationVariant === 'details' ? null : (
+                        <PtvShellSearch
+                            isExpanded={isSearchExpanded}
+                            onClose={handleSearchClose}
+                            onOpen={handleSearchOpen}
+                            query={searchQuery}
+                            setQuery={setSearchQuery}
+                        />
+                    )}
+                    {showBackButton ? (
+                        <button
+                            aria-label='Back'
+                            className='ptv-shell-icon-button ptv-shell-back-button'
+                            onClick={handleBack}
+                            title='Back'
+                            type='button'
+                        >
+                            <PtvIcon name='back' />
+                        </button>
+                    ) : null}
                 </div>
             </header>
 

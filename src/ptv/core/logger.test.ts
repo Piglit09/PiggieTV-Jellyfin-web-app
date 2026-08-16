@@ -12,6 +12,10 @@ type PtvLoggerWindow = Window & {
 
 afterEach(() => {
     destroyPtvLogging();
+    ptvLogger.clear();
+    delete (window as unknown as Record<string, unknown>).PTV_DEBUG;
+    window.history.replaceState({}, '', '/');
+    vi.restoreAllMocks();
 });
 
 describe('PTV client logger', () => {
@@ -41,5 +45,40 @@ describe('PTV client logger', () => {
         expect(state?.loggerCreateCount).toBe(beforeCreateCount + 1);
         expect(state?.loggerReuseCount).toBeGreaterThanOrEqual(1);
         expect(state?.duplicateInitializationSuppressed).toBeGreaterThanOrEqual(1);
+    });
+
+    it('redacts credentials from memory entries, routes, browser errors, and debug console output', () => {
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_TOKEN', 'logger' ].join('_');
+        const passwordCanary = [ 'PTV_TEST', 'PASSWORD', 'logger' ].join('_');
+        const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+
+        (window as unknown as Record<string, unknown>).PTV_DEBUG = true;
+        window.history.replaceState({}, '', `/?api_key=${accessCanary}#/settings`);
+        initPtvLogging();
+        ptvLogger.error('Authenticated request failed', {
+            config: {
+                headers: {
+                    Authorization: `Bearer ${accessCanary}`
+                },
+                password: passwordCanary
+            },
+            tokenCount: 9
+        }, 'Authentication');
+        window.dispatchEvent(new ErrorEvent('error', {
+            error: Object.assign(new Error(`socket?token=${accessCanary}`), {
+                headers: { 'X-Emby-Token': accessCanary }
+            }),
+            message: `socket?token=${accessCanary}`
+        }));
+
+        const serializedEntries = JSON.stringify(ptvLogger.getEntries());
+        const serializedConsole = JSON.stringify(debug.mock.calls);
+
+        expect(serializedEntries).not.toContain(accessCanary);
+        expect(serializedEntries).not.toContain(passwordCanary);
+        expect(serializedConsole).not.toContain(accessCanary);
+        expect(serializedConsole).not.toContain(passwordCanary);
+        expect(serializedEntries).toContain('[REDACTED]');
+        expect(serializedEntries).toContain('tokenCount');
     });
 });

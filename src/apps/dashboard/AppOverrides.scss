@@ -1,3 +1,5 @@
+@use '../../ptv/modules/settings/admin/adminDashboard';
+
 // Default MUI breakpoints
 // https://mui.com/material-ui/customization/breakpoints/#default-breakpoints
 $mui-bp-sm: 600px;
@@ -5,13 +7,22 @@ $mui-bp-md: 900px;
 $mui-bp-lg: 1200px;
 $mui-bp-xl: 1536px;
 
-$drawer-width: 240px;
-
 // Fix dashboard pages layout to work with drawer
 .dashboardDocument {
+    .MuiDrawer-paper {
+        height: calc(100% - var(--ptv-header-safe-height));
+        top: var(--ptv-header-safe-height);
+    }
+
+    .ptv-dashboard-tabs-bar:has(.MuiTabs-root) {
+        background: rgb(8 7 18 / 78%) !important;
+        border-bottom: 1px solid rgb(221 202 255 / 10%);
+        backdrop-filter: blur(18px) saturate(1.16);
+    }
+
     .mainAnimatedPage:not(.metadataEditorPage) {
         @media all and (min-width: $mui-bp-md) {
-            left: $drawer-width;
+            left: 0;
         }
     }
 
@@ -21,18 +32,69 @@ $drawer-width: 240px;
 
     // Fix the padding of dashboard pages
     .content-primary {
-        padding-top: 3.25rem;
+        padding-top: 7.5rem;
     }
     // Tabbed pages
     .withTabs .content-primary {
-        padding-top: 6.5rem;
+        padding-top: 10.5rem;
 
         @media all and (min-width: $mui-bp-lg) {
-            padding-top: 3.25rem;
+            padding-top: 8.5rem;
         }
     }
 
     .metadataEditorPage {
-        padding-top: 3.25rem !important;
+        padding-top: 7.5rem !important;
+    }
+
+    .ptv-admin-shell-dashboard {
+        .mainAnimatedPage {
+            left: 0 !important;
+        }
+
+        // Server-owned plugin pages are injected into the bounded admin main
+        // column. Keep their legacy absolute page wrapper from escaping that
+        // column while leaving the plugin's own inner layout and CSS intact.
+        .pluginConfigurationPage {
+            position: relative;
+            width: 100%;
+            min-height: calc(100vh - var(--ptv-header-safe-height) - 72px);
+            overflow: visible;
+        }
+
+        .metadataEditorPage {
+            position: relative;
+            width: 100%;
+            min-height: calc(100vh - 112px);
+            padding-top: 0 !important;
+        }
+
+        .metadataEditorPage .editPageSidebar {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            width: min(300px, 30%);
+            box-sizing: border-box;
+        }
+
+        .metadataEditorPage .editPageInnerContent {
+            width: calc(100% - min(318px, 32%));
+        }
+    }
+
+    @media all and (max-width: 1080px) {
+        .ptv-admin-shell-dashboard .metadataEditorPage .editPageSidebar {
+            position: relative;
+            width: 100%;
+            max-height: 42vh;
+            border-right: 0;
+            border-bottom: 1px solid var(--ptv-border-divider);
+        }
+
+        .ptv-admin-shell-dashboard .metadataEditorPage .editPageInnerContent {
+            width: 100%;
+            float: none;
+        }
     }
 }

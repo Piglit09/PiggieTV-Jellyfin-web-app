@@ -72,15 +72,21 @@ const DEFAULT_INTEGRATIONS: PtvIntegrationsSettings = {
     }
 };
 
-let settingsCache: {
+type IntegrationSettingsCacheEntry = {
     expiresAt: number;
     promise: Promise<PtvIntegrationsSettings> | null;
     settings: PtvIntegrationsSettings;
-} = {
-    expiresAt: 0,
-    promise: null,
-    settings: DEFAULT_INTEGRATIONS
 };
+
+const settingsCacheByServer = new Map<string, IntegrationSettingsCacheEntry>();
+
+function getEmptySettingsCache(): IntegrationSettingsCacheEntry {
+    return {
+        expiresAt: 0,
+        promise: null,
+        settings: DEFAULT_INTEGRATIONS
+    };
+}
 
 function cleanUrl(value: unknown) {
     if (typeof value !== 'string') return '';
@@ -137,14 +143,18 @@ function normalizeSettings(settings: IntegrationSettingsResponse | null | undefi
 }
 
 export function clearPtvIntegrationSettingsCache() {
-    settingsCache = {
-        expiresAt: 0,
-        promise: null,
-        settings: DEFAULT_INTEGRATIONS
-    };
+    settingsCacheByServer.clear();
 }
 
 export function getPtvIntegrationSettings(options: { force?: boolean } = {}) {
+    const pluginApi = getCurrentPtvPluginApiClient();
+
+    if (!pluginApi?.getSettings) {
+        return Promise.resolve(DEFAULT_INTEGRATIONS);
+    }
+
+    const serverId = String(pluginApi.getCurrentServerId?.() || 'unknown-server');
+    const settingsCache = settingsCacheByServer.get(serverId) || getEmptySettingsCache();
     const now = Date.now();
 
     if (!options.force && settingsCache.settings && settingsCache.expiresAt > now) {
@@ -155,26 +165,27 @@ export function getPtvIntegrationSettings(options: { force?: boolean } = {}) {
         return settingsCache.promise;
     }
 
-    const pluginApi = getCurrentPtvPluginApiClient();
-
-    if (!pluginApi?.getSettings) {
-        return Promise.resolve(DEFAULT_INTEGRATIONS);
-    }
-
-    settingsCache.promise = pluginApi.getSettings<IntegrationSettingsResponse>()
+    const request = pluginApi.getSettings<IntegrationSettingsResponse>()
         .then(settings => normalizeSettings(settings))
         .catch(() => DEFAULT_INTEGRATIONS)
         .then(settings => {
-            settingsCache = {
-                expiresAt: Date.now() + SETTINGS_TTL_MS,
-                promise: null,
-                settings
-            };
+            if (settingsCacheByServer.get(serverId)?.promise === request) {
+                settingsCacheByServer.set(serverId, {
+                    expiresAt: Date.now() + SETTINGS_TTL_MS,
+                    promise: null,
+                    settings
+                });
+            }
 
             return settings;
         });
 
-    return settingsCache.promise;
+    settingsCacheByServer.set(serverId, {
+        ...settingsCache,
+        promise: request
+    });
+
+    return request;
 }
 
 export async function getPtvRequestPortalUrl(query?: string) {

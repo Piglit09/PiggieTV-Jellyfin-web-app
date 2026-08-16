@@ -1,4 +1,5 @@
 import { recordPtvEvent, shouldCollectDiagnostics } from '../core/observability';
+import { redactPtvCoreText, sanitizePtvCoreMetadata } from '../core/diagnostics/redaction';
 import { registerPtvRuntimeListener } from '../core/runtime';
 
 type PtvPerformanceEntryKind =
@@ -102,9 +103,11 @@ function trimEntries() {
 }
 
 function supportsPerformanceEntryType(entryType: string) {
-    if (typeof PerformanceObserver === 'undefined') return false;
+    const PerformanceObserverConstructor = window['PerformanceObserver'];
 
-    const supportedEntryTypes = PerformanceObserver.supportedEntryTypes || [];
+    if (!PerformanceObserverConstructor) return false;
+
+    const supportedEntryTypes = PerformanceObserverConstructor.supportedEntryTypes || [];
 
     return supportedEntryTypes.indexOf(entryType) >= 0;
 }
@@ -119,20 +122,27 @@ export function recordPtvPerformanceEntry(
     detail: Record<string, unknown> = {},
     durationMs?: number
 ) {
+    const sanitizedDetail = sanitizePtvCoreMetadata(detail);
+    const sanitizedName = redactPtvCoreText(name, 200);
     const entry: PtvPerformanceEntry = {
         at: now(),
-        detail,
+        detail: sanitizedDetail,
         durationMs,
         kind,
-        name
+        name: sanitizedName
     };
 
     entries.push(entry);
     trimEntries();
 
     if (shouldCollectDiagnostics()) {
-        recordPtvEvent(kind === 'playback' ? 'playback' : kind === 'request' ? 'api' : 'render', `perf:${name}`, {
-            ...detail,
+        let eventType: 'api' | 'playback' | 'render' = 'render';
+
+        if (kind === 'playback') eventType = 'playback';
+        if (kind === 'request') eventType = 'api';
+
+        recordPtvEvent(eventType, `perf:${sanitizedName}`, {
+            ...sanitizedDetail,
             durationMs,
             kind
         });
@@ -175,10 +185,11 @@ export function setPtvPlaybackSubscriptionCount(count: number) {
 
 export function recordPtvRouteTransition(destinationRoute: string) {
     const sourceRoute = previousRoute || '';
+    const sanitizedDestinationRoute = redactPtvCoreText(destinationRoute, 500);
 
-    previousRoute = destinationRoute;
+    previousRoute = sanitizedDestinationRoute;
     recordPtvPerformanceEntry('navigation', 'route-transition', {
-        destinationRoute,
+        destinationRoute: sanitizedDestinationRoute,
         sourceRoute
     });
 }
@@ -230,7 +241,7 @@ export function getPtvPerformanceReport() {
         longTaskCount: longTasks.length,
         longTaskTotalMs: Number(longTasks.reduce((total, entry) => total + (entry.durationMs || 0), 0).toFixed(1)),
         largestLongTaskMs: Number(longTasks.reduce((max, entry) => Math.max(max, entry.durationMs || 0), 0).toFixed(1)),
-        route: window.location.hash || window.location.pathname
+        route: redactPtvCoreText(window.location.hash || window.location.pathname, 500)
     };
 }
 

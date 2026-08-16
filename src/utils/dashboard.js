@@ -24,6 +24,7 @@ import {
     getRequestedPtvServerUrl
 } from 'ptv/core/serverOriginSelection';
 import { isPtvWebpackDevServerOrigin } from 'ptv/core/urlOrigins';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 const SERVER_DISCOVERY_TIMEOUT_MS = 2200;
 const SERVER_DISCOVERY_HEDGE_DELAY_MS = 150;
@@ -53,7 +54,7 @@ export async function serverAddress() {
         null;
 
     if (requestedServerUrl) {
-        console.info('[PTV] Using explicit server override from shell query:', requestedServerUrl);
+        ptvSafeConsole.info('[PTV] Using explicit server override from shell query', requestedServerUrl);
     }
     const apiClient = getCurrentApiClientForDiscovery();
     const development = PTV_CONFIG.runtime.mode === 'development';

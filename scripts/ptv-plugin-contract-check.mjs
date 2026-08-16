@@ -9,11 +9,12 @@ const cacheValidator = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/Pt
 const statusController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs');
 const relationshipController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvRelationshipController.cs');
 const recommendationController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvRecommendationController.cs');
+const readingMetadataController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvReadingMetadataController.cs');
 const statusResponse = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvStatusResponse.cs');
 const project = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
 const pluginManifest = JSON.parse(read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/meta.json'));
 const packageJson = JSON.parse(read('package.json'));
-const expectedPluginVersion = '0.5.0.0';
+const expectedPluginVersion = '0.5.11.0';
 
 function requiredMatch(source, pattern, label) {
     const match = source.match(pattern);
@@ -37,6 +38,8 @@ const requiredRoutes = [
     ['featured', "featuredContent: 'Ptv/v1/featured'"],
     ['featured refresh', "featuredContentRefresh: 'Ptv/v1/featured/refresh'"],
     ['Google Books metadata', "googleBooksMetadataSearch: 'Ptv/v1/reading/metadata/googlebooks/search'"],
+    ['Reading metadata providers', "readingMetadataProviders: 'Ptv/v1/reading/metadata/providers'"],
+    ['Reading metadata search', "readingMetadataSearch: 'Ptv/v1/reading/metadata/search'"],
     ['reading series overrides', "readingSeriesOverrides: 'Ptv/v1/reading/series-overrides'"],
     ['authoritative relationships', "relationships: 'Ptv/v1/relationships'"],
     ['recommendation policy v2', "recommendationPolicyRank: 'Ptv/v2/recommendations/rank'"]
@@ -55,8 +58,8 @@ if (contract.pluginVersion !== expectedPluginVersion) {
 if (contract.pluginManifestVersion !== contract.pluginVersion) {
     failures.push(`Plugin manifest mismatch: project ${contract.pluginVersion}, manifest ${contract.pluginManifestVersion}`);
 }
-if (contract.pluginTarget !== '10.11.8') {
-    failures.push(`Unexpected Jellyfin package target: expected 10.11.8, received ${contract.pluginTarget}`);
+if (contract.pluginTarget !== '10.11.11') {
+    failures.push(`Unexpected Jellyfin package target: expected 10.11.11, received ${contract.pluginTarget}`);
 }
 
 for (const [label, sourceText] of requiredRoutes) {
@@ -64,6 +67,10 @@ for (const [label, sourceText] of requiredRoutes) {
 }
 
 const backendContracts = [
+    ['Reading metadata controller', readingMetadataController, /\[Route\("Ptv\/v1\/reading\/metadata"\)\]/],
+    ['Reading metadata providers route', readingMetadataController, /\[HttpGet\("providers"\)\]/],
+    ['Reading metadata search route', readingMetadataController, /\[HttpPost\("search"\)\]/],
+    ['Reading metadata administrator authorization', readingMetadataController, /Policies\.RequiresElevation/],
     ['reading override GET route', statusController, /\[HttpGet\("reading\/series-overrides\/\{routeKind\}"\)\]/],
     ['reading override PUT route', statusController, /\[HttpPut\("reading\/series-overrides\/\{routeKind\}"\)\]/],
     ['relationship GET route', relationshipController, /\[HttpGet\("\{sourceItemId\}"\)\]/],

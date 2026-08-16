@@ -23,7 +23,7 @@ import type {
     PtvRecommendationScore
 } from './types/recommendationTypes';
 
-const PTV_ROW_BUILDER_HASH = '#/dashboard/piggietv/rows';
+const PTV_ROW_BUILDER_HASH = '#/settings/admin/piggietv/rows';
 
 function getErrorMessage(error: unknown) {
     if (error instanceof Error && error.message) return error.message;

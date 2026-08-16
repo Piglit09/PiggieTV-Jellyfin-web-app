@@ -236,7 +236,7 @@ describe('PTV details render lifecycle', () => {
         expect(moreFromSeason).toContain('Limit: 100');
         expect(moreFromSeason).toContain('signal');
         expect(moreFromSeason).not.toContain('apiClient.getEpisodes');
-        expect(similar).toContain('requestPtvJson(`Items/${encodeURIComponent(item.Id)}/Similar`');
+        expect(similar).toContain('loadPtvDetailRelatedItems(item, {');
         expect(similar).toContain('signal');
         expect(similar).not.toContain('apiClient.getSimilarItems');
     });

@@ -10,6 +10,7 @@ import ListItemLink from 'components/ListItemLink';
 import globalize from 'lib/globalize';
 import Dashboard from 'utils/dashboard';
 import { useConfigurationPages } from 'apps/dashboard/features/plugins/api/useConfigurationPages';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 const PluginDrawerSection = () => {
     const {
@@ -18,7 +19,7 @@ const PluginDrawerSection = () => {
     } = useConfigurationPages({ enableInMainMenu: true });
 
     useEffect(() => {
-        if (error) console.error('[PluginDrawerSection] unable to fetch plugin config pages', error);
+        if (error) ptvSafeConsole.error('[PluginDrawerSection] unable to fetch plugin config pages', error);
     }, [ error ]);
 
     return (

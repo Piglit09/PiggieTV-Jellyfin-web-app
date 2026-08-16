@@ -1,7 +1,5 @@
 using System.Globalization;
-using System.Net;
 using System.Net.Mail;
-using System.Net.Mime;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -29,6 +27,8 @@ public sealed class PtvSignupService : IPtvSignupService
     private static readonly Regex EmailRegex = new("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ILogger<PtvSignupService> _logger;
+    private readonly IPtvAccountService _accountService;
+    private readonly IPtvMailService _mailService;
     private readonly IDataProtector _passwordProtector;
     private readonly IUserManager _userManager;
 
@@ -38,12 +38,18 @@ public sealed class PtvSignupService : IPtvSignupService
     /// <param name="logger">Logger.</param>
     /// <param name="userManager">Jellyfin user manager.</param>
     /// <param name="dataProtectionProvider">Data protection provider.</param>
+    /// <param name="accountService">Durable account service.</param>
+    /// <param name="mailService">Central transactional mail service.</param>
     public PtvSignupService(
         ILogger<PtvSignupService> logger,
         IUserManager userManager,
-        IDataProtectionProvider dataProtectionProvider)
+        IDataProtectionProvider dataProtectionProvider,
+        IPtvAccountService accountService,
+        IPtvMailService mailService)
     {
+        _accountService = accountService;
         _logger = logger;
+        _mailService = mailService;
         _passwordProtector = dataProtectionProvider.CreateProtector("PiggieTV.Signup.PendingPassword.v1");
         _userManager = userManager;
     }
@@ -128,7 +134,9 @@ public sealed class PtvSignupService : IPtvSignupService
             var username = CleanUsername(request.Username);
             var email = CleanEmail(request.Email);
             var passwordError = ValidatePassword(request.Password, request.ConfirmPassword);
-            var verificationBaseUrl = CleanVerificationBaseUrl(request.VerificationBaseUrl);
+            var verificationBaseUrl = string.IsNullOrWhiteSpace(_mailService.PublicBaseUrl)
+                ? string.Empty
+                : $"{_mailService.PublicBaseUrl}/web/#/signup";
 
             if (IsRateLimited(signup, "signup-create", remoteAddress, email ?? username, 8, 15, 15))
             {
@@ -149,6 +157,11 @@ public sealed class PtvSignupService : IPtvSignupService
             if (passwordError is not null)
             {
                 return Fail(passwordError);
+            }
+
+            if (string.IsNullOrWhiteSpace(verificationBaseUrl))
+            {
+                return Fail("The public PiggieTV URL is not configured yet.");
             }
 
             if (UserNameExists(username))
@@ -298,25 +311,57 @@ public sealed class PtvSignupService : IPtvSignupService
                 await ChangePasswordAsync(createdUser, password).ConfigureAwait(false);
                 await ApplyPolicyAsync(createdUser.Id, new UserPolicy(), preset, pending.EnabledFolderIds, cancellationToken)
                     .ConfigureAwait(false);
-            }
-            catch
-            {
-                await _userManager.DeleteUserAsync(createdUser.Id).ConfigureAwait(false);
-                throw;
-            }
+                await _accountService.ImportVerifiedSignupEmailAsync(
+                    createdUser.Id,
+                    pending.Username,
+                    pending.Email,
+                    cancellationToken).ConfigureAwait(false);
 
-            signup.PendingVerifications.Remove(pending);
-            signup.Users.Add(new SignupUserRecord
+                signup.PendingVerifications.Remove(pending);
+                signup.Users.Add(new SignupUserRecord
+                {
+                    CreatedAtUtc = DateTimeOffset.UtcNow,
+                    Email = pending.Email,
+                    PolicyPresetId = preset.Id,
+                    RemoteAddress = remoteAddress,
+                    UserId = createdUser.Id.ToString("N"),
+                    Username = pending.Username
+                });
+                SaveConfiguration(configuration);
+            }
+            catch (Exception provisioningException)
             {
-                CreatedAtUtc = DateTimeOffset.UtcNow,
-                Email = pending.Email,
-                PolicyPresetId = preset.Id,
-                RemoteAddress = remoteAddress,
-                UserId = createdUser.Id.ToString("N"),
-                Username = pending.Username
-            });
+                signup.Users.RemoveAll(record => string.Equals(record.UserId, createdUser.Id.ToString("N"), StringComparison.OrdinalIgnoreCase));
+                if (!signup.PendingVerifications.Contains(pending)) signup.PendingVerifications.Add(pending);
+                try
+                {
+                    SaveConfiguration(configuration);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(rollbackException, "PiggieTV failed to restore pending signup configuration. UserId={UserId}.", createdUser.Id);
+                }
 
-            SaveConfiguration(configuration);
+                try
+                {
+                    await _accountService.RemoveProvisioningProfileAsync(createdUser.Id, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(rollbackException, "PiggieTV failed to roll back profile provisioning. UserId={UserId}.", createdUser.Id);
+                }
+
+                try
+                {
+                    await _userManager.DeleteUserAsync(createdUser.Id).ConfigureAwait(false);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(rollbackException, "PiggieTV failed to roll back Jellyfin user provisioning. UserId={UserId}.", createdUser.Id);
+                }
+
+                throw new InvalidOperationException("PiggieTV account provisioning failed and rollback was attempted.", provisioningException);
+            }
 
             _logger.LogInformation(
                 "PiggieTV email verified and Jellyfin user created. Username={Username}; Email={Email}; PendingId={PendingId}; Remote={RemoteAddress}.",
@@ -354,7 +399,7 @@ public sealed class PtvSignupService : IPtvSignupService
         SignupEmailSettings emailSettings;
         SignupUserRecord? userRecord;
         string resetCode;
-        var cleanedResetPageUrl = CleanPasswordResetPageUrl(resetPageUrl);
+        var cleanedResetPageUrl = $"{_mailService.PublicBaseUrl}/web/#/signup?mode=reset";
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -381,7 +426,21 @@ public sealed class PtvSignupService : IPtvSignupService
                 return Fail("Password reset email is not configured yet.");
             }
 
-            userRecord = FindUserByEmail(signup, email);
+            if (string.IsNullOrWhiteSpace(_mailService.PublicBaseUrl))
+            {
+                return Fail("The public PiggieTV URL is not configured yet.");
+            }
+
+            var verifiedProfile = await _accountService.FindVerifiedProfileByEmailAsync(email, cancellationToken).ConfigureAwait(false);
+            userRecord = verifiedProfile is null ? null : new SignupUserRecord
+            {
+                CreatedAtUtc = verifiedProfile.EmailVerifiedAtUtc ?? verifiedProfile.CreatedAtUtc,
+                Email = verifiedProfile.Email!,
+                PolicyPresetId = string.Empty,
+                RemoteAddress = "ptv-profile",
+                UserId = verifiedProfile.JellyfinUserId,
+                Username = verifiedProfile.UsernameSnapshot
+            };
 
             if (userRecord is null)
             {
@@ -479,8 +538,12 @@ public sealed class PtvSignupService : IPtvSignupService
                 return Fail("Too many reset attempts. Request a new reset code.");
             }
 
-            var userRecord = FindUserByEmail(signup, email);
-            var user = userRecord is null ? _userManager.GetUserByName(reset.Username) : FindJellyfinUser(userRecord);
+            var verifiedProfile = await _accountService.FindVerifiedProfileByEmailAsync(email, cancellationToken).ConfigureAwait(false);
+            var user = verifiedProfile is not null
+                && Guid.TryParse(verifiedProfile.JellyfinUserId, out var verifiedUserId)
+                && string.Equals(verifiedProfile.UsernameSnapshot, reset.Username, StringComparison.OrdinalIgnoreCase)
+                ? _userManager.GetUserById(verifiedUserId)
+                : null;
 
             if (user is null)
             {
@@ -611,11 +674,13 @@ public sealed class PtvSignupService : IPtvSignupService
 
         try
         {
-            await SendEmailAsync(
-                settings,
+            var logoUrl = _mailService.ResolveLogoUrl(request.ReferenceUrl ?? string.Empty);
+            var email = PtvSignupEmailTemplates.BuildDeliveryTest(logoUrl);
+
+            await _mailService.SendAsync(
                 recipient,
-                "PiggieTV test email",
-                "PiggieTV email delivery is configured and working.",
+                "PiggieTV email test - delivery confirmed",
+                email,
                 cancellationToken).ConfigureAwait(false);
 
             return new PtvSignupResponse { Ok = true, Message = "Test email sent." };
@@ -894,11 +959,6 @@ public sealed class PtvSignupService : IPtvSignupService
 
             if (string.IsNullOrWhiteSpace(requestedEmail))
             {
-                if (existing is not null)
-                {
-                    signup.Users.Remove(existing);
-                }
-
                 continue;
             }
 
@@ -1242,6 +1302,7 @@ public sealed class PtvSignupService : IPtvSignupService
     private static void ApplyEmailSettingsPatch(SignupEmailSettings settings, PtvSignupEmailSettingsDto patch)
     {
         settings.Enabled = patch.Enabled;
+        settings.PublicBaseUrl = CleanPublicBaseUrl(patch.PublicBaseUrl);
         settings.FromAddress = CleanEmail(patch.FromAddress) ?? string.Empty;
         settings.FromName = CleanText(patch.FromName, "PiggieTV", 80);
         settings.LogoUrl = CleanEmailLogoUrl(patch.LogoUrl);
@@ -1275,6 +1336,7 @@ public sealed class PtvSignupService : IPtvSignupService
         FromName = source.FromName,
         LogoUrl = source.LogoUrl,
         Password = source.Password,
+        PublicBaseUrl = source.PublicBaseUrl,
         ResetCodeMinutes = source.ResetCodeMinutes,
         ResetSubject = source.ResetSubject,
         SmtpHost = source.SmtpHost,
@@ -1285,203 +1347,46 @@ public sealed class PtvSignupService : IPtvSignupService
         VerificationSubject = source.VerificationSubject
     };
 
-    private static async Task SendVerificationEmailAsync(
+    private async Task SendVerificationEmailAsync(
         SignupEmailSettings settings,
         SignupPendingVerification pending,
         string verificationLink,
         CancellationToken cancellationToken)
     {
-        var plainText = new StringBuilder()
-            .AppendLine($"Hi {pending.Username},")
-            .AppendLine()
-            .AppendLine("Welcome to PiggieTV. Please verify your email to finish creating your account.")
-            .AppendLine()
-            .AppendLine(verificationLink)
-            .AppendLine()
-            .AppendLine($"This verification link expires after {settings.VerificationLinkMinutes} minutes.")
-            .AppendLine("If you did not request this account, you can ignore this email.")
-            .ToString();
-        var html = BuildVerificationEmailHtml(settings, pending, verificationLink);
+        var logoUrl = _mailService.ResolveLogoUrl(verificationLink);
+        var email = PtvSignupEmailTemplates.BuildVerification(
+            pending.Username,
+            verificationLink,
+            logoUrl,
+            settings.VerificationLinkMinutes);
 
-        await SendEmailAsync(settings, pending.Email, settings.VerificationSubject, plainText, cancellationToken, html).ConfigureAwait(false);
+        await _mailService.SendAsync(
+            pending.Email,
+            settings.VerificationSubject,
+            email,
+            cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task SendResetEmailAsync(
+    private async Task SendResetEmailAsync(
         SignupEmailSettings settings,
         SignupUserRecord userRecord,
         string resetCode,
         string resetPageUrl,
         CancellationToken cancellationToken)
     {
-        var body = new StringBuilder()
-            .AppendLine($"Hi {userRecord.Username},")
-            .AppendLine()
-            .AppendLine("Use this PiggieTV password reset code:")
-            .AppendLine()
-            .AppendLine(resetCode)
-            .AppendLine()
-            .AppendLine("Open PiggieTV to enter the code and choose a new password:")
-            .AppendLine(resetPageUrl)
-            .AppendLine()
-            .AppendLine($"This code expires in {settings.ResetCodeMinutes} minutes.")
-            .AppendLine("If you did not request this, you can ignore this email.")
-            .ToString();
-        var html = BuildResetEmailHtml(settings, userRecord, resetCode, resetPageUrl);
+        var logoUrl = _mailService.ResolveLogoUrl(resetPageUrl);
+        var email = PtvSignupEmailTemplates.BuildPasswordReset(
+            userRecord.Username,
+            resetCode,
+            resetPageUrl,
+            logoUrl,
+            settings.ResetCodeMinutes);
 
-        await SendEmailAsync(settings, userRecord.Email, settings.ResetSubject, body, cancellationToken, html).ConfigureAwait(false);
-    }
-
-    private static string BuildVerificationEmailHtml(
-        SignupEmailSettings settings,
-        SignupPendingVerification pending,
-        string verificationLink)
-    {
-        var logoUrl = ResolveEmailLogoUrl(settings.LogoUrl, verificationLink);
-        var safeLogoUrl = WebUtility.HtmlEncode(logoUrl);
-        var safeLink = WebUtility.HtmlEncode(verificationLink);
-        var safeUsername = WebUtility.HtmlEncode(pending.Username);
-        var expiryText = $"This verification link expires after {settings.VerificationLinkMinutes} minutes.";
-
-        return $$"""
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Verify your PiggieTV email</title>
-</head>
-<body style="margin:0;background:#08050f;color:#f7f4ff;font-family:Arial,Helvetica,sans-serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#08050f;padding:32px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:linear-gradient(145deg,#151126,#231036);border:1px solid #3a2a66;border-radius:22px;box-shadow:0 20px 70px rgba(36,16,76,.45);overflow:hidden;">
-          <tr>
-            <td align="center" style="padding:34px 28px 10px;">
-              <img src="{{safeLogoUrl}}" alt="PiggieTV" width="220" style="display:block;max-width:220px;width:70%;height:auto;border:0;">
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 34px 4px;text-align:center;">
-              <h1 style="margin:0 0 12px;font-size:30px;line-height:1.2;color:#ffffff;">Welcome, {{safeUsername}}</h1>
-              <p style="margin:0;color:#ddd7f2;font-size:16px;line-height:1.6;">Welcome to PiggieTV. Please verify your email to finish creating your account.</p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:30px 34px 34px;">
-              <a href="{{safeLink}}" style="display:inline-block;background:#20aee5;color:#05040a;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:16px 30px;border-radius:999px;box-shadow:0 0 28px rgba(32,174,229,.42);">Verify Email</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 34px 30px;text-align:center;">
-              <p style="margin:0;color:#bcb4d7;font-size:13px;line-height:1.5;">{{WebUtility.HtmlEncode(expiryText)}}</p>
-              <p style="margin:12px 0 0;color:#827996;font-size:12px;line-height:1.5;">If you did not request this account, you can safely ignore this email.</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""";
-    }
-
-    private static string BuildResetEmailHtml(
-        SignupEmailSettings settings,
-        SignupUserRecord userRecord,
-        string resetCode,
-        string resetPageUrl)
-    {
-        var logoUrl = ResolveEmailLogoUrl(settings.LogoUrl, resetPageUrl);
-        var safeLogoUrl = WebUtility.HtmlEncode(logoUrl);
-        var safeResetCode = WebUtility.HtmlEncode(resetCode);
-        var safeResetPageUrl = WebUtility.HtmlEncode(resetPageUrl);
-        var safeUsername = WebUtility.HtmlEncode(userRecord.Username);
-        var expiryText = $"This code expires in {settings.ResetCodeMinutes} minutes.";
-
-        return $$"""
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Reset your PiggieTV password</title>
-</head>
-<body style="margin:0;background:#08050f;color:#f7f4ff;font-family:Arial,Helvetica,sans-serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#08050f;padding:32px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:linear-gradient(145deg,#151126,#231036);border:1px solid #3a2a66;border-radius:22px;box-shadow:0 20px 70px rgba(36,16,76,.45);overflow:hidden;">
-          <tr>
-            <td align="center" style="padding:34px 28px 10px;">
-              <img src="{{safeLogoUrl}}" alt="PiggieTV" width="220" style="display:block;max-width:220px;width:70%;height:auto;border:0;">
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 34px 4px;text-align:center;">
-              <h1 style="margin:0 0 12px;font-size:30px;line-height:1.2;color:#ffffff;">Reset your password</h1>
-              <p style="margin:0;color:#ddd7f2;font-size:16px;line-height:1.6;">Hi {{safeUsername}}, use this PiggieTV code to choose a new password.</p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:28px 34px 18px;">
-              <div style="display:inline-block;min-width:220px;background:#0f0a1b;border:1px solid #4d3b7c;border-radius:18px;padding:18px 26px;color:#ffffff;font-size:34px;line-height:1.1;font-weight:800;letter-spacing:8px;font-family:'Courier New',Courier,monospace;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04),0 14px 34px rgba(0,0,0,.28);">{{safeResetCode}}</div>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:8px 34px 30px;">
-              <a href="{{safeResetPageUrl}}" style="display:inline-block;background:#20aee5;color:#05040a;text-decoration:none;font-weight:700;font-size:16px;line-height:1;padding:16px 30px;border-radius:999px;box-shadow:0 0 28px rgba(32,174,229,.42);">Reset Password</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 34px 30px;text-align:center;">
-              <p style="margin:0;color:#bcb4d7;font-size:13px;line-height:1.5;">{{WebUtility.HtmlEncode(expiryText)}}</p>
-              <p style="margin:12px 0 0;color:#827996;font-size:12px;line-height:1.5;">If you did not request this, you can safely ignore this email.</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-""";
-    }
-
-    private static async Task SendEmailAsync(
-        SignupEmailSettings settings,
-        string recipient,
-        string subject,
-        string body,
-        CancellationToken cancellationToken,
-        string? htmlBody = null)
-    {
-        using var message = new MailMessage
-        {
-            From = new MailAddress(settings.FromAddress, settings.FromName),
-            Subject = subject,
-            Body = body,
-            IsBodyHtml = false
-        };
-        message.To.Add(recipient);
-
-        if (!string.IsNullOrWhiteSpace(htmlBody))
-        {
-            message.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(body, Encoding.UTF8, MediaTypeNames.Text.Plain));
-            message.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(htmlBody, Encoding.UTF8, MediaTypeNames.Text.Html));
-        }
-
-        using var smtp = new SmtpClient(settings.SmtpHost, settings.SmtpPort)
-        {
-            EnableSsl = settings.UseSsl
-        };
-
-        if (!string.IsNullOrWhiteSpace(settings.Username) || !string.IsNullOrWhiteSpace(settings.Password))
-        {
-            smtp.Credentials = new NetworkCredential(settings.Username ?? string.Empty, settings.Password ?? string.Empty);
-        }
-
-        await smtp.SendMailAsync(message).WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _mailService.SendAsync(
+            userRecord.Email,
+            settings.ResetSubject,
+            email,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -1630,24 +1535,6 @@ public sealed class PtvSignupService : IPtvSignupService
         return $"{baseUrl}{separator}verify={Uri.EscapeDataString(token)}";
     }
 
-    private static string ResolveEmailLogoUrl(string? logoUrl, string referenceUrl)
-    {
-        var cleanedLogo = CleanEmailLogoUrl(logoUrl);
-
-        if (Uri.TryCreate(cleanedLogo, UriKind.Absolute, out var absoluteLogo)
-            && (absoluteLogo.Scheme == Uri.UriSchemeHttps || absoluteLogo.Scheme == Uri.UriSchemeHttp))
-        {
-            return absoluteLogo.ToString();
-        }
-
-        if (Uri.TryCreate(referenceUrl, UriKind.Absolute, out var referenceUri))
-        {
-            return new Uri(referenceUri, cleanedLogo).ToString();
-        }
-
-        return cleanedLogo;
-    }
-
     private static string? CleanUsername(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1699,30 +1586,15 @@ public sealed class PtvSignupService : IPtvSignupService
         return cleaned.Length is >= 24 and <= 256 ? cleaned : null;
     }
 
-    private static string CleanVerificationBaseUrl(string? value)
+    private static string CleanPublicBaseUrl(string? value)
     {
-        if (!string.IsNullOrWhiteSpace(value)
-            && Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)
-            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
         {
-            var cleaned = uri.ToString();
-            return cleaned.Length > 320 ? cleaned[..320] : cleaned.TrimEnd('&', '?');
+            return string.Empty;
         }
 
-        return "/web/#/signup";
-    }
-
-    private static string CleanPasswordResetPageUrl(string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value)
-            && Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri)
-            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-        {
-            var cleaned = uri.ToString();
-            return cleaned.Length > 320 ? cleaned[..320] : cleaned;
-        }
-
-        return "/web/#/signup?mode=reset";
+        return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
     }
 
     private static string CleanEmailLogoUrl(string? value)

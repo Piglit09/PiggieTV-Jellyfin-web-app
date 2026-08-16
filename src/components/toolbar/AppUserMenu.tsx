@@ -10,7 +10,6 @@ import MenuItem from '@mui/material/MenuItem';
 import React, { FC, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 
-import { useApi } from 'hooks/useApi';
 import globalize from 'lib/globalize';
 import { requestJellyfinLogout } from 'ptv/services/jellyfinLogoutAction';
 
@@ -25,8 +24,6 @@ const AppUserMenu: FC<AppUserMenuProps> = ({
     open,
     onMenuClose
 }) => {
-    const { user } = useApi();
-
     const onLogoutClick = useCallback(() => {
         onMenuClose();
         void requestJellyfinLogout();
@@ -50,7 +47,7 @@ const AppUserMenu: FC<AppUserMenuProps> = ({
         >
             <MenuItem
                 component={Link}
-                to={`/userprofile?userId=${user?.Id}`}
+                to='/settings/profile'
                 onClick={onMenuClose}
             >
                 <ListItemIcon>
@@ -62,7 +59,7 @@ const AppUserMenu: FC<AppUserMenuProps> = ({
             </MenuItem>
             <MenuItem
                 component={Link}
-                to='/quickconnect'
+                to='/settings/devices'
                 onClick={onMenuClose}
             >
                 <ListItemIcon>
@@ -75,7 +72,7 @@ const AppUserMenu: FC<AppUserMenuProps> = ({
 
             <MenuItem
                 component={Link}
-                to='/mypreferencesmenu'
+                to='/settings'
                 onClick={onMenuClose}
             >
                 <ListItemIcon>

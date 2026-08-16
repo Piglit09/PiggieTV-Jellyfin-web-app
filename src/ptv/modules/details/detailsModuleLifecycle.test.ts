@@ -25,6 +25,7 @@ const detailsMocks = vi.hoisted(() => ({
     clearImageRepairAttempts: vi.fn(),
     coordinatedDetail: vi.fn(),
     detailsRenderedHandler: null as ((event: CustomEvent) => void) | null,
+    episodePresentation: vi.fn(),
     getApiClient: vi.fn(),
     getImageCandidates: vi.fn(() => []),
     prepareLayout: vi.fn(),
@@ -33,7 +34,10 @@ const detailsMocks = vi.hoisted(() => ({
     releaseLayout: vi.fn(),
     restoreRouteOrigin: vi.fn(),
     resetBackdrop: vi.fn(),
+    resetEpisodePresentation: vi.fn(),
+    resetHeroArtwork: vi.fn(),
     setBackdropCandidates: vi.fn(),
+    setHeroArtworkCandidates: vi.fn(),
     setShellSection: vi.fn()
 }));
 
@@ -111,10 +115,14 @@ vi.mock('./detailsShell', () => ({
 }));
 
 vi.mock('./detailsLayout', () => ({
+    applyPtvEpisodeDetailsPresentation: detailsMocks.episodePresentation,
     preparePtvDetailsLayout: detailsMocks.prepareLayout,
     releasePtvDetailsLayout: detailsMocks.releaseLayout,
     resetPtvDetailsBackdrop: detailsMocks.resetBackdrop,
-    setPtvDetailsBackdropCandidates: detailsMocks.setBackdropCandidates
+    resetPtvDetailsHeroArtwork: detailsMocks.resetHeroArtwork,
+    resetPtvEpisodeDetailsPresentation: detailsMocks.resetEpisodePresentation,
+    setPtvDetailsBackdropCandidates: detailsMocks.setBackdropCandidates,
+    setPtvDetailsHeroArtworkCandidates: detailsMocks.setHeroArtworkCandidates
 }));
 
 vi.mock('./detailImageRepairState', () => ({

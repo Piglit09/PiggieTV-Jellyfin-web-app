@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-shadow, react/jsx-no-bind, sonarjs/prefer-read-only-props */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { redactPtvCoreText } from '../../core/diagnostics/redaction';
 import { recordPtvEvent } from '../../core/observability';
 
 import { ReaderProgress } from './ReaderProgress';
@@ -90,7 +91,12 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
             })
             .catch(error => {
                 if (cancelled) return;
-                setLoadError(error?.message || 'PiggieTV Reader could not open this item.');
+                const safeMessage = redactPtvCoreText(
+                    error instanceof Error ? error.message : '',
+                    500
+                );
+
+                setLoadError(safeMessage || 'PiggieTV Reader could not open this item.');
                 setLoading(false);
             });
 

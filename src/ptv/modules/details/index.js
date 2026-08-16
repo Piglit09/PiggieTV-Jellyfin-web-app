@@ -21,10 +21,14 @@ import {
     setPtvDetailsShellSection
 } from './detailsShell';
 import {
+    applyPtvEpisodeDetailsPresentation,
     preparePtvDetailsLayout,
     releasePtvDetailsLayout,
     resetPtvDetailsBackdrop,
-    setPtvDetailsBackdropCandidates
+    resetPtvDetailsHeroArtwork,
+    resetPtvEpisodeDetailsPresentation,
+    setPtvDetailsBackdropCandidates,
+    setPtvDetailsHeroArtworkCandidates
 } from './detailsLayout';
 import {
     claimPtvDetailImageRepair,
@@ -336,6 +340,8 @@ function releaseDetailImages(page) {
 
 function resetDetailEnhancementState(page) {
     releaseDetailImages(page);
+    resetPtvEpisodeDetailsPresentation(page);
+    resetPtvDetailsHeroArtwork(page);
     page.querySelector(`.${READER_ACTIONS_CLASS}`)?.remove();
     page.querySelector(`.${DETAILS_CINEMATIC_CLASS}`)?.remove();
     delete page.dataset.ptvDetailsCinematicGeneration;
@@ -490,7 +496,9 @@ function renderDetailsCinematicExperience(page, itemId, item, owner) {
             const skeleton = createPtvCinematicDetailsSkeleton(item);
 
             page.querySelector(`.${DETAILS_CINEMATIC_CLASS}`)?.remove();
-            if (similarSection?.parentElement === host) {
+            if (page.classList.contains('ptv-details--episode') && similarSection?.parentElement === host) {
+                similarSection.after(skeleton);
+            } else if (similarSection?.parentElement === host) {
                 host.insertBefore(skeleton, similarSection);
             } else {
                 host.append(skeleton);
@@ -584,6 +592,56 @@ function getBackdropCandidates(item, relatedItems) {
     ];
 }
 
+function getEpisodeArtworkCandidates(item, relatedItems = []) {
+    if (item.Type !== 'Episode') return [];
+
+    const baseOptions = {
+        fillHeight: 540,
+        fillWidth: 960,
+        quality: 90
+    };
+    const episodeLandscapeOptions = {
+        baseOptions,
+        includeParentPrimary: false,
+        includePrimary: false,
+        includeSeriesPrimary: false,
+        includeUntagged: true,
+        order: ['Thumb', 'Backdrop']
+    };
+    const seriesItem = relatedItems.find(relatedItem => String(relatedItem?.Id || '') === String(item.SeriesId || ''));
+
+    return [
+        ...getPtvItemImageCandidates(item, episodeLandscapeOptions),
+        ...getPtvItemImageCandidates(item, {
+            baseOptions,
+            includeBackdrop: false,
+            includeParentPrimary: false,
+            includePrimary: false,
+            includeThumb: false,
+            includeUntagged: false,
+            order: ['SeriesPrimary']
+        }),
+        ...(seriesItem ? getPtvItemImageCandidates(seriesItem, {
+            baseOptions,
+            includeBackdrop: false,
+            includeParentPrimary: false,
+            includeSeriesPrimary: false,
+            includeThumb: false,
+            includeUntagged: true,
+            order: ['Primary']
+        }) : []),
+        ...getPtvItemImageCandidates(item, {
+            baseOptions,
+            includeBackdrop: false,
+            includeParentPrimary: false,
+            includeSeriesPrimary: false,
+            includeThumb: false,
+            includeUntagged: true,
+            order: ['Primary']
+        })
+    ];
+}
+
 function prepareDetailItemState(page, itemId, owner) {
     const generation = String(owner.generation);
 
@@ -601,6 +659,8 @@ function prepareDetailItemState(page, itemId, owner) {
     page.querySelector(`.${READER_ACTIONS_CLASS}`)?.remove();
     clearDetailsCinematicExperience(page);
     resetPtvDetailsBackdrop(page, itemId);
+    resetPtvDetailsHeroArtwork(page);
+    resetPtvEpisodeDetailsPresentation(page);
 }
 
 function applyDetailItem(page, itemId, item, apiClient, owner) {
@@ -608,6 +668,8 @@ function applyDetailItem(page, itemId, item, apiClient, owner) {
 
     setPtvDetailsShellSection(getPtvDetailsShellSection(item));
     setPtvDetailsBackdropCandidates(page, getBackdropCandidates(item, []), itemId);
+    applyPtvEpisodeDetailsPresentation(page, item);
+    setPtvDetailsHeroArtworkCandidates(page, getEpisodeArtworkCandidates(item), itemId);
 
     const relatedArtworkIds = getRelatedArtworkIds(item);
 
@@ -626,6 +688,11 @@ function applyDetailItem(page, itemId, item, apiClient, owner) {
             setPtvDetailsBackdropCandidates(
                 page,
                 getBackdropCandidates(item, relatedItems.filter(Boolean)),
+                itemId
+            );
+            setPtvDetailsHeroArtworkCandidates(
+                page,
+                getEpisodeArtworkCandidates(item, relatedItems.filter(Boolean)),
                 itemId
             );
         });

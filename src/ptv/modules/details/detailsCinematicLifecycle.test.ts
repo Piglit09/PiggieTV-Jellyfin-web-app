@@ -20,7 +20,7 @@ describe('cinematic Details lifecycle ownership', () => {
 
         expect(experience).toContain('includeHomeScans: true');
         expect(experience).toContain('signal: requestSignal');
-        expect(experience).toContain("options.signal?.addEventListener('abort', retireSource, { once: true })");
+        expect(experience).toContain("options.signal?.addEventListener('abort', abortEnrichment, { once: true })");
         expect(experience).toContain('enrichmentController.abort()');
         expect(experience).toContain('getPtvRecommendationHomeData');
         expect(experience).toContain('getPtvAuthoritativeRelationships');

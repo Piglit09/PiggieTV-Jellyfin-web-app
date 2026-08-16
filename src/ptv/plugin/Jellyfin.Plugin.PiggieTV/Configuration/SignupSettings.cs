@@ -109,6 +109,9 @@ public sealed class SignupEmailSettings
     /// <summary>Gets or sets default public logo URL used in branded email templates.</summary>
     public const string DefaultLogoUrl = "/web/assets/logo/banner-light.png";
 
+    /// <summary>Gets or sets the trusted public PiggieTV origin used in verification links.</summary>
+    public string PublicBaseUrl { get; set; } = string.Empty;
+
     /// <summary>Gets or sets a value indicating whether email delivery is enabled.</summary>
     public bool Enabled { get; set; }
 
@@ -146,7 +149,7 @@ public sealed class SignupEmailSettings
     public string VerificationSubject { get; set; } = "Verify your PiggieTV email";
 
     /// <summary>Gets or sets email verification link lifetime in minutes.</summary>
-    public int VerificationLinkMinutes { get; set; } = 30;
+    public int VerificationLinkMinutes { get; set; } = 1440;
 }
 
 /// <summary>

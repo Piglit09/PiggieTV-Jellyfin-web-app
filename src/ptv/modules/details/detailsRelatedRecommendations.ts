@@ -9,7 +9,9 @@ export const PTV_RELATED_VIDEO_DISPLAY_LIMIT = 12;
 export const PTV_RELATED_VIDEO_FIELDS = [
     'PrimaryImageAspectRatio',
     'CanDelete',
+    'CollectionName',
     'Genres',
+    'People',
     'Tags',
     'Studios',
     'OriginalTitle',
@@ -17,12 +19,13 @@ export const PTV_RELATED_VIDEO_FIELDS = [
     'SeriesStudio'
 ].join(',');
 
-type PtvRelatedVideoItem = Readonly<Record<string, unknown> & {
+export type PtvRelatedVideoItem = Readonly<Record<string, unknown> & {
     Genres?: unknown;
     Id?: unknown;
     Name?: unknown;
     OriginalTitle?: unknown;
     ParentId?: unknown;
+    People?: unknown;
     ProductionYear?: unknown;
     SeriesId?: unknown;
     Studios?: unknown;
@@ -163,6 +166,7 @@ type RelatedAffinitySignals = Readonly<{
     itemTitleCore: string;
     sameSeries: boolean;
     sharedGenres: string[];
+    sharedPeople: string[];
     sharedStudios: string[];
     sharedTags: string[];
     sharedTitleTokens: string[];
@@ -177,6 +181,8 @@ function getRelatedAffinitySignals(seed: PtvRelatedVideoItem, item: PtvRelatedVi
     const itemTags = getTextSignals(item.Tags);
     const seedStudios = getNameIdSignals(seed.Studios);
     const itemStudios = getNameIdSignals(item.Studios);
+    const seedPeople = getNameIdSignals(seed.People);
+    const itemPeople = getNameIdSignals(item.People);
     const seedTitleCore = getTitleCore(seed);
     const itemTitleCore = getTitleCore(item);
     const seedTitleTokens = getTitleTokens(seed);
@@ -194,6 +200,7 @@ function getRelatedAffinitySignals(seed: PtvRelatedVideoItem, item: PtvRelatedVi
         itemTitleCore,
         sameSeries: Boolean(seedSeriesId && itemSeriesId && seedSeriesId === itemSeriesId),
         sharedGenres: getSharedValues(seedGenres, itemGenres),
+        sharedPeople: getSharedValues(seedPeople, itemPeople),
         sharedStudios: getSharedValues(seedStudios, itemStudios),
         sharedTags: getSharedValues(seedTags, itemTags),
         sharedTitleTokens: getSharedValues(seedTitleTokens, itemTitleTokens),
@@ -232,6 +239,10 @@ function scoreMetadataAffinity(signals: RelatedAffinitySignals) {
     if (signals.sharedStudios.length) {
         affinityStrength += 3;
         score += Math.min(92, 58 + ((signals.sharedStudios.length - 1) * 17));
+    }
+    if (signals.sharedPeople.length) {
+        affinityStrength += Math.min(6, signals.sharedPeople.length * 2);
+        score += Math.min(150, 50 + (signals.sharedPeople.length * 20));
     }
     if (signals.sharedGenres.length) {
         affinityStrength += Math.min(4, signals.sharedGenres.length * 2);

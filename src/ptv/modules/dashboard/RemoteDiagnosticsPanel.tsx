@@ -7,15 +7,23 @@ import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { getPtvServerId } from '../../api/client';
 import type { PtvClientKind } from '../../core/clientProfile';
 import { PTV_RUNTIME } from '../../core/config';
+import { redactPtvSensitiveValue } from '../../core/diagnostics/redaction';
 import { isPtvDebugEnabled } from '../../core/observability';
 import { getCurrentPtvPluginApiClient, normalizePtvApiError } from '../../core/pluginApi';
+import { ptvSafeConsole } from '../../core/safeConsole';
 
-let remoteDiagnosticsRefreshInFlight: Promise<[unknown, unknown, DiagnosticsStorageStatus | null]> | null = null;
-let remoteDiagnosticsRefreshProfile = '';
+type RemoteDiagnosticsRefreshResult = readonly [
+    PromiseSettledResult<unknown>,
+    PromiseSettledResult<unknown>,
+    PromiseSettledResult<DiagnosticsStorageStatus | null>
+];
+
+const remoteDiagnosticsRefreshInFlight = new Map<string, Promise<RemoteDiagnosticsRefreshResult>>();
 let remoteDiagnosticsExportInFlight = false;
 
 type RemoteDiagnosticsClient = {
@@ -152,6 +160,21 @@ const PHYSICAL_LAYOUT_STATUS_SEVERITIES = {
     warning: 'warning'
 } as const;
 
+export function getRemoteDiagnosticsRefreshKey(serverId: string, profile: string) {
+    return JSON.stringify([ serverId.trim() || 'unresolved-server', profile ]);
+}
+
+export function getRemoteDiagnosticsReportFilename(receivedAtUtc: string) {
+    return `piggie-tv-diagnostics-${receivedAtUtc.replace(/[:.]/g, '-')}.json`;
+}
+
+function settleRequest<T>(request: Promise<T>): Promise<PromiseSettledResult<T>> {
+    return request.then(
+        value => ({ status: 'fulfilled', value }),
+        reason => ({ reason, status: 'rejected' })
+    );
+}
+
 const PROFILE_FILTERS: Array<{ label: string; value: '' | PtvClientKind }> = [
     { label: 'All profiles', value: '' },
     { label: 'webOS', value: 'webos' },
@@ -194,7 +217,7 @@ function warnMalformedRemoteDiagnosticsItem(options: {
 }) {
     if (!shouldLogMalformedRemoteDiagnosticsItem()) return;
 
-    console.warn('[PiggieTV Dashboard] Malformed remote diagnostics client skipped or normalized.', {
+    ptvSafeConsole.warn('[PiggieTV Dashboard] Malformed remote diagnostics client skipped or normalized.', {
         componentName: REMOTE_DIAGNOSTICS_COMPONENT,
         itemId: options.itemId || '[missing]',
         itemType: REMOTE_DIAGNOSTICS_ITEM_TYPE,
@@ -603,6 +626,60 @@ function getPluginApi() {
     return pluginApi;
 }
 
+function getRemoteDiagnosticsRefreshRequest(
+    pluginApi: ReturnType<typeof getPluginApi>,
+    profileFilter: '' | PtvClientKind,
+    serverId: string
+) {
+    const refreshProfile = profileFilter || '';
+    const refreshKey = getRemoteDiagnosticsRefreshKey(serverId, refreshProfile);
+    const currentRequest = remoteDiagnosticsRefreshInFlight.get(refreshKey);
+
+    if (currentRequest) return currentRequest;
+
+    const storageRequest = typeof pluginApi.getRemoteDiagnosticsStorage === 'function' ?
+        pluginApi.getRemoteDiagnosticsStorage<DiagnosticsStorageStatus>({ bypassCache: true }) :
+        Promise.resolve(null);
+    const refreshRequest: Promise<RemoteDiagnosticsRefreshResult> = Promise.all([
+        settleRequest(pluginApi.getRemoteDiagnosticsClients<unknown>(profileFilter || undefined, {
+            bypassCache: true
+        })),
+        settleRequest(pluginApi.getJellyfinSessions<unknown>({
+            activeWithinSeconds: 300,
+            controllableByUserId: pluginApi.getCurrentUserId?.()
+        })),
+        settleRequest(storageRequest)
+    ]);
+
+    remoteDiagnosticsRefreshInFlight.set(refreshKey, refreshRequest);
+    void refreshRequest.then(() => {
+        if (remoteDiagnosticsRefreshInFlight.get(refreshKey) === refreshRequest) {
+            remoteDiagnosticsRefreshInFlight.delete(refreshKey);
+        }
+    });
+
+    return refreshRequest;
+}
+
+function normalizeRemoteDiagnosticsRefreshResult(
+    [clientsResult, sessionsResult, storageResult]: RemoteDiagnosticsRefreshResult
+) {
+    const clients = clientsResult.status === 'fulfilled' ?
+        normalizeRemoteDiagnosticsClients(clientsResult.value) :
+        null;
+    const sessions = sessionsResult.status === 'fulfilled' ?
+        normalizeDetectedJellyfinSessions(sessionsResult.value, clients || []) :
+        null;
+
+    return {
+        clientError: clientsResult.status === 'rejected' ? clientsResult.reason : null,
+        clients,
+        sessionError: sessionsResult.status === 'rejected' ? sessionsResult.reason : null,
+        sessions,
+        storage: storageResult.status === 'fulfilled' ? storageResult.value : null
+    };
+}
+
 function downloadJson(value: unknown, filename: string) {
     const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
     // eslint-disable-next-line compat/compat -- Supported by every runtime targeted by the PiggieTV dashboard.
@@ -794,6 +871,7 @@ export function RemoteDiagnosticsPanel() {
     const [sessionsLoadState, setSessionsLoadState] = useState<SessionsLoadState>('loading');
     const [statusMessage, setStatusMessage] = useState('');
     const [storage, setStorage] = useState<DiagnosticsStorageStatus | null>(null);
+    const refreshGenerationRef = useRef(0);
 
     const selectedClient = useMemo(
         () => clients.find(client => client.clientId === selectedClientId) || null,
@@ -805,46 +883,47 @@ export function RemoteDiagnosticsPanel() {
     const selectedClientSupportsReportExport = selectedClient?.capabilities.reportExport === true;
 
     const refreshClients = useCallback(async (quiet = false) => {
-        if (!quiet) setBusyAction('refresh');
-        if (!quiet) setClientLoadState('loading');
+        if (!quiet) {
+            setBusyAction('refresh');
+            setClientLoadState('loading');
+        }
+        const refreshGeneration = ++refreshGenerationRef.current;
 
         try {
             const pluginApi = getPluginApi();
-            const refreshProfile = profileFilter || '';
+            const serverId = String(getPtvServerId() || '');
+            const refreshResult = normalizeRemoteDiagnosticsRefreshResult(
+                await getRemoteDiagnosticsRefreshRequest(pluginApi, profileFilter, serverId)
+            );
+            if (refreshGeneration !== refreshGenerationRef.current || String(getPtvServerId() || '') !== serverId) return;
 
-            if (!remoteDiagnosticsRefreshInFlight || remoteDiagnosticsRefreshProfile !== refreshProfile) {
-                remoteDiagnosticsRefreshProfile = refreshProfile;
-                remoteDiagnosticsRefreshInFlight = Promise.all([
-                    pluginApi.getRemoteDiagnosticsClients<unknown>(profileFilter || undefined, {
-                        bypassCache: true
-                    }),
-                    pluginApi.getJellyfinSessions<unknown>({
-                        activeWithinSeconds: 300,
-                        controllableByUserId: pluginApi.getCurrentUserId?.()
-                    }),
-                    typeof pluginApi.getRemoteDiagnosticsStorage === 'function'
-                        ? pluginApi.getRemoteDiagnosticsStorage<DiagnosticsStorageStatus>({ bypassCache: true }).catch(() => null)
-                        : Promise.resolve(null)
-                ]).finally(() => {
-                    remoteDiagnosticsRefreshInFlight = null;
+            const failures: unknown[] = [];
+
+            if (refreshResult.clients) {
+                setClients(refreshResult.clients);
+                setClientLoadState(refreshResult.clients.length ? 'success' : 'empty');
+                setSelectedClientId(previousId => {
+                    if (refreshResult.clients?.some(client => client.clientId === previousId)) return previousId;
+
+                    return refreshResult.clients?.[0]?.clientId || '';
                 });
+            } else {
+                failures.push(refreshResult.clientError);
+                setClientLoadState('error');
             }
 
-            const [rawClients, rawSessions, rawStorage] = await remoteDiagnosticsRefreshInFlight;
-            const nextClients = normalizeRemoteDiagnosticsClients(rawClients);
-            const nextSessions = normalizeDetectedJellyfinSessions(rawSessions, nextClients);
+            if (refreshResult.sessions) {
+                setDetectedSessions(refreshResult.sessions);
+                setSessionsLoadState(refreshResult.sessions.length ? 'success' : 'empty');
+            } else {
+                failures.push(refreshResult.sessionError);
+                setSessionsLoadState('error');
+            }
 
-            setDetectedSessions(nextSessions);
-            setSessionsLoadState(nextSessions.length ? 'success' : 'empty');
-            setClients(nextClients);
-            setClientLoadState(nextClients.length ? 'success' : 'empty');
-            setStorage(rawStorage);
-            setSelectedClientId(previousId => {
-                if (nextClients.some(client => client.clientId === previousId)) return previousId;
+            setStorage(refreshResult.storage);
+            const nextErrorMessage = failures.map(getApiErrorMessage).join(' ');
 
-                return nextClients[0]?.clientId || '';
-            });
-            setErrorMessage('');
+            if (!quiet || !nextErrorMessage) setErrorMessage(nextErrorMessage);
         } catch (error) {
             setClientLoadState('error');
             setSessionsLoadState('error');
@@ -861,7 +940,10 @@ export function RemoteDiagnosticsPanel() {
             refreshClients(true).catch(() => undefined);
         }, 30_000);
 
-        return () => window.clearInterval(timer);
+        return () => {
+            window.clearInterval(timer);
+            refreshGenerationRef.current += 1;
+        };
     }, [refreshClients]);
 
     useEffect(() => {
@@ -923,10 +1005,19 @@ export function RemoteDiagnosticsPanel() {
 
             if (!nextReport) throw new Error('Remote diagnostics report response is invalid.');
 
-            setReport(nextReport);
+            const safeReport = {
+                ...nextReport,
+                report: redactPtvSensitiveValue(nextReport.report, {
+                    maxArrayItems: 120,
+                    maxDepth: 9,
+                    maxObjectKeys: 160,
+                    maxStringLength: 1600
+                })
+            };
+
+            setReport(safeReport);
             if (download) {
-                const timestamp = nextReport.receivedAtUtc.replace(/[:.]/g, '-');
-                downloadJson(nextReport.report, `piggie-tv-diagnostics-${selectedClientId}-${timestamp}.json`);
+                downloadJson(safeReport.report, getRemoteDiagnosticsReportFilename(safeReport.receivedAtUtc));
                 setStatusMessage('Diagnostics report downloaded locally.');
             }
         } catch (error) {
@@ -970,6 +1061,34 @@ export function RemoteDiagnosticsPanel() {
             setBusyAction(null);
         }
     }, [refreshClients]);
+    const handleRefreshStorage = useCallback(() => {
+        void runStorageAction('refresh-storage', () => Promise.resolve(), 'Diagnostics storage refreshed.');
+    }, [runStorageAction]);
+    const handleRotateStorage = useCallback(() => {
+        void runStorageAction('rotate-storage', () => getPluginApi().rotateRemoteDiagnosticsStorage(), 'Diagnostics log rotated.');
+    }, [runStorageAction]);
+    const handleDownloadStorage = useCallback(() => {
+        window.open(getPluginApi().getRemoteDiagnosticsStorageDownloadUrl(), '_blank', 'noopener');
+    }, []);
+    const handleDownloadStorageBundle = useCallback(() => {
+        window.open(getPluginApi().getRemoteDiagnosticsStorageBundleUrl(), '_blank', 'noopener');
+    }, []);
+    const handleConsolidateStorage = useCallback(() => {
+        void runStorageAction(
+            'consolidate-storage',
+            () => getPluginApi().consolidateRemoteDiagnosticsStorage(),
+            'Legacy PTV diagnostics consolidated.',
+            'Archive and remove only recognized legacy PTV diagnostic files?'
+        );
+    }, [runStorageAction]);
+    const handleClearStorage = useCallback(() => {
+        void runStorageAction(
+            'clear-storage',
+            () => getPluginApi().clearRemoteDiagnosticsStorage(),
+            'Rolling diagnostics logs cleared.',
+            'Delete all current PTV rolling diagnostic logs?'
+        );
+    }, [runStorageAction]);
 
     return (
         <Stack spacing={1.25} data-ptv-remote-diagnostics-admin>
@@ -1062,19 +1181,19 @@ export function RemoteDiagnosticsPanel() {
             <Typography variant='h4'>Diagnostics storage</Typography>
             {storage ? (
                 <Stack className='ptv-dashboard-status-list' spacing={0.5}>
-                    <Typography>Active log: {storage.activeLogPath || 'unavailable'} ({formatBytes(storage.activeFileSizeBytes)})</Typography>
+                    <Typography>Active log: {storage.activeLogPath ? 'Available' : 'Unavailable'} ({formatBytes(storage.activeFileSizeBytes)})</Typography>
                     <Typography>Retained: {storage.rotatedFileCount} rotation(s), {formatBytes(storage.totalRetainedBytes)}, oldest {formatTimestamp(storage.oldestRetainedAtUtc)}, {storage.retentionDays} day retention</Typography>
                     <Typography>Events: {storage.eventsWritten} written, {storage.eventsAggregated} aggregated, {storage.duplicateEventsSuppressed} duplicates suppressed, {storage.eventsDropped} dropped, {storage.eventsQueued} queued</Typography>
                     <Typography>Health: {storage.writeFailures} write failure(s), last rotation {formatTimestamp(storage.lastRotationUtc)}, legacy files {storage.legacyFileCount} ({formatBytes(storage.legacyFileSizeBytes)})</Typography>
                 </Stack>
             ) : <Typography color='text.secondary'>Rolling diagnostics storage is unavailable on this plugin build.</Typography>}
             <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
-                <Button disabled={busyAction !== null} onClick={() => runStorageAction('refresh-storage', async () => undefined, 'Diagnostics storage refreshed.') } variant='outlined'>Refresh storage</Button>
-                <Button disabled={!storage || busyAction !== null} onClick={() => runStorageAction('rotate-storage', () => getPluginApi().rotateRemoteDiagnosticsStorage(), 'Diagnostics log rotated.') } variant='outlined'>Rotate now</Button>
-                <Button disabled={!storage || busyAction !== null} onClick={() => window.open(getPluginApi().getRemoteDiagnosticsStorageDownloadUrl(), '_blank', 'noopener') } variant='outlined'>Download current log</Button>
-                <Button disabled={!storage || busyAction !== null} onClick={() => window.open(getPluginApi().getRemoteDiagnosticsStorageBundleUrl(), '_blank', 'noopener') } variant='outlined'>Download bundle</Button>
-                <Button color='warning' disabled={!storage || busyAction !== null} onClick={() => runStorageAction('consolidate-storage', () => getPluginApi().consolidateRemoteDiagnosticsStorage(), 'Legacy PTV diagnostics consolidated.', 'Archive and remove only recognized legacy PTV diagnostic files?') } variant='outlined'>Consolidate legacy logs</Button>
-                <Button color='error' disabled={!storage || busyAction !== null} onClick={() => runStorageAction('clear-storage', () => getPluginApi().clearRemoteDiagnosticsStorage(), 'Rolling diagnostics logs cleared.', 'Delete all current PTV rolling diagnostic logs?') } variant='outlined'>Clear diagnostic logs</Button>
+                <Button disabled={busyAction !== null} onClick={handleRefreshStorage} variant='outlined'>Refresh storage</Button>
+                <Button disabled={!storage || busyAction !== null} onClick={handleRotateStorage} variant='outlined'>Rotate now</Button>
+                <Button disabled={!storage || busyAction !== null} onClick={handleDownloadStorage} variant='outlined'>Download current log</Button>
+                <Button disabled={!storage || busyAction !== null} onClick={handleDownloadStorageBundle} variant='outlined'>Download bundle</Button>
+                <Button color='warning' disabled={!storage || busyAction !== null} onClick={handleConsolidateStorage} variant='outlined'>Consolidate legacy logs</Button>
+                <Button color='error' disabled={!storage || busyAction !== null} onClick={handleClearStorage} variant='outlined'>Clear diagnostic logs</Button>
             </Stack>
             {report ? (
                 <Box

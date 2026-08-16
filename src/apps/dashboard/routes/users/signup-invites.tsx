@@ -1,3 +1,6 @@
-import InviteAdminPage from 'ptv/modules/signup/InviteAdminPage';
+import React from 'react';
+import { Navigate } from 'react-router-dom';
 
-export const Component = InviteAdminPage;
+export function Component() {
+    return <Navigate replace to='/settings/admin/users/signup-invites' />;
+}

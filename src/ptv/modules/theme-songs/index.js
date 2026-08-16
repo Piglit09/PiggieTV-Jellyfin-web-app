@@ -7,6 +7,7 @@ import { toApi } from '../../../utils/jellyfin-apiclient/compat';
 import { registerModule } from '../../core/lifecycle';
 import { watchElement } from '../../core/observer';
 import { createPtvAbortController } from '../../core/abortController';
+import { ptvSafeConsole } from '../../core/safeConsole';
 
 import './theme-songs.scss';
 
@@ -257,7 +258,7 @@ function enhanceThemeSongs(generation = lifecycleGeneration) {
     try {
         identity = createThemeIdentity(serverId, id);
     } catch (err) {
-        console.warn('[PiggieTV] Theme song lookup failed', err);
+        ptvSafeConsole.warn('[PiggieTV] Theme song lookup failed', err);
         removeChip(page);
 
         return Promise.resolve();
@@ -281,7 +282,7 @@ function enhanceThemeSongs(generation = lifecycleGeneration) {
         } catch (err) {
             if (!isCurrentEnhancement(generation, page, identity)) return;
 
-            console.warn('[PiggieTV] Theme song lookup failed', err);
+            ptvSafeConsole.warn('[PiggieTV] Theme song lookup failed', err);
             removeChip(page);
         }
     })();

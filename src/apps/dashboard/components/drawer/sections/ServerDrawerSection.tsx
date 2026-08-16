@@ -69,7 +69,7 @@ const ServerDrawerSection = () => {
                 </ListItemLink>
             </ListItem>
             <ListItem disablePadding>
-                <ListItemLink to='/dashboard/piggietv'>
+                <ListItemLink to='/settings/admin/piggietv'>
                     <ListItemIcon>
                         <Dashboard />
                     </ListItemIcon>
@@ -77,7 +77,7 @@ const ServerDrawerSection = () => {
                 </ListItemLink>
             </ListItem>
             <ListItem disablePadding>
-                <ListItemLink to='/dashboard/piggietv/rows'>
+                <ListItemLink to='/settings/admin/piggietv/rows'>
                     <ListItemIcon>
                         <Dashboard />
                     </ListItemIcon>
@@ -85,7 +85,7 @@ const ServerDrawerSection = () => {
                 </ListItemLink>
             </ListItem>
             <ListItem disablePadding>
-                <ListItemLink to='/dashboard/piggietv/diagnostics'>
+                <ListItemLink to='/settings/admin/piggietv/diagnostics'>
                     <ListItemIcon>
                         <Dashboard />
                     </ListItemIcon>
@@ -107,7 +107,7 @@ const ServerDrawerSection = () => {
                 <ListItemText primary={globalize.translate('HeaderBranding')} />
             </ListItemLink>
             <ListItem disablePadding>
-                <ListItemLink to='/dashboard/users'>
+                <ListItemLink to='/settings/admin/users'>
                     <ListItemIcon>
                         <People />
                     </ListItemIcon>

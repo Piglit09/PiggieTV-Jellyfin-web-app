@@ -88,6 +88,143 @@ describe('plugin API authentication startup', () => {
         expect(diagnostics.attemptedResponses.slice(-3).every(entry => entry.durationMs >= 0)).toBe(true);
     });
 
+    it('keeps general and signup settings response caches isolated', async () => {
+        const getJSON = vi.fn(async (url: string) => url.endsWith('/Ptv/v1/settings') ?
+            { generalSetting: true } :
+            { policyPresets: [{ id: 'standard' }] });
+
+        connectionMocks.client = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'user',
+            getJSON,
+            getUrl: path => `http://localhost:8096/${path}`
+        };
+
+        const pluginApi = getCurrentPtvPluginApiClient(connectionMocks.client)!;
+        const generalSettings = await pluginApi.getSettings<{ generalSetting: boolean }>();
+        const signupSettings = await pluginApi.getSignupSettings<{ policyPresets: Array<{ id: string }> }>();
+
+        expect(generalSettings.generalSetting).toBe(true);
+        expect(signupSettings.policyPresets).toEqual([{ id: 'standard' }]);
+        expect(getJSON).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps cached plugin reads isolated when the active Jellyfin server changes', async () => {
+        const firstGetJSON = vi.fn(async () => ({ server: 'first' }));
+        const nextGetJSON = vi.fn(async () => ({ server: 'next' }));
+        const firstClient = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'user',
+            getJSON: firstGetJSON,
+            getUrl: (path: string) => `https://media.example.test/${path}`,
+            serverId: () => 'server-a'
+        };
+        const nextClient = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'user',
+            getJSON: nextGetJSON,
+            getUrl: (path: string) => `https://media.example.test/${path}`,
+            serverId: () => 'server-b'
+        };
+
+        connectionMocks.client = firstClient;
+        const firstSettings = await getCurrentPtvPluginApiClient(firstClient)!.getSettings();
+
+        connectionMocks.client = nextClient;
+        const nextSettings = await getCurrentPtvPluginApiClient(nextClient)!.getSettings();
+
+        expect(firstSettings).toEqual({ server: 'first' });
+        expect(nextSettings).toEqual({ server: 'next' });
+        expect(firstGetJSON).toHaveBeenCalledOnce();
+        expect(nextGetJSON).toHaveBeenCalledOnce();
+    });
+
+    it('does not deduplicate concurrent plugin reads across Jellyfin servers', async () => {
+        let resolveFirst: ((value: unknown) => void) | undefined;
+        let resolveNext: ((value: unknown) => void) | undefined;
+        const firstGetJSON = vi.fn(() => new Promise(resolve => {
+            resolveFirst = resolve;
+        }));
+        const nextGetJSON = vi.fn(() => new Promise(resolve => {
+            resolveNext = resolve;
+        }));
+        const firstClient = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'user',
+            getJSON: firstGetJSON,
+            getUrl: (path: string) => `https://media.example.test/${path}`,
+            serverId: () => 'server-a'
+        };
+        const nextClient = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'user',
+            getJSON: nextGetJSON,
+            getUrl: (path: string) => `https://media.example.test/${path}`,
+            serverId: () => 'server-b'
+        };
+
+        connectionMocks.client = firstClient;
+        const firstSettings = getCurrentPtvPluginApiClient(firstClient)!.getSettings();
+
+        connectionMocks.client = nextClient;
+        const nextSettings = getCurrentPtvPluginApiClient(nextClient)!.getSettings();
+
+        expect(firstGetJSON).toHaveBeenCalledOnce();
+        expect(nextGetJSON).toHaveBeenCalledOnce();
+
+        resolveFirst?.({ server: 'first' });
+        resolveNext?.({ server: 'next' });
+
+        await expect(firstSettings).resolves.toEqual({ server: 'first' });
+        await expect(nextSettings).resolves.toEqual({ server: 'next' });
+    });
+
+    it('loads administrator profile summaries from the dedicated batch route', async () => {
+        const getJSON = vi.fn(async () => ({ ok: true, users: [] }));
+
+        connectionMocks.client = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'admin-user',
+            getJSON,
+            getUrl: path => `http://localhost:8096/${path}`
+        };
+
+        const pluginApi = getCurrentPtvPluginApiClient(connectionMocks.client)!;
+
+        await expect(pluginApi.getAccountAdminUsers()).resolves.toEqual({ ok: true, users: [] });
+        expect(getJSON).toHaveBeenCalledWith(
+            'http://localhost:8096/Ptv/v1/account/admin/users',
+            true
+        );
+    });
+
+    it('deduplicates only identical settings routes while both are in flight', async () => {
+        const pendingRequests = new Map<string, (value: unknown) => void>();
+        const getJSON = vi.fn((url: string) => new Promise(resolve => pendingRequests.set(url, resolve)));
+
+        connectionMocks.client = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'user',
+            getJSON,
+            getUrl: path => `http://localhost:8096/${path}`
+        };
+
+        const pluginApi = getCurrentPtvPluginApiClient(connectionMocks.client)!;
+        const generalSettings = pluginApi.getSettings();
+        const firstSignupSettings = pluginApi.getSignupSettings();
+        const secondSignupSettings = pluginApi.getSignupSettings();
+
+        await Promise.resolve();
+        expect(getJSON).toHaveBeenCalledTimes(2);
+
+        pendingRequests.get('http://localhost:8096/Ptv/v1/settings')?.({ generalSetting: true });
+        pendingRequests.get('http://localhost:8096/Ptv/v1/signup/admin/settings')?.({ policyPresets: [] });
+
+        await expect(generalSettings).resolves.toEqual({ generalSetting: true });
+        await expect(firstSignupSettings).resolves.toEqual({ policyPresets: [] });
+        await expect(secondSignupSettings).resolves.toEqual({ policyPresets: [] });
+    });
+
     it('uses the authenticated window client during a direct dashboard load', async () => {
         const getJSON = vi.fn(async (url: string) => ({ url }));
         const windowClient = {

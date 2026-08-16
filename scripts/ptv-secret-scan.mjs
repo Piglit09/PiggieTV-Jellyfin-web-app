@@ -1,13 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { extname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import process from 'node:process';
 
+import { findPotentialSecretLabels, isSecretScanCandidatePath } from './ptv-secret-scan-rules.mjs';
+
 const ROOT = process.argv[2] ? resolve(process.argv[2]) : resolve(import.meta.dirname, '..');
-const INCLUDED_EXTENSIONS = new Set([
-    '.cs', '.css', '.html', '.js', '.json', '.jsx', '.md', '.mjs', '.scss',
-    '.ts', '.tsx', '.yaml', '.yml'
-]);
 const EXCLUDED_PREFIXES = [
     '.dotnet-home/',
     'node_modules/',
@@ -16,15 +14,6 @@ const EXCLUDED_PREFIXES = [
     'src/ptv/plugin/Jellyfin.Plugin.PiggieTV/bin/',
     'src/ptv/plugin/Jellyfin.Plugin.PiggieTV/obj/'
 ];
-const RULES = [
-    ['private key', /-----BEGIN (?:EC |OPENSSH |PGP |RSA )?PRIVATE KEY-----/],
-    ['GitHub token', /\bgh[opsu]_[A-Za-z0-9]{30,}\b/],
-    ['Google API key', /\bAIza[0-9A-Za-z_-]{30,}\b/],
-    ['JWT', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/],
-    ['authorization literal', /\bAuthorization\s*[:=]\s*["'](?:Basic|Bearer)\s+[^\s"']{12,}["']/i],
-    ['credential assignment', /\b(?:apiKey|password|secret|token)\s*[:=]\s*["'][^"'\s]{16,}["']/i]
-];
-
 const gitCandidates = process.platform === 'win32' ?
     [
         resolve(process.env.ProgramFiles || 'C:/Program Files', 'Git/cmd/git.exe'),
@@ -44,7 +33,7 @@ const findings = [];
 for (const filePath of repositoryFiles) {
     const normalizedPath = filePath.replaceAll('\\', '/');
     if (EXCLUDED_PREFIXES.some(prefix => normalizedPath.startsWith(prefix))) continue;
-    if (!INCLUDED_EXTENSIONS.has(extname(normalizedPath).toLowerCase())) continue;
+    if (!isSecretScanCandidatePath(normalizedPath)) continue;
 
     let content;
     try {
@@ -53,8 +42,8 @@ for (const filePath of repositoryFiles) {
         continue;
     }
 
-    for (const [label, pattern] of RULES) {
-        if (pattern.test(content)) findings.push(`${normalizedPath}: ${label}`);
+    for (const label of findPotentialSecretLabels(content)) {
+        findings.push(`${normalizedPath}: ${label}`);
     }
 }
 

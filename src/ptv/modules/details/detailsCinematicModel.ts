@@ -1033,19 +1033,17 @@ export function buildPtvCinematicDetailsModel(
         ...getMetadataEntityCards(discoveryLinks, usedItemIds, usedEntityNames)
     ].slice(0, ENTITY_CARD_LIMIT);
 
-    if (entityCards.length) {
-        pushShelf({
-            description: 'Open authoritative people, studio, network, collection, and franchise destinations.',
-            id: 'universe-entities',
-            items: entityCards,
-            orderLabel: 'Explicit metadata',
-            presentation: 'entities',
-            relationship: 'shared-creator',
-            title: 'Explore this universe'
-        });
-    }
-
     pushShelf(createAuthoritativeRelationshipShelf(authoritativeRelationships, usedItemIds, item));
+
+    const explicitScores = scores.filter(score => hasExplicitConnection(item, score.item as PtvRecord));
+    pushShelf(createMediaShelf({
+        description: 'Related through exact creator, studio, network, tag, genre, artist, or series metadata.',
+        id: 'explicit-connections',
+        orderLabel: 'Evidence match',
+        presentation: 'cards',
+        relationship: getExplicitShelfRelationship(item, explicitScores),
+        title: getExplicitShelfTitle(family)
+    }, explicitScores, usedItemIds, item, 'Explicit metadata connection'));
 
     const preferredRow = getPreferredRecommendationRow(family, data.rows);
 
@@ -1062,15 +1060,17 @@ export function buildPtvCinematicDetailsModel(
         }, preferredRow.items, usedItemIds, item, 'Similar Watch History', null, 'Similar Watch History'));
     }
 
-    const explicitScores = scores.filter(score => hasExplicitConnection(item, score.item as PtvRecord));
-    pushShelf(createMediaShelf({
-        description: 'Related through exact creator, studio, network, tag, genre, artist, or series metadata.',
-        id: 'explicit-connections',
-        orderLabel: 'Evidence match',
-        presentation: 'cards',
-        relationship: getExplicitShelfRelationship(item, explicitScores),
-        title: getExplicitShelfTitle(family)
-    }, explicitScores, usedItemIds, item, 'Explicit metadata connection'));
+    if (entityCards.length) {
+        pushShelf({
+            description: 'Open authoritative people, studio, network, collection, and franchise destinations.',
+            id: 'universe-entities',
+            items: entityCards,
+            orderLabel: 'Explicit metadata',
+            presentation: 'entities',
+            relationship: 'shared-creator',
+            title: 'People and places'
+        });
+    }
 
     const hiddenGems = data.rows.find(row => row.id === 'hidden-gems');
 

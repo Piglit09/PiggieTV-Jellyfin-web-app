@@ -12,6 +12,9 @@ const focusMocks = vi.hoisted(() => ({
 const relationshipMocks = vi.hoisted(() => ({
     getRelationships: vi.fn()
 }));
+const relatedMocks = vi.hoisted(() => ({
+    getRelatedItems: vi.fn()
+}));
 const routeMocks = vi.hoisted(() => ({
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- The optional argument keeps mock call tuples aligned with the resolver contract.
     resolve: vi.fn((item: { Id?: string; Type?: string }, _options?: { mediaType?: string }) => ({
@@ -53,6 +56,10 @@ vi.mock('../../core/tvFocus', () => ({
 
 vi.mock('./detailsAuthoritativeRelationships', () => ({
     getPtvAuthoritativeRelationships: relationshipMocks.getRelationships
+}));
+
+vi.mock('./detailsRelatedSource', () => ({
+    loadPtvDetailRelatedItems: relatedMocks.getRelatedItems
 }));
 
 import type { PtvRecommendationHomeData } from '../recommendations/types/recommendationTypes';
@@ -102,6 +109,8 @@ describe('cinematic Details experience', () => {
         focusMocks.focusElement.mockReset();
         relationshipMocks.getRelationships.mockReset();
         relationshipMocks.getRelationships.mockResolvedValue([]);
+        relatedMocks.getRelatedItems.mockReset();
+        relatedMocks.getRelatedItems.mockResolvedValue([]);
         routeMocks.resolve.mockReset();
         routeMocks.resolve.mockImplementation((item: { Id?: string }) => ({
             fallbackReason: '',
@@ -163,12 +172,47 @@ describe('cinematic Details experience', () => {
         });
 
         expect(section?.getAttribute('data-ptv-source-settled')).toBe('false');
+        expect(relatedMocks.getRelatedItems).toHaveBeenCalledWith(expect.objectContaining({ Id: 'seed' }), expect.objectContaining({
+            includeSimilar: false,
+            includeStudios: false
+        }));
         expect(section?.querySelectorAll('.ptv-cinematic-card')).toHaveLength(1);
 
         await vi.advanceTimersByTimeAsync(8000);
 
         expect(section?.getAttribute('data-ptv-source-settled')).toBe('retired');
         expect(section?.querySelectorAll('.ptv-cinematic-card')).toHaveLength(1);
+    });
+
+    it('renders exact library relationships after the broad source retires', async () => {
+        vi.useFakeTimers();
+        recommendationMocks.getHomeData.mockReturnValue(new Promise(() => undefined));
+        let resolveRelated!: (items: Array<Record<string, unknown>>) => void;
+
+        relatedMocks.getRelatedItems.mockReturnValue(new Promise(resolve => {
+            resolveRelated = resolve;
+        }));
+
+        const director = { Id: 'director', Name: 'Exact Director', Type: 'Director' };
+        const section = await loadPtvCinematicDetailsElement({
+            Id: 'seed',
+            Name: 'Seed',
+            People: [director],
+            Type: 'Movie'
+        });
+
+        await vi.advanceTimersByTimeAsync(8000);
+        resolveRelated([{
+            Id: 'related',
+            Name: 'Related',
+            People: [director],
+            Type: 'Movie'
+        }]);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(section?.getAttribute('data-ptv-source-settled')).toBe('retired');
+        expect(section?.querySelector('[data-ptv-shelf-id="explicit-connections"] .ptv-cinematic-card__title')?.textContent)
+            .toBe('Related');
     });
 
     it('renders an authoritative relationship without waiting for recommendation scans', async () => {

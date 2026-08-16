@@ -3,7 +3,12 @@ import { getPtvItemImageCandidates, type PtvItemImageCandidate } from '../../api
 import { recordPtvItemRouteClick, resolvePtvItemRoute } from '../../core/itemRoutes';
 import { focusPtvTvElement } from '../../core/tvFocus';
 import { getPtvRecommendationHomeData } from '../recommendations/engine/recommendationEngine';
-import type { PtvRecommendationHomeData } from '../recommendations/types/recommendationTypes';
+import type {
+    PtvRecommendationHomeData,
+    PtvRecommendationItem,
+    PtvRecommendationMediaType,
+    PtvRecommendationScore
+} from '../recommendations/types/recommendationTypes';
 import {
     buildPtvCinematicDetailsModel,
     getPtvCinematicMediaFamily,
@@ -19,6 +24,11 @@ import {
     getPtvDetailsDiscoveryLinks,
     type PtvDetailsDiscoveryItem
 } from './detailsDiscoveryModel';
+import {
+    rankPtvRelatedVideoItems,
+    type PtvRelatedVideoItem
+} from './detailsRelatedRecommendations';
+import { loadPtvDetailRelatedItems } from './detailsRelatedSource';
 
 type PtvCinematicLoadOptions = Readonly<{
     signal?: AbortSignal;
@@ -32,6 +42,40 @@ type PtvCinematicRenderOptions = Readonly<{
 
 const CINEMATIC_HEADING_ID = 'ptv-cinematic-details-heading';
 const CINEMATIC_ENRICHMENT_TIMEOUT_MS = 8000;
+
+function getRelatedMediaType(item: PtvRelatedVideoItem): PtvRecommendationMediaType {
+    const type = String(item.Type || '').toLocaleLowerCase();
+
+    if (type === 'audio' || type === 'musicalbum' || type === 'musicartist') return 'music';
+    if (type === 'book' || type === 'audiobook' || type === 'comic' || type === 'manga') return 'book';
+    if (type === 'series' || type === 'season' || type === 'episode') return 'show';
+
+    return 'movie';
+}
+
+function mergeRelatedRecommendationData(
+    data: PtvRecommendationHomeData,
+    items: readonly PtvRelatedVideoItem[]
+): PtvRecommendationHomeData {
+    const relatedScores: PtvRecommendationScore[] = items.map((item, index) => ({
+        affinityScore: Math.max(1, 1000 - index),
+        discoveryWeight: 0,
+        item: item as PtvRecommendationItem,
+        mediaType: getRelatedMediaType(item),
+        reasons: [{
+            category: 'studios',
+            label: 'Related library metadata',
+            score: Math.max(1, 1000 - index)
+        }],
+        score: Math.max(1, 1000 - index),
+        source: 'details-related-library'
+    }));
+
+    return {
+        ...data,
+        candidates: [ ...relatedScores, ...data.candidates ]
+    };
+}
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
     tagName: K,
@@ -324,7 +368,10 @@ export async function loadPtvCinematicDetailsElement(
 
     // eslint-disable-next-line compat/compat -- Jellyfin loads the AbortController polyfill before PTV starts.
     const enrichmentController = new AbortController();
+    // eslint-disable-next-line compat/compat -- Jellyfin loads the AbortController polyfill before PTV starts.
+    const relatedController = new AbortController();
     const requestSignal = enrichmentController.signal;
+    const relatedSignal = relatedController.signal;
     const discoveryLinks = getPtvDetailsDiscoveryLinks(item as PtvDetailsDiscoveryItem);
     const relationshipPromise = getPtvAuthoritativeRelationships(String(item.Id || ''), {
         serverId: String(item.ServerId || '') || null,
@@ -339,6 +386,12 @@ export async function loadPtvCinematicDetailsElement(
         serverId: String(item.ServerId || '') || null,
         signal: requestSignal
     });
+    const relatedPromise = loadPtvDetailRelatedItems(item as PtvRelatedVideoItem, {
+        includeSimilar: false,
+        includeStudios: false,
+        serverId: String(item.ServerId || '') || null,
+        signal: relatedSignal
+    }).then(items => rankPtvRelatedVideoItems(item as PtvRelatedVideoItem, items, items.length));
     const emptyData: PtvRecommendationHomeData = {
         candidates: [],
         generatedAt: 0,
@@ -355,16 +408,17 @@ export async function loadPtvCinematicDetailsElement(
     const initialModel = buildPtvCinematicDetailsModel(item, emptyData, discoveryLinks);
     const initialSection = initialModel.shelves.length ? createPtvCinematicDetailsElement(initialModel, {
         progressive: true,
-        signal: requestSignal,
+        signal: options.signal,
         sourceSettled: false
     }) : createPtvCinematicDetailsSkeleton(item);
 
     initialSection.dataset.ptvSourceSettled = 'false';
     let sourceRetired = false;
     let timeoutId: number | null = null;
-    let retireSource = () => undefined;
-    let pendingEnrichments = 2;
+    let abortEnrichment = () => undefined;
+    let pendingEnrichments = 3;
     let currentData = emptyData;
+    let currentRelatedItems: PtvRelatedVideoItem[] = [];
     let currentRelationships: Awaited<typeof relationshipPromise> = [];
     let sourceState: 'failed' | 'pending' | 'settled' = 'pending';
     const discardEmptySection = () => {
@@ -377,7 +431,7 @@ export async function loadPtvCinematicDetailsElement(
     const releaseSource = () => {
         if (timeoutId !== null) window.clearTimeout(timeoutId);
         timeoutId = null;
-        options.signal?.removeEventListener('abort', retireSource);
+        options.signal?.removeEventListener('abort', abortEnrichment);
     };
     const finishEnrichment = () => {
         pendingEnrichments = Math.max(0, pendingEnrichments - 1);
@@ -387,14 +441,19 @@ export async function loadPtvCinematicDetailsElement(
         discardEmptySection();
     };
     const renderEnrichment = () => {
-        if (requestSignal.aborted || sourceRetired) return;
+        if (options.signal?.aborted) return;
 
-        const enrichedModel = buildPtvCinematicDetailsModel(item, currentData, discoveryLinks, currentRelationships);
+        const enrichedModel = buildPtvCinematicDetailsModel(
+            item,
+            mergeRelatedRecommendationData(currentData, currentRelatedItems),
+            discoveryLinks,
+            currentRelationships
+        );
 
         if (!enrichedModel.shelves.length) return;
 
         const enrichedSection = createPtvCinematicDetailsElement(enrichedModel, {
-            signal: requestSignal,
+            signal: options.signal,
             sourceSettled: sourceState === 'settled'
         });
         const activeElement = initialSection.ownerDocument.activeElement;
@@ -413,7 +472,8 @@ export async function loadPtvCinematicDetailsElement(
         Array.from(enrichedSection.attributes).forEach(attribute => {
             initialSection.setAttribute(attribute.name, attribute.value);
         });
-        if (sourceState === 'failed') initialSection.dataset.ptvSourceSettled = 'failed';
+        if (sourceRetired) initialSection.dataset.ptvSourceSettled = 'retired';
+        else if (sourceState === 'failed') initialSection.dataset.ptvSourceSettled = 'failed';
         initialSection.replaceChildren(...enrichedSection.childNodes);
         railOffsets.forEach((scrollLeft, shelfId) => {
             const rail = Array.from(initialSection.querySelectorAll<HTMLElement>('[data-ptv-shelf-id]'))
@@ -432,28 +492,46 @@ export async function loadPtvCinematicDetailsElement(
         }
     };
 
-    retireSource = () => {
+    const retireSource = () => {
         sourceRetired = true;
         initialSection.dataset.ptvSourceSettled = 'retired';
         if (!requestSignal.aborted) enrichmentController.abort();
+        discardEmptySection();
+        timeoutId = null;
+    };
+    abortEnrichment = () => {
+        sourceRetired = true;
+        initialSection.dataset.ptvSourceSettled = 'retired';
+        if (!requestSignal.aborted) enrichmentController.abort();
+        if (!relatedSignal.aborted) relatedController.abort();
         discardEmptySection();
         releaseSource();
     };
 
     timeoutId = window.setTimeout(retireSource, CINEMATIC_ENRICHMENT_TIMEOUT_MS);
-    options.signal?.addEventListener('abort', retireSource, { once: true });
+    options.signal?.addEventListener('abort', abortEnrichment, { once: true });
 
     void relationshipPromise.then(relationships => {
         currentRelationships = relationships;
         renderEnrichment();
     }).catch(() => undefined).finally(finishEnrichment);
 
+    void relatedPromise.then(items => {
+        currentRelatedItems = items;
+        renderEnrichment();
+    }).catch(error => {
+        if (relatedSignal.aborted || error?.name === 'AbortError') return;
+    }).finally(finishEnrichment);
+
     void sourcePromise.then(data => {
+        if (sourceRetired) return;
+
         currentData = data;
         sourceState = 'settled';
         renderEnrichment();
     }).catch(error => {
         if (requestSignal.aborted || error?.name === 'AbortError') return;
+        if (sourceRetired) return;
 
         sourceState = 'failed';
         renderEnrichment();

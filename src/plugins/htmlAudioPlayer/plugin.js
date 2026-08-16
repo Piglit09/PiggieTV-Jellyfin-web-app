@@ -1,5 +1,6 @@
 import { AppFeature } from 'constants/appFeature';
 import { MediaError } from 'types/mediaError';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 import browser from '../../scripts/browser';
 import { appHost } from '../../components/apphost';
@@ -113,7 +114,7 @@ class HtmlAudioPlayer {
             bindEvents(elem);
 
             let val = options.url;
-            console.debug('playing url: ' + val);
+            ptvSafeConsole.debug('playing url: ' + val);
             import('../../scripts/settings/userSettings').then((userSettings) => {
                 let normalizationGain;
                 if (userSettings.selectAudioNormalization() == 'TrackGain') {
@@ -146,7 +147,7 @@ class HtmlAudioPlayer {
                 }
                 console.debug('gain: ' + self.normalizationGain);
             }).catch((err) => {
-                console.error('Failed to add/change gainNode', err);
+                ptvSafeConsole.error('Failed to add/change gainNode', err);
             });
 
             // Convert to seconds
@@ -303,7 +304,7 @@ class HtmlAudioPlayer {
 
                 self.gainNode = gainNode;
             } catch (e) {
-                console.error('Web Audio API is not supported in this browser', e);
+                ptvSafeConsole.error('Web Audio API is not supported in this browser', e);
             }
         }
 
@@ -357,7 +358,7 @@ class HtmlAudioPlayer {
         function onError() {
             const errorCode = this.error ? (this.error.code || 0) : 0;
             const errorMessage = this.error ? (this.error.message || '') : '';
-            console.error('media element error: ' + errorCode.toString() + ' ' + errorMessage);
+            ptvSafeConsole.error('media element error', errorCode, errorMessage);
 
             let type;
 
@@ -568,11 +569,11 @@ class HtmlAudioPlayer {
             if (document.AirPlayEnabled) {
                 if (isEnabled) {
                     mediaElement.requestAirPlay().catch(function(err) {
-                        console.error('Error requesting AirPlay', err);
+                        ptvSafeConsole.error('Error requesting AirPlay', err);
                     });
                 } else {
                     document.exitAirPLay().catch(function(err) {
-                        console.error('Error exiting AirPlay', err);
+                        ptvSafeConsole.error('Error exiting AirPlay', err);
                     });
                 }
             } else {

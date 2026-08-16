@@ -12,6 +12,8 @@ import { getPtvRuntimeDiagnostics } from './runtime';
 import { resetRuntimeScope } from './scope';
 import { classifyPtvRequestUrl } from './urlOrigins';
 import { appendBoundedPtvEvent } from './observabilityBuffer';
+import { redactPtvSensitiveText, redactPtvSensitiveValue } from './diagnostics/redaction';
+import { ptvSafeConsole } from './safeConsole';
 
 export type PtvDebugEventType =
     | 'api'
@@ -287,13 +289,13 @@ function getPtvGlobal() {
 function debugConsole(message: string, detail?: unknown) {
     if (!shouldCollectDiagnostics()) return;
 
-    console.debug(`[PiggieTV Debug] ${message}`, detail);
+    ptvSafeConsole.debug(`[PiggieTV Debug] ${message}`, detail);
 }
 
 function warnDebug(message: string, detail?: unknown) {
     if (!shouldCollectDiagnostics()) return;
 
-    console.warn(`[PiggieTV Debug] ${message}`, detail);
+    ptvSafeConsole.warn(`[PiggieTV Debug] ${message}`, detail);
 }
 
 function getActiveProfiles(): {
@@ -1358,10 +1360,12 @@ export function setPtvDebug(enabled: boolean) {
 
 export function recordPtvEvent(type: PtvDebugEventType, name: string, detail?: unknown) {
     const at = Date.now();
+    const safeName = redactPtvSensitiveText(name, 300);
+    const safeDetail = detail === undefined ? undefined : redactPtvSensitiveValue(detail);
 
     observabilitySubscribers.forEach(listener => {
         try {
-            listener({ at, detail, kind: 'event', name, type });
+            listener({ at, detail: safeDetail, kind: 'event', name: safeName, type });
         } catch {
             // Passive observers cannot affect application behavior.
         }
@@ -1369,16 +1373,16 @@ export function recordPtvEvent(type: PtvDebugEventType, name: string, detail?: u
 
     if (!shouldCollectDiagnostics()) return;
 
-    const eventDetail = type === 'image' && name === 'reading-image-profile-cache-hit' ?
-        aggregateReadingImageProfileCacheHit(detail) :
-        detail;
+    const eventDetail = type === 'image' && safeName === 'reading-image-profile-cache-hit' ?
+        aggregateReadingImageProfileCacheHit(safeDetail) :
+        safeDetail;
 
     if (eventDetail === null) return;
 
     appendBoundedPtvEvent(events, {
         at,
         detail: eventDetail,
-        name,
+        name: safeName,
         type
     }, PTV_DEBUG.maxEvents);
 }
@@ -1390,15 +1394,17 @@ export function recordPtvTiming(
     detail?: unknown
 ) {
     const roundedDuration = Number(durationMs.toFixed(1));
+    const safeName = redactPtvSensitiveText(name, 300);
+    const safeDetail = detail === undefined ? undefined : redactPtvSensitiveValue(detail);
 
     observabilitySubscribers.forEach(listener => {
         try {
             listener({
                 at: Date.now(),
-                detail,
+                detail: safeDetail,
                 durationMs: roundedDuration,
                 kind: 'timing',
-                name,
+                name: safeName,
                 type
             });
         } catch {
@@ -1412,22 +1418,22 @@ export function recordPtvTiming(
         recordPtvEvent('image', 'image-duration-discarded', {
             detail,
             durationMs: Number(durationMs.toFixed(1)),
-            name
+            name: safeName
         });
         return;
     }
 
     timings.push({
         at: Date.now(),
-        detail,
+        detail: safeDetail,
         durationMs: roundedDuration,
-        name,
+        name: safeName,
         type
     });
     trimBuffer(timings, PTV_DEBUG.maxTimings);
 
     if (roundedDuration > 500) {
-        debugConsole(`${type}:${name} ${roundedDuration}ms`, detail);
+        debugConsole(`${type}:${safeName} ${roundedDuration}ms`, safeDetail);
     }
 }
 
@@ -1477,6 +1483,21 @@ export function registerPtvDebugShellStatusProvider(provider: (() => unknown) | 
 
 export function registerPtvDebugSignupStatusProvider(provider: (() => unknown) | null) {
     debugSignupStatusProvider = provider;
+}
+
+// eslint-disable-next-line sonarjs/function-return-type -- Provider snapshots intentionally share the recursive diagnostic union.
+function getSanitizedDebugProviderValue(provider: (() => unknown) | null) {
+    let result: ReturnType<typeof redactPtvSensitiveValue> = null;
+
+    if (!provider) return result;
+
+    try {
+        result = redactPtvSensitiveValue(provider());
+    } catch {
+        result = { status: 'unavailable' };
+    }
+
+    return result;
 }
 
 export function getPtvDebugReport() {
@@ -1581,7 +1602,7 @@ export function getPtvDebugReport() {
             errors: getEventCount('cache', 'error'),
             hits: getEventCount('cache', 'hit'),
             misses: getEventCount('cache', 'miss'),
-            status: debugCacheStatusProvider?.() || null,
+            status: getSanitizedDebugProviderValue(debugCacheStatusProvider),
             staleHits: getEventCount('cache', 'stale-hit'),
             timings: getTimingSummary('cache')
         },
@@ -1631,8 +1652,8 @@ export function getPtvDebugReport() {
         render: getTimingSummary('render'),
         renderProfile,
         rowFetch: getTimingSummary('row-fetch'),
-        shell: debugShellStatusProvider?.() || null,
-        signup: debugSignupStatusProvider?.() || null,
+        shell: getSanitizedDebugProviderValue(debugShellStatusProvider),
+        signup: getSanitizedDebugProviderValue(debugSignupStatusProvider),
         timings: [...timings],
         timestamp: now(),
         tvRender: getTvRenderSummary(),

@@ -9,7 +9,7 @@ import {
 import { createPtvAbortController } from '../core/abortController';
 import { recordPtvEvent } from '../core/observability';
 import Events from '../../utils/events';
-import { redactPtvCoreText } from '../core/diagnostics/redaction';
+import { redactPtvCoreText, redactPtvSensitiveValue } from '../core/diagnostics/redaction';
 import {
     coordinatePtvJsonRequest,
     getPtvRequestCoordinatorKey
@@ -35,18 +35,22 @@ export class PtvApiError extends Error {
     responseBody: string;
 
     constructor(message: string, endpoint: string, statusCode: number | null = null, responseBody = '') {
-        super(message);
+        const safeMessage = redactPtvCoreText(message, 1000);
+        const safeEndpoint = redactPtvCoreText(endpoint, 1000);
+        const safeResponseBody = redactPtvCoreText(responseBody, 4000);
+
+        super(safeMessage);
         this.name = 'PtvApiError';
-        this.endpoint = endpoint;
+        this.endpoint = safeEndpoint;
         this.statusCode = statusCode;
-        this.responseBody = responseBody;
+        this.responseBody = safeResponseBody;
         this.coreError = createPtvCoreError({
             code: statusCode ? `API_HTTP_${statusCode}` : 'API_REQUEST_FAILED',
-            developerDetail: responseBody || undefined,
+            developerDetail: safeResponseBody || undefined,
             httpStatus: statusCode || undefined,
             kind: statusCode ? getPtvCoreErrorKindForHttpStatus(statusCode) : 'unknown',
-            message,
-            operation: endpoint,
+            message: safeMessage,
+            operation: safeEndpoint,
             retryable: statusCode === null || statusCode === 408 || statusCode === 429 || statusCode >= 500
         });
     }
@@ -216,7 +220,7 @@ function getErrorResponseBody(error: unknown): string {
 
         if (isRecord(candidate)) {
             try {
-                return redactDiagnosticText(JSON.stringify(candidate)).slice(0, 2000);
+                return redactDiagnosticText(JSON.stringify(redactPtvSensitiveValue(candidate))).slice(0, 2000);
             } catch {
                 return '[unserializable response body]';
             }
@@ -252,8 +256,8 @@ export function normalizePtvApiLayerError(error: unknown, endpoint: string): Ptv
     if (error instanceof PtvApiError) return error;
 
     return new PtvApiError(
-        getErrorMessage(error, 'Jellyfin API request failed.'),
-        endpoint,
+        redactDiagnosticText(getErrorMessage(error, 'Jellyfin API request failed.')),
+        redactDiagnosticText(endpoint),
         getErrorStatus(error),
         getErrorResponseBody(error)
     );
@@ -263,8 +267,8 @@ async function normalizePtvApiLayerErrorAsync(error: unknown, endpoint: string):
     if (error instanceof PtvApiError) return error;
 
     return new PtvApiError(
-        getErrorMessage(error, 'Jellyfin API request failed.'),
-        endpoint,
+        redactDiagnosticText(getErrorMessage(error, 'Jellyfin API request failed.')),
+        redactDiagnosticText(endpoint),
         getErrorStatus(error),
         await getErrorResponseBodyAsync(error)
     );

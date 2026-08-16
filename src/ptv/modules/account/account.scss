@@ -1,0 +1,310 @@
+.ptv-account-profile-page {
+    min-height: 100%;
+    color: var(--ptv-color-text-primary, #fff);
+    background:
+        radial-gradient(circle at 12% 0%, rgba(145, 71, 255, 0.2), transparent 34rem),
+        linear-gradient(180deg, #0e0919 0%, #07050d 100%);
+}
+
+.ptv-account-profile {
+    width: min(1080px, calc(100% - 40px));
+    margin: 0 auto;
+    padding: clamp(76px, 10vw, 132px) 0 80px;
+}
+
+.ptv-account-profile > header {
+    max-width: 720px;
+    margin-bottom: 30px;
+}
+
+.ptv-account-profile.is-embedded {
+    width: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+.ptv-account-profile-heading {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+}
+
+.ptv-account-profile-avatar {
+    display: grid;
+    flex: 0 0 auto;
+    width: 78px;
+    height: 78px;
+    overflow: hidden;
+    border: 1px solid rgba(205, 168, 255, 0.38);
+    border-radius: 24px;
+    color: #f9f5ff;
+    background: linear-gradient(145deg, #6f3fa5, #42235f);
+    box-shadow: 0 14px 38px rgba(0, 0, 0, 0.26);
+    font-size: 28px;
+    font-weight: 900;
+    place-items: center;
+}
+
+.ptv-account-profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ptv-account-profile h1,
+.ptv-account-profile h2,
+.ptv-account-prompt h2 {
+    margin: 0;
+    color: var(--ptv-color-text-primary, #fff);
+    font-family: var(--ptv-font-accent, inherit);
+}
+
+.ptv-account-profile h1 {
+    margin: 8px 0 10px;
+    font-size: clamp(38px, 7vw, 68px);
+    line-height: 0.95;
+}
+
+.ptv-account-profile p,
+.ptv-account-prompt p {
+    color: var(--ptv-color-text-secondary, #c9c1d9);
+    line-height: 1.55;
+}
+
+.ptv-account-eyebrow {
+    color: #cda8ff;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.ptv-account-profile-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.ptv-account-card,
+.ptv-account-prompt {
+    border: 1px solid rgba(205, 168, 255, 0.2);
+    border-radius: 22px;
+    background: linear-gradient(145deg, rgba(35, 24, 55, 0.96), rgba(13, 9, 23, 0.96));
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.36), inset 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.ptv-account-card {
+    padding: clamp(22px, 4vw, 34px);
+}
+
+.ptv-account-pending-card {
+    grid-column: 1 / -1;
+}
+
+.ptv-account-password-card {
+    grid-column: 1 / -1;
+}
+
+.ptv-account-password-card > button {
+    margin-top: 8px;
+}
+
+.ptv-account-password-step {
+    margin-top: 18px;
+}
+
+.ptv-account-password-step > p:first-child {
+    margin-top: 0;
+}
+
+.ptv-account-security-note {
+    margin: 18px 0 0;
+    font-size: 12px;
+}
+
+.ptv-account-card-heading {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.ptv-account-card-heading span,
+.ptv-account-card dt {
+    color: var(--ptv-color-text-secondary, #b8adc9);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.ptv-account-card dl {
+    display: grid;
+    gap: 14px;
+    margin: 28px 0 0;
+}
+
+.ptv-account-card dl > div {
+    display: grid;
+    gap: 4px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ptv-account-card dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ptv-account-id {
+    color: var(--ptv-color-text-secondary, #c9c1d9);
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.ptv-account-status {
+    padding: 7px 11px;
+    border-radius: 999px;
+    color: #ded6eb;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 12px;
+    text-transform: capitalize;
+    white-space: nowrap;
+}
+
+.ptv-account-status.is-verified,
+.ptv-account-banner.is-success {
+    color: #bff6d7;
+    background: rgba(35, 167, 100, 0.17);
+}
+
+.ptv-account-status.is-pending,
+.ptv-account-status.is-sent,
+.ptv-account-banner.is-info {
+    color: #ead7ff;
+    background: rgba(145, 71, 255, 0.18);
+}
+
+.ptv-account-status.is-failed,
+.ptv-account-status.is-expired,
+.ptv-account-banner.is-error {
+    color: #ffd0d0;
+    background: rgba(214, 62, 72, 0.17);
+}
+
+.ptv-account-card form,
+.ptv-account-prompt form {
+    display: grid;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.ptv-account-card label,
+.ptv-account-prompt label {
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.ptv-account-card input,
+.ptv-account-prompt input {
+    min-width: 0;
+    padding: 14px 15px;
+    border: 1px solid rgba(205, 168, 255, 0.26);
+    border-radius: 11px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.26);
+    font: inherit;
+}
+
+.ptv-account-card button,
+.ptv-account-prompt button {
+    min-height: 44px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 11px;
+    color: #130a21;
+    background: #cda8ff;
+    font: inherit;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.ptv-account-card button:disabled,
+.ptv-account-prompt button:disabled {
+    cursor: wait;
+    opacity: 0.55;
+}
+
+.ptv-account-card button.is-secondary,
+.ptv-account-prompt button.is-secondary {
+    border: 1px solid rgba(205, 168, 255, 0.24);
+    color: #f5efff;
+    background: transparent;
+}
+
+.ptv-account-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.ptv-account-banner,
+.ptv-account-loading {
+    margin: 0 0 18px;
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+}
+
+.ptv-account-recovery-note,
+.ptv-account-message {
+    margin-bottom: 0;
+    font-size: 13px;
+}
+
+.ptv-account-prompt-backdrop {
+    position: fixed;
+    z-index: 100020;
+    inset: 0;
+    display: grid;
+    padding: 22px;
+    background: rgba(4, 2, 8, 0.76);
+    backdrop-filter: blur(18px);
+    pointer-events: auto;
+    place-items: center;
+}
+
+.ptv-account-prompt {
+    width: min(480px, 100%);
+    padding: clamp(24px, 5vw, 40px);
+}
+
+.ptv-account-prompt h2 {
+    margin-top: 8px;
+    font-size: clamp(30px, 7vw, 44px);
+}
+
+.ptv-account-prompt a {
+    display: inline-block;
+    margin-top: 18px;
+    color: #dcbfff;
+}
+
+@media (max-width: 760px) {
+    .ptv-account-profile-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-account-pending-card {
+        grid-column: auto;
+    }
+
+    .ptv-account-password-card {
+        grid-column: auto;
+    }
+
+    .ptv-account-card-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}

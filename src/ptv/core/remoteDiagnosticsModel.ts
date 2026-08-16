@@ -1,4 +1,8 @@
 import type { PtvClientKind, PtvClientProfile, PtvLowPowerProfileDecision } from './clientProfile';
+import {
+    isPtvSensitiveKey,
+    PTV_REDACTED_VALUE
+} from './diagnostics/redaction';
 
 export const PTV_REMOTE_DIAGNOSTICS_SCHEMA_VERSION = 1 as const;
 export const PTV_REMOTE_DIAGNOSTICS_MAX_LEASE_MS = 10 * 60 * 1000;
@@ -261,7 +265,6 @@ type PtvRemoteDiagnosticsProfileEnvironment = {
     viewportWidth?: number;
 };
 
-const SENSITIVE_DETAIL_KEY_PATTERN = /(?:authorization|cookie|credential|password|secret|token|api[-_]?key|access[-_]?key|refresh[-_]?key)/i;
 const CREDENTIAL_ASSIGNMENT_PATTERN = /\b(?:authorization|password|secret|token)\s*[:=]|\b(?:api|access|refresh)[-_ ]?(?:key|token)\s*[:=]/i;
 const SESSION_ID_PATTERN = /^[a-z0-9_-]{8,96}$/i;
 const MAX_ARRAY_ITEMS = 16;
@@ -333,9 +336,9 @@ export class PtvDiagnosticsRingBuffer<T> {
 }
 
 function sanitizeString(value: string): string {
-    const withoutBearerTokens = value.replace(/\bBearer\s+[a-z0-9._~+/-]+/gi, 'Bearer [redacted]');
+    const withoutBearerTokens = value.replace(/\bBearer\s+[a-z0-9._~+/-]+/gi, `Bearer ${PTV_REDACTED_VALUE}`);
     const withoutCredentialAssignments = CREDENTIAL_ASSIGNMENT_PATTERN.test(withoutBearerTokens) ?
-        '[redacted]' :
+        PTV_REDACTED_VALUE :
         withoutBearerTokens;
     const withoutUrlOrigins: string = withoutCredentialAssignments.replace(/https?:\/\/[^\s/]+([^\s]*)/gi, (_match, suffix: string): string => {
         const path: string = String(suffix || '/').split(/[?#]/, 1)[0] || '/';
@@ -462,8 +465,8 @@ function sanitizeValue(
             .forEach(([key, nestedValue]) => {
                 const safeKey = key.slice(0, 64);
 
-                sanitized[safeKey] = SENSITIVE_DETAIL_KEY_PATTERN.test(key) ?
-                    '[redacted]' :
+                sanitized[safeKey] = isPtvSensitiveKey(key) ?
+                    PTV_REDACTED_VALUE :
                     sanitizeValue(nestedValue, depth + 1, seen);
             });
 

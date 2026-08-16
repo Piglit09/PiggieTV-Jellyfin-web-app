@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions, no-nested-ternary, react/jsx-no-bind, sonarjs/no-nested-conditional, sonarjs/prefer-read-only-props */
 import React, { useEffect, useMemo, useRef } from 'react';
 
+import { ptvSafeConsole } from '../../core/safeConsole';
 import type { LoadedReaderDocument, ReaderProgressState, ReaderSettings } from './readerModels';
 
 export interface ReaderNavigator {
@@ -78,7 +79,7 @@ function PdfPage({ document, pageIndex, settings }: { document: any; pageIndex: 
             await page.render({ canvasContext: context, viewport: scaledViewport }).promise;
         }
 
-        render().catch(error => console.warn('[PiggieTV Reader] PDF page render failed', error));
+        render().catch(error => ptvSafeConsole.warn('[PiggieTV Reader] PDF page render failed', error));
 
         return () => {
             cancelled = true;

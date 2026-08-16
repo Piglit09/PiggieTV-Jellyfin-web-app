@@ -1,5 +1,6 @@
 import { getPtvPerformanceProfile } from './clientProfile';
 import { recordPtvEvent } from './observability';
+import { ptvSafeConsole } from './safeConsole';
 
 export type PtvImagePriority =
     | 'below-fold-poster'
@@ -165,7 +166,7 @@ function isDebugEnabled() {
 function debugLog(message: string, detail?: unknown) {
     if (!isDebugEnabled()) return;
 
-    console.debug(`[PiggieTV ImageManager] ${message}`, detail);
+    ptvSafeConsole.debug(`[PiggieTV ImageManager] ${message}`, detail);
 }
 
 function getLimits() {

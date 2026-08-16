@@ -91,6 +91,12 @@ public static class PtvApiRoutes
     /// </summary>
     public const string V1GoogleBooksMetadataSearch = $"{V1}/reading/metadata/googlebooks/search";
 
+    /// <summary>Versioned provider-neutral Reading metadata provider inventory.</summary>
+    public const string V1ReadingMetadataProviders = $"{V1}/reading/metadata/providers";
+
+    /// <summary>Versioned provider-neutral Reading metadata identification route.</summary>
+    public const string V1ReadingMetadataSearch = $"{V1}/reading/metadata/search";
+
     /// <summary>
     /// Legacy unversioned status route.
     /// </summary>

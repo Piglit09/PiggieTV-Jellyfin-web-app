@@ -2,6 +2,7 @@ import loading from 'components/loading/loading';
 import toast from 'components/toast/toast';
 import globalize from 'lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import Dashboard from 'utils/dashboard';
 
 import 'styles/dashboard.scss';
@@ -11,19 +12,18 @@ import 'elements/emby-button/emby-button';
 function nextWizardPage() {
     Dashboard.navigate('wizard/library')
         .catch(err => {
-            console.error('[Wizard > User] error navigating to library setup', err);
+            ptvSafeConsole.error('[Wizard > User] error navigating to library setup', err);
         });
 }
 
-function onUpdateUserComplete(result) {
-    console.debug('[Wizard > User] user update complete:', result);
+function onUpdateUserComplete() {
+    ptvSafeConsole.debug('[Wizard > User] user update complete');
     loading.hide();
     nextWizardPage();
 }
 
-async function onUpdateUserError(result) {
-    const message = await result.text();
-    console.warn('[Wizard > User] user update failed:', message);
+function onUpdateUserError() {
+    ptvSafeConsole.warn('[Wizard > User] user update failed');
     toast(globalize.translate('ErrorDefault'));
     loading.hide();
 }

@@ -11,7 +11,7 @@ describe('PiggieTV recommendations compatibility route', () => {
         expect(element.type).toBe(Navigate);
         expect(element.props).toMatchObject({
             replace: true,
-            to: '/dashboard/piggietv/rows'
+            to: '/settings/admin/piggietv/rows'
         });
     });
 });

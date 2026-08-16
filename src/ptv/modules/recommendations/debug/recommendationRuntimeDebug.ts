@@ -1,4 +1,5 @@
 import { recordPtvEvent, shouldCollectDiagnostics } from '../../../core/observability';
+import { ptvSafeConsole } from '../../../core/safeConsole';
 
 const PTV_RECOMMENDATION_LOG_PREFIX = '[PTV Recommendations]';
 
@@ -40,7 +41,7 @@ function getStageEventName(stage: string) {
 export function logPtvRecommendationStage(stage: string, detail?: Record<string, unknown>) {
     if (!shouldCollectDiagnostics()) return;
 
-    console.info(`${PTV_RECOMMENDATION_LOG_PREFIX} ${stage}`, detail || {});
+    ptvSafeConsole.info(`${PTV_RECOMMENDATION_LOG_PREFIX} ${stage}`, detail || {});
     recordPtvEvent('recommendation', getStageEventName(stage), detail);
 }
 
@@ -51,7 +52,7 @@ export function logPtvRecommendationFailure(stage: string, error: unknown, detai
     };
 
     if (shouldCollectDiagnostics()) {
-        console.error(`${PTV_RECOMMENDATION_LOG_PREFIX} ${stage} failed`, failureDetail);
+        ptvSafeConsole.error(`${PTV_RECOMMENDATION_LOG_PREFIX} ${stage} failed`, failureDetail);
     }
     recordPtvEvent('recommendation', `${getStageEventName(stage)}-failed`, failureDetail);
 }

@@ -2,6 +2,7 @@ import { emit, on } from '../core/events';
 import { getRoute, scheduleRouteCheck } from '../core/router';
 import { recordPtvEvent } from '../core/observability';
 import { registerPtvRuntimeListener } from '../core/runtime';
+import { ptvSafeConsole } from '../core/safeConsole';
 import { getPtvCanonicalRouteIdentity } from './routeIdentity';
 import { getPtvRouteOwnership } from './routes';
 
@@ -187,7 +188,7 @@ function getForcedRouteDescriptor(route: PtvRouteLike): PtvRouteLike | null {
     return null;
 }
 
-console.info('[PTV Recommendations] Route registered', {
+ptvSafeConsole.info('[PTV Recommendations] Route registered', {
     ...getCurrentRouteDiagnostics(),
     routeId: 'recommendations',
     source: 'ptv-route-controller'
@@ -394,14 +395,14 @@ function publishRowBuilderRouteMatch(nextState: PtvRouteControllerState) {
             reason: 'Row Builder URL was claimed by a different PTV route matcher.'
         };
 
-        console.error('[PTV Row Builder] Route matched failed', failureDetail);
+        ptvSafeConsole.error('[PTV Row Builder] Route matched failed', failureDetail);
         recordPtvEvent('route', 'row-builder-route-matched-failed', failureDetail);
         return;
     }
 
     if (nextState.routeId !== 'row-builder') return;
 
-    console.info('[PTV Row Builder] Route matched', detail);
+    ptvSafeConsole.info('[PTV Row Builder] Route matched', detail);
     recordPtvEvent('route', 'row-builder-route-matched', detail);
 }
 
@@ -430,14 +431,14 @@ function publishRecommendationRouteMatch(nextState: PtvRouteControllerState) {
             reason: 'Recommendations URL was claimed by a different PTV route matcher.'
         };
 
-        console.error('[PTV Recommendations] Route matched failed', failureDetail);
+        ptvSafeConsole.error('[PTV Recommendations] Route matched failed', failureDetail);
         recordPtvEvent('recommendation', 'recommendation-route-matched-failed', failureDetail);
         return;
     }
 
     if (nextState.routeId !== 'recommendations') return;
 
-    console.info('[PTV Recommendations] Route matched', detail);
+    ptvSafeConsole.info('[PTV Recommendations] Route matched', detail);
     recordPtvEvent('recommendation', 'recommendation-route-matched', detail);
 }
 

@@ -2,8 +2,10 @@ import { expect, test } from '@playwright/test';
 
 test.describe('general runtime integration', () => {
     test('offers a waiting service-worker update and requests activation', async ({ page }) => {
+        await page.setViewportSize({ height: 844, width: 390 });
         await page.goto('/?update=waiting#/home');
         await expect(page.locator('#update-notice')).toContainText('PiggieTV update available');
+        await expect(page.locator('#update-notice')).toHaveCSS('pointer-events', 'auto');
         await page.getByRole('button', { name: 'Reload' }).click();
         await expect(page.locator('html')).toHaveAttribute('data-skip-waiting-requested', 'true');
         await expect(page.locator('html')).toHaveAttribute('data-reload-requested', 'true');
@@ -23,7 +25,7 @@ test.describe('general runtime integration', () => {
         await page.goto('/#/home');
         await page.keyboard.press('Tab');
 
-        await expect(page.getByRole('link', { name: 'Home' })).toBeFocused();
+        await expect(page.getByRole('link', { name: 'PiggieTV' })).toBeFocused();
         await page.keyboard.press('Tab');
         await expect(page.getByRole('link', { name: 'Movies' })).toBeFocused();
     });

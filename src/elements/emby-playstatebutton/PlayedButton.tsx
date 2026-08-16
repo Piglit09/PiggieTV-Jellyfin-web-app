@@ -7,6 +7,7 @@ import classNames from 'classnames';
 
 import globalize from 'lib/globalize';
 import { useTogglePlayedMutation } from 'hooks/useFetchItems';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 interface PlayedButtonProps {
     className?: string;
@@ -55,7 +56,7 @@ const PlayedButton: FC<PlayedButtonProps> = ({
                 });
             } });
         } catch (e) {
-            console.error(e);
+            ptvSafeConsole.error('[PlayedButton] unable to update played state', e);
         }
     }, [itemId, togglePlayedMutation, isPlayed, queryClient, queryKey]);
 

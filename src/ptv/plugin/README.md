@@ -24,6 +24,17 @@ Primary endpoints include:
 - `POST /Ptv/v1/diagnostics/clients/{clientId}/sessions`
 - `POST /Ptv/v1/diagnostics/clients/{clientId}/snapshot`
 - `GET /Ptv/v1/diagnostics/clients/{clientId}/report`
+- `GET /Ptv/v1/metadata-quality/status`
+- `POST /Ptv/v1/metadata-quality/ai/test`
+- `GET /Ptv/v1/metadata-quality/summary`
+- `GET /Ptv/v1/metadata-quality/results`
+- `GET /Ptv/v1/metadata-quality/results/{itemId}`
+- `POST /Ptv/v1/metadata-quality/scan`
+- `POST /Ptv/v1/metadata-quality/scan/cancel`
+- `POST /Ptv/v1/metadata-quality/results/{itemId}/resolve`
+- `GET /Ptv/v1/metadata-quality/settings`
+- `POST /Ptv/v1/metadata-quality/settings`
+- `POST /Ptv/v1/metadata-quality/index/rebuild`
 
 Temporary compatibility aliases are also available:
 
@@ -38,7 +49,9 @@ Temporary compatibility aliases are also available:
 - `DELETE /Ptv/FeaturedContent`
 - `POST /Ptv/FeaturedContent/Refresh`
 
-All endpoints require an authenticated Jellyfin user. Featured-content reads, authoritative relationship reads, and minimal diagnostic client check-in/report publication are available to authenticated clients. Relationship reads omit mappings when either endpoint is not visible to the current user. `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, all relationship mutations, Reading override writes, all settings endpoints, and all diagnostic client listing/command/report reads require Jellyfin admin/elevated permissions. Remote diagnostics state is bounded, memory-only, automatically expires, and is described in [Remote client diagnostics](../docs/remote-diagnostics.md).
+All endpoints require an authenticated Jellyfin user. Featured-content reads, authoritative relationship reads, and minimal diagnostic client check-in/report publication are available to authenticated clients. Relationship reads omit mappings when either endpoint is not visible to the current user. `PUT /Ptv/v1/featured`, `DELETE /Ptv/v1/featured`, `POST /Ptv/v1/featured/refresh`, all relationship mutations, Reading override writes, all settings endpoints, all Metadata Quality endpoints, and all diagnostic client listing/command/report reads require Jellyfin admin/elevated permissions. Remote diagnostics state is bounded, memory-only, automatically expires, and is described in [Remote client diagnostics](../docs/remote-diagnostics.md).
+
+Metadata Quality persists immutable scan generations in a server-local SQLite index and serves filtered, sorted, 50-row pages without loading the retained result document into memory. The original atomic JSON document remains a migration/reference/rollback snapshot rather than a second authority. New generations are built and validated while readers continue using the current generation, then activated atomically; interrupted builds never replace the active generation. The confirmed rebuild endpoint is a recovery operation that stages and validates a replacement from JSON before installation and retains only the two newest replaced-database backups.
 
 Release `0.5.0.0` starts the canonical PiggieTV companion version line. PiggieTV release numbers are independent of the Jellyfin ABI: this release still targets Jellyfin `10.11.8.0` and keeps plugin API v1 and featured cache v7 compatibility.
 
@@ -83,6 +96,38 @@ PTV_TMDB_API_KEY
 ```
 
 The read access token is preferred. The API key is a fallback. If neither is configured, PiggieTV keeps using Jellyfin metadata only.
+
+## Metadata Quality
+
+The `PTV Metadata Quality Scan` scheduled task and `/Ptv/v1/metadata-quality/*` API provide a read-only metadata audit and human review queue. Scans run server-side in bounded batches, persist only privacy-reduced item evidence, skip unchanged fingerprints, and use Jellyfin's configured remote metadata providers only for uncertain items. The API exposes no automatic metadata-fix or provider-apply operation; corrections remain in PiggieTV Metadata Manager/Jellyfin Identify.
+
+Optional AI reasoning is disabled by default. `OPENAI_API_KEY` is the only supported credential source and is read only from the Jellyfin process environment:
+
+```text
+OPENAI_API_KEY
+PTV_METADATA_QUALITY_OPENAI_MODEL   # optional environment model override
+```
+
+The model resolves from the environment override, then the non-secret Metadata Quality model setting, then `gpt-5.6-luna`. That default was verified on 2026-08-13 against the [OpenAI API model catalog](https://developers.openai.com/api/docs/models/gpt-5.6-luna) for Responses API and Structured Outputs support.
+
+The key is never returned to the browser, written to plugin/Metadata Quality settings, backed up by the PiggieTV account backup, or logged. Unknown persisted settings remain server-side and are excluded from API projections. A model value that exactly matches the active credential is rejected. There is no browser-managed credential write/delete API. The administrator-only status and connection-test APIs expose only safe configured/source/model/result fields; the test uses one tiny synthetic structured request and never library metadata. AI input contains only bounded identity evidence and verified candidate summaries, uses `store: false`, and cannot supply a provider ID.
+
+For systemd production, keep the secret in a server-only file outside this repository, owned by the Jellyfin service account with mode `0600`:
+
+```text
+# /etc/jellyfin/piggietv-openai.env
+OPENAI_API_KEY=<secret>
+PTV_METADATA_QUALITY_OPENAI_MODEL=gpt-5.6-luna
+```
+
+Reference it from a Jellyfin service override and restart Jellyfin after changes:
+
+```ini
+[Service]
+EnvironmentFile=/etc/jellyfin/piggietv-openai.env
+```
+
+Use a dedicated OpenAI project/key with restricted permissions and spend alerts where practical. Rotate an environment credential by changing the protected server file and restarting Jellyfin; PiggieTV cannot reveal or rotate it. See [Metadata Quality architecture](../../../docs/ptv-metadata-quality.md).
 
 Build:
 

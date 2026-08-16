@@ -727,6 +727,7 @@ public static class PtvPluginSettingsNormalizer
 
     private static void NormalizeSignupEmailSettings(SignupEmailSettings settings)
     {
+        settings.PublicBaseUrl = CleanPublicBaseUrl(settings.PublicBaseUrl);
         settings.SmtpHost = CleanText(settings.SmtpHost, string.Empty, 160);
         settings.SmtpPort = Clamp(settings.SmtpPort, 1, 65535);
         settings.Username = CleanSecret(settings.Username);
@@ -738,6 +739,17 @@ public static class PtvPluginSettingsNormalizer
         settings.ResetCodeMinutes = Clamp(settings.ResetCodeMinutes, 5, 120);
         settings.VerificationSubject = CleanText(settings.VerificationSubject, "Verify your PiggieTV email", 120);
         settings.VerificationLinkMinutes = Clamp(settings.VerificationLinkMinutes, 10, 1440);
+    }
+
+    private static string CleanPublicBaseUrl(string? value)
+    {
+        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            return string.Empty;
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
     }
 
     private static SignupPolicyPreset NormalizeSignupPolicyPreset(SignupPolicyPreset preset)

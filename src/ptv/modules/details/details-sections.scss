@@ -671,3 +671,127 @@ html.ptv-client-low-power .ptv-detail-page .ptv-cinematic-skeleton-card {
         transform: none;
     }
 }
+
+.ptv-detail-page.ptv-details--episode .detailPageSecondaryContainer {
+    margin-top: 0 !important;
+    padding-bottom: 96px !important;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible {
+    overflow: visible;
+    width: calc(100% + clamp(28px, 3vw, 58px));
+    margin: 0 !important;
+    padding: 0 0 22px !important;
+
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible::before {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible > .sectionTitle {
+    margin: 0 0 14px !important;
+
+    color: rgba(255, 252, 255, 0.95) !important;
+    font-size: clamp(20px, 1.55vw, 27px) !important;
+    font-weight: 900 !important;
+    letter-spacing: -0.02em !important;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible > .sectionTitle::after {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible [is='emby-scroller'] {
+    overflow: visible;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .similarContent {
+    display: flex;
+    gap: clamp(12px, 1.35vw, 22px);
+    overflow-x: auto;
+    padding: 3px clamp(28px, 3vw, 58px) 18px 3px !important;
+
+    scroll-padding-inline: 3px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .similarContent::-webkit-scrollbar {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .card {
+    flex: 0 0 clamp(238px, 18vw, 344px);
+    min-width: 0;
+    margin: 0 !important;
+
+    scroll-snap-align: start;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardBox {
+    border: 1px solid rgba(211, 158, 255, 0.16);
+    border-radius: 15px;
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 180ms ease;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardScalable {
+    position: relative;
+
+    aspect-ratio: 16 / 9;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardPadder {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardImageContainer {
+    position: absolute;
+    inset: 0;
+
+    background-position: center;
+    background-size: cover;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardText {
+    padding: 10px 3px 0;
+
+    color: rgba(248, 243, 252, 0.9);
+    font-size: 14px;
+    font-weight: 760;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .card:is(:hover, :focus-within, .show-focus) .cardBox {
+    border-color: var(--ptv-details-focus-core);
+    box-shadow:
+        0 0 0 2px rgba(207, 125, 255, 0.58),
+        0 0 28px var(--ptv-details-focus-glow),
+        0 18px 42px rgba(0, 0, 0, 0.4);
+    transform: translateY(-2px);
+}
+
+.ptv-detail-page.ptv-details--episode .detailPageSecondaryContainer .detailVerticalSection:not(#similarCollapsible),
+.ptv-detail-page.ptv-details--episode .detailPageSecondaryContainer .verticalSection:not(#similarCollapsible) {
+    margin-top: 26px !important;
+}
+
+@media (max-width: 900px) {
+    .ptv-detail-page.ptv-details--episode #similarCollapsible {
+        width: calc(100% + 18px);
+    }
+
+    .ptv-detail-page.ptv-details--episode #similarCollapsible .similarContent {
+        padding-right: 18px !important;
+    }
+
+    .ptv-detail-page.ptv-details--episode #similarCollapsible .card {
+        flex-basis: min(72vw, 300px);
+    }
+}

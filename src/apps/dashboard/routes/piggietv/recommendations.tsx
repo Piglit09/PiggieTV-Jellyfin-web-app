@@ -1,6 +1,3 @@
-import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { LegacyPiggietvRecommendationsRedirect } from './LegacyPiggietvAdminRedirect';
 
-export const Component = () => (
-    <Navigate replace to='/dashboard/piggietv/rows' />
-);
+export const Component = LegacyPiggietvRecommendationsRedirect;

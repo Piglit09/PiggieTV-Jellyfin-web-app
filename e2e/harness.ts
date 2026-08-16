@@ -37,7 +37,12 @@ import {
     getPtvDropdownViewport,
     hasPtvDropdownPointerMoved
 } from '../src/ptv/shell/primaryNavigationDropdown';
-import { preparePtvDetailsLayout } from '../src/ptv/modules/details/detailsLayout';
+import {
+    applyPtvEpisodeDetailsPresentation,
+    preparePtvDetailsLayout,
+    setPtvDetailsBackdropCandidates,
+    setPtvDetailsHeroArtworkCandidates
+} from '../src/ptv/modules/details/detailsLayout';
 import {
     createPtvDiagnosticHealth,
     type PtvFocusGraphDiagnostic,
@@ -66,6 +71,9 @@ import '../src/ptv/styles/profiles/tv.scss';
 import '../src/ptv/styles/profiles/webos.scss';
 
 const root = document.getElementById('app');
+const DIAGNOSTICS_ROUTE = '/settings/admin/piggietv/diagnostics';
+const DIAGNOSTICS_ROUTE_FAMILY = 'settings/admin/piggietv/diagnostics';
+const LEGACY_DIAGNOSTICS_ROUTE = '/dashboard/piggietv/diagnostics';
 
 if (!root) throw new Error('PiggieTV browser harness root is missing.');
 
@@ -159,11 +167,13 @@ const SEARCH_FIXTURE_GROUPS: Readonly<Record<PtvSearchGroupId, Readonly<{
     artists: { itemType: 'MusicArtist', title: 'Artists' },
     collections: { itemType: 'BoxSet', title: 'Collections' },
     episodes: { itemType: 'Episode', title: 'Episodes' },
+    genres: { itemType: 'Genre', title: 'Genres' },
     movies: { itemType: 'Movie', title: 'Movies' },
     music: { itemType: 'Audio', title: 'Songs' },
     people: { itemType: 'Person', title: 'People' },
     reading: { itemType: 'Book', title: 'Reading' },
-    shows: { itemType: 'Series', title: 'Shows' }
+    shows: { itemType: 'Series', title: 'Shows' },
+    studios: { itemType: 'Studio', title: 'Studios' }
 };
 const retriedFixtureSearches = new Set<string>();
 const HOME_FIXTURE_STORAGE_PREFIX = 'ptv:e2e:home-preferences:';
@@ -1190,23 +1200,43 @@ function renderBasicHeader() {
         className: 'authenticated-header ptv-shell-header'
     });
     const left = addElement(header, 'div', { className: 'ptv-shell-header-left' });
-    const home = addElement(left, 'a', { className: 'ptv-shell-brand', text: 'Home' });
+    const home = addElement(left, 'a', { className: 'ptv-shell-brand', text: 'PiggieTV' });
 
     home.href = '#/home';
     const navigation = addElement(header, 'nav', { className: 'ptv-shell-nav ptv-shell-header-primary' });
     const navigationPill = addElement(navigation, 'div', { className: 'ptv-shell-nav-primary' });
-    const movies = addElement(navigationPill, 'a', { className: 'ptv-shell-nav-button', text: 'Movies' });
+    const detailRoute = window.location.hash.startsWith('#/details');
+    const navigationLinks = detailRoute ? [
+        ['Home', '#/home'],
+        ['Movies', '#/movies'],
+        ['Shows', '#/shows'],
+        ['Music', '#/music'],
+        ['Reading', '#/reading'],
+        ['Search', '#/search']
+    ] : [['Movies', '#/movies']];
 
-    movies.href = '#/movies';
+    navigationLinks.forEach(([label, href]) => {
+        const link = addElement(navigationPill, 'a', {
+            className: `ptv-shell-nav-button${label === 'Shows' && detailRoute ? ' is-active' : ''}`,
+            text: label
+        });
+
+        link.href = href;
+    });
     const right = addElement(header, 'div', { className: 'ptv-shell-header-right' });
     const actions = addElement(right, 'div', { className: 'ptv-shell-actions' });
 
-    for (const label of ['Notifications', 'Settings', 'User menu']) {
+    const actionLabels = detailRoute ? ['Settings', 'User menu', 'Back'] : ['Notifications', 'Settings', 'User menu'];
+
+    for (const label of actionLabels) {
         const action = addElement(actions, 'button', { className: 'ptv-shell-icon-button' });
 
         action.setAttribute('aria-label', label);
+        if (label === 'Back') action.classList.add('ptv-shell-back-button');
         addFixtureIcon(action);
     }
+    if (detailRoute) return;
+
     const search = addElement(right, 'form', { className: 'ptv-shell-search' });
     const searchButton = addElement(search, 'button', { className: 'ptv-shell-search-trigger' });
 
@@ -1595,7 +1625,9 @@ function renderFixtureDetailsDiscovery(page: HTMLElement) {
 
                 if (!host || !isCurrentFixtureDetails(page, itemId)) return;
 
-                if (similarSection?.parentElement === host) {
+                if (page.classList.contains('ptv-details--episode') && similarSection?.parentElement === host) {
+                    similarSection.after(section);
+                } else if (similarSection?.parentElement === host) {
                     host.insertBefore(section, similarSection);
                 } else {
                     host.append(section);
@@ -1613,44 +1645,47 @@ function renderFixtureDetailsDiscovery(page: HTMLElement) {
 
 function renderDetails() {
     document.body.classList.add('ptv-e2e-details');
+    document.documentElement.classList.add('ptv-route-detail-page');
     const page = addElement(root, 'main', {
         className: 'itemDetailPage',
         id: 'itemDetailPage'
     });
 
     page.innerHTML = `
-        <div class="itemBackdrop" style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221600%22 height=%22900%22%3E%3Crect width=%221600%22 height=%22900%22 fill=%22%23211a4a%22/%3E%3Ccircle cx=%221150%22 cy=%22280%22 r=%22360%22 fill=%22%237d3fc7%22/%3E%3C/svg%3E')"></div>
-        <div class="detailLogo" aria-label="Fixture title logo"></div>
+        <div class="itemBackdrop" style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221600%22 height=%22900%22%3E%3Cdefs%3E%3ClinearGradient id=%22sky%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%237cc9f3%22/%3E%3Cstop offset=%221%22 stop-color=%22%23efb57f%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%221600%22 height=%22900%22 fill=%22url(%23sky)%22/%3E%3Crect y=%22540%22 width=%221600%22 height=%22360%22 fill=%22%238a5d4b%22/%3E%3Ccircle cx=%221070%22 cy=%22400%22 r=%22130%22 fill=%22%23d84846%22/%3E%3Ccircle cx=%221310%22 cy=%22420%22 r=%22120%22 fill=%22%23ece4cf%22/%3E%3C/svg%3E')"></div>
+        <div class="detailLogo" aria-label="Fixture series logo" style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221000%22 height=%22200%22%3E%3Ctext x=%220%22 y=%22125%22 fill=%22%23fff%22 font-family=%22Arial%22 font-size=%2294%22 font-weight=%22900%22%3EFIXTURE SERIES%3C/text%3E%3C/svg%3E')"></div>
         <div class="detailPageWrapperContainer">
             <div class="detailPagePrimaryContainer">
                 <div class="detailImageContainer hide-mobile">
-                    <div class="card"><div class="detail-poster-fixture">Poster</div></div>
+                    <div class="card"><div class="detail-poster-fixture">Episode</div></div>
                 </div>
                 <div class="detailRibbon">
                     <div class="infoWrapper">
                         <div class="detailImageContainer hide-desktop">
-                            <div class="card"><div class="detail-poster-fixture">Poster</div></div>
+                            <div class="card"><div class="detail-poster-fixture">Episode</div></div>
                         </div>
-                        <div class="detailNameContainer">
-                            <h1 class="itemName">PiggieTV Native Details</h1>
-                            <div class="itemMiscInfo">
-                                <span class="mediaInfoItem">2026</span>
-                                <span class="mediaInfoItem">PG-13</span>
-                                <span class="mediaInfoItem">2h 5m</span>
+                        <div class="nameContainer">
+                            <h1 class="parentName">Fixture Series</h1>
+                            <h3 class="itemName">Season 1 - Romance Dawn</h3>
+                            <div class="itemMiscInfo itemMiscInfo-primary">
+                                <span class="mediaInfoItem">2023</span>
+                                <span class="mediaInfoItem">TV-14</span>
+                                <span class="mediaInfoItem">1:04:26</span>
                             </div>
                         </div>
                     </div>
                     <div class="mainDetailButtons">
-                        <button class="detailButton btnPlay" type="button">Play</button>
-                        <button class="detailButton" type="button">More</button>
+                        <button class="detailButton btnPlay" type="button"><span class="detailButton-content">▶</span></button>
+                        <button class="detailButton btnReplay" type="button"><span class="detailButton-content">↻</span></button>
+                        <button class="detailButton btnMoreCommands" type="button">More</button>
                     </div>
                 </div>
                 <div class="detailPagePrimaryContent padded-right">
                     <div class="detailSection">
                         <div class="detailSectionContent">
-                            <p class="itemGenres"><a href="#genre-action">Action</a><a href="#genre-drama">Drama</a><a href="#genre-scifi">Science Fiction</a></p>
-                            <p class="overview">A representative overview long enough to prove that native details metadata retains a readable line length instead of inheriting Jellyfin's large desktop left offset.</p>
-                            <div class="itemTags"><a href="#tag-one">Adventure</a><a href="#tag-two">Character drama</a><a href="#tag-three">Mystery</a></div>
+                            <p class="itemGenres"></p>
+                            <p class="overview">Stranded on a sinking boat, carefree Luffy begins his journey in search of a pirate king's lost treasure. But first, he'll need a crew, a ship and a map.</p>
+                            <div class="itemTags"><a href="#tag-one">Adventure</a><a href="#tag-two">Character drama</a></div>
                         </div>
                         <div class="itemDetailsGroup">
                             <div class="detailsGroupItem genresGroup">
@@ -1673,13 +1708,43 @@ function renderDetails() {
                     </section>
                     <section class="verticalSection detailVerticalSection" id="similarCollapsible">
                         <h2 class="sectionTitle padded-right">More Like This</h2>
-                        <div is="emby-scroller"><div class="itemsContainer detail-shelf-fixture"><div>Title 1</div><div>Title 2</div></div></div>
+                        <div is="emby-scroller"><div class="itemsContainer similarContent">
+                            ${['East Blue', 'Grand Line', 'Straw Hat Stories', 'Pirate Legends', 'Treasure Island'].map((title, index) => `
+                                <article class="card backdropCard${index === 0 ? ' show-focus' : ''}">
+                                    <div class="cardBox">
+                                        <div class="cardScalable"><div class="cardPadder cardPadder-backdrop"></div><div class="cardImageContainer" style="background: linear-gradient(135deg, hsl(${265 + index * 14} 58% 34%), hsl(${325 + index * 8} 68% 44%));"></div></div>
+                                    </div>
+                                    <div class="cardText">${title}</div>
+                                </article>
+                            `).join('')}
+                        </div></div>
                     </section>
                 </div>
             </div>
         </div>
     `;
     preparePtvDetailsLayout(page);
+    setPtvDetailsBackdropCandidates(page, [{
+        requestedType: 'Backdrop',
+        url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221600%22 height=%22900%22%3E%3Crect width=%221600%22 height=%22900%22 fill=%22%2379cbed%22/%3E%3Crect y=%22520%22 width=%221600%22 height=%22380%22 fill=%22%239b7057%22/%3E%3Ccircle cx=%221050%22 cy=%22410%22 r=%22145%22 fill=%22%23d8434d%22/%3E%3Ccircle cx=%221330%22 cy=%22425%22 r=%22125%22 fill=%22%23efe4c8%22/%3E%3C/svg%3E'
+    }], 'fixture-item');
+    applyPtvEpisodeDetailsPresentation(page, {
+        CommunityRating: 8.3,
+        Genres: ['Action', 'Adventure', 'Comedy'],
+        Id: 'fixture-item',
+        IndexNumber: 1,
+        Name: 'Romance Dawn',
+        OfficialRating: 'TV-14',
+        ParentIndexNumber: 1,
+        ProductionYear: 2023,
+        RunTimeTicks: 38660000000,
+        Type: 'Episode',
+        UserData: { PlaybackPositionTicks: 120000000 }
+    });
+    setPtvDetailsHeroArtworkCandidates(page, [{
+        requestedType: 'Thumb',
+        url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22960%22 height=%22540%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%2384d2f1%22/%3E%3Cstop offset=%221%22 stop-color=%22%23e9a46d%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%22960%22 height=%22540%22 fill=%22url(%23g)%22/%3E%3Crect y=%22310%22 width=%22960%22 height=%22230%22 fill=%22%23936a50%22/%3E%3Ccircle cx=%22480%22 cy=%22255%22 r=%22105%22 fill=%22%23d8434d%22/%3E%3Ccircle cx=%22720%22 cy=%22270%22 r=%2292%22 fill=%22%23eee2c4%22/%3E%3C/svg%3E'
+    }], 'fixture-item');
     renderFixtureDetailsDiscovery(page);
 }
 
@@ -2081,7 +2146,7 @@ function renderDiagnosticsDashboard() {
         currentCandidatePresent: profile.isTv,
         currentCategory: profile.isTv ? 'nav-item' : 'unknown',
         currentFingerprint: profile.isTv ? 'element-tv-fixture' : 'none',
-        currentRoute: 'dashboard/piggietv/diagnostics',
+        currentRoute: DIAGNOSTICS_ROUTE_FAMILY,
         currentScope: profile.isTv ? 'main-content' : 'unknown',
         currentVisible: profile.isTv,
         disabledReason: profile.isTv ? '' : 'non-tv-profile',
@@ -2115,7 +2180,7 @@ function renderDiagnosticsDashboard() {
         p95FrameMs: 18,
         p99FrameMs: 34,
         reducedMotion: false,
-        routeFamily: 'dashboard/piggietv/diagnostics',
+        routeFamily: DIAGNOSTICS_ROUTE_FAMILY,
         sampledAt: new Date().toISOString(),
         visibilityState: 'visible'
     });
@@ -2217,7 +2282,7 @@ function renderDiagnosticsDashboard() {
             currentCandidatePresent: navigation.focusGraphSummary.currentCandidatePresent,
             currentCategory: classifyPtvTvFocusElement(active),
             currentFingerprint: getPtvSafeFocusFingerprint(active),
-            currentRoute: 'dashboard/piggietv/diagnostics',
+            currentRoute: DIAGNOSTICS_ROUTE_FAMILY,
             currentScope: navigation.focusGraphSummary.activeScope,
             currentVisible: navigation.focusGraphSummary.currentRegion === 'overlapping',
             disabledReason: profile.isTv ? navigation.focusManagerReady ? '' : 'not-initialized' : 'non-tv-profile',
@@ -2292,7 +2357,7 @@ function renderDiagnosticsDashboard() {
                 propagationStopped: detail.propagationStopped === true,
                 repeat: detail.repeat === true,
                 repeatCount: Number(detail.repeatCount) || 0,
-                routeFamily: 'dashboard/piggietv/diagnostics',
+                routeFamily: DIAGNOSTICS_ROUTE_FAMILY,
                 routeSettled: true,
                 safeAction,
                 source,
@@ -2309,7 +2374,7 @@ function renderDiagnosticsDashboard() {
             diagnosticStore.recordFocusGraph({
                 ...(detail.graphSummary as Omit<PtvFocusGraphDiagnostic, 'routeFamily'>),
                 generatedAt: occurredAt,
-                routeFamily: 'dashboard/piggietv/diagnostics'
+                routeFamily: DIAGNOSTICS_ROUTE_FAMILY
             });
             diagnosticStore.markRouteFocusPhase('focus-graph-ready');
             return;
@@ -2328,7 +2393,7 @@ function renderDiagnosticsDashboard() {
                 occurredAt,
                 previousCategory: String(detail.previousCategory || 'unknown') as typeof category,
                 reason: String(detail.reason || 'focus-observed'),
-                routeFamily: 'dashboard/piggietv/diagnostics',
+                routeFamily: DIAGNOSTICS_ROUTE_FAMILY,
                 scope: String(detail.scope || 'unknown') as PtvFocusScopeDiagnostic['scope'],
                 visible
             });
@@ -2340,7 +2405,7 @@ function renderDiagnosticsDashboard() {
                 inputId: String(detail.inputId || ''),
                 obscuredBy: 'unobscured',
                 occurredAt,
-                routeFamily: 'dashboard/piggietv/diagnostics',
+                routeFamily: DIAGNOSTICS_ROUTE_FAMILY,
                 scrollContainer: String(detail.scope || 'unknown') as PtvFocusScopeDiagnostic['scope'],
                 status: 'focus-observed',
                 visible,
@@ -2359,7 +2424,7 @@ function renderDiagnosticsDashboard() {
                 orphanedAfterRouteChange: detail.orphanedAfterRouteChange === true,
                 previousFocusRestored: typeof detail.previousFocusRestored === 'boolean'
                     ? detail.previousFocusRestored : null,
-                routeFamily: 'dashboard/piggietv/diagnostics',
+                routeFamily: DIAGNOSTICS_ROUTE_FAMILY,
                 scope: String(detail.scope || 'unknown') as PtvFocusScopeDiagnostic['scope'],
                 status: String(detail.scopeStatus || 'activated') as PtvFocusScopeDiagnostic['status'],
                 trapActive: detail.trapActive === true
@@ -2671,6 +2736,14 @@ function renderCollections(search: string) {
 }
 
 function renderRoute() {
+    if (getHashRoute().path === LEGACY_DIAGNOSTICS_ROUTE) {
+        window.history.replaceState(
+            window.history.state,
+            '',
+            `${window.location.pathname}${window.location.search}#${DIAGNOSTICS_ROUTE}`
+        );
+    }
+
     if (activeHash) scrollPositions.set(activeHash, window.scrollY);
     activeHash = window.location.hash || '#/home';
     cleanupPrimaryNavigation();
@@ -2681,6 +2754,7 @@ function renderRoute() {
         element.remove();
     });
     document.body.classList.remove('ptv-e2e-details');
+    document.documentElement.classList.remove('ptv-route-detail-page');
     document.body.classList.remove('ptv-route-music-mounted');
     delete document.documentElement.dataset.ptvPlaybackSurface;
     document.documentElement.classList.remove('ptv-render-tv', 'ptv-platform-webos', 'ptv-route-music-mounted');
@@ -2700,7 +2774,7 @@ function renderRoute() {
     renderHeader();
     const { path, search } = getHashRoute();
 
-    if (path === '/dashboard/piggietv/diagnostics') {
+    if (path === DIAGNOSTICS_ROUTE) {
         renderDiagnosticsDashboard();
     } else if (path === '/e2e/music-fullscreen-layout') {
         renderMusicFullscreenLayout(search);
@@ -2733,6 +2807,11 @@ async function startUpdateScenario() {
 
     if (params.get('update') !== 'waiting') return;
 
+    const runtimeHost = addElement(document.body, 'div');
+
+    runtimeHost.dataset.ptvRuntimeRootHost = 'true';
+    const runtimeRoot = addElement(runtimeHost, 'div', { className: 'ptv-runtime-root' });
+
     const controllerListeners = new Map<string, () => void>();
     const waitingWorker = {
         postMessage: () => {
@@ -2758,7 +2837,8 @@ async function startUpdateScenario() {
         document.getElementById('update-notice')?.remove();
         if (!['available', 'deferred'].includes(snapshot.state)) return;
 
-        const notice = addElement(document.body, 'aside', {
+        const notice = addElement(runtimeRoot, 'aside', {
+            className: 'ptv-update-notice',
             id: 'update-notice',
             text: snapshot.state === 'deferred' ? snapshot.activityReason : 'PiggieTV update available'
         });

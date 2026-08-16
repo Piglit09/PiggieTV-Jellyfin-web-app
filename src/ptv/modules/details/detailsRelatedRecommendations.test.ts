@@ -11,6 +11,7 @@ type TestItem = Record<string, unknown> & {
     Genres?: string[];
     Id: string;
     Name: string;
+    People?: Array<{ Id: string; Name: string; Type: string }>;
     ProductionYear?: number;
     Studios?: Array<{ Id: string; Name: string }>;
     Tags?: string[];
@@ -36,11 +37,49 @@ describe('Details related-video recommendations', () => {
         expect(PTV_RELATED_VIDEO_DISPLAY_LIMIT).toBe(12);
         expect(PTV_RELATED_VIDEO_FIELDS.split(',')).toEqual(expect.arrayContaining([
             'Genres',
+            'People',
+            'CollectionName',
             'Tags',
             'Studios',
             'OriginalTitle',
             'ProviderIds'
         ]));
+    });
+
+    it('keeps a shared director and cast trilogy ahead of generic studio matches', () => {
+        const dc = [{ Id: 'studio-dc', Name: 'DC' }];
+        const nolan = { Id: 'person-nolan', Name: 'Christopher Nolan', Type: 'Director' };
+        const bale = { Id: 'person-bale', Name: 'Christian Bale', Type: 'Actor' };
+        const seed = movie('dark-knight', 'The Dark Knight', {
+            Genres: [ 'Action', 'Crime', 'Drama' ],
+            People: [ nolan, bale ],
+            ProductionYear: 2008,
+            Studios: dc,
+            Tags: [ 'Batman', 'Superhero', 'Vigilante' ]
+        });
+        const candidates = [
+            movie('dirty-harry', 'Dirty Harry', { Genres: [ 'Action', 'Crime' ] }),
+            movie('batman-hush', 'Batman: Hush', { Genres: [ 'Action' ], Studios: dc, Tags: [ 'Batman' ] }),
+            movie('dark-knight-rises', 'The Dark Knight Rises', {
+                Genres: [ 'Action', 'Crime', 'Drama' ],
+                People: [ nolan, bale ],
+                ProductionYear: 2012,
+                Studios: dc,
+                Tags: [ 'Batman', 'Superhero', 'Vigilante' ]
+            }),
+            movie('batman-begins', 'Batman Begins', {
+                Genres: [ 'Action', 'Crime', 'Drama' ],
+                People: [ nolan, bale ],
+                ProductionYear: 2005,
+                Studios: dc,
+                Tags: [ 'Batman', 'Superhero', 'Vigilante' ]
+            })
+        ];
+
+        expect(rankPtvRelatedVideoItems(seed, candidates, 4).slice(0, 2).map(item => item.Id)).toEqual([
+            'dark-knight-rises',
+            'batman-begins'
+        ]);
     });
 
     it('promotes franchise, studio, and genre affinity over weak Jellyfin server order', () => {

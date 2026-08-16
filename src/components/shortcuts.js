@@ -9,6 +9,7 @@ import inputManager from '../scripts/inputManager';
 import { appRouter } from './router/appRouter';
 import globalize from '../lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import dom from '../utils/dom';
 import recordingHelper from './recordingcreator/recordinghelper';
 import toast from './toast/toast';
@@ -143,7 +144,7 @@ function showContextMenu(card, options = {}) {
                     .then(({ data }) => data)
                     .catch(err => {
                         // If a user doesn't have access, then the request will 404 and throw
-                        console.info('[Shortcuts] Failed to fetch playlist permissions', err);
+                        ptvSafeConsole.info('[Shortcuts] Failed to fetch playlist permissions', err);
                         return { CanEdit: false };
                     }) :
                 // Not a playlist item

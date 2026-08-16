@@ -6,6 +6,7 @@ import {
     type PtvImagePriority
 } from './imageManager';
 import { getPtvPluginApiResolvedRoot } from './pluginApi';
+import { ptvSafeConsole } from './safeConsole';
 import { resolvePtvStaticAssetUrl } from './urlOrigins';
 
 export type PtvStaticAssetProfile = 'PTV_DESKTOP' | 'PTV_FIRETV' | 'PTV_LOWPOWER' | 'PTV_TV' | 'PTV_WEBOS';
@@ -67,7 +68,7 @@ function isDebugEnabled() {
 
 function debugLog(message: string, detail?: unknown) {
     if (isDebugEnabled()) {
-        console.warn(`[PTV Image] ${message}`, detail);
+        ptvSafeConsole.warn(`[PTV Image] ${message}`, detail);
     }
 }
 

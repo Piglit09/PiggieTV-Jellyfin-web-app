@@ -43,7 +43,8 @@ import {
     disposePtvWebDiagnosticPlatformForTests,
     initializePtvWebDiagnosticPlatform,
     isPtvDiagnosticFocusVisible,
-    isPtvDiagnosticRouteContentReady
+    isPtvDiagnosticRouteContentReady,
+    isPtvDiagnosticsRouteFamily
 } from './webDiagnosticPlatform';
 import {
     getPtvDiagnosticStore,
@@ -231,6 +232,12 @@ describe('web diagnostic platform privacy classification', () => {
         replacement.setAttribute('src', '/logo-next.png');
         expect(guard.shouldRecord('diagnostics', replacement)).toBe(true);
         expect(guard.shouldRecord('another-route', first)).toBe(true);
+    });
+
+    it('recognizes both native and retained legacy Diagnostics route families', () => {
+        expect(isPtvDiagnosticsRouteFamily('settings/admin/piggietv/diagnostics')).toBe(true);
+        expect(isPtvDiagnosticsRouteFamily('dashboard/piggietv/diagnostics')).toBe(true);
+        expect(isPtvDiagnosticsRouteFamily('settings/admin/piggietv/configuration')).toBe(false);
     });
 
     it('does not settle while route-critical or visible shelf work is pending', () => {

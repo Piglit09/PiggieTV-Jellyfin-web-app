@@ -182,6 +182,11 @@ export function createPtvImageRemountGuard(limit = 32) {
     };
 }
 
+export function isPtvDiagnosticsRouteFamily(routeFamily: string) {
+    return routeFamily === 'dashboard/piggietv/diagnostics'
+        || routeFamily === 'settings/admin/piggietv/diagnostics';
+}
+
 export function createPtvImageLifecycleTracker(now: () => number = () => performance.now()) {
     const states = new WeakMap<HTMLImageElement, PtvImageLifecycleState>();
 
@@ -1073,7 +1078,7 @@ function createCollector(): DisposableCollector {
         const routeFamily = currentRouteFamily();
         if (
             role === 'logo'
-            && routeFamily === 'dashboard/piggietv/diagnostics'
+            && isPtvDiagnosticsRouteFamily(routeFamily)
             && !diagnosticSelfImageGenerations.shouldRecord(currentRouteSessionId || routeFamily, image)
         ) return;
 

@@ -110,3 +110,81 @@
     line-height: 1.2;
     text-decoration: none;
 }
+
+.ptv-detail-page.ptv-details--episode .itemMiscInfo-primary,
+.ptv-detail-page.ptv-details--episode .itemMiscInfo-secondary {
+    display: none !important;
+}
+
+.ptv-detail-page .ptv-episode-metadata {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    align-items: center;
+    margin-top: 14px;
+
+    color: rgba(247, 242, 252, 0.88);
+    font-size: clamp(14px, 1.05vw, 18px);
+    font-weight: 720;
+    letter-spacing: 0.005em;
+    line-height: 1.4;
+    text-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+
+.ptv-detail-page .ptv-episode-metadata > span {
+    display: inline-flex;
+    align-items: center;
+}
+
+.ptv-detail-page .ptv-episode-metadata > span + span::before {
+    content: '•';
+
+    margin: 0 9px;
+
+    color: rgba(232, 184, 255, 0.64);
+}
+
+.ptv-detail-page.ptv-details--episode .detailPagePrimaryContent > .detailSection {
+    padding: 0 !important;
+}
+
+.ptv-detail-page.ptv-details--episode .detailSectionContent {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: 720px;
+}
+
+.ptv-detail-page.ptv-details--episode .itemGenres.ptv-episode-genres {
+    display: block;
+    order: -2;
+    margin: 0 0 12px !important;
+
+    color: #ff83d1 !important;
+    font-size: clamp(13px, 0.96vw, 16px) !important;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1.4;
+    text-shadow: 0 0 18px rgba(255, 88, 195, 0.16);
+}
+
+.ptv-detail-page.ptv-details--episode .overview {
+    order: -1;
+    max-width: 700px;
+    margin: 0 !important;
+
+    color: rgba(241, 236, 247, 0.8) !important;
+    font-size: clamp(15px, 1.08vw, 18px) !important;
+    font-weight: 570;
+    line-height: 1.62;
+    text-shadow: 0 3px 16px rgba(0, 0, 0, 0.5);
+}
+
+.ptv-detail-page.ptv-details--episode .overview-controls,
+.ptv-detail-page.ptv-details--episode .trackSelections,
+.ptv-detail-page.ptv-details--episode .itemTags,
+.ptv-detail-page.ptv-details--episode .itemExternalLinks,
+.ptv-detail-page.ptv-details--episode .itemDetailsGroup,
+.ptv-detail-page.ptv-details--episode .tagline {
+    display: none !important;
+}

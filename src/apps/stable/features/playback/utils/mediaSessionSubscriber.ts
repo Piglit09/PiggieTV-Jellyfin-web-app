@@ -10,6 +10,7 @@ import shell from 'scripts/shell';
 import type { ItemDto } from 'types/base/models/item-dto';
 import type { PlayerState } from 'types/playbackStopInfo';
 import type { Event } from 'utils/events';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 /** The default image resolutions to provide to the media session.
  *
@@ -112,10 +113,10 @@ function updateExternalMediaSessionPresentation(state: PtvExternalMediaSessionSt
     }
 }
 
-function resetInactiveMediaSession(message: string, state?: PlayerState) {
+function resetInactiveMediaSession(message: string, _state?: PlayerState) {
     if (externalMediaSession?.state.active) return;
 
-    console.debug(message, state);
+    ptvSafeConsole.debug(message);
     resetMediaSession();
 }
 

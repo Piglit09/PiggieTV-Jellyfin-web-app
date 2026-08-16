@@ -76,12 +76,16 @@
         filter 220ms ease;
 }
 
+.ptv-native-cards .itemsContainer > .card.card-hoverable {
+    contain: layout style !important;
+}
+
 .ptv-native-cards .ptv-card > .cardBox,
 .ptv-native-cards .itemsContainer > .card > .cardBox {
     position: relative;
     isolation: isolate;
     box-sizing: border-box;
-    overflow: visible;
+    overflow: visible !important;
     padding: clamp(0.34rem, 0.45vw, 0.5rem);
     border: 1px solid rgb(206 158 255 / 26%);
     border-radius: var(--ptv-premium-card-radius);
@@ -190,7 +194,8 @@
 .ptv-native-cards .ptv-card-hover-panel {
     position: absolute;
     z-index: 14;
-    top: 50%;
+    top: auto;
+    bottom: 0.7rem;
     left: 50%;
     box-sizing: border-box;
     display: flex;
@@ -212,7 +217,7 @@
         0 1.2rem 3rem rgb(2 0 8 / 50%),
         0 0 2rem rgb(154 85 229 / 15%);
     opacity: 0;
-    transform: translate(-50%, -46%) scale(0.96);
+    transform: translate(-50%, 0.6rem) scale(0.96);
     transition:
         opacity 180ms ease,
         transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
@@ -224,9 +229,13 @@
 .ptv-native-cards .card-hoverable:is(:hover, :focus-within) .ptv-card-hover-panel {
     visibility: visible;
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, 0) scale(1);
     transition-delay: 90ms, 90ms, 0s;
     pointer-events: auto;
+}
+
+.ptv-native-cards #similarCollapsible {
+    overflow: visible !important;
 }
 
 .ptv-native-cards .ptv-card-hover-panel__title {

@@ -10,9 +10,14 @@ const pluginApiMocks = vi.hoisted(() => ({
     getJellyfinSessions: vi.fn(),
     getRemoteDiagnosticsClients: vi.fn(),
     getRemoteDiagnosticsReport: vi.fn(),
+    getRemoteDiagnosticsStorage: vi.fn(),
     requestRemoteDiagnosticsSnapshot: vi.fn(),
     startRemoteDiagnosticsSession: vi.fn(),
     stopRemoteDiagnosticsSession: vi.fn()
+}));
+
+const apiClientMocks = vi.hoisted(() => ({
+    getPtvServerId: vi.fn(() => 'server-1')
 }));
 
 const observabilityMocks = vi.hoisted(() => ({
@@ -26,12 +31,20 @@ vi.mock('../../core/pluginApi', () => ({
     })
 }));
 
+vi.mock('../../api/client', () => ({
+    getPtvServerId: apiClientMocks.getPtvServerId
+}));
+
 vi.mock('../../core/observability', () => ({
     isPtvDebugEnabled: observabilityMocks.isPtvDebugEnabled
 }));
 
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
-import { RemoteDiagnosticsPanel } from './RemoteDiagnosticsPanel';
+import {
+    getRemoteDiagnosticsRefreshKey,
+    getRemoteDiagnosticsReportFilename,
+    RemoteDiagnosticsPanel
+} from './RemoteDiagnosticsPanel';
 
 const capabilities = {
     heartbeat: true,
@@ -180,8 +193,11 @@ describe('RemoteDiagnosticsPanel', () => {
             mock.mockReset();
         });
         observabilityMocks.isPtvDebugEnabled.mockReturnValue(true);
+        apiClientMocks.getPtvServerId.mockReturnValue('server-1');
+        pluginApiMocks.getCurrentUserId.mockReturnValue('user-1');
         pluginApiMocks.getRemoteDiagnosticsClients.mockResolvedValue(clients);
         pluginApiMocks.getJellyfinSessions.mockResolvedValue([]);
+        pluginApiMocks.getRemoteDiagnosticsStorage.mockResolvedValue(null);
         pluginApiMocks.getRemoteDiagnosticsReport.mockResolvedValue({
             clientId: clients[0].clientId,
             receivedAtUtc: '2026-07-19T15:03:00.000Z',
@@ -237,6 +253,25 @@ describe('RemoteDiagnosticsPanel', () => {
         expect(container.textContent).toContain('2 recent clients');
         expect(getButton(container, 'Start diagnostics').disabled).toBe(false);
         expect(getButton(container, 'Stop').disabled).toBe(false);
+    });
+
+    it('scopes coordinated refreshes by server and profile', () => {
+        expect(getRemoteDiagnosticsRefreshKey('server-a', 'webos')).toBe(
+            getRemoteDiagnosticsRefreshKey('server-a', 'webos')
+        );
+        expect(getRemoteDiagnosticsRefreshKey('server-a', 'webos')).not.toBe(
+            getRemoteDiagnosticsRefreshKey('server-b', 'webos')
+        );
+        expect(getRemoteDiagnosticsRefreshKey('server-a', 'webos')).not.toBe(
+            getRemoteDiagnosticsRefreshKey('server-a', 'firetv')
+        );
+    });
+
+    it('creates report download names without exposing the client identifier', () => {
+        const filename = getRemoteDiagnosticsReportFilename('2026-07-19T15:03:00.000Z');
+
+        expect(filename).toBe('piggie-tv-diagnostics-2026-07-19T15-03-00-000Z.json');
+        expect(filename).not.toContain(clients[0].clientId);
     });
 
     it('normalizes PascalCase Jellyfin plugin client and report responses', async () => {
@@ -448,6 +483,61 @@ describe('RemoteDiagnosticsPanel', () => {
         expect(container.textContent).toContain('No supported PTV clients have checked in yet.');
         expect(getButton(container, 'Start diagnostics').disabled).toBe(true);
         expect(getButton(container, 'Stop').disabled).toBe(true);
+    });
+
+    it('keeps Jellyfin sessions usable when the remote client source fails', async () => {
+        pluginApiMocks.getRemoteDiagnosticsClients.mockRejectedValue(new Error('clients unavailable'));
+        pluginApiMocks.getJellyfinSessions.mockResolvedValue([{
+            ApplicationVersion: '0.19.9',
+            Client: 'Jellyfin Android TV',
+            DeviceId: 'fire-device',
+            DeviceName: 'Bedroom Fire TV',
+            Id: 'fire-session',
+            LastActivityDate: '2026-07-19T15:04:00.000Z'
+        }]);
+
+        await renderPanel();
+
+        expect(container.textContent).toContain('Remote diagnostics clients could not be loaded.');
+        expect(container.textContent).toContain('Bedroom Fire TV');
+        expect(container.textContent).not.toContain('Jellyfin sessions could not be loaded.');
+    });
+
+    it('keeps remote clients usable when the Jellyfin sessions source fails', async () => {
+        pluginApiMocks.getJellyfinSessions.mockRejectedValue(new Error('sessions unavailable'));
+
+        await renderPanel();
+
+        expect(container.textContent).toContain('2 recent clients');
+        expect(container.textContent).toContain('Client: Living Room LG (LG webOS)');
+        expect(container.textContent).toContain('Jellyfin sessions could not be loaded.');
+        expect(container.textContent).not.toContain('Remote diagnostics clients could not be loaded.');
+    });
+
+    it('shows diagnostics storage availability without rendering its filesystem path', async () => {
+        const privatePath = 'C:\\private\\jellyfin\\plugins\\PiggieTV\\diagnostics.jsonl';
+        pluginApiMocks.getRemoteDiagnosticsStorage.mockResolvedValue({
+            activeFileSizeBytes: 1024,
+            activeLogPath: privatePath,
+            duplicateEventsSuppressed: 0,
+            eventsAggregated: 0,
+            eventsDropped: 0,
+            eventsQueued: 0,
+            eventsWritten: 10,
+            lastRotationUtc: null,
+            legacyFileCount: 0,
+            legacyFileSizeBytes: 0,
+            oldestRetainedAtUtc: null,
+            retentionDays: 7,
+            rotatedFileCount: 0,
+            totalRetainedBytes: 1024,
+            writeFailures: 0
+        });
+
+        await renderPanel();
+
+        expect(container.textContent).toContain('Active log: Available');
+        expect(container.textContent).not.toContain(privatePath);
     });
 
     it('shows active native Fire TV sessions as detected but unsupported when no PTV check-in exists', async () => {

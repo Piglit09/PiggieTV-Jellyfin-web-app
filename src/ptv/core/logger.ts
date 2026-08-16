@@ -1,4 +1,9 @@
 import { PTV_LOGGING } from './config';
+import {
+    redactPtvSensitiveText,
+    redactPtvSensitiveValue
+} from './diagnostics/redaction';
+import { ptvSafeConsole } from './safeConsole';
 
 type PtvLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
@@ -42,12 +47,6 @@ function isDebugEnabled() {
     return ptvWindow[DEBUG_FLAG_KEY] === true;
 }
 
-function debugConsole(message: string, detail?: unknown) {
-    if (!isDebugEnabled()) return;
-
-    console.debug(`[PiggieTV Logger] ${message}`, detail);
-}
-
 function trimEntries(entries: PtvLogEntry[]) {
     if (entries.length <= PTV_LOGGING.maxEntries) return entries;
 
@@ -67,29 +66,10 @@ function writeStoredEntries(entries: PtvLogEntry[]) {
 function stringifyDetail(detail: unknown) {
     if (detail === undefined) return undefined;
 
-    const seen = typeof WeakSet === 'function' ? new WeakSet<object>() : null;
-
     try {
-        const serialized = JSON.stringify(detail, (_key: string, value: unknown) => {
-            if (value instanceof Error) {
-                return {
-                    message: value.message,
-                    name: value.name,
-                    stack: value.stack
-                };
-            }
-
-            if (typeof value === 'string' && value.length > PTV_LOGGING.maxDetailLength) {
-                return `${value.slice(0, PTV_LOGGING.maxDetailLength)}...`;
-            }
-
-            if (value && typeof value === 'object') {
-                if (seen?.has(value)) return '[Circular]';
-                seen?.add(value);
-            }
-
-            return value;
-        });
+        const serialized = JSON.stringify(redactPtvSensitiveValue(detail, {
+            maxStringLength: PTV_LOGGING.maxDetailLength
+        }));
 
         if (!serialized) return undefined;
 
@@ -97,14 +77,8 @@ function stringifyDetail(detail: unknown) {
             `${serialized.slice(0, PTV_LOGGING.maxDetailLength)}...` :
             serialized;
     } catch {
-        return String(detail).slice(0, PTV_LOGGING.maxDetailLength);
+        return redactPtvSensitiveText(String(detail), PTV_LOGGING.maxDetailLength);
     }
-}
-
-function formatEntry(entry: PtvLogEntry) {
-    const detail = entry.detail ? ` ${entry.detail}` : '';
-
-    return `[${entry.at}] [${entry.level.toUpperCase()}] [${entry.scope}] ${entry.message} route=${entry.route}${detail}`;
 }
 
 function getPtvGlobal() {
@@ -114,13 +88,16 @@ function getPtvGlobal() {
 }
 
 function appendEntry(level: PtvLogLevel, message: string, detail?: unknown, scope = 'PTV') {
+    const safeDetail = detail === undefined ? undefined : redactPtvSensitiveValue(detail, {
+        maxStringLength: PTV_LOGGING.maxDetailLength
+    });
     const entry: PtvLogEntry = {
         at: new Date().toISOString(),
-        detail: stringifyDetail(detail),
+        detail: stringifyDetail(safeDetail),
         level,
-        message,
-        route: `${window.location.pathname}${window.location.hash}${window.location.search}`,
-        scope
+        message: redactPtvSensitiveText(message),
+        route: redactPtvSensitiveText(`${window.location.pathname}${window.location.hash}${window.location.search}`),
+        scope: redactPtvSensitiveText(scope)
     };
 
     const entries = readStoredEntries();
@@ -129,9 +106,8 @@ function appendEntry(level: PtvLogLevel, message: string, detail?: unknown, scop
     writeStoredEntries(entries);
 
     if (isDebugEnabled()) {
-        console[level === 'trace' ? 'debug' : level](`[PiggieTV] ${message}`, detail);
+        ptvSafeConsole[level === 'trace' ? 'debug' : level](`[PiggieTV] ${message}`, safeDetail);
     }
-
 }
 
 function logBrowserError(event: ErrorEvent) {

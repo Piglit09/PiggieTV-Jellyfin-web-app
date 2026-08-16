@@ -12,8 +12,8 @@ public static class PtvDiagnosticsSanitizer
     private const int MaximumArrayItems = 500;
     private const int MaximumObjectProperties = 96;
     private const int MaximumStringLength = 1024;
-    private static readonly string[] SensitivePropertyFragments = ["authorization", "cookie", "password", "secret", "token", "apikey", "api-key", "accesskey"];
-    private static readonly Regex SensitiveStringPattern = new(@"(?:https?://|file://|[a-z]:\\|\\\\|(?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret|token)\s*[:=])", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
+    private static readonly string[] SensitivePropertyFragments = ["authorization", "cookie", "credential", "password", "secret", "token", "apikey", "api-key", "accesskey"];
+    private static readonly Regex SensitiveStringPattern = new(@"(?:https?://|file://|[a-z]:\\|\\\\|(?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|credential|password|secret|token)\s*[:=]|sk-(?:proj-)?[a-z0-9_-]{20,})", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
     private static readonly Regex QueryValuePattern = new(@"[?&][a-z0-9_.~-]{1,64}=[^&#\s)""']*", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
 
     /// <summary>Sanitizes a JSON value using the configured disk privacy policy.</summary>

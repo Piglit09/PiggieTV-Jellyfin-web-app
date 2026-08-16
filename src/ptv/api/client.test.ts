@@ -12,7 +12,9 @@ vi.mock('lib/jellyfin-apiclient', () => ({
 
 import {
     cleanPtvQuery,
+    normalizePtvApiLayerError,
     normalizePtvItemFields,
+    PtvApiError,
     requestPtvJson
 } from './client';
 import { createPtvAbortController } from '../core/abortController';
@@ -76,6 +78,37 @@ describe('PTV ItemFields query normalization', () => {
             IncludeItemTypes: 'Movie',
             Limit: 50
         });
+    });
+});
+
+describe('PTV API error credential safety', () => {
+    it('does not retain secret-bearing endpoints or response details on the error object', () => {
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_TOKEN', 'api-error' ].join('_');
+        const error = new PtvApiError(
+            `Request failed with Bearer ${accessCanary}`,
+            `https://server.invalid/Items?api_key=${accessCanary}`,
+            401,
+            JSON.stringify({ accessToken: accessCanary })
+        );
+        const serialized = JSON.stringify(error);
+
+        expect(serialized).not.toContain(accessCanary);
+        expect(serialized).toContain('[REDACTED]');
+    });
+
+    it('structurally redacts provider credentials in response objects', () => {
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_KEY', 'api-error' ].join('_');
+        const error = normalizePtvApiLayerError({
+            data: {
+                accessKey: accessCanary,
+                nested: { certificatePassword: accessCanary }
+            },
+            message: 'Request failed',
+            status: 500
+        }, '/Ptv/v1/status');
+
+        expect(JSON.stringify(error)).not.toContain(accessCanary);
+        expect(error.responseBody).toContain('[REDACTED]');
     });
 });
 

@@ -6,6 +6,7 @@ import { useCustomSubtitles } from 'apps/stable/features/playback/utils/subtitle
 import subtitleAppearanceHelper from 'components/subtitlesettings/subtitleappearancehelper';
 import { AppFeature } from 'constants/appFeature';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import { currentSettings as userSettings } from 'scripts/settings/userSettings';
 import { MediaError } from 'types/mediaError';
 
@@ -58,7 +59,7 @@ function resolveUrl(url) {
             resolve(xhr.responseURL || url);
         };
         xhr.onerror = function (e) {
-            console.error(e);
+            ptvSafeConsole.error('Unable to resolve video URL', e);
             resolve(url);
         };
         xhr.send(null);
@@ -72,7 +73,7 @@ function tryRemoveElement(elem) {
         try {
             parentNode.removeChild(elem);
         } catch (err) {
-            console.error(`error removing dialog element: ${err}`);
+            ptvSafeConsole.error('error removing dialog element', err);
         }
     }
 }
@@ -371,7 +372,7 @@ export class HtmlVideoPlayer {
 
             loading.show();
 
-            console.debug(`prefetching hls playlist: ${hlsPlaylistUrl}`);
+            ptvSafeConsole.debug('prefetching hls playlist', hlsPlaylistUrl);
 
             return ServerConnections.getApiClient(item.ServerId).ajax({
 
@@ -379,12 +380,12 @@ export class HtmlVideoPlayer {
                 url: hlsPlaylistUrl
 
             }).then(function () {
-                console.debug(`completed prefetching hls playlist: ${hlsPlaylistUrl}`);
+                ptvSafeConsole.debug('completed prefetching hls playlist', hlsPlaylistUrl);
 
                 loading.hide();
                 streamInfo.url = hlsPlaylistUrl;
             }, function () {
-                console.error(`error prefetching hls playlist: ${hlsPlaylistUrl}`);
+                ptvSafeConsole.error('error prefetching hls playlist', hlsPlaylistUrl);
 
                 loading.hide();
             });
@@ -482,7 +483,7 @@ export class HtmlVideoPlayer {
         elem.removeEventListener('error', this.onError);
 
         let val = options.url;
-        console.debug(`playing url: ${val}`);
+        ptvSafeConsole.debug(`playing url: ${val}`);
 
         // Convert to seconds
         const seconds = (options.playerStartPositionTicks || 0) / 10000000;
@@ -1079,7 +1080,7 @@ export class HtmlVideoPlayer {
         const elem = e.target;
         const errorCode = elem.error ? (elem.error.code || 0) : 0;
         const errorMessage = elem.error ? (elem.error.message || '') : '';
-        console.error(`media element error: ${errorCode} ${errorMessage}`);
+        ptvSafeConsole.error('media element error', errorCode, errorMessage);
 
         let type;
 
@@ -1470,7 +1471,7 @@ export class HtmlVideoPlayer {
                     trackElement.removeCue(trackElement.cues[0]);
                 }
             } catch (e) {
-                console.error('error removing cue from textTrack', e);
+                ptvSafeConsole.error('error removing cue from textTrack', e);
             }
 
             trackElement.mode = 'disabled';
@@ -1833,7 +1834,7 @@ export class HtmlVideoPlayer {
     }
 
     static onPictureInPictureError(err) {
-        console.error(`Picture in picture error: ${err}`);
+        ptvSafeConsole.error('Picture in picture error', err);
     }
 
     setPictureInPictureEnabled(isEnabled) {
@@ -1889,11 +1890,11 @@ export class HtmlVideoPlayer {
             if (video) {
                 if (isEnabled) {
                     video.requestAirPlay().catch(function(err) {
-                        console.error('Error requesting AirPlay', err);
+                        ptvSafeConsole.error('Error requesting AirPlay', err);
                     });
                 } else {
                     document.exitAirPLay().catch(function(err) {
-                        console.error('Error exiting AirPlay', err);
+                        ptvSafeConsole.error('Error exiting AirPlay', err);
                     });
                 }
             }

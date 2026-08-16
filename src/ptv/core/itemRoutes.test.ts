@@ -124,7 +124,7 @@ describe('resolvePtvItemRoute', () => {
 
     it('keeps core shell routes out of the removed playback route', () => {
         expect(PTV_ROUTES.request).toBe('#/requests');
-        expect(PTV_ROUTES.profilePreferences).toBe('#/mypreferencesmenu');
+        expect(PTV_ROUTES.profilePreferences).toBe('#/settings');
         const routeValues = Object.keys(PTV_ROUTES).map(key => PTV_ROUTES[key as keyof typeof PTV_ROUTES]);
 
         expect(routeValues).not.toContain('#/playback');
