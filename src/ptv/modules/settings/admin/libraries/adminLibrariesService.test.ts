@@ -1,10 +1,12 @@
 import type { Api } from '@jellyfin/sdk';
+import type { LibraryOptions } from '@jellyfin/sdk/lib/generated-client/models/library-options';
 import type { LibraryOptionsResultDto } from '@jellyfin/sdk/lib/generated-client/models/library-options-result-dto';
 import type { VirtualFolderInfo } from '@jellyfin/sdk/lib/generated-client/models/virtual-folder-info';
 import type { ApiClient } from 'jellyfin-apiclient';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { normalizeAdminLibraryOptions } from './adminLibrariesAdapters';
+import type { AdminLibraryProviderSummary } from './adminLibrariesModel';
 
 const sdkMocks = vi.hoisted(() => ({
     addMediaPath: vi.fn(),
@@ -73,6 +75,7 @@ import {
     startAdminLibrariesScan,
     startAdminLibraryScan,
     updateAdminLibraryOptions,
+    updateAdminLibraryProviders,
     validateAdminLibraryPath
 } from './adminLibrariesService';
 
@@ -444,6 +447,190 @@ describe('administrator libraries service mutations', () => {
         await expect(updateAdminLibraryOptions(api, 'library-a', {
             enabled: false
         }, normalizeAdminLibraryOptions(library().LibraryOptions!))).rejects.toMatchObject({
+            code: 'library-options-unavailable'
+        });
+        expect(sdkMocks.updateLibraryOptions).not.toHaveBeenCalled();
+    });
+
+    it('refetches, conflict-checks, and patches providers on the full authoritative object', async () => {
+        const confirmedOptions: LibraryOptions = {
+            MetadataSavers: ['Nfo'],
+            TypeOptions: [{
+                ImageFetcherOrder: ['Artwork A', 'Artwork B'],
+                ImageFetchers: ['Artwork A'],
+                ImageOptions: [{ Limit: 1, Type: 'Primary' }],
+                MetadataFetcherOrder: ['Metadata A', 'Metadata B'],
+                MetadataFetchers: ['Metadata A'],
+                Type: 'Movie'
+            }, {
+                ImageFetcherOrder: ['Episode art'],
+                ImageFetchers: ['Episode art'],
+                Type: 'Episode'
+            }]
+        };
+        const authoritativeOptions = {
+            ...confirmedOptions,
+            Enabled: false,
+            FutureField: { Nested: [{ Keep: 'yes' }] },
+            TypeOptions: [{
+                ...confirmedOptions.TypeOptions![0],
+                ImageOptions: [{ Limit: 4, Type: 'Primary' }],
+                UnknownProviderState: { Rank: 8 }
+            }, {
+                ImageFetcherOrder: ['Episode art'],
+                ImageFetchers: ['Episode art'],
+                Type: 'Episode'
+            }]
+        } as unknown as LibraryOptions;
+        const providers: AdminLibraryProviderSummary = {
+            groups: [{
+                imageProviders: [
+                    { available: true, enabled: false, name: 'Artwork B' },
+                    { available: true, enabled: true, name: 'Artwork A' }
+                ],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { available: true, enabled: true, name: 'Metadata B' },
+                    { available: true, enabled: false, name: 'Metadata A' }
+                ]
+            }],
+            metadataSavers: [
+                { available: true, enabled: false, name: 'Nfo' },
+                { available: true, enabled: true, name: 'Json' }
+            ]
+        };
+        const confirmedProviders: AdminLibraryProviderSummary = {
+            groups: [{
+                imageProviders: [
+                    { available: true, enabled: true, name: 'Artwork A' },
+                    { available: true, enabled: false, name: 'Artwork B' }
+                ],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { available: true, enabled: true, name: 'Metadata A' },
+                    { available: true, enabled: false, name: 'Metadata B' }
+                ]
+            }],
+            metadataSavers: [
+                { available: true, enabled: true, name: 'Nfo' },
+                { available: true, enabled: false, name: 'Json' }
+            ]
+        };
+        sdkMocks.getVirtualFolders.mockResolvedValue({
+            data: [library({ LibraryOptions: authoritativeOptions })]
+        });
+
+        const saved = await updateAdminLibraryProviders(
+            api,
+            'library-a',
+            providers,
+            confirmedProviders,
+            confirmedOptions
+        );
+
+        expect(saved.LibraryOptions).toMatchObject({
+            Enabled: false,
+            FutureField: { Nested: [{ Keep: 'yes' }] },
+            MetadataSavers: ['Json'],
+            TypeOptions: [{
+                ImageFetcherOrder: ['Artwork A', 'Artwork B'],
+                ImageFetchers: ['Artwork A'],
+                ImageOptions: [{ Limit: 4, Type: 'Primary' }],
+                MetadataFetcherOrder: ['Metadata A', 'Metadata B'],
+                MetadataFetchers: ['Metadata B'],
+                UnknownProviderState: { Rank: 8 }
+            }, {
+                ImageFetcherOrder: ['Episode art'],
+                ImageFetchers: ['Episode art'],
+                Type: 'Episode'
+            }]
+        });
+        expect(sdkMocks.updateLibraryOptions).toHaveBeenCalledWith({
+            updateLibraryOptionsDto: {
+                Id: 'library-a',
+                LibraryOptions: saved.LibraryOptions
+            }
+        }, { signal: undefined });
+        expect(saved.LibraryOptions).not.toBe(authoritativeOptions);
+    });
+
+    it('creates options only for the changed default-resolved provider category', async () => {
+        const confirmedOptions: LibraryOptions = { Enabled: true };
+        sdkMocks.getVirtualFolders.mockResolvedValue({
+            data: [library({
+                LibraryOptions: {
+                    Enabled: false,
+                    FutureField: { Keep: true }
+                } as unknown as LibraryOptions
+            })]
+        });
+
+        const saved = await updateAdminLibraryProviders(api, 'library-a', {
+            groups: [{
+                imageProviders: [{ available: true, enabled: true, name: 'Artwork' }],
+                mediaType: 'Movie',
+                metadataProviders: [{ available: true, enabled: true, name: 'Metadata' }]
+            }],
+            metadataSavers: [{ available: true, enabled: true, name: 'Nfo' }]
+        }, {
+            groups: [{
+                imageProviders: [{ available: true, enabled: false, name: 'Artwork' }],
+                mediaType: 'Movie',
+                metadataProviders: [{ available: true, enabled: true, name: 'Metadata' }]
+            }],
+            metadataSavers: [{ available: true, enabled: true, name: 'Nfo' }]
+        }, confirmedOptions);
+
+        expect(saved.LibraryOptions).toMatchObject({
+            Enabled: false,
+            FutureField: { Keep: true },
+            TypeOptions: [{
+                ImageFetchers: ['Artwork'],
+                Type: 'Movie'
+            }]
+        });
+        expect('MetadataSavers' in saved.LibraryOptions!).toBe(false);
+        expect('MetadataFetchers' in saved.LibraryOptions!.TypeOptions![0]!).toBe(false);
+        expect('ImageFetcherOrder' in saved.LibraryOptions!.TypeOptions![0]!).toBe(false);
+        expect(sdkMocks.updateLibraryOptions).toHaveBeenCalledOnce();
+    });
+
+    it('rejects a provider write when any raw provider selection or order changed', async () => {
+        const confirmedOptions = library().LibraryOptions!;
+        sdkMocks.getVirtualFolders.mockResolvedValue({
+            data: [library({
+                LibraryOptions: {
+                    ...confirmedOptions,
+                    TypeOptions: [{
+                        ...confirmedOptions.TypeOptions![0],
+                        MetadataFetchers: []
+                    }]
+                }
+            })]
+        });
+
+        await expect(updateAdminLibraryProviders(api, 'library-a', {
+            groups: [],
+            metadataSavers: []
+        }, {
+            groups: [],
+            metadataSavers: []
+        }, confirmedOptions)).rejects.toMatchObject({ code: 'conflict' });
+        expect(sdkMocks.updateLibraryOptions).not.toHaveBeenCalled();
+    });
+
+    it('fails a provider write closed when the fresh read has no options', async () => {
+        sdkMocks.getVirtualFolders.mockResolvedValue({
+            data: [library({ LibraryOptions: undefined })]
+        });
+
+        await expect(updateAdminLibraryProviders(api, 'library-a', {
+            groups: [],
+            metadataSavers: []
+        }, {
+            groups: [],
+            metadataSavers: []
+        }, library().LibraryOptions!)).rejects.toMatchObject({
             code: 'library-options-unavailable'
         });
         expect(sdkMocks.updateLibraryOptions).not.toHaveBeenCalled();

@@ -474,10 +474,74 @@
     accent-color: var(--ptv-color-accent-secondary);
 }
 
+.ptv-admin-library-artwork-storage {
+    display: grid;
+    gap: 8px;
+}
+
+.ptv-admin-library-artwork-storage > strong {
+    color: var(--ptv-color-text-soft);
+    font-size: 0.8rem;
+}
+
+.ptv-admin-library-storage-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+}
+
+.ptv-admin-library-storage-options > label {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: flex-start;
+    min-height: 74px;
+    box-sizing: border-box;
+    padding: 11px 12px;
+    border: 1px solid var(--ptv-border-divider);
+    border-radius: 12px;
+    background: rgba(var(--ptv-palette-black-rgb), 0.14);
+    cursor: pointer;
+}
+
+.ptv-admin-library-storage-options > label[data-selected='true'] {
+    border-color: var(--ptv-state-selected-border);
+    background: var(--ptv-state-selected);
+    box-shadow: var(--ptv-state-focus-shadow);
+}
+
+.ptv-admin-library-storage-options input {
+    margin: 3px 0 0;
+    accent-color: var(--ptv-color-accent-secondary);
+}
+
+.ptv-admin-library-storage-options span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-library-storage-options strong {
+    color: var(--ptv-color-text-soft);
+    font-size: 0.76rem;
+}
+
+.ptv-admin-library-storage-options small {
+    margin-top: 4px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.68rem;
+    line-height: 1.4;
+}
+
 .ptv-admin-library-path-list,
 .ptv-admin-library-provider-list {
     display: grid;
     gap: 8px;
+}
+
+.ptv-admin-library-provider-list {
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    align-items: start;
 }
 
 .ptv-admin-library-path-row {
@@ -505,24 +569,88 @@
     padding: 6px 10px;
 }
 
-.ptv-admin-library-provider-list > div {
+.ptv-admin-library-provider-group {
     display: grid;
-    gap: 4px;
-    padding: 10px 12px;
+    gap: 14px;
+    min-width: 0;
+    margin: 0;
+    padding: 11px 12px 13px;
     border: 1px solid var(--ptv-border-divider);
     border-radius: 11px;
+    background: rgba(var(--ptv-palette-black-rgb), 0.14);
 }
 
-.ptv-admin-library-provider-list strong {
+.ptv-admin-library-provider-group legend {
+    padding: 0 6px;
     color: var(--ptv-color-text-soft);
     font-size: 0.78rem;
+    font-weight: 850;
     text-transform: capitalize;
 }
 
-.ptv-admin-library-provider-list small {
+.ptv-admin-library-provider-category {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+}
+
+.ptv-admin-library-provider-category h3 {
+    margin: 0;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.74rem;
+}
+
+.ptv-admin-library-provider-category > small {
     color: var(--ptv-color-text-muted);
-    font-size: 0.7rem;
-    line-height: 1.35;
+    font-size: 0.66rem;
+    line-height: 1.4;
+}
+
+.ptv-admin-library-provider-choices {
+    display: grid;
+    gap: 5px;
+}
+
+.ptv-admin-library-provider-choices > label {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 9px;
+    align-items: center;
+    min-height: 36px;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    color: var(--ptv-color-text-primary);
+    background: var(--ptv-component-chip-bg);
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
+.ptv-admin-library-provider-choices > label[data-selected='true'] {
+    border-color: var(--ptv-state-selected-border);
+    background: var(--ptv-state-selected);
+}
+
+.ptv-admin-library-provider-choices > label.is-unavailable {
+    color: var(--ptv-color-text-muted);
+}
+
+.ptv-admin-library-provider-choices input {
+    margin: 0;
+    accent-color: var(--ptv-color-accent-secondary);
+}
+
+.ptv-admin-library-provider-choices span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    overflow-wrap: anywhere;
+}
+
+.ptv-admin-library-provider-choices span small {
+    margin-top: 2px;
+    color: var(--ptv-state-warning-text, #f2c878);
+    font-size: 0.62rem;
 }
 
 .ptv-admin-library-provider-error {
@@ -691,6 +819,7 @@
     .ptv-admin-library-dialog-grid { grid-template-columns: 1fr; }
     .ptv-admin-library-path-row { grid-template-columns: 1fr; }
     .ptv-admin-library-path-row button { justify-self: start; }
+    .ptv-admin-library-storage-options { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

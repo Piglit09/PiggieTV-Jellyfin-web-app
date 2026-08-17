@@ -207,6 +207,7 @@ export function useAdminLibrary(
         loading: detailQuery.isPending && !detailQuery.data,
         providerError: providerQuery.isError,
         providerLoading: hasAuthoritativeOptions && providerQuery.isPending && !providerQuery.data,
+        providerOptions,
         refetch: detailQuery.refetch,
         refetchProviders: providerQuery.refetch,
         removeCachedDetail,

@@ -2,6 +2,7 @@ import type { Api } from '@jellyfin/sdk';
 import type { CollectionType } from '@jellyfin/sdk/lib/generated-client/models/collection-type';
 import type { CollectionTypeOptions } from '@jellyfin/sdk/lib/generated-client/models/collection-type-options';
 import type { FileSystemEntryInfo } from '@jellyfin/sdk/lib/generated-client/models/file-system-entry-info';
+import type { LibraryOptions } from '@jellyfin/sdk/lib/generated-client/models/library-options';
 import type { LibraryOptionsResultDto } from '@jellyfin/sdk/lib/generated-client/models/library-options-result-dto';
 import type { TaskInfo } from '@jellyfin/sdk/lib/generated-client/models/task-info';
 import type { VirtualFolderInfo } from '@jellyfin/sdk/lib/generated-client/models/virtual-folder-info';
@@ -13,14 +14,17 @@ import { getScheduledTasksApi } from '@jellyfin/sdk/lib/utils/api/scheduled-task
 import type { ApiClient } from 'jellyfin-apiclient';
 
 import {
+    areAdminLibraryProviderConfigurationsEqual,
     areAdminLibraryOptionsEqual,
     buildDefaultAdminLibraryOptions,
     normalizeAdminLibraryOptions,
-    patchAdminLibraryOptions
+    patchAdminLibraryOptions,
+    patchAdminLibraryProviders
 } from './adminLibrariesAdapters';
 import type {
     AdminLibraryOptionsForm,
     AdminLibraryOptionsPatch,
+    AdminLibraryProviderSummary,
     CreateAdminLibraryInput
 } from './adminLibrariesModel';
 
@@ -364,6 +368,41 @@ export async function updateAdminLibraryOptions(
         );
     }
     const options = patchAdminLibraryOptions(library.LibraryOptions, patch);
+    await getLibraryStructureApi(api).updateLibraryOptions({
+        updateLibraryOptionsDto: {
+            Id: library.ItemId!,
+            LibraryOptions: options
+        }
+    }, { signal });
+    return { ...library, LibraryOptions: options };
+}
+
+export async function updateAdminLibraryProviders(
+    api: Api,
+    libraryId: string,
+    providers: AdminLibraryProviderSummary,
+    confirmedProviders: AdminLibraryProviderSummary,
+    confirmedOptions: LibraryOptions,
+    signal?: AbortSignal
+): Promise<VirtualFolderInfo> {
+    const library = await loadAdminLibrary(api, libraryId, signal);
+    if (!library.LibraryOptions) {
+        throw new AdminLibrariesServiceError(
+            'library-options-unavailable',
+            'Library options could not be verified. No changes were made.'
+        );
+    }
+    if (!areAdminLibraryProviderConfigurationsEqual(library.LibraryOptions, confirmedOptions)) {
+        throw new AdminLibrariesServiceError(
+            'conflict',
+            'This library changed on the server while you were editing. Reload before saving.'
+        );
+    }
+    const options = patchAdminLibraryProviders(
+        library.LibraryOptions,
+        providers,
+        confirmedProviders
+    );
     await getLibraryStructureApi(api).updateLibraryOptions({
         updateLibraryOptionsDto: {
             Id: library.ItemId!,

@@ -5,6 +5,8 @@ import type { VirtualFolderInfo } from '@jellyfin/sdk/lib/generated-client/model
 import { describe, expect, it } from 'vitest';
 
 import {
+    areAdminLibraryProviderConfigurationsEqual,
+    areAdminLibraryProvidersEqual,
     areAdminLibraryOptionsEqual,
     buildAdminLibraryOptionsPatch,
     buildDefaultAdminLibraryOptions,
@@ -15,9 +17,13 @@ import {
     normalizeAdminLibraryOptions,
     normalizeAdminLibraryProviders,
     patchAdminLibraryOptions,
+    patchAdminLibraryProviders,
     selectAdminLibraries
 } from './adminLibrariesAdapters';
-import type { AdminLibraryOptionsForm } from './adminLibrariesModel';
+import type {
+    AdminLibraryOptionsForm,
+    AdminLibraryProviderSummary
+} from './adminLibrariesModel';
 
 function folder(overrides: Partial<VirtualFolderInfo> = {}): VirtualFolderInfo {
     return {
@@ -46,6 +52,7 @@ function optionsForm(overrides: Partial<AdminLibraryOptionsForm> = {}): AdminLib
         lufsAnalysis: true,
         photos: true,
         realTimeMonitoring: true,
+        saveLocalMetadata: false,
         saveTrickplayWithMedia: false,
         trickplayImages: false,
         trickplayImagesDuringScan: false,
@@ -169,16 +176,18 @@ describe('administrator library options normalization', () => {
         expect(normalizeAdminLibraryOptions({
             EnablePhotos: false,
             EnableRealtimeMonitor: true,
+            SaveLocalMetadata: false,
             Enabled: undefined
         })).toMatchObject({
             enabled: null,
             photos: false,
             realTimeMonitoring: true,
+            saveLocalMetadata: false,
             trickplayImages: null
         });
     });
 
-    it('uses configured providers and server defaults only when configuration is absent', () => {
+    it('normalizes ordered provider choices without losing unavailable configured names', () => {
         const available: LibraryOptionsResultDto = {
             MetadataSavers: [
                 { DefaultEnabled: true, Name: 'Nfo' },
@@ -189,7 +198,10 @@ describe('administrator library options normalization', () => {
                     { DefaultEnabled: true, Name: 'TheMovieDb' },
                     { DefaultEnabled: false, Name: 'Fanart' }
                 ],
-                MetadataFetchers: [{ DefaultEnabled: true, Name: 'TheMovieDb' }],
+                MetadataFetchers: [
+                    { DefaultEnabled: true, Name: 'TheMovieDb' },
+                    { DefaultEnabled: false, Name: 'Secondary metadata' }
+                ],
                 Type: 'Movie'
             }]
         };
@@ -197,18 +209,313 @@ describe('administrator library options normalization', () => {
         const normalized = normalizeAdminLibraryProviders({
             MetadataSavers: [],
             TypeOptions: [{
-                ImageFetchers: ['Fanart'],
+                ImageFetcherOrder: [
+                    'TheMovieDb',
+                    'Fanart',
+                    'Removed ordered provider',
+                    'Removed selected provider'
+                ],
+                ImageFetchers: ['Fanart', 'Removed selected provider'],
+                MetadataFetcherOrder: ['Secondary metadata', 'TheMovieDb'],
                 MetadataFetchers: undefined,
                 Type: 'Movie'
             }]
         }, available);
 
-        expect(normalized.metadataSavers).toEqual([]);
+        expect(normalized.metadataSavers).toEqual([
+            { available: true, enabled: false, name: 'Nfo' },
+            { available: true, enabled: false, name: 'Custom saver' }
+        ]);
         expect(normalized.groups).toEqual([{
-            imageProviders: ['Fanart'],
+            imageProviders: [
+                { available: true, enabled: false, name: 'TheMovieDb' },
+                { available: true, enabled: true, name: 'Fanart' },
+                { available: false, enabled: false, name: 'Removed ordered provider' },
+                { available: false, enabled: true, name: 'Removed selected provider' }
+            ],
             mediaType: 'Movie',
-            metadataProviders: ['TheMovieDb']
+            metadataProviders: [
+                { available: true, enabled: false, name: 'Secondary metadata' },
+                { available: true, enabled: true, name: 'TheMovieDb' }
+            ]
         }]);
+    });
+
+    it('uses discovery defaults only when a configured provider array is absent', () => {
+        const available: LibraryOptionsResultDto = {
+            TypeOptions: [{
+                MetadataFetchers: [
+                    { DefaultEnabled: true, Name: 'Default provider' },
+                    { DefaultEnabled: false, Name: 'Optional provider' }
+                ],
+                Type: 'Movie'
+            }]
+        };
+
+        const absent = normalizeAdminLibraryProviders({ TypeOptions: [{ Type: 'Movie' }] }, available);
+        const explicitEmpty = normalizeAdminLibraryProviders({
+            TypeOptions: [{ MetadataFetchers: [], Type: 'Movie' }]
+        }, available);
+
+        expect(absent.groups[0]?.metadataProviders.map(choice => choice.enabled)).toEqual([ true, false ]);
+        expect(explicitEmpty.groups[0]?.metadataProviders.map(choice => choice.enabled)).toEqual([ false, false ]);
+    });
+
+    it('compares provider edits while ignoring availability-only changes', () => {
+        const left: AdminLibraryProviderSummary = {
+            groups: [{
+                imageProviders: [{ available: true, enabled: false, name: 'Artwork' }],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { available: true, enabled: true, name: 'Primary' },
+                    { available: false, enabled: false, name: 'Secondary' }
+                ]
+            }],
+            metadataSavers: [{ available: true, enabled: true, name: 'Nfo' }]
+        };
+        const availabilityChanged: AdminLibraryProviderSummary = {
+            groups: [{
+                imageProviders: [{ available: false, enabled: false, name: 'Artwork' }],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { available: false, enabled: true, name: 'Primary' },
+                    { available: true, enabled: false, name: 'Secondary' }
+                ]
+            }],
+            metadataSavers: [{ available: false, enabled: true, name: 'Nfo' }]
+        };
+
+        expect(areAdminLibraryProvidersEqual(left, availabilityChanged)).toBe(true);
+        expect(areAdminLibraryProvidersEqual(left, {
+            ...availabilityChanged,
+            groups: [{
+                ...availabilityChanged.groups[0]!,
+                metadataProviders: [ ...availabilityChanged.groups[0]!.metadataProviders ].reverse()
+            }]
+        })).toBe(false);
+        expect(areAdminLibraryProvidersEqual(left, {
+            ...availabilityChanged,
+            metadataSavers: [{ available: false, enabled: false, name: 'Nfo' }]
+        })).toBe(false);
+    });
+
+    it('patches only changed enabled selections and preserves untouched inherited categories', () => {
+        const authoritative = {
+            FutureBackendField: { Keep: true },
+            TypeOptions: [{
+                ImageFetcherOrder: ['Artwork A', 'Artwork B'],
+                ImageFetchers: ['Artwork A'],
+                ImageOptions: [{ Limit: 1, Type: 'Primary' }],
+                MetadataFetcherOrder: ['Metadata A', 'Metadata B'],
+                MetadataFetchers: ['Metadata A'],
+                Type: 'Movie',
+                UnknownProviderState: { Keep: true }
+            }, {
+                ImageFetcherOrder: ['Episode artwork'],
+                ImageFetchers: ['Episode artwork'],
+                Type: 'Episode'
+            }]
+        } as unknown as LibraryOptions;
+        const confirmedProviders: AdminLibraryProviderSummary = {
+            groups: [{
+                imageProviders: [
+                    { available: true, enabled: true, name: 'Artwork A' },
+                    { available: true, enabled: false, name: 'Artwork B' }
+                ],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { available: true, enabled: true, name: 'Metadata A' },
+                    { available: true, enabled: false, name: 'Metadata B' }
+                ]
+            }, {
+                imageProviders: [
+                    { available: true, enabled: true, name: 'Inherited series artwork' }
+                ],
+                mediaType: 'Series',
+                metadataProviders: []
+            }],
+            metadataSavers: [
+                { available: true, enabled: true, name: 'Nfo' },
+                { available: true, enabled: false, name: 'Json' }
+            ]
+        };
+        const providers: AdminLibraryProviderSummary = {
+            groups: [{
+                imageProviders: [
+                    { available: false, enabled: false, name: 'Artwork B' },
+                    { available: true, enabled: true, name: 'Artwork A' }
+                ],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { available: true, enabled: true, name: 'Metadata B' },
+                    { available: true, enabled: false, name: 'Metadata A' }
+                ]
+            }, {
+                imageProviders: [
+                    { available: true, enabled: true, name: 'Inherited series artwork' }
+                ],
+                mediaType: 'Series',
+                metadataProviders: []
+            }],
+            metadataSavers: [
+                { available: true, enabled: false, name: 'Json' },
+                { available: false, enabled: true, name: 'Nfo' }
+            ]
+        };
+
+        const patched = patchAdminLibraryProviders(
+            authoritative,
+            providers,
+            confirmedProviders
+        );
+
+        expect(patched).toMatchObject({
+            FutureBackendField: { Keep: true },
+            TypeOptions: [{
+                ImageFetcherOrder: ['Artwork A', 'Artwork B'],
+                ImageFetchers: ['Artwork A'],
+                ImageOptions: [{ Limit: 1, Type: 'Primary' }],
+                MetadataFetcherOrder: ['Metadata A', 'Metadata B'],
+                MetadataFetchers: ['Metadata B'],
+                Type: 'Movie',
+                UnknownProviderState: { Keep: true }
+            }, {
+                ImageFetcherOrder: ['Episode artwork'],
+                ImageFetchers: ['Episode artwork'],
+                Type: 'Episode'
+            }]
+        });
+        expect('MetadataSavers' in patched).toBe(false);
+        expect(patched.TypeOptions?.find(value => value.Type === 'Series')).toBeUndefined();
+        expect(patched).not.toBe(authoritative);
+        expect(patched.TypeOptions).not.toBe(authoritative.TypeOptions);
+        expect(authoritative.TypeOptions?.[0]?.MetadataFetchers).toEqual(['Metadata A']);
+    });
+
+    it('leaves absent provider categories absent when no choices are represented', () => {
+        const authoritative: LibraryOptions = {
+            TypeOptions: [{ ImageOptions: [{ Limit: 1, Type: 'Primary' }], Type: 'Movie' }]
+        };
+        const patched = patchAdminLibraryProviders(authoritative, {
+            groups: [{ imageProviders: [], mediaType: 'Movie', metadataProviders: [] }],
+            metadataSavers: []
+        }, {
+            groups: [{ imageProviders: [], mediaType: 'Movie', metadataProviders: [] }],
+            metadataSavers: []
+        });
+
+        expect('MetadataSavers' in patched).toBe(false);
+        expect('MetadataFetchers' in patched.TypeOptions![0]!).toBe(false);
+        expect('MetadataFetcherOrder' in patched.TypeOptions![0]!).toBe(false);
+        expect('ImageFetchers' in patched.TypeOptions![0]!).toBe(false);
+        expect('ImageFetcherOrder' in patched.TypeOptions![0]!).toBe(false);
+        expect(patched.TypeOptions?.[0]?.ImageOptions).toEqual([{ Limit: 1, Type: 'Primary' }]);
+    });
+
+    it('materializes only a changed inherited selection with explicit-empty semantics', () => {
+        const authoritative: LibraryOptions = { Enabled: true };
+        const patched = patchAdminLibraryProviders(authoritative, {
+            groups: [{
+                imageProviders: [],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { available: true, enabled: false, name: 'Metadata A' },
+                    { available: true, enabled: true, name: 'Metadata B' }
+                ]
+            }, {
+                imageProviders: [],
+                mediaType: 'Episode',
+                metadataProviders: []
+            }],
+            metadataSavers: []
+        }, {
+            groups: [{
+                imageProviders: [],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { available: true, enabled: true, name: 'Metadata A' },
+                    { available: true, enabled: false, name: 'Metadata B' }
+                ]
+            }, {
+                imageProviders: [],
+                mediaType: 'Episode',
+                metadataProviders: []
+            }],
+            metadataSavers: []
+        });
+
+        expect(patched.TypeOptions).toEqual([{
+            MetadataFetchers: ['Metadata B'],
+            Type: 'Movie'
+        }]);
+        expect('TypeOptions' in authoritative).toBe(false);
+    });
+
+    it('writes an explicit empty selection only when the user disabled an inherited default', () => {
+        const authoritative: LibraryOptions = {};
+        const patched = patchAdminLibraryProviders(authoritative, {
+            groups: [{
+                imageProviders: [{ available: true, enabled: false, name: 'Default artwork' }],
+                mediaType: 'Movie',
+                metadataProviders: []
+            }],
+            metadataSavers: [{ available: true, enabled: true, name: 'Nfo' }]
+        }, {
+            groups: [{
+                imageProviders: [{ available: true, enabled: true, name: 'Default artwork' }],
+                mediaType: 'Movie',
+                metadataProviders: []
+            }],
+            metadataSavers: [{ available: true, enabled: true, name: 'Nfo' }]
+        });
+
+        expect(patched).toEqual({
+            TypeOptions: [{ ImageFetchers: [], Type: 'Movie' }]
+        });
+        expect('MetadataSavers' in patched).toBe(false);
+        expect('ImageFetcherOrder' in patched.TypeOptions![0]!).toBe(false);
+    });
+
+    it('compares only raw provider configuration with absent and empty kept distinct', () => {
+        const left: LibraryOptions = {
+            Enabled: true,
+            MetadataSavers: ['Nfo'],
+            TypeOptions: [{
+                ImageFetcherOrder: ['Artwork A', 'Artwork B'],
+                ImageFetchers: ['Artwork A'],
+                ImageOptions: [{ Limit: 1, Type: 'Primary' }],
+                MetadataFetcherOrder: ['Metadata A', 'Metadata B'],
+                MetadataFetchers: ['Metadata A'],
+                Type: 'Movie'
+            }]
+        };
+        const sameProviders: LibraryOptions = {
+            Enabled: false,
+            MetadataSavers: ['Nfo'],
+            TypeOptions: [{ Type: 'Episode' }, {
+                ImageFetcherOrder: ['Artwork A', 'Artwork B'],
+                ImageFetchers: ['Artwork A'],
+                ImageOptions: [{ Limit: 9, Type: 'Primary' }],
+                MetadataFetcherOrder: ['Metadata A', 'Metadata B'],
+                MetadataFetchers: ['Metadata A'],
+                Type: 'Movie'
+            }]
+        };
+
+        expect(areAdminLibraryProviderConfigurationsEqual(left, sameProviders)).toBe(true);
+        expect(areAdminLibraryProviderConfigurationsEqual(left, {
+            ...sameProviders,
+            TypeOptions: [{
+                ...sameProviders.TypeOptions![1],
+                MetadataFetchers: []
+            }]
+        })).toBe(false);
+        expect(areAdminLibraryProviderConfigurationsEqual({}, { MetadataSavers: [] })).toBe(false);
+        expect(areAdminLibraryProviderConfigurationsEqual({
+            TypeOptions: [{ Type: 'Movie' }]
+        }, {
+            TypeOptions: [{ MetadataFetchers: [], Type: 'Movie' }]
+        })).toBe(false);
     });
 
     it('does not invent detail options when the server omitted them', () => {

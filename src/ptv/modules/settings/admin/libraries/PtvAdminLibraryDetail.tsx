@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { LibraryOptions } from '@jellyfin/sdk/lib/generated-client/models/library-options';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import ConfirmDialog from '../../../../../components/ConfirmDialog';
@@ -8,10 +9,16 @@ import { getPtvAdminDestination } from '../adminNavigation';
 import { useAdminUnsavedChanges } from '../configuration/useAdminUnsavedChanges';
 import {
     areAdminLibraryOptionsEqual,
+    areAdminLibraryProvidersEqual,
     buildAdminLibraryOptionsPatch,
-    normalizeAdminLibraryOptions
+    normalizeAdminLibraryOptions,
+    normalizeAdminLibraryProviders
 } from './adminLibrariesAdapters';
-import type { AdminLibraryOptionsForm } from './adminLibrariesModel';
+import type {
+    AdminLibraryOptionsForm,
+    AdminLibraryProviderChoice,
+    AdminLibraryProviderSummary
+} from './adminLibrariesModel';
 import {
     addAdminLibraryPath,
     AdminLibrariesServiceError,
@@ -19,7 +26,8 @@ import {
     removeAdminLibraryPath,
     renameAdminLibrary,
     startAdminLibraryScan,
-    updateAdminLibraryOptions
+    updateAdminLibraryOptions,
+    updateAdminLibraryProviders
 } from './adminLibrariesService';
 import { AdminLibraryFolderPicker } from './AdminLibraryDialogs';
 import {
@@ -68,12 +76,124 @@ function LibraryOptionToggle({
     );
 }
 
+function LibraryArtworkStorage({
+    onChange,
+    value
+}: Readonly<{
+    onChange: (value: boolean) => void;
+    value: boolean | null;
+}>) {
+    if (value === null) return null;
+    return (
+        <div aria-label='Artwork storage' className='ptv-admin-library-artwork-storage' role='radiogroup'>
+            <strong>Artwork storage</strong>
+            <div className='ptv-admin-library-storage-options'>
+                <label data-selected={!value}>
+                    <input checked={!value} name='ptv-library-artwork-storage' onChange={() => onChange(false)} type='radio' />
+                    <span>
+                        <strong>Jellyfin data folder</strong>
+                        <small>Keep downloaded artwork in Jellyfin-managed metadata storage.</small>
+                    </span>
+                </label>
+                <label data-selected={value}>
+                    <input checked={value} name='ptv-library-artwork-storage' onChange={() => onChange(true)} type='radio' />
+                    <span>
+                        <strong>Media folders</strong>
+                        <small>Save artwork beside the media. Jellyfin needs write access to the folder, including a mounted ZFS dataset.</small>
+                    </span>
+                </label>
+            </div>
+        </div>
+    );
+}
+
+function LibraryProviderChoices({
+    choices,
+    confirmedChoices,
+    description,
+    label,
+    onChange
+}: Readonly<{
+    choices: readonly AdminLibraryProviderChoice[];
+    confirmedChoices?: readonly AdminLibraryProviderChoice[];
+    description: string;
+    label: string;
+    onChange: (name: string, enabled: boolean) => void;
+}>) {
+    if (!choices.length) return null;
+    return (
+        <div className='ptv-admin-library-provider-category'>
+            <h3>{label}</h3>
+            <div className='ptv-admin-library-provider-choices'>
+                {choices.map(choice => (
+                    <label
+                        className={!choice.available ? 'is-unavailable' : undefined}
+                        data-selected={choice.enabled}
+                        key={choice.name}
+                    >
+                        <input
+                            checked={choice.enabled}
+                            disabled={!choice.available && !choice.enabled && !confirmedChoices?.some(
+                                confirmedChoice => confirmedChoice.name === choice.name && confirmedChoice.enabled
+                            )}
+                            onChange={event => onChange(choice.name, event.currentTarget.checked)}
+                            type='checkbox'
+                        />
+                        <span>
+                            {choice.name}
+                            {!choice.available ? <small>Not currently available</small> : null}
+                        </span>
+                    </label>
+                ))}
+            </div>
+            <small>{description}</small>
+        </div>
+    );
+}
+
+function formatProviderMediaType(value: string) {
+    return value.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+}
+
+function updateProviderChoice(
+    current: AdminLibraryProviderSummary,
+    mediaType: string,
+    field: 'imageProviders' | 'metadataProviders',
+    providerName: string,
+    enabled: boolean
+): AdminLibraryProviderSummary {
+    return {
+        ...current,
+        groups: current.groups.map(group => group.mediaType === mediaType ? {
+            ...group,
+            [field]: group[field].map(choice => (
+                choice.name === providerName ? { ...choice, enabled } : choice
+            ))
+        } : group)
+    };
+}
+
+function updateMetadataSaverChoice(
+    current: AdminLibraryProviderSummary,
+    providerName: string,
+    enabled: boolean
+): AdminLibraryProviderSummary {
+    return {
+        ...current,
+        metadataSavers: current.metadataSavers.map(choice => (
+            choice.name === providerName ? { ...choice, enabled } : choice
+        ))
+    };
+}
+
 export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryId: string }>) {
     const { __legacyApiClient__: apiClient, api } = useApi();
     const navigate = useNavigate();
     const state = useAdminLibrary(api, apiClient, libraryId);
     const detail = state.detail;
     const hydratedId = useRef('');
+    const providerHydratedId = useRef('');
+    const confirmedProviderOptionsRef = useRef<LibraryOptions | null>(null);
     const mutationBusyRef = useRef(false);
     const scanBusyRef = useRef(false);
     const removeBusyRef = useRef(false);
@@ -82,8 +202,11 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
     const [ confirmedName, setConfirmedName ] = useState('');
     const [ options, setOptions ] = useState<AdminLibraryOptionsForm | null>(null);
     const [ confirmedOptions, setConfirmedOptions ] = useState<AdminLibraryOptionsForm | null>(null);
+    const [ providers, setProviders ] = useState<AdminLibraryProviderSummary | null>(null);
+    const [ confirmedProviders, setConfirmedProviders ] = useState<AdminLibraryProviderSummary | null>(null);
     const [ generalState, setGeneralState ] = useState<SaveState>('idle');
     const [ optionsState, setOptionsState ] = useState<SaveState>('idle');
+    const [ providersState, setProvidersState ] = useState<SaveState>('idle');
     const [ actionMessage, setActionMessage ] = useState('');
     const [ scanBusy, setScanBusy ] = useState(false);
     const [ pathBusy, setPathBusy ] = useState(false);
@@ -102,11 +225,32 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
         setConfirmedOptions(detail.options ? { ...detail.options } : null);
     }, [detail, libraryId]);
 
+    useEffect(() => {
+        if (
+            !detail?.providerSummary
+            || !detail.rawOptions
+            || state.providerLoading
+            || state.providerError
+        ) return;
+        const identity = detail.id || libraryId;
+        if (providerHydratedId.current === identity) return;
+        providerHydratedId.current = identity;
+        setProviders(detail.providerSummary);
+        setConfirmedProviders(detail.providerSummary);
+        confirmedProviderOptionsRef.current = detail.rawOptions;
+    }, [detail, libraryId, state.providerError, state.providerLoading]);
+
     const nameDirty = Boolean(detail && name.trim() !== confirmedName);
     const optionsDirty = Boolean(
         options && confirmedOptions && !areAdminLibraryOptionsEqual(options, confirmedOptions)
     );
-    const dirty = nameDirty || optionsDirty;
+    const providersDirty = Boolean(
+        providers && confirmedProviders && !areAdminLibraryProvidersEqual(providers, confirmedProviders)
+    );
+    const mutationBusy = generalState === 'saving'
+        || optionsState === 'saving'
+        || providersState === 'saving';
+    const dirty = nameDirty || optionsDirty || providersDirty;
     useAdminUnsavedChanges(
         dirty,
         'Leave without saving your library changes?',
@@ -116,6 +260,21 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
     const setOption = useCallback(<K extends keyof AdminLibraryOptionsForm>(field: K, value: boolean) => {
         setOptions(current => current ? { ...current, [field]: value } : current);
         setOptionsState(current => current === 'conflict' ? current : 'idle');
+    }, []);
+    const setProvider = useCallback((
+        mediaType: string,
+        field: 'imageProviders' | 'metadataProviders',
+        providerName: string,
+        enabled: boolean
+    ) => {
+        setProviders(current => current ?
+            updateProviderChoice(current, mediaType, field, providerName, enabled) : current);
+        setProvidersState(current => current === 'conflict' ? current : 'idle');
+    }, []);
+    const setMetadataSaver = useCallback((providerName: string, enabled: boolean) => {
+        setProviders(current => current ?
+            updateMetadataSaverChoice(current, providerName, enabled) : current);
+        setProvidersState(current => current === 'conflict' ? current : 'idle');
     }, []);
     const saveName = useCallback(async () => {
         if (!api || !detail || mutationBusyRef.current || !nameDirty) return;
@@ -151,6 +310,15 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
             const savedOptions = normalizeAdminLibraryOptions(saved.LibraryOptions!);
             setOptions({ ...savedOptions });
             setConfirmedOptions({ ...savedOptions });
+            if (!providersDirty && providers && saved.LibraryOptions) {
+                const savedProviders = normalizeAdminLibraryProviders(
+                    saved.LibraryOptions,
+                    state.providerOptions
+                );
+                setProviders(savedProviders);
+                setConfirmedProviders(savedProviders);
+                confirmedProviderOptionsRef.current = saved.LibraryOptions;
+            }
             setOptionsState('saved');
         } catch (error) {
             setOptionsState(error instanceof AdminLibrariesServiceError && error.code === 'conflict' ?
@@ -158,7 +326,49 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
         } finally {
             mutationBusyRef.current = false;
         }
-    }, [api, confirmedOptions, detail, libraryId, options, optionsDirty, state]);
+    }, [api, confirmedOptions, detail, libraryId, options, optionsDirty, providers, providersDirty, state]);
+    const saveProviders = useCallback(async () => {
+        const confirmedProviderOptions = confirmedProviderOptionsRef.current;
+        if (
+            !api
+            || !detail
+            || !providers
+            || !confirmedProviders
+            || !confirmedProviderOptions
+            || mutationBusyRef.current
+            || !providersDirty
+        ) return;
+        mutationBusyRef.current = true;
+        setProvidersState('saving');
+        try {
+            const saved = await updateAdminLibraryProviders(
+                api,
+                libraryId,
+                providers,
+                confirmedProviders,
+                confirmedProviderOptions
+            );
+            await state.adoptLibrary(saved);
+            const savedProviders = normalizeAdminLibraryProviders(
+                saved.LibraryOptions!,
+                state.providerOptions
+            );
+            setProviders(savedProviders);
+            setConfirmedProviders(savedProviders);
+            confirmedProviderOptionsRef.current = saved.LibraryOptions!;
+            if (!optionsDirty) {
+                const savedOptions = normalizeAdminLibraryOptions(saved.LibraryOptions!);
+                setOptions({ ...savedOptions });
+                setConfirmedOptions({ ...savedOptions });
+            }
+            setProvidersState('saved');
+        } catch (error) {
+            setProvidersState(error instanceof AdminLibrariesServiceError && error.code === 'conflict' ?
+                'conflict' : 'error');
+        } finally {
+            mutationBusyRef.current = false;
+        }
+    }, [api, confirmedProviders, detail, libraryId, optionsDirty, providers, providersDirty, state]);
     const addPath = useCallback(async (path: string) => {
         if (!api || pathBusyRef.current) return;
         pathBusyRef.current = true;
@@ -230,8 +440,11 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
             removeBusyRef.current = false;
         }
     }, [api, detail, libraryId, name, navigate, options, state]);
-    const providerGroups = useMemo(() => detail?.providerSummary?.groups || [], [detail?.providerSummary]);
-    const metadataSavers = detail?.providerSummary?.metadataSavers || [];
+    const providerGroups = providers?.groups || [];
+    const metadataSavers = providers?.metadataSavers || [];
+    const hasProviderChoices = metadataSavers.length > 0 || providerGroups.some(group => (
+        group.metadataProviders.length > 0 || group.imageProviders.length > 0
+    ));
 
     if (state.loading) {
         return <div className='ptv-admin-library-detail-loading' role='status'>Loading library…</div>;
@@ -272,7 +485,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                     <div className='ptv-admin-library-section-body'>
                         <label className='ptv-admin-library-field'>
                             <span>Library name</span>
-                            <input onChange={event => {
+                            <input disabled={mutationBusy} onChange={event => {
                                 setName(event.currentTarget.value);
                                 setGeneralState(current => current === 'conflict' ? current : 'idle');
                             }} value={name} />
@@ -284,14 +497,14 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                         </label>
                         <div className='ptv-admin-library-section-actions'>
                             <LibrarySaveState message={`We couldn't rename ${detail.name}.`} state={generalState} />
-                            <button className='is-primary' disabled={!nameDirty || !name.trim() || generalState === 'saving' || generalState === 'conflict'} onClick={() => void saveName()} type='button'>Save name</button>
+                            <button className='is-primary' disabled={!nameDirty || !name.trim() || mutationBusy || generalState === 'conflict'} onClick={() => void saveName()} type='button'>Save name</button>
                         </div>
                     </div>
                 </section>
 
                 <section className='ptv-admin-library-section'>
                     <header><h2>Library Behavior</h2><p>Everyday behavior for this media source.</p></header>
-                    <fieldset className='ptv-admin-library-section-body' disabled={!options}>
+                    <fieldset className='ptv-admin-library-section-body' disabled={!options || mutationBusy}>
                         {options ? (
                             <>
                                 <LibraryOptionToggle description='Make this library available to PiggieTV clients.' label='Library enabled' onChange={value => setOption('enabled', value)} value={options.enabled} />
@@ -310,7 +523,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                                 </details>
                                 <div className='ptv-admin-library-section-actions'>
                                     <LibrarySaveState message={`We couldn't save ${detail.name}'s behavior.`} state={optionsState} />
-                                    <button className='is-primary' disabled={!optionsDirty || optionsState === 'saving' || optionsState === 'conflict'} onClick={() => void saveOptions()} type='button'>Save changes</button>
+                                    <button className='is-primary' disabled={!optionsDirty || mutationBusy || optionsState === 'conflict'} onClick={() => void saveOptions()} type='button'>Save changes</button>
                                 </div>
                                 <p className='ptv-admin-library-status-message'>Some changes may apply after the next library scan.</p>
                             </>
@@ -339,9 +552,9 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                     </div>
                 </section>
 
-                <section className='ptv-admin-library-section' id='ptv-admin-library-metadata'>
+                <section className='ptv-admin-library-section is-wide' id='ptv-admin-library-metadata'>
                     <header><h2>Metadata</h2><p>Provider choices for this library.</p></header>
-                    <div className='ptv-admin-library-section-body'>
+                    <fieldset className='ptv-admin-library-section-body' disabled={mutationBusy}>
                         {!detail.rawOptions ? (
                             <p className='ptv-admin-library-status-message is-error'>Authoritative library options are unavailable, so provider settings cannot be shown.</p>
                         ) : state.providerLoading ? <p role='status' className='ptv-admin-library-status-message'>Loading providers…</p> : state.providerError ? (
@@ -349,36 +562,65 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                                 <p>Metadata provider settings are temporarily unavailable.</p>
                                 <button onClick={() => void state.refetchProviders()} type='button'>Retry providers</button>
                             </div>
-                        ) : providerGroups.length > 0 || metadataSavers.length > 0 ? (
-                            <div className='ptv-admin-library-provider-list'>
-                                {metadataSavers.length > 0 && (
-                                    <div>
-                                        <strong>Metadata writers</strong>
-                                        <small>{metadataSavers.join(', ')}</small>
-                                    </div>
-                                )}
-                                {providerGroups.map(group => (
-                                    <div key={group.mediaType}>
-                                        <strong>{group.mediaType}</strong>
-                                        <small>Metadata: {group.metadataProviders.join(', ') || 'None enabled'}</small>
-                                        <small>Images: {group.imageProviders.join(', ') || 'None enabled'}</small>
-                                    </div>
-                                ))}
-                            </div>
+                        ) : providers && hasProviderChoices ? (
+                            <>
+                                <div className='ptv-admin-library-provider-list'>
+                                    {metadataSavers.length > 0 && (
+                                        <fieldset className='ptv-admin-library-provider-group'>
+                                            <legend>Metadata files</legend>
+                                            <LibraryProviderChoices
+                                                choices={metadataSavers}
+                                                confirmedChoices={confirmedProviders?.metadataSavers}
+                                                description='Choose which sidecar formats this library may write.'
+                                                label='Metadata writers'
+                                                onChange={setMetadataSaver}
+                                            />
+                                        </fieldset>
+                                    )}
+                                    {providerGroups.map(group => (
+                                        <fieldset className='ptv-admin-library-provider-group' key={group.mediaType}>
+                                            <legend>{formatProviderMediaType(group.mediaType)}</legend>
+                                            <LibraryProviderChoices
+                                                choices={group.metadataProviders}
+                                                confirmedChoices={confirmedProviders?.groups.find(
+                                                    confirmedGroup => confirmedGroup.mediaType === group.mediaType
+                                                )?.metadataProviders}
+                                                description='Lower entries fill information that higher-priority providers leave missing.'
+                                                label='Metadata downloaders'
+                                                onChange={(providerName, enabled) => setProvider(group.mediaType, 'metadataProviders', providerName, enabled)}
+                                            />
+                                            <LibraryProviderChoices
+                                                choices={group.imageProviders}
+                                                confirmedChoices={confirmedProviders?.groups.find(
+                                                    confirmedGroup => confirmedGroup.mediaType === group.mediaType
+                                                )?.imageProviders}
+                                                description='Enabled image providers are tried in the displayed priority order.'
+                                                label='Image providers'
+                                                onChange={(providerName, enabled) => setProvider(group.mediaType, 'imageProviders', providerName, enabled)}
+                                            />
+                                        </fieldset>
+                                    ))}
+                                </div>
+                                <div className='ptv-admin-library-section-actions'>
+                                    <LibrarySaveState message={`We couldn't save ${detail.name}'s providers.`} state={providersState} />
+                                    <button className='is-primary' disabled={!providersDirty || mutationBusy || providersState === 'conflict'} onClick={() => void saveProviders()} type='button'>Save providers</button>
+                                </div>
+                            </>
                         ) : <p className='ptv-admin-library-status-message'>No provider details were returned for this library type.</p>}
                         <div className='ptv-admin-library-related-links'>
                             {LIBRARY_METADATA_ROUTE ? <Link className='ptv-admin-library-button' to={LIBRARY_METADATA_ROUTE}>Metadata Settings</Link> : null}
                             {METADATA_MANAGER_ROUTE ? <Link className='ptv-admin-library-button' to={METADATA_MANAGER_ROUTE}>Metadata Manager</Link> : null}
                             {LIBRARY_NFO_ROUTE ? <Link className='ptv-admin-library-button' to={LIBRARY_NFO_ROUTE}>NFO Settings</Link> : null}
                         </div>
-                    </div>
+                    </fieldset>
                 </section>
 
                 <section className='ptv-admin-library-section'>
                     <header><h2>Images &amp; Extraction</h2><p>Library-specific visual processing.</p></header>
-                    <fieldset className='ptv-admin-library-section-body' disabled={!options}>
+                    <fieldset className='ptv-admin-library-section-body' disabled={!options || mutationBusy}>
                         {options ? (
                             <>
+                                <LibraryArtworkStorage onChange={value => setOption('saveLocalMetadata', value)} value={options.saveLocalMetadata} />
                                 {[ 'home-videos', 'mixed', 'movies', 'music-videos', 'shows' ].includes(detail.kind) ? <>
                                     <LibraryOptionToggle description='Create seek-preview images for supported videos.' label='Generate trickplay images' onChange={value => setOption('trickplayImages', value)} value={options.trickplayImages} />
                                     <LibraryOptionToggle description='Generate trickplay images during a library scan.' label='Generate trickplay during scans' onChange={value => setOption('trickplayImagesDuringScan', value)} value={options.trickplayImagesDuringScan} />
@@ -388,7 +630,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                                 </> : <p className='ptv-admin-library-status-message'>Extraction controls do not apply to this library type.</p>}
                                 <div className='ptv-admin-library-section-actions'>
                                     <LibrarySaveState message={`We couldn't save ${detail.name}'s image settings.`} state={optionsState} />
-                                    <button className='is-primary' disabled={!optionsDirty || optionsState === 'saving' || optionsState === 'conflict'} onClick={() => void saveOptions()} type='button'>Save changes</button>
+                                    <button className='is-primary' disabled={!optionsDirty || mutationBusy || optionsState === 'conflict'} onClick={() => void saveOptions()} type='button'>Save changes</button>
                                 </div>
                             </>
                         ) : <p className='ptv-admin-library-status-message is-error'>Image options are unavailable. No changes can be saved.</p>}

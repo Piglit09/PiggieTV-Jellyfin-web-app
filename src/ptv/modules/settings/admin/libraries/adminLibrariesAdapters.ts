@@ -10,6 +10,7 @@ import type {
     AdminLibraryKind,
     AdminLibraryOptionsForm,
     AdminLibraryOptionsPatch,
+    AdminLibraryProviderChoice,
     AdminLibraryProviderGroup,
     AdminLibraryProviderSummary,
     AdminLibraryScanState,
@@ -45,6 +46,7 @@ const OPTION_FIELD_MAP = {
     lufsAnalysis: 'EnableLUFSScan',
     photos: 'EnablePhotos',
     realTimeMonitoring: 'EnableRealtimeMonitor',
+    saveLocalMetadata: 'SaveLocalMetadata',
     saveTrickplayWithMedia: 'SaveTrickplayWithMedia',
     trickplayImages: 'EnableTrickplayImageExtraction',
     trickplayImagesDuringScan: 'ExtractTrickplayImagesDuringLibraryScan'
@@ -162,6 +164,7 @@ export function normalizeAdminLibraryOptions(options: LibraryOptions): AdminLibr
         lufsAnalysis: booleanOrNull(options.EnableLUFSScan),
         photos: booleanOrNull(options.EnablePhotos),
         realTimeMonitoring: booleanOrNull(options.EnableRealtimeMonitor),
+        saveLocalMetadata: booleanOrNull(options.SaveLocalMetadata),
         saveTrickplayWithMedia: booleanOrNull(options.SaveTrickplayWithMedia),
         trickplayImages: booleanOrNull(options.EnableTrickplayImageExtraction),
         trickplayImagesDuringScan: booleanOrNull(options.ExtractTrickplayImagesDuringLibraryScan)
@@ -182,11 +185,35 @@ function defaultProviderNames(
     return uniqueText((values || []).filter(value => value.DefaultEnabled).map(value => value.Name));
 }
 
-function providerNames(
+type ProviderInfo = Readonly<{ DefaultEnabled?: boolean; Name?: string | null }>;
+
+function providerChoices(
     configured: readonly string[] | null | undefined,
-    available: readonly Readonly<{ DefaultEnabled?: boolean; Name?: string | null }>[] | undefined
+    configuredOrder: readonly string[] | null | undefined,
+    available: readonly ProviderInfo[] | undefined
 ) {
-    return Array.isArray(configured) ? uniqueText(configured) : defaultProviderNames(available);
+    const configuredNames = Array.isArray(configured) ? uniqueText(configured) : [];
+    const orderedNames = uniqueText([
+        ...(Array.isArray(configuredOrder) ? configuredOrder : []),
+        ...configuredNames,
+        ...(available || []).map(value => value.Name)
+    ]);
+    const availableByName = new Map<string, ProviderInfo>();
+    (available || []).forEach(value => {
+        if (typeof value.Name === 'string' && value.Name.trim() && !availableByName.has(value.Name)) {
+            availableByName.set(value.Name, value);
+        }
+    });
+    const configuredSet = new Set(configuredNames);
+    const hasConfiguredSelection = Array.isArray(configured);
+    return orderedNames.map<AdminLibraryProviderChoice>(name => {
+        const discovered = availableByName.get(name);
+        return {
+            available: Boolean(discovered),
+            enabled: hasConfiguredSelection ? configuredSet.has(name) : Boolean(discovered?.DefaultEnabled),
+            name
+        };
+    });
 }
 
 export function normalizeAdminLibraryProviders(
@@ -203,16 +230,54 @@ export function normalizeAdminLibraryProviders(
         const configured = configuredTypes.find(type => type.Type === mediaType);
         const optionsForType = availableTypes.find(type => type.Type === mediaType);
         return {
-            imageProviders: providerNames(configured?.ImageFetchers, optionsForType?.ImageFetchers),
+            imageProviders: providerChoices(
+                configured?.ImageFetchers,
+                configured?.ImageFetcherOrder,
+                optionsForType?.ImageFetchers
+            ),
             mediaType,
-            metadataProviders: providerNames(configured?.MetadataFetchers, optionsForType?.MetadataFetchers)
+            metadataProviders: providerChoices(
+                configured?.MetadataFetchers,
+                configured?.MetadataFetcherOrder,
+                optionsForType?.MetadataFetchers
+            )
         };
     });
 
     return {
         groups,
-        metadataSavers: providerNames(options.MetadataSavers, available?.MetadataSavers)
+        metadataSavers: providerChoices(
+            options.MetadataSavers,
+            options.MetadataSavers,
+            available?.MetadataSavers
+        )
     };
+}
+
+function providerChoicesEqual(
+    left: readonly AdminLibraryProviderChoice[],
+    right: readonly AdminLibraryProviderChoice[]
+) {
+    return left.length === right.length && left.every((choice, index) => (
+        choice.name === right[index]?.name && choice.enabled === right[index]?.enabled
+    ));
+}
+
+/** Compares editable provider selection and order while ignoring discovery availability. */
+export function areAdminLibraryProvidersEqual(
+    left: AdminLibraryProviderSummary,
+    right: AdminLibraryProviderSummary
+) {
+    if (!providerChoicesEqual(left.metadataSavers, right.metadataSavers)) return false;
+    if (left.groups.length !== right.groups.length) return false;
+    return left.groups.every(leftGroup => {
+        const rightGroup = right.groups.find(group => group.mediaType === leftGroup.mediaType);
+        return Boolean(
+            rightGroup
+            && providerChoicesEqual(leftGroup.metadataProviders, rightGroup.metadataProviders)
+            && providerChoicesEqual(leftGroup.imageProviders, rightGroup.imageProviders)
+        );
+    });
 }
 
 export function normalizeAdminLibraryDetail(
@@ -264,6 +329,141 @@ export function patchAdminLibraryOptions(
         result[backendField] = value as never;
     });
     return result;
+}
+
+function enabledProviderChoiceNames(choices: readonly AdminLibraryProviderChoice[]) {
+    return uniqueText(choices.filter(choice => choice.enabled).map(choice => choice.name));
+}
+
+function providerEnabledSelectionsEqual(
+    left: readonly AdminLibraryProviderChoice[],
+    right: readonly AdminLibraryProviderChoice[]
+) {
+    const leftEnabled = new Set(enabledProviderChoiceNames(left));
+    const rightEnabled = new Set(enabledProviderChoiceNames(right));
+    return leftEnabled.size === rightEnabled.size
+        && Array.from(leftEnabled).every(name => rightEnabled.has(name));
+}
+
+/**
+ * Clones authoritative options and patches only provider categories whose enabled
+ * selection changed from the confirmed, default-resolved editor baseline.
+ */
+export function patchAdminLibraryProviders(
+    authoritative: LibraryOptions,
+    providers: AdminLibraryProviderSummary,
+    confirmedProviders: AdminLibraryProviderSummary
+): LibraryOptions {
+    const result = cloneValue(authoritative);
+    if (
+        providers.metadataSavers.length > 0
+        && !providerEnabledSelectionsEqual(
+            providers.metadataSavers,
+            confirmedProviders.metadataSavers
+        )
+    ) {
+        result.MetadataSavers = enabledProviderChoiceNames(providers.metadataSavers);
+    }
+
+    providers.groups.forEach(group => {
+        const confirmedGroup = confirmedProviders.groups.find(value => (
+            value.mediaType === group.mediaType
+        ));
+        const metadataProvidersChanged = group.metadataProviders.length > 0
+            && !providerEnabledSelectionsEqual(
+                group.metadataProviders,
+                confirmedGroup?.metadataProviders || []
+            );
+        const imageProvidersChanged = group.imageProviders.length > 0
+            && !providerEnabledSelectionsEqual(
+                group.imageProviders,
+                confirmedGroup?.imageProviders || []
+            );
+        if (!metadataProvidersChanged && !imageProvidersChanged) return;
+        if (!Array.isArray(result.TypeOptions)) result.TypeOptions = [];
+        let typeOptions = result.TypeOptions.find(value => value.Type === group.mediaType);
+        if (!typeOptions) {
+            typeOptions = { Type: group.mediaType };
+            result.TypeOptions.push(typeOptions);
+        }
+        if (metadataProvidersChanged) {
+            typeOptions.MetadataFetchers = enabledProviderChoiceNames(group.metadataProviders);
+        }
+        if (imageProvidersChanged) {
+            typeOptions.ImageFetchers = enabledProviderChoiceNames(group.imageProviders);
+        }
+    });
+    return result;
+}
+
+type ConfiguredProviderArray = readonly string[] | null;
+
+type ProviderConfigurationGroup = Readonly<{
+    imageFetcherOrder: ConfiguredProviderArray;
+    imageFetchers: ConfiguredProviderArray;
+    metadataFetcherOrder: ConfiguredProviderArray;
+    metadataFetchers: ConfiguredProviderArray;
+}>;
+
+function configuredProviderArray(value: readonly string[] | null | undefined): ConfiguredProviderArray {
+    return Array.isArray(value) ? [ ...value ] : null;
+}
+
+function configuredProviderArraysEqual(left: ConfiguredProviderArray, right: ConfiguredProviderArray) {
+    if (left === null || right === null) return left === right;
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function providerConfigurationGroups(options: LibraryOptions) {
+    const result = new Map<string, ProviderConfigurationGroup[]>();
+    (Array.isArray(options.TypeOptions) ? options.TypeOptions : []).forEach(typeOptions => {
+        const configuration: ProviderConfigurationGroup = {
+            imageFetcherOrder: configuredProviderArray(typeOptions.ImageFetcherOrder),
+            imageFetchers: configuredProviderArray(typeOptions.ImageFetchers),
+            metadataFetcherOrder: configuredProviderArray(typeOptions.MetadataFetcherOrder),
+            metadataFetchers: configuredProviderArray(typeOptions.MetadataFetchers)
+        };
+        if (Object.values(configuration).every(value => value === null)) return;
+        const key = typeof typeOptions.Type === 'string' ? `type:${typeOptions.Type}` : 'type:<absent>';
+        const entries = result.get(key) || [];
+        entries.push(configuration);
+        result.set(key, entries);
+    });
+    return result;
+}
+
+function providerConfigurationGroupsEqual(
+    left: Map<string, ProviderConfigurationGroup[]>,
+    right: Map<string, ProviderConfigurationGroup[]>
+) {
+    if (left.size !== right.size) return false;
+    return Array.from(left).every(([ key, leftEntries ]) => {
+        const rightEntries = right.get(key);
+        return Boolean(rightEntries && leftEntries.length === rightEntries.length && leftEntries.every(
+            (leftEntry, index) => {
+                const rightEntry = rightEntries[index];
+                return Boolean(rightEntry
+                    && configuredProviderArraysEqual(leftEntry.metadataFetchers, rightEntry.metadataFetchers)
+                    && configuredProviderArraysEqual(leftEntry.metadataFetcherOrder, rightEntry.metadataFetcherOrder)
+                    && configuredProviderArraysEqual(leftEntry.imageFetchers, rightEntry.imageFetchers)
+                    && configuredProviderArraysEqual(leftEntry.imageFetcherOrder, rightEntry.imageFetcherOrder));
+            }
+        ));
+    });
+}
+
+/** Compares only provider-owned configured arrays and preserves absent-versus-empty semantics. */
+export function areAdminLibraryProviderConfigurationsEqual(
+    left: LibraryOptions,
+    right: LibraryOptions
+) {
+    return configuredProviderArraysEqual(
+        configuredProviderArray(left.MetadataSavers),
+        configuredProviderArray(right.MetadataSavers)
+    ) && providerConfigurationGroupsEqual(
+        providerConfigurationGroups(left),
+        providerConfigurationGroups(right)
+    );
 }
 
 export function buildAdminLibraryOptionsPatch(

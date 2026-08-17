@@ -12,8 +12,10 @@ import type { ApiClient } from 'jellyfin-apiclient';
 import type {
     AdminLibraryDetail,
     AdminLibraryOptionsForm,
+    AdminLibraryProviderSummary,
     AdminLibrarySummary
 } from './adminLibrariesModel';
+import { patchAdminLibraryProviders } from './adminLibrariesAdapters';
 
 type LibrariesStateMock = ReturnType<typeof librariesState>;
 type LibraryStateMock = ReturnType<typeof libraryState>;
@@ -40,6 +42,7 @@ const uiMocks = vi.hoisted(() => ({
     startAdminLibrariesScan: vi.fn(),
     startAdminLibraryScan: vi.fn(),
     updateAdminLibraryOptions: vi.fn(),
+    updateAdminLibraryProviders: vi.fn(),
     validateAdminLibraryPath: vi.fn()
 }));
 
@@ -68,6 +71,7 @@ vi.mock('./adminLibrariesService', () => ({
     startAdminLibrariesScan: uiMocks.startAdminLibrariesScan,
     startAdminLibraryScan: uiMocks.startAdminLibraryScan,
     updateAdminLibraryOptions: uiMocks.updateAdminLibraryOptions,
+    updateAdminLibraryProviders: uiMocks.updateAdminLibraryProviders,
     validateAdminLibraryPath: uiMocks.validateAdminLibraryPath
 }));
 
@@ -142,6 +146,7 @@ function options(overrides: Partial<AdminLibraryOptionsForm> = {}): AdminLibrary
         lufsAnalysis: false,
         photos: false,
         realTimeMonitoring: true,
+        saveLocalMetadata: false,
         saveTrickplayWithMedia: false,
         trickplayImages: false,
         trickplayImagesDuringScan: false,
@@ -176,13 +181,31 @@ function detail(overrides: Partial<AdminLibraryDetail> = {}): AdminLibraryDetail
         options: options(),
         providerSummary: {
             groups: [{
-                imageProviders: [ 'TheMovieDb' ],
+                imageProviders: [
+                    { available: true, enabled: true, name: 'TheMovieDb' },
+                    { available: true, enabled: false, name: 'Fanart' }
+                ],
                 mediaType: 'Movie',
-                metadataProviders: [ 'TheMovieDb' ]
+                metadataProviders: [
+                    { available: true, enabled: true, name: 'TheMovieDb' },
+                    { available: true, enabled: false, name: 'Open Movie Database' }
+                ]
             }],
-            metadataSavers: [ 'Nfo' ]
+            metadataSavers: [{ available: true, enabled: true, name: 'Nfo' }]
         },
-        rawOptions: { Enabled: true, EnableRealtimeMonitor: true },
+        rawOptions: {
+            Enabled: true,
+            EnableRealtimeMonitor: true,
+            MetadataSavers: [ 'Nfo' ],
+            SaveLocalMetadata: false,
+            TypeOptions: [{
+                ImageFetcherOrder: [ 'TheMovieDb', 'Fanart' ],
+                ImageFetchers: [ 'TheMovieDb' ],
+                MetadataFetcherOrder: [ 'TheMovieDb', 'Open Movie Database' ],
+                MetadataFetchers: [ 'TheMovieDb' ],
+                Type: 'Movie'
+            }]
+        },
         ...overrides
     };
 }
@@ -210,6 +233,20 @@ function libraryState(overrides: Record<string, unknown> = {}) {
         loading: false,
         providerError: false,
         providerLoading: false,
+        providerOptions: {
+            MetadataSavers: [{ DefaultEnabled: true, Name: 'Nfo' }],
+            TypeOptions: [{
+                ImageFetchers: [
+                    { DefaultEnabled: true, Name: 'TheMovieDb' },
+                    { DefaultEnabled: false, Name: 'Fanart' }
+                ],
+                MetadataFetchers: [
+                    { DefaultEnabled: true, Name: 'TheMovieDb' },
+                    { DefaultEnabled: false, Name: 'Open Movie Database' }
+                ],
+                Type: 'Movie'
+            }]
+        } as LibraryOptionsResultDto,
         refetch: vi.fn(async () => undefined),
         refetchProviders: vi.fn(async () => undefined),
         removeCachedDetail: vi.fn(),
@@ -238,12 +275,26 @@ function buttonWithText(root: ParentNode, text: string) {
     return Array.from(root.querySelectorAll('button')).find(button => button.textContent === text);
 }
 
+function sectionWithHeading(root: ParentNode, text: string) {
+    return Array.from(root.querySelectorAll('section')).find(section => (
+        section.querySelector(':scope > header h2')?.textContent === text
+    ));
+}
+
 async function flushAsync() {
     await act(async () => {
         await Promise.resolve();
         await new Promise(resolve => setTimeout(resolve, 0));
         await Promise.resolve();
     });
+}
+
+function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>(promiseResolve => {
+        resolve = promiseResolve;
+    });
+    return { promise, resolve };
 }
 
 describe('PiggieTV administrator libraries UI', () => {
@@ -278,9 +329,24 @@ describe('PiggieTV administrator libraries UI', () => {
         ) => Promise.resolve({
             ItemId: 'library-a',
             LibraryOptions: {
+                ...detail().rawOptions,
                 Enabled: true,
-                EnableRealtimeMonitor: patch.realTimeMonitoring ?? true
+                EnableRealtimeMonitor: patch.realTimeMonitoring ?? true,
+                SaveLocalMetadata: patch.saveLocalMetadata ?? false
             },
+            Name: 'Movies'
+        }));
+        uiMocks.updateAdminLibraryProviders.mockImplementation((
+            _api: Api,
+            _libraryId: string,
+            providers: AdminLibraryProviderSummary
+        ) => Promise.resolve({
+            ItemId: 'library-a',
+            LibraryOptions: patchAdminLibraryProviders(
+                detail().rawOptions!,
+                providers,
+                detail().providerSummary!
+            ),
             Name: 'Movies'
         }));
         uiMocks.addAdminLibraryPath.mockResolvedValue(undefined);
@@ -485,6 +551,226 @@ describe('PiggieTV administrator libraries UI', () => {
             .toContain('NFO Settings');
         expect(container.querySelector('a[href="/settings/admin/media/metadata-manager"]')?.textContent)
             .toContain('Metadata Manager');
+    });
+
+    it('lets an administrator choose per-library metadata and image providers', async () => {
+        await render(<PtvAdminLibraryDetail libraryId='library-a' />);
+
+        const metadataSection = sectionWithHeading(container, 'Metadata')!;
+        const category = (label: string) => Array.from(
+            metadataSection.querySelectorAll<HTMLElement>('.ptv-admin-library-provider-category')
+        ).find(value => value.querySelector('h3')?.textContent === label)!;
+        const provider = (categoryLabel: string, name: string) => Array.from(
+            category(categoryLabel).querySelectorAll('label')
+        ).find(label => label.textContent?.includes(name))?.querySelector<HTMLInputElement>('input');
+        const metadataProvider = provider('Metadata downloaders', 'TheMovieDb');
+        const imageProvider = provider('Image providers', 'Fanart');
+        const metadataWriter = provider('Metadata writers', 'Nfo');
+
+        expect(metadataProvider?.checked).toBe(true);
+        expect(imageProvider?.checked).toBe(false);
+        expect(metadataWriter?.checked).toBe(true);
+        await act(async () => metadataProvider?.click());
+        await act(async () => imageProvider?.click());
+        expect(buttonWithText(metadataSection, 'Save providers')?.disabled).toBe(false);
+        await act(async () => {
+            buttonWithText(metadataSection, 'Save providers')?.click();
+            await Promise.resolve();
+        });
+        await flushAsync();
+
+        expect(uiMocks.updateAdminLibraryProviders).toHaveBeenCalledOnce();
+        const [ calledApi, calledId, savedProviders, confirmedProviderBaseline, confirmedOptions ] =
+            uiMocks.updateAdminLibraryProviders.mock.calls[0];
+        expect(calledApi).toEqual(api);
+        expect(calledId).toBe('library-a');
+        expect(confirmedProviderBaseline).toEqual(detail().providerSummary);
+        expect(confirmedOptions).toEqual(detail().rawOptions);
+        expect(savedProviders).toMatchObject({
+            groups: [{
+                imageProviders: [
+                    { enabled: true, name: 'TheMovieDb' },
+                    { enabled: true, name: 'Fanart' }
+                ],
+                mediaType: 'Movie',
+                metadataProviders: [
+                    { enabled: false, name: 'TheMovieDb' },
+                    { enabled: false, name: 'Open Movie Database' }
+                ]
+            }],
+            metadataSavers: [{ enabled: true, name: 'Nfo' }]
+        });
+        expect(uiMocks.libraryState.adoptLibrary).toHaveBeenCalledOnce();
+    });
+
+    it('keeps a configured unavailable provider reversible before saving', async () => {
+        const libraryDetail = detail();
+        const providerGroup = libraryDetail.providerSummary!.groups[0];
+        uiMocks.libraryState = libraryState({
+            detail: {
+                ...libraryDetail,
+                providerSummary: {
+                    ...libraryDetail.providerSummary!,
+                    groups: [{
+                        ...providerGroup,
+                        imageProviders: [
+                            ...providerGroup.imageProviders,
+                            { available: false, enabled: true, name: 'Legacy Artwork' },
+                            { available: false, enabled: false, name: 'Removed Artwork' }
+                        ]
+                    }]
+                }
+            }
+        });
+        await render(<PtvAdminLibraryDetail libraryId='library-a' />);
+
+        const metadataSection = sectionWithHeading(container, 'Metadata')!;
+        const configuredUnavailable = Array.from(metadataSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Legacy Artwork'))
+            ?.querySelector<HTMLInputElement>('input');
+        const neverConfiguredUnavailable = Array.from(metadataSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Removed Artwork'))
+            ?.querySelector<HTMLInputElement>('input');
+
+        expect(configuredUnavailable?.checked).toBe(true);
+        expect(configuredUnavailable?.disabled).toBe(false);
+        expect(neverConfiguredUnavailable?.checked).toBe(false);
+        expect(neverConfiguredUnavailable?.disabled).toBe(true);
+        await act(async () => configuredUnavailable?.click());
+        expect(configuredUnavailable?.checked).toBe(false);
+        expect(configuredUnavailable?.disabled).toBe(false);
+        await act(async () => configuredUnavailable?.click());
+        expect(configuredUnavailable?.checked).toBe(true);
+        expect(buttonWithText(metadataSection, 'Save providers')?.disabled).toBe(true);
+    });
+
+    it('locks provider edits while an option save is in flight', async () => {
+        const pendingSave = deferred<{
+            ItemId: string;
+            LibraryOptions: NonNullable<AdminLibraryDetail['rawOptions']>;
+            Name: string;
+        }>();
+        uiMocks.updateAdminLibraryOptions.mockReturnValueOnce(pendingSave.promise);
+        await render(<PtvAdminLibraryDetail libraryId='library-a' />);
+
+        const behaviorSection = sectionWithHeading(container, 'Library Behavior')!;
+        const metadataSection = sectionWithHeading(container, 'Metadata')!;
+        const imageSection = sectionWithHeading(container, 'Images & Extraction')!;
+        const monitor = Array.from(behaviorSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Watch folders for new media'))
+            ?.querySelector<HTMLInputElement>('input');
+        const imageProvider = Array.from(metadataSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Fanart'))
+            ?.querySelector<HTMLInputElement>('input');
+        const mediaFolders = Array.from(imageSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Media folders'))
+            ?.querySelector<HTMLInputElement>('input');
+
+        await act(async () => monitor?.click());
+        await act(async () => {
+            buttonWithText(behaviorSection, 'Save changes')?.click();
+            await Promise.resolve();
+        });
+
+        expect(uiMocks.updateAdminLibraryOptions).toHaveBeenCalledOnce();
+        expect(monitor?.matches(':disabled')).toBe(true);
+        expect(imageProvider?.matches(':disabled')).toBe(true);
+        expect(mediaFolders?.matches(':disabled')).toBe(true);
+        await act(async () => imageProvider?.click());
+        expect(imageProvider?.checked).toBe(false);
+
+        pendingSave.resolve({
+            ItemId: 'library-a',
+            LibraryOptions: {
+                ...detail().rawOptions!,
+                EnableRealtimeMonitor: false
+            },
+            Name: 'Movies'
+        });
+        await flushAsync();
+
+        expect(imageProvider?.matches(':disabled')).toBe(false);
+        await act(async () => imageProvider?.click());
+        expect(imageProvider?.checked).toBe(true);
+        expect(buttonWithText(metadataSection, 'Save providers')?.disabled).toBe(false);
+    });
+
+    it('locks option edits while a provider save is in flight', async () => {
+        const pendingSave = deferred<{
+            ItemId: string;
+            LibraryOptions: NonNullable<AdminLibraryDetail['rawOptions']>;
+            Name: string;
+        }>();
+        uiMocks.updateAdminLibraryProviders.mockReturnValueOnce(pendingSave.promise);
+        await render(<PtvAdminLibraryDetail libraryId='library-a' />);
+
+        const behaviorSection = sectionWithHeading(container, 'Library Behavior')!;
+        const metadataSection = sectionWithHeading(container, 'Metadata')!;
+        const imageSection = sectionWithHeading(container, 'Images & Extraction')!;
+        const monitor = Array.from(behaviorSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Watch folders for new media'))
+            ?.querySelector<HTMLInputElement>('input');
+        const imageProvider = Array.from(metadataSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Fanart'))
+            ?.querySelector<HTMLInputElement>('input');
+        const mediaFolders = Array.from(imageSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Media folders'))
+            ?.querySelector<HTMLInputElement>('input');
+
+        await act(async () => imageProvider?.click());
+        await act(async () => {
+            buttonWithText(metadataSection, 'Save providers')?.click();
+            await Promise.resolve();
+        });
+
+        expect(uiMocks.updateAdminLibraryProviders).toHaveBeenCalledOnce();
+        expect(imageProvider?.matches(':disabled')).toBe(true);
+        expect(monitor?.matches(':disabled')).toBe(true);
+        expect(mediaFolders?.matches(':disabled')).toBe(true);
+        await act(async () => monitor?.click());
+        expect(monitor?.checked).toBe(true);
+
+        const submittedProviders = uiMocks.updateAdminLibraryProviders.mock.calls[0][2] as AdminLibraryProviderSummary;
+        pendingSave.resolve({
+            ItemId: 'library-a',
+            LibraryOptions: patchAdminLibraryProviders(
+                detail().rawOptions!,
+                submittedProviders,
+                detail().providerSummary!
+            ),
+            Name: 'Movies'
+        });
+        await flushAsync();
+
+        expect(monitor?.matches(':disabled')).toBe(false);
+        await act(async () => monitor?.click());
+        expect(monitor?.checked).toBe(false);
+        expect(buttonWithText(behaviorSection, 'Save changes')?.disabled).toBe(false);
+    });
+
+    it('offers Jellyfin-managed or media-folder artwork storage', async () => {
+        await render(<PtvAdminLibraryDetail libraryId='library-a' />);
+
+        const imageSection = sectionWithHeading(container, 'Images & Extraction')!;
+        const mediaFolders = Array.from(imageSection.querySelectorAll('label'))
+            .find(label => label.textContent?.includes('Media folders'))
+            ?.querySelector<HTMLInputElement>('input[type="radio"]');
+        expect(mediaFolders?.checked).toBe(false);
+        expect(imageSection.textContent).toContain('mounted ZFS dataset');
+        await act(async () => mediaFolders?.click());
+        expect(buttonWithText(imageSection, 'Save changes')?.disabled).toBe(false);
+        await act(async () => {
+            buttonWithText(imageSection, 'Save changes')?.click();
+            await Promise.resolve();
+        });
+        await flushAsync();
+
+        expect(uiMocks.updateAdminLibraryOptions).toHaveBeenCalledWith(api, 'library-a', {
+            saveLocalMetadata: true
+        }, options());
+        expect(uiMocks.libraryState.adoptLibrary).toHaveBeenCalledWith(expect.objectContaining({
+            LibraryOptions: expect.objectContaining({ SaveLocalMetadata: true })
+        }));
     });
 
     it('fails option writes closed when authoritative library options are absent', async () => {

@@ -46,20 +46,27 @@ export type AdminLibraryOptionsForm = Readonly<{
     lufsAnalysis: AdminLibraryOptionValue;
     photos: AdminLibraryOptionValue;
     realTimeMonitoring: AdminLibraryOptionValue;
+    saveLocalMetadata: AdminLibraryOptionValue;
     saveTrickplayWithMedia: AdminLibraryOptionValue;
     trickplayImages: AdminLibraryOptionValue;
     trickplayImagesDuringScan: AdminLibraryOptionValue;
 }>;
 
+export type AdminLibraryProviderChoice = Readonly<{
+    available: boolean;
+    enabled: boolean;
+    name: string;
+}>;
+
 export type AdminLibraryProviderGroup = Readonly<{
-    imageProviders: readonly string[];
+    imageProviders: readonly AdminLibraryProviderChoice[];
     mediaType: string;
-    metadataProviders: readonly string[];
+    metadataProviders: readonly AdminLibraryProviderChoice[];
 }>;
 
 export type AdminLibraryProviderSummary = Readonly<{
     groups: readonly AdminLibraryProviderGroup[];
-    metadataSavers: readonly string[];
+    metadataSavers: readonly AdminLibraryProviderChoice[];
 }>;
 
 export type AdminLibraryDetail = AdminLibrarySummary & Readonly<{
