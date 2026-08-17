@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.PiggieTV.Tests;
 
 public sealed class PluginReleaseVersionContractTests
 {
-    private const string ExpectedPluginVersion = "0.5.12.0";
+    private const string ExpectedPluginVersion = "0.5.13.0";
 
     [Fact]
     public void AssemblyAndStatusReportCurrentPluginVersion()

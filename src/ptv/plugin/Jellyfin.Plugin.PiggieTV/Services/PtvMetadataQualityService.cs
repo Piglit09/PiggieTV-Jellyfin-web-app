@@ -2612,21 +2612,38 @@ public sealed class PtvMetadataQualityService : IPtvMetadataQualityService
 
     private static string? SafeFileName(string? path)
     {
-        try { return string.IsNullOrWhiteSpace(path) ? null : Path.GetFileName(path); }
-        catch (ArgumentException) { return null; }
+        return PortablePathLeaf(path);
     }
 
     private static string? SafeFolderName(string? path, string? containingFolderPath)
     {
-        try
+        if (!string.IsNullOrWhiteSpace(containingFolderPath))
         {
-            var directory = !string.IsNullOrWhiteSpace(containingFolderPath) ? containingFolderPath : Path.GetDirectoryName(path);
-            return string.IsNullOrWhiteSpace(directory) ? null : Path.GetFileName(directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            return PortablePathLeaf(containingFolderPath);
         }
-        catch (ArgumentException)
+
+        if (string.IsNullOrWhiteSpace(path))
         {
             return null;
         }
+
+        var portablePath = path.Trim().Replace('\\', '/');
+        var separator = portablePath.LastIndexOf('/');
+        if (separator < 0)
+        {
+            return null;
+        }
+
+        return PortablePathLeaf(portablePath[..separator]);
+    }
+
+    private static string? PortablePathLeaf(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var portablePath = path.Trim().Replace('\\', '/').TrimEnd('/');
+        var separator = portablePath.LastIndexOf('/');
+        var leaf = separator >= 0 ? portablePath[(separator + 1)..] : portablePath;
+        return string.IsNullOrWhiteSpace(leaf) ? null : leaf;
     }
 
     private static bool ContainsSpecialLabel(string? value) => value?.Contains("special", StringComparison.OrdinalIgnoreCase) == true

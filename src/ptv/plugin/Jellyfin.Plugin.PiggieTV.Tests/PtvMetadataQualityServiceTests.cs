@@ -115,6 +115,25 @@ public sealed class PtvMetadataQualityServiceTests : IDisposable
         Assert.Equal(1, latest.ProviderCacheHits);
     }
 
+    [Theory]
+    [InlineData("C:\\Movies\\The Thing (1982)\\The.Thing.1982.2160p.mkv")]
+    [InlineData("/Movies/The Thing (1982)/The.Thing.1982.2160p.mkv")]
+    public async Task ScanUsesPortablePathComponentsForProviderEvidence(string path)
+    {
+        var libraryId = Guid.NewGuid();
+        var item = Movie("The Thing", path, 2011, "60935");
+        var provider = new RecordingProviderVerifier();
+        var service = CreateService(libraryId, "Movies", [item], provider);
+
+        await service.RunScheduledScanAsync(new RecordingProgress(), CancellationToken.None);
+
+        var detail = Assert.IsType<PtvMetadataQualityResult>(await service.GetResultAsync(item.Id));
+        Assert.Equal("The.Thing.1982.2160p.mkv", detail.FileName);
+        Assert.Equal("The Thing (1982)", detail.FolderName);
+        Assert.Equal("the thing", provider.LastRequest?.EvidenceName);
+        Assert.Equal(1982, provider.LastRequest?.EvidenceYear);
+    }
+
     [Fact]
     public async Task DuplicateProviderIdReclassifiesTheSecondItemForReview()
     {

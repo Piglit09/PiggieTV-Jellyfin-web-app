@@ -266,7 +266,10 @@ test.describe('Phase F1 flagship discovery slice', () => {
 
         const creatorLink = links.locator('.ptv-details-discovery-link--creator');
         const creatorHref = await creatorLink.getAttribute('href');
-        const creatorQuery = new URLSearchParams(creatorHref?.split('?')[1] || '').get('query') || '';
+        const creatorQueryMatch = /(?:^|&)query=([^&]*)/.exec(creatorHref?.split('?')[1] || '');
+        const creatorQuery = creatorQueryMatch ?
+            decodeURIComponent(creatorQueryMatch[1].replace(/\+/g, ' ')) :
+            '';
 
         await creatorLink.focus();
         await creatorLink.press('Enter');
