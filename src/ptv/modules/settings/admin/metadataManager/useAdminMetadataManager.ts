@@ -74,6 +74,7 @@ export type UseAdminMetadataManagerInput = Readonly<{
     searchTerm?: string;
     startIndex?: number;
     userId?: string;
+    workspaceEnabled?: boolean;
 }>;
 
 function normalizeText(value?: string) {
@@ -259,7 +260,8 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
     const {
         api,
         apiClient,
-        artworkEnabled = false
+        artworkEnabled = false,
+        workspaceEnabled = true
     } = input;
     const serverKey = getResolvedAdminServerId(apiClient);
     const userId = normalizeText(input.userId);
@@ -284,11 +286,12 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
     const itemKey = keys.item(userId, itemId);
     const imagesKey = keys.images(itemId);
     const queriesEnabled = Boolean(api && serverKey);
-    const catalogEnabled = Boolean(queriesEnabled && userId && catalogRequest.parentId);
+    const workspaceQueriesEnabled = Boolean(queriesEnabled && workspaceEnabled);
+    const catalogEnabled = Boolean(workspaceQueriesEnabled && userId && catalogRequest.parentId);
     const itemEnabled = Boolean(queriesEnabled && itemId);
 
     const rootsQuery = useQuery({
-        enabled: queriesEnabled,
+        enabled: workspaceQueriesEnabled,
         queryFn: ({ signal }) => loadAdminMetadataRoots(api!, { userId: userId || undefined }, signal),
         queryKey: rootsKey,
         refetchOnWindowFocus: false,

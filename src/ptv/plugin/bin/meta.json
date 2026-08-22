@@ -8,7 +8,7 @@
   "owner": "PiggieTV",
   "targetAbi": "10.11.11.0",
   "timestamp": "2026-08-16T04:00:32Z",
-  "version": "0.5.12.0",
+  "version": "0.5.13.0",
   "status": 0,
   "autoUpdate": false,
   "assemblies": [

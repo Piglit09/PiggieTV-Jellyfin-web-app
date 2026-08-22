@@ -12,6 +12,7 @@ import { recordPtvEvent } from '../core/observability';
 import { createPtvAbortController } from '../core/abortController';
 import { requestPtvJson } from './client';
 import {
+    getPtvSeasonEpisodeItems,
     getPtvSeasonEpisodes,
     getPtvSeasonEpisodesCoreResult
 } from './seasonEpisodes';
@@ -109,6 +110,66 @@ describe('season details episode metadata facade', () => {
         expect(getEpisodes).toHaveBeenCalledTimes(1);
     });
 
+    it('returns only Core-approved episode rows without changing their order or identity', async () => {
+        type Episode = Readonly<{
+            Id?: string;
+            Name?: string;
+            SeasonId?: string;
+            SeriesId?: string;
+        }>;
+        const first: Episode = {
+            Id: 'episode-2',
+            SeasonId: 'season-1',
+            SeriesId: 'series-1'
+        };
+        const second: Episode = {
+            Id: 'episode-1',
+            SeasonId: 'season-1',
+            SeriesId: 'series-1'
+        };
+        const response = {
+            Items: [
+                first,
+                null,
+                { Name: 'Missing ID' },
+                {
+                    Id: 'foreign-series-episode',
+                    SeasonId: 'season-1',
+                    SeriesId: 'series-2'
+                },
+                {
+                    Id: 'foreign-season-episode',
+                    SeasonId: 'season-2',
+                    SeriesId: 'series-1'
+                },
+                second
+            ]
+        };
+        const getEpisodes = vi.fn().mockResolvedValue(response);
+
+        const result = await getPtvSeasonEpisodeItems<Episode>(
+            { getEpisodes },
+            'series-1',
+            'season-1'
+        );
+
+        expect(result).toEqual([first, second]);
+        expect(result[0]).toBe(first);
+        expect(result[1]).toBe(second);
+        expect(getEpisodes).toHaveBeenCalledTimes(1);
+        expect(recordPtvEvent).toHaveBeenCalledWith(
+            'api',
+            'ptv-core-season-episodes-request',
+            expect.objectContaining({
+                droppedInvalidIdCount: 2,
+                droppedSeasonScopeCount: 1,
+                droppedSeriesScopeCount: 1,
+                success: true,
+                validItemCount: 2
+            })
+        );
+    });
+
     it('rethrows original authentication, cancellation, and network errors without retry', async () => {
         const authError = { status: 401 };
         const cancelError = new DOMException('cancelled', 'AbortError');
@@ -122,7 +183,7 @@ describe('season details episode metadata facade', () => {
             'series-1',
             'season-1'
         )).rejects.toBe(authError);
-        await expect(getPtvSeasonEpisodes(
+        await expect(getPtvSeasonEpisodeItems(
             { getEpisodes: cancelTransport },
             'series-1',
             'season-1'
@@ -177,7 +238,7 @@ describe('season details episode metadata facade', () => {
 
         vi.mocked(requestPtvJson).mockResolvedValue(response);
 
-        await expect(getPtvSeasonEpisodes(
+        await expect(getPtvSeasonEpisodeItems(
             { getEpisodes },
             'series-1',
             'season-1',
@@ -186,7 +247,7 @@ describe('season details episode metadata facade', () => {
                 serverId: 'server-1',
                 signal: controller.signal
             }
-        )).resolves.toBe(response);
+        )).resolves.toEqual(response.Items);
         expect(requestPtvJson).toHaveBeenCalledWith('Shows/series-1/Episodes', {
             params: query,
             serverId: 'server-1',

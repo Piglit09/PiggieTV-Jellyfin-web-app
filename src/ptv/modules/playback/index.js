@@ -21,6 +21,10 @@ import {
     isPtvVideoPlayerControlFocused,
     reconcilePtvVideoControlSurface
 } from './videoInputOwnership';
+import {
+    shouldArmPlayerChromeHide,
+    shouldDeferPlayerChromeHide
+} from './playerChromeTimer';
 
 import './playbackChrome';
 import './playback.scss';
@@ -925,7 +929,10 @@ function showPlayerChrome(autoHide = true) {
 
     playerChromeTimer = window.setTimeout(() => {
         playerChromeTimer = null;
-        if (hasFocusedPlayerControl()) {
+        if (shouldDeferPlayerChromeHide({
+            controlFocused: hasFocusedPlayerControl(),
+            isTv: getPtvClientProfile().isTv
+        })) {
             showPlayerChrome(true);
             return;
         }
@@ -1210,6 +1217,15 @@ function setPauseState(isPaused) {
 
     if (isPaused) {
         showPlayerChrome(false);
+    } else if (shouldArmPlayerChromeHide({
+        controlsVisible: document.documentElement.classList.contains(PLAYER_CHROME_VISIBLE_CLASS),
+        hasTimer: Boolean(playerChromeTimer),
+        paused: false,
+        playbackActive: isPlaybackUiActive()
+    })) {
+        // A transient paused state clears auto-hide during playback startup.
+        // Re-arm it as soon as the player confirms that playback is moving.
+        showPlayerChrome(true);
     }
     setPtvVideoPlaybackPresentation({
         available: isPlaybackUiActive(),

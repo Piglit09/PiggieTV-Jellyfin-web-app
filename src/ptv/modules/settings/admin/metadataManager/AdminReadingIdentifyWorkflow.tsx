@@ -27,6 +27,7 @@ import {
 /* eslint-disable react/jsx-no-bind */
 
 export type AdminReadingIdentifyWorkflowProps = Readonly<{
+    applyError: string | null;
     applying: boolean;
     error: string | null;
     initialIssueNumber?: string | null;
@@ -41,6 +42,7 @@ export type AdminReadingIdentifyWorkflowProps = Readonly<{
     itemName: string;
     message: string | null;
     onApply: (candidate: AdminReadingMetadataCandidate) => Promise<void>;
+    onClearApplyError: () => void;
     onLoadProviders: () => void;
     onRetryProviders: () => void;
     onSearch: (request: AdminReadingMetadataSearchRequest) => void;
@@ -730,9 +732,17 @@ export default function AdminReadingIdentifyWorkflow(props: AdminReadingIdentify
         setSelectedCandidate(null);
         titleInputRef.current?.focus();
     };
+    const closeApply = () => {
+        setSelectedCandidate(null);
+        props.onClearApplyError();
+    };
+    const selectCandidate = (candidate: AdminReadingMetadataCandidate) => {
+        props.onClearApplyError();
+        setSelectedCandidate(candidate);
+    };
     const confirmApply = () => {
         if (!selectedCandidate || props.applying) return;
-        props.onApply(selectedCandidate).then(() => setSelectedCandidate(null), () => undefined);
+        props.onApply(selectedCandidate).then(closeApply, () => undefined);
     };
     const providerFailureCount = props.response?.providerResults.filter(result => Boolean(result.failure)).length || 0;
 
@@ -783,7 +793,7 @@ export default function AdminReadingIdentifyWorkflow(props: AdminReadingIdentify
             <CandidateResults
                 applying={props.applying}
                 error={props.error}
-                onSelect={setSelectedCandidate}
+                onSelect={selectCandidate}
                 response={props.response}
                 searching={props.searching}
             />
@@ -795,7 +805,7 @@ export default function AdminReadingIdentifyWorkflow(props: AdminReadingIdentify
                 disableEscapeKeyDown={props.applying}
                 fullWidth
                 maxWidth='sm'
-                onClose={() => !props.applying && setSelectedCandidate(null)}
+                onClose={() => !props.applying && closeApply()}
                 open={Boolean(selectedCandidate)}
             >
                 <DialogTitle id='ptv-reading-apply-title'>Apply this metadata match?</DialogTitle>
@@ -803,9 +813,14 @@ export default function AdminReadingIdentifyWorkflow(props: AdminReadingIdentify
                     <DialogContentText id='ptv-reading-apply-description'>
                         {selectedCandidate ? `Apply “${selectedCandidate.title}” from ${adminReadingProviderDisplayName(selectedCandidate.provider)} to “${props.itemName}”? Locked fields stay protected, and artwork is not replaced automatically.` : ''}
                     </DialogContentText>
+                    {props.applyError && (
+                        <p aria-live='assertive' className='ptv-metadata-workflow-message is-error' role='alert'>
+                            {props.applyError}
+                        </p>
+                    )}
                 </DialogContent>
                 <DialogActions className='ptv-metadata-workflow-dialog-actions'>
-                    <button disabled={props.applying} onClick={() => setSelectedCandidate(null)} type='button'>Cancel</button>
+                    <button disabled={props.applying} onClick={closeApply} type='button'>Cancel</button>
                     <button className='is-primary' disabled={props.applying} onClick={confirmApply} type='button'>
                         {props.applying ? 'Applying…' : 'Apply match'}
                     </button>

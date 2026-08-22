@@ -159,4 +159,33 @@ describe('integration Request action', () => {
 
         await vi.waitFor(() => expect(detailMocks.getItem).toHaveBeenCalledTimes(3));
     });
+
+    it('renders actions on the visible restored details page only', async () => {
+        document.body.innerHTML = `
+            <main class="itemDetailPage hide" data-page="stale">
+                <div class="mainDetailButtons"></div>
+            </main>
+            <main class="itemDetailPage" data-page="current">
+                <div class="mainDetailButtons"></div>
+            </main>
+        `;
+        detailMocks.getItem.mockResolvedValue({
+            Id: 'identity-fixture',
+            Name: 'Current item',
+            Type: 'Book'
+        });
+        settingsMocks.getSettings.mockResolvedValue({
+            seerr: {
+                enabled: true,
+                enableRequestsPage: true
+            }
+        });
+
+        integrationModule.refresh();
+
+        await vi.waitFor(() => {
+            expect(document.querySelector('[data-page="current"] .ptv-integration-action-request')).not.toBeNull();
+        });
+        expect(document.querySelector('[data-page="stale"] .ptv-integration-action-request')).toBeNull();
+    });
 });

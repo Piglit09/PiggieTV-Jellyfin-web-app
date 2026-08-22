@@ -94,6 +94,10 @@ export function startRouter() {
     }));
     routerScope.listen(window, 'hashchange', () => scheduleRouteCheck());
     routerScope.listen(window, 'popstate', () => scheduleRouteCheck());
+    // Jellyfin restores cached views between the history event and the next
+    // animation frame. Reconcile synchronously so route modules are listening
+    // before the restored view emits its viewshow/detailsrendered events.
+    routerScope.listen(document, 'viewbeforeshow', () => checkRoute(), true);
 
     currentPath = '';
     checkRoute();

@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -92,11 +92,6 @@ const page: AdminMetadataQualityResultPage = {
     totalRecordCount: 1
 };
 
-function LocationProbe() {
-    const location = useLocation();
-    return <output data-state={JSON.stringify(location.state)} data-testid='location'>{location.pathname}</output>;
-}
-
 describe('Metadata Quality presentation', () => {
     let container: HTMLDivElement;
     let root: Root;
@@ -139,7 +134,7 @@ describe('Metadata Quality presentation', () => {
         expect(container.querySelector('a[href="/settings/admin/media/metadata-quality/item%20a"]')).not.toBeNull();
     });
 
-    it('shows side-by-side evidence and delegates all correction to Metadata Manager', async () => {
+    it('shows side-by-side evidence with Identify on the review page', async () => {
         const onDismiss = vi.fn();
         const onKeepCurrent = vi.fn();
         await act(async () => root.render(
@@ -148,12 +143,12 @@ describe('Metadata Quality presentation', () => {
                     busy={false}
                     detail={detail}
                     error={false}
+                    identify={<div data-testid='inline-identify'>Inline Identify workflow</div>}
                     loading={false}
                     onDismiss={onDismiss}
                     onKeepCurrent={onKeepCurrent}
                     onRetry={vi.fn()}
                 />
-                <LocationProbe />
             </MemoryRouter>
         ));
 
@@ -161,40 +156,23 @@ describe('Metadata Quality presentation', () => {
         expect(container.textContent).toContain('Completeness88%');
         expect(container.textContent).toContain('Current match');
         expect(container.textContent).toContain('Suggested match');
+        expect(container.querySelector('[data-testid="inline-identify"]')).not.toBeNull();
+        expect(container.textContent).toContain('Inline Identify workflow');
         expect(container.querySelector('a[href="/settings/admin/media/metadata-manager/item%20a"]')).not.toBeNull();
-        expect(container.textContent).toContain('Review Suggested Fix');
-        expect(container.textContent).not.toContain('Search Manually');
-        expect(container.textContent).not.toContain('Use Suggested Match');
-
-        await act(async () => container.querySelector<HTMLAnchorElement>('a[href="/settings/admin/media/metadata-manager/item%20a"]')?.click());
-
-        const location = container.querySelector<HTMLOutputElement>('[data-testid="location"]');
-        expect(location?.textContent).toBe('/settings/admin/media/metadata-manager/item%20a');
-        expect(JSON.parse(location?.dataset.state || 'null')).toEqual({
-            ptvMetadataQualityIdentify: {
-                issueNumber: null,
-                itemId: 'item a',
-                mediaClass: null,
-                name: 'The Thing',
-                provider: null,
-                providerIds: { TMDb: '1091' },
-                seriesStartYear: null,
-                seriesTitle: null,
-                version: 2,
-                year: 1982
-            }
-        });
+        expect(container.textContent).toContain('Open the full metadata editor');
+        expect(container.textContent).not.toContain('Review Suggested Fix');
         expect(onDismiss).not.toHaveBeenCalled();
         expect(onKeepCurrent).not.toHaveBeenCalled();
     });
 
-    it('does not offer a suggested fix when provider verification is unavailable', async () => {
+    it('keeps inline Identify available when provider verification is unavailable', async () => {
         await act(async () => root.render(
             <MemoryRouter>
                 <MetadataQualityDetail
                     busy={false}
                     detail={{ ...detail, providerVerified: false }}
                     error={false}
+                    identify={<div data-testid='inline-identify'>Search providers manually</div>}
                     loading={false}
                     onDismiss={vi.fn()}
                     onKeepCurrent={vi.fn()}
@@ -204,7 +182,8 @@ describe('Metadata Quality presentation', () => {
         ));
 
         expect(container.textContent).not.toContain('Review Suggested Fix');
-        expect(container.textContent).toContain('Open Metadata Manager');
+        expect(container.textContent).toContain('Search providers manually');
+        expect(container.textContent).toContain('Open the full metadata editor');
     });
 
     it('presents a truthful manual-review state when no candidate is reliable', async () => {
@@ -243,10 +222,10 @@ describe('Metadata Quality presentation', () => {
         expect(container.textContent).not.toContain('Rejected · 5% match');
         expect(container.textContent).not.toContain('verified candidates');
         expect(container.textContent).not.toContain('Review Suggested Fix');
-        expect(container.textContent).toContain('Open Metadata Manager');
+        expect(container.textContent).toContain('Open the full metadata editor');
     });
 
-    it('renders and hands off separate comic run and publication identity', async () => {
+    it('renders separate comic run and publication identity alongside inline Identify', async () => {
         const suggestedMatch = {
             issueNumber: '009',
             issuePublicationDate: '2020-12-16',
@@ -292,12 +271,12 @@ describe('Metadata Quality presentation', () => {
                         title: 'Deadpool 009 (2019) (Digital) (Zone-Empire)'
                     }}
                     error={false}
+                    identify={<div data-testid='inline-identify'>Comic Identify workflow</div>}
                     loading={false}
                     onDismiss={vi.fn()}
                     onKeepCurrent={vi.fn()}
                     onRetry={vi.fn()}
                 />
-                <LocationProbe />
             </MemoryRouter>
         ));
 
@@ -306,22 +285,7 @@ describe('Metadata Quality presentation', () => {
         expect(container.textContent).toContain('Other candidates');
         expect(container.textContent).toContain('Rejected · 12% match');
 
-        await act(async () => container.querySelector<HTMLAnchorElement>('a[href="/settings/admin/media/metadata-manager/deadpool-9"]')?.click());
-        const location = container.querySelector<HTMLOutputElement>('[data-testid="location"]');
-        expect(JSON.parse(location?.dataset.state || 'null')).toEqual({
-            ptvMetadataQualityIdentify: {
-                issueNumber: '009',
-                itemId: 'deadpool-9',
-                mediaClass: 'comic',
-                name: 'Deadpool',
-                provider: 'Comic Vine',
-                providerIds: { ComicVine: '4000-77815' },
-                seriesStartYear: 2019,
-                seriesTitle: 'Deadpool',
-                version: 2,
-                year: 2020
-            }
-        });
+        expect(container.textContent).toContain('Comic Identify workflow');
     });
 
     it('keeps review results visible when the independent summary source fails', async () => {

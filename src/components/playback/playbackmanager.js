@@ -22,6 +22,17 @@ import { PluginType } from '../../types/plugin.ts';
 import { includesAny } from '../../utils/container.ts';
 import { getItems } from '../../utils/jellyfin-apiclient/getItems.ts';
 import { getItemBackdropImageUrl } from '../../utils/jellyfin-apiclient/backdropImage';
+import {
+    beginPlaybackRequest,
+    beginPlayerStart,
+    cancelRetiredPlayerStart,
+    clearRetiredPlayerState,
+    completePlaybackRequest,
+    completePlayerStart,
+    isGuardedPlaybackStart,
+    isPlaybackStartAllowed,
+    stopPlayerWithoutPlaybackEvents
+} from './playbackStartGuard';
 
 import { PlayerEvent } from 'apps/stable/features/playback/constants/playerEvent';
 import { bindMediaSegmentManager } from 'apps/stable/features/playback/utils/mediaSegmentManager';
@@ -655,7 +666,10 @@ function truncatePlayOptions(playOptions) {
         mediaSourceId: playOptions.mediaSourceId,
         audioStreamIndex: playOptions.audioStreamIndex,
         subtitleStreamIndex: playOptions.subtitleStreamIndex,
-        startPositionTicks: playOptions.startPositionTicks
+        startPositionTicks: playOptions.startPositionTicks,
+        playbackStartGuard: playOptions.playbackStartGuard,
+        playbackStartIsGuarded: playOptions.playbackStartIsGuarded,
+        playbackRequestGuard: playOptions.playbackRequestGuard
     };
 }
 
@@ -2086,51 +2100,58 @@ export class PlaybackManager {
         self.getItemsForPlayback = getItemsForPlayback;
 
         self.play = async function (options) {
-            normalizePlayOptions(options);
+            const playbackRequest = beginPlaybackRequest(self, options);
+            if (!playbackRequest) return;
 
-            if (self._currentPlayer) {
-                if (options.enableRemotePlayers === false && !self._currentPlayer.isLocalPlayer) {
-                    throw new Error('Remote players are disabled');
+            try {
+                normalizePlayOptions(options);
+
+                if (self._currentPlayer) {
+                    if (options.enableRemotePlayers === false && !self._currentPlayer.isLocalPlayer) {
+                        throw new Error('Remote players are disabled');
+                    }
+
+                    if (!self._currentPlayer.isLocalPlayer) {
+                        return await self._currentPlayer.play(options);
+                    }
                 }
 
-                if (!self._currentPlayer.isLocalPlayer) {
-                    return self._currentPlayer.play(options);
-                }
-            }
-
-            if (options.fullscreen) {
-                loading.show();
-            }
-
-            let { items } = options;
-            // If items were not passed directly, fetch them by ID
-            if (!items) {
-                if (!options.serverId) {
-                    throw new Error('serverId required!');
+                if (options.fullscreen) {
+                    loading.show();
                 }
 
-                items = (await getItemsForPlayback(options.serverId, {
-                    Ids: options.ids.join(',')
-                })).Items;
-            }
+                let { items } = options;
+                // If items were not passed directly, fetch them by ID
+                if (!items) {
+                    if (!options.serverId) {
+                        throw new Error('serverId required!');
+                    }
 
-            // Prepare the list of items
-            items = await translateItemsForPlayback(items, options);
-            // Add any additional parts for movies or episodes
-            items = await getAdditionalParts(items);
-            // Adjust the start index for additional parts added to the queue
-            if (options.startIndex) {
-                let adjustedStartIndex = 0;
-                for (let i = 0; i < options.startIndex; i++) {
-                    adjustedStartIndex += items[i].length;
+                    items = (await getItemsForPlayback(options.serverId, {
+                        Ids: options.ids.join(',')
+                    })).Items;
                 }
 
-                options.startIndex = adjustedStartIndex;
-            }
-            // getAdditionalParts returns an array of arrays of items, so flatten it
-            items = items.flat();
+                // Prepare the list of items
+                items = await translateItemsForPlayback(items, options);
+                // Add any additional parts for movies or episodes
+                items = await getAdditionalParts(items);
+                // Adjust the start index for additional parts added to the queue
+                if (options.startIndex) {
+                    let adjustedStartIndex = 0;
+                    for (let i = 0; i < options.startIndex; i++) {
+                        adjustedStartIndex += items[i].length;
+                    }
 
-            return playWithIntros(items, options);
+                    options.startIndex = adjustedStartIndex;
+                }
+                // getAdditionalParts returns an array of arrays of items, so flatten it
+                items = items.flat();
+
+                return await playWithIntros(items, options);
+            } finally {
+                completePlaybackRequest(self, playbackRequest);
+            }
         };
 
         function getPlayerData(player) {
@@ -2318,7 +2339,10 @@ export class PlaybackManager {
 
                 if (introItems.length) {
                     introPlayOptions = {
-                        fullscreen: firstItem.playOptions.fullscreen
+                        fullscreen: firstItem.playOptions.fullscreen,
+                        playbackStartGuard: firstItem.playOptions.playbackStartGuard,
+                        playbackStartIsGuarded: firstItem.playOptions.playbackStartIsGuarded,
+                        playbackRequestGuard: firstItem.playOptions.playbackRequestGuard
                     };
                 } else {
                     introPlayOptions = firstItem.playOptions;
@@ -2459,17 +2483,41 @@ export class PlaybackManager {
             }, reject);
         }
 
-        function sendPlaybackListToPlayer(player, items, deviceProfile, apiClient, mediaSourceId, options) {
+        function sendPlaybackListToPlayer(player, items, deviceProfile, apiClient, mediaSourceId, options, playOptions) {
             return setStreamUrls(items, deviceProfile, options.maxBitrate, apiClient, options.startPosition).then(function () {
-                loading.hide();
+                if (!isPlaybackStartAllowed(playOptions)) return;
 
-                return player.play({
+                loading.hide();
+                const playerStartToken = beginPlayerStart(player, {
+                    guarded: isGuardedPlaybackStart(playOptions)
+                });
+                if (!playerStartToken) return;
+                const result = player.play({
                     items,
                     startPositionTicks: options.startPosition || 0,
                     mediaSourceId,
                     audioStreamIndex: options.audioStreamIndex,
                     subtitleStreamIndex: options.subtitleStreamIndex,
                     startIndex: options.startIndex
+                });
+
+                return Promise.resolve(result).then(async value => {
+                    if (!isPlaybackStartAllowed(playOptions)) {
+                        await cancelRetiredPlayerStart(
+                            player,
+                            playerStartToken,
+                            () => stopRetiredPlayerSilently(player)
+                        );
+                        return;
+                    }
+
+                    if (!completePlayerStart(player, playerStartToken)) return;
+
+                    return value;
+                }, err => {
+                    if (!completePlayerStart(player, playerStartToken)) return;
+
+                    throw err;
                 });
             });
         }
@@ -2619,6 +2667,8 @@ export class PlaybackManager {
         }
 
         function playAfterBitrateDetect(maxBitrate, item, playOptions, onPlaybackStartedFn, prevSource) {
+            if (!isPlaybackStartAllowed(playOptions)) return Promise.resolve();
+
             const startPosition = playOptions.startPositionTicks;
 
             const player = getPlayer(item, playOptions);
@@ -2645,14 +2695,43 @@ export class PlaybackManager {
 
             if (!isServerItem(item) || item.MediaType === 'Book') {
                 return promise.then(function () {
+                    if (!isPlaybackStartAllowed(playOptions)) return;
+
                     const streamInfo = createStreamInfoFromUrlItem(item);
                     streamInfo.fullscreen = playOptions.fullscreen;
+                    const playerStartToken = beginPlayerStart(player, {
+                        guarded: isGuardedPlaybackStart(playOptions)
+                    });
+                    if (!playerStartToken) return;
                     getPlayerData(player).isChangingStream = false;
-                    return player.play(streamInfo).then(() => {
+
+                    return player.play(streamInfo).then(async () => {
+                        if (!isPlaybackStartAllowed(playOptions)) {
+                            await cancelRetiredPlayerStart(
+                                player,
+                                playerStartToken,
+                                () => stopRetiredPlayerSilently(player, streamInfo)
+                            );
+                            return;
+                        }
+
+                        if (!completePlayerStart(player, playerStartToken)) return;
+
                         loading.hide();
                         onPlaybackStartedFn();
                         onPlaybackStarted(player, playOptions, streamInfo);
-                    }).catch((errorCode) => {
+                    }, async errorCode => {
+                        if (!isPlaybackStartAllowed(playOptions)) {
+                            await cancelRetiredPlayerStart(
+                                player,
+                                playerStartToken,
+                                () => stopRetiredPlayerSilently(player, streamInfo)
+                            );
+                            return;
+                        }
+
+                        if (!completePlayerStart(player, playerStartToken)) return;
+
                         self.stop(player);
                         loading.hide();
                         showPlaybackInfoErrorMessage(self, errorCode || 'ErrorDefault');
@@ -2691,7 +2770,15 @@ export class PlaybackManager {
                 };
 
                 if (player && !enableLocalPlaylistManagement(player)) {
-                    return sendPlaybackListToPlayer(player, playOptions.items, deviceProfile, apiClient, mediaSourceId, options);
+                    return sendPlaybackListToPlayer(
+                        player,
+                        playOptions.items,
+                        deviceProfile,
+                        apiClient,
+                        mediaSourceId,
+                        options,
+                        playOptions
+                    );
                 }
 
                 // this reference was only needed by sendPlaybackListToPlayer
@@ -2715,6 +2802,8 @@ export class PlaybackManager {
                 }
 
                 return getPlaybackMediaSource(player, apiClient, deviceProfile, item, mediaSourceId, options).then(async (mediaSource) => {
+                    if (!isPlaybackStartAllowed(playOptions)) return;
+
                     if (trackOptions.DefaultSecondarySubtitleStreamIndex != null) {
                         mediaSource.DefaultSecondarySubtitleStreamIndex = trackOptions.DefaultSecondarySubtitleStreamIndex;
                     }
@@ -2739,16 +2828,42 @@ export class PlaybackManager {
                     streamInfo.fullscreen = playOptions.fullscreen;
 
                     const playerData = getPlayerData(player);
+                    const playerStartToken = beginPlayerStart(player, {
+                        guarded: isGuardedPlaybackStart(playOptions)
+                    });
+                    if (!playerStartToken) return;
 
                     playerData.isChangingStream = false;
                     playerData.maxStreamingBitrate = maxBitrate;
                     playerData.streamInfo = streamInfo;
 
-                    return player.play(streamInfo).then(function () {
+                    return player.play(streamInfo).then(async function () {
+                        if (!isPlaybackStartAllowed(playOptions)) {
+                            await cancelRetiredPlayerStart(
+                                player,
+                                playerStartToken,
+                                () => stopRetiredPlayerSilently(player, streamInfo)
+                            );
+                            return;
+                        }
+
+                        if (!completePlayerStart(player, playerStartToken)) return;
+
                         loading.hide();
                         onPlaybackStartedFn();
                         onPlaybackStarted(player, playOptions, streamInfo, mediaSource);
-                    }, function (err) {
+                    }, async function (err) {
+                        if (!isPlaybackStartAllowed(playOptions)) {
+                            await cancelRetiredPlayerStart(
+                                player,
+                                playerStartToken,
+                                () => stopRetiredPlayerSilently(player, streamInfo)
+                            );
+                            return;
+                        }
+
+                        if (!completePlayerStart(player, playerStartToken)) return;
+
                         // TODO: Improve this because it will report playback start on a failure
                         onPlaybackStartedFn();
                         onPlaybackStarted(player, playOptions, streamInfo, mediaSource);
@@ -3600,6 +3715,32 @@ export class PlaybackManager {
                 Events.off(player, 'stopped', onPlaybackStopped);
                 Events.on(player, 'stopped', onPlaybackStopped);
             }
+        }
+
+        async function stopRetiredPlayerSilently(player, expectedStreamInfo) {
+            const playerData = getPlayerData(player);
+
+            // The shared audio element may already belong to a newer user
+            // request. Verify ownership before invoking stop(), not afterward.
+            if (expectedStreamInfo && playerData.streamInfo !== expectedStreamInfo) {
+                return false;
+            }
+
+            try {
+                await stopPlayerWithoutPlaybackEvents(player, unbindStopped, bindStopped);
+            } finally {
+                clearRetiredPlayerState({
+                    currentPlayer: self._currentPlayer,
+                    expectedStreamInfo,
+                    player,
+                    playerData,
+                    removeCurrentPlayer,
+                    resetQueue: () => self._playQueueManager.reset(),
+                    stopProgress: stopPlaybackProgressTimer
+                });
+            }
+
+            return true;
         }
 
         function onPlaybackTimeUpdate() {

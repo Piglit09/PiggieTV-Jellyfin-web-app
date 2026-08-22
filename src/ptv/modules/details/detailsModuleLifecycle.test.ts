@@ -389,4 +389,72 @@ describe('details enhancement module lifecycle', () => {
         expect(inspectionSignal.aborted).toBe(false);
         expect(detailsMocks.setShellSection).not.toHaveBeenCalled();
     });
+
+    it('enhances the visible restored page when a hidden cached detail remains connected', async () => {
+        window.location.hash = '#/details?id=item-current&serverId=server-a';
+        document.body.innerHTML = `
+            <main id="itemDetailPage" class="itemDetailPage hide" data-page="stale">
+                <div class="mainDetailButtons"></div>
+            </main>
+            <main id="itemDetailPage" class="itemDetailPage" data-page="current">
+                <div class="mainDetailButtons"></div>
+            </main>
+        `;
+
+        const stalePage = document.querySelector<HTMLElement>('[data-page="stale"]')!;
+        const currentPage = document.querySelector<HTMLElement>('[data-page="current"]')!;
+        const scope = createScope();
+
+        detailsMocks.coordinatedDetail.mockResolvedValueOnce({
+            Id: 'item-current',
+            Name: 'current',
+            Type: 'Movie'
+        });
+
+        getRegisteredModule().init({ scope: scope.scope });
+
+        expect(detailsMocks.prepareLayout).toHaveBeenCalledWith(currentPage);
+        expect(detailsMocks.prepareLayout).not.toHaveBeenCalledWith(stalePage);
+
+        scope.runInspection();
+        await settlePromises();
+
+        expect(currentPage.dataset.ptvDetailsHydratedItemId).toBe('item-current');
+        expect(stalePage.dataset.ptvDetailsHydratedItemId).toBeUndefined();
+    });
+
+    it('waits through an all-hidden restore transition and applies the exact rendered page', () => {
+        window.location.hash = '#/details?id=item-incoming&serverId=server-a';
+        document.body.innerHTML = `
+            <main id="itemDetailPage" class="itemDetailPage hide" data-page="incoming">
+                <div class="mainDetailButtons"></div>
+            </main>
+            <main id="itemDetailPage" class="itemDetailPage hide" data-page="stale">
+                <div class="mainDetailButtons"></div>
+            </main>
+        `;
+
+        const incomingPage = document.querySelector<HTMLElement>('[data-page="incoming"]')!;
+        const stalePage = document.querySelector<HTMLElement>('[data-page="stale"]')!;
+
+        getRegisteredModule().init({ scope: createScope().scope });
+
+        expect(detailsMocks.prepareLayout).not.toHaveBeenCalled();
+
+        incomingPage.classList.remove('hide');
+        detailsMocks.detailsRenderedHandler?.(new CustomEvent('detailsrendered', {
+            detail: {
+                item: {
+                    Id: 'item-incoming',
+                    ServerId: 'server-a',
+                    Type: 'Movie'
+                },
+                page: incomingPage
+            }
+        }));
+
+        expect(detailsMocks.prepareLayout).toHaveBeenCalledWith(incomingPage);
+        expect(detailsMocks.prepareLayout).not.toHaveBeenCalledWith(stalePage);
+        expect(incomingPage.dataset.ptvDetailsHydratedItemId).toBe('item-incoming');
+    });
 });

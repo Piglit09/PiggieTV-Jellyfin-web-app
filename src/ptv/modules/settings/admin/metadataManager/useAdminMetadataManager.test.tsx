@@ -423,6 +423,19 @@ describe('useAdminMetadataManager', () => {
         expect(latest?.itemBundle).toBeNull();
     });
 
+    it('loads only the selected item when the surrounding workspace is disabled', async () => {
+        await render({ itemId: 'item-a', workspaceEnabled: false });
+
+        await vi.waitFor(() => expect(serviceMocks.loadItem).toHaveBeenCalledOnce());
+        expect(serviceMocks.loadItem.mock.calls[0][1]).toMatchObject({
+            itemId: 'item-a',
+            userId: 'admin-a'
+        });
+        expect(serviceMocks.loadRoots).not.toHaveBeenCalled();
+        expect(serviceMocks.loadCatalog).not.toHaveBeenCalled();
+        expect(latest?.itemBundle?.item.id).toBe('item-a');
+    });
+
     it('aborts a stale item selection and never exposes it over the new item', async () => {
         let resolveA!: (value: AdminMetadataItemBundle) => void;
         let resolveB!: (value: AdminMetadataItemBundle) => void;

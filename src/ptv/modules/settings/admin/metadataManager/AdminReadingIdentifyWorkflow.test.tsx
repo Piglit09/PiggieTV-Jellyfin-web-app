@@ -132,6 +132,7 @@ function response(overrides: Partial<AdminReadingMetadataSearchResponse> = {}): 
 
 function props(overrides: Partial<AdminReadingIdentifyWorkflowProps> = {}): AdminReadingIdentifyWorkflowProps {
     return {
+        applyError: null,
         applying: false,
         error: null,
         initialName: 'Deadpool v08 003',
@@ -141,6 +142,7 @@ function props(overrides: Partial<AdminReadingIdentifyWorkflowProps> = {}): Admi
         itemName: 'Deadpool v08 003',
         message: null,
         onApply: vi.fn(async () => undefined),
+        onClearApplyError: vi.fn(),
         onLoadProviders: vi.fn(),
         onRetryProviders: vi.fn(),
         onSearch: vi.fn(),
@@ -465,6 +467,58 @@ describe('PTV Reading Identify workflow', () => {
         await flushAsync();
         expect(onApply).toHaveBeenCalledOnce();
         expect(onApply).toHaveBeenCalledWith(match);
+        expect(document.body.querySelector('#ptv-reading-apply-description')?.textContent).toBe('');
+    });
+
+    it('keeps a failed confirmation open and clears its error before another candidate', async () => {
+        const match = candidate();
+        const alternateMatch = candidate({
+            providerId: '4000-456',
+            title: 'Alternate match'
+        });
+        const onApply = vi.fn()
+            .mockRejectedValueOnce(new Error('request failed'))
+            .mockResolvedValueOnce(undefined);
+        const onClearApplyError = vi.fn();
+        const baseProps = props({
+            onApply,
+            onClearApplyError,
+            response: response({ candidates: [ match, alternateMatch ] })
+        });
+        await render(baseProps);
+
+        await act(async () => elementWithText<HTMLButtonElement>(container, 'button', 'Review match')?.click());
+        let dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+        await act(async () => elementWithText<HTMLButtonElement>(dialog!, 'button', 'Apply match')?.click());
+        await flushAsync();
+
+        expect(onApply).toHaveBeenCalledOnce();
+        expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+
+        await render({ ...baseProps, applyError: "We couldn't apply this reading metadata match." });
+        dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+        expect(dialog?.querySelector('[role="alert"]')?.textContent)
+            .toContain("We couldn't apply this reading metadata match.");
+        expect(elementWithText<HTMLButtonElement>(dialog!, 'button', 'Apply match')?.disabled).toBe(false);
+
+        await act(async () => elementWithText<HTMLButtonElement>(dialog!, 'button', 'Cancel')?.click());
+        expect(document.body.querySelector('#ptv-reading-apply-description')?.textContent).toBe('');
+        expect(onClearApplyError).toHaveBeenCalledTimes(2);
+
+        await render(baseProps);
+        const alternateCard = Array.from(container.querySelectorAll<HTMLElement>('.ptv-reading-candidate-card'))
+            .find(card => card.textContent?.includes(alternateMatch.title));
+        await act(async () => elementWithText<HTMLButtonElement>(alternateCard!, 'button', 'Review match')?.click());
+        dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
+        expect(onClearApplyError).toHaveBeenCalledTimes(3);
+        expect(dialog?.textContent).toContain(alternateMatch.title);
+        expect(dialog?.querySelector('[role="alert"]')).toBeNull();
+
+        await act(async () => elementWithText<HTMLButtonElement>(dialog!, 'button', 'Apply match')?.click());
+        await flushAsync();
+        expect(onApply).toHaveBeenCalledTimes(2);
+        expect(onApply).toHaveBeenLastCalledWith(alternateMatch);
+        expect(document.body.querySelector('#ptv-reading-apply-description')?.textContent).toBe('');
     });
 
     it('renders provider prose as bounded plain text and rejects unsafe cover/source URLs', async () => {

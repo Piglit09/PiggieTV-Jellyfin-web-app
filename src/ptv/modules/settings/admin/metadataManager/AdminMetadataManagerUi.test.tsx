@@ -340,6 +340,7 @@ function artworkProps(overrides: Partial<AdminMetadataArtworkWorkflowProps> = {}
 
 function identifyProps(overrides: Partial<AdminMetadataIdentifyWorkflowProps> = {}): AdminMetadataIdentifyWorkflowProps {
     return {
+        applyError: null,
         applying: false,
         error: null,
         initialName: 'Example Movie',
@@ -347,6 +348,7 @@ function identifyProps(overrides: Partial<AdminMetadataIdentifyWorkflowProps> = 
         initialYear: 2024,
         message: null,
         onApply: vi.fn(async () => undefined),
+        onClearApplyError: vi.fn(),
         onLoadProviders: vi.fn(),
         onRetryProviders: vi.fn(),
         onSearch: vi.fn(),
@@ -610,6 +612,72 @@ describe('PiggieTV native Metadata Manager UI', () => {
         await flushAsync();
         expect(onApply).toHaveBeenCalledOnce();
         expect(onApply).toHaveBeenCalledWith(result);
+        expect(container.querySelector('[role="dialog"]')).toBeNull();
+    });
+
+    it('keeps a failed Identify confirmation open and clears its error before another result', async () => {
+        const result = {
+            id: 'result-a',
+            imageUrl: null,
+            name: 'Provider Match',
+            overview: 'Matched provider record.',
+            providerIds: { Imdb: 'tt999' },
+            providerName: 'IMDb',
+            source: {},
+            year: 2024
+        } as const;
+        const alternateResult = {
+            ...result,
+            id: 'result-b',
+            name: 'Alternate Provider Match',
+            providerIds: { Imdb: 'tt1000' }
+        } as const;
+        const onApply = vi.fn()
+            .mockRejectedValueOnce(new Error('request failed'))
+            .mockResolvedValueOnce(undefined);
+        const onClearApplyError = vi.fn();
+        const baseIdentify = identifyProps({
+            onApply,
+            onClearApplyError,
+            results: [ result, alternateResult ]
+        });
+        await renderWorkflow('identify', { identify: baseIdentify });
+
+        await act(async () => buttonWithText(container, 'Use this match')?.click());
+        let dialog = container.querySelector<HTMLElement>('[role="dialog"]');
+        await act(async () => buttonWithText(dialog!, 'Use this match')?.click());
+        await flushAsync();
+
+        expect(onApply).toHaveBeenCalledOnce();
+        expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+
+        await renderWorkflow('identify', {
+            identify: { ...baseIdentify, applyError: "We couldn't apply this identify result." }
+        });
+        dialog = container.querySelector<HTMLElement>('[role="dialog"]');
+        expect(dialog?.querySelector('[role="alert"]')?.textContent)
+            .toContain("We couldn't apply this identify result.");
+        expect(buttonWithText(dialog!, 'Use this match')?.disabled).toBe(false);
+        expect(container.textContent).not.toContain('Identify results unavailable');
+
+        await act(async () => buttonWithText(dialog!, 'Cancel')?.click());
+        expect(container.querySelector('[role="dialog"]')).toBeNull();
+        expect(onClearApplyError).toHaveBeenCalledTimes(2);
+
+        await renderWorkflow('identify', { identify: baseIdentify });
+        const alternateCard = Array.from(container.querySelectorAll<HTMLElement>('.ptv-metadata-identify-result'))
+            .find(card => card.textContent?.includes(alternateResult.name));
+        await act(async () => buttonWithText(alternateCard!, 'Use this match')?.click());
+        dialog = container.querySelector<HTMLElement>('[role="dialog"]');
+        expect(onClearApplyError).toHaveBeenCalledTimes(3);
+        expect(dialog?.textContent).toContain(alternateResult.name);
+        expect(dialog?.querySelector('[role="alert"]')).toBeNull();
+
+        await act(async () => buttonWithText(dialog!, 'Use this match')?.click());
+        await flushAsync();
+        expect(onApply).toHaveBeenCalledTimes(2);
+        expect(onApply).toHaveBeenLastCalledWith(alternateResult);
+        expect(container.querySelector('[role="dialog"]')).toBeNull();
     });
 
     it('mounts provider-neutral Reading Identify for Books without loading the legacy provider form', async () => {

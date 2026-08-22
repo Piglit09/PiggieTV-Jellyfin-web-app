@@ -34,10 +34,13 @@ import {
     claimPtvDetailImageRepair,
     clearPtvDetailImageRepairAttempts
 } from './detailImageRepairState';
+import {
+    DETAIL_PAGE_SELECTOR,
+    getActiveDetailsPage
+} from './activeDetailsPage';
 
 import './details.scss';
 
-const DETAIL_PAGE_SELECTOR = '#itemDetailPage, .itemDetailPage';
 const DETAILS_CINEMATIC_CLASS = 'ptv-cinematic-details';
 const READER_ACTIONS_CLASS = 'ptv-reader-detail-actions';
 let detailsEnhancementActive = false;
@@ -374,7 +377,7 @@ function handleDetailsRouteOriginClick(event) {
 function enhanceDetails(pageHint, item, owner = captureDetailsEnhancementGeneration()) {
     const page = pageHint instanceof Element && pageHint.matches(DETAIL_PAGE_SELECTOR) ?
         pageHint :
-        document.querySelector(DETAIL_PAGE_SELECTOR);
+        getActiveDetailsPage();
 
     if (!page) return;
 
@@ -769,7 +772,7 @@ function enhanceDetailItem(page, renderedItem, owner = captureDetailsEnhancement
 function inspectCurrentDetailItem(owner = captureDetailsEnhancementGeneration()) {
     if (!isDetailsEnhancementGenerationCurrent(owner)) return;
 
-    const page = document.querySelector(DETAIL_PAGE_SELECTOR);
+    const page = getActiveDetailsPage();
 
     if (page) enhanceDetailItem(page, undefined, owner);
 }

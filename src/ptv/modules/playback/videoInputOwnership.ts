@@ -189,7 +189,9 @@ export function reconcilePtvVideoControlSurface(
 }
 
 export function isPtvVideoPlayerControlFocused(element: Element | null = document.activeElement) {
-    return element instanceof HTMLElement && Boolean(element.closest([
+    if (!(element instanceof HTMLElement)) return false;
+
+    const controlSurface = element.closest([
         '.ptv-player-pause-stage',
         '#videoOsdPage .videoOsdBottom',
         '.videoOsdPage .videoOsdBottom',
@@ -197,5 +199,16 @@ export function isPtvVideoPlayerControlFocused(element: Element | null = documen
         '.videoOsdPage .osdControls',
         '#videoOsdPage .osdHeader',
         '.videoOsdPage .osdHeader'
-    ].join(',')));
+    ].join(','));
+
+    if (!controlSurface) return false;
+
+    return !element.closest([
+        '.hide',
+        '.hidden',
+        '[hidden]',
+        '[aria-hidden="true"]',
+        '.videoOsdBottom-hidden',
+        '.osdHeader-hidden'
+    ].join(','));
 }

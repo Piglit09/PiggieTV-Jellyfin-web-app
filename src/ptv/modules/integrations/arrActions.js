@@ -2,13 +2,13 @@ import { ServerConnections } from '../../../lib/jellyfin-apiclient';
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
 import { getCoordinatedLegacyItemDetail } from '../../services/coordinatedLegacyItemDetail';
+import { getActiveDetailsPage } from '../details/activeDetailsPage';
 import { openPtvRequestPortal } from '../request/requestLoader';
 import { getPtvIntegrationActions } from './arrLinks';
 import { getPtvIntegrationSettings } from './integrationsConfig';
 
 import './integrations.scss';
 
-const DETAIL_PAGE_SELECTOR = '#itemDetailPage, .itemDetailPage';
 const ACTION_CLASS = 'ptv-integration-action';
 const ACTION_GROUP_CLASS = 'ptv-integration-actions';
 const CACHE_TTL_MS = 2 * 60 * 1000;
@@ -197,7 +197,7 @@ function renderActions(page, item, settings) {
 }
 
 async function enhanceDetailIntegrations() {
-    const page = document.querySelector(DETAIL_PAGE_SELECTOR);
+    const page = getActiveDetailsPage();
 
     if (!page) return;
 

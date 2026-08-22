@@ -53,6 +53,7 @@ export type AdminMetadataArtworkWorkflowProps = Readonly<{
 }>;
 
 export type AdminMetadataIdentifyWorkflowProps = Readonly<{
+    applyError: string | null;
     applying: boolean;
     error: string | null;
     initialName: string;
@@ -60,6 +61,7 @@ export type AdminMetadataIdentifyWorkflowProps = Readonly<{
     initialYear: number | null;
     message: string | null;
     onApply: (result: AdminMetadataIdentifyResult) => Promise<void>;
+    onClearApplyError: () => void;
     onLoadProviders: () => void;
     onRetryProviders: () => void;
     onSearch: (query: AdminMetadataIdentifyQuery) => void;
@@ -82,7 +84,7 @@ export type AdminMetadataRefreshWorkflowProps = Readonly<{
 export type AdminMetadataManagerWorkflowsProps = Readonly<{
     activeTab: AdminMetadataManagerWorkflowTab;
     artwork: AdminMetadataArtworkWorkflowProps;
-    identify: AdminMetadataIdentifyWorkflowProps;
+    identify?: AdminMetadataIdentifyWorkflowProps;
     itemId: string;
     itemName: string;
     itemType: string;
@@ -95,6 +97,7 @@ type ConfirmationDialogProps = Readonly<{
     busy: boolean;
     confirmLabel: string;
     destructive?: boolean;
+    error?: string | null;
     onCancel: () => void;
     onConfirm: () => void;
     open: boolean;
@@ -144,6 +147,7 @@ function WorkflowConfirmationDialog({
     busy,
     confirmLabel,
     destructive = false,
+    error = null,
     onCancel,
     onConfirm,
     open,
@@ -163,6 +167,11 @@ function WorkflowConfirmationDialog({
             <DialogTitle id='ptv-metadata-workflow-confirm-title'>{title}</DialogTitle>
             <DialogContent>
                 <DialogContentText>{text}</DialogContentText>
+                {error && (
+                    <p aria-live='assertive' className='ptv-metadata-workflow-message is-error' role='alert'>
+                        {error}
+                    </p>
+                )}
             </DialogContent>
             <DialogActions className='ptv-metadata-workflow-dialog-actions'>
                 <button disabled={busy} onClick={onCancel} type='button'>Cancel</button>
@@ -428,7 +437,7 @@ function ArtworkWorkflow({ artwork }: Readonly<{ artwork: AdminMetadataArtworkWo
     );
 }
 
-function IdentifyWorkflow({ identify, itemId, itemName, itemType }: Readonly<{
+export function AdminMetadataIdentifyWorkflow({ identify, itemId, itemName, itemType }: Readonly<{
     identify: AdminMetadataIdentifyWorkflowProps;
     itemId: string;
     itemName: string;
@@ -488,9 +497,17 @@ function IdentifyWorkflow({ identify, itemId, itemName, itemType }: Readonly<{
         setSelectedResult(null);
         titleInputRef.current?.focus();
     };
+    const closeApply = () => {
+        setSelectedResult(null);
+        identify.onClearApplyError();
+    };
+    const selectResult = (result: AdminMetadataIdentifyResult) => {
+        identify.onClearApplyError();
+        setSelectedResult(result);
+    };
     const confirmApply = () => {
         if (!selectedResult || identify.applying) return;
-        identify.onApply(selectedResult).then(() => setSelectedResult(null), () => undefined);
+        identify.onApply(selectedResult).then(closeApply, () => undefined);
     };
 
     return (
@@ -567,7 +584,7 @@ function IdentifyWorkflow({ identify, itemId, itemName, itemType }: Readonly<{
                                     <p>{[ result.year, result.providerName ].filter(Boolean).join(' - ')}</p>
                                     {result.overview && <small>{result.overview}</small>}
                                 </div>
-                                <button className='is-primary' disabled={identify.applying} onClick={() => setSelectedResult(result)} type='button'>Use this match</button>
+                                <button className='is-primary' disabled={identify.applying} onClick={() => selectResult(result)} type='button'>Use this match</button>
                             </article>
                         ))}
                     </div>
@@ -576,7 +593,8 @@ function IdentifyWorkflow({ identify, itemId, itemName, itemType }: Readonly<{
             <WorkflowConfirmationDialog
                 busy={identify.applying}
                 confirmLabel='Use this match'
-                onCancel={() => setSelectedResult(null)}
+                error={identify.applyError}
+                onCancel={closeApply}
                 onConfirm={confirmApply}
                 open={Boolean(selectedResult)}
                 text={selectedResult ? `Apply “${selectedResult.name}” to “${itemName}”? PiggieTV will ask Jellyfin to apply the selected provider result without replacing all artwork.` : ''}
@@ -696,7 +714,7 @@ export default function AdminMetadataManagerWorkflows({
                 role={showTabs ? 'tabpanel' : undefined}
             >
                 {activeTab === 'artwork' && <ArtworkWorkflow artwork={artwork} />}
-                {activeTab === 'identify' && <IdentifyWorkflow identify={identify} itemId={itemId} itemName={itemName} itemType={itemType} />}
+                {activeTab === 'identify' && identify && <AdminMetadataIdentifyWorkflow identify={identify} itemId={itemId} itemName={itemName} itemType={itemType} />}
                 {activeTab === 'refresh' && <RefreshWorkflow itemId={itemId} itemName={itemName} refresh={refresh} />}
             </div>
         </div>

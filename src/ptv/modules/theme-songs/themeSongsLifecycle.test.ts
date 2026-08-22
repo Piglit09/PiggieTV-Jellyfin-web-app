@@ -537,4 +537,43 @@ describe('theme song details lifecycle', () => {
         expect(themeSongMocks.getThemeMedia).toHaveBeenCalledTimes(2);
         expect(transportSignals[1]?.aborted).toBe(false);
     });
+
+    it('renders on the visible restored detail page instead of a hidden cached page', async () => {
+        document.body.innerHTML = `
+            <div id="itemDetailPage" class="itemDetailPage hide" data-page="stale">
+                <div class="mainDetailButtons"></div>
+            </div>
+            <div id="itemDetailPage" class="itemDetailPage" data-page="current">
+                <div class="mainDetailButtons"></div>
+            </div>
+        `;
+        setDetailsRoute('item-a');
+        themeSongMocks.getThemeMedia.mockResolvedValue(createResponse('song-a'));
+
+        getRegisteredModule().init({ scope: createScope().scope });
+        await vi.advanceTimersByTimeAsync(16);
+        await settlePromises();
+
+        expect(document.querySelector('[data-page="stale"] .ptv-theme-song-chip')).toBeNull();
+        expect(document.querySelector('[data-page="current"] .ptv-theme-song-chip')).not.toBeNull();
+    });
+
+    it('persists an explicit opt-out and updates the chip accessibility state', async () => {
+        renderDetailsPage();
+        setDetailsRoute('item-a');
+        themeSongMocks.getThemeMedia.mockResolvedValue(createResponse('song-a'));
+
+        getRegisteredModule().init({ scope: createScope().scope });
+        await vi.advanceTimersByTimeAsync(16);
+        await settlePromises();
+
+        const chip = document.querySelector<HTMLButtonElement>('.ptv-theme-song-chip')!;
+
+        chip.click();
+
+        expect(themeSongMocks.enableThemeSongs).toHaveBeenCalledWith(false);
+        expect(chip.getAttribute('aria-pressed')).toBe('false');
+        expect(chip.getAttribute('aria-label')).toBe('Enable theme songs');
+        expect(chip.textContent).toContain('Theme Songs Off');
+    });
 });

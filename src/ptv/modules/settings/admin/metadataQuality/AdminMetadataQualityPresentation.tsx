@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom';
 import { PtvPagination } from '../../../../primitives';
 import PtvIcon from '../../../icons/PtvIcon';
 import AdminStatusBadge from '../AdminStatusBadge';
-import { createAdminMetadataManagerIdentifyHandoff } from '../metadataManager/adminMetadataManagerIdentifyHandoff';
 import { ADMIN_METADATA_MANAGER_PATH } from '../metadataManager/AdminMetadataManagerRoute';
 import { ADMIN_TASKS_PATH } from '../tasks/AdminTasksRoute';
 import { ADMIN_METADATA_QUALITY_PATH } from './adminMetadataQualityRouting';
@@ -456,6 +455,7 @@ export function MetadataQualityDetail({
     busy,
     detail,
     error,
+    identify,
     loading,
     onDismiss,
     onKeepCurrent,
@@ -464,6 +464,7 @@ export function MetadataQualityDetail({
     busy: boolean;
     detail: AdminMetadataQualityDetail | undefined;
     error: boolean;
+    identify?: React.ReactNode;
     loading: boolean;
     onDismiss: () => void;
     onKeepCurrent: () => void;
@@ -472,17 +473,6 @@ export function MetadataQualityDetail({
     if (loading) return <section aria-label='Loading review detail' className='ptv-metadata-quality-detail-skeleton' role='status'><span /><span /><span /></section>;
     if (error || !detail) return <section className='ptv-metadata-quality-error' role='alert'><PtvIcon name='alerts' size='26px' /><div><h2>This review result couldn&apos;t be loaded.</h2><p>Return to the queue or retry this result.</p></div><button onClick={onRetry} type='button'>Retry result</button></section>;
     const resolved = Boolean(detail.resolutionState || detail.status === 'resolved' || detail.status === 'dismissed');
-    const suggestedFixState = detail.providerVerified && detail.suggestedMatch ? createAdminMetadataManagerIdentifyHandoff({
-        issueNumber: detail.suggestedMatch.issueNumber,
-        itemId: detail.itemId,
-        mediaClass: detail.suggestedMatch.mediaClass,
-        name: detail.suggestedMatch.seriesTitle || detail.suggestedMatch.title,
-        provider: detail.suggestedMatch.provider,
-        providerIds: detail.suggestedMatch.providerIds,
-        seriesStartYear: detail.suggestedMatch.seriesStartYear,
-        seriesTitle: detail.suggestedMatch.seriesTitle,
-        year: detail.suggestedMatch.year
-    }) : null;
     const metadataManagerPath = `${ADMIN_METADATA_MANAGER_PATH}/${encodeURIComponent(detail.itemId)}`;
     return (
         <article className='ptv-metadata-quality-detail'>
@@ -498,20 +488,20 @@ export function MetadataQualityDetail({
                 <div><h3>Current match</h3><MatchSummary emptyLabel='Current match unavailable' match={detail.currentMatch} /></div>
                 <div><h3>Suggested match</h3><MatchSummary emptyLabel='No reliable automatic match found. Review manually.' match={detail.suggestedMatch} /></div>
             </section>
+            {identify ? <section aria-label='Identify metadata' className='ptv-metadata-quality-identify'>{identify}</section> : null}
             {detail.fileName || detail.folderName ? <section className='ptv-metadata-quality-file-context'><h3>Local evidence</h3>{detail.folderName ? <p><span>Folder</span><strong>{detail.folderName}</strong></p> : null}{detail.fileName ? <p><span>File</span><strong>{detail.fileName}</strong></p> : null}</section> : null}
             <section className='ptv-metadata-quality-reasons'><h3>Why this item was flagged</h3>{detail.reasons.length ? <ul>{detail.reasons.map(reason => <li key={`${reason.code}:${reason.message}:${reason.evidence ?? ''}:${reason.severity}`}><strong>{reason.message}</strong>{reason.evidence ? <span>{reason.evidence}</span> : null}<small>{reason.code}</small></li>)}</ul> : <p>No detailed explanation is available.</p>}</section>
             {Object.keys(detail.signals).length ? <section className='ptv-metadata-quality-signals'><h3>Evidence</h3><dl>{Object.entries(detail.signals).map(([ key, value ]) => <div key={key}><dt>{friendlySignalName(key)}</dt><dd>{signalValue(value)}</dd></div>)}</dl></section> : null}
             <MetadataQualityCandidates candidates={detail.candidates} suggestedMatch={detail.suggestedMatch} />
             <footer className='ptv-metadata-quality-detail-actions'>
                 {!resolved ? <button disabled={busy} onClick={onKeepCurrent} type='button'>Keep Current</button> : null}
-                {suggestedFixState ? (
-                    <Link className='is-primary' state={suggestedFixState} to={metadataManagerPath}>Review Suggested Fix</Link>
-                ) : (
-                    <Link className='is-primary' to={metadataManagerPath}>Open Metadata Manager</Link>
-                )}
                 {!resolved ? <button className='is-subtle' disabled={busy} onClick={onDismiss} type='button'>Dismiss</button> : null}
             </footer>
-            <p className='ptv-metadata-quality-safety-note'><PtvIcon name='info' size='15px' />Metadata Quality never changes Jellyfin metadata. A suggested fix opens Identify for explicit administrator review and confirmation.</p>
+            <p className='ptv-metadata-quality-safety-note'>
+                <PtvIcon name='info' size='15px' />
+                Identify changes Jellyfin metadata only after an administrator selects and confirms a provider result.
+                {' '}<Link to={metadataManagerPath}>Open the full metadata editor</Link> for artwork and advanced fields.
+            </p>
         </article>
     );
 }

@@ -11,13 +11,13 @@ import { useApi } from '../../../../../hooks/useApi';
 import PtvIcon from '../../../icons/PtvIcon';
 import { useAdminConfigurationForm } from '../configuration/useAdminConfigurationForm';
 import { useAdminUnsavedChanges } from '../configuration/useAdminUnsavedChanges';
-import { areAdminMetadataFormsEqual, getAdminMetadataIdentifyType } from './adminMetadataManagerAdapters';
+import { areAdminMetadataFormsEqual } from './adminMetadataManagerAdapters';
 import type { AdminMetadataManagerIdentifyPrefill } from './adminMetadataManagerIdentifyHandoff';
+import AdminMetadataIdentifyPanel from './AdminMetadataIdentifyPanel';
 import AdminMetadataManagerCatalog from './AdminMetadataManagerCatalog';
 import AdminMetadataManagerForm from './AdminMetadataManagerForm';
 import AdminMetadataManagerWorkflows, {
     type AdminMetadataArtworkWorkflowProps,
-    type AdminMetadataIdentifyWorkflowProps,
     type AdminMetadataManagerWorkflowTab,
     type AdminMetadataRefreshWorkflowProps
 } from './AdminMetadataManagerWorkflows';
@@ -25,19 +25,9 @@ import {
     AdminMetadataManagerServiceError,
     type AdminMetadataCatalogItem,
     type AdminMetadataForm,
-    type AdminMetadataIdentifyQuery,
-    type AdminMetadataIdentifyResult,
-    type AdminMetadataProviderField,
     type AdminMetadataRemoteImagePage,
     type AdminMetadataRemoteImageProvider
 } from './adminMetadataManagerModel';
-import AdminReadingIdentifyWorkflow from './AdminReadingIdentifyWorkflow';
-import { toAdminMetadataIdentifyResult } from './adminReadingMetadataAdapters';
-import type {
-    AdminReadingMetadataSearchRequest,
-    AdminReadingMetadataSearchResponse,
-    AdminReadingProviderStatus
-} from './adminReadingMetadataModel';
 import { ADMIN_METADATA_MANAGER_PATH } from './AdminMetadataManagerRoute';
 import { useAdminMetadataManager } from './useAdminMetadataManager';
 
@@ -146,25 +136,10 @@ export default function PtvAdminMetadataManagerPage({
     const [ remotePage, setRemotePage ] = useState<AdminMetadataRemoteImagePage | null>(null);
     const [ remoteError, setRemoteError ] = useState<string | null>(null);
     const [ remoteLoading, setRemoteLoading ] = useState(false);
-    const [ identifyProviders, setIdentifyProviders ] = useState<readonly AdminMetadataProviderField[]>([]);
-    const [ identifyProviderError, setIdentifyProviderError ] = useState<string | null>(null);
-    const [ identifyProvidersLoading, setIdentifyProvidersLoading ] = useState(false);
-    const [ identifyResults, setIdentifyResults ] = useState<readonly AdminMetadataIdentifyResult[]>([]);
-    const [ identifyError, setIdentifyError ] = useState<string | null>(null);
-    const [ identifyMessage, setIdentifyMessage ] = useState<string | null>(null);
-    const [ identifySearching, setIdentifySearching ] = useState(false);
-    const [ readingProviders, setReadingProviders ] = useState<readonly AdminReadingProviderStatus[]>([]);
-    const [ readingProviderError, setReadingProviderError ] = useState<string | null>(null);
-    const [ readingProvidersLoading, setReadingProvidersLoading ] = useState(false);
-    const [ readingResponse, setReadingResponse ] = useState<AdminReadingMetadataSearchResponse | null>(null);
     const [ refreshError, setRefreshError ] = useState<string | null>(null);
     const [ refreshMessage, setRefreshMessage ] = useState<string | null>(null);
     const remoteProviderFlight = useRef(false);
-    const identifyProviderFlight = useRef(false);
     const remoteSearchFlight = useRef(false);
-    const identifySearchFlight = useRef(false);
-    const readingProviderFlight = useRef(false);
-    const readingSearchGenerationRef = useRef(0);
     const itemGenerationRef = useRef(0);
     const selectedParent = folderStack.at(-1);
     const state = useAdminMetadataManager({
@@ -186,7 +161,6 @@ export default function PtvAdminMetadataManagerPage({
     const roots = useMemo(() => state.roots || [], [ state.roots ]);
     const confirmedLibrary = initialLibrary(libraryId, roots);
     const bundle = state.itemBundle;
-    const identifyType = getAdminMetadataIdentifyType(bundle?.item.type);
     const mutationError = state.mutationError ? safeMessage(state.mutationError, 'The metadata action could not be completed.') : null;
 
     useAdminUnsavedChanges(formState.dirty, 'Leave without saving your metadata changes?');
@@ -199,10 +173,6 @@ export default function PtvAdminMetadataManagerPage({
         itemGenerationRef.current += 1;
         remoteProviderFlight.current = false;
         remoteSearchFlight.current = false;
-        identifyProviderFlight.current = false;
-        identifySearchFlight.current = false;
-        readingProviderFlight.current = false;
-        readingSearchGenerationRef.current += 1;
         setActiveTab(managerTabForIdentifyHandoff(itemId, identifyPrefill));
         setFeedback('');
         setArtworkMessage(null);
@@ -212,17 +182,6 @@ export default function PtvAdminMetadataManagerPage({
         setRemotePage(null);
         setRemoteError(null);
         setRemoteLoading(false);
-        setIdentifyProviders([]);
-        setIdentifyProviderError(null);
-        setIdentifyProvidersLoading(false);
-        setIdentifyResults([]);
-        setIdentifyError(null);
-        setIdentifyMessage(null);
-        setIdentifySearching(false);
-        setReadingProviders([]);
-        setReadingProviderError(null);
-        setReadingProvidersLoading(false);
-        setReadingResponse(null);
         setRefreshError(null);
         setRefreshMessage(null);
     }, [ identifyPrefill, itemId ]);
@@ -325,104 +284,6 @@ export default function PtvAdminMetadataManagerPage({
             }
         }
     }, [ state ]);
-    const loadIdentifyProviders = useCallback(async () => {
-        if (identifyProviderFlight.current || !identifyType) return;
-        const generation = itemGenerationRef.current;
-        identifyProviderFlight.current = true;
-        setIdentifyProvidersLoading(true);
-        setIdentifyProviderError(null);
-        try {
-            const providers = await state.fetchIdentifyProviders();
-            if (generation === itemGenerationRef.current) setIdentifyProviders(providers);
-        } catch (error) {
-            if (generation === itemGenerationRef.current) {
-                setIdentifyProviderError(safeMessage(error, 'Identify providers are unavailable.'));
-            }
-        } finally {
-            if (generation === itemGenerationRef.current) {
-                identifyProviderFlight.current = false;
-                setIdentifyProvidersLoading(false);
-            }
-        }
-    }, [ identifyType, state ]);
-    const searchIdentify = useCallback(async (query: AdminMetadataIdentifyQuery) => {
-        if (identifySearchFlight.current || !identifyType) return;
-        const generation = itemGenerationRef.current;
-        identifySearchFlight.current = true;
-        setIdentifySearching(true);
-        setIdentifyError(null);
-        setIdentifyMessage(null);
-        try {
-            const results = await state.searchIdentify({ itemType: identifyType, query });
-            if (generation === itemGenerationRef.current) {
-                setIdentifyResults(results);
-                if (!results.length) setIdentifyMessage('No matching provider results were found.');
-            }
-        } catch (error) {
-            if (generation === itemGenerationRef.current) {
-                setIdentifyError(safeMessage(error, 'Identify results could not be loaded.'));
-            }
-        } finally {
-            if (generation === itemGenerationRef.current) {
-                identifySearchFlight.current = false;
-                setIdentifySearching(false);
-            }
-        }
-    }, [ identifyType, state ]);
-    const loadReadingProviders = useCallback(async () => {
-        if (readingProviderFlight.current) return;
-        const generation = itemGenerationRef.current;
-        readingProviderFlight.current = true;
-        setReadingProvidersLoading(true);
-        setReadingProviderError(null);
-        try {
-            const response = await state.fetchReadingProviders();
-            if (generation === itemGenerationRef.current) setReadingProviders(response.providers);
-        } catch (error) {
-            if (generation === itemGenerationRef.current) {
-                setReadingProviderError(safeMessage(error, 'Reading metadata providers are unavailable.'));
-            }
-        } finally {
-            if (generation === itemGenerationRef.current) {
-                readingProviderFlight.current = false;
-                setReadingProvidersLoading(false);
-            }
-        }
-    }, [ state ]);
-    const searchReadingIdentify = useCallback(async (request: AdminReadingMetadataSearchRequest) => {
-        const itemGeneration = itemGenerationRef.current;
-        const searchGeneration = readingSearchGenerationRef.current + 1;
-        readingSearchGenerationRef.current = searchGeneration;
-        setIdentifySearching(true);
-        setIdentifyError(null);
-        setIdentifyMessage(null);
-        setReadingResponse(null);
-        try {
-            const response = await state.searchReadingIdentify(request);
-            if (
-                itemGeneration === itemGenerationRef.current
-                && searchGeneration === readingSearchGenerationRef.current
-            ) {
-                setReadingResponse(response);
-                if (!response.candidates.length) setIdentifyMessage('No matching provider results were found.');
-            }
-        } catch (error) {
-            if (
-                itemGeneration === itemGenerationRef.current
-                && searchGeneration === readingSearchGenerationRef.current
-            ) {
-                setIdentifyError(safeMessage(error, 'Reading identification results could not be loaded.'));
-            }
-        } finally {
-            if (
-                itemGeneration === itemGenerationRef.current
-                && searchGeneration === readingSearchGenerationRef.current
-            ) {
-                setIdentifySearching(false);
-            }
-        }
-    }, [ state ]);
-
     const artworkProps: AdminMetadataArtworkWorkflowProps = {
         busy: Boolean(state.activeMutation?.includes('artwork')),
         error: state.artworkError ? safeMessage(state.artworkError, 'Artwork could not be loaded.') : mutationError,
@@ -461,33 +322,6 @@ export default function PtvAdminMetadataManagerPage({
         remoteProviders,
         remoteProvidersLoading,
         uploadImageTypes: UPLOAD_IMAGE_TYPES
-    };
-    const identifyProps: AdminMetadataIdentifyWorkflowProps = {
-        applying: state.activeMutation === 'apply-identify',
-        error: identifyError || (state.activeMutation === 'apply-identify' ? mutationError : null),
-        initialName: identifyPrefill?.name || bundle?.form.name || '',
-        initialProviderIds: identifyPrefill?.providerIds || bundle?.form.providerIds || {},
-        initialYear: identifyPrefill ? identifyPrefill.year : bundle?.form.productionYear ?? null,
-        message: identifyMessage,
-        onApply: async result => {
-            if (formState.dirty) {
-                const message = 'Save or reset your metadata edits before applying an Identify match.';
-                setIdentifyError(message);
-                throw new AdminMetadataManagerServiceError('invalid-input', message);
-            }
-            const saved = await state.applyIdentifyResult(result);
-            formState.adopt(saved.form);
-            setIdentifyMessage('Identify result applied. Jellyfin may continue processing the item.');
-        },
-        onLoadProviders: () => void loadIdentifyProviders(),
-        onRetryProviders: () => void loadIdentifyProviders(),
-        onSearch: query => void searchIdentify(query),
-        providerError: identifyProviderError,
-        providerFields: identifyProviders,
-        providersLoading: identifyProvidersLoading,
-        results: identifyResults,
-        searching: identifySearching,
-        supported: Boolean(identifyType)
     };
     const refreshProps: AdminMetadataRefreshWorkflowProps = {
         busy: state.activeMutation === 'refresh',
@@ -636,51 +470,20 @@ export default function PtvAdminMetadataManagerPage({
                                     saving={state.activeMutation === 'save'}
                                 />
                             )}
-                            {activeTab === 'identify' && bundle.item.type === 'Book' && (
-                                <AdminReadingIdentifyWorkflow
-                                    applying={state.activeMutation === 'apply-identify'}
-                                    error={identifyError || (state.activeMutation === 'apply-identify' ? mutationError : null)}
-                                    initialIssueNumber={identifyPrefill?.issueNumber}
-                                    initialMediaClass={identifyPrefill?.mediaClass}
-                                    initialName={identifyPrefill?.name || bundle.form.name || ''}
-                                    initialProvider={identifyPrefill?.provider}
-                                    initialProviderIds={identifyPrefill?.providerIds || bundle.form.providerIds || {}}
-                                    initialSeriesStartYear={identifyPrefill?.seriesStartYear}
-                                    initialSeriesTitle={identifyPrefill?.seriesTitle}
-                                    initialYear={identifyPrefill ? identifyPrefill.seriesStartYear ?? identifyPrefill.year : bundle.form.productionYear ?? null}
-                                    itemId={bundle.item.id}
-                                    itemName={bundle.form.name}
-                                    message={identifyMessage}
-                                    onApply={async candidate => {
-                                        if (formState.dirty) {
-                                            const message = 'Save or reset your metadata edits before applying an Identify match.';
-                                            setIdentifyError(message);
-                                            throw new AdminMetadataManagerServiceError('invalid-input', message);
-                                        }
-                                        const result = toAdminMetadataIdentifyResult(
-                                            candidate,
-                                            readingResponse?.candidates.indexOf(candidate) ?? 0,
-                                            readingResponse?.query
-                                        );
-                                        const saved = await state.applyIdentifyResult(result);
-                                        formState.adopt(saved.form);
-                                        setIdentifyMessage('Reading metadata applied. Locked fields and artwork were preserved.');
-                                    }}
-                                    onLoadProviders={() => void loadReadingProviders()}
-                                    onRetryProviders={() => void loadReadingProviders()}
-                                    onSearch={request => void searchReadingIdentify(request)}
-                                    providerError={readingProviderError}
-                                    providers={readingProviders}
-                                    providersLoading={readingProvidersLoading}
-                                    response={readingResponse}
-                                    searching={identifySearching}
+                            {activeTab === 'identify' && (
+                                <AdminMetadataIdentifyPanel
+                                    applyBlocker={() => formState.dirty ?
+                                        'Save or reset your metadata edits before applying an Identify match.' : null}
+                                    bundle={bundle}
+                                    identifyPrefill={identifyPrefill}
+                                    onApplied={saved => formState.adopt(saved.form)}
+                                    operations={state}
                                 />
                             )}
-                            {activeTab !== 'metadata' && !(activeTab === 'identify' && bundle.item.type === 'Book') && (
+                            {(activeTab === 'artwork' || activeTab === 'refresh') && (
                                 <AdminMetadataManagerWorkflows
                                     activeTab={activeTab}
                                     artwork={artworkProps}
-                                    identify={identifyProps}
                                     itemId={bundle.item.id}
                                     itemName={bundle.form.name}
                                     itemType={bundle.item.type}

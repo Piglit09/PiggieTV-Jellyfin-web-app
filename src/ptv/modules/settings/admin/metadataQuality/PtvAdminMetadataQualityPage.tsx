@@ -27,6 +27,7 @@ const AdminMetadataQualityResolutionDialog = lazy(async () => ({
 const AdminMetadataQualitySettingsDialog = lazy(async () => ({
     default: (await loadAdminMetadataQualityDialogs()).AdminMetadataQualitySettingsDialog
 }));
+const AdminMetadataQualityIdentify = lazy(() => import('./AdminMetadataQualityIdentify'));
 
 function MetadataQualityDialogFallback() {
     return <p aria-live='polite' className='ptv-metadata-quality-feedback' role='status'>Loading controls…</p>;
@@ -114,6 +115,14 @@ export default function PtvAdminMetadataQualityPage({ itemId }: Readonly<{ itemI
                     busy={actionBusy}
                     detail={state.detail}
                     error={Boolean(state.detailError)}
+                    identify={state.detail ? (
+                        <Suspense fallback={<p className='ptv-metadata-quality-identify-state' role='status'>Loading Identify tools...</p>}>
+                            <AdminMetadataQualityIdentify
+                                detail={state.detail}
+                                onApplied={() => void state.refetchDetail()}
+                            />
+                        </Suspense>
+                    ) : undefined}
                     loading={state.detailLoading}
                     onDismiss={() => setResolutionAction('dismiss')}
                     onKeepCurrent={() => setResolutionAction('keep_current')}
