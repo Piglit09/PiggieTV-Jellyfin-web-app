@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const connectionMocks = vi.hoisted(() => ({
     client: null as null | {
         accessToken: () => string;
+        ajax?: ReturnType<typeof vi.fn>;
         getCurrentUserId: () => string;
         getJSON: ReturnType<typeof vi.fn>;
         getUrl: (path: string) => string;
@@ -86,6 +87,43 @@ describe('plugin API authentication startup', () => {
             expect.objectContaining({ endpoint: 'featuredContent', ok: true, status: 200, url: 'endpoint:featuredContent' })
         ]);
         expect(diagnostics.attemptedResponses.slice(-3).every(entry => entry.durationMs >= 0)).toBe(true);
+    });
+
+    it('posts public account and signup actions without waiting for Jellyfin authentication', async () => {
+        const ajax = vi.fn(async (request: { url: string }) => ({
+            ok: true,
+            url: request.url
+        }));
+        const getJSON = vi.fn();
+
+        connectionMocks.client = {
+            accessToken: () => '',
+            ajax,
+            getCurrentUserId: () => '',
+            getJSON,
+            getUrl: path => `http://localhost:8096/${path}`
+        };
+
+        const authenticationWaitCountBefore = getPtvPluginApiDiagnostics().authenticationWaitCount;
+        const pluginApi = getCurrentPtvPluginApiClient(connectionMocks.client)!;
+
+        await expect(Promise.all([
+            pluginApi.verifyAccountEmail({ request: 'account-verification' }),
+            pluginApi.createSignupUser({ email: 'new-user@example.test' }),
+            pluginApi.verifySignupEmail({ request: 'signup-verification' }),
+            pluginApi.requestSignupPasswordReset({ email: 'new-user@example.test' }),
+            pluginApi.confirmSignupPasswordReset({ request: 'password-reset-confirmation' })
+        ])).resolves.toHaveLength(5);
+
+        expect(ajax.mock.calls.map(([request]) => request.url)).toEqual([
+            'http://localhost:8096/Ptv/v1/account/email/verify',
+            'http://localhost:8096/Ptv/v1/signup/create-user',
+            'http://localhost:8096/Ptv/v1/signup/verify-email',
+            'http://localhost:8096/Ptv/v1/signup/password-reset/request',
+            'http://localhost:8096/Ptv/v1/signup/password-reset/confirm'
+        ]);
+        expect(getJSON).not.toHaveBeenCalled();
+        expect(getPtvPluginApiDiagnostics().authenticationWaitCount).toBe(authenticationWaitCountBefore);
     });
 
     it('keeps general and signup settings response caches isolated', async () => {

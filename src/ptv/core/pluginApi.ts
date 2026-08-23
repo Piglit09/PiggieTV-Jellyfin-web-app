@@ -95,6 +95,7 @@ export type PtvPluginRequestOptions = {
 
 export type PtvPluginPayloadRequestOptions = PtvPluginRequestOptions & {
     body?: unknown;
+    requiresAuthentication?: boolean;
 };
 
 export type PtvPluginApiDiagnostics = {
@@ -1242,7 +1243,7 @@ function requestPluginJson<T>(
 
     const currentClient = getCurrentApiClient() || apiClient;
 
-    if (!isPluginAuthenticationReady(currentClient)) {
+    if (options.requiresAuthentication !== false && !isPluginAuthenticationReady(currentClient)) {
         return waitForPluginAuthentication(currentClient, options.signal)
             .then(authenticatedClient => requestPluginJson<T>(authenticatedClient, path, options));
     }
@@ -1684,7 +1685,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
             return requestPluginJson<TResponse>(apiClient, PTV_PLUGIN_API.endpoints.accountEmailVerify, {
                 ...options,
                 body,
-                method: 'POST'
+                method: 'POST',
+                requiresAuthentication: false
             });
         },
         getAccountAdminHealth<T = unknown>(options?: PtvPluginRequestOptions) {
@@ -2195,7 +2197,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body,
-                    method: 'POST'
+                    method: 'POST',
+                    requiresAuthentication: false
                 }
             );
         },
@@ -2206,7 +2209,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body,
-                    method: 'POST'
+                    method: 'POST',
+                    requiresAuthentication: false
                 }
             );
         },
@@ -2217,7 +2221,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body,
-                    method: 'POST'
+                    method: 'POST',
+                    requiresAuthentication: false
                 }
             );
         },
@@ -2228,7 +2233,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body,
-                    method: 'POST'
+                    method: 'POST',
+                    requiresAuthentication: false
                 }
             );
         },
