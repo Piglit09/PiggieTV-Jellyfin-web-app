@@ -316,7 +316,7 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
         ),
         queryKey: itemKey,
         refetchOnWindowFocus: false,
-        retry: 1,
+        retry: false,
         staleTime: 10_000
     });
     const artworkQuery = useQuery({

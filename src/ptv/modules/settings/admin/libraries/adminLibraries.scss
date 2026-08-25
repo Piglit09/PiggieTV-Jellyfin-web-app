@@ -726,7 +726,12 @@
     border-radius: 12px;
 }
 
-.ptv-admin-library-dialog .ptv-admin-library-directory-list button {
+.ptv-admin-library-folder-browser-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.ptv-admin-library-dialog .ptv-admin-library-directory-list .ptv-admin-library-directory-entry {
     display: grid;
     grid-template-columns: 20px minmax(0, 1fr) 16px;
     min-height: 46px;
@@ -734,6 +739,28 @@
     border-bottom: 1px solid var(--ptv-border-divider);
     border-radius: 0;
     text-align: left;
+}
+
+.ptv-admin-library-dialog .ptv-admin-library-directory-list .ptv-admin-library-directory-suggestion,
+.ptv-admin-library-dialog .ptv-admin-library-directory-list .ptv-admin-library-directory-action {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    justify-content: stretch;
+    min-height: 46px;
+    border: 0;
+    border-bottom: 1px solid var(--ptv-border-divider);
+    border-radius: 0;
+    text-align: left;
+}
+
+.ptv-admin-library-dialog .ptv-admin-library-directory-suggestion[aria-pressed='true'] {
+    color: var(--ptv-state-selected-text, var(--ptv-color-text-strong));
+    background: var(--ptv-state-selected);
+}
+
+.ptv-admin-library-directory-list .ptv-admin-library-directory-heading {
+    color: var(--ptv-color-text-soft);
+    font-weight: 800;
 }
 .ptv-admin-library-directory-list button:last-of-type { border-bottom: 0; }
 

@@ -4,7 +4,7 @@ import DialogContent from '@mui/material/DialogContent/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle/DialogTitle';
 import type { Api } from '@jellyfin/sdk';
 import type { FileSystemEntryInfo } from '@jellyfin/sdk/lib/generated-client/models/file-system-entry-info';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ApiClient } from 'jellyfin-apiclient';
 
@@ -29,6 +29,8 @@ const COLLECTION_TYPES = [
     { label: 'Mixed Media', value: 'mixed' }
 ] as const;
 
+const NO_SUGGESTED_PATHS: readonly string[] = [];
+
 function safeLibraryMutationMessage(error: unknown, fallback: string) {
     if (error instanceof AdminLibrariesServiceError) return error.message;
     return fallback;
@@ -38,12 +40,14 @@ export function AdminLibraryFolderPicker({
     api,
     onCancel,
     onSelect,
-    open
+    open,
+    suggestedPaths = NO_SUGGESTED_PATHS
 }: Readonly<{
     api?: Api;
     onCancel: () => void;
     onSelect: (path: string) => void;
     open: boolean;
+    suggestedPaths?: readonly string[];
 }>) {
     const [ currentPath, setCurrentPath ] = useState<string | undefined>(undefined);
     const [ selectedPath, setSelectedPath ] = useState('');
@@ -52,21 +56,37 @@ export function AdminLibraryFolderPicker({
     const [ loading, setLoading ] = useState(false);
     const [ validating, setValidating ] = useState(false);
     const [ message, setMessage ] = useState('');
+    const [ browseFailed, setBrowseFailed ] = useState(false);
+    const browseAbortRef = useRef<AbortController | null>(null);
+    const lastBrowsePathRef = useRef<string | undefined>(undefined);
     const requestRef = useRef(0);
     const validationRef = useRef(0);
+    const configuredPaths = useMemo(() => Array.from(new Set(
+        suggestedPaths.map(path => path.trim()).filter(Boolean)
+    )), [suggestedPaths]);
 
     useEffect(() => () => {
+        browseAbortRef.current?.abort();
         requestRef.current += 1;
         validationRef.current += 1;
     }, []);
 
     const browse = useCallback(async (path?: string) => {
-        if (!api) return;
+        browseAbortRef.current?.abort();
+        lastBrowsePathRef.current = path;
         const request = ++requestRef.current;
+        if (!api) {
+            setLoading(false);
+            return;
+        }
+        const AbortControllerConstructor = globalThis['AbortController'];
+        const controller = new AbortControllerConstructor();
+        browseAbortRef.current = controller;
         setLoading(true);
         setMessage('');
+        setBrowseFailed(false);
         try {
-            const result = await loadAdminLibraryDirectory(api, path);
+            const result = await loadAdminLibraryDirectory(api, path, controller.signal);
             if (request !== requestRef.current) return;
             setCurrentPath(result.path);
             setSelectedPath(result.path);
@@ -75,24 +95,43 @@ export function AdminLibraryFolderPicker({
         } catch (error) {
             if (request !== requestRef.current) return;
             setMessage(safeLibraryMutationMessage(error, 'This server folder could not be opened.'));
+            setBrowseFailed(true);
         } finally {
+            if (browseAbortRef.current === controller) browseAbortRef.current = null;
             if (request === requestRef.current) setLoading(false);
         }
     }, [api]);
 
+    const chooseConfiguredPath = useCallback((path: string) => {
+        browseAbortRef.current?.abort();
+        browseAbortRef.current = null;
+        requestRef.current += 1;
+        setCurrentPath(undefined);
+        setSelectedPath(path);
+        setEntries([]);
+        setParentPath('');
+        setLoading(false);
+        setMessage('');
+        setBrowseFailed(false);
+    }, []);
+
     useEffect(() => {
         if (open) {
-            void browse();
+            if (configuredPaths.length === 0) void browse();
         } else {
+            browseAbortRef.current?.abort();
+            browseAbortRef.current = null;
             requestRef.current += 1;
             validationRef.current += 1;
             setCurrentPath(undefined);
             setSelectedPath('');
             setEntries([]);
             setParentPath('');
+            setLoading(false);
             setMessage('');
+            setBrowseFailed(false);
         }
-    }, [browse, open]);
+    }, [browse, configuredPaths, open]);
 
     const select = useCallback(async () => {
         if (!api || validating || !selectedPath.trim()) return;
@@ -130,19 +169,31 @@ export function AdminLibraryFolderPicker({
                     <label className='ptv-admin-library-field'>
                         <span>Folder path</span>
                         <input onChange={event => setSelectedPath(event.currentTarget.value)} value={selectedPath} />
-                        <small>The path is resolved and validated by your PiggieTV server.</small>
+                        <small>Choose a configured folder or enter a path. PiggieTV validates it before saving.</small>
                     </label>
+                    <div className='ptv-admin-library-folder-browser-actions'>
+                        <button
+                            disabled={loading || !selectedPath.trim()}
+                            onClick={() => void browse(selectedPath.trim())}
+                            type='button'
+                        >
+                            <PtvIcon name='folders' size='16px' />
+                            Browse entered path
+                        </button>
+                    </div>
                     <div aria-busy={loading} className='ptv-admin-library-directory-list'>
-                        {parentPath && (
-                            <button onClick={() => void browse(parentPath)} type='button'>
+                        {currentPath && (
+                            <button className='ptv-admin-library-directory-entry' onClick={() => void browse(parentPath || undefined)} type='button'>
                                 <PtvIcon name='back' size='16px' />
-                                Parent folder
+                                <span>{parentPath ? 'Parent folder' : 'Server drives'}</span>
+                                <PtvIcon name='right' size='14px' />
                             </button>
                         )}
                         {entries.map(entry => {
                             const path = entry.Path || '';
                             return (
                                 <button
+                                    className='ptv-admin-library-directory-entry'
                                     disabled={!path}
                                     key={`${path}:${entry.Name || 'directory'}`}
                                     onClick={() => void browse(path)}
@@ -155,10 +206,49 @@ export function AdminLibraryFolderPicker({
                                 </button>
                             );
                         })}
-                        {!loading && entries.length === 0 && (
+                        {!currentPath && entries.length === 0 && configuredPaths.length > 0 && (
+                            <>
+                                <p className='ptv-admin-library-directory-heading'>Configured library folders</p>
+                                {configuredPaths.map(path => (
+                                    <button
+                                        aria-label={`Choose configured folder ${path}`}
+                                        aria-pressed={selectedPath === path}
+                                        className='ptv-admin-library-directory-suggestion'
+                                        key={path}
+                                        onClick={() => chooseConfiguredPath(path)}
+                                        title={path}
+                                        type='button'
+                                    >
+                                        <PtvIcon name='folders' size='17px' />
+                                        <span>{path}</span>
+                                    </button>
+                                ))}
+                                {!loading && !browseFailed && (
+                                    <button
+                                        className='ptv-admin-library-directory-action'
+                                        onClick={() => void browse()}
+                                        type='button'
+                                    >
+                                        <PtvIcon name='refresh' size='16px' />
+                                        <span>Browse all server folders</span>
+                                    </button>
+                                )}
+                            </>
+                        )}
+                        {!loading && !browseFailed && entries.length === 0 && configuredPaths.length === 0 && (
                             <p>{currentPath ? 'No folders are available here.' : 'No server folders are available.'}</p>
                         )}
                         {loading && <p role='status'>Loading server folders…</p>}
+                        {!loading && browseFailed && (
+                            <button
+                                className='ptv-admin-library-directory-action'
+                                onClick={() => void browse(lastBrowsePathRef.current)}
+                                type='button'
+                            >
+                                <PtvIcon name='refresh' size='16px' />
+                                <span>Retry server folders</span>
+                            </button>
+                        )}
                     </div>
                     {message && <p aria-live='polite' className='ptv-admin-library-status-message is-error'>{message}</p>}
                 </div>
@@ -178,13 +268,15 @@ export function AddAdminLibraryDialog({
     apiClient,
     onClose,
     onCreated,
-    open
+    open,
+    suggestedPaths = NO_SUGGESTED_PATHS
 }: Readonly<{
     api?: Api;
     apiClient?: ApiClient;
     onClose: () => void;
     onCreated: (libraryId: string | null) => void;
     open: boolean;
+    suggestedPaths?: readonly string[];
 }>) {
     const [ name, setName ] = useState('');
     const [ collectionType, setCollectionType ] = useState('movies');
@@ -311,6 +403,7 @@ export function AddAdminLibraryDialog({
                 onCancel={() => setFolderPickerOpen(false)}
                 onSelect={addLocation}
                 open={folderPickerOpen}
+                suggestedPaths={suggestedPaths}
             />
         </>
     );

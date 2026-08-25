@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { HashRouter, MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -34,6 +34,11 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 /* eslint-enable @typescript-eslint/naming-convention */
 
 const NOW = Date.parse('2026-08-12T18:00:00.000Z');
+
+function LocationProbe() {
+    const location = useLocation();
+    return <output data-testid='dashboard-location'>{`${location.pathname}${location.search}`}</output>;
+}
 
 const directPlaySession: AdminPlaybackSession = {
     bitrateMbps: null,
@@ -177,6 +182,7 @@ describe('PiggieTV administration dashboard', () => {
     afterEach(async () => {
         await act(async () => root.unmount());
         container.remove();
+        window.history.replaceState(null, '', '/');
         vi.restoreAllMocks();
     });
 
@@ -201,6 +207,16 @@ describe('PiggieTV administration dashboard', () => {
             <MemoryRouter>
                 <PtvAdminDashboard />
             </MemoryRouter>
+        ));
+    }
+
+    async function renderHashDashboard() {
+        window.history.replaceState(null, '', '/web/#/settings/admin');
+        await act(async () => root.render(
+            <HashRouter>
+                <LocationProbe />
+                <PtvAdminDashboard />
+            </HashRouter>
         ));
     }
 
@@ -267,6 +283,23 @@ describe('PiggieTV administration dashboard', () => {
             { href: '/settings/admin/plugins', label: 'Plugins' },
             { href: '/settings/admin?section=server', label: 'Server' }
         ]);
+    });
+
+    it('keeps the plugin workspace action inside the client router', async () => {
+        useDashboard();
+        await renderHashDashboard();
+
+        const pluginWorkspace = Array.from(container.querySelectorAll<HTMLAnchorElement>('a'))
+            .find(link => link.textContent?.includes('Plugin workspace'));
+
+        expect(pluginWorkspace?.getAttribute('href')).toBe('#/settings/admin/piggietv');
+
+        await act(async () => pluginWorkspace?.click());
+
+        expect(container.querySelector('[data-testid="dashboard-location"]')?.textContent)
+            .toBe('/settings/admin/piggietv');
+        expect(window.location.pathname).toBe('/web/');
+        expect(window.location.hash).toBe('#/settings/admin/piggietv');
     });
 
     it('keeps server data visible when PTV status is unavailable and retries only the plugin', async () => {

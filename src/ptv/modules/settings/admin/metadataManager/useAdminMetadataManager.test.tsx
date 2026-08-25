@@ -292,7 +292,7 @@ describe('useAdminMetadataManager', () => {
         readingServiceMocks.loadProviders.mockResolvedValue({ providers: [] });
         readingServiceMocks.search.mockResolvedValue(readingResponse());
         queryClient = new QueryClient({
-            defaultOptions: { queries: { retry: false } }
+            defaultOptions: { queries: { retry: false, retryDelay: 0 } }
         });
         container = document.createElement('div');
         document.body.append(container);
@@ -434,6 +434,18 @@ describe('useAdminMetadataManager', () => {
         expect(serviceMocks.loadRoots).not.toHaveBeenCalled();
         expect(serviceMocks.loadCatalog).not.toHaveBeenCalled();
         expect(latest?.itemBundle?.item.id).toBe('item-a');
+    });
+
+    it('surfaces a selected-item failure without repeating the full request automatically', async () => {
+        const error = new Error('bounded item request failed');
+        serviceMocks.loadItem.mockRejectedValue(error);
+
+        await render({ itemId: 'item-a', workspaceEnabled: false });
+
+        await vi.waitFor(() => expect(latest?.itemError).toBe(error));
+        expect(serviceMocks.loadItem).toHaveBeenCalledOnce();
+        expect(latest?.itemBundle).toBeNull();
+        expect(latest?.itemLoading).toBe(false);
     });
 
     it('aborts a stale item selection and never exposes it over the new item', async () => {

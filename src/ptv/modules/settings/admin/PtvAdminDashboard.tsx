@@ -348,9 +348,9 @@ function SystemOverview({
                     action={sourceStates.ptv.error ? (
                         <RetryButton label='plugin' onRetry={onRetryPtv} />
                     ) : (
-                        <a className='ptv-admin-card-action' href={pluginDestination?.href || '#/settings/admin'}>
+                        <Link className='ptv-admin-card-action' to={pluginDestination?.href || '/settings/admin'}>
                             Plugin workspace <PtvIcon name='right' size='14px' />
-                        </a>
+                        </Link>
                     )}
                     icon='plugins'
                     severity={snapshot.ptv.severity}

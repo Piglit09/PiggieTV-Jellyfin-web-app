@@ -7,6 +7,7 @@ import type { ApiClient } from 'jellyfin-apiclient';
 
 import { getResolvedAdminServerId } from '../adminServerIdentity';
 import {
+    getAdminLibraryLocations,
     normalizeAdminLibraries,
     normalizeAdminLibraryDetail
 } from './adminLibrariesAdapters';
@@ -166,6 +167,10 @@ export function useAdminLibrary(
         staleTime: 5_000
     });
     const providerOptions = providerQuery.isError ? null : providerQuery.data;
+    const cachedLibraries = queryClient.getQueryData<readonly VirtualFolderInfo[]>(keys.list) || [];
+    const configuredLocations = useMemo(() => Array.from(new Set(
+        cachedLibraries.flatMap(getAdminLibraryLocations)
+    )), [cachedLibraries]);
     const detail = useMemo(() => detailQuery.data ? normalizeAdminLibraryDetail(
         detailQuery.data,
         providerOptions,
@@ -201,6 +206,7 @@ export function useAdminLibrary(
 
     return {
         adoptLibrary,
+        configuredLocations,
         detail,
         error: detailQuery.isError,
         invalidate,

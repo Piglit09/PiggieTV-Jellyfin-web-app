@@ -60,6 +60,8 @@ vi.mock('@jellyfin/sdk/lib/utils/api/scheduled-tasks-api', () => ({
 }));
 
 import {
+    ADMIN_LIBRARY_DIRECTORY_TIMEOUT_MS,
+    ADMIN_LIBRARY_PATH_VALIDATION_TIMEOUT_MS,
     AdminLibrariesServiceError,
     addAdminLibraryPath,
     createAdminLibrary,
@@ -126,7 +128,9 @@ describe('administrator libraries service reads', () => {
     });
 
     it('loads the authoritative list with the caller AbortSignal', async () => {
-        const signal = { aborted: false } as AbortSignal;
+        const AbortControllerConstructor = globalThis['AbortController'];
+        const controller = new AbortControllerConstructor();
+        const signal = controller.signal;
 
         await expect(loadAdminLibraries(api, signal)).resolves.toHaveLength(1);
         expect(sdkMocks.getVirtualFolders).toHaveBeenCalledWith({ signal });
@@ -178,27 +182,30 @@ describe('administrator libraries service reads', () => {
     });
 
     it('uses the server directory API and never asks for files', async () => {
-        const signal = { aborted: false } as AbortSignal;
+        const AbortControllerConstructor = globalThis['AbortController'];
+        const controller = new AbortControllerConstructor();
         sdkMocks.getDirectoryContents.mockResolvedValue({
             data: [{ IsDirectory: true, Name: 'Movies', Path: '/media/Movies' }]
         });
 
-        await expect(loadAdminLibraryDirectory(api, undefined, signal)).resolves.toEqual({
+        await expect(loadAdminLibraryDirectory(api, '/media', controller.signal)).resolves.toEqual({
             entries: [{ IsDirectory: true, Name: 'Movies', Path: '/media/Movies' }],
             parentPath: '/',
             path: '/media'
         });
-        expect(sdkMocks.getDefaultDirectoryBrowser).toHaveBeenCalledWith({ signal });
+        const requestSignal = sdkMocks.getDirectoryContents.mock.calls[0][1].signal as AbortSignal;
+        expect(requestSignal).toBeInstanceOf(AbortSignal);
+        expect(requestSignal).not.toBe(controller.signal);
+        expect(sdkMocks.getDefaultDirectoryBrowser).not.toHaveBeenCalled();
         expect(sdkMocks.getDirectoryContents).toHaveBeenCalledWith({
             includeDirectories: true,
             includeFiles: false,
             path: '/media'
-        }, { signal });
-        expect(sdkMocks.getParentPath).toHaveBeenCalledWith({ path: '/media' }, { signal });
+        }, { signal: requestSignal });
+        expect(sdkMocks.getParentPath).toHaveBeenCalledWith({ path: '/media' }, { signal: requestSignal });
     });
 
     it('loads drives at the server root and maps browse failures to a safe message', async () => {
-        sdkMocks.getDefaultDirectoryBrowser.mockResolvedValue({ data: { Path: '' } });
         sdkMocks.getDrives.mockResolvedValue({ data: [
             { Name: 'Data', Path: 'D:\\' },
             { Name: 'Duplicate Data', Path: 'D:\\' },
@@ -208,12 +215,47 @@ describe('administrator libraries service reads', () => {
             entries: [{ Name: 'Data', Path: 'D:\\' }],
             path: ''
         });
+        expect(sdkMocks.getDefaultDirectoryBrowser).not.toHaveBeenCalled();
 
         sdkMocks.getDirectoryContents.mockRejectedValue(new Error('sensitive backend detail'));
         await expect(loadAdminLibraryDirectory(api, '/denied')).rejects.toMatchObject({
             code: 'directory-unavailable',
             message: 'This server folder could not be opened.'
         });
+    });
+
+    it('strictly bounds a stalled root browse and aborts its transport', async () => {
+        vi.useFakeTimers();
+        try {
+            sdkMocks.getDrives.mockReturnValue(new Promise(() => undefined));
+            const directoryPromise = loadAdminLibraryDirectory(api);
+            const rejection = expect(directoryPromise).rejects.toMatchObject({
+                code: 'directory-unavailable',
+                message: 'Server folders took too long to load. Try again.'
+            });
+
+            await vi.advanceTimersByTimeAsync(ADMIN_LIBRARY_DIRECTORY_TIMEOUT_MS);
+            await rejection;
+
+            const requestSignal = sdkMocks.getDrives.mock.calls[0][0].signal as AbortSignal;
+            expect(requestSignal.aborted).toBe(true);
+            expect(sdkMocks.getDefaultDirectoryBrowser).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('settles immediately when a caller cancels an abort-ignoring browse transport', async () => {
+        const AbortControllerConstructor = globalThis['AbortController'];
+        const controller = new AbortControllerConstructor();
+        sdkMocks.getDrives.mockReturnValue(new Promise(() => undefined));
+        const directoryPromise = loadAdminLibraryDirectory(api, undefined, controller.signal);
+
+        controller.abort();
+
+        await expect(directoryPromise).rejects.toMatchObject({ name: 'AbortError' });
+        const requestSignal = sdkMocks.getDrives.mock.calls[0][0].signal as AbortSignal;
+        expect(requestSignal.aborted).toBe(true);
     });
 });
 
@@ -236,15 +278,38 @@ describe('administrator libraries service mutations', () => {
     });
 
     it('validates exact paths without trimming or requesting write access', async () => {
-        const signal = { aborted: false } as AbortSignal;
-        await expect(validateAdminLibraryPath(api, ' /mnt/media ', signal)).resolves.toBe(' /mnt/media ');
+        const AbortControllerConstructor = globalThis['AbortController'];
+        const controller = new AbortControllerConstructor();
+        await expect(validateAdminLibraryPath(api, ' /mnt/media ', controller.signal)).resolves.toBe(' /mnt/media ');
+        const requestSignal = sdkMocks.validatePath.mock.calls[0][1].signal as AbortSignal;
         expect(sdkMocks.validatePath).toHaveBeenCalledWith({
             validatePathDto: {
                 IsFile: false,
                 Path: ' /mnt/media ',
                 ValidateWritable: false
             }
-        }, { signal });
+        }, { signal: requestSignal });
+        expect(requestSignal).not.toBe(controller.signal);
+    });
+
+    it('strictly bounds a stalled path validation and aborts its transport', async () => {
+        vi.useFakeTimers();
+        try {
+            sdkMocks.validatePath.mockReturnValue(new Promise(() => undefined));
+            const validationPromise = validateAdminLibraryPath(api, '/mnt/stalled');
+            const rejection = expect(validationPromise).rejects.toMatchObject({
+                code: 'invalid-library-path',
+                message: 'Server path validation took too long. Try again.'
+            });
+
+            await vi.advanceTimersByTimeAsync(ADMIN_LIBRARY_PATH_VALIDATION_TIMEOUT_MS);
+            await rejection;
+
+            const requestSignal = sdkMocks.validatePath.mock.calls[0][1].signal as AbortSignal;
+            expect(requestSignal.aborted).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('fails creation closed unless option discovery and at least one valid path exist', async () => {
@@ -267,7 +332,9 @@ describe('administrator libraries service mutations', () => {
         sdkMocks.getVirtualFolders.mockResolvedValue({
             data: [library({ ItemId: 'new-id', Locations: ['/media/a', '/media/b'], Name: 'New Movies' })]
         });
-        const signal = { aborted: false } as AbortSignal;
+        const AbortControllerConstructor = globalThis['AbortController'];
+        const controller = new AbortControllerConstructor();
+        const signal = controller.signal;
 
         await expect(createAdminLibrary(api, {
             collectionType: ' MOVIES ',

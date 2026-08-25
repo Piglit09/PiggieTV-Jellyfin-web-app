@@ -124,7 +124,7 @@ vi.mock('react-router-dom', async importOriginal => {
 });
 
 import { readAdminLibraryId } from './AdminLibrariesRoute';
-import { AddAdminLibraryDialog } from './AdminLibraryDialogs';
+import { AddAdminLibraryDialog, AdminLibraryFolderPicker } from './AdminLibraryDialogs';
 import PtvAdminLibrariesPage from './PtvAdminLibrariesPage';
 import PtvAdminLibraryDetail from './PtvAdminLibraryDetail';
 
@@ -227,6 +227,7 @@ function librariesState(overrides: Record<string, unknown> = {}) {
 function libraryState(overrides: Record<string, unknown> = {}) {
     return {
         adoptLibrary: vi.fn(async () => undefined),
+        configuredLocations: [ '/media/movies' ],
         detail: detail(),
         error: false,
         invalidate: vi.fn(async () => undefined),
@@ -447,6 +448,131 @@ describe('PiggieTV administrator libraries UI', () => {
         await flushAsync();
         expect(uiMocks.librariesState.refresh).toHaveBeenCalledOnce();
         expect(container.textContent).toContain('Library scan requested.');
+    });
+
+    it('aborts a pending folder browse when the picker closes', async () => {
+        const pending = deferred<{
+            entries: [];
+            parentPath: string;
+            path: string;
+        }>();
+        uiMocks.loadAdminLibraryDirectory.mockReturnValue(pending.promise);
+
+        await render(
+            <AdminLibraryFolderPicker api={api} onCancel={vi.fn()} onSelect={vi.fn()} open />
+        );
+
+        expect(container.textContent).toContain('Loading server folders…');
+        const signal = uiMocks.loadAdminLibraryDirectory.mock.calls[0][2] as AbortSignal;
+        expect(signal.aborted).toBe(false);
+
+        await render(
+            <AdminLibraryFolderPicker api={api} onCancel={vi.fn()} onSelect={vi.fn()} open={false} />
+        );
+
+        expect(signal.aborted).toBe(true);
+        expect(container.textContent).not.toContain('Loading server folders…');
+    });
+
+    it('keeps Retry after validation fails and navigates between server drives and a drive root', async () => {
+        uiMocks.loadAdminLibraryDirectory
+            .mockRejectedValueOnce(new uiMocks.AdminLibrariesServiceError(
+                'directory-unavailable',
+                'Server folders took too long to load. Try again.'
+            ))
+            .mockResolvedValueOnce({
+                entries: [{ IsDirectory: true, Name: 'Data', Path: 'D:\\' }],
+                parentPath: '',
+                path: ''
+            })
+            .mockResolvedValueOnce({
+                entries: [],
+                parentPath: '',
+                path: 'D:\\'
+            })
+            .mockResolvedValueOnce({
+                entries: [{ IsDirectory: true, Name: 'Data', Path: 'D:\\' }],
+                parentPath: '',
+                path: ''
+            });
+        uiMocks.validateAdminLibraryPath.mockRejectedValueOnce(new uiMocks.AdminLibrariesServiceError(
+            'invalid-path',
+            'That server path could not be validated.'
+        ));
+
+        await render(
+            <AdminLibraryFolderPicker api={api} onCancel={vi.fn()} onSelect={vi.fn()} open />
+        );
+        await flushAsync();
+
+        expect(container.textContent).toContain('Server folders took too long to load. Try again.');
+        expect(container.textContent).not.toContain('No server folders are available.');
+        const retry = buttonWithText(container, 'Retry server folders');
+        expect(retry).toBeDefined();
+
+        const path = container.querySelector<HTMLInputElement>('input');
+        await act(async () => changeInput(path!, 'D:\\Missing'));
+        await act(async () => buttonWithText(container, 'Use this folder')?.click());
+        await flushAsync();
+        expect(container.textContent).toContain('That server path could not be validated.');
+        expect(buttonWithText(container, 'Retry server folders')).toBeDefined();
+
+        await act(async () => retry?.click());
+        await flushAsync();
+
+        expect(uiMocks.loadAdminLibraryDirectory).toHaveBeenCalledTimes(2);
+        expect(container.textContent).toContain('Data');
+        expect(container.textContent).not.toContain('Retry server folders');
+
+        await act(async () => buttonWithText(container, 'Data')?.click());
+        await flushAsync();
+        expect(container.textContent).toContain('Server drives');
+
+        await act(async () => buttonWithText(container, 'Server drives')?.click());
+        await flushAsync();
+        expect(uiMocks.loadAdminLibraryDirectory).toHaveBeenLastCalledWith(api, undefined, expect.any(AbortSignal));
+        expect(container.textContent).toContain('Data');
+    });
+
+    it('uses configured folders immediately when drive browsing is unavailable', async () => {
+        uiMocks.loadAdminLibraryDirectory.mockRejectedValue(new uiMocks.AdminLibrariesServiceError(
+            'directory-unavailable',
+            'Server folders took too long to load. Try again.'
+        ));
+        const onSelect = vi.fn();
+
+        await render(
+            <AdminLibraryFolderPicker
+                api={api}
+                onCancel={vi.fn()}
+                onSelect={onSelect}
+                open
+                suggestedPaths={[ ' /media/movies ', '/media/movies', '/media/shows' ]}
+            />
+        );
+
+        expect(uiMocks.loadAdminLibraryDirectory).not.toHaveBeenCalled();
+        expect(container.textContent).toContain('Configured library folders');
+        expect(container.querySelectorAll('.ptv-admin-library-directory-suggestion')).toHaveLength(2);
+
+        await act(async () => buttonWithText(container, 'Browse all server folders')?.click());
+        await flushAsync();
+
+        expect(container.textContent).toContain('Server folders took too long to load. Try again.');
+        expect(buttonWithText(container, 'Retry server folders')?.classList.contains(
+            'ptv-admin-library-directory-action'
+        )).toBe(true);
+        expect(buttonWithText(container, '/media/movies')).toBeDefined();
+
+        await act(async () => buttonWithText(container, '/media/movies')?.click());
+        const path = container.querySelector<HTMLInputElement>('input');
+        expect(path?.value).toBe('/media/movies');
+        expect(buttonWithText(container, 'Use this folder')?.disabled).toBe(false);
+
+        await act(async () => buttonWithText(container, 'Use this folder')?.click());
+        await flushAsync();
+        expect(uiMocks.validateAdminLibraryPath).toHaveBeenCalledWith(api, '/media/movies');
+        expect(onSelect).toHaveBeenCalledWith('/media/movies');
     });
 
     it('validates Add Library, deduplicates exact paths, and prevents duplicate creates', async () => {

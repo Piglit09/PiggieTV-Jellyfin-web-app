@@ -185,6 +185,7 @@ describe('administrator libraries hooks', () => {
             id: 'library-a',
             name: 'Movies'
         });
+        expect(stateRef.current?.detail.configuredLocations).toEqual([ '/media/movies' ]);
         expect(stateRef.current?.creation.data).toMatchObject({
             MetadataSavers: [{ Name: 'Nfo' }]
         });

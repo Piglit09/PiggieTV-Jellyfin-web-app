@@ -16,6 +16,8 @@ import { getUserLibraryApi } from '@jellyfin/sdk/lib/utils/api/user-library-api'
 
 import type { ApiClient } from 'jellyfin-apiclient';
 
+import { createPtvCoreRequestCancellation } from '../../../../core/api/apiContracts';
+import { isPtvTimeoutError, withPtvTimeout } from '../../../../utils/withPtvTimeout';
 import {
     areAdminMetadataFormsEqual,
     createAdminMetadataItemBundle,
@@ -47,6 +49,8 @@ import {
     type AdminMetadataRemoteImagePage,
     type AdminMetadataRemoteImageProvider
 } from './adminMetadataManagerModel';
+
+export const ADMIN_METADATA_ITEM_BUNDLE_TIMEOUT_MS = 15_000;
 
 type ItemIdentityInput = Readonly<{
     itemId: string;
@@ -254,15 +258,48 @@ export async function loadAdminMetadataItemBundle(
 ): Promise<AdminMetadataItemBundle> {
     const itemId = requireIdentity(input.itemId);
     const userId = input.userId ? requireIdentity(input.userId, 'user') : undefined;
+    const request = createPtvCoreRequestCancellation({
+        signal
+    });
     try {
-        const [ item, editorInfo, ancestorsResponse ] = await Promise.all([
-            loadExactAdminMetadataItem(api, { itemId, userId }, signal),
-            loadExactAdminMetadataEditor(api, itemId, signal),
-            getLibraryApi(api).getAncestors({ itemId, userId }, { signal })
-        ]);
+        const [ item, editorInfo, ancestorsResponse ] = await withPtvTimeout(
+            Promise.all([
+                loadExactAdminMetadataItem(api, { itemId, userId }, request.signal),
+                loadExactAdminMetadataEditor(api, itemId, request.signal),
+                getLibraryApi(api).getAncestors({ itemId, userId }, { signal: request.signal })
+            ]),
+            ADMIN_METADATA_ITEM_BUNDLE_TIMEOUT_MS,
+            'Metadata item loading timed out.',
+            request.abort,
+            signal
+        );
         return createAdminMetadataItemBundle(item, editorInfo, ancestorsResponse.data);
     } catch (error) {
+        request.abort();
+        if (signal?.aborted) throw error;
+        if (isPtvTimeoutError(error)) {
+            throw new AdminMetadataManagerServiceError(
+                'item-unavailable',
+                'This item took too long to load. Try again.'
+            );
+        }
         return throwSanitized(error, 'item-unavailable', 'This item could not be loaded.');
+    } finally {
+        request.dispose();
+    }
+}
+
+async function reloadAdminMetadataItemAfterMutation(
+    api: Api,
+    input: ItemIdentityInput,
+    signal: AbortSignal | undefined,
+    message: string
+): Promise<AdminMetadataItemBundle> {
+    try {
+        return await loadAdminMetadataItemBundle(api, input, signal);
+    } catch (error) {
+        if (signal?.aborted) throw error;
+        throw new AdminMetadataManagerServiceError('item-unavailable', message);
     }
 }
 
@@ -307,7 +344,12 @@ export function saveAdminMetadataItem(
         } catch (error) {
             return throwSanitized(error, 'save-failed', "We couldn't save metadata for this item.");
         }
-        return loadAdminMetadataItemBundle(api, input, signal);
+        return reloadAdminMetadataItemAfterMutation(
+            api,
+            input,
+            signal,
+            'Metadata was saved, but the updated item could not be reloaded. Reload the page before trying again.'
+        );
     })().finally(() => flights?.delete(itemId));
     flights.set(itemId, promise);
     return promise;
@@ -584,7 +626,12 @@ export function applyAdminMetadataIdentifyResult(
         } catch (error) {
             return throwSanitized(error, 'identify-unavailable', "We couldn't apply this identify result.");
         }
-        return loadAdminMetadataItemBundle(api, input, signal);
+        return reloadAdminMetadataItemAfterMutation(
+            api,
+            input,
+            signal,
+            'The identify result was applied, but the updated item could not be reloaded. Reload the page before trying again.'
+        );
     })().finally(() => flights?.delete(itemId));
     flights.set(itemId, promise);
     return promise;

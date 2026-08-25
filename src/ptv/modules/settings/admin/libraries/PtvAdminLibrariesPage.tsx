@@ -102,6 +102,10 @@ export default function PtvAdminLibrariesPage() {
         filter,
         query
     }), [filter, query, state.libraries]);
+    const configuredLibraryPaths = useMemo(
+        () => state.libraries.flatMap(library => library.locations),
+        [state.libraries]
+    );
     const openAdd = useCallback(() => setSearchParams({ action: 'add' }), [setSearchParams]);
     const closeAdd = useCallback(() => setSearchParams({}, { replace: true }), [setSearchParams]);
     const handleCreated = useCallback((libraryId: string | null) => {
@@ -220,6 +224,7 @@ export default function PtvAdminLibrariesPage() {
                         onClose={closeAdd}
                         onCreated={handleCreated}
                         open
+                        suggestedPaths={configuredLibraryPaths}
                     />
                 </Suspense>
             )}

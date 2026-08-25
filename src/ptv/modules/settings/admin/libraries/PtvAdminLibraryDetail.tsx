@@ -658,7 +658,13 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                 </section>
             </div>
 
-            <AdminLibraryFolderPicker api={api} onCancel={() => setPickerOpen(false)} onSelect={addPath} open={pickerOpen} />
+            <AdminLibraryFolderPicker
+                api={api}
+                onCancel={() => setPickerOpen(false)}
+                onSelect={addPath}
+                open={pickerOpen}
+                suggestedPaths={state.configuredLocations.length > 0 ? state.configuredLocations : detail.locations}
+            />
             <ConfirmDialog
                 confirmButtonColor='error'
                 confirmButtonText={pathBusy ? 'Removing…' : 'Remove folder'}

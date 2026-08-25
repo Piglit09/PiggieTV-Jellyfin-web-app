@@ -13,6 +13,8 @@ import { getScheduledTasksApi } from '@jellyfin/sdk/lib/utils/api/scheduled-task
 
 import type { ApiClient } from 'jellyfin-apiclient';
 
+import { createPtvCoreRequestCancellation } from '../../../../core/api/apiContracts';
+import { isPtvTimeoutError, withPtvTimeout } from '../../../../utils/withPtvTimeout';
 import {
     areAdminLibraryProviderConfigurationsEqual,
     areAdminLibraryOptionsEqual,
@@ -39,6 +41,9 @@ export type AdminLibrariesServiceErrorCode =
     | 'library-options-unavailable'
     | 'scan-unavailable'
     | 'tasks-unavailable';
+
+export const ADMIN_LIBRARY_DIRECTORY_TIMEOUT_MS = 15_000;
+export const ADMIN_LIBRARY_PATH_VALIDATION_TIMEOUT_MS = 15_000;
 
 export class AdminLibrariesServiceError extends Error {
     public readonly code: AdminLibrariesServiceErrorCode;
@@ -167,14 +172,38 @@ export async function validateAdminLibraryPath(
     signal?: AbortSignal
 ) {
     const value = requireLibraryPath(path);
-    await getEnvironmentApi(api).validatePath({
-        validatePathDto: {
-            IsFile: false,
-            Path: value,
-            ValidateWritable: false
+    const request = createPtvCoreRequestCancellation({ signal });
+    try {
+        await withPtvTimeout(
+            getEnvironmentApi(api).validatePath({
+                validatePathDto: {
+                    IsFile: false,
+                    Path: value,
+                    ValidateWritable: false
+                }
+            }, { signal: request.signal }),
+            ADMIN_LIBRARY_PATH_VALIDATION_TIMEOUT_MS,
+            'Server path validation timed out.',
+            request.abort,
+            signal
+        );
+        return value;
+    } catch (error) {
+        request.abort();
+        if (signal?.aborted) throw error;
+        if (isPtvTimeoutError(error)) {
+            throw new AdminLibrariesServiceError(
+                'invalid-library-path',
+                'Server path validation took too long. Try again.'
+            );
         }
-    }, { signal });
-    return value;
+        throw new AdminLibrariesServiceError(
+            'invalid-library-path',
+            'That server path could not be validated.'
+        );
+    } finally {
+        request.dispose();
+    }
 }
 
 export type AdminLibraryDirectory = Readonly<{
@@ -194,43 +223,64 @@ function uniqueDirectoryEntries(value: unknown): FileSystemEntryInfo[] {
     });
 }
 
+async function loadAdminLibraryDirectoryRequest(
+    environment: ReturnType<typeof getEnvironmentApi>,
+    requestedPath: string | undefined,
+    signal: AbortSignal
+): Promise<AdminLibraryDirectory> {
+    if (!requestedPath) {
+        const response = await environment.getDrives({ signal });
+        return {
+            entries: uniqueDirectoryEntries(response.data),
+            parentPath: '',
+            path: ''
+        };
+    }
+    const [ contents, parent ] = await Promise.all([
+        environment.getDirectoryContents({
+            includeDirectories: true,
+            includeFiles: false,
+            path: requestedPath
+        }, { signal }),
+        environment.getParentPath({ path: requestedPath }, { signal })
+    ]);
+    return {
+        entries: uniqueDirectoryEntries(contents.data),
+        parentPath: typeof parent.data === 'string' ? parent.data : '',
+        path: requestedPath
+    };
+}
+
 export async function loadAdminLibraryDirectory(
     api: Api,
     requestedPath?: string,
     signal?: AbortSignal
 ): Promise<AdminLibraryDirectory> {
     const environment = getEnvironmentApi(api);
-    const path = requestedPath === undefined ?
-        (await environment.getDefaultDirectoryBrowser({ signal })).data.Path || '' :
-        requestedPath;
+    const request = createPtvCoreRequestCancellation({ signal });
     try {
-        if (!path) {
-            const response = await environment.getDrives({ signal });
-            return {
-                entries: uniqueDirectoryEntries(response.data),
-                parentPath: '',
-                path: ''
-            };
-        }
-        const [ contents, parent ] = await Promise.all([
-            environment.getDirectoryContents({
-                includeDirectories: true,
-                includeFiles: false,
-                path
-            }, { signal }),
-            environment.getParentPath({ path }, { signal })
-        ]);
-        return {
-            entries: uniqueDirectoryEntries(contents.data),
-            parentPath: typeof parent.data === 'string' ? parent.data : '',
-            path
-        };
+        return await withPtvTimeout(
+            loadAdminLibraryDirectoryRequest(environment, requestedPath, request.signal),
+            ADMIN_LIBRARY_DIRECTORY_TIMEOUT_MS,
+            'Server folder loading timed out.',
+            request.abort,
+            signal
+        );
     } catch (error) {
-        if ((error as { name?: string })?.name === 'AbortError') throw error;
+        request.abort();
+        if (signal?.aborted) throw error;
+        if (isPtvTimeoutError(error)) {
+            throw new AdminLibrariesServiceError(
+                'directory-unavailable',
+                'Server folders took too long to load. Try again.'
+            );
+        }
         throw new AdminLibrariesServiceError(
             'directory-unavailable',
             'This server folder could not be opened.'
         );
+    } finally {
+        request.dispose();
     }
 }
 

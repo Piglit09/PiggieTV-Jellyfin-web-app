@@ -75,6 +75,22 @@ function itemBundle(): AdminMetadataItemBundle {
     } as unknown as AdminMetadataItemBundle;
 }
 
+function managerState(overrides: Record<string, unknown> = {}) {
+    return {
+        activeMutation: null,
+        applyIdentifyResult: vi.fn(),
+        fetchIdentifyProviders: vi.fn(),
+        fetchReadingProviders: vi.fn(),
+        itemBundle: itemBundle(),
+        itemError: null,
+        itemLoading: false,
+        refetchItem: vi.fn(),
+        searchIdentify: vi.fn(),
+        searchReadingIdentify: vi.fn(),
+        ...overrides
+    };
+}
+
 describe('Metadata Quality inline Identify adapter', () => {
     let container: HTMLDivElement;
     let root: Root;
@@ -85,18 +101,7 @@ describe('Metadata Quality inline Identify adapter', () => {
             api: {},
             user: { Id: 'admin-a' }
         });
-        identifyMocks.useManager.mockReturnValue({
-            activeMutation: null,
-            applyIdentifyResult: vi.fn(),
-            fetchIdentifyProviders: vi.fn(),
-            fetchReadingProviders: vi.fn(),
-            itemBundle: itemBundle(),
-            itemError: null,
-            itemLoading: false,
-            refetchItem: vi.fn(),
-            searchIdentify: vi.fn(),
-            searchReadingIdentify: vi.fn()
-        });
+        identifyMocks.useManager.mockReturnValue(managerState());
         container = document.createElement('div');
         document.body.append(container);
         root = createRoot(container);
@@ -127,6 +132,28 @@ describe('Metadata Quality inline Identify adapter', () => {
             })
         }));
         expect(container.textContent).toContain('verified Metadata Quality suggestion is prefilled');
+    });
+
+    it('replaces a stalled loading state with the reachable Retry action', async () => {
+        const detail = qualityDetail();
+        const refetchItem = vi.fn();
+        identifyMocks.useManager.mockReturnValue(managerState({
+            itemBundle: null,
+            itemLoading: true
+        }));
+        await act(async () => root.render(<AdminMetadataQualityIdentify detail={detail} />));
+        expect(container.textContent).toContain('Loading Identify tools...');
+
+        identifyMocks.useManager.mockReturnValue(managerState({
+            itemBundle: null,
+            itemError: new Error('bounded item request failed'),
+            refetchItem
+        }));
+        await act(async () => root.render(<AdminMetadataQualityIdentify detail={detail} />));
+        expect(container.textContent).toContain("Identify tools couldn't be loaded.");
+
+        await act(async () => container.querySelector('button')?.click());
+        expect(refetchItem).toHaveBeenCalledOnce();
     });
 
     it('does not trust an unverified suggestion as Identify prefill', () => {

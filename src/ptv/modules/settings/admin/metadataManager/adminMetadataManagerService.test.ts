@@ -82,6 +82,7 @@ vi.mock('@jellyfin/sdk/lib/utils/api/item-lookup-api', () => ({
 
 import { normalizeAdminMetadataForm } from './adminMetadataManagerAdapters';
 import {
+    ADMIN_METADATA_ITEM_BUNDLE_TIMEOUT_MS,
     applyAdminMetadataIdentifyResult,
     createAdminMetadataRefreshOptions,
     deleteAdminMetadataArtwork,
@@ -254,18 +255,60 @@ describe('Metadata Manager service', () => {
         expect(bundle.item.id).toBe('item-a');
         expect(bundle.editor.providerFields[0].label).toBe('IMDb');
         expect(bundle.ancestors[0].id).toBe('library-a');
+        const itemSignal = apiMocks.getItem.mock.calls[0][1].signal as AbortSignal;
+        expect(itemSignal).toBeInstanceOf(AbortSignal);
+        expect(itemSignal).not.toBe(controller.signal);
         expect(apiMocks.getItem).toHaveBeenCalledWith(
             { itemId: 'item-a', userId: 'user-a' },
-            { signal: controller.signal }
+            { signal: itemSignal }
         );
         expect(apiMocks.getMetadataEditorInfo).toHaveBeenCalledWith(
             { itemId: 'item-a' },
-            { signal: controller.signal }
+            { signal: itemSignal }
         );
         expect(apiMocks.getAncestors).toHaveBeenCalledWith(
             { itemId: 'item-a', userId: 'user-a' },
-            { signal: controller.signal }
+            { signal: itemSignal }
         );
+    });
+
+    it('aborts a stalled item bundle and returns a retryable user-safe error', async () => {
+        vi.useFakeTimers();
+        try {
+            apiMocks.getItem.mockReturnValue(new Promise(() => undefined));
+
+            const bundlePromise = loadAdminMetadataItemBundle(api, {
+                itemId: 'item-a',
+                userId: 'user-a'
+            });
+            const rejection = expect(bundlePromise).rejects.toMatchObject({
+                code: 'item-unavailable',
+                message: 'This item took too long to load. Try again.'
+            });
+
+            await vi.advanceTimersByTimeAsync(ADMIN_METADATA_ITEM_BUNDLE_TIMEOUT_MS);
+            await rejection;
+
+            const itemSignal = apiMocks.getItem.mock.calls[0][1].signal as AbortSignal;
+            expect(itemSignal.aborted).toBe(true);
+            expect(apiMocks.getMetadataEditorInfo.mock.calls[0][1].signal).toBe(itemSignal);
+            expect(apiMocks.getAncestors.mock.calls[0][1].signal).toBe(itemSignal);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('settles immediately when a caller cancels an abort-ignoring item transport', async () => {
+        const AbortControllerConstructor = globalThis['AbortController'];
+        const controller = new AbortControllerConstructor();
+        apiMocks.getItem.mockReturnValue(new Promise(() => undefined));
+        const bundlePromise = loadAdminMetadataItemBundle(api, { itemId: 'item-a' }, controller.signal);
+
+        controller.abort();
+
+        await expect(bundlePromise).rejects.toMatchObject({ name: 'AbortError' });
+        const itemSignal = apiMocks.getItem.mock.calls[0][1].signal as AbortSignal;
+        expect(itemSignal.aborted).toBe(true);
     });
 
     it('sanitizes transport failures and distinguishes an externally deleted item', async () => {
@@ -309,6 +352,35 @@ describe('Metadata Manager service', () => {
         expect(Reflect.get(outgoing, 'FutureTopLevel')).toEqual({ nested: [ 'preserve' ] });
         expect(Reflect.get(outgoing.People![0], 'UnknownPersonData')).toEqual({ keep: true });
         expect(saved.form.name).toBe('Renamed');
+    });
+
+    it('reports that save committed when the post-save reload times out', async () => {
+        vi.useFakeTimers();
+        try {
+            const authoritative = rawItem();
+            const confirmedForm = normalizeAdminMetadataForm(authoritative);
+            apiMocks.getItem
+                .mockResolvedValueOnce({ data: authoritative })
+                .mockReturnValueOnce(new Promise(() => undefined));
+
+            const savePromise = saveAdminMetadataItem(api, {
+                confirmedForm,
+                desiredForm: { ...confirmedForm, name: 'Renamed' },
+                itemId: 'item-a'
+            });
+            const rejection = expect(savePromise).rejects.toMatchObject({
+                code: 'item-unavailable',
+                message: 'Metadata was saved, but the updated item could not be reloaded. Reload the page before trying again.'
+            });
+
+            await vi.advanceTimersByTimeAsync(0);
+            expect(apiMocks.updateItem).toHaveBeenCalledOnce();
+            await vi.advanceTimersByTimeAsync(ADMIN_METADATA_ITEM_BUNDLE_TIMEOUT_MS);
+            await rejection;
+            expect(apiMocks.updateItem).toHaveBeenCalledOnce();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('fails closed on a material baseline conflict before any update', async () => {
@@ -540,6 +612,34 @@ describe('Metadata Manager service', () => {
         }, { signal: undefined });
         expect(bundle.item.id).toBe('item-a');
         expect(apiMocks.getItem).toHaveBeenCalledOnce();
+    });
+
+    it('reports that identify committed when the post-apply reload times out', async () => {
+        vi.useFakeTimers();
+        try {
+            apiMocks.getItem.mockReturnValue(new Promise(() => undefined));
+            const result = (await searchAdminMetadataIdentify(api, {
+                itemId: 'item-a',
+                itemType: 'Movie',
+                query: { name: 'Example', providerIds: {}, year: null }
+            }))[0];
+            const applyPromise = applyAdminMetadataIdentifyResult(api, {
+                itemId: 'item-a',
+                result
+            });
+            const rejection = expect(applyPromise).rejects.toMatchObject({
+                code: 'item-unavailable',
+                message: 'The identify result was applied, but the updated item could not be reloaded. Reload the page before trying again.'
+            });
+
+            await vi.advanceTimersByTimeAsync(0);
+            expect(apiMocks.applySearchCriteria).toHaveBeenCalledOnce();
+            await vi.advanceTimersByTimeAsync(ADMIN_METADATA_ITEM_BUNDLE_TIMEOUT_MS);
+            await rejection;
+            expect(apiMocks.applySearchCriteria).toHaveBeenCalledOnce();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('creates explicit safe refresh presets', () => {
