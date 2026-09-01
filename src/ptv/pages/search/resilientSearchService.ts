@@ -1,7 +1,8 @@
 import {
     getPtvSearchPrimaryOutcome,
     PtvSearchAbortedError,
-    PtvSearchPrimaryTimeoutError
+    PtvSearchPrimaryTimeoutError,
+    searchPtvItems
 } from '../../api/search';
 import { requestPtvJson } from '../../api/client';
 import type { PtvItem, PtvItemsResult } from '../../api/types';
@@ -82,8 +83,8 @@ const PTV_DIRECT_PLAN_BY_TYPE = new Map(
     ))
 );
 const PTV_DIRECT_SEARCH_PRIORITY = new Map<PtvSearchGroupId, number>([
-    ['shows', 0],
-    ['movies', 1],
+    ['movies', 0],
+    ['shows', 1],
     ['collections', 2],
     ['music', 3],
     ['albums', 4],
@@ -94,10 +95,11 @@ const PTV_DIRECT_SEARCH_PRIORITY = new Map<PtvSearchGroupId, number>([
     ['genres', 9],
     ['studios', 10]
 ]);
+const PTV_CRITICAL_DIRECT_GROUPS = new Set<PtvSearchGroupId>(['movies', 'shows']);
 
 export const PTV_SEARCH_HINT_PRIMARY_TIMEOUT_MS = 8000;
 export const PTV_SEARCH_DIRECT_GROUP_TIMEOUT_MS = 4500;
-export const PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS = 4000;
+export const PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS = 7000;
 export const PTV_SEARCH_DIRECT_MAX_CONCURRENCY = 1;
 export const PTV_SEARCH_MAX_CONCURRENCY = PTV_SEARCH_DIRECT_MAX_CONCURRENCY + 1;
 export const PTV_SEARCH_DIRECT_FIELDS = [
@@ -371,6 +373,53 @@ async function searchDirectGroup(
     plan: PtvDirectSearchPlan,
     options: PtvDirectSearchOptions
 ): Promise<PtvDirectSearchOutcome> {
+    if (plan.groupId === 'movies') {
+        try {
+            const result = await searchPtvItems<PtvItem>({
+                fields: PTV_SEARCH_DIRECT_FIELDS,
+                includeItemTypes: 'Movie',
+                limit: options.perGroupLimit,
+                onPrimaryResult: primaryResult => {
+                    options.onGroupResult?.({
+                        groupId: plan.groupId,
+                        items: rankAndDedupeItems(primaryResult.Items || [], options.query, options.perGroupLimit),
+                        requestCount: 1,
+                        source: 'direct'
+                    });
+                },
+                primaryTimeoutMs: PTV_SEARCH_DIRECT_GROUP_TIMEOUT_MS,
+                recoveryFields: PTV_SEARCH_DIRECT_FIELDS,
+                recursive: true,
+                searchTerm: options.query,
+                serverId: options.serverId,
+                signal: options.signal,
+                userId: options.userId
+            });
+            const diagnostics = result.ptvSearchRecoveryDiagnostics;
+            const items = rankAndDedupeItems(result.Items || [], options.query, options.perGroupLimit);
+            const incompleteEmptyResult = !items.length
+                && diagnostics.recoveryAttempted
+                && !diagnostics.catalogExhausted;
+            const requestCount = 1
+                + diagnostics.catalogRequestsThisSearch
+                + (diagnostics.catalogHydrationCount > 0 ? 1 : 0);
+
+            return {
+                groupId: plan.groupId,
+                items,
+                requestCount,
+                status: incompleteEmptyResult ? 'error' : 'success'
+            };
+        } catch (error) {
+            return {
+                groupId: plan.groupId,
+                items: [],
+                requestCount: 1,
+                status: getFailureStatus(error)
+            };
+        }
+    }
+
     if (plan.groupId === 'shows') {
         try {
             const result = await searchAuthoritativeSeriesWithTimeout(options);
@@ -456,14 +505,18 @@ async function searchDirectGroupsBounded(
 
     const runWorker = async () => {
         while (!controller.signal.aborted) {
-            if (options.shouldContinue && !options.shouldContinue()) return;
-
             const planIndex = nextPlanIndex;
-
-            nextPlanIndex += 1;
             if (planIndex >= plans.length) return;
 
             const plan = plans[planIndex];
+
+            if (
+                options.shouldContinue
+                && !options.shouldContinue()
+                && !PTV_CRITICAL_DIRECT_GROUPS.has(plan.groupId)
+            ) return;
+
+            nextPlanIndex += 1;
 
             const outcome = await searchDirectGroup(plan, {
                 ...options,
@@ -628,19 +681,28 @@ export async function searchPtvWithRecovery(options: Readonly<{
     let successfulDirectCount = 0;
 
     directOutcomes.forEach(outcome => {
-        if (outcome.status === 'success') {
+        const publishedItems = publishedDirectResults.get(outcome.groupId)?.items || [];
+        const directItems = rankAndDedupeItems([
+            ...publishedItems,
+            ...outcome.items
+        ], options.query, options.perGroupLimit);
+
+        if (outcome.status === 'success' || directItems.length) {
             successfulDirectCount += 1;
-            recoveredGroupIds.push(outcome.groupId);
+            if (!recoveredGroupIds.includes(outcome.groupId)) recoveredGroupIds.push(outcome.groupId);
             groups[outcome.groupId] = outcome.groupId === 'shows' ?
-                outcome.items :
+                directItems :
                 rankAndDedupeItems([
-                    ...outcome.items,
+                    ...directItems,
                     ...(groups[outcome.groupId] || [])
                 ], options.query, options.perGroupLimit);
             return;
         }
 
-        if (!primaryResult) {
+        if (
+            !primaryResult
+            || (outcome.groupId === 'movies' && !(groups.movies || []).length)
+        ) {
             failedGroupIds.push(outcome.groupId);
         }
     });

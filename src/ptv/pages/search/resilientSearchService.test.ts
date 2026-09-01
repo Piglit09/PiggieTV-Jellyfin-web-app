@@ -6,6 +6,7 @@ const {
     PtvSearchPrimaryTimeoutError,
     requestPtvJson,
     searchPtvAuthoritativeSeries,
+    searchPtvItems,
     searchPtvHints
 } = vi.hoisted(() => {
     class SearchAbortedError extends Error {
@@ -27,6 +28,7 @@ const {
         PtvSearchPrimaryTimeoutError: SearchTimeoutError,
         requestPtvJson: vi.fn(),
         searchPtvAuthoritativeSeries: vi.fn(),
+        searchPtvItems: vi.fn(),
         searchPtvHints: vi.fn()
     };
 });
@@ -34,7 +36,8 @@ const {
 vi.mock('../../api/search', () => ({
     getPtvSearchPrimaryOutcome,
     PtvSearchAbortedError,
-    PtvSearchPrimaryTimeoutError
+    PtvSearchPrimaryTimeoutError,
+    searchPtvItems
 }));
 vi.mock('../../api/client', () => ({ requestPtvJson }));
 vi.mock('./authoritativeSeriesSearch', () => ({ searchPtvAuthoritativeSeries }));
@@ -51,12 +54,14 @@ vi.mock('./searchHintService', () => ({
 
 import {
     PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS,
+    PTV_SEARCH_DIRECT_GROUP_TIMEOUT_MS,
     PTV_SEARCH_HINT_PRIMARY_TIMEOUT_MS,
     PTV_SEARCH_MAX_CONCURRENCY,
     searchPtvWithRecovery
 } from './resilientSearchService';
 import type { PtvGroupedSearchHints } from './searchHintService';
 import { createPtvAbortController } from '../../core/abortController';
+import { createPtvSearchRecoveryDiagnostics } from '../../services/searchRecovery';
 
 function emptyGroups(): PtvGroupedSearchHints {
     return {
@@ -71,6 +76,35 @@ function emptyGroups(): PtvGroupedSearchHints {
         reading: [],
         shows: [],
         studios: []
+    };
+}
+
+function movieSearchResult(
+    items: Array<{ Id: string; Name: string; Type: string }> = [],
+    diagnosticOverrides: Parameters<typeof createPtvSearchRecoveryDiagnostics>[0] = {}
+) {
+    const emptyResult = items.length === 0;
+
+    return {
+        Items: items,
+        TotalRecordCount: items.length,
+        ptvLibraryRootDiagnostics: {
+            deduplicatedCount: 0,
+            groups: [],
+            inputCount: items.length,
+            outputCount: items.length
+        },
+        ptvSearchRecoveryDiagnostics: createPtvSearchRecoveryDiagnostics({
+            catalogExhausted: emptyResult,
+            catalogStatus: emptyResult ? 'complete' : 'not-requested',
+            catalogStopReason: emptyResult ? 'exhausted' : 'not-requested',
+            finalItemCount: items.length,
+            primaryItemCount: items.length,
+            primaryStatus: 'success',
+            recoveryAttempted: emptyResult,
+            recoveryReason: emptyResult ? 'empty-primary-result' : 'complete-primary-result',
+            ...diagnosticOverrides
+        })
     };
 }
 
@@ -159,6 +193,7 @@ function resolveSearchAfterUnlessAborted<T>(value: T, delayMs: number, signal: A
 beforeEach(() => {
     vi.clearAllMocks();
     searchPtvAuthoritativeSeries.mockResolvedValue({ items: [], pagesLoaded: 1, totalRecordCount: 0 });
+    searchPtvItems.mockResolvedValue(movieSearchResult());
     getPtvSearchPrimaryOutcome.mockResolvedValue({
         durationMs: 2,
         items: [],
@@ -169,7 +204,7 @@ beforeEach(() => {
 });
 
 describe('resilient web search', () => {
-    it('keeps a successful broad hint search to one hint request plus authoritative Series', async () => {
+    it('keeps a successful broad hint search to one hint request plus Movie and Series enrichment', async () => {
         const groups = emptyGroups();
         let activeRequests = 0;
         let peakRequests = 0;
@@ -211,7 +246,7 @@ describe('resilient web search', () => {
         expect(searchPtvAuthoritativeSeries).toHaveBeenCalledTimes(1);
         expect(getPtvSearchPrimaryOutcome).not.toHaveBeenCalled();
         expect(peakRequests).toBe(PTV_SEARCH_MAX_CONCURRENCY);
-        expect(result.requestCount).toBe(2);
+        expect(result.requestCount).toBe(3);
         expect(result.groups.movies).toHaveLength(1);
         expect(result.groups.shows).toHaveLength(1);
     });
@@ -231,6 +266,175 @@ describe('resilient web search', () => {
         expect(result.primaryStatus).toBe('success');
         expect(result.failedGroupIds).toEqual([]);
         expect(result.groups.movies).toEqual([expect.objectContaining({ Id: 'movie-1' })]);
+    });
+
+    it('marks an empty Movie hint as incomplete when catalog recovery resolves after an error', async () => {
+        searchPtvHints.mockResolvedValue({
+            groups: emptyGroups(),
+            hintCount: 0,
+            totalRecordCount: 0
+        });
+        searchPtvItems.mockResolvedValue(movieSearchResult([], {
+            catalogExhausted: false,
+            catalogStatus: 'partial',
+            catalogStopReason: 'request-error',
+            recoveryAttempted: true,
+            recoveryReason: 'supplemental-failed',
+            supplementalStatus: 'error'
+        }));
+
+        const result = await searchPtvWithRecovery(options(['Movie']));
+
+        expect(result.primaryStatus).toBe('success');
+        expect(result.groups.movies).toEqual([]);
+        expect(result.failedGroupIds).toContain('movies');
+    });
+
+    it('marks a page-limited empty Movie catalog search as incomplete', async () => {
+        searchPtvHints.mockResolvedValue({
+            groups: emptyGroups(),
+            hintCount: 0,
+            totalRecordCount: 0
+        });
+        searchPtvItems.mockResolvedValue(movieSearchResult([], {
+            catalogExhausted: false,
+            catalogStatus: 'partial',
+            catalogStopReason: 'page-budget',
+            recoveryAttempted: true
+        }));
+
+        const result = await searchPtvWithRecovery(options(['Movie']));
+
+        expect(result.groups.movies).toEqual([]);
+        expect(result.failedGroupIds).toContain('movies');
+    });
+
+    it('routes broad Movie recovery through the catalog-aware search boundary', async () => {
+        const groups = emptyGroups();
+
+        searchPtvHints.mockResolvedValue({ groups, hintCount: 0, totalRecordCount: 0 });
+        searchPtvItems.mockResolvedValue(movieSearchResult([
+            { Id: 'movie-catalog', Name: 'Alien', Type: 'Movie' }
+        ]));
+
+        const result = await searchPtvWithRecovery(options(['Movie', 'Series']));
+
+        expect(searchPtvItems).toHaveBeenCalledWith(expect.objectContaining({
+            includeItemTypes: 'Movie',
+            limit: 14,
+            onPrimaryResult: expect.any(Function),
+            recoveryFields: expect.stringContaining('ProviderIds'),
+            searchTerm: 'digimon'
+        }));
+        expect(result.groups.movies).toEqual([
+            expect.objectContaining({ Id: 'movie-catalog' })
+        ]);
+        expect(result.failedGroupIds).not.toContain('movies');
+    });
+
+    it('still starts authoritative Series when hints settle during Movie recovery', async () => {
+        const movieResult = createDeferred<ReturnType<typeof movieSearchResult>>();
+
+        searchPtvHints.mockResolvedValue({
+            groups: emptyGroups(),
+            hintCount: 0,
+            totalRecordCount: 0
+        });
+        searchPtvItems.mockReturnValue(movieResult.promise);
+
+        const resultPromise = searchPtvWithRecovery(options(['Movie', 'Series']));
+
+        await vi.waitFor(() => expect(searchPtvItems).toHaveBeenCalledTimes(1));
+        movieResult.resolve(movieSearchResult());
+        await resultPromise;
+
+        expect(searchPtvAuthoritativeSeries).toHaveBeenCalledTimes(1);
+    });
+
+    it('accepts Movie catalog recovery between the primary and batch deadlines', async () => {
+        vi.useFakeTimers();
+
+        try {
+            const movie = { Id: 'movie-catalog-late', Name: 'Alien', Type: 'Movie' };
+            const onGroupResult = vi.fn();
+            const recoveryDelayMs = PTV_SEARCH_DIRECT_GROUP_TIMEOUT_MS + 1000;
+
+            searchPtvHints.mockImplementation(({ signal }) => rejectOnSearchAbort(signal));
+            searchPtvItems.mockImplementation(({ signal }) => resolveSearchAfterUnlessAborted(
+                movieSearchResult([movie], {
+                    catalogExhausted: false,
+                    catalogMatchCount: 1,
+                    catalogRequestsThisSearch: 1,
+                    catalogStatus: 'partial',
+                    catalogStopReason: 'exact-match-found',
+                    recoveryAttempted: true
+                }),
+                recoveryDelayMs,
+                signal
+            ));
+
+            const resultPromise = searchPtvWithRecovery({
+                ...options(['Movie', 'Series']),
+                onGroupResult
+            });
+
+            await vi.advanceTimersByTimeAsync(recoveryDelayMs);
+            expect(onGroupResult).toHaveBeenCalledWith(expect.objectContaining({
+                groupId: 'movies',
+                items: [expect.objectContaining({ Id: 'movie-catalog-late' })],
+                source: 'direct'
+            }));
+
+            await vi.advanceTimersByTimeAsync(PTV_SEARCH_HINT_PRIMARY_TIMEOUT_MS - recoveryDelayMs);
+            const result = await resultPromise;
+
+            expect(recoveryDelayMs).toBeGreaterThan(PTV_SEARCH_DIRECT_GROUP_TIMEOUT_MS);
+            expect(recoveryDelayMs).toBeLessThan(PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS);
+            expect(result.groups.movies).toEqual([
+                expect.objectContaining({ Id: 'movie-catalog-late' })
+            ]);
+            expect(result.failedGroupIds).not.toContain('movies');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('preserves progressive Movie results when catalog recovery reaches the batch deadline', async () => {
+        vi.useFakeTimers();
+
+        try {
+            const movie = { Id: 'movie-primary', Name: 'Alien', Type: 'Movie' };
+            const onGroupResult = vi.fn();
+
+            searchPtvHints.mockImplementation(({ signal }) => rejectOnSearchAbort(signal));
+            searchPtvItems.mockImplementation(searchOptions => {
+                searchOptions.onPrimaryResult?.(movieSearchResult([movie]));
+                return rejectOnSearchAbort(searchOptions.signal);
+            });
+
+            const resultPromise = searchPtvWithRecovery({
+                ...options(['Movie', 'Series']),
+                onGroupResult
+            });
+
+            await vi.advanceTimersByTimeAsync(PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS + 1);
+            await vi.advanceTimersByTimeAsync(
+                PTV_SEARCH_HINT_PRIMARY_TIMEOUT_MS - PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS
+            );
+            const result = await resultPromise;
+
+            expect(onGroupResult).toHaveBeenCalledWith(expect.objectContaining({
+                groupId: 'movies',
+                items: [expect.objectContaining({ Id: 'movie-primary' })],
+                source: 'direct'
+            }));
+            expect(result.groups.movies).toEqual([
+                expect.objectContaining({ Id: 'movie-primary' })
+            ]);
+            expect(result.failedGroupIds).not.toContain('movies');
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('adds the authoritative Series result when global hints are crowded by Episodes', async () => {
@@ -286,6 +490,9 @@ describe('resilient web search', () => {
 
     it('recovers every requested group with bounded Items searches after a hint failure', async () => {
         searchPtvHints.mockRejectedValue(new Error('Search/Hints unavailable'));
+        searchPtvItems.mockResolvedValue(movieSearchResult([
+            { Id: 'Movie-1', Name: 'Digimon', Type: 'Movie' }
+        ]));
         searchPtvAuthoritativeSeries.mockResolvedValue({
             items: [{ Id: 'series-1', Name: 'Digimon', RecursiveItemCount: 10, Type: 'Series' }],
             pagesLoaded: 1,
@@ -309,6 +516,7 @@ describe('resilient web search', () => {
 
     it('preserves successful recovery groups when another fallback group fails', async () => {
         searchPtvHints.mockRejectedValue(new Error('Search/Hints unavailable'));
+        searchPtvItems.mockRejectedValue(new Error('group unavailable'));
         searchPtvAuthoritativeSeries.mockResolvedValue({
             items: [{ Id: 'series-1', Name: 'Digimon', RecursiveItemCount: 10, Type: 'Series' }],
             pagesLoaded: 1,
@@ -443,7 +651,7 @@ describe('resilient web search', () => {
 
         try {
             const groups = emptyGroups();
-            const primaryDelayMs = PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS + 1000;
+            const primaryDelayMs = PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS + 500;
 
             groups.movies = [{ Id: 'movie-cold', Name: 'Digimon', Type: 'Movie' }];
             groups.shows = [{ Id: 'series-cold', Name: 'Digimon', RecursiveItemCount: 54, Type: 'Series' }];
@@ -473,13 +681,13 @@ describe('resilient web search', () => {
             expect(result.groups.movies).toEqual([expect.objectContaining({ Id: 'movie-cold' })]);
             expect(result.groups.shows).toEqual([expect.objectContaining({ Id: 'series-cold' })]);
             expect(result.groups.episodes).toEqual([expect.objectContaining({ Id: 'episode-cold' })]);
-            expect(getPtvSearchPrimaryOutcome).not.toHaveBeenCalled();
+            expect(searchPtvItems).toHaveBeenCalledTimes(1);
         } finally {
             vi.useRealTimers();
         }
     });
 
-    it('settles a timed-out broad search at the primary deadline without starting a second fallback wave', async () => {
+    it('settles a timed-out broad search at the primary deadline without starting a directory fallback wave', async () => {
         vi.useFakeTimers();
 
         try {
@@ -502,7 +710,6 @@ describe('resilient web search', () => {
             ]));
 
             await vi.advanceTimersByTimeAsync(PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS + 1);
-            expect(getPtvSearchPrimaryOutcome).not.toHaveBeenCalled();
 
             await vi.advanceTimersByTimeAsync(
                 PTV_SEARCH_HINT_PRIMARY_TIMEOUT_MS - PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS
@@ -510,14 +717,19 @@ describe('resilient web search', () => {
             const result = await resultPromise;
 
             expect(result.primaryStatus).toBe('timeout');
-            expect(result.requestCount).toBe(2);
+            expect(result.requestCount).toBe(
+                1
+                + searchPtvItems.mock.calls.length
+                + searchPtvAuthoritativeSeries.mock.calls.length
+                + getPtvSearchPrimaryOutcome.mock.calls.length
+            );
             expect(result.failedGroupIds).toEqual(expect.arrayContaining([
-                'movies',
                 'shows',
                 'genres',
                 'studios'
             ]));
-            expect(getPtvSearchPrimaryOutcome).not.toHaveBeenCalled();
+            expect(result.failedGroupIds).not.toContain('movies');
+            expect(searchPtvItems).toHaveBeenCalledTimes(1);
             expect(requestPtvJson).not.toHaveBeenCalled();
         } finally {
             vi.useRealTimers();
@@ -526,6 +738,7 @@ describe('resilient web search', () => {
 
     it('returns structured group failures when hints and every fallback time out', async () => {
         searchPtvHints.mockRejectedValue(new PtvSearchPrimaryTimeoutError(PTV_SEARCH_HINT_PRIMARY_TIMEOUT_MS));
+        searchPtvItems.mockRejectedValue(new PtvSearchPrimaryTimeoutError(PTV_SEARCH_DIRECT_GROUP_TIMEOUT_MS));
         searchPtvAuthoritativeSeries.mockRejectedValue(new PtvSearchPrimaryTimeoutError(4000));
         getPtvSearchPrimaryOutcome.mockResolvedValue({
             durationMs: 4000,
