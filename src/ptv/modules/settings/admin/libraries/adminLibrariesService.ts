@@ -19,6 +19,7 @@ import {
     areAdminLibraryProviderConfigurationsEqual,
     areAdminLibraryOptionsEqual,
     buildDefaultAdminLibraryOptions,
+    getAdminLibraryLocations,
     normalizeAdminLibraryOptions,
     patchAdminLibraryOptions,
     patchAdminLibraryProviders
@@ -32,6 +33,7 @@ import type {
 
 export type AdminLibrariesServiceErrorCode =
     | 'creation-options-unavailable'
+    | 'creation-outcome-uncertain'
     | 'conflict'
     | 'directory-unavailable'
     | 'invalid-library'
@@ -114,6 +116,44 @@ function normalizeCreateCollectionType(value: string): CollectionTypeOptions | u
     // Jellyfin's established creator represents Mixed by omitting collectionType.
     if (!normalized || normalized === 'mixed') return undefined;
     return normalized as CollectionTypeOptions;
+}
+
+function normalizeCreateFingerprintCollectionType(value: unknown) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return !normalized || normalized === 'mixed' ? 'mixed' : normalized;
+}
+
+function haveExactPaths(left: readonly string[], right: readonly string[]) {
+    const leftPaths = new Set(left);
+    const rightPaths = new Set(right);
+    return leftPaths.size === rightPaths.size
+        && Array.from(leftPaths).every(path => rightPaths.has(path));
+}
+
+function findExactCreateMatches(
+    libraries: readonly VirtualFolderInfo[],
+    name: string,
+    collectionType: string,
+    locations: readonly string[]
+) {
+    const normalizedType = normalizeCreateFingerprintCollectionType(collectionType);
+    return libraries.filter(library => (
+        typeof library.Name === 'string'
+        && library.Name.trim() === name
+        && normalizeCreateFingerprintCollectionType(library.CollectionType) === normalizedType
+        && haveExactPaths(getAdminLibraryLocations(library), locations)
+    ));
+}
+
+function resolveExactCreateMatch(matches: readonly VirtualFolderInfo[]) {
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function uncertainCreateOutcome() {
+    return new AdminLibrariesServiceError(
+        'creation-outcome-uncertain',
+        'Jellyfin may have created this library, but the result could not be confirmed. Review the Libraries list before trying again.'
+    );
 }
 
 export async function loadAdminLibraries(
@@ -308,22 +348,50 @@ export async function createAdminLibrary(
     const name = requireLibraryName(input.name);
     const locations = uniquePaths(input.locations);
     await Promise.all(locations.map(path => validateAdminLibraryPath(api, path, signal)));
-    await getLibraryStructureApi(api).addVirtualFolder({
-        addVirtualFolderDto: {
-            LibraryOptions: buildDefaultAdminLibraryOptions(availableOptions, locations)
-        },
-        collectionType: normalizeCreateCollectionType(input.collectionType),
+    const preflightMatches = findExactCreateMatches(
+        await loadAdminLibraries(api, signal),
         name,
-        paths: [ ...locations ],
-        refreshLibrary: false
-    }, { signal });
+        input.collectionType,
+        locations
+    );
+    if (preflightMatches.length > 0) return resolveExactCreateMatch(preflightMatches);
+
+    try {
+        await getLibraryStructureApi(api).addVirtualFolder({
+            addVirtualFolderDto: {
+                LibraryOptions: buildDefaultAdminLibraryOptions(availableOptions, locations)
+            },
+            collectionType: normalizeCreateCollectionType(input.collectionType),
+            name,
+            paths: [ ...locations ],
+            refreshLibrary: false
+        }, { signal });
+    } catch {
+        try {
+            const matches = findExactCreateMatches(
+                await loadAdminLibraries(api, signal),
+                name,
+                input.collectionType,
+                locations
+            );
+            if (matches.length === 1) return matches[0];
+            if (matches.length > 1) return null;
+        } catch {
+            throw uncertainCreateOutcome();
+        }
+        throw uncertainCreateOutcome();
+    }
 
     // Creation returns void. Refetch once to discover an unambiguous server-assigned
     // ItemId. A failed discovery must not turn an accepted create into a retry prompt.
     try {
         const libraries = await loadAdminLibraries(api, signal);
-        const matches = libraries.filter(library => library.Name === name);
-        return matches.length === 1 ? matches[0] : null;
+        return resolveExactCreateMatch(findExactCreateMatches(
+            libraries,
+            name,
+            input.collectionType,
+            locations
+        ));
     } catch {
         return null;
     }

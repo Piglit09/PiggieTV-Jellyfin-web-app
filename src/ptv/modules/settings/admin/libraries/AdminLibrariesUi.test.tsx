@@ -765,6 +765,45 @@ describe('PiggieTV administrator libraries UI', () => {
         expect(onCreated).toHaveBeenCalledWith('new-library');
     });
 
+    it('locks Add Library after an uncertain create outcome even when the form is submitted again', async () => {
+        uiMocks.createAdminLibrary.mockRejectedValueOnce(
+            new uiMocks.AdminLibrariesServiceError(
+                'creation-outcome-uncertain',
+                'sensitive backend detail'
+            )
+        );
+        await render(
+            <AddAdminLibraryDialog
+                api={api}
+                apiClient={apiClient}
+                onClose={vi.fn()}
+                onCreated={vi.fn()}
+                open
+                suggestedPaths={[ '/media/movies' ]}
+            />
+        );
+
+        const form = container.querySelector<HTMLFormElement>('#ptv-add-library-form')!;
+        const name = form.querySelector<HTMLInputElement>('input[autocomplete="off"]')!;
+        await act(async () => changeInput(name, 'Cinema'));
+        await act(async () => buttonWithText(container, 'Add Folder')?.click());
+        await act(async () => buttonWithText(container, '/media/movies')?.click());
+        await act(async () => buttonWithText(container, 'Use this folder')?.click());
+        await flushAsync();
+
+        const activeForm = container.querySelector<HTMLFormElement>('#ptv-add-library-form')!;
+        await act(async () => activeForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+        await flushAsync();
+
+        expect(container.textContent).toContain(
+            'Jellyfin may have created this library, but the result could not be confirmed. Review the Libraries list before trying again.'
+        );
+        expect(buttonWithText(container, 'Create Library')?.disabled).toBe(true);
+        await act(async () => activeForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+        await flushAsync();
+        expect(uiMocks.createAdminLibrary).toHaveBeenCalledOnce();
+    });
+
     it('fails Add Library closed when authoritative defaults are unavailable', async () => {
         const refetch = vi.fn(async () => undefined);
         uiMocks.creationOptionsState = creationOptionsState({

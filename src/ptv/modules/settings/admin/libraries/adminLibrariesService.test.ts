@@ -349,9 +349,16 @@ describe('administrator libraries service mutations', () => {
     });
 
     it('creates once with validated exact unique paths, discovered defaults, and no automatic scan', async () => {
-        sdkMocks.getVirtualFolders.mockResolvedValue({
-            data: [library({ ItemId: 'new-id', Locations: ['/media/a', '/media/b'], Name: 'New Movies' })]
-        });
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [] })
+            .mockResolvedValueOnce({
+                data: [library({
+                    ItemId: 'new-id',
+                    LibraryOptions: { PathInfos: [{ Path: ' /media/b ' }] },
+                    Locations: ['/media/a'],
+                    Name: 'New Movies'
+                })]
+            });
         const AbortControllerConstructor = globalThis['AbortController'];
         const controller = new AbortControllerConstructor();
         const signal = controller.signal;
@@ -379,7 +386,185 @@ describe('administrator libraries service mutations', () => {
             paths: ['/media/a', ' /media/b '],
             refreshLibrary: false
         }, { signal });
+        expect(sdkMocks.getVirtualFolders).toHaveBeenCalledTimes(2);
+    });
+
+    it('reuses one exact preflight match among same-name and same-path decoys without requiring ItemId', async () => {
+        const exact = library({
+            CollectionType: 'movies',
+            ItemId: undefined,
+            LibraryOptions: {
+                PathInfos: [
+                    { Path: '/media/archive' },
+                    { Path: '/media/movies' },
+                    { Path: '/media/archive' }
+                ]
+            },
+            Locations: ['/media/movies'],
+            Name: 'Cinema'
+        });
+        sdkMocks.getVirtualFolders.mockResolvedValue({
+            data: [
+                library({ Name: 'Cinema Archive' }),
+                library({ Locations: ['/media/archive', '/media/movies'], Name: 'cinema' }),
+                library({ CollectionType: 'music', Name: 'Cinema' }),
+                library({ Locations: ['/media/movies'], Name: 'Cinema' }),
+                library({ Locations: ['/media/movies', '/media/archive', '/media/extra'], Name: 'Cinema' }),
+                library({ Locations: ['/media/movies', '/media/other'], Name: 'Cinema' }),
+                library({ Locations: ['/MEDIA/movies', '/media/archive'], Name: 'Cinema' }),
+                library({ Locations: ['\\media\\movies', '/media/archive'], Name: 'Cinema' }),
+                exact
+            ]
+        });
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'movies',
+            locations: ['/media/archive', '/media/movies'],
+            name: ' Cinema '
+        }, creationOptions())).resolves.toBe(exact);
+
         expect(sdkMocks.getVirtualFolders).toHaveBeenCalledOnce();
+        expect(sdkMocks.addVirtualFolder).not.toHaveBeenCalled();
+    });
+
+    it('accepts multiple exact preflight matches as unresolved without another POST', async () => {
+        sdkMocks.getVirtualFolders.mockResolvedValue({
+            data: [
+                library({
+                    ItemId: 'match-a',
+                    LibraryOptions: { PathInfos: [{ Path: '/media/new' }] },
+                    Locations: ['/media/new'],
+                    Name: 'New Movies'
+                }),
+                library({
+                    ItemId: undefined,
+                    LibraryOptions: { PathInfos: [{ Path: '/media/new' }] },
+                    Locations: [],
+                    Name: 'New Movies'
+                })
+            ]
+        });
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'movies',
+            locations: ['/media/new'],
+            name: 'New Movies'
+        }, creationOptions())).resolves.toBeNull();
+
+        expect(sdkMocks.getVirtualFolders).toHaveBeenCalledOnce();
+        expect(sdkMocks.addVirtualFolder).not.toHaveBeenCalled();
+    });
+
+    it('treats an absent configured collection type as the same Mixed definition', async () => {
+        const exact = library({
+            CollectionType: undefined,
+            ItemId: undefined,
+            LibraryOptions: { PathInfos: [{ Path: '/media/mixed' }] },
+            Locations: [],
+            Name: 'Mixed'
+        });
+        sdkMocks.getVirtualFolders.mockResolvedValue({ data: [exact] });
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'mixed',
+            locations: ['/media/mixed'],
+            name: 'Mixed'
+        }, creationOptions())).resolves.toBe(exact);
+
+        expect(sdkMocks.getVirtualFolders).toHaveBeenCalledOnce();
+        expect(sdkMocks.addVirtualFolder).not.toHaveBeenCalled();
+    });
+
+    it('reconciles one exact match after a rejected POST without retrying the mutation', async () => {
+        const exact = library({
+            ItemId: 'created-id',
+            LibraryOptions: { PathInfos: [{ Path: '/media/archive' }] },
+            Locations: ['/media/new'],
+            Name: 'New Movies'
+        });
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [
+                library({ ItemId: 'name-decoy', Locations: ['/media/other'], Name: 'New Movies' }),
+                library({ ItemId: 'path-decoy', Locations: ['/media/new', '/media/archive'], Name: 'New Movies Archive' })
+            ] })
+            .mockResolvedValueOnce({ data: [
+                library({ CollectionType: 'music', ItemId: 'type-decoy', Locations: ['/media/new', '/media/archive'], Name: 'New Movies' }),
+                exact
+            ] });
+        sdkMocks.addVirtualFolder.mockRejectedValueOnce(new Error('server returned 500'));
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'movies',
+            locations: ['/media/archive', '/media/new'],
+            name: 'New Movies'
+        }, creationOptions())).resolves.toBe(exact);
+
+        expect(sdkMocks.addVirtualFolder).toHaveBeenCalledOnce();
+        expect(sdkMocks.getVirtualFolders).toHaveBeenCalledTimes(2);
+    });
+
+    it('accepts multiple exact rejected-POST readback matches as unresolved without retrying', async () => {
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [] })
+            .mockResolvedValueOnce({ data: [
+                library({
+                    ItemId: 'match-a',
+                    LibraryOptions: { PathInfos: [{ Path: '/media/new' }] },
+                    Locations: ['/media/new'],
+                    Name: 'New Movies'
+                }),
+                library({
+                    ItemId: 'match-b',
+                    LibraryOptions: { PathInfos: [{ Path: '/media/new' }] },
+                    Locations: ['/media/new'],
+                    Name: 'New Movies'
+                })
+            ] });
+        sdkMocks.addVirtualFolder.mockRejectedValueOnce(new Error('server returned 500'));
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'movies',
+            locations: ['/media/new'],
+            name: 'New Movies'
+        }, creationOptions())).resolves.toBeNull();
+
+        expect(sdkMocks.addVirtualFolder).toHaveBeenCalledOnce();
+        expect(sdkMocks.getVirtualFolders).toHaveBeenCalledTimes(2);
+    });
+
+    it('raises a typed uncertain outcome when rejected-POST readback has no exact match or fails', async () => {
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [] })
+            .mockResolvedValueOnce({ data: [
+                library({ Locations: ['/media/different'], Name: 'New Movies' }),
+                library({ Locations: ['/media/new'], Name: 'New Movies Archive' })
+            ] });
+        sdkMocks.addVirtualFolder.mockRejectedValueOnce(new Error('server returned 500'));
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'movies',
+            locations: ['/media/new'],
+            name: 'New Movies'
+        }, creationOptions())).rejects.toMatchObject({
+            code: 'creation-outcome-uncertain'
+        });
+        expect(sdkMocks.addVirtualFolder).toHaveBeenCalledOnce();
+
+        vi.clearAllMocks();
+        sdkMocks.validatePath.mockResolvedValue({ data: undefined });
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [] })
+            .mockRejectedValueOnce(new Error('list unavailable'));
+        sdkMocks.addVirtualFolder.mockRejectedValueOnce(new Error('server returned 500'));
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'movies',
+            locations: ['/media/new'],
+            name: 'New Movies'
+        }, creationOptions())).rejects.toMatchObject({
+            code: 'creation-outcome-uncertain'
+        });
+        expect(sdkMocks.addVirtualFolder).toHaveBeenCalledOnce();
     });
 
     it('uses an omitted collection type for a Mixed library', async () => {
@@ -395,7 +580,9 @@ describe('administrator libraries service mutations', () => {
     });
 
     it('does not invite a duplicate create when post-create identity discovery is unavailable or ambiguous', async () => {
-        sdkMocks.getVirtualFolders.mockRejectedValueOnce(new Error('list unavailable'));
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [] })
+            .mockRejectedValueOnce(new Error('list unavailable'));
         await expect(createAdminLibrary(api, {
             collectionType: 'movies',
             locations: ['/media/new'],
@@ -406,12 +593,35 @@ describe('administrator libraries service mutations', () => {
         vi.clearAllMocks();
         sdkMocks.addVirtualFolder.mockResolvedValue({ data: undefined });
         sdkMocks.validatePath.mockResolvedValue({ data: undefined });
-        sdkMocks.getVirtualFolders.mockResolvedValue({
-            data: [
-                library({ ItemId: 'new-a', Name: 'New Movies' }),
-                library({ ItemId: 'new-b', Name: 'New Movies' })
-            ]
-        });
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [] })
+            .mockResolvedValueOnce({ data: [
+                library({
+                    ItemId: 'new-a',
+                    LibraryOptions: { PathInfos: [{ Path: '/media/new' }] },
+                    Locations: ['/media/new'],
+                    Name: 'New Movies'
+                }),
+                library({
+                    ItemId: 'new-b',
+                    LibraryOptions: { PathInfos: [{ Path: '/media/new' }] },
+                    Locations: ['/media/new'],
+                    Name: 'New Movies'
+                })
+            ] });
+        await expect(createAdminLibrary(api, {
+            collectionType: 'movies',
+            locations: ['/media/new'],
+            name: 'New Movies'
+        }, creationOptions())).resolves.toBeNull();
+        expect(sdkMocks.addVirtualFolder).toHaveBeenCalledOnce();
+
+        vi.clearAllMocks();
+        sdkMocks.addVirtualFolder.mockResolvedValue({ data: undefined });
+        sdkMocks.validatePath.mockResolvedValue({ data: undefined });
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [] })
+            .mockResolvedValueOnce({ data: [] });
         await expect(createAdminLibrary(api, {
             collectionType: 'movies',
             locations: ['/media/new'],

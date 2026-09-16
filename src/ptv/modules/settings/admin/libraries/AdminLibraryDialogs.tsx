@@ -30,6 +30,7 @@ const COLLECTION_TYPES = [
 ] as const;
 
 const NO_SUGGESTED_PATHS: readonly string[] = [];
+const UNCERTAIN_CREATE_MESSAGE = 'Jellyfin may have created this library, but the result could not be confirmed. Review the Libraries list before trying again.';
 
 function safeLibraryMutationMessage(error: unknown, fallback: string) {
     if (error instanceof AdminLibrariesServiceError) return error.message;
@@ -283,8 +284,10 @@ export function AddAdminLibraryDialog({
     const [ locations, setLocations ] = useState<string[]>([]);
     const [ folderPickerOpen, setFolderPickerOpen ] = useState(false);
     const [ busy, setBusy ] = useState(false);
+    const [ createLocked, setCreateLocked ] = useState(false);
     const [ message, setMessage ] = useState('');
     const busyRef = useRef(false);
+    const createLockedRef = useRef(false);
     const optionsQuery = useAdminLibraryCreationOptions(api, apiClient, collectionType, open);
 
     const clear = useCallback(() => {
@@ -293,8 +296,10 @@ export function AddAdminLibraryDialog({
         setLocations([]);
         setFolderPickerOpen(false);
         setBusy(false);
+        setCreateLocked(false);
         setMessage('');
         busyRef.current = false;
+        createLockedRef.current = false;
     }, []);
     useEffect(() => {
         if (!open) clear();
@@ -310,7 +315,7 @@ export function AddAdminLibraryDialog({
     }, []);
     const submit = useCallback(async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!api || busyRef.current || busy) return;
+        if (!api || busyRef.current || busy || createLockedRef.current || createLocked) return;
         if (!name.trim()) {
             setMessage('Enter a library name.');
             return;
@@ -335,12 +340,22 @@ export function AddAdminLibraryDialog({
             clear();
             onCreated(created?.ItemId || null);
         } catch (error) {
-            setMessage(safeLibraryMutationMessage(error, 'We could not create this library.'));
+            const createOutcomeUncertain = (
+                error instanceof AdminLibrariesServiceError
+                && error.code === 'creation-outcome-uncertain'
+            );
+            if (createOutcomeUncertain) {
+                createLockedRef.current = true;
+                setCreateLocked(true);
+            }
+            setMessage(createOutcomeUncertain ?
+                UNCERTAIN_CREATE_MESSAGE :
+                safeLibraryMutationMessage(error, 'We could not create this library.'));
         } finally {
             busyRef.current = false;
             setBusy(false);
         }
-    }, [api, busy, clear, collectionType, locations, name, onCreated, optionsQuery.data, optionsQuery.isError]);
+    }, [api, busy, clear, collectionType, createLocked, locations, name, onCreated, optionsQuery.data, optionsQuery.isError]);
 
     return (
         <>
@@ -393,7 +408,7 @@ export function AddAdminLibraryDialog({
                 <DialogActions className='ptv-admin-library-dialog-actions'>
                     {optionsQuery.isError && <button disabled={busy} onClick={() => void optionsQuery.refetch()} type='button'>Retry defaults</button>}
                     <button disabled={busy} onClick={close} type='button'>Cancel</button>
-                    <button className='is-primary' disabled={busy || optionsQuery.isPending || optionsQuery.isError} form='ptv-add-library-form' type='submit'>
+                    <button className='is-primary' disabled={busy || createLocked || optionsQuery.isPending || optionsQuery.isError} form='ptv-add-library-form' type='submit'>
                         {busy ? 'Creating…' : 'Create Library'}
                     </button>
                 </DialogActions>
