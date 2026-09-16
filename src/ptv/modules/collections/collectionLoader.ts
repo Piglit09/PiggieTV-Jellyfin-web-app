@@ -220,8 +220,24 @@ export async function loadPtvCollectionDetails(
                 Recursive: true
             }, { signal })
         ]);
+        const members = getItems(membersResult);
+        const directCollection = normalizeJellyfinCollection(raw, members);
 
-        return normalizeJellyfinCollection(raw, getItems(membersResult));
+        if (directCollection) return directCollection;
+
+        const verificationResult = await getPtvItems({
+            EnableImages: true,
+            EnableImageTypes: 'Primary,Backdrop,Thumb,Logo',
+            Fields: COLLECTION_FIELDS,
+            Ids: itemId,
+            ImageTypeLimit: 2,
+            IncludeItemTypes: 'BoxSet',
+            Limit: 1,
+            Recursive: true
+        }, { signal });
+        const verifiedCollection = getItems(verificationResult)[0];
+
+        return verifiedCollection ? normalizeJellyfinCollection(verifiedCollection, members) : null;
     }
 
     const deferred = await loadPtvCollectionDeferred(signal);

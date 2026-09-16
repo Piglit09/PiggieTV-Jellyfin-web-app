@@ -87,7 +87,12 @@ function executePtvItemDetailsRequest<TItem>(
         userId,
         itemId
     ].join(':');
-    const requestKey = getPtvRequestCoordinatorKey('GET', requestIdentity, true);
+    const requestKey = getPtvRequestCoordinatorKey(
+        'GET',
+        requestIdentity,
+        true,
+        `${options.serverId || apiClient?.serverId?.() || ''}:${userId}`
+    );
 
     return coordinatePtvJsonRequest<PtvItemDetailsExecution<TItem>>(requestKey, async signal => {
         let legacyError: unknown;

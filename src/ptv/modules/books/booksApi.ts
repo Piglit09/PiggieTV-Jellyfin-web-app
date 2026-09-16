@@ -7,12 +7,14 @@ import {
     getPtvItems,
     getPtvServerId,
     getPtvUserViews,
+    type PtvItemImageCandidate,
     type PtvItemQuery,
     type PtvLibrary
 } from '../../api';
 import { createPtvAbortController } from '../../core/abortController';
 import { recordPtvEvent, recordPtvTiming, timePtvAsync } from '../../core/observability';
 import {
+    deletePtvLibraryIndexCache,
     deletePtvLibraryIndexCacheByPrefix,
     PTV_LIBRARY_INDEX_CACHE_TTL_MS,
     readPtvLibraryIndexCache,
@@ -45,6 +47,8 @@ import {
     canUsePtvReadingHomeCache,
     isPtvReadingFullHomeCache
 } from './readingCachePolicy';
+import { createPtvReadingMetadataOverlayLifecycle } from './readingMetadataOverlayLifecycle';
+import { getPtvReadingFailedReadCount } from './readingHomeState';
 import type {
     PtvReadingCacheDiagnostic,
     PtvReadingHomeData,
@@ -61,16 +65,45 @@ import type {
 
 type PtvReadingImageType = 'Backdrop' | 'Primary' | 'Thumb';
 
+export type PtvReadingArtworkSurface = 'backdrop' | 'cover';
+
+export type PtvReadingArtworkCandidateKind =
+    | 'backdrop'
+    | 'parent-primary'
+    | 'primary'
+    | 'series-primary'
+    | 'thumb';
+
+export type PtvReadingArtworkCandidate = Readonly<{
+    imageItemId: string;
+    imageType: string;
+    kind: PtvReadingArtworkCandidateKind;
+    requestedType: string;
+    src: string;
+    tag: string;
+}>;
+
+export type PtvReadingArtworkResolution = Readonly<{
+    candidates: readonly PtvReadingArtworkCandidate[];
+    generation: string;
+    surface: PtvReadingArtworkSurface;
+}>;
+
 const READING_SHELF_FIELDS = [
+    'BackdropImageTags',
     'CanDownload',
     'Container',
     'DateCreated',
     'Genres',
     'ImageTags',
     'MediaSources',
+    'ParentBackdropImageTags',
+    'ParentBackdropItemId',
     'ParentId',
     'ParentPrimaryImageItemId',
     'ParentPrimaryImageTag',
+    'ParentThumbImageTag',
+    'ParentThumbItemId',
     'Path',
     'People',
     'PremiereDate',
@@ -78,6 +111,7 @@ const READING_SHELF_FIELDS = [
     'ProductionYear',
     'ProviderIds',
     'SeriesId',
+    'SeriesPrimaryImageTag',
     'SortName',
     'Tags'
 ].join(',');
@@ -88,6 +122,31 @@ const READING_PROBE_FIELDS = [
     'MediaSources',
     'Path',
     'SortName'
+].join(',');
+const READING_LIBRARY_INDEX_FIELDS = [
+    'BackdropImageTags',
+    'Container',
+    'DateCreated',
+    'Genres',
+    'ImageTags',
+    'MediaSources',
+    'ParentBackdropImageTags',
+    'ParentBackdropItemId',
+    'ParentPrimaryImageItemId',
+    'ParentPrimaryImageTag',
+    'ParentThumbImageTag',
+    'ParentThumbItemId',
+    'Path',
+    'People',
+    'PremiereDate',
+    'PrimaryImageAspectRatio',
+    'ProductionYear',
+    'ProviderIds',
+    'SeriesId',
+    'SeriesName',
+    'SeriesPrimaryImageTag',
+    'SortName',
+    'Tags'
 ].join(',');
 
 const READING_HOME_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -110,7 +169,7 @@ const READING_LIBRARY_COUNT_TIMEOUT_MS = 10_000;
 const READING_SHELF_TIMEOUT_MS = 20_000;
 const READING_OPTIONAL_SHELF_TIMEOUT_MS = 7_000;
 const READING_CONTINUE_LIMIT = 12;
-const READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 4;
+const READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 5;
 const READING_HOME_STORAGE_SCHEMA_VERSION = 5;
 const READING_HOME_SCOPE_STORAGE_SCHEMA_VERSION = 1;
 const BOOKS_KEYWORDS = /\b(?:books?|ebooks?|novels?|reader|reading|pdfs?|docs?)\b/i;
@@ -178,6 +237,67 @@ function getCacheKey(kind: PtvReadingRouteKind | 'all' = 'all') {
         getPtvCurrentUserId() || 'user',
         kind
     ].join(':');
+}
+
+const readingMetadataOverlays = createPtvReadingMetadataOverlayLifecycle(() => getCacheKey('all'));
+
+function getReadingMetadataCacheWriteOptions() {
+    return readingMetadataOverlays.getWriteOptions();
+}
+
+export function applyPtvReadingMetadataOverlays(
+    items: PtvReadingItem[],
+    requestMetadataEpoch: number | null = null
+) {
+    return readingMetadataOverlays.apply(items, requestMetadataEpoch);
+}
+
+export function applyPtvReadingMetadataOverlaysToHomeData(
+    homeData: PtvReadingHomeData,
+    requestMetadataEpoch: number | null = null
+) {
+    let changed = false;
+    const sections = homeData.sections.map(section => {
+        const items = applyPtvReadingMetadataOverlays(section.items, requestMetadataEpoch);
+
+        if (items === section.items) return section;
+
+        changed = true;
+        return {
+            ...section,
+            items
+        };
+    });
+
+    if (!changed) return homeData;
+
+    const allItems = uniquePtvReadingItems(sections.reduce<PtvReadingItem[]>(
+        (items, section) => items.concat(section.items),
+        []
+    ));
+
+    return {
+        ...homeData,
+        sections,
+        stats: {
+            ...homeData.stats,
+            metadata: getPtvReadingMetadataStats(allItems)
+        }
+    };
+}
+
+function retirePtvReadingMetadataOverlays(items: PtvReadingItem[], requestMetadataEpoch: number) {
+    readingMetadataOverlays.retire(items, requestMetadataEpoch);
+}
+
+function retirePtvReadingMetadataOverlaysFromHomeData(
+    homeData: PtvReadingHomeData,
+    requestMetadataEpoch: number
+) {
+    retirePtvReadingMetadataOverlays(uniquePtvReadingItems(homeData.sections.reduce<PtvReadingItem[]>(
+        (items, section) => items.concat(section.items),
+        []
+    )), requestMetadataEpoch);
 }
 
 function getReadingHomeCacheKey(
@@ -893,8 +1013,11 @@ function createReadingProgressiveLibraryState(
                 StartIndex: startIndex
             };
             const requestOptions: ReadingItemsRequestOptions = {
-                enableImages: false,
-                fields: READING_PROBE_FIELDS,
+                // Keep the index scoped to fields rendered or searched by cards.
+                // Image identity is required so it cannot downgrade an
+                // authoritative card to a placeholder.
+                enableImages: true,
+                fields: READING_LIBRARY_INDEX_FIELDS,
                 signal,
                 stage: `${library?.name || routeKind} library index page ${Math.floor(startIndex / limit) + 1}`,
                 timeoutMs: READING_SHELF_TIMEOUT_MS
@@ -974,8 +1097,11 @@ function buildPtvReadingLibraryIndex(
     libraryDiagnostics: PtvReadingLibraryDiagnostic[],
     selectedLibraries: PtvReadingLibraryScope[],
     states: PtvReadingProgressiveLibraryState[],
-    startedAt: number,
-    stage: 'background' | 'complete' | 'initial' | 'retired'
+    options: Readonly<{
+        requestMetadataEpoch: number;
+        stage: 'background' | 'complete' | 'initial' | 'retired';
+        startedAt: number;
+    }>
 ): PtvReadingLibraryIndex {
     const snapshots = states.map(state => state.loader.getSnapshot());
     const rawEntries = snapshots.reduce<ScopedReadingItem[]>((items, snapshot) => items.concat(snapshot.items), []);
@@ -984,20 +1110,23 @@ function buildPtvReadingLibraryIndex(
     const duplicateDropCount = Math.max(0, matchedEntries.length - uniqueItems.length);
     const routeFilterDropCount = Math.max(0, rawEntries.length - matchedEntries.length);
     const dropReasons = states.reduce<string[]>((reasons, state) => reasons.concat(state.dropReasons), []);
+    const failedReadCount = dropReasons.length;
 
     if (duplicateDropCount) dropReasons.push(`${routeKind}: ${duplicateDropCount} duplicate item(s) removed`);
     if (routeFilterDropCount) dropReasons.push(`${routeKind}: ${routeFilterDropCount} item(s) excluded by reading kind filter`);
 
-    const sortedItems = [...uniqueItems].sort(byTitle);
+    retirePtvReadingMetadataOverlays(uniqueItems, options.requestMetadataEpoch);
+    const sortedItems = [...applyPtvReadingMetadataOverlays(uniqueItems, options.requestMetadataEpoch)].sort(byTitle);
     const totalRecordCount = snapshots.reduce((total, snapshot) => total + snapshot.totalRecordCount, 0);
     const isComplete = snapshots.length > 0 && snapshots.every(snapshot => snapshot.isComplete);
-    let resolvedStage = stage;
+    let resolvedStage = options.stage;
 
-    if (stage === 'retired') resolvedStage = 'retired';
+    if (options.stage === 'retired') resolvedStage = 'retired';
     else if (isComplete) resolvedStage = 'complete';
     const debug: PtvReadingLibraryDebug = {
         dropReasons,
         droppedItemCount: duplicateDropCount + routeFilterDropCount,
+        failedReadCount,
         fetchedItemCount: sortedItems.length,
         indexAccumulatedCount: sortedItems.length,
         indexIsComplete: isComplete,
@@ -1011,11 +1140,11 @@ function buildPtvReadingLibraryIndex(
         pageCount: snapshots.reduce((total, snapshot) => total + snapshot.pageCount, 0),
         pageSize: READING_LIBRARY_PAGE_SIZE,
         readingLibraryNames: selectedLibraries.map(library => library.name),
-        requestDurationMs: Number((performance.now() - startedAt).toFixed(1)),
+        requestDurationMs: Number((performance.now() - options.startedAt).toFixed(1)),
         routeKind,
         selectedReadingLibraryIds: selectedLibraries.map(library => library.id),
         sectionDiagnostics: [],
-        statusCode: dropReasons.length ? null : 200,
+        statusCode: failedReadCount ? null : 200,
         totalRecordCountFromApi: totalRecordCount
     };
 
@@ -1038,6 +1167,7 @@ export async function fetchPtvReadingLibraryIndex(
     throwIfReadingAborted(options.signal);
 
     const startedAt = performance.now();
+    const requestMetadataEpoch = readingMetadataOverlays.getEpoch();
     const cacheKey = getReadingLibraryIndexCacheKey(routeKind);
 
     if (!options.forceRefresh) {
@@ -1053,7 +1183,8 @@ export async function fetchPtvReadingLibraryIndex(
                 debug: {
                     ...cachedIndex.debug,
                     indexStage: 'cache'
-                }
+                },
+                items: applyPtvReadingMetadataOverlays(cachedIndex.items)
             };
         }
     }
@@ -1110,18 +1241,22 @@ export async function fetchPtvReadingLibraryIndex(
         discovery.diagnostics,
         selectedLibraries,
         states,
-        startedAt,
-        isCurrent() ? 'initial' : 'retired'
+        {
+            requestMetadataEpoch,
+            stage: isCurrent() ? 'initial' : 'retired',
+            startedAt
+        }
     );
 
     recordPtvEvent('api', 'reading-library-index-loaded', index.debug);
 
-    if (isCurrent() && index.debug.indexIsComplete && (index.items.length || !index.debug.dropReasons.length)) {
+    if (isCurrent() && index.debug.indexIsComplete && (index.items.length || !getPtvReadingFailedReadCount(index.debug))) {
         await writePtvLibraryIndexCache(
             cacheKey,
             READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION,
             index,
-            PTV_LIBRARY_INDEX_CACHE_TTL_MS
+            PTV_LIBRARY_INDEX_CACHE_TTL_MS,
+            getReadingMetadataCacheWriteOptions()
         );
     } else if (isCurrent()) {
         void (async () => {
@@ -1147,8 +1282,11 @@ export async function fetchPtvReadingLibraryIndex(
                     discovery.diagnostics,
                     selectedLibraries,
                     states,
-                    startedAt,
-                    'background'
+                    {
+                        requestMetadataEpoch,
+                        stage: 'background',
+                        startedAt
+                    }
                 );
 
                 options.onProgress?.(progressIndex);
@@ -1162,12 +1300,13 @@ export async function fetchPtvReadingLibraryIndex(
                 });
 
                 if (progressIndex.debug.indexIsComplete) {
-                    if (progressIndex.items.length || !progressIndex.debug.dropReasons.length) {
+                    if (progressIndex.items.length || !getPtvReadingFailedReadCount(progressIndex.debug)) {
                         await writePtvLibraryIndexCache(
                             cacheKey,
                             READING_LIBRARY_INDEX_CACHE_SCHEMA_VERSION,
                             progressIndex,
-                            PTV_LIBRARY_INDEX_CACHE_TTL_MS
+                            PTV_LIBRARY_INDEX_CACHE_TTL_MS,
+                            getReadingMetadataCacheWriteOptions()
                         );
                     }
 
@@ -1195,15 +1334,58 @@ export async function fetchPtvReadingLibraryIndex(
     return index;
 }
 
-export function invalidatePtvReadingHomeCache() {
-    readingLibraryIndexGenerations.clear();
+export function invalidatePtvReadingMetadataCache(item?: PtvReadingItem) {
+    readingMetadataOverlays.record(item);
+
+    if (item?.Id) {
+        const itemKind = getPtvReadingItemKind(item);
+        const affectedRoutes: PtvReadingRouteKind[] = [ 'reading', 'books' ];
+
+        if (itemKind === 'manga') affectedRoutes.push('manga');
+        if (itemKind === 'comic') affectedRoutes.push('comics');
+
+        let clearedHomeEntryCount = 0;
+
+        try {
+            clearedHomeEntryCount = clearPtvLocalStorageByPrefix(affectedRoutes.flatMap(routeKind => [
+                `ptv:reading-home:${getCacheKey(routeKind)}:`,
+                `ptv:reading-home:scope:${getCacheKey(routeKind)}:`
+            ]));
+        } catch {
+            recordPtvEvent('cache', 'reading-metadata-home-cache-invalidation-failed', {
+                itemKind,
+                routeCount: affectedRoutes.length
+            });
+        }
+
+        affectedRoutes.forEach(routeKind => {
+            void deletePtvLibraryIndexCache(getReadingLibraryIndexCacheKey(routeKind)).catch(() => {
+                recordPtvEvent('cache', 'reading-metadata-index-cache-invalidation-failed', {
+                    routeKind
+                });
+            });
+        });
+        recordPtvEvent('cache', 'reading-metadata-persistent-cache-invalidated', {
+            clearedHomeEntryCount,
+            itemKind,
+            routeCount: affectedRoutes.length
+        });
+        return;
+    }
+
     readingHomeCache.clear();
     readingHomeSummaryCache.clear();
-    readingLibraryCache.clear();
-    readingLibraryResolutionRequests.clear();
     readingRecentlyAddedRequestCache.clear();
     clearStoredReadingHomeCache();
     void deletePtvLibraryIndexCacheByPrefix(getReadingLibraryIndexCachePrefix());
+}
+
+export function invalidatePtvReadingHomeCache() {
+    readingLibraryIndexGenerations.clear();
+    readingLibraryCache.clear();
+    readingLibraryResolutionRequests.clear();
+    readingMetadataOverlays.clear();
+    invalidatePtvReadingMetadataCache();
 }
 
 export async function getPtvReadingLibraries(
@@ -1508,7 +1690,13 @@ export function getPtvReadingGenres(item?: PtvReadingItem | null): string[] {
 }
 
 export function getPtvReadingStableId(item: PtvReadingItem | null | undefined) {
-    if (item?.Id) return `jellyfin:${item.ServerId || 'default'}:${item.Id}`;
+    if (item?.Id) {
+        const serverId = item.ServerId
+            || (typeof item.serverId === 'string' ? item.serverId : '')
+            || 'default';
+
+        return `jellyfin:${serverId}:${item.Id}`;
+    }
 
     return `source:${item?.Path || item?.Name || 'unknown'}`;
 }
@@ -1517,69 +1705,210 @@ export function getPtvReadingImagePlaceholder() {
     return READING_PLACEHOLDER_IMAGE;
 }
 
+const READING_COVER_ARTWORK_ORDER = [
+    'Primary',
+    'ParentPrimary',
+    'Thumb',
+    'SeriesPrimary'
+] as const;
+const READING_BACKDROP_ARTWORK_ORDER = [
+    'Backdrop',
+    'Primary',
+    'ParentPrimary',
+    'Thumb',
+    'SeriesPrimary'
+] as const;
+const READING_THUMB_ARTWORK_ORDER = [
+    'Thumb',
+    'Primary',
+    'ParentPrimary',
+    'SeriesPrimary'
+] as const;
+
+type PtvReadingArtworkRequestType = typeof READING_BACKDROP_ARTWORK_ORDER[number];
+
+function getReadingArtworkCandidateKind(
+    candidate: PtvItemImageCandidate
+): PtvReadingArtworkCandidateKind {
+    switch (candidate.requestedType) {
+        case 'Backdrop':
+            return 'backdrop';
+        case 'ParentPrimary':
+            return 'parent-primary';
+        case 'SeriesPrimary':
+            return 'series-primary';
+        case 'Thumb':
+            return 'thumb';
+        case 'Primary':
+        default:
+            return 'primary';
+    }
+}
+
+function getCachedReadingArtworkCandidate(
+    candidate: PtvItemImageCandidate,
+    options: Readonly<{
+        fillHeight: number;
+        fillWidth: number;
+        preferredImageType: PtvReadingImageType;
+        quality: number;
+        resolvedServerId: string;
+        semanticProfile: string;
+        surface: PtvReadingArtworkSurface;
+    }>
+): PtvReadingArtworkCandidate {
+    const cacheKey = JSON.stringify([
+        options.resolvedServerId,
+        candidate.imageItemId,
+        candidate.imageType,
+        candidate.requestedType,
+        candidate.tag,
+        options.surface,
+        options.semanticProfile,
+        options.fillWidth,
+        options.fillHeight,
+        options.quality
+    ]);
+    const cachedUrl = readingImageUrlCache.get(cacheKey);
+    const src = cachedUrl || candidate.url;
+
+    if (cachedUrl) {
+        recordPtvEvent('image', 'reading-image-profile-cache-hit', {
+            imageProfile: options.semanticProfile,
+            preferredImageType: options.preferredImageType,
+            surface: options.surface
+        });
+    } else {
+        readingImageUrlCache.set(cacheKey, candidate.url);
+        recordPtvEvent('image', 'reading-image-profile-requested', {
+            duplicateImageTransformPrevented: false,
+            imageProfile: options.semanticProfile,
+            largestRequestedDimension: options.preferredImageType === 'Backdrop' ?
+                options.fillWidth : options.fillHeight,
+            preferredImageType: options.preferredImageType,
+            surface: options.surface
+        });
+    }
+
+    return {
+        imageItemId: candidate.imageItemId,
+        imageType: candidate.imageType,
+        kind: getReadingArtworkCandidateKind(candidate),
+        requestedType: candidate.requestedType,
+        src,
+        tag: candidate.tag
+    };
+}
+
+function resolvePtvReadingArtwork(
+    item: PtvReadingItem | null | undefined,
+    size: number,
+    surface: PtvReadingArtworkSurface,
+    preferredImageType: PtvReadingImageType,
+    order: readonly PtvReadingArtworkRequestType[]
+): PtvReadingArtworkResolution {
+    if (!item) {
+        return {
+            candidates: [],
+            generation: JSON.stringify([ surface, 'missing-item' ]),
+            surface
+        };
+    }
+
+    const canonicalSize = getReadingCanonicalImageSize(size, preferredImageType);
+    const semanticProfile = getReadingImageSemanticProfile(canonicalSize, preferredImageType);
+    const resolvedServerId = item.ServerId
+        || (typeof item.serverId === 'string' ? item.serverId : '')
+        || getPtvServerId()
+        || '';
+    const fillHeight = preferredImageType === 'Backdrop' ?
+        Math.round(canonicalSize * 0.56) :
+        Math.round(canonicalSize * 1.5);
+    const fillWidth = canonicalSize;
+    const quality = 84;
+    const candidates = getPtvItemImageCandidates(item, {
+        baseOptions: {
+            fillHeight,
+            fillWidth,
+            quality,
+            serverId: resolvedServerId || undefined
+        },
+        order: [...order]
+    }).filter(candidate => Boolean(candidate.tag && candidate.url))
+        .map(candidate => getCachedReadingArtworkCandidate(candidate, {
+            fillHeight,
+            fillWidth,
+            preferredImageType,
+            quality,
+            resolvedServerId,
+            semanticProfile,
+            surface
+        }));
+    const generation = JSON.stringify([
+        resolvedServerId,
+        item.Id || '',
+        surface,
+        semanticProfile,
+        fillWidth,
+        fillHeight,
+        ...candidates.flatMap(candidate => [
+            candidate.kind,
+            candidate.imageItemId,
+            candidate.imageType,
+            candidate.tag,
+            candidate.src
+        ])
+    ]);
+
+    return { candidates, generation, surface };
+}
+
+export function getPtvReadingArtworkResolution(
+    item: PtvReadingItem | null | undefined,
+    size = 420,
+    surface: PtvReadingArtworkSurface = 'cover'
+): PtvReadingArtworkResolution {
+    if (surface === 'backdrop') {
+        return resolvePtvReadingArtwork(
+            item,
+            size,
+            surface,
+            'Backdrop',
+            READING_BACKDROP_ARTWORK_ORDER
+        );
+    }
+
+    return resolvePtvReadingArtwork(
+        item,
+        size,
+        surface,
+        'Primary',
+        READING_COVER_ARTWORK_ORDER
+    );
+}
+
 export function getPtvReadingImageUrl(
     item: PtvReadingItem | null | undefined,
     size = 420,
     preferredImageType: PtvReadingImageType = 'Primary'
 ) {
-    if (!item) return READING_PLACEHOLDER_IMAGE;
+    let resolution: PtvReadingArtworkResolution;
 
-    const canonicalSize = getReadingCanonicalImageSize(size, preferredImageType);
-    const semanticProfile = getReadingImageSemanticProfile(canonicalSize, preferredImageType);
-    const imageTag = preferredImageType === 'Backdrop' ?
-        item.BackdropImageTags?.[0] || item.ImageTags?.Primary || item.ParentPrimaryImageTag || '' :
-        item.ImageTags?.Primary || item.ParentPrimaryImageTag || '';
-    const cacheKey = [
-        item.Id || item.Name || item.Path || 'unknown',
-        imageTag,
-        preferredImageType,
-        semanticProfile,
-        canonicalSize
-    ].join(':');
-    const cachedUrl = readingImageUrlCache.get(cacheKey);
+    if (preferredImageType === 'Thumb') {
+        resolution = resolvePtvReadingArtwork(
+            item,
+            size,
+            'cover',
+            preferredImageType,
+            READING_THUMB_ARTWORK_ORDER
+        );
+    } else {
+        const surface = preferredImageType === 'Backdrop' ? 'backdrop' : 'cover';
 
-    if (cachedUrl) {
-        recordPtvEvent('image', 'reading-image-profile-cache-hit', {
-            imageProfile: semanticProfile,
-            preferredImageType
-        });
-
-        return cachedUrl;
+        resolution = getPtvReadingArtworkResolution(item, size, surface);
     }
 
-    let order: Array<'Primary' | 'Thumb' | 'Backdrop' | 'SeriesPrimary' | 'ParentPrimary'> = ['Primary', 'ParentPrimary', 'Thumb', 'Backdrop'];
-
-    if (preferredImageType === 'Backdrop') {
-        order = ['Backdrop', 'Primary', 'ParentPrimary', 'Thumb'];
-    } else if (preferredImageType === 'Thumb') {
-        order = ['Thumb', 'Primary', 'ParentPrimary', 'Backdrop'];
-    }
-
-    const candidates = getPtvItemImageCandidates(item, {
-        baseOptions: {
-            fillHeight: preferredImageType === 'Backdrop' ? Math.round(canonicalSize * 0.56) : Math.round(canonicalSize * 1.5),
-            fillWidth: canonicalSize,
-            quality: 84
-        },
-        order
-    });
-    const taggedCandidate = candidates.find(candidate => candidate.tag);
-
-    if (taggedCandidate?.url) {
-        readingImageUrlCache.set(cacheKey, taggedCandidate.url);
-        recordPtvEvent('image', 'reading-image-profile-requested', {
-            duplicateImageTransformPrevented: false,
-            imageProfile: semanticProfile,
-            itemId: item.Id || null,
-            largestRequestedDimension: preferredImageType === 'Backdrop' ? canonicalSize : Math.round(canonicalSize * 1.5),
-            preferredImageType
-        });
-
-        return taggedCandidate.url;
-    }
-
-    readingImageUrlCache.set(cacheKey, READING_PLACEHOLDER_IMAGE);
-    return READING_PLACEHOLDER_IMAGE;
+    return resolution.candidates[0]?.src || READING_PLACEHOLDER_IMAGE;
 }
 
 function getReadingCanonicalImageSize(size: number, preferredImageType: 'Backdrop' | 'Primary' | 'Thumb') {
@@ -1720,7 +2049,7 @@ export function mergePtvReadingLibraryIndex(
         return homeData;
     }
 
-    if (!libraryIndex.items.length && libraryIndex.debug.dropReasons.length && existingItems.length) {
+    if (!libraryIndex.items.length && getPtvReadingFailedReadCount(libraryIndex.debug) && existingItems.length) {
         const existingItemCount = existingItems.length;
         const previousDebug = homeData.libraryDebug;
         const dropReasons = [...new Set([
@@ -1736,6 +2065,7 @@ export function mergePtvReadingLibraryIndex(
                 ...(previousDebug || libraryIndex.debug),
                 dropReasons,
                 droppedItemCount: Math.max(previousDebug?.droppedItemCount || 0, libraryIndex.debug.droppedItemCount),
+                failedReadCount: Math.max(previousDebug?.failedReadCount || 0, libraryIndex.debug.failedReadCount || 0),
                 fetchedItemCount: Math.max(previousDebug?.fetchedItemCount || 0, existingItemCount),
                 jellyfinItemTotal: Math.max(previousDebug?.jellyfinItemTotal || 0, libraryIndex.debug.jellyfinItemTotal, existingItemCount),
                 jellyfinRouteItemTotal: Math.max(previousDebug?.jellyfinRouteItemTotal || 0, libraryIndex.debug.jellyfinRouteItemTotal, existingItemCount),
@@ -2269,6 +2599,7 @@ function buildReadingLibraryDebug(
             return `${label}: ${diagnostic.error}`;
         }),
         droppedItemCount: 0,
+        failedReadCount: failedDiagnostics.length,
         fetchedItemCount: allItems.length,
         indexAccumulatedCount: allItems.length,
         indexIsComplete: allItems.length >= routeItemTotal,
@@ -2333,7 +2664,9 @@ export function getPtvReadingHome(
             source: 'reading-memory-full'
         });
 
-        return Promise.resolve(withCacheDiagnostic(fullCached.data, cacheDiagnostics));
+        return Promise.resolve(applyPtvReadingMetadataOverlaysToHomeData(
+            withCacheDiagnostic(fullCached.data, cacheDiagnostics)
+        ));
     }
 
     if (canUseKnownCache && cached && cached.expiresAt > Date.now() && (options.initialOnly || isPtvReadingFullHomeCache(cached.data))) {
@@ -2353,7 +2686,9 @@ export function getPtvReadingHome(
             sectionCount: cached.data.sections.length
         });
 
-        return Promise.resolve(withCacheDiagnostic(cached.data, cacheDiagnostics));
+        return Promise.resolve(applyPtvReadingMetadataOverlaysToHomeData(
+            withCacheDiagnostic(cached.data, cacheDiagnostics)
+        ));
     }
 
     if (canUseKnownCache) {
@@ -2373,7 +2708,7 @@ export function getPtvReadingHome(
                 staleHit: Boolean(storedData.cacheDiagnostics?.staleHit)
             });
 
-            return Promise.resolve(storedData);
+            return Promise.resolve(applyPtvReadingMetadataOverlaysToHomeData(storedData));
         }
     }
 
@@ -2381,6 +2716,7 @@ export function getPtvReadingHome(
         initialOnly: Boolean(options.initialOnly),
         kind: routeKind
     });
+    const requestMetadataEpoch = readingMetadataOverlays.getEpoch();
 
     return timePtvAsync('api', 'reading-api-loaded', async () => {
         throwIfReadingAborted(options.signal);
@@ -2425,7 +2761,9 @@ export function getPtvReadingHome(
                     resumedCount: 0
                 }
             };
-            const cachedData = withCacheDiagnostic(data, getCacheDiagnostic('refresh', 'jellyfin-initial', data, {
+            retirePtvReadingMetadataOverlaysFromHomeData(data, requestMetadataEpoch);
+            const overlaidData = applyPtvReadingMetadataOverlaysToHomeData(data, requestMetadataEpoch);
+            const cachedData = withCacheDiagnostic(overlaidData, getCacheDiagnostic('refresh', 'jellyfin-initial', overlaidData, {
                 cacheKey,
                 refreshDurationMs: requestDurationMs
             }));
@@ -2537,7 +2875,9 @@ export function getPtvReadingHome(
                 resumedCount: continueReadingSection.items.length
             }
         };
-        const cachedData = withCacheDiagnostic(data, getCacheDiagnostic('refresh', 'jellyfin-background', data, {
+        retirePtvReadingMetadataOverlaysFromHomeData(data, requestMetadataEpoch);
+        const overlaidData = applyPtvReadingMetadataOverlaysToHomeData(data, requestMetadataEpoch);
+        const cachedData = withCacheDiagnostic(overlaidData, getCacheDiagnostic('refresh', 'jellyfin-background', overlaidData, {
             cacheKey,
             refreshDurationMs: requestDurationMs
         }));

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import Events from '../../../utils/events';
 
 import {
     getPtvCurrentUser,
@@ -21,6 +22,14 @@ import {
     getPtvFeaturedRowConfigHash,
     type FeaturedPayload
 } from '../../modules/cache/featuredContentCache';
+import {
+    getPtvFeaturedPayloadItemIds,
+    reconcilePtvFeaturedPayloadForUser
+} from './featuredPayloadIdentity';
+import {
+    createConfiguredRowAssociationResolver,
+    type ConfiguredRowAssociationResult
+} from './configuredRowAssociation';
 import { summarizeFeaturedContentPayload } from '../../modules/cache/featuredContentSemantics';
 import { getPtvQualityTags } from '../../modules/cards/qualityTags';
 import type {
@@ -47,7 +56,7 @@ import {
     setPtvShellError,
     setPtvShellLoading
 } from '../../shell/foundation';
-import { PtvIdentityScopedCache } from '../../services/displayIdentity';
+import { getPtvDisplayIdentityKey, PtvIdentityScopedCache } from '../../services/displayIdentity';
 import { buildNativeHomeProfile } from './services/homeProfileService';
 import {
     decideNativeHomeModelReplacement,
@@ -61,6 +70,19 @@ import {
     type NativeHomeAdaptiveDebug
 } from './services/homeLayoutService';
 import { resolveNativeHomeDerivedRowSourceValue } from './rowSourceValue';
+import {
+    beginConfiguredRowVerification,
+    getConfiguredRowFreshnessSnapshot,
+    getConfiguredRowProofAuthority,
+    isConfiguredRowPresentationCurrent,
+    isConfiguredPayloadVerified,
+    isConfiguredSectionVerified,
+    readConfiguredPresentationAuthority,
+    retireConfiguredRowFreshness,
+    subscribeConfiguredRowFreshness,
+    verifyConfiguredRowFreshness,
+    type ConfiguredRowProof
+} from './configuredRowFreshness';
 
 export type NativeHomeRowKind = 'items' | 'libraries';
 export type NativeHomeRowSource = 'adaptive-today' | 'because-you-watched' | 'continue-listening' | 'continue-reading' | 'featured-cache' | 'featured-endpoint' | 'libraries' | 'next-up' | 'recently-added' | 'recommendation' | 'resume';
@@ -101,6 +123,7 @@ export type NativeHomeRowDiagnostics = {
 };
 
 export type NativeHomeRow = {
+    configuredPresentationAuthority?: string;
     accepted?: boolean;
     adaptivePriorityScore?: number;
     adaptiveReason?: string;
@@ -160,6 +183,8 @@ export type NativeHomeState = {
     error: string | null;
     heroItem: PtvItem | null;
     heroItems: PtvItem[];
+    independentHeroItems?: PtvItem[];
+    configuredHeroAuthorities?: Record<string, string>;
     isLoading: boolean;
     rows: NativeHomeRow[];
     user: PtvUser | null;
@@ -188,6 +213,55 @@ export type NativeHomePerformanceDebug = {
 };
 
 const lastUsableNativeHomeStates = new PtvIdentityScopedCache<NativeHomeState>(4);
+const FEATURED_IDENTITY_ITEM_LIMIT = 120;
+const FEATURED_IDENTITY_BATCH_SIZE = FEATURED_IDENTITY_ITEM_LIMIT;
+const FEATURED_IDENTITY_MAX_CONCURRENCY = 1;
+
+export function retireNativeHomeIdentityState(serverId: unknown, userId: unknown) {
+    return lastUsableNativeHomeStates.delete(serverId, userId);
+}
+
+async function revalidateFeaturedPayloadForIdentity(
+    payload: FeaturedPayload | null,
+    options: {
+        serverId: string;
+        signal: AbortSignal;
+        userId: string;
+    }
+) {
+    if (!payload || !options.serverId || !options.userId) return null;
+
+    const ids = getPtvFeaturedPayloadItemIds(payload, FEATURED_IDENTITY_ITEM_LIMIT);
+    if (!ids.length) return payload;
+
+    const batches = Array.from(
+        { length: Math.ceil(ids.length / FEATURED_IDENTITY_BATCH_SIZE) },
+        (_, index) => ids.slice(
+            index * FEATURED_IDENTITY_BATCH_SIZE,
+            (index + 1) * FEATURED_IDENTITY_BATCH_SIZE
+        )
+    );
+    const currentItems: PtvItem[] = [];
+
+    for (let index = 0; index < batches.length; index += FEATURED_IDENTITY_MAX_CONCURRENCY) {
+        if (options.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+        const results = await Promise.all(
+            batches
+                .slice(index, index + FEATURED_IDENTITY_MAX_CONCURRENCY)
+                .map(batch => getPtvItems<PtvItem>({
+                    Fields: ITEM_FIELDS,
+                    Ids: batch.join(','),
+                    Limit: batch.length
+                }, options))
+        );
+        results.forEach(result => {
+            currentItems.push(...(result.Items || []));
+        });
+    }
+
+    return reconcilePtvFeaturedPayloadForUser(payload, currentItems);
+}
 
 const ITEM_FIELDS = [
     'Overview',
@@ -200,9 +274,6 @@ const ITEM_FIELDS = [
     'Container',
     'Height',
     'LocationType',
-    'MediaSourceCount',
-    'MediaSources',
-    'MediaStreams',
     'MediaType',
     'ParentId',
     'Album',
@@ -218,7 +289,6 @@ const ITEM_FIELDS = [
     'ParentPrimaryImageTag',
     'ParentThumbImageTag',
     'ParentThumbItemId',
-    'Path',
     'ProductionYear',
     'ProviderIds',
     'DateCreated',
@@ -282,6 +352,7 @@ function getEmptyRecommendationScoreDistribution(): PtvRecommendationScoreDistri
     };
 }
 const NATIVE_HOME_CRITICAL_FETCH_TIMEOUT_MS = 1800;
+const NATIVE_HOME_FEATURED_ADOPTION_TIMEOUT_MS = 900;
 const NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS = 2600;
 const NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS = 3200;
 
@@ -307,7 +378,9 @@ type NativeHomeStudioRowTarget = {
 };
 
 type PtvRowsEndpointSettings = {
+    currentPresentationAuthority?: unknown;
     categories?: unknown[];
+    configuredRowAssociations?: unknown;
     enableConfiguredRows?: boolean;
     defaultsInitialized?: boolean;
     enableRecommendedRows?: boolean;
@@ -919,6 +992,7 @@ function normalizeFeaturedPayloadShape(value: unknown): FeaturedPayload | null {
     }
 
     return {
+        currentPresentationAuthority: readConfiguredPresentationAuthority(value) || undefined,
         heroItems: Array.isArray(value.heroItems) ? value.heroItems : [],
         recommendationConfigHash: typeof value.recommendationConfigHash === 'string' && value.recommendationConfigHash.trim() ? value.recommendationConfigHash.trim() : undefined,
         rowConfigApplied: typeof value.rowConfigApplied === 'boolean' ? value.rowConfigApplied : undefined,
@@ -974,7 +1048,7 @@ function shouldRenderConfiguredRows(settings: PtvRowsEndpointSettings | null) {
     return shouldUseSavedRowRules(settings);
 }
 
-function getRowsEndpointSettingsHash(settings: PtvRowsEndpointSettings | null) {
+export function getRowsEndpointSettingsHash(settings: PtvRowsEndpointSettings | null) {
     if (!settings || !Array.isArray(settings.rules)) return '';
 
     const hashableSettings = {
@@ -992,6 +1066,10 @@ function getRowsEndpointSettingsHash(settings: PtvRowsEndpointSettings | null) {
             subgenreRowCount: 0
         }))
     };
+
+    // Response-only association is not part of the legacy persisted settings hash.
+    delete hashableSettings.configuredRowAssociations;
+    delete hashableSettings.currentPresentationAuthority;
 
     return getPtvFeaturedRowConfigHash(hashableSettings);
 }
@@ -1014,8 +1092,12 @@ function areRecommendationsEnabled(settings: PtvRowsEndpointSettings | null) {
 
 function isFeaturedPayloadCurrentForRows(
     featuredPayload: FeaturedPayload | null,
-    rowSettings: PtvRowsEndpointSettings | null
+    rowSettings: PtvRowsEndpointSettings | null,
+    configuredProof?: ConfiguredRowProof | null
 ) {
+    // SEC-01 intentionally removes private persisted configuration hashes.
+    // Only the new final-read proof may replace that legacy presentation check.
+    if (isConfiguredPayloadVerified(featuredPayload, configuredProof)) return true;
     const payloadHash = featuredPayload?.rowConfigHash?.trim();
     const settingsHash = getRowsEndpointSettingsHash(rowSettings);
     const payloadRecommendationHash = featuredPayload?.recommendationConfigHash?.trim();
@@ -1076,6 +1158,9 @@ function normalizeSectionRowType(value: string): NativeHomeRowType | null {
 
 function getSectionRowType(section: unknown): NativeHomeRowType {
     if (!isRecord(section)) return 'fallback';
+    if (getSectionRuleId(section) || Object.keys(section).some(key => /configured.*(?:association|authority)/i.test(key))) {
+        return 'configured-rule';
+    }
 
     const explicitType = normalizeSectionRowType(getRecordString(section, 'rowType', 'RowType'));
 
@@ -1521,6 +1606,45 @@ function expandNativeHomeStudioRows(
     return Promise.all(rows.map(row => expandNativeHomeStudioRow(row, userId, studioMap, signal)));
 }
 
+function createNativeHomeFeaturedRowResults(
+    featuredPayload: FeaturedPayload | null,
+    featuredEndpointPayload: FeaturedPayload | null,
+    rowSettings: PtvRowsEndpointSettings | null,
+    userId: string,
+    options: NativeRowFetchOptions,
+    configuredProof?: ConfiguredRowProof | null
+) {
+    const createResults = (studioMap: Map<string, string>) => ({
+        cachedRowsResult: createRowsFromFeaturedPayload(featuredPayload, {
+            configuredProof,
+            rowSettings,
+            source: 'featured-cache',
+            studioMap
+        }),
+        endpointRowsResult: createRowsFromFeaturedPayload(featuredEndpointPayload, {
+            configuredProof,
+            rowSettings,
+            source: 'featured-endpoint',
+            studioMap
+        }),
+        studioMap
+    });
+    const initialResults = createResults(new Map<string, string>());
+    const hasStudioRows = [
+        ...initialResults.cachedRowsResult.rows,
+        ...initialResults.endpointRowsResult.rows
+    ].some(row => isNativeHomeStudioSource(row.sourceType));
+
+    if (!hasStudioRows) return Promise.resolve(initialResults);
+
+    return createNativeRowFetch(
+        'native-home-studio-map',
+        signal => loadNativeHomeStudioMap(userId, signal),
+        new Map<string, string>(),
+        options
+    ).then(createResults);
+}
+
 function isRuleMatchForSection(
     rule: PtvRowBuilderRule,
     sectionRuleId: string
@@ -1816,7 +1940,7 @@ function finalizeNativeHomeRows(stage: string, rows: NativeHomeRow[]) {
     return rowsWithReasons.filter(row => !row.filteredReason);
 }
 
-async function fetchRowsEndpointSettings(signal?: AbortSignal): Promise<PtvRowsEndpointSettings | null> {
+export async function fetchRowsEndpointSettings(signal?: AbortSignal): Promise<PtvRowsEndpointSettings | null> {
     const currentUser = await getPtvCurrentUser(undefined, signal).catch(() => null);
 
     if (!isPtvAdminUser(currentUser)) {
@@ -2053,6 +2177,27 @@ function createRows(
     return finalizeNativeHomeRows('planner-candidate:jellyfin-api', systemRows);
 }
 
+function mergeNativeHomeResumeRow(
+    rows: NativeHomeRow[],
+    resumeItems: PtvItem[],
+    rowSettings: PtvRowsEndpointSettings | null
+) {
+    const resumeRows = createRows(resumeItems, [], [], [], rowSettings)
+        .filter(row => row.id === 'resume');
+
+    return orderFocusedNativeHomeRows([
+        ...resumeRows,
+        ...rows
+    ]);
+}
+
+function getNativeHomeSupplementalCachedRows(
+    cachedRows: NativeHomeRow[],
+    fallbackRows: NativeHomeRow[]
+) {
+    return cachedRows.length ? cachedRows : fallbackRows;
+}
+
 function getEmptyRecommendationDebug(): PtvRecommendationSurfaceDebug {
     return {
         duplicateItemsRemoved: 0,
@@ -2076,54 +2221,14 @@ function createUserSpecificRecommendationRows(rowSettings: PtvRowsEndpointSettin
     const settingsHash = getRecommendationRowsSettingsHash(rowSettings);
     const settingsRows = getRecommendationSettingsRows(rowSettings);
 
-    if (!settingsRows.length) {
-        recordPtvEvent('recommendation', 'native-home-recommendation-settings-empty', {
-            enabled: areRecommendationsEnabled(rowSettings),
-            recommendationConfigHash: settingsHash || null,
-            savedRowCount: rowSettings?.recommendations?.rows?.length || 0
-        });
+    recordPtvEvent('recommendation', 'native-home-persisted-recommendations-retired', {
+        enabled: areRecommendationsEnabled(rowSettings),
+        reason: 'identity-scoped-engine-required',
+        recommendationConfigHash: settingsHash || null,
+        savedRowCount: settingsRows.length
+    });
 
-        return [];
-    }
-
-    return settingsRows.map((row, index) => {
-        const rawItems = row.items as unknown as PtvItem[];
-        const items = dedupeNativeHomeRecommendationItems(rawItems);
-        const localDedupeRemovals = Math.max(0, rawItems.length - items.length);
-        const diagnostics = row.diagnostics;
-        const configHash = row.recommendationConfigHash || settingsHash || undefined;
-        const rowConfigHash = row.rowConfigHash || rowSettings?.recommendations?.rowConfigHash || undefined;
-
-        return {
-            accepted: true,
-            cacheHash: configHash,
-            candidateCount: diagnostics?.candidateCount ?? rawItems.length,
-            configHash,
-            dedupeRemovals: (diagnostics?.dedupeRemovals || 0) + localDedupeRemovals,
-            enabled: row.enabled !== false,
-            finalRenderedCount: diagnostics?.finalRenderedCount ?? items.length,
-            generatedAt: row.generatedAt ?? rowSettings?.recommendations?.generatedAt ?? null,
-            hydrationRemovals: diagnostics?.hydrationRemovals ?? 0,
-            id: row.id,
-            items,
-            kind: 'items' as const,
-            mediaType: row.mediaType,
-            persisted: true,
-            recommendationConfigHash: configHash,
-            renderedSource: 'recommendation-settings' as const,
-            rowConfigHash,
-            rowType: 'generated-recommendation' as const,
-            source: 'recommendation' as const,
-            sourceConfigHash: configHash,
-            sourceGroupId: 'recommendation-settings',
-            sourceGroupTitle: 'Recommendation Settings',
-            sourceRecommendationId: row.id,
-            sourceSortIndex: index,
-            sourceType: 'recommendation-settings',
-            subtitle: row.explanation || 'Accepted recommendation row',
-            title: row.title
-        };
-    }).filter(row => row.items.length >= PTV_MIN_RECOMMENDATION_ROW_ITEMS);
+    return [];
 }
 
 function getRecommendationSettingsDropReason(row: PtvPersistedRecommendationRow) {
@@ -2132,7 +2237,7 @@ function getRecommendationSettingsDropReason(row: PtvPersistedRecommendationRow)
     if (row.draft === true) return 'draft-recommendation-row';
     if (!Array.isArray(row.items) || row.items.length < PTV_MIN_RECOMMENDATION_ROW_ITEMS) return 'below-minimum-items';
 
-    return 'filtered-before-render';
+    return 'identity-scoped-engine-required';
 }
 
 function createUserSpecificRecommendationDebug(
@@ -2205,11 +2310,48 @@ function getNativeHomeDisplayIdentity(): NativeHomeDisplayIdentity {
     };
 }
 
+export function retainCurrentNativeHomePresentation(state: NativeHomeState, identityKey?: string | null): NativeHomeState {
+    const rows = state.rows.map(row => {
+        // This exact live Jellyfin Resume owner has independent user authorization.
+        // Retire its configured label/association without discarding playback progress.
+        if (row.source !== 'resume' || row.id !== 'resume' || isConfiguredRowPresentationCurrent(row, identityKey)) return row;
+        return { ...row, configuredPresentationAuthority: undefined, ruleId: undefined, sourceRuleId: undefined,
+            rowType: 'fallback' as const, renderedSource: 'fallback' as const, sourceType: undefined,
+            sourceGroupId: 'jellyfin-defaults', title: 'Continue Watching', subtitle: 'Pick up where you left off' };
+    }).filter(row => isConfiguredRowPresentationCurrent(row, identityKey));
+    const independentIds = new Set((state.independentHeroItems || []).map(item => item.Id));
+    rows.filter(row => !row.configuredPresentationAuthority).forEach(row => {
+        row.items.forEach(item => {
+            independentIds.add(item.Id);
+        });
+    });
+    const configuredHeroAuthorities = { ...state.configuredHeroAuthorities };
+    state.rows.forEach(row => {
+        if (row.configuredPresentationAuthority) {
+            row.items.forEach(item => {
+                if (item.Id) configuredHeroAuthorities[item.Id] = row.configuredPresentationAuthority!;
+            });
+        }
+    });
+    const heroIsCurrent = (item: PtvItem) => !item.Id || independentIds.has(item.Id)
+        || !configuredHeroAuthorities[item.Id] || isConfiguredRowPresentationCurrent({
+        rowType: 'configured-rule', configuredPresentationAuthority: configuredHeroAuthorities[item.Id]
+    }, identityKey);
+    const heroItems = state.heroItems.filter(heroIsCurrent);
+    const heroItem = state.heroItem && heroIsCurrent(state.heroItem) ? state.heroItem : heroItems[0] || null;
+    const retainedHeroIds = new Set([...heroItems, ...(heroItem ? [heroItem] : [])].map(item => item.Id));
+    Object.keys(configuredHeroAuthorities).forEach(id => {
+        if (!retainedHeroIds.has(id) || independentIds.has(id)) delete configuredHeroAuthorities[id];
+    });
+    return { ...state, rows, heroItems, heroItem, configuredHeroAuthorities };
+}
+
 function rememberUsableNativeHomeState(
     state: NativeHomeState,
     reason: string,
     identity: NativeHomeDisplayIdentity
 ) {
+    state = retainCurrentNativeHomePresentation(state, getPtvDisplayIdentityKey(identity.serverId, identity.userId));
     if (!hasRenderableNativeHomeRows(state.rows)) return;
 
     const stored = lastUsableNativeHomeStates.set(identity.serverId, identity.userId, state);
@@ -2223,7 +2365,8 @@ function rememberUsableNativeHomeState(
 }
 
 function getLastUsableNativeHomeState(identity: NativeHomeDisplayIdentity) {
-    return lastUsableNativeHomeStates.get(identity.serverId, identity.userId) || null;
+    const state = lastUsableNativeHomeStates.get(identity.serverId, identity.userId);
+    return state ? retainCurrentNativeHomePresentation(state, getPtvDisplayIdentityKey(identity.serverId, identity.userId)) : null;
 }
 
 function getAdaptiveNativeHomeLayout(
@@ -2579,9 +2722,10 @@ function getFeaturedRecommendationCacheAcceptance(
     };
 }
 
-function createRowsFromFeaturedPayload(
+export function createRowsFromFeaturedPayload(
     payload: FeaturedPayload | null,
     options: {
+        configuredProof?: ConfiguredRowProof | null;
         rowSettings?: PtvRowsEndpointSettings | null;
         source?: Extract<NativeHomeRowSource, 'featured-cache' | 'featured-endpoint'>;
         studioMap?: Map<string, string> | null;
@@ -2614,6 +2758,7 @@ function createRowsFromFeaturedPayload(
             .filter(Boolean)
     );
     const renderedRuleCounts = new Map<string, number>();
+    const associationResolver = createConfiguredRowAssociationResolver(rowSettings, sections);
     const sectionEntries = getFeaturedSectionEntries(payload, sections);
     const expandedRowsBeforeDedupe = sectionEntries
         .slice(0, MAX_CACHED_ROWS);
@@ -2705,6 +2850,7 @@ function createRowsFromFeaturedPayload(
     }
 
     const acceptedEntries = dedupedSectionEntries.reduce<Array<{
+        association?: Extract<ConfiguredRowAssociationResult, { kind: 'matched' }>;
         entry: FeaturedSectionEntry;
         recommendationId?: string;
         recommendationRow?: PtvPersistedRecommendationRow | null;
@@ -2713,9 +2859,10 @@ function createRowsFromFeaturedPayload(
         const sectionId = entry.sectionId;
         const section = entry.section;
         const recommendationId = getSectionRecommendationId(section);
-        const ruleId = getSectionRuleId(section);
         const parentRuleId = getSectionParentRuleId(section);
         const rowType = getSectionRowType(section);
+        const association = rowType === 'configured-rule' ? associationResolver.resolve(section) : null;
+        const ruleId = association?.kind === 'matched' ? association.ruleId : getSectionRuleId(section);
         const title = getSectionTitle(section, sectionId);
         const ruleKey = toLookupKey(ruleId);
         const parentRuleKey = toLookupKey(parentRuleId);
@@ -2749,6 +2896,23 @@ function createRowsFromFeaturedPayload(
 
         if (rowType === 'configured-rule' && !configuredRowsEnabled) {
             skipRow('configured-row-home-output-disabled');
+            return accepted;
+        }
+
+        if (association?.kind === 'rejected') {
+            skipRow(association.reason);
+            return accepted;
+        }
+
+        if (rowType === 'configured-rule' && (association?.kind !== 'matched'
+            || !isConfiguredPayloadVerified(payload, options.configuredProof)
+            || !isConfiguredSectionVerified(section, options.configuredProof))) {
+            skipRow('configured-authority-unverified');
+            return accepted;
+        }
+
+        if (association?.kind === 'matched' && recommendationId) {
+            skipRow('configured-association-row-kind-invalid');
             return accepted;
         }
 
@@ -2814,22 +2978,31 @@ function createRowsFromFeaturedPayload(
         }
 
         renderedRuleCounts.set(ruleKey, renderedCount + 1);
-        accepted.push({ entry, rule: enabledRule });
+        accepted.push({
+            association: association?.kind === 'matched' ? association : undefined,
+            entry,
+            rule: enabledRule
+        });
 
         return accepted;
     }, []);
 
     const rows: NativeHomeRow[] = acceptedEntries
-        .map(({ entry, recommendationId, recommendationRow, rule }, index) => {
+        .map(({ association, entry, recommendationId, recommendationRow, rule }, index) => {
             const sectionId = entry.sectionId;
             const section = entry.section;
             const rawItems = getFeaturedSectionItems(payload, entry);
-            const rowId = getFeaturedSectionRowId(entry);
+            const rowId = association ? `featured-associated-${association.section}` : getFeaturedSectionRowId(entry);
             const rowType = getSectionRowType(section);
-            const ruleId = getSectionRuleId(section);
+            const ruleId = association?.ruleId || getSectionRuleId(section);
             const sourceType = getSectionSourceType(section);
-            const title = getSectionTitle(section, sectionId || `Featured ${index + 1}`);
-            const sourceValue = resolveNativeHomeDerivedRowSourceValue({
+            const redactedAssociation = Boolean(association && isRecord(section) && getRecordString(section, 'source', 'Source') === 'authorized');
+            const singleConfiguredRow = Boolean(rule && getRuleRowLimit(rule) === 1 && !rule.includeSubgenres);
+            const title = redactedAssociation && singleConfiguredRow && rule?.name?.trim() ?
+                rule.name.trim() :
+                getSectionTitle(section, sectionId || `Featured ${index + 1}`);
+            // Private derived selectors remain redacted; association does not recreate them.
+            const sourceValue = redactedAssociation ? '' : resolveNativeHomeDerivedRowSourceValue({
                 ruleSourceValue: rule?.sourceValue,
                 sectionSourceValue: getSectionExplicitSourceValue(section) || getSectionSourceValue(section),
                 sourceType,
@@ -2900,6 +3073,8 @@ function createRowsFromFeaturedPayload(
             });
 
             return {
+                configuredPresentationAuthority: rowType === 'configured-rule' ?
+                    getConfiguredRowProofAuthority(options.configuredProof) : undefined,
                 accepted: rowType === 'generated-recommendation' ?
                     Boolean(recommendationRow?.accepted) :
                     (rowType === 'configured-rule' ? Boolean(rule) : undefined),
@@ -3161,7 +3336,7 @@ export function createNativeRowFetch<T>(
 
                 requestController.abort();
                 options.onTimeout?.(name);
-                recordPtvEvent('row-fetch', 'native-home-slow-fetch-aborted', {
+                recordPtvEvent('row-fetch', 'native-home-slow-fetch-timed-out', {
                     fetchName: name,
                     timeoutMs
                 });
@@ -3177,6 +3352,12 @@ export function createNativeRowFetch<T>(
 
 function emptyPtvItemsResult() {
     return Promise.resolve({ Items: [] as PtvItem[] });
+}
+
+async function readNativeHomeConfiguredAuthority(signal: AbortSignal) {
+    const pluginApi = getCurrentPtvPluginApiClient();
+    if (!pluginApi) throw new Error('Configured authority unavailable.');
+    return pluginApi.getStatus({ bypassCache: true, signal });
 }
 
 function emptyPtvItemsArray() {
@@ -3198,6 +3379,16 @@ function fetchNativeHomeResumeFallback(
         Limit: 16,
         MediaTypes: 'Video'
     }, { signal, userId }), { Items: [] }, options);
+}
+
+function fetchNativeHomeConfiguredResumeFallback(
+    userId: string,
+    rowSettings: PtvRowsEndpointSettings | null,
+    options: NativeRowFetchOptions
+) {
+    if (!shouldRenderConfiguredRows(rowSettings)) return emptyPtvItemsResult();
+
+    return fetchNativeHomeResumeFallback(userId, rowSettings, options);
 }
 
 function fetchNativeHomeReadingFallback(
@@ -3420,8 +3611,14 @@ function getNativeHomeRowViewportPosition(
     };
 }
 
-export function useNativeHomeData(): NativeHomeState {
-    const [state, setState] = useState<NativeHomeState>({
+export function useNativeHomeData(): NativeHomeState & { identityKey: string | null } {
+    const currentDisplayIdentity = getNativeHomeDisplayIdentity();
+    const currentDisplayIdentityKey = getPtvDisplayIdentityKey(
+        currentDisplayIdentity.serverId,
+        currentDisplayIdentity.userId
+    );
+    useSyncExternalStore(subscribeConfiguredRowFreshness, getConfiguredRowFreshnessSnapshot);
+    const [state, setStoredState] = useState<NativeHomeState>({
         debug: {
             home: getEmptyNativeHomeAdaptiveDebug(),
             performance: getEmptyNativeHomePerformanceDebug(),
@@ -3434,11 +3631,36 @@ export function useNativeHomeData(): NativeHomeState {
         rows: [],
         user: null
     });
+    const [stateIdentityKey, setStateIdentityKey] = useState(currentDisplayIdentityKey);
+    const setState = useCallback((update: NativeHomeState | ((previous: NativeHomeState) => NativeHomeState)) => {
+        setStoredState(previous => {
+            const safePrevious = retainCurrentNativeHomePresentation(previous, currentDisplayIdentityKey);
+            const next = typeof update === 'function' ? update(safePrevious) : update;
+            return retainCurrentNativeHomePresentation(next, currentDisplayIdentityKey);
+        });
+    }, [currentDisplayIdentityKey]);
 
     useEffect(() => {
+        setStateIdentityKey(currentDisplayIdentityKey);
         const generation = ++nativeHomeRouteGeneration;
         const displayIdentity = getNativeHomeDisplayIdentity();
         const routeAbortController = createPtvAbortController();
+        let configuredVerification = beginConfiguredRowVerification(currentDisplayIdentityKey);
+        const recordConfiguredPresentation = () => {
+            const presentation = getConfiguredRowFreshnessSnapshot();
+            recordPtvEvent('render', 'configured-row-presentation-state', {
+                state: presentation.status,
+                reason: presentation.reason
+            });
+        };
+        const unsubscribeConfiguredPresentation = subscribeConfiguredRowFreshness(recordConfiguredPresentation);
+        recordConfiguredPresentation();
+        const connectionClient = getCurrentPtvApiClient();
+        const retireConnectionProof = () => retireConfiguredRowFreshness('connection-authority-uncertain');
+        if (connectionClient) {
+            Events.on(connectionClient, 'websocketclose', retireConnectionProof);
+            Events.on(connectionClient, 'websocketopen', retireConnectionProof);
+        }
         const deferredFrameIds = new Set<number>();
         const deferredTimerIds = new Set<number>();
         let disposed = false;
@@ -3551,10 +3773,10 @@ export function useNativeHomeData(): NativeHomeState {
         });
         setPtvShellLoading(true);
         clearPtvShellStatus();
-        setState(previous => {
+        setState(() => {
             const lastUsableState = getLastUsableNativeHomeState(displayIdentity);
 
-            if (lastUsableState && !hasRenderableNativeHomeRows(previous.rows)) {
+            if (lastUsableState) {
                 const restoredAt = Math.round(performance.now() - startedAt);
 
                 recordPtvEvent('render', 'native-home-last-good-state-restored', {
@@ -3582,14 +3804,17 @@ export function useNativeHomeData(): NativeHomeState {
             }
 
             return {
-                ...previous,
                 debug: {
                     home: getEmptyNativeHomeAdaptiveDebug(),
                     performance: getEmptyNativeHomePerformanceDebug(),
                     recommendations: getEmptyRecommendationDebug()
                 },
                 error: null,
-                isLoading: true
+                heroItem: null,
+                heroItems: [],
+                isLoading: true,
+                rows: [],
+                user: null
             };
         });
 
@@ -3767,7 +3992,11 @@ export function useNativeHomeData(): NativeHomeState {
         const renderFromFeaturedCache = async (
             featuredPayload: FeaturedPayload | null,
             rowSettings: PtvRowsEndpointSettings | null = null,
-            options: { mode?: 'cache-only' | 'settings-validated' } = {}
+            options: {
+                configuredProof?: ConfiguredRowProof | null;
+                mode?: 'cache-only' | 'settings-validated';
+                user?: PtvUser | null;
+            } = {}
         ) => {
             if (!isRouteWorkCurrent() || renderedFromCache || !hasUsableFeaturedPayload(featuredPayload)) return false;
             const cacheResponseReceivedAt = Math.round(performance.now() - startedAt);
@@ -3779,7 +4008,7 @@ export function useNativeHomeData(): NativeHomeState {
                 responseMs: cacheResponseReceivedAt
             });
 
-            if (!cacheOnly && !isFeaturedPayloadCurrentForRows(featuredPayload, rowSettings)) {
+            if (!cacheOnly && !isFeaturedPayloadCurrentForRows(featuredPayload, rowSettings, options.configuredProof)) {
                 recordPtvEvent('cache', 'native-home-cache-render-skipped', {
                     payloadHash: featuredPayload?.rowConfigHash || null,
                     reason: 'row-config-hash-mismatch',
@@ -3790,6 +4019,7 @@ export function useNativeHomeData(): NativeHomeState {
             }
 
             const cacheRowsResult = createRowsFromFeaturedPayload(featuredPayload, {
+                configuredProof: options.configuredProof,
                 rowSettings: cacheOnly ? null : rowSettings,
                 source: 'featured-cache'
             });
@@ -3804,7 +4034,7 @@ export function useNativeHomeData(): NativeHomeState {
             const adaptiveCache = cacheOnly ? {
                 debug: getEmptyNativeHomeAdaptiveDebug(),
                 rows: focusedCacheRows
-            } : getAdaptiveNativeHomeLayout(focusedCacheRows, null, startedAt);
+            } : getAdaptiveNativeHomeLayout(focusedCacheRows, options.user || null, startedAt);
             const adaptiveCacheRows = adaptiveCache.rows;
 
             if (!focusedCacheRows.length) {
@@ -3904,9 +4134,10 @@ export function useNativeHomeData(): NativeHomeState {
                 error: null,
                 heroItem,
                 heroItems,
+                independentHeroItems: preferredHeroItems,
                 isLoading: false,
                 rows: adaptiveCacheRows,
-                user: null
+                user: options.user || null
             };
 
             rememberUsableNativeHomeState(nextState, 'featured-cache', displayIdentity);
@@ -3925,9 +4156,9 @@ export function useNativeHomeData(): NativeHomeState {
         });
         const featuredPayloadPromise = createNativeRowFetch(
             'native-home-featured-cache',
-            () => getCachedFeaturedContentPayload({ allowStale: false }),
+            () => getCachedFeaturedContentPayload({ allowStale: true }),
             null,
-            getFetchOptions(0)
+            getFetchOptions(NATIVE_HOME_FEATURED_ADOPTION_TIMEOUT_MS)
         );
         recordTimeline('memory-cache-read-started', 'memory-cache');
         recordTimeline('browser-cache-read-skipped', 'browser-cache', {}, {
@@ -3946,9 +4177,43 @@ export function useNativeHomeData(): NativeHomeState {
             null,
             getFetchOptions(0)
         );
+        const userScopedFeaturedPayloadPromise = createNativeRowFetch(
+            'native-home-featured-adoption',
+            async signal => {
+                const [featuredPayload, user] = await Promise.all([
+                    featuredPayloadPromise,
+                    currentUserPromise
+                ]);
 
-        void featuredPayloadPromise
-            .then(featuredPayload => {
+                return {
+                    featuredPayload: await revalidateFeaturedPayloadForIdentity(featuredPayload, {
+                        serverId: displayIdentity.serverId,
+                        signal,
+                        userId: user?.Id || ''
+                    }),
+                    user
+                };
+            },
+            { featuredPayload: null, user: null },
+            getFetchOptions(NATIVE_HOME_FEATURED_ADOPTION_TIMEOUT_MS)
+        );
+
+        const verifyConfiguredInputs = (rowSettings: PtvRowsEndpointSettings | null, featuredPayload: FeaturedPayload | null) => {
+            const verification = configuredVerification;
+            return verifyConfiguredRowFreshness({
+                verification, settings: rowSettings, featured: featuredPayload,
+                isCurrent: isRouteWorkCurrent,
+                readAuthority: () => createNativeRowFetch('native-home-configured-authority', readNativeHomeConfiguredAuthority,
+                    null, getFetchOptions(NATIVE_HOME_CRITICAL_FETCH_TIMEOUT_MS))
+            });
+        };
+        // Both input reads finish before this independent, non-coalesced final authority read starts.
+        const configuredInputsPromise = Promise.all([userScopedFeaturedPayloadPromise, rowSettingsPromise])
+            .then(async ([result, rowSettings]) => ({ ...result, rowSettings,
+                configuredProof: await verifyConfiguredInputs(rowSettings, result.featuredPayload) }));
+
+        void userScopedFeaturedPayloadPromise
+            .then(({ featuredPayload, user }) => {
                 const semanticSummary = summarizeFeaturedContentPayload(featuredPayload);
                 const cacheStatus = getFeaturedContentCacheStatus();
 
@@ -3969,15 +4234,19 @@ export function useNativeHomeData(): NativeHomeState {
                     { reason: semanticSummary.reason }
                 );
 
-                return renderFromFeaturedCache(featuredPayload, null, { mode: 'cache-only' });
+                return renderFromFeaturedCache(featuredPayload, null, {
+                    mode: 'cache-only',
+                    user
+                });
             })
             .catch(() => undefined);
 
-        void Promise.all([
-            featuredPayloadPromise,
-            rowSettingsPromise
-        ])
-            .then(([featuredPayload, rowSettings]) => renderFromFeaturedCache(featuredPayload, rowSettings, { mode: 'settings-validated' }))
+        void configuredInputsPromise
+            .then(({ featuredPayload, user, rowSettings, configuredProof }) => renderFromFeaturedCache(featuredPayload, rowSettings, {
+                configuredProof,
+                mode: 'settings-validated',
+                user
+            }))
             .catch(() => undefined);
 
         recordTimeline('live-jellyfin-requests-started', 'jellyfin-live');
@@ -3988,22 +4257,13 @@ export function useNativeHomeData(): NativeHomeState {
                 }
 
                 const userId = user.Id;
-                const studioMapPromise = createNativeRowFetch(
-                    'native-home-studio-map',
-                    signal => loadNativeHomeStudioMap(userId, signal),
-                    new Map<string, string>(),
-                    getFetchOptions(NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS)
-                );
-                const [rowSettings, featuredPayload, studioMap] = await Promise.all([
-                    rowSettingsPromise,
-                    featuredPayloadPromise,
-                    studioMapPromise
-                ]);
+                const { rowSettings, featuredPayload, configuredProof: cachedConfiguredProof } = await configuredInputsPromise;
+                let configuredProof = cachedConfiguredProof;
                 const savedRowRulesActive = shouldRenderConfiguredRows(rowSettings);
                 const hasFeaturedCache = hasUsableFeaturedPayload(featuredPayload)
-                    && isFeaturedPayloadCurrentForRows(featuredPayload, rowSettings);
+                    && isFeaturedPayloadCurrentForRows(featuredPayload, rowSettings, configuredProof);
                 let featuredEndpointPayload: FeaturedPayload | null = null;
-                let resumeResult: { Items?: PtvItem[] } | PtvItem[] = { Items: [] };
+                let resumeResult: { Items?: PtvItem[] } | PtvItem[];
                 let continueReadingResult: { Items?: PtvItem[] } | PtvItem[] = { Items: [] };
                 let continueListeningResult: { Items?: PtvItem[] } | PtvItem[] = { Items: [] };
                 let recentResult: { Items?: PtvItem[] } | PtvItem[] = [];
@@ -4018,6 +4278,11 @@ export function useNativeHomeData(): NativeHomeState {
                         'native-home-watched-context',
                         'native-home-because-watched-candidates'
                     ]);
+                    resumeResult = await fetchNativeHomeConfiguredResumeFallback(
+                        userId,
+                        rowSettings,
+                        getFetchOptions(NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS)
+                    );
                 } else {
                     ([
                         featuredEndpointPayload,
@@ -4045,6 +4310,19 @@ export function useNativeHomeData(): NativeHomeState {
                             userId
                         }), { Items: [] }, getFetchOptions(NATIVE_HOME_FALLBACK_FETCH_TIMEOUT_MS))
                     ]));
+
+                    featuredEndpointPayload = await revalidateFeaturedPayloadForIdentity(
+                        featuredEndpointPayload,
+                        {
+                            serverId: displayIdentity.serverId,
+                            signal: routeAbortController.signal,
+                            userId
+                        }
+                    );
+                    if (isRouteWorkCurrent()) {
+                        configuredVerification = beginConfiguredRowVerification(currentDisplayIdentityKey);
+                        configuredProof = await verifyConfiguredInputs(rowSettings, featuredEndpointPayload);
+                    }
                 }
 
                 if (!areRecommendationsEnabled(rowSettings)) {
@@ -4053,7 +4331,7 @@ export function useNativeHomeData(): NativeHomeState {
                     });
                 } else {
                     recordPtvEvent('recommendation', 'native-home-user-recommendations-skipped', {
-                        reason: 'home-uses-accepted-recommendation-settings'
+                        reason: 'home-uses-identity-scoped-engine'
                     });
                 }
 
@@ -4064,17 +4342,21 @@ export function useNativeHomeData(): NativeHomeState {
                     sectionItemCount: Object.keys(featuredEndpointPayload?.sectionItems || {}).length
                 });
 
-                const cachedRowsResult = createRowsFromFeaturedPayload(featuredPayload, {
-                    rowSettings,
-                    source: 'featured-cache',
+                const {
+                    cachedRowsResult,
+                    endpointRowsResult,
                     studioMap
-                });
-                const endpointRowsResult = createRowsFromFeaturedPayload(featuredEndpointPayload, {
+                } = await createNativeHomeFeaturedRowResults(
+                    featuredPayload,
+                    featuredEndpointPayload,
                     rowSettings,
-                    source: 'featured-endpoint',
-                    studioMap
-                });
-                const preferredFeaturedRowsResult = cachedRowsResult.rows.length ?
+                    userId,
+                    getFetchOptions(NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS),
+                    configuredProof
+                );
+                const preferVerifiedEndpoint = isConfiguredPayloadVerified(featuredEndpointPayload, configuredProof)
+                    && !isConfiguredPayloadVerified(featuredPayload, configuredProof);
+                const preferredFeaturedRowsResult = !preferVerifiedEndpoint && cachedRowsResult.rows.length ?
                     cachedRowsResult :
                     endpointRowsResult;
                 const cachedRows = await expandNativeHomeStudioRows(
@@ -4139,12 +4421,18 @@ export function useNativeHomeData(): NativeHomeState {
                 if (!isRouteWorkCurrent()) return;
 
                 if (renderedFromCache) {
-                    const supplementalCachedRows = payload.cachedRows.length ?
-                        payload.cachedRows :
-                        cacheRowsForSupplemental;
+                    const supplementalCachedRows = getNativeHomeSupplementalCachedRows(
+                        payload.cachedRows,
+                        cacheRowsForSupplemental
+                    );
+                    const cachedRowsWithResume = mergeNativeHomeResumeRow(
+                        supplementalCachedRows,
+                        payload.resumeItems,
+                        payload.rowSettings
+                    );
                     const rowsWithUserRecommendations = payload.userRecommendationRows.length ?
-                        insertNativeHomeRecommendationRows(supplementalCachedRows, payload.userRecommendationRows) :
-                        supplementalCachedRows;
+                        insertNativeHomeRecommendationRows(cachedRowsWithResume, payload.userRecommendationRows) :
+                        cachedRowsWithResume;
                     const adaptiveBackground = getAdaptiveNativeHomeLayout(rowsWithUserRecommendations, payload.user, performance.now());
 
                     recordPtvEvent('render', 'native-home-background-refresh-ready', {
@@ -4308,6 +4596,7 @@ export function useNativeHomeData(): NativeHomeState {
                     error: null,
                     heroItem,
                     heroItems,
+                    independentHeroItems: preferredHeroItems,
                     isLoading: false,
                     rows: adaptiveRows,
                     user: payload.user
@@ -4316,6 +4605,8 @@ export function useNativeHomeData(): NativeHomeState {
                 setState(previous => {
                     const settledNextState = {
                         ...nextState,
+                        configuredHeroAuthorities: previous.configuredHeroAuthorities,
+                        independentHeroItems: nextState.heroItems.length ? nextState.independentHeroItems : previous.independentHeroItems,
                         heroItem: nextState.heroItem || previous.heroItem,
                         heroItems: nextState.heroItems.length ? nextState.heroItems : previous.heroItems,
                         rows: mergeSettledNativeHomeRows(previous.rows, nextState.rows)
@@ -4423,6 +4714,14 @@ export function useNativeHomeData(): NativeHomeState {
 
         return () => {
             disposed = true;
+            if (connectionClient) {
+                Events.off(connectionClient, 'websocketclose', retireConnectionProof);
+                Events.off(connectionClient, 'websocketopen', retireConnectionProof);
+            }
+            if (getConfiguredRowFreshnessSnapshot().revision === configuredVerification.revision) {
+                retireConfiguredRowFreshness('home-route-retired');
+            }
+            unsubscribeConfiguredPresentation();
             routeAbortController.abort();
             deferredFrameIds.forEach(frameId => {
                 window.cancelAnimationFrame(frameId);
@@ -4435,9 +4734,12 @@ export function useNativeHomeData(): NativeHomeState {
             recordTimeline('home-route-retired', 'route');
             setPtvShellLoading(false);
         };
-    }, []);
+    }, [currentDisplayIdentityKey, setState]);
 
-    return state;
+    return {
+        ...retainCurrentNativeHomePresentation(state, currentDisplayIdentityKey),
+        identityKey: stateIdentityKey
+    };
 }
 
 export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
@@ -4453,6 +4755,7 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
     const [mountedRowReasons, setMountedRowReasons] = useState<Map<string, string>>(() => new Map());
     const mountedRowIdsRef = useRef(mountedRowIds);
     const observerRef = useRef<IntersectionObserver | null>(null);
+    const rowRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
     const observerTriggerCountRef = useRef(0);
     const manualViewportPassCountRef = useRef(0);
     const nodeMap = useRef(new Map<string, HTMLElement>());
@@ -4763,27 +5066,37 @@ export function useNativeHomeVirtualRows(rows: NativeHomeRow[]) {
         };
     }, []);
 
-    const registerRowRef = useCallback((rowId: string) => (node: HTMLElement | null) => {
-        const previousNode = nodeMap.current.get(rowId);
+    const registerRowRef = useCallback((rowId: string) => {
+        const existingCallback = rowRefCallbacks.current.get(rowId);
 
-        if (previousNode && observerRef.current) {
-            observerRef.current.unobserve(previousNode);
-        }
+        if (existingCallback) return existingCallback;
 
-        if (!node) {
-            nodeMap.current.delete(rowId);
-            return;
-        }
+        const callback = (node: HTMLElement | null) => {
+            const previousNode = nodeMap.current.get(rowId);
 
-        node.dataset.ptvNativeRowId = rowId;
-        nodeMap.current.set(rowId, node);
+            if (previousNode && observerRef.current) {
+                observerRef.current.unobserve(previousNode);
+            }
 
-        if (mountedRowIdsRef.current.has(rowId)) {
-            observerRef.current?.unobserve(node);
-            return;
-        }
+            if (!node) {
+                nodeMap.current.delete(rowId);
+                return;
+            }
 
-        observerRef.current?.observe(node);
+            node.dataset.ptvNativeRowId = rowId;
+            nodeMap.current.set(rowId, node);
+
+            if (mountedRowIdsRef.current.has(rowId)) {
+                observerRef.current?.unobserve(node);
+                return;
+            }
+
+            observerRef.current?.observe(node);
+        };
+
+        rowRefCallbacks.current.set(rowId, callback);
+
+        return callback;
     }, []);
 
     const isRowMounted = useCallback(

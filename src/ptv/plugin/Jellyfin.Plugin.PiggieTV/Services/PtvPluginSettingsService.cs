@@ -38,6 +38,7 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
     /// <inheritdoc />
     public PtvPluginSettingsDto SaveSettings(PtvPluginSettingsPatchDto settings)
     {
+        using var mutation = PtvConfiguredRowAssociationService.BeginConfigurationMutation();
         var configuration = GetConfiguration();
 
         PtvPluginSettingsNormalizer.Normalize(configuration);

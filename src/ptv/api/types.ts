@@ -33,6 +33,7 @@ export type PtvApiClientLike = {
     markPlayed?: (userId: string, itemId: string, datePlayed?: string) => Promise<unknown>;
     markUnplayed?: (userId: string, itemId: string) => Promise<unknown>;
     serverId?: () => string;
+    serverInfo?: () => (Record<string, unknown> & { Id?: string }) | null | undefined;
     setRequestHeaders?: (headers: Record<string, string>) => void;
     updateFavoriteStatus?: (userId: string, itemId: string, isFavorite: boolean) => Promise<unknown>;
 };

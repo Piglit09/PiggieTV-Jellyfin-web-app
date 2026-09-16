@@ -69,8 +69,14 @@ describe('resolvePtvItemRoute', () => {
         {
             expectedHref: '#/manga/item/manga%201',
             expectedSource: 'ptv-reading',
-            item: { Id: 'manga 1', Name: 'Manga Volume 1', Type: 'Book' },
+            item: { Id: 'manga 1', PtvReadingLibraryKindHint: 'manga', Type: 'Book' },
             name: 'Manga Open'
+        },
+        {
+            expectedHref: '#/details?id=photo%201',
+            expectedSource: 'jellyfin-fallback',
+            item: { Id: 'photo 1', Type: 'Photo' },
+            name: 'Unsupported Item Jellyfin Fallback'
         },
         {
             expectedHref: '#/collections?view=details&collectionId=jellyfin%3Acollection%201',
@@ -88,9 +94,37 @@ describe('resolvePtvItemRoute', () => {
         expect(route.href).not.toContain('#/playback');
     });
 
+    it.each([
+        ['Genre', 'genreId'],
+        ['MusicGenre', 'musicGenreId'],
+        ['Studio', 'studioId']
+    ])('opens %s directory results in the canonical Jellyfin list route', (type, parameter) => {
+        const route = resolvePtvItemRoute({ Id: 'facet /1', Type: type }, {
+            serverId: 'server /1'
+        });
+
+        expect(route).toEqual({
+            fallbackReason: '',
+            href: `#/list?${parameter}=facet%20%2F1&serverId=server%20%2F1`,
+            routeSource: 'jellyfin-list'
+        });
+    });
+
+    it('prefers the item server when resolving a cross-server Studio result', () => {
+        const route = resolvePtvItemRoute({
+            Id: 'studio-1',
+            ServerId: 'item-server',
+            Type: 'Studio'
+        }, {
+            serverId: 'active-server'
+        });
+
+        expect(route.href).toBe('#/list?studioId=studio-1&serverId=item-server');
+    });
+
     it('keeps core shell routes out of the removed playback route', () => {
         expect(PTV_ROUTES.request).toBe('#/requests');
-        expect(PTV_ROUTES.profilePreferences).toBe('#/mypreferencesmenu');
+        expect(PTV_ROUTES.profilePreferences).toBe('#/settings');
         const routeValues = Object.keys(PTV_ROUTES).map(key => PTV_ROUTES[key as keyof typeof PTV_ROUTES]);
 
         expect(routeValues).not.toContain('#/playback');

@@ -12,6 +12,7 @@ import Events, { type Event } from 'utils/events';
 
 interface AppTabsParams {
     isDrawerOpen: boolean
+    onVisibilityChange?: (isVisible: boolean) => void
 }
 
 interface TabDefinition {
@@ -22,7 +23,8 @@ interface TabDefinition {
 const handleResize = debounce(() => window.dispatchEvent(new Event('resize')), 100);
 
 const AppTabs: FC<AppTabsParams> = ({
-    isDrawerOpen
+    isDrawerOpen,
+    onVisibilityChange
 }) => {
     const documentRef = useRef<Document>(document);
     const [ activeIndex, setActiveIndex ] = useState(0);
@@ -58,6 +60,10 @@ const AppTabs: FC<AppTabsParams> = ({
     useEffect(() => {
         handleResize();
     }, [ isDrawerOpen ]);
+
+    useEffect(() => {
+        onVisibilityChange?.(Boolean(tabs?.length));
+    }, [ onVisibilityChange, tabs?.length ]);
 
     if (!tabs?.length) return null;
 

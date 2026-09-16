@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -19,6 +22,17 @@ describe('Collections retry routing', () => {
     it('preserves a collection Details retry query', () => {
         expect(getPtvCollectionRetryHref('/collections', '?view=details&collectionId=collection'))
             .toBe('#/collections?view=details&collectionId=collection');
+    });
+});
+
+describe('Collections acceptance-ledger integration', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/ptv/modules/collections/CollectionsPage.tsx'), 'utf8');
+
+    it('records only accepted visible retries and rejected async commits', () => {
+        expect(source).toContain('if (!retryGate.current.claim()) return;');
+        expect(source).toContain('recordPtvRequestLedgerVisibleRetry();');
+        expect(source).toContain('recordPtvRequestLedgerStaleRejected();');
+        expect(source).toContain('if (rejectStaleCompletion()) return;');
     });
 });
 

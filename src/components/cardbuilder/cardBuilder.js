@@ -1301,9 +1301,9 @@ function buildCard(index, item, apiClient, options) {
     + ptvPlayPillHtml
 
     + overlayButtons
-    + additionalCardContent
     + cardScalableClose
     + outerCardFooter
+    + additionalCardContent
     + cardBoxClose
 
     + '</' + tagName + '>'
@@ -1317,34 +1317,61 @@ function buildCard(index, item, apiClient, options) {
  * @returns {string} HTML markup of the card overlay.
  */
 function getHoverMenuHtml(item, action) {
-    let html = '';
-
-    html += '<div class="cardOverlayContainer itemAction" data-action="' + action + '">';
-
+    const userData = item.UserData || {};
     const btnCssClass = 'cardOverlayButton cardOverlayButton-hover itemAction paper-icon-button-light';
+    const title = item.Name || '';
+    const overviewText = `${item.Overview || ''}`.replace(/\s+/g, ' ').trim();
+    const overview = overviewText.length > 190 ? `${overviewText.slice(0, 187).trim()}...` : overviewText;
+    const communityRating = Number(item.CommunityRating);
+    const metadata = [
+        item.ProductionYear ? datetime.toLocaleString(item.ProductionYear, { useGrouping: false }) : '',
+        item.RunTimeTicks ? datetime.getDisplayRunningTime(item.RunTimeTicks) : '',
+        item.Genres?.slice(0, 2).join(' / ') || '',
+        item.OfficialRating || '',
+        Number.isFinite(communityRating) && communityRating > 0 ? `\u2605 ${communityRating.toFixed(1)}` : ''
+    ].filter(Boolean);
+    const moreLabel = globalize.translate('ButtonMore');
+    const resumeLabel = globalize.translate('ButtonResume');
+    const detailsUrl = escapeHtml(appRouter.getRouteUrl(item));
 
-    if (playbackManager.canPlay(item)) {
-        html += `<button is="paper-icon-button-light" class="${btnCssClass} cardOverlayFab-primary" data-action="resume" title="${globalize.translate('Play')}"><span class="material-icons cardOverlayButtonIcon cardOverlayButtonIcon-hover play_arrow" aria-hidden="true"></span></button>`;
+    let html = '<div class="cardOverlayContainer ptv-card-overlay-container itemAction" data-action="' + action + '">';
+
+    html += `<button is="paper-icon-button-light" type="button" class="${btnCssClass} ptv-card-menu-button" data-action="menu" title="${escapeHtml(moreLabel)}" aria-label="${escapeHtml(moreLabel)}"><span class="material-icons cardOverlayButtonIcon cardOverlayButtonIcon-hover more_vert" aria-hidden="true"></span></button>`;
+    html += `<section class="ptv-card-hover-panel" role="group" aria-label="${escapeHtml(title || 'Card details')}">`;
+    html += `<h3 class="ptv-card-hover-panel__title">${escapeHtml(title)}</h3>`;
+
+    if (metadata.length) {
+        html += '<div class="ptv-card-hover-panel__metadata">';
+        html += metadata.map(value => `<span>${escapeHtml(value)}</span>`).join('');
+        html += '</div>';
     }
 
-    html += '<div class="cardOverlayButton-br flex">';
+    if (overview) {
+        html += `<p class="ptv-card-hover-panel__overview">${escapeHtml(overview)}</p>`;
+    }
 
-    const userData = item.UserData || {};
+    html += '<div class="ptv-card-hover-panel__actions">';
+
+    if (playbackManager.canPlay(item) && userData.PlaybackPositionTicks) {
+        html += `<button type="button" class="ptv-card-hover-action itemAction" data-action="resume"><span class="material-icons play_arrow" aria-hidden="true"></span><span>${escapeHtml(resumeLabel)}</span></button>`;
+    }
+
+    html += `<a href="${detailsUrl}" class="ptv-card-hover-action itemAction" data-action="link"><span class="material-icons info" aria-hidden="true"></span><span>Details</span></a>`;
 
     if (itemHelper.canMarkPlayed(item)) {
         import('../../elements/emby-playstatebutton/emby-playstatebutton');
-        html += '<button is="emby-playstatebutton" type="button" data-action="none" class="' + btnCssClass + '" data-id="' + item.Id + '" data-serverid="' + item.ServerId + '" data-itemtype="' + item.Type + '" data-played="' + (userData.Played) + '"><span class="material-icons cardOverlayButtonIcon cardOverlayButtonIcon-hover check" aria-hidden="true"></span></button>';
+        html += '<button is="emby-playstatebutton" type="button" data-action="none" class="' + btnCssClass + ' ptv-card-hover-action" data-id="' + item.Id + '" data-serverid="' + item.ServerId + '" data-itemtype="' + item.Type + '" data-played="' + (userData.Played) + '" aria-label="Mark played"><span class="material-icons cardOverlayButtonIcon cardOverlayButtonIcon-hover check" aria-hidden="true"></span><span class="ptv-card-hover-action__label">Played</span></button>';
     }
 
     if (itemHelper.canRate(item)) {
         const likes = userData.Likes == null ? '' : userData.Likes;
 
         import('../../elements/emby-ratingbutton/emby-ratingbutton');
-        html += '<button is="emby-ratingbutton" type="button" data-action="none" class="' + btnCssClass + '" data-id="' + item.Id + '" data-serverid="' + item.ServerId + '" data-itemtype="' + item.Type + '" data-likes="' + likes + '" data-isfavorite="' + (userData.IsFavorite) + '"><span class="material-icons cardOverlayButtonIcon cardOverlayButtonIcon-hover favorite" aria-hidden="true"></span></button>';
+        html += '<button is="emby-ratingbutton" type="button" data-action="none" class="' + btnCssClass + ' ptv-card-hover-action" data-id="' + item.Id + '" data-serverid="' + item.ServerId + '" data-itemtype="' + item.Type + '" data-likes="' + likes + '" data-isfavorite="' + (userData.IsFavorite) + '" aria-label="Favorite"><span class="material-icons cardOverlayButtonIcon cardOverlayButtonIcon-hover favorite" aria-hidden="true"></span><span class="ptv-card-hover-action__label">Favorite</span></button>';
     }
 
-    html += `<button is="paper-icon-button-light" class="${btnCssClass}" data-action="menu" title="${globalize.translate('ButtonMore')}"><span class="material-icons cardOverlayButtonIcon cardOverlayButtonIcon-hover more_vert" aria-hidden="true"></span></button>`;
     html += '</div>';
+    html += '</section>';
     html += '</div>';
 
     return html;

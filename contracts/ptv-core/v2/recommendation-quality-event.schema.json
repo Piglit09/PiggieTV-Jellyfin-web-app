@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v2/recommendation-quality-event.schema.json",
+  "title": "PTV Recommendation Quality Event v2",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "policyVersion",
+    "algorithmId",
+    "eventType",
+    "surface",
+    "timestamp"
+  ],
+  "properties": {
+    "contractVersion": { "const": "2.0" },
+    "policyVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "algorithmId": { "type": "string", "minLength": 1, "maxLength": 96 },
+    "eventType": {
+      "enum": ["generated", "fallback", "shown", "played", "skipped", "completed"]
+    },
+    "surface": {
+      "enum": ["home", "made-for-you", "radio", "related", "discovery"]
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "requestId": { "type": "string", "maxLength": 128 },
+    "cohort": { "type": "string", "maxLength": 64 },
+    "rank": { "type": "integer", "minimum": 1, "maximum": 200 },
+    "itemCount": { "type": "integer", "minimum": 0, "maximum": 200 },
+    "familiarCount": { "type": "integer", "minimum": 0, "maximum": 200 },
+    "discoveryCount": { "type": "integer", "minimum": 0, "maximum": 200 },
+    "generationLatencyMs": { "type": "number", "minimum": 0 },
+    "playbackLatencyMs": { "type": "number", "minimum": 0 },
+    "playedMs": { "type": "number", "minimum": 0 },
+    "fallbackReason": { "type": "string", "maxLength": 96 },
+    "source": { "type": "string", "maxLength": 64 },
+    "classification": { "enum": ["affinity", "discovery", "mixed"] },
+    "reasonCodes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "maxItems": 16,
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

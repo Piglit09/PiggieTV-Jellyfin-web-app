@@ -3,11 +3,15 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/* eslint-disable @typescript-eslint/naming-convention */
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+const ROUTER_FUTURE = { v7_relativeSplatPath: true, v7_startTransition: true } as const;
+/* eslint-enable @typescript-eslint/naming-convention */
 
 const connectionState = vi.hoisted(() => ({
     connect: vi.fn(),
     firstConnection: true,
+    getCurrentUser: vi.fn(),
     isAdministrator: false,
     isLoggedIn: true,
     serverId: 'server-one'
@@ -25,9 +29,7 @@ vi.mock('lib/jellyfin-apiclient', () => ({
     ServerConnections: {
         connect: connectionState.connect,
         currentApiClient: () => ({
-            getCurrentUser: () => Promise.resolve({
-                Policy: { IsAdministrator: connectionState.isAdministrator }
-            }),
+            getCurrentUser: connectionState.getCurrentUser,
             isLoggedIn: () => connectionState.isLoggedIn,
             serverId: () => connectionState.serverId
         }),
@@ -57,6 +59,10 @@ describe('ConnectionRequired admin access', () => {
     beforeEach(() => {
         connectionState.connect.mockReset();
         connectionState.firstConnection = true;
+        connectionState.getCurrentUser.mockReset();
+        connectionState.getCurrentUser.mockImplementation(() => Promise.resolve({
+            Policy: { IsAdministrator: connectionState.isAdministrator }
+        }));
         connectionState.isAdministrator = false;
         connectionState.isLoggedIn = true;
         connectionState.serverId = 'server-one';
@@ -68,19 +74,21 @@ describe('ConnectionRequired admin access', () => {
     afterEach(async () => {
         await act(async () => root.unmount());
         container.remove();
+        vi.restoreAllMocks();
         vi.unstubAllGlobals();
     });
 
-    async function renderAdminRoute() {
+    async function renderAdminRoute(initialEntry = '/dashboard/piggietv') {
         await act(async () => {
             root.render(
                 <MemoryRouter
-                    future={{ v7_relativeSplatPath: true, v7_startTransition: true }}
-                    initialEntries={[ '/dashboard/piggietv' ]}
+                    future={ROUTER_FUTURE}
+                    initialEntries={[ initialEntry ]}
                 >
                     <Routes>
                         <Route element={<ConnectionRequired level='admin' />}>
-                            <Route path='/dashboard/piggietv' element={<div>Dashboard content</div>} />
+                            <Route path='/dashboard/*' element={<div>Dashboard content</div>} />
+                            <Route path='/configurationpage' element={<div>Plugin configuration content</div>} />
                         </Route>
                         <Route path='/home' element={<div>Home content</div>} />
                     </Routes>
@@ -105,6 +113,38 @@ describe('ConnectionRequired admin access', () => {
         expect(container.textContent).toContain('Dashboard content');
     });
 
+    it.each([
+        '/dashboard/piggietv',
+        '/configurationpage?name=plugin-a'
+    ])('fails closed for retained administration route %s when policy lookup fails', async initialEntry => {
+        connectionState.getCurrentUser.mockRejectedValue(new Error('policy unavailable'));
+
+        await renderAdminRoute(initialEntry);
+
+        expect(container.textContent).toContain('Loading');
+        expect(container.textContent).not.toContain('Dashboard content');
+        expect(container.textContent).not.toContain('Plugin configuration content');
+        expect(connectionState.getCurrentUser).toHaveBeenCalledOnce();
+    });
+
+    it('fails closed without exposing authenticated policy errors to console output', async () => {
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_TOKEN', 'connection-required' ].join('_');
+        const consoleSpies = ([ 'debug', 'error', 'info', 'log', 'warn' ] as const).map(level => (
+            vi.spyOn(console, level).mockImplementation(() => undefined)
+        ));
+        connectionState.getCurrentUser.mockRejectedValue(Object.assign(
+            new Error(`policy request failed?api_key=${accessCanary}`),
+            { config: { headers: { Authorization: `Bearer ${accessCanary}` } } }
+        ));
+
+        await renderAdminRoute();
+
+        expect(container.textContent).toContain('Loading');
+        const consoleOutput = JSON.stringify(consoleSpies.flatMap(spy => spy.mock.calls));
+        expect(consoleOutput).not.toContain(accessCanary);
+        expect(consoleOutput).toContain('[REDACTED]');
+    });
+
     it('starts one authoritative connection attempt across a StrictMode effect replay', async () => {
         let resolveConnection!: (value: unknown) => void;
 
@@ -122,7 +162,7 @@ describe('ConnectionRequired admin access', () => {
             root.render(
                 <StrictMode>
                     <MemoryRouter
-                        future={{ v7_relativeSplatPath: true, v7_startTransition: true }}
+                        future={ROUTER_FUTURE}
                         initialEntries={[ '/home' ]}
                     >
                         <Routes>

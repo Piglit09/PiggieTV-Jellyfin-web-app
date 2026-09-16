@@ -9,6 +9,7 @@ import toast from 'components/toast/toast';
 import dom from 'utils/dom';
 import globalize from 'lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import { currentSettings as userSettings } from 'scripts/settings/userSettings';
 import { PluginType } from 'types/plugin';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
@@ -56,21 +57,21 @@ function onSubmit(this: HTMLElement, e: Event) {
             userSettings.set('playlisteditor-lastplaylistid', playlistId);
             addToPlaylist(panel, playlistId)
                 .catch(err => {
-                    console.error('[PlaylistEditor] Failed to add to playlist %s', playlistId, err);
+                    ptvSafeConsole.error('[PlaylistEditor] Failed to add to playlist %s', playlistId, err);
                     toast(globalize.translate('PlaylistError.AddFailed'));
                 })
                 .finally(loading.hide);
         } else if (panel.playlistId) {
             updatePlaylist(panel)
                 .catch(err => {
-                    console.error('[PlaylistEditor] Failed to update to playlist %s', panel.playlistId, err);
+                    ptvSafeConsole.error('[PlaylistEditor] Failed to update to playlist %s', panel.playlistId, err);
                     toast(globalize.translate('PlaylistError.UpdateFailed'));
                 })
                 .finally(loading.hide);
         } else {
             createPlaylist(panel)
                 .catch(err => {
-                    console.error('[PlaylistEditor] Failed to create playlist', err);
+                    ptvSafeConsole.error('[PlaylistEditor] Failed to create playlist', err);
                     toast(globalize.translate('PlaylistError.CreateFailed'));
                 })
                 .finally(loading.hide);
@@ -146,7 +147,7 @@ function addToPlaylist(dlg: DialogElement, id: string) {
             serverId: currentServerId,
             ids: itemIds.split(',')
         }).catch(err => {
-            console.error('[PlaylistEditor] failed to add to queue', err);
+            ptvSafeConsole.error('[PlaylistEditor] failed to add to queue', err);
         });
         dlg.submitted = true;
         dialogHelper.close(dlg);
@@ -212,7 +213,7 @@ function populatePlaylists(editorOptions: PlaylistEditorOptions, panel: DialogEl
                     }))
                     .catch(err => {
                         // If a user doesn't have access, then the request will 404 and throw
-                        console.info('[PlaylistEditor] Failed to fetch playlist permissions', err);
+                        ptvSafeConsole.info('[PlaylistEditor] Failed to fetch playlist permissions', err);
 
                         return playlist;
                     });
@@ -318,7 +319,7 @@ function initEditor(content: DialogElement, options: PlaylistEditorOptions, item
         content.querySelector('.fldSelectPlaylist')?.classList.remove('hide');
         populatePlaylists(options, content)
             .catch(err => {
-                console.error('[PlaylistEditor] failed to populate playlists', err);
+                ptvSafeConsole.error('[PlaylistEditor] failed to populate playlists', err);
             })
             .finally(loading.hide);
     } else if (options.id) {
@@ -347,7 +348,7 @@ function initEditor(content: DialogElement, options: PlaylistEditorOptions, item
                 if (publicField) publicField.checked = !!playlist.OpenAccess;
             })
             .catch(err => {
-                console.error('[playlistEditor] failed to get playlist details', err);
+                ptvSafeConsole.error('[playlistEditor] failed to get playlist details', err);
             });
     } else {
         content.querySelector('.fldSelectPlaylist')?.classList.add('hide');

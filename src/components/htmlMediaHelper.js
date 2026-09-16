@@ -5,8 +5,6 @@ import { MediaError } from 'types/mediaError';
 
 const DEFAULT_MEDIA_VOLUME_LEVEL = 50;
 const DEFAULT_MEDIA_VOLUME = Math.pow(DEFAULT_MEDIA_VOLUME_LEVEL / 100, 3);
-const HLS_NETWORK_RETRY_LIMIT = 6;
-const HLS_NETWORK_RETRYABLE_STATUS_CODES = new Set([0, 404, 408, 409, 425, 429, 500, 502, 503, 504]);
 
 export function getSavedVolume() {
     const value = Number(appSettings.get('volume'));
@@ -87,30 +85,44 @@ export function enableHlsJsPlayer(runTimeTicks, mediaType) {
     return true;
 }
 
-let recoverDecodingErrorDate;
-let recoverSwapAudioCodecDate;
 export function handleHlsJsMediaError(instance, reject) {
     const hlsPlayer = instance._hlsPlayer;
 
     if (!hlsPlayer) {
-        return;
+        return false;
     }
 
-    let now = Date.now();
+    const playbackSession = instance._ptvPlaybackSession;
 
-    if (window.performance?.now) {
-        now = performance.now();
+    if (playbackSession?.recoverFromMediaError) {
+        const recovered = playbackSession.recoverFromMediaError(hlsPlayer);
+
+        if (recovered) return true;
+
+        playbackSession.markFailed('media-recovery-exhausted');
+        hlsPlayer.destroy();
+        if (instance._hlsPlayer === hlsPlayer) instance._hlsPlayer = null;
+
+        if (reject) {
+            reject();
+        } else {
+            onErrorInternal(instance, MediaError.FATAL_HLS_ERROR);
+        }
+
+        return false;
     }
 
-    if (!recoverDecodingErrorDate || (now - recoverDecodingErrorDate) > 3000) {
-        recoverDecodingErrorDate = now;
+    instance._hlsMediaRecoveryCount = (instance._hlsMediaRecoveryCount || 0) + 1;
+
+    if (instance._hlsMediaRecoveryCount === 1) {
         console.debug('try to recover media Error ...');
         hlsPlayer.recoverMediaError();
-    } else if (!recoverSwapAudioCodecDate || (now - recoverSwapAudioCodecDate) > 3000) {
-        recoverSwapAudioCodecDate = now;
+        return true;
+    } else if (instance._hlsMediaRecoveryCount === 2) {
         console.debug('try to swap Audio Codec and recover media Error ...');
         hlsPlayer.swapAudioCodec();
         hlsPlayer.recoverMediaError();
+        return true;
     } else {
         console.error('cannot recover, last media error recovery failed ...');
 
@@ -119,6 +131,8 @@ export function handleHlsJsMediaError(instance, reject) {
         } else {
             onErrorInternal(instance, MediaError.FATAL_HLS_ERROR);
         }
+
+        return false;
     }
 }
 
@@ -245,6 +259,8 @@ export function destroyCastPlayer(instance) {
 }
 
 export function destroyHlsPlayer(instance) {
+    instance._ptvCancelHlsBinding?.();
+    instance._ptvCancelHlsBinding = null;
     const player = instance._hlsPlayer;
     if (player) {
         try {
@@ -272,122 +288,82 @@ export function destroyFlvPlayer(instance) {
     }
 }
 
-export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, reject) {
-    let pendingReject = reject;
+export function bindEventsToHlsPlayer(instance, hls, elem, onErrorFn, resolve, reject, ownership = {}) {
+    let settled = false;
+    const isCurrentSource = ownership.isCurrentSource || (() => true);
+    const settleResolve = () => {
+        if (settled) return;
+
+        settled = true;
+        resolve();
+    };
+    const settleReject = error => {
+        if (settled) return;
+
+        settled = true;
+        reject(error);
+    };
+
+    const destroyOwnedHls = () => {
+        hls.destroy();
+        if (instance._hlsPlayer === hls) instance._hlsPlayer = null;
+    };
 
     hls.on(Hls.Events.MANIFEST_PARSED, function () {
-        instance._hlsNetworkRetryCount = 0;
-        playWithPromise(elem, onErrorFn).then(function () {
-            pendingReject = null;
-            resolve();
-        }, function () {
-            if (pendingReject) {
-                pendingReject();
-                pendingReject = null;
-            }
-        });
-    });
+        if (!isCurrentSource()) return;
 
-    hls.on(Hls.Events.FRAG_LOADED, function () {
-        instance._hlsNetworkRetryCount = 0;
+        instance._hlsMediaRecoveryCount = 0;
+        instance._ptvPlaybackSession?.recordPlayerAction?.('play');
+        playWithPromise(elem, onErrorFn).then(function () {
+            settleResolve();
+        }, settleReject);
     });
 
     hls.on(Hls.Events.ERROR, function (event, data) {
+        if (!isCurrentSource()) return;
+
         console.error('HLS Error: Type: ' + data.type + ' Details: ' + (data.details || '') + ' Fatal: ' + (data.fatal || false));
 
-        // try to recover network error
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR
-                && data.response?.code && data.response.code >= 400
-        ) {
-            console.debug('hls.js response error code: ' + data.response.code);
+        // Non-fatal manifest and fragment retries are owned by hls.js. Calling
+        // startLoad here would restart an active stream-controller load.
+        if (!data.fatal) return;
 
-            if (shouldRetryHlsNetworkError(instance, data.response.code)) {
-                retryHlsNetworkLoad(instance, hls, elem, data.response.code);
-                return;
+        switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR: {
+                const responseCode = data.response?.code || 0;
+
+                if (instance._ptvPlaybackSession?.recoverFromFatalNetwork?.(hls, responseCode, data)) return;
+
+                instance._ptvPlaybackSession?.markFailed?.('fatal-network');
+                destroyOwnedHls();
+
+                const errorType = responseCode === 0 ? MediaError.NETWORK_ERROR : MediaError.SERVER_ERROR;
+                if (!settled) {
+                    settleReject(errorType);
+                } else {
+                    onErrorInternal(instance, errorType);
+                }
+                break;
             }
+            case Hls.ErrorTypes.MEDIA_ERROR:
+                console.debug('fatal media error encountered, try to recover');
+                handleHlsJsMediaError(instance, settled ? null : settleReject);
+                break;
+            default:
+                console.debug('Cannot recover from hls error - destroy and trigger error');
+                instance._ptvPlaybackSession?.markFailed?.('fatal-hls');
+                destroyOwnedHls();
 
-            // Trigger failure differently depending on whether this is prior to start of playback, or after
-            hls.destroy();
-
-            if (pendingReject) {
-                pendingReject(MediaError.SERVER_ERROR);
-                pendingReject = null;
-            } else {
-                onErrorInternal(instance, MediaError.SERVER_ERROR);
-            }
-
-            return;
-        }
-
-        if (data.fatal) {
-            switch (data.type) {
-                case Hls.ErrorTypes.NETWORK_ERROR:
-
-                    if (shouldRetryHlsNetworkError(instance, data.response?.code || 0)) {
-                        retryHlsNetworkLoad(instance, hls, elem, data.response?.code || 0);
-                        return;
-                    }
-
-                    if (data.response && data.response.code === 0) {
-                        // This could be a CORS error related to access control response headers
-
-                        console.debug('hls.js response error code: ' + data.response.code);
-
-                        // Trigger failure differently depending on whether this is prior to start of playback, or after
-                        hls.destroy();
-
-                        if (pendingReject) {
-                            pendingReject(MediaError.NETWORK_ERROR);
-                            pendingReject = null;
-                        } else {
-                            onErrorInternal(instance, MediaError.NETWORK_ERROR);
-                        }
-                    } else {
-                        console.debug('fatal network error encountered, try to recover');
-                        hls.startLoad();
-                    }
-
-                    break;
-                case Hls.ErrorTypes.MEDIA_ERROR:
-                    console.debug('fatal media error encountered, try to recover');
-                    handleHlsJsMediaError(instance, pendingReject);
-                    pendingReject = null;
-                    break;
-                default:
-
-                    console.debug('Cannot recover from hls error - destroy and trigger error');
-                    // cannot recover
-                    // Trigger failure differently depending on whether this is prior to start of playback, or after
-                    hls.destroy();
-
-                    if (pendingReject) {
-                        pendingReject();
-                        pendingReject = null;
-                    } else {
-                        onErrorInternal(instance, MediaError.FATAL_HLS_ERROR);
-                    }
-                    break;
-            }
+                if (!settled) {
+                    settleReject(MediaError.FATAL_HLS_ERROR);
+                } else {
+                    onErrorInternal(instance, MediaError.FATAL_HLS_ERROR);
+                }
+                break;
         }
     });
-}
 
-function shouldRetryHlsNetworkError(instance, responseCode) {
-    const retryCount = instance._hlsNetworkRetryCount || 0;
-
-    return retryCount < HLS_NETWORK_RETRY_LIMIT
-        && HLS_NETWORK_RETRYABLE_STATUS_CODES.has(responseCode || 0);
-}
-
-function retryHlsNetworkLoad(instance, hls, elem, responseCode) {
-    instance._hlsNetworkRetryCount = (instance._hlsNetworkRetryCount || 0) + 1;
-    console.debug(`retrying hls.js network load after segment response ${responseCode}; attempt ${instance._hlsNetworkRetryCount}`);
-
-    try {
-        hls.startLoad(Number.isFinite(elem.currentTime) ? elem.currentTime : -1);
-    } catch (err) {
-        console.error('error retrying hls.js network load: ' + err);
-    }
+    return settleResolve;
 }
 
 export function onEndedInternal(instance, elem, onErrorFn) {

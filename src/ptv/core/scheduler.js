@@ -1,3 +1,5 @@
+import { ptvSafeConsole } from './safeConsole';
+
 const queues = new Map();
 
 export function schedule(name, callback) {
@@ -9,7 +11,7 @@ export function schedule(name, callback) {
         try {
             callback();
         } catch (err) {
-            console.error(`[PiggieTV] Scheduled task failed: ${name}`, err);
+            ptvSafeConsole.error(`[PiggieTV] Scheduled task failed: ${name}`, err);
         }
     });
 

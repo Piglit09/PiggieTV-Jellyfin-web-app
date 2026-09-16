@@ -24,12 +24,25 @@ import template from './itemidentifier.template.html';
 import datetime from '../../scripts/datetime';
 import { recordPtvEvent } from '../../ptv/core/observability';
 import {
+    classifyIdentifyAuthorityFailure,
+    confirmGenericIdentifyMutation,
+    createGenericIdentifyExpectedEffectProjection,
+    GENERIC_IDENTIFY_READBACK_DELAYS_MS,
+    GENERIC_IDENTIFY_READBACK_TIMEOUT_MS
+} from './itemIdentifierExpectedEffects';
+import {
     buildReadingMetadataPreview,
     buildRemoteSearchPayload,
+    createIdentifyTerminalCoordinator,
     createMetadataSearchResultViewModel,
     dedupeExternalIdInfos,
     getReadingIdentifyInfo,
     getReadingIdentifyName,
+    getReadingIdentifyApplyDisposition,
+    getReadingIdentifyCompletionMessage,
+    getReadingIdentifyFieldControlState,
+    getReadingIdentifyReadbackState,
+    getReadingIdentifyWritableFields,
     getSafeReadingProviderLink,
     getRemoteSearchApplyPayload,
     getRemoteSearchResponseShape,
@@ -39,14 +52,19 @@ import {
     normalizeRemoteProviderIds,
     normalizeRemoteSearchResultForApply,
     normalizeRemoteSearchResults,
-    rankMetadataSearchResults
+    pollReadingIdentifyReadback,
+    rankMetadataSearchResults,
+    isReadingIdentifyFieldLocked,
+    withReadingIdentifyDeadline
 } from './itemidentifierUtils';
 import './itemidentifier.scss';
 
 const enableFocusTransform = !browser.slow && !browser.edge;
 const IDENTIFY_SEARCH_SOFT_TIMEOUT_MS = 5000;
 const IDENTIFY_SEARCH_HARD_TIMEOUT_MS = 20000;
-const IDENTIFY_APPLY_REFRESH_DELAYS_MS = [0, 750, 1750, 3500, 6500, 10000];
+const READING_IDENTIFY_APPLY_WRITE_TIMEOUT_MS = 45000;
+const READING_IDENTIFY_READBACK_TIMEOUT_MS = 20000;
+const READING_IDENTIFY_READBACK_DELAYS_MS = [0, 300, 750, 1500, 3000, 5000];
 
 let currentItem;
 let currentItemType;
@@ -58,6 +76,11 @@ let currentSearchResult;
 let currentSearchRequestId = 0;
 let currentIdentifyApplyRequestId = 0;
 let currentReadingMetadataPreview = [];
+let currentReadingIdentifyApplyCoordinator = null;
+let currentReadingIdentifyApplyPage = null;
+let currentReadingIdentifyOwnerGeneration = null;
+let currentIdentifyReadbackCode = null;
+let currentIdentifyResultMode = 'item';
 
 function isIdentifyPageConnected(page) {
     if (!page) return false;
@@ -90,6 +113,10 @@ function getDiagnosticError(error) {
     if (!error) return '';
 
     return error.message || error.statusText || error.status || String(error);
+}
+
+function getReadingIdentifyDiagnosticErrorCategory(error) {
+    return classifyIdentifyAuthorityFailure(error);
 }
 
 function getReadingIdentifyFormat(item) {
@@ -231,21 +258,6 @@ function mergeProviderIds(...providerIdSources) {
     }), {});
 }
 
-function getRefreshedItemDiagnostics(item, applyResult) {
-    return {
-        appliedProviderIds: { ...(applyResult.ProviderIds || {}) },
-        genreCount: Array.isArray(item?.Genres) ? item.Genres.length : 0,
-        hasOverview: Boolean(item?.Overview),
-        itemProviderIds: getProviderIdsForDiagnostic(item),
-        itemYear: item?.ProductionYear || null,
-        peopleCount: Array.isArray(item?.People) ? item.People.length : 0,
-        resultHasOverview: Boolean(applyResult.Overview),
-        resultName: applyResult.Name || '',
-        resultYear: applyResult.ProductionYear || null,
-        seriesName: item?.SeriesName || ''
-    };
-}
-
 function getAppliedProviderIdMatches(item, applyResult) {
     const itemProviderIds = getProviderIdsForDiagnostic(item);
     const resultProviderIds = normalizeRemoteProviderIds(applyResult.ProviderIds);
@@ -260,76 +272,7 @@ function getAppliedProviderIdMatches(item, applyResult) {
     ));
 }
 
-function hasAppliedMetadataSettled(item, applyResult) {
-    if (!item) return false;
-    if (!getAppliedProviderIdMatches(item, applyResult)) return false;
-
-    const resultOverview = String(applyResult.Overview || '').trim();
-    const resultYear = Number(applyResult.ProductionYear || 0);
-    const report = getApplyPersistenceReport(item, applyResult);
-
-    if (resultOverview && !String(item.Overview || '').trim()) return false;
-    if (report.missing.length) return false;
-
-    return !(resultYear && Number(item.ProductionYear || 0) !== resultYear);
-}
-
-function mergeAppliedResultFallback(item, applyResult) {
-    if (!item) return item;
-
-    const providerIds = mergeProviderIds(item.ProviderIds, applyResult.ProviderIds);
-    const itemOverview = cleanOverviewText(item.Overview);
-    const resultOverview = cleanOverviewText(applyResult.Overview);
-    const genres = getUniqueTextList([
-        ...(Array.isArray(item.Genres) ? item.Genres : []),
-        ...(Array.isArray(applyResult.Genres) ? applyResult.Genres : [])
-    ]);
-
-    return {
-        ...item,
-        Genres: genres.length ? genres : item.Genres,
-        Overview: itemOverview || resultOverview || '',
-        ProductionYear: item.ProductionYear || applyResult.ProductionYear,
-        ProviderIds: providerIds
-    };
-}
-
-function waitForDelay(ms) {
-    if (!ms) return Promise.resolve();
-
-    return new Promise(resolve => {
-        window.setTimeout(resolve, ms);
-    });
-}
-
-function queueAppliedMetadataRefresh(apiClient, itemId, replaceImages) {
-    if (!apiClient?.refreshItem || !itemId) {
-        return Promise.resolve();
-    }
-
-    const options = {
-        ImageRefreshMode: replaceImages ? 'FullRefresh' : 'Default',
-        MetadataRefreshMode: 'FullRefresh',
-        Recursive: true,
-        ReplaceAllImages: Boolean(replaceImages),
-        ReplaceAllMetadata: true
-    };
-
-    recordIdentificationDiagnostic('ptv-reading-identify-metadata-refresh-queued', {
-        itemId,
-        options
-    });
-
-    return apiClient.refreshItem(itemId, options).catch(error => {
-        recordIdentificationDiagnostic('ptv-reading-identify-metadata-refresh-queue-failed', {
-            error: getDiagnosticError(error),
-            itemId,
-            options
-        });
-    });
-}
-
-function persistAppliedResultImage(apiClient, itemId, applyResult, replaceImages) {
+function persistAppliedResultImage(apiClient, itemId, applyResult, replaceImages, diagnosticContext = {}) {
     const imageUrl = String(applyResult?.ImageUrl || applyResult?.imageUrl || '').trim();
 
     if (!replaceImages || !imageUrl || !apiClient?.downloadRemoteImage || !itemId) {
@@ -344,30 +287,31 @@ function persistAppliedResultImage(apiClient, itemId, applyResult, replaceImages
     };
     const startedAt = performance.now();
 
-    recordIdentificationDiagnostic('ptv-reading-identify-applied-image-save-started', {
-        imageUrl: redactDiagnosticUrl(imageUrl),
-        itemId,
-        provider: options.ProviderName,
-        type: options.Type
+    recordIdentifyAuthorityDiagnostic('ptv-identify-applied-image-save-started', {
+        effectCategories: [ 'image-primary' ],
+        operationGeneration: diagnosticContext.operationGeneration || null,
+        ownerGeneration: diagnosticContext.ownerGeneration || null,
+        phase: 'artwork-write'
     });
 
     return apiClient.downloadRemoteImage(options).then(() => {
-        recordIdentificationDiagnostic('ptv-reading-identify-applied-image-save-completed', {
+        recordIdentifyAuthorityDiagnostic('ptv-identify-applied-image-save-completed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
-            itemId,
-            provider: options.ProviderName,
-            type: options.Type
+            effectCategories: [ 'image-primary' ],
+            operationGeneration: diagnosticContext.operationGeneration || null,
+            ownerGeneration: diagnosticContext.ownerGeneration || null,
+            phase: 'artwork-write'
         });
 
         return true;
     }, error => {
-        recordIdentificationDiagnostic('ptv-reading-identify-applied-image-save-failed', {
+        recordIdentifyAuthorityDiagnostic('ptv-identify-applied-image-save-failed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
-            error: getDiagnosticError(error),
-            imageUrl: redactDiagnosticUrl(imageUrl),
-            itemId,
-            provider: options.ProviderName,
-            type: options.Type
+            effectCategories: [ 'image-primary' ],
+            failureReason: getReadingIdentifyDiagnosticErrorCategory(error),
+            operationGeneration: diagnosticContext.operationGeneration || null,
+            ownerGeneration: diagnosticContext.ownerGeneration || null,
+            phase: 'artwork-write'
         });
 
         return false;
@@ -600,11 +544,8 @@ function resolveDetailedRemoteSearchResult(apiClient, itemId, applyResult) {
     const requestUrl = apiClient.getUrl(`Items/RemoteSearch/${currentItemType}`);
     const startedAt = performance.now();
 
-    recordIdentificationDiagnostic('ptv-reading-identify-detail-lookup-started', {
-        endpoint: redactDiagnosticUrl(requestUrl),
-        httpMethod: 'POST',
-        providerIds: { ...lookupRequest.SearchInfo.ProviderIds },
-        searchProviderName: lookupRequest.SearchProviderName || ''
+    recordIdentifyAuthorityDiagnostic('ptv-identify-detail-lookup-started', {
+        phase: 'provider-detail-lookup'
     });
 
     return withIdentificationHardTimeout(apiClient.ajax({
@@ -627,77 +568,23 @@ function resolveDetailedRemoteSearchResult(apiClient, itemId, applyResult) {
             normalizeReadingMetadataCandidate(mergedResult, searchInfo) :
             mergedResult;
 
-        recordIdentificationDiagnostic('ptv-reading-identify-detail-lookup-completed', {
+        recordIdentifyAuthorityDiagnostic('ptv-identify-detail-lookup-completed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
-            endpoint: redactDiagnosticUrl(requestUrl),
-            hasDetailedOverview: Boolean(normalizedMergedResult.Overview),
-            providerIds: normalizedMergedResult.ProviderIds || {},
+            phase: 'provider-detail-lookup',
             resultCount: detailedResults.length,
-            searchProviderName: normalizedMergedResult.SearchProviderName || ''
+            resultShape: detailedResult ? 'matched' : 'fallback'
         });
 
         return normalizedMergedResult;
     }, error => {
-        recordIdentificationDiagnostic('ptv-reading-identify-detail-lookup-failed', {
+        recordIdentifyAuthorityDiagnostic('ptv-identify-detail-lookup-failed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
-            endpoint: redactDiagnosticUrl(requestUrl),
-            error: getDiagnosticError(error),
-            providerIds: applyResult.ProviderIds || {},
-            searchProviderName: applyResult.SearchProviderName || ''
+            failureReason: getReadingIdentifyDiagnosticErrorCategory(error),
+            phase: 'provider-detail-lookup'
         });
 
         return applyResult;
     });
-}
-
-function fetchAppliedItemWithSettledMetadata(apiClient, itemId, applyResult) {
-    const userId = apiClient.getCurrentUserId?.();
-
-    if (!userId || !apiClient.getItem) {
-        return Promise.resolve(null);
-    }
-
-    let lastItem = null;
-
-    function tryRefresh(index) {
-        const delayMs = IDENTIFY_APPLY_REFRESH_DELAYS_MS[index] || 0;
-
-        return waitForDelay(delayMs)
-            .then(() => apiClient.getItem(userId, itemId))
-            .then(item => {
-                lastItem = item;
-                const settled = hasAppliedMetadataSettled(item, applyResult);
-
-                recordIdentificationDiagnostic('ptv-reading-identify-apply-refresh-polled', {
-                    ...getRefreshedItemDiagnostics(item, applyResult),
-                    delayMs,
-                    pollIndex: index,
-                    settled
-                });
-
-                if (settled || index >= IDENTIFY_APPLY_REFRESH_DELAYS_MS.length - 1) {
-                    return mergeAppliedResultFallback(item, applyResult);
-                }
-
-                return tryRefresh(index + 1);
-            })
-            .catch(error => {
-                recordIdentificationDiagnostic('ptv-reading-identify-refresh-after-apply-failed', {
-                    delayMs,
-                    error: getDiagnosticError(error),
-                    itemId,
-                    pollIndex: index
-                });
-
-                if (index >= IDENTIFY_APPLY_REFRESH_DELAYS_MS.length - 1) {
-                    return mergeAppliedResultFallback(lastItem, applyResult);
-                }
-
-                return tryRefresh(index + 1);
-            });
-    }
-
-    return tryRefresh(0);
 }
 
 function normalizeUpdateStudios(studios) {
@@ -711,9 +598,7 @@ function normalizeUpdateStudios(studios) {
 }
 
 function isMetadataFieldLocked(item, field) {
-    const lockedFields = Array.isArray(item?.LockedFields) ? item.LockedFields : [];
-
-    return lockedFields.some(lockedField => normalizeProviderKey(lockedField) === normalizeProviderKey(field));
+    return isReadingIdentifyFieldLocked(item, field);
 }
 
 function getResultTextList(applyResult, ...keys) {
@@ -938,6 +823,30 @@ function getMetadataUpdateItem(item, applyResult, selectedFields = null) {
     };
 }
 
+function getGenericIdentifyIntendedFields(item, applyResult) {
+    const fields = [];
+    const addTextField = (field, value) => {
+        if (String(value || '').trim() && !isMetadataFieldLocked(item, field)) fields.push(field);
+    };
+
+    addTextField('Name', applyResult.Name);
+    addTextField('OriginalTitle', applyResult.OriginalTitle);
+    addTextField('SeriesName', applyResult.SeriesName);
+    addTextField('Overview', cleanOverviewText(applyResult.Overview));
+
+    if (applyResult.IndexNumber != null && !isMetadataFieldLocked(item, 'IndexNumber')) fields.push('IndexNumber');
+    if (applyResult.ParentIndexNumber != null && !isMetadataFieldLocked(item, 'ParentIndexNumber')) fields.push('ParentIndexNumber');
+    if (Number(applyResult.ProductionYear || 0) && !isMetadataFieldLocked(item, 'ProductionYear')) fields.push('ProductionYear');
+    if (String(applyResult.PremiereDate || '').trim() && !isMetadataFieldLocked(item, 'PremiereDate')) fields.push('PremiereDate');
+    if (getResultTextList(applyResult, 'Genres', 'GenreItems').length && !isMetadataFieldLocked(item, 'Genres')) fields.push('Genres');
+    if (getResultPeople(applyResult).length && !isMetadataFieldLocked(item, 'People')) fields.push('People');
+    if (getResultStudios(applyResult).length && !isMetadataFieldLocked(item, 'Studios')) fields.push('Studios');
+    if (getResultTextList(applyResult, 'Tags').length && !isMetadataFieldLocked(item, 'Tags')) fields.push('Tags');
+    if (Object.values(normalizeRemoteProviderIds(applyResult.ProviderIds)).some(value => String(value || '').trim())) fields.push('ProviderIds');
+
+    return Array.from(new Set(fields));
+}
+
 function shouldPersistAppliedResultFields(item, applyResult) {
     const resultOverview = cleanOverviewText(applyResult.Overview);
     const resultYear = Number(applyResult.ProductionYear || 0);
@@ -951,44 +860,50 @@ function shouldPersistAppliedResultFields(item, applyResult) {
     return !getAppliedProviderIdMatches(item, applyResult);
 }
 
-function persistAppliedResultFields(apiClient, item, applyResult, selectedFields = null, force = false) {
+function persistAppliedResultFields(apiClient, item, applyResult, selectedFields = null, force = false, readBack = true, diagnosticContext = {}) {
     if (!apiClient?.updateItem || !item?.Id || (!force && !shouldPersistAppliedResultFields(item, applyResult))) {
         return Promise.resolve(item);
     }
 
     const userId = apiClient.getCurrentUserId?.();
     const updateItem = getMetadataUpdateItem(item, applyResult, selectedFields);
+    const confirmedUpdate = {
+        ...item,
+        ...updateItem
+    };
     const startedAt = performance.now();
 
-    recordIdentificationDiagnostic('ptv-reading-identify-applied-fields-save-started', {
-        hasOverview: Boolean(updateItem.Overview),
-        itemId: updateItem.Id,
-        providerIds: updateItem.ProviderIds || {},
-        year: updateItem.ProductionYear || null
+    recordIdentifyAuthorityDiagnostic('ptv-identify-applied-fields-save-started', {
+        effectCategories: diagnosticContext.effectCategories || [],
+        operationGeneration: diagnosticContext.operationGeneration || null,
+        ownerGeneration: diagnosticContext.ownerGeneration || null,
+        phase: 'metadata-write'
     });
 
     return apiClient.updateItem(updateItem).then(() => {
-        recordIdentificationDiagnostic('ptv-reading-identify-applied-fields-save-completed', {
+        recordIdentifyAuthorityDiagnostic('ptv-identify-applied-fields-save-completed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
-            hasOverview: Boolean(updateItem.Overview),
-            itemId: updateItem.Id,
-            providerIds: updateItem.ProviderIds || {},
-            year: updateItem.ProductionYear || null
+            effectCategories: diagnosticContext.effectCategories || [],
+            operationGeneration: diagnosticContext.operationGeneration || null,
+            ownerGeneration: diagnosticContext.ownerGeneration || null,
+            phase: 'metadata-write'
         });
 
-        if (!userId || !apiClient.getItem) {
-            return Array.isArray(selectedFields) ? updateItem : mergeAppliedResultFallback(updateItem, applyResult);
+        if (!readBack || !userId || !apiClient.getItem) {
+            return confirmedUpdate;
         }
 
         return apiClient.getItem(userId, updateItem.Id)
-            .then(refreshedItem => Array.isArray(selectedFields) ? refreshedItem : mergeAppliedResultFallback(refreshedItem, applyResult))
-            .catch(() => Array.isArray(selectedFields) ? updateItem : mergeAppliedResultFallback(updateItem, applyResult));
+            .then(refreshedItem => refreshedItem)
+            .catch(() => confirmedUpdate);
     }, error => {
-        recordIdentificationDiagnostic('ptv-reading-identify-applied-fields-save-failed', {
+        recordIdentifyAuthorityDiagnostic('ptv-identify-applied-fields-save-failed', {
             durationMs: Number((performance.now() - startedAt).toFixed(1)),
-            error: getDiagnosticError(error),
-            itemId: updateItem.Id,
-            providerIds: updateItem.ProviderIds || {}
+            effectCategories: diagnosticContext.effectCategories || [],
+            failureReason: getReadingIdentifyDiagnosticErrorCategory(error),
+            operationGeneration: diagnosticContext.operationGeneration || null,
+            ownerGeneration: diagnosticContext.ownerGeneration || null,
+            phase: 'metadata-write'
         });
 
         if (force) throw error;
@@ -1057,6 +972,24 @@ function recordIdentificationDiagnostic(name, detail) {
     });
 }
 
+function getIdentifyItemTypeCategory() {
+    const category = String(currentItemType || currentItem?.Type || '')
+        .replace(/[^a-z0-9]/gi, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-/, '')
+        .replace(/-$/, '')
+        .toLowerCase();
+
+    return category || 'unknown';
+}
+
+function recordIdentifyAuthorityDiagnostic(name, detail = {}) {
+    recordPtvEvent('api', name, {
+        itemTypeCategory: getIdentifyItemTypeCategory(),
+        ...detail
+    });
+}
+
 function setSearchSubmitDisabled(page, disabled) {
     const submitButton = page.querySelector('.popupIdentifyForm button[type="submit"]');
 
@@ -1095,6 +1028,24 @@ function setApplySubmitDisabled(page, disabled) {
     if (submitButton) {
         submitButton.disabled = disabled;
     }
+}
+
+function setIdentifyDismissDisabled(page, disabled) {
+    page.querySelectorAll('.btnCancel').forEach(button => {
+        button.disabled = disabled;
+    });
+}
+
+function requestIdentifyDialogClose(page) {
+    if (currentReadingIdentifyApplyCoordinator && currentReadingIdentifyApplyPage === page) {
+        if (!currentReadingIdentifyApplyCoordinator.requestClose()) {
+            showApplyStatus(page, 'Finishing the metadata operation before closing...', 'loading');
+        }
+
+        return;
+    }
+
+    dialogHelper.close(page);
 }
 
 function getIdentificationSearchErrorMessage(error) {
@@ -1424,10 +1375,10 @@ function getReadingMetadataPreviewHtml(preview, applyResult, apiClient) {
     html += '<div class="identifyMetadataTableHeader" role="row"><span>Apply</span><span>Field</span><span>Current Jellyfin value</span><span>Proposed provider value</span></div>';
 
     metadataRows.forEach(field => {
-        const disabled = !field.changed || !field.proposedValue;
+        const controlState = getReadingIdentifyFieldControlState(field);
         const warningHtml = field.warning ? `<small class="identifyMetadataWarning">${escapeHtml(field.warning)}</small>` : '';
         html += `<div class="identifyMetadataRow${field.changed ? ' is-changed' : ''}" role="row">`;
-        html += `<label class="identifyMetadataToggle" title="Apply ${escapeHtml(field.label)}"><input type="checkbox" is="emby-checkbox" class="readingMetadataField" data-metadata-field="${escapeHtml(field.key)}"${field.selected ? ' checked' : ''}${disabled ? ' disabled' : ''} /><span class="visually-hidden">Apply ${escapeHtml(field.label)}</span></label>`;
+        html += `<label class="identifyMetadataToggle" title="Apply ${escapeHtml(field.label)}"><input type="checkbox" is="emby-checkbox" class="readingMetadataField" data-metadata-field="${escapeHtml(field.key)}"${controlState.checked ? ' checked' : ''}${controlState.disabled ? ' disabled' : ''} /><span class="visually-hidden">Apply ${escapeHtml(field.label)}</span></label>`;
         html += `<strong class="identifyMetadataLabel">${escapeHtml(field.label)}</strong>`;
         html += `<div class="identifyMetadataValue">${getMetadataPreviewValueHtml(field.currentValue, field.key)}</div>`;
         html += `<div class="identifyMetadataValue">${getMetadataPreviewValueHtml(field.proposedValue, field.key)}${warningHtml}</div>`;
@@ -1441,8 +1392,9 @@ function getReadingMetadataPreviewHtml(preview, applyResult, apiClient) {
     html += '</div><div><span>Proposed cover</span>';
     html += proposedImageUrl ? `<img src="${escapeHtml(proposedImageUrl)}" alt="Proposed cover" />` : '<div class="identifyCoverPlaceholder">No proposed cover</div>';
     html += '</div>';
-    const imageChecked = imageField?.selected ? ' checked' : '';
-    const imageDisabled = proposedImageUrl ? '' : ' disabled';
+    const imageControlState = getReadingIdentifyFieldControlState(imageField, proposedImageUrl);
+    const imageChecked = imageControlState.checked ? ' checked' : '';
+    const imageDisabled = imageControlState.disabled ? ' disabled' : '';
     const imageWarning = imageField?.warning ? `<small>${escapeHtml(imageField.warning)}</small>` : '';
     html += `<label class="checkboxContainer identifyArtworkToggle"><input type="checkbox" is="emby-checkbox" id="chkIdentifyReplaceImages" class="readingMetadataField" data-metadata-field="PrimaryImage"${imageChecked}${imageDisabled} /><span>Replace existing primary image</span>${imageWarning}</label>`;
     html += '</section>';
@@ -1633,10 +1585,86 @@ function getSearchResultHtml(result, index) {
 }
 
 function getSelectedReadingMetadataFields(page) {
-    return Array.from(page.querySelectorAll('.readingMetadataField'))
+    const selectedFields = Array.from(page.querySelectorAll('.readingMetadataField'))
         .filter(input => input.checked && !input.disabled)
         .map(input => input.dataset.metadataField)
         .filter(Boolean);
+
+    return getReadingIdentifyWritableFields(currentItem, selectedFields);
+}
+
+function getBestReadingIdentifyItem(beforeItem, savedItem, readbackResult, readbackState, metadataStatus) {
+    const readbackItem = readbackResult.item;
+
+    if (readbackItem && (readbackResult.status === 'confirmed' || readbackState.metadataSettled)) {
+        return readbackItem;
+    }
+
+    if (metadataStatus !== 'saved') {
+        return readbackItem || beforeItem;
+    }
+
+    const bestItem = {
+        ...(readbackItem || beforeItem),
+        ...(savedItem || {})
+    };
+
+    if (readbackItem?.ImageTags) bestItem.ImageTags = readbackItem.ImageTags;
+    if (readbackItem?.BackdropImageTags) bestItem.BackdropImageTags = readbackItem.BackdropImageTags;
+
+    return bestItem;
+}
+
+function getReadingIdentifyUpdateEventDetail({
+    applyResult,
+    artworkStatus,
+    disposition,
+    item,
+    metadataStatus,
+    operationGeneration,
+    readingOwnerGeneration,
+    selectedMetadataFields
+}) {
+    if (!disposition.committed) return null;
+
+    return {
+        artworkCode: disposition.artworkCode,
+        artworkStatus,
+        item: item || null,
+        itemId: item?.Id,
+        metadataCode: disposition.metadataCode,
+        metadataStatus,
+        operationGeneration,
+        outcome: disposition.outcome,
+        provider: applyResult.SearchProviderName || '',
+        readingOwnerGeneration,
+        readbackCode: disposition.readbackCode,
+        selectedMetadataFields
+    };
+}
+
+function createCurrentIdentifyApplyCoordinator(page) {
+    const coordinator = createIdentifyTerminalCoordinator({
+        close: () => dialogHelper.close(page),
+        dispatch: detail => {
+            window.dispatchEvent(new CustomEvent('ptv-reading-item-metadata-updated', { detail }));
+        },
+        onPendingChange: pending => {
+            page.dataset.identifyApplyLoading = String(pending);
+            setIdentifyDismissDisabled(page, pending);
+            if (!pending) loading.hide();
+        },
+        onRetryable: () => {
+            if (isIdentifyPageConnected(page)) setApplySubmitDisabled(page, false);
+        },
+        onTerminalClosed: finishIdentifyDialogResolution
+    });
+
+    currentReadingIdentifyApplyCoordinator = coordinator;
+    currentReadingIdentifyApplyPage = page;
+    coordinator.start();
+
+    return coordinator;
 }
 
 function submitReadingIdentificationResult(page, applyResult, applyRequestId) {
@@ -1650,13 +1678,17 @@ function submitReadingIdentificationResult(page, applyResult, applyRequestId) {
     }
 
     const apiClient = getApiClient();
+    const beforeItem = currentItem;
+    const readingOwnerGeneration = currentReadingIdentifyOwnerGeneration;
     const startedAt = performance.now();
     let metadataStatus = selectedMetadataFields.length ? 'saving' : 'skipped';
     let artworkStatus = replaceImages ? 'saving' : 'skipped';
     let savedItem = currentItem;
+    let metadataError = null;
+    let artworkError = null;
 
     loading.show();
-    page.dataset.identifyApplyLoading = 'true';
+    const coordinator = createCurrentIdentifyApplyCoordinator(page);
     setApplySubmitDisabled(page, true);
     showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, 'loading');
 
@@ -1667,7 +1699,14 @@ function submitReadingIdentificationResult(page, applyResult, applyRequestId) {
     });
 
     const metadataPromise = selectedMetadataFields.length ?
-        persistAppliedResultFields(apiClient, currentItem, applyResult, selectedMetadataFields, true)
+        withReadingIdentifyDeadline(
+            persistAppliedResultFields(apiClient, currentItem, applyResult, selectedMetadataFields, true, false, {
+                effectCategories: selectedMetadataFields.map(field => String(field).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()),
+                operationGeneration: applyRequestId,
+                ownerGeneration: readingOwnerGeneration
+            }),
+            READING_IDENTIFY_APPLY_WRITE_TIMEOUT_MS
+        )
             .then(item => {
                 metadataStatus = 'saved';
                 savedItem = item || savedItem;
@@ -1678,8 +1717,10 @@ function submitReadingIdentificationResult(page, applyResult, applyRequestId) {
                 return item;
             }, error => {
                 metadataStatus = 'failed';
+                metadataError = error;
                 recordIdentificationDiagnostic('ptv-reading-identify-selective-metadata-failed', {
-                    error: getDiagnosticError(error),
+                    errorCategory: getReadingIdentifyDiagnosticErrorCategory(error),
+                    reason: error?.name === 'PtvReadingIdentifyTimeoutError' ? 'METADATA_WRITE_TIMEOUT' : 'METADATA_WRITE_FAILED',
                     selectedMetadataFields
                 });
 
@@ -1687,86 +1728,162 @@ function submitReadingIdentificationResult(page, applyResult, applyRequestId) {
             }) :
         Promise.resolve(currentItem);
     const artworkPromise = replaceImages ?
-        persistAppliedResultImage(apiClient, currentItem.Id, applyResult, true).then(saved => {
+        withReadingIdentifyDeadline(
+            persistAppliedResultImage(apiClient, currentItem.Id, applyResult, true, {
+                operationGeneration: applyRequestId,
+                ownerGeneration: readingOwnerGeneration
+            }),
+            READING_IDENTIFY_APPLY_WRITE_TIMEOUT_MS
+        ).then(saved => {
             artworkStatus = saved ? 'saved' : 'failed';
             if (canUpdateIdentifyApply(page, applyRequestId)) {
                 showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, metadataStatus === 'saving' ? 'loading' : 'info');
             }
 
             return saved;
+        }, error => {
+            artworkStatus = 'failed';
+            artworkError = error;
+            recordPtvEvent('api', 'ptv-reading-identify-selective-artwork-failed', {
+                errorCategory: getReadingIdentifyDiagnosticErrorCategory(error),
+                reason: error?.name === 'PtvReadingIdentifyTimeoutError' ? 'ARTWORK_WRITE_TIMEOUT' : 'ARTWORK_WRITE_FAILED'
+            });
+
+            return false;
         }) :
         Promise.resolve(false);
 
-    Promise.all([metadataPromise, artworkPromise]).then(() => {
+    Promise.all([metadataPromise, artworkPromise]).then(async () => {
         const userId = apiClient.getCurrentUserId?.();
-        const refreshPromise = userId && apiClient.getItem ?
-            apiClient.getItem(userId, currentItem.Id).catch(() => savedItem) :
-            Promise.resolve(savedItem);
+        const committed = metadataStatus === 'saved' || artworkStatus === 'saved';
+        let readbackResult = {
+            attempts: 0,
+            error: null,
+            item: null,
+            status: committed ? 'failed' : 'not-required'
+        };
 
-        return refreshPromise.then(refreshedItem => {
-            if (!canUpdateIdentifyApply(page, applyRequestId)) {
-                loading.hide();
-                return;
+        if (committed && userId && apiClient.getItem) {
+            if (canUpdateIdentifyApply(page, applyRequestId)) {
+                showApplyStatus(page, 'Changes saved. Reading back the authoritative item...', 'loading');
             }
 
-            if (refreshedItem) currentItem = refreshedItem;
-
-            const metadataSucceeded = metadataStatus === 'saved' || metadataStatus === 'skipped';
-            const artworkSucceeded = artworkStatus === 'saved' || artworkStatus === 'skipped';
-            const verificationReport = getApplyPersistenceReport(currentItem, applyResult, selectedMetadataFields);
-            const fullySuccessful = metadataSucceeded && artworkSucceeded && !verificationReport.missing.length;
-
-            hasChanges = metadataStatus === 'saved' || artworkStatus === 'saved';
-            currentSearchResult = applyResult;
-            loading.hide();
-            page.dataset.identifyApplyLoading = 'false';
-
-            window.dispatchEvent(new CustomEvent('ptv-reading-item-metadata-updated', {
-                detail: {
+            readbackResult = await pollReadingIdentifyReadback({
+                delays: READING_IDENTIFY_READBACK_DELAYS_MS,
+                isSettled: item => getReadingIdentifyReadbackState({
+                    applyResult,
                     artworkStatus,
-                    item: currentItem || null,
-                    itemId: currentItem?.Id,
+                    beforeItem,
+                    expectedItem: savedItem,
+                    item,
                     metadataStatus,
-                    provider: applyResult.SearchProviderName || '',
                     selectedMetadataFields
-                }
-            }));
-
-            recordIdentificationDiagnostic('ptv-reading-identify-selective-apply-completed', {
-                artworkStatus,
-                durationMs: Number((performance.now() - startedAt).toFixed(1)),
-                metadataStatus,
-                missingFields: verificationReport.missing,
-                selectedMetadataFields,
-                status: fullySuccessful ? 'success' : 'partial'
+                }).settled,
+                loadItem: () => apiClient.getItem(userId, beforeItem.Id),
+                timeoutMs: READING_IDENTIFY_READBACK_TIMEOUT_MS
             });
+        }
 
-            if (fullySuccessful) {
-                showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.`, 'success');
-                toast('Metadata updated.');
-                dialogHelper.close(page);
-                return;
-            }
+        if (!isCurrentIdentifyApplyRequest(applyRequestId) || currentReadingIdentifyApplyCoordinator !== coordinator) return;
 
-            const missingText = verificationReport.missing.length ?
-                ` Missing metadata fields: ${verificationReport.missing.join(', ')}.` :
-                '';
-
-            showApplyStatus(page, `Metadata: ${metadataStatus}. Artwork: ${artworkStatus}.${missingText}`, 'error');
-            setApplySubmitDisabled(page, false);
-            toast('Metadata update completed with warnings.');
-        });
-    }).catch(error => {
-        loading.hide();
-        if (!isCurrentIdentifyApplyRequest(applyRequestId) || !isIdentifyPageConnected(page)) return;
-
-        page.dataset.identifyApplyLoading = 'false';
-        setApplySubmitDisabled(page, false);
-        showApplyStatus(page, getIdentificationApplyErrorMessage(error), 'error');
-        recordIdentificationDiagnostic('ptv-reading-identify-selective-apply-failed', {
-            error: getDiagnosticError(error),
+        const readbackState = getReadingIdentifyReadbackState({
+            applyResult,
+            artworkStatus,
+            beforeItem,
+            expectedItem: savedItem,
+            item: readbackResult.item,
+            metadataStatus,
             selectedMetadataFields
         });
+        const bestItem = getBestReadingIdentifyItem(
+            beforeItem,
+            savedItem,
+            readbackResult,
+            readbackState,
+            metadataStatus
+        );
+        const disposition = getReadingIdentifyApplyDisposition({
+            artworkStatus,
+            metadataStatus,
+            readbackState,
+            readbackStatus: readbackResult.status
+        });
+        const verificationReport = getApplyPersistenceReport(bestItem, applyResult, selectedMetadataFields);
+        const completionMessage = getReadingIdentifyCompletionMessage(disposition, metadataStatus, artworkStatus);
+
+        if (bestItem) currentItem = bestItem;
+        currentIdentifyReadbackCode = disposition.readbackCode;
+        hasChanges = hasChanges || disposition.committed;
+        currentSearchResult = applyResult;
+        const eventDetail = getReadingIdentifyUpdateEventDetail({
+            applyResult,
+            artworkStatus,
+            disposition,
+            item: currentItem,
+            metadataStatus,
+            operationGeneration: applyRequestId,
+            readingOwnerGeneration,
+            selectedMetadataFields
+        });
+
+        recordIdentificationDiagnostic('ptv-reading-identify-selective-apply-completed', {
+            artworkCode: disposition.artworkCode,
+            artworkErrorCategory: getReadingIdentifyDiagnosticErrorCategory(artworkError),
+            artworkStatus,
+            durationMs: Number((performance.now() - startedAt).toFixed(1)),
+            metadataCode: disposition.metadataCode,
+            metadataErrorCategory: getReadingIdentifyDiagnosticErrorCategory(metadataError),
+            metadataStatus,
+            outcome: disposition.outcome,
+            proposalDifferences: verificationReport.missing,
+            readbackAttempts: readbackResult.attempts,
+            readbackCode: disposition.readbackCode,
+            readbackErrorCategory: getReadingIdentifyDiagnosticErrorCategory(readbackResult.error),
+            selectedMetadataFields
+        });
+
+        if (isIdentifyPageConnected(page)) {
+            let completionState = 'warning';
+
+            if (disposition.outcome === 'FULL_SUCCESS') completionState = 'success';
+            if (disposition.outcome === 'FAILURE') completionState = 'error';
+            showApplyStatus(page, completionMessage, completionState);
+            toast(completionMessage);
+        }
+
+        coordinator.settle({ disposition, eventDetail });
+    }).catch(error => {
+        if (!isCurrentIdentifyApplyRequest(applyRequestId) || currentReadingIdentifyApplyCoordinator !== coordinator) return;
+
+        const committed = metadataStatus === 'saved' || artworkStatus === 'saved';
+        const disposition = getReadingIdentifyApplyDisposition({
+            artworkStatus,
+            metadataStatus,
+            readbackStatus: committed ? 'failed' : 'not-required'
+        });
+
+        if (savedItem) currentItem = savedItem;
+        currentIdentifyReadbackCode = disposition.readbackCode;
+        hasChanges = hasChanges || disposition.committed;
+        const eventDetail = getReadingIdentifyUpdateEventDetail({
+            applyResult,
+            artworkStatus,
+            disposition,
+            item: currentItem,
+            metadataStatus,
+            operationGeneration: applyRequestId,
+            readingOwnerGeneration,
+            selectedMetadataFields
+        });
+
+        if (isIdentifyPageConnected(page)) {
+            showApplyStatus(page, getIdentificationApplyErrorMessage(error), 'error');
+        }
+        recordIdentificationDiagnostic('ptv-reading-identify-selective-apply-failed', {
+            errorCategory: getReadingIdentifyDiagnosticErrorCategory(error),
+            selectedMetadataFields
+        });
+        coordinator.settle({ disposition, eventDetail });
     });
 }
 
@@ -1788,10 +1905,9 @@ function submitIdentficationResult(page) {
 
     if (!hasRemoteSearchProviderIds(applyResult)) {
         showApplyStatus(page, 'This metadata result did not include a provider ID, so it cannot be applied safely.', 'error');
-        recordIdentificationDiagnostic('ptv-reading-identify-apply-blocked', {
-            reason: 'missing-provider-ids',
-            resultName: applyResult.Name || '',
-            searchProviderName: applyResult.SearchProviderName || ''
+        recordIdentifyAuthorityDiagnostic('ptv-identify-apply-blocked', {
+            failureReason: 'missing-provider-ids',
+            phase: 'validation'
         });
         return;
     }
@@ -1802,7 +1918,6 @@ function submitIdentficationResult(page) {
     }
 
     loading.show();
-    page.dataset.identifyApplyLoading = 'true';
     setApplySubmitDisabled(page, true);
     showApplyStatus(page, 'Sending selected remote result...', 'loading');
 
@@ -1814,155 +1929,226 @@ function submitIdentficationResult(page) {
     const apiClient = getApiClient();
     const requestUrl = apiClient.getUrl(`Items/RemoteSearch/Apply/${currentItem.Id}`, options);
     const startedAt = performance.now();
-    const beforeImageTags = { ...(currentItem.ImageTags || {}) };
-
-    resolveDetailedRemoteSearchResult(apiClient, currentItem.Id, applyResult).then(detailedApplyResult => {
-        if (!isCurrentIdentifyApplyRequest(applyRequestId)) return;
-
-        applyResult = detailedApplyResult;
-
-        recordIdentificationDiagnostic('ptv-reading-identify-apply-started', {
-            endpoint: redactDiagnosticUrl(requestUrl),
-            hasOverview: Boolean(applyResult.Overview),
-            httpMethod: 'POST',
-            provider: applyResult.SearchProviderName || '',
-            providerIds: applyResult.ProviderIds || {},
-            resultName: applyResult.Name || '',
-            resultYear: applyResult.ProductionYear || null
-        });
-        if (canUpdateIdentifyApply(page, applyRequestId)) {
-            showApplyStatus(page, 'Sending selected remote result...', 'loading');
-        }
-
-        return apiClient.ajax({
-            type: 'POST',
-            url: requestUrl,
-            data: JSON.stringify(applyResult),
-            contentType: 'application/json'
-
-        }).catch(error => {
-            if (!isPtvNativeMetadataResult(applyResult)) {
-                throw error;
-            }
-
-            recordIdentificationDiagnostic('ptv-reading-identify-native-remote-apply-skipped', {
-                endpoint: redactDiagnosticUrl(requestUrl),
-                error: getDiagnosticError(error),
-                provider: applyResult.SearchProviderName || '',
-                providerIds: applyResult.ProviderIds || {},
-                status: error?.status || error?.StatusCode || 'error'
-            });
-            if (canUpdateIdentifyApply(page, applyRequestId)) {
-                showApplyStatus(page, 'Jellyfin provider apply is unavailable. Saving selected metadata directly...', 'loading');
-            }
-
-            return {
-                ptvNativeFallback: true
-            };
-        });
-    }).then(() => {
-        if (!isCurrentIdentifyApplyRequest(applyRequestId)) return;
-        if (!isIdentifyPageConnected(page)) {
-            loading.hide();
-            return;
-        }
-
-        showApplyStatus(page, 'Server accepted metadata request. Refreshing metadata...', 'loading');
-        const refreshPromise = queueAppliedMetadataRefresh(apiClient, currentItem.Id, replaceImages)
-            .then(() => {
-                showApplyStatus(page, replaceImages ? 'Refreshing metadata and artwork...' : 'Refreshing metadata...', 'loading');
-                return persistAppliedResultImage(apiClient, currentItem.Id, applyResult, replaceImages);
-            })
-            .then(() => {
-                return fetchAppliedItemWithSettledMetadata(apiClient, currentItem.Id, applyResult);
-            })
-            .then(refreshedItem => {
-                showApplyStatus(page, 'Verifying persisted fields...', 'loading');
-                return refreshedItem;
-            })
-            .then(refreshedItem => persistAppliedResultFields(apiClient, refreshedItem || currentItem, applyResult));
-
-        return refreshPromise.then(refreshedItem => {
-            if (!canUpdateIdentifyApply(page, applyRequestId)) {
-                loading.hide();
-                return;
-            }
-
-            hasChanges = true;
-            currentSearchResult = applyResult;
-
-            if (refreshedItem) {
-                currentItem = refreshedItem;
-            }
-
-            window.dispatchEvent(new CustomEvent('ptv-reading-item-metadata-updated', {
-                detail: {
-                    item: refreshedItem || null,
-                    itemId: currentItem.Id,
-                    provider: applyResult.SearchProviderName || '',
-                    providerIds: applyResult.ProviderIds || {},
-                    resultName: applyResult.Name || ''
-                }
-            }));
-
-            loading.hide();
-            page.dataset.identifyApplyLoading = 'false';
-            const verificationReport = getApplyPersistenceReport(refreshedItem || currentItem, applyResult);
-            const afterImageTags = { ...((refreshedItem || currentItem)?.ImageTags || {}) };
-            const imageChanged = JSON.stringify(beforeImageTags) !== JSON.stringify(afterImageTags);
-
-            recordIdentificationDiagnostic('ptv-reading-identify-apply-completed', {
-                appliedFields: verificationReport.applied,
-                beforeImageTags,
-                durationMs: Number((performance.now() - startedAt).toFixed(1)),
-                endpoint: redactDiagnosticUrl(requestUrl),
-                imageChanged,
-                missingFields: verificationReport.missing,
-                persistedGenres: (refreshedItem || currentItem)?.Genres || [],
-                persistedName: (refreshedItem || currentItem)?.Name || '',
-                persistedOverviewLength: String((refreshedItem || currentItem)?.Overview || '').length,
-                persistedPeopleCount: Array.isArray((refreshedItem || currentItem)?.People) ? (refreshedItem || currentItem).People.length : 0,
-                persistedProviderIds: getProviderIdsForDiagnostic(refreshedItem || currentItem),
-                persistedStudios: ((refreshedItem || currentItem)?.Studios || []).map(studio => studio?.Name || ''),
-                providerIds: applyResult.ProviderIds || {},
-                refreshed: Boolean(refreshedItem),
-                status: verificationReport.missing.length ? 'partial' : 'success'
-            });
-
-            if (verificationReport.missing.length) {
-                const appliedSummary = [
-                    verificationReport.providerLinked ? 'metadata provider ID' : '',
-                    imageChanged ? 'primary image' : '',
-                    ...verificationReport.applied
-                ].filter(Boolean).join(', ') || 'some metadata';
-                const missingSummary = verificationReport.missing.join(', ');
-
-                showApplyStatus(page, `Metadata partially applied. Applied: ${appliedSummary}. Not applied: ${missingSummary}.`, 'error');
-                setApplySubmitDisabled(page, false);
-                toast('Metadata partially applied.');
-                return;
-            }
-
-            showApplyStatus(page, 'Metadata fully applied.', 'success');
-            toast('Metadata updated.');
-            dialogHelper.close(page);
-        });
-    }, error => {
-        loading.hide();
-        if (!isCurrentIdentifyApplyRequest(applyRequestId) || !isIdentifyPageConnected(page)) return;
-
-        page.dataset.identifyApplyLoading = 'false';
-        setApplySubmitDisabled(page, false);
-        showApplyStatus(page, getIdentificationApplyErrorMessage(error), 'error');
-        toast('Unable to apply metadata.');
-        recordIdentificationDiagnostic('ptv-reading-identify-apply-failed', {
-            durationMs: Number((performance.now() - startedAt).toFixed(1)),
-            endpoint: redactDiagnosticUrl(requestUrl),
-            error: getDiagnosticError(error),
-            providerIds: applyResult.ProviderIds || {},
-            status: error?.status || error?.StatusCode || 'error'
-        });
+    const operation = Object.freeze({
+        beforeItem: currentItem,
+        itemId: currentItem.Id,
+        itemType: currentItemType || currentItem.Type,
+        operationGeneration: applyRequestId,
+        ownerGeneration: currentReadingIdentifyOwnerGeneration
     });
+    const coordinator = createCurrentIdentifyApplyCoordinator(page);
+    let remoteMutationAccepted = false;
+    const isOperationCurrent = () => isCurrentIdentifyApplyRequest(applyRequestId)
+        && currentReadingIdentifyApplyCoordinator === coordinator
+        && currentReadingIdentifyOwnerGeneration === operation.ownerGeneration
+        && isIdentifyPageConnected(page);
+
+    const settleRetiredOperation = () => coordinator.settle({
+        disposition: {
+            committed: false,
+            shouldClose: true
+        }
+    });
+
+    void (async () => {
+        try {
+            applyResult = await resolveDetailedRemoteSearchResult(apiClient, operation.itemId, applyResult);
+            if (!isOperationCurrent()) {
+                settleRetiredOperation();
+                return;
+            }
+
+            recordIdentifyAuthorityDiagnostic('ptv-generic-identify-apply-started', {
+                operationGeneration: operation.operationGeneration,
+                ownerGeneration: operation.ownerGeneration,
+                phase: 'remote-apply'
+            });
+
+            await apiClient.ajax({
+                type: 'POST',
+                url: requestUrl,
+                data: JSON.stringify(applyResult),
+                contentType: 'application/json'
+            });
+            remoteMutationAccepted = true;
+
+            if (!isOperationCurrent()) {
+                settleRetiredOperation();
+                return;
+            }
+
+            const intendedFields = getGenericIdentifyIntendedFields(operation.beforeItem, applyResult);
+            const initialOutboundItem = getMetadataUpdateItem(operation.beforeItem, applyResult);
+            const expectedEffect = createGenericIdentifyExpectedEffectProjection({
+                beforeItem: operation.beforeItem,
+                expectedProviderIds: applyResult.ProviderIds,
+                intendedFields,
+                itemType: operation.itemType,
+                mutationResult: applyResult,
+                outboundItem: initialOutboundItem,
+                replaceAllImages: replaceImages
+            });
+            const hasRelationshipExpectedEffect = expectedEffect.effects
+                .some(effect => effect.kind === 'relationship-set');
+            let artworkSaved = false;
+
+            if (replaceImages) {
+                artworkSaved = await persistAppliedResultImage(apiClient, operation.itemId, applyResult, true, {
+                    operationGeneration: operation.operationGeneration,
+                    ownerGeneration: operation.ownerGeneration
+                });
+            }
+
+            const userId = apiClient.getCurrentUserId?.();
+            let readbackResult = {
+                attempts: 0,
+                error: null,
+                item: null,
+                status: 'unconfirmed'
+            };
+
+            if (userId && apiClient.getItem) {
+                showApplyStatus(page, 'Metadata accepted. Confirming the exact server result...', 'loading');
+                readbackResult = await confirmGenericIdentifyMutation({
+                    buildFallbackProjection: hasRelationshipExpectedEffect ? undefined : item => createGenericIdentifyExpectedEffectProjection({
+                        beforeItem: item,
+                        expectedProviderIds: applyResult.ProviderIds,
+                        intendedFields,
+                        itemType: operation.itemType,
+                        mutationResult: applyResult,
+                        outboundItem: getMetadataUpdateItem(item, applyResult),
+                        replaceAllImages: replaceImages
+                    }),
+                    delays: GENERIC_IDENTIFY_READBACK_DELAYS_MS,
+                    expectedEffect,
+                    isCurrent: isOperationCurrent,
+                    loadItem: () => apiClient.getItem(userId, operation.itemId),
+                    onAttempt: ({ ordinal, result }) => {
+                        recordIdentifyAuthorityDiagnostic('ptv-generic-identify-readback-attempted', {
+                            attemptOrdinal: ordinal,
+                            authorityClassification: result,
+                            effectCategories: expectedEffect.effects.map(effect => effect.category),
+                            operationGeneration: operation.operationGeneration,
+                            ownerGeneration: operation.ownerGeneration,
+                            phase: 'readback'
+                        });
+                    },
+                    timeoutMs: GENERIC_IDENTIFY_READBACK_TIMEOUT_MS,
+                    writeFallback: hasRelationshipExpectedEffect ? undefined : (item, projection) => persistAppliedResultFields(apiClient, item, applyResult, null, true, false, {
+                        effectCategories: projection.effects.map(effect => effect.category),
+                        operationGeneration: operation.operationGeneration,
+                        ownerGeneration: operation.ownerGeneration
+                    })
+                });
+            }
+
+            if (readbackResult.status === 'retired' || !isOperationCurrent()) {
+                settleRetiredOperation();
+                return;
+            }
+
+            const readbackConfirmed = readbackResult.status === 'confirmed' && Boolean(readbackResult.item);
+            const authoritativeItem = readbackConfirmed ? readbackResult.item : null;
+            const readbackCode = readbackConfirmed ? 'READBACK_CONFIRMED' : 'REFRESH_FAILED';
+
+            if (authoritativeItem) currentItem = authoritativeItem;
+            currentIdentifyReadbackCode = readbackCode;
+            currentSearchResult = applyResult;
+            hasChanges = true;
+            let artworkStatus = 'skipped';
+
+            if (replaceImages) artworkStatus = artworkSaved ? 'saved' : 'failed';
+
+            const eventDetail = {
+                artworkStatus,
+                item: authoritativeItem || operation.beforeItem,
+                itemId: operation.itemId,
+                metadataStatus: 'saved',
+                operationGeneration: operation.operationGeneration,
+                outcome: readbackConfirmed ? 'FULL_SUCCESS' : 'PARTIAL_SUCCESS',
+                readingOwnerGeneration: operation.ownerGeneration,
+                readbackCode
+            };
+
+            recordIdentifyAuthorityDiagnostic('ptv-generic-identify-apply-completed', {
+                authorityClassification: readbackConfirmed ? 'confirmed' : readbackResult.expectedEffect?.reason || expectedEffect.reason || 'unconfirmed',
+                durationMs: Number((performance.now() - startedAt).toFixed(1)),
+                effectCategories: expectedEffect.effects.map(effect => effect.category),
+                operationGeneration: operation.operationGeneration,
+                ownerGeneration: operation.ownerGeneration,
+                readbackAttempts: readbackResult.attempts
+            });
+
+            if (isIdentifyPageConnected(page)) {
+                const message = readbackConfirmed ?
+                    'Metadata saved and confirmed from Jellyfin.' :
+                    'Metadata changes were accepted, but the authoritative item could not be fully confirmed.';
+
+                showApplyStatus(page, message, readbackConfirmed ? 'success' : 'warning');
+                toast(readbackConfirmed ? 'Metadata saved.' : 'Metadata accepted; refreshed values remain unconfirmed.');
+            }
+
+            coordinator.settle({
+                disposition: {
+                    committed: true,
+                    shouldClose: true
+                },
+                eventDetail
+            });
+        } catch (error) {
+            if (!isOperationCurrent()) {
+                settleRetiredOperation();
+                return;
+            }
+
+            recordIdentifyAuthorityDiagnostic('ptv-generic-identify-apply-failed', {
+                durationMs: Number((performance.now() - startedAt).toFixed(1)),
+                failureReason: getReadingIdentifyDiagnosticErrorCategory(error),
+                operationGeneration: operation.operationGeneration,
+                ownerGeneration: operation.ownerGeneration,
+                phase: remoteMutationAccepted ? 'confirmation' : 'remote-apply'
+            });
+
+            if (remoteMutationAccepted) {
+                hasChanges = true;
+                currentIdentifyReadbackCode = 'REFRESH_FAILED';
+                const message = 'Metadata changes were accepted, but the authoritative item could not be fully confirmed.';
+
+                if (isIdentifyPageConnected(page)) {
+                    showApplyStatus(page, message, 'warning');
+                    toast('Metadata accepted; refreshed values remain unconfirmed.');
+                }
+                coordinator.settle({
+                    disposition: {
+                        committed: true,
+                        shouldClose: true
+                    },
+                    eventDetail: {
+                        artworkStatus: replaceImages ? 'failed' : 'skipped',
+                        item: operation.beforeItem,
+                        itemId: operation.itemId,
+                        metadataStatus: 'saved',
+                        operationGeneration: operation.operationGeneration,
+                        outcome: 'PARTIAL_SUCCESS',
+                        readingOwnerGeneration: operation.ownerGeneration,
+                        readbackCode: 'REFRESH_FAILED'
+                    }
+                });
+                return;
+            }
+
+            if (isIdentifyPageConnected(page)) {
+                showApplyStatus(page, getIdentificationApplyErrorMessage(error), 'error');
+                toast('Unable to apply metadata.');
+            }
+            coordinator.settle({
+                disposition: {
+                    committed: false,
+                    shouldClose: false
+                }
+            });
+        }
+    })();
 }
 
 function showIdentificationForm(page, item) {
@@ -2082,7 +2268,7 @@ function showEditor(itemId) {
 
         dlg.querySelectorAll('.btnCancel').forEach(button => {
             button.addEventListener('click', () => {
-                dialogHelper.close(dlg);
+                requestIdentifyDialogClose(dlg);
             });
         });
 
@@ -2091,16 +2277,38 @@ function showEditor(itemId) {
     });
 }
 
-function onDialogClosed() {
+function finishIdentifyDialogResolution() {
     loading.hide();
     currentIdentifyApplyRequestId += 1;
     currentReadingMetadataPreview = [];
     currentSearchResult = null;
+    currentReadingIdentifyApplyCoordinator = null;
+    currentReadingIdentifyApplyPage = null;
+    currentReadingIdentifyOwnerGeneration = null;
+    const resolution = currentIdentifyResultMode === 'authority' ? {
+        item: currentIdentifyReadbackCode === 'READBACK_CONFIRMED' ? currentItem : null,
+        readbackCode: currentIdentifyReadbackCode
+    } : currentItem;
     if (hasChanges) {
-        currentResolve(currentItem);
+        currentResolve?.(resolution);
     } else {
-        currentReject();
+        currentReject?.();
     }
+
+    currentResolve = null;
+    currentReject = null;
+    currentIdentifyReadbackCode = null;
+    currentIdentifyResultMode = 'item';
+}
+
+function onDialogClosed(event) {
+    if (currentReadingIdentifyApplyCoordinator && currentReadingIdentifyApplyPage === event.currentTarget) {
+        loading.hide();
+        currentReadingIdentifyApplyCoordinator.handleClosed();
+        return;
+    }
+
+    finishIdentifyDialogResolution();
 }
 
 // TODO investigate where this was used
@@ -2171,18 +2379,38 @@ function showIdentificationFormFindNew(dlg, itemName, itemYear, itemType) {
     dlg.querySelector('.formDialogHeaderTitle').innerHTML = globalize.translate('Search');
 }
 
-export function show(itemId, serverId) {
+export function show(itemId, serverId, options = {}) {
+    if (currentReadingIdentifyApplyCoordinator) {
+        return currentReadingIdentifyApplyCoordinator.whenTerminalClosed().then(() => show(itemId, serverId, options));
+    }
+
     return new Promise((resolve, reject) => {
         currentResolve = resolve;
         currentReject = reject;
         currentServerId = serverId;
+        currentReadingIdentifyOwnerGeneration = Number.isSafeInteger(options.readingOwnerGeneration)
+            && options.readingOwnerGeneration > 0 ? options.readingOwnerGeneration : null;
+        currentIdentifyReadbackCode = null;
+        currentIdentifyResultMode = options.resultMode === 'authority' ? 'authority' : 'item';
         hasChanges = false;
 
         showEditor(itemId);
     });
 }
 
+export function showWithAuthority(itemId, serverId, options = {}) {
+    return show(itemId, serverId, {
+        ...options,
+        resultMode: 'authority'
+    });
+}
+
 export function showFindNew(itemName, itemYear, itemType, serverId) {
+    if (currentReadingIdentifyApplyCoordinator) {
+        return currentReadingIdentifyApplyCoordinator.whenTerminalClosed()
+            .then(() => showFindNew(itemName, itemYear, itemType, serverId));
+    }
+
     return new Promise((resolve) => {
         currentServerId = serverId;
 
@@ -2193,5 +2421,6 @@ export function showFindNew(itemName, itemYear, itemType, serverId) {
 
 export default {
     show: show,
+    showWithAuthority: showWithAuthority,
     showFindNew: showFindNew
 };

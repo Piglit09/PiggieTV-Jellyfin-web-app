@@ -14,4 +14,16 @@ describe('PTV logout navigation contract', () => {
         });
         expect(item).not.toHaveProperty('href');
     });
+
+    it('derives global administration launchers from the administration registry', () => {
+        const adminItems = PTV_NAVIGATION_SECTIONS.find(section => section.id === 'admin')?.items;
+
+        expect(adminItems).toEqual(expect.arrayContaining([
+            expect.objectContaining({ href: '#/settings/admin', label: 'Overview' }),
+            expect.objectContaining({ href: '#/settings/admin/piggietv/rows', label: 'Home Rows' }),
+            expect.objectContaining({ href: '#/settings/admin/piggietv/diagnostics', label: 'Diagnostics' }),
+            expect.objectContaining({ href: '#/settings/admin/media/metadata-manager', label: 'Metadata Manager' })
+        ]));
+        expect(adminItems?.some(item => item.href === '#/dashboard/piggietv/recommendations')).toBe(false);
+    });
 });

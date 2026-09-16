@@ -1,4 +1,9 @@
 :root {
+    --ptv-layout-content-edge: 1.5rem;
+    --ptv-layout-content-edge-tablet: 1rem;
+    --ptv-layout-content-edge-phone: 0.75rem;
+    --ptv-touch-target-min: 44px;
+
     /* Primitive palette: raw values live here; components consume the semantic map below. */
     --ptv-palette-cyan: #7dd6ff;
     --ptv-palette-cyan-soft: #9fe7ff;

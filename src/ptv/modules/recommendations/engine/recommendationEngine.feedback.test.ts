@@ -12,6 +12,8 @@ const identity = vi.hoisted(() => ({
 }));
 const engineMocks = vi.hoisted(() => ({
     getBundle: vi.fn(),
+    logFailure: vi.fn(),
+    logStage: vi.fn(),
     scoreCandidates: vi.fn()
 }));
 
@@ -32,8 +34,8 @@ vi.mock('../../../core/observability', () => ({
 }));
 
 vi.mock('../debug/recommendationRuntimeDebug', () => ({
-    logPtvRecommendationFailure: vi.fn(),
-    logPtvRecommendationStage: vi.fn()
+    logPtvRecommendationFailure: engineMocks.logFailure,
+    logPtvRecommendationStage: engineMocks.logStage
 }));
 
 vi.mock('../providers/jellyfinRecommendationProvider', () => ({
@@ -153,6 +155,8 @@ describe('recommendation engine feedback integration', () => {
             userId: 'user-a'
         });
         engineMocks.getBundle.mockReset();
+        engineMocks.logFailure.mockReset();
+        engineMocks.logStage.mockReset();
         engineMocks.scoreCandidates.mockReset();
         engineMocks.scoreCandidates.mockImplementation((_profile, items: PtvRecommendationItem[]) => items.map(value => ({
             affinityScore: 50,
@@ -211,5 +215,37 @@ describe('recommendation engine feedback integration', () => {
         await getPtvRecommendationHomeData();
 
         expect(engineMocks.getBundle).toHaveBeenCalledTimes(2);
+    });
+
+    it('propagates a distinct opaque diagnostic generation through each real engine run', async () => {
+        engineMocks.getBundle.mockResolvedValue(bundle(item('keep-a')));
+
+        await Promise.all([
+            buildPtvRecommendationEngineResult(),
+            buildPtvRecommendationEngineResult()
+        ]);
+
+        const starts = engineMocks.logStage.mock.calls.filter(([ stage ]) => stage === 'Generation started');
+        const generationIds = starts.map(([, detail ]) => String(detail.generationId));
+
+        expect(generationIds).toHaveLength(2);
+        expect(new Set(generationIds).size).toBe(2);
+        generationIds.forEach(generationId => {
+            expect(generationId).toMatch(/^recommendation-generation-\d+$/);
+        });
+        expect(engineMocks.getBundle.mock.calls.map(([ options ]) => options.diagnosticGenerationId)).toEqual(generationIds);
+
+        for (const [, detail ] of engineMocks.logStage.mock.calls.filter(([ stage ]) => (
+            [
+                'Diagnostic report generated',
+                'Engine created',
+                'Generation started',
+                'Profile loaded',
+                'Recommendations generated',
+                'Rows generated'
+            ].includes(stage)
+        ))) {
+            expect(generationIds).toContain(String(detail.generationId));
+        }
     });
 });

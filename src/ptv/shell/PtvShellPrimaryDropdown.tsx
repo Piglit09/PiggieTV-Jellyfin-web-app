@@ -310,7 +310,7 @@ export default function PtvShellPrimaryDropdown({
                 type='button'
             >
                 <PtvIcon name={icon} />
-                <span>{label}</span>
+                <span className='ptv-shell-nav-label'>{label}</span>
                 <span className='ptv-shell-nav-caret' aria-hidden='true' />
             </button>
             {panel && typeof document !== 'undefined' ? createPortal(panel, document.body) : null}

@@ -7,6 +7,8 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const { DefinePlugin, IgnorePlugin } = require('webpack');
 const packageJson = require('./package.json');
+const { resolvePtvCommitSha } = require('./scripts/ptv-build-provenance.cjs');
+const { readPtvVersion } = require('./scripts/ptv-version.cjs');
 
 const Assets = [
     'native-promise-only/npo.js',
@@ -21,17 +23,15 @@ const Assets = [
 ];
 
 const DEV_MODE = process.env.NODE_ENV !== 'production';
+const PTV_ACCEPTANCE_LEDGER = !!JSON.parse(process.env.PTV_ACCEPTANCE_LEDGER || '0');
 const PTV_BUILD_DATE = process.env.PTV_BUILD_DATE || new Date().toISOString();
-const PTV_BUILD_ID = process.env.PTV_BUILD_ID || packageJson.version;
-let COMMIT_SHA = '';
+const PTV_VERSION = readPtvVersion();
+const PTV_BUILD_ID = process.env.PTV_BUILD_ID || `ptv-web-${PTV_VERSION}`;
+let COMMIT_SHA = 'unavailable';
 try {
-    COMMIT_SHA = require('child_process')
-        // eslint-disable-next-line sonarjs/no-os-command-from-path
-        .execSync('git describe --always --dirty')
-        .toString()
-        .trim();
+    COMMIT_SHA = resolvePtvCommitSha();
 } catch (err) {
-    console.warn('Failed to get commit sha. Is git installed?', err);
+    console.warn('Failed to resolve the PTV commit SHA. Is git installed?', err);
 }
 
 const NODE_MODULES_REGEX = /[\\/]node_modules[\\/]/;
@@ -65,10 +65,12 @@ const config = {
                     process.env.JELLYFIN_VERSION || 'Release'),
             __PACKAGE_JSON_NAME__: JSON.stringify(packageJson.name),
             __PACKAGE_JSON_VERSION__: JSON.stringify(packageJson.version),
+            __PTV_ACCEPTANCE_LEDGER__: PTV_ACCEPTANCE_LEDGER,
             __PTV_BUILD_DATE__: JSON.stringify(PTV_BUILD_DATE),
             __PTV_BUILD_ID__: JSON.stringify(PTV_BUILD_ID),
             __PTV_BUILD_MODE__: JSON.stringify(DEV_MODE ? 'development' : 'production'),
             __PTV_DEV_JELLYFIN_URL__: JSON.stringify(DEV_MODE ? process.env.PTV_DEV_JELLYFIN_URL || '' : ''),
+            __PTV_VERSION__: JSON.stringify(PTV_VERSION),
             __USE_SYSTEM_FONTS__: !!JSON.parse(process.env.USE_SYSTEM_FONTS || '0'),
             __WEBPACK_SERVE__: !!JSON.parse(process.env.WEBPACK_SERVE || '0')
         }),
@@ -79,8 +81,7 @@ const config = {
             // Append file hashes to bundle urls for cache busting
             hash: true,
             chunks: [
-                'main.jellyfin',
-                'serviceworker'
+                'main.jellyfin'
             ]
         }),
         new CopyPlugin({
@@ -147,7 +148,9 @@ const config = {
         removeAvailableModules: false,
         removeEmptyChunks: false,
         splitChunks: {
-            chunks: 'all',
+            // A registered service worker executes in its own global scope and
+            // cannot consume page runtime/vendor chunks. Keep it standalone.
+            chunks: chunk => chunk.name !== 'serviceworker',
             maxInitialRequests: Infinity,
             cacheGroups: {
                 node_modules: {
@@ -191,6 +194,14 @@ const config = {
     },
     module: {
         rules: [
+            {
+                test: /\.js$/,
+                include: [require.resolve('jellyfin-apiclient')],
+                enforce: 'pre',
+                use: [{
+                    loader: path.resolve(__dirname, 'scripts/ptv-jellyfin-apiclient-security-loader.cjs')
+                }]
+            },
             {
                 test: /\.(html)$/,
                 use: {

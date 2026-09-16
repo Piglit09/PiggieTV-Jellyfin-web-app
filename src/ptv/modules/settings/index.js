@@ -2,6 +2,7 @@ import { on } from '../../core/events';
 import { registerModule } from '../../core/lifecycle';
 import { runIconEngine, scheduleIconEngine } from '../../utils/icons';
 import { mountPtvSettingsShell } from './settingsShell';
+import './settingsPreferences';
 
 import './settings.scss';
 

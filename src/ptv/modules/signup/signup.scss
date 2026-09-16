@@ -113,9 +113,14 @@
     min-width: 0;
 }
 
+.ptv-signup-invites-page {
+    min-width: 0;
+    color: var(--ptv-color-text-primary);
+}
+
 .ptv-signup-invites-content {
-    padding-top: clamp(24px, 4vw, 48px);
-    padding-bottom: clamp(48px, 6vw, 88px);
+    min-width: 0;
+    padding-bottom: clamp(32px, 5vw, 64px);
 }
 
 .ptv-signup-invites-content h1 {
@@ -124,6 +129,58 @@
     font-size: clamp(32px, 4vw, 52px);
     font-weight: 900;
     letter-spacing: 0;
+}
+
+.ptv-signup-invites-page .MuiCard-root {
+    min-width: 0;
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.2);
+    border-radius: var(--ptv-radius-panel);
+    color: var(--ptv-color-text-primary);
+    background:
+        linear-gradient(145deg, rgba(25, 18, 45, 0.78), rgba(8, 5, 18, 0.76)),
+        rgba(0, 0, 0, 0.18);
+    box-shadow:
+        inset 0 1px 0 rgba(var(--ptv-palette-white-rgb), 0.06),
+        0 18px 50px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(18px);
+}
+
+.ptv-signup-invites-page .MuiCardContent-root {
+    padding: clamp(18px, 2.4vw, 28px);
+}
+
+.ptv-signup-invites-page .MuiCardContent-root:last-child {
+    padding-bottom: clamp(18px, 2.4vw, 28px);
+}
+
+.ptv-signup-invites-page .MuiTypography-colorTextSecondary {
+    color: var(--ptv-color-text-secondary);
+}
+
+.ptv-signup-invites-page .MuiDivider-root {
+    border-color: rgba(var(--ptv-color-focus-rgb), 0.16);
+}
+
+.ptv-signup-invites-page .ptv-status-badge {
+    border: 1px solid rgba(var(--ptv-palette-white-rgb), 0.12);
+    color: var(--ptv-color-text-primary);
+    background: rgba(var(--ptv-palette-white-rgb), 0.06);
+}
+
+.ptv-signup-invites-page .ptv-status-badge-info {
+    border-color: rgba(var(--ptv-color-focus-rgb), 0.24);
+    background: rgba(var(--ptv-color-focus-rgb), 0.1);
+}
+
+.ptv-signup-invites-page .ptv-status-badge-success {
+    border-color: var(--ptv-state-success-border, rgba(92, 219, 145, 0.3));
+    color: var(--ptv-state-success-text, #8ee8b5);
+    background: var(--ptv-state-success-bg, rgba(28, 92, 60, 0.22));
+}
+
+.ptv-signup-invites-page :is(button, a, input, [role='button']):focus-visible {
+    outline: 2px solid var(--ptv-color-focus);
+    outline-offset: 3px;
 }
 
 .ptv-signup-library-picker {
@@ -159,6 +216,49 @@
     font-weight: 900;
 }
 
+.ptv-signup-invite-form {
+    display: grid;
+    gap: var(--ptv-space-3);
+    padding: var(--ptv-space-3);
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.14);
+    border-radius: var(--ptv-radius-panel);
+    background: rgba(8, 5, 18, 0.34);
+}
+
+.ptv-signup-invite-form > .MuiButton-root {
+    justify-self: start;
+}
+
+.ptv-signup-created-code code {
+    display: block;
+    max-width: 100%;
+    padding: 10px 12px;
+    border-radius: var(--ptv-radius-sm);
+    color: var(--ptv-color-text-strong);
+    background: rgba(0, 0, 0, 0.3);
+    font-family: var(--ptv-font-monospace, monospace);
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.ptv-signup-admin-link {
+    display: inline-flex;
+    min-height: 40px;
+    padding: 8px 14px;
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.32);
+    border-radius: var(--ptv-radius-md);
+    align-items: center;
+    color: var(--ptv-color-text-primary);
+    font-weight: 800;
+    text-decoration: none;
+    background: rgba(var(--ptv-color-focus-rgb), 0.1);
+}
+
+.ptv-signup-admin-link:hover {
+    border-color: rgba(var(--ptv-color-focus-rgb), 0.54);
+    background: rgba(var(--ptv-color-focus-rgb), 0.16);
+}
+
 .ptv-signup-user-row {
     display: grid;
     gap: var(--ptv-space-2);
@@ -180,6 +280,21 @@
 
 .ptv-signup-user-meta {
     font-size: var(--ptv-text-caption);
+    overflow-wrap: anywhere;
+}
+
+.ptv-signup-backup-health {
+    padding: var(--ptv-space-3);
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.18);
+    border-radius: var(--ptv-radius-panel);
+    background: rgba(8, 5, 18, 0.42);
+}
+
+.ptv-signup-backup-health h3 {
+    margin: 0 0 var(--ptv-space-1);
+    color: var(--ptv-color-text-primary);
+    font-size: var(--ptv-text-subtitle);
+    font-weight: 900;
 }
 
 @media (max-width: 720px) {
@@ -191,5 +306,16 @@
     .ptv-native-signup-card {
         margin-top: var(--ptv-space-6);
         border-radius: var(--ptv-radius-lg);
+    }
+
+    .ptv-signup-invites-page .MuiCardContent-root {
+        padding: var(--ptv-space-3);
+    }
+
+    .ptv-signup-invite-row,
+    .ptv-signup-user-row,
+    .ptv-signup-library-picker,
+    .ptv-signup-invite-form {
+        padding: var(--ptv-space-2);
     }
 }

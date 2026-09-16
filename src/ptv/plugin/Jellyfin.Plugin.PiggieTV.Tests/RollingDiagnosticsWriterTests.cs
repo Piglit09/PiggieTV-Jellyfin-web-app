@@ -28,7 +28,15 @@ public sealed class RollingDiagnosticsWriterTests : IAsyncLifetime
     public async Task AppendsMultipleEventsToOneActiveJsonlFileAndSanitizesSecrets()
     {
         await using var writer = CreateWriter();
-        writer.Enqueue(Event("search", "one", new { token = "secret-token", url = "https://example.test/path?api_key=secret" }));
+        var syntheticOpenAiCredential = string.Concat("sk", "-proj-", new string('A', 48));
+        writer.Enqueue(Event("search", "one", new
+        {
+            token = "secret-token",
+            openAiApiKey = "test-openai-key",
+            openAiCredential = syntheticOpenAiCredential,
+            note = syntheticOpenAiCredential,
+            url = "https://example.test/path?api_key=secret"
+        }));
         writer.Enqueue(Event("search", "two", new { durationMs = 42 }));
         await writer.FlushAsync();
 
@@ -39,6 +47,8 @@ public sealed class RollingDiagnosticsWriterTests : IAsyncLifetime
         Assert.Equal(2, lines.Length);
         Assert.All(lines, line => Assert.Contains("\"timestamp\"", line));
         Assert.DoesNotContain("secret-token", string.Join('\n', lines), StringComparison.Ordinal);
+        Assert.DoesNotContain("test-openai-key", string.Join('\n', lines), StringComparison.Ordinal);
+        Assert.DoesNotContain(syntheticOpenAiCredential, string.Join('\n', lines), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -121,6 +131,23 @@ public sealed class RollingDiagnosticsWriterTests : IAsyncLifetime
         using var zip = new ZipArchive(new MemoryStream(bundle), ZipArchiveMode.Read);
         Assert.Contains(zip.Entries, entry => entry.Name == "manifest.json");
         Assert.DoesNotContain(Directory.GetFiles(_root, "*.tmp"), path => Path.GetFileName(path).Contains("diagnostics", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task DisposeAsyncIsSafeWhenCalledConcurrentlyAndRepeatedly()
+    {
+        var writer = CreateWriter();
+        writer.Enqueue(Event("plugin", "shutdown", new { ok = true }));
+
+        var disposals = Enumerable.Range(0, 8)
+            .Select(_ => writer.DisposeAsync().AsTask())
+            .ToArray();
+
+        await Task.WhenAll(disposals);
+        await writer.DisposeAsync();
+
+        Assert.All(disposals, disposal => Assert.True(disposal.IsCompletedSuccessfully));
+        Assert.Contains("shutdown", await File.ReadAllTextAsync(Path.Combine(_root, "ptv-diagnostics.log")), StringComparison.Ordinal);
     }
 
     private PtvRollingDiagnosticsWriter CreateWriter(PtvDiagnosticsStorageSettings? settings = null) => new(

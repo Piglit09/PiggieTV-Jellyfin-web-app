@@ -1,9 +1,10 @@
 /* eslint-disable react/jsx-no-bind, sonarjs/prefer-read-only-props */
 import React from 'react';
 
-import type { ReaderSettings } from './readerModels';
+import type { ReaderFormat, ReaderSettings } from './readerModels';
 
 interface ReaderSettingsPanelProps {
+    format: ReaderFormat;
     settings: ReaderSettings;
     onChange: (settings: ReaderSettings) => void;
 }
@@ -20,7 +21,7 @@ function set<T extends keyof ReaderSettings>(
     });
 }
 
-export function ReaderSettingsPanel({ settings, onChange }: ReaderSettingsPanelProps) {
+export function ReaderSettingsPanel({ format, settings, onChange }: ReaderSettingsPanelProps) {
     return (
         <aside className='ptv-reader-settings' aria-label='Reader settings'>
             <h2>Reader Settings</h2>
@@ -51,39 +52,43 @@ export function ReaderSettingsPanel({ settings, onChange }: ReaderSettingsPanelP
                 </select>
             </label>
 
-            <label>
-                Font size
-                <input
-                    min='12'
-                    max='34'
-                    type='range'
-                    value={settings.fontSize}
-                    onChange={event => set(settings, 'fontSize', Number(event.target.value), onChange)}
-                />
-            </label>
+            {format === 'epub' && (
+                <>
+                    <label>
+                        Base font size
+                        <input
+                            min='12'
+                            max='34'
+                            type='range'
+                            value={settings.fontSize}
+                            onChange={event => set(settings, 'fontSize', Number(event.target.value), onChange)}
+                        />
+                    </label>
 
-            <label>
-                Line height
-                <input
-                    min='1.1'
-                    max='2.2'
-                    step='0.05'
-                    type='range'
-                    value={settings.lineHeight}
-                    onChange={event => set(settings, 'lineHeight', Number(event.target.value), onChange)}
-                />
-            </label>
+                    <label>
+                        Line height
+                        <input
+                            min='1.1'
+                            max='2.2'
+                            step='0.05'
+                            type='range'
+                            value={settings.lineHeight}
+                            onChange={event => set(settings, 'lineHeight', Number(event.target.value), onChange)}
+                        />
+                    </label>
 
-            <label>
-                Margins
-                <input
-                    min='8'
-                    max='72'
-                    type='range'
-                    value={settings.margin}
-                    onChange={event => set(settings, 'margin', Number(event.target.value), onChange)}
-                />
-            </label>
+                    <label>
+                        Margins
+                        <input
+                            min='8'
+                            max='72'
+                            type='range'
+                            value={settings.margin}
+                            onChange={event => set(settings, 'margin', Number(event.target.value), onChange)}
+                        />
+                    </label>
+                </>
+            )}
 
             <label>
                 Brightness
@@ -97,22 +102,15 @@ export function ReaderSettingsPanel({ settings, onChange }: ReaderSettingsPanelP
                 />
             </label>
 
-            <label>
-                Comic fit
-                <select value={settings.fitMode} onChange={event => set(settings, 'fitMode', event.target.value as ReaderSettings['fitMode'], onChange)}>
-                    <option value='width'>Fit width</option>
-                    <option value='height'>Fit height</option>
-                    <option value='page'>Fit page</option>
-                </select>
-            </label>
-
-            <label>
-                Comic pages
-                <select value={settings.spreadMode} onChange={event => set(settings, 'spreadMode', event.target.value as ReaderSettings['spreadMode'], onChange)}>
-                    <option value='single'>Single page</option>
-                    <option value='double'>Double-page spread</option>
-                </select>
-            </label>
+            {format === 'comic' && (
+                <label>
+                    Comic pages
+                    <select value={settings.spreadMode} onChange={event => set(settings, 'spreadMode', event.target.value as ReaderSettings['spreadMode'], onChange)}>
+                        <option value='single'>Single page</option>
+                        <option value='double'>Double-page spread</option>
+                    </select>
+                </label>
+            )}
         </aside>
     );
 }

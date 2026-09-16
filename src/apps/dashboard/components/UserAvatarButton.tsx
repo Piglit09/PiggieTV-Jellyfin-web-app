@@ -25,7 +25,7 @@ const UserAvatarButton: FC<UserAvatarButtonProps> = ({
             }}
             title={user.Name || undefined}
             component={Link}
-            to={`/dashboard/users/profile?userId=${user.Id}`}
+            to={`/settings/admin/users/${encodeURIComponent(user.Id)}`}
         >
             <UserAvatar user={user} />
         </IconButton>

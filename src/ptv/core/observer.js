@@ -1,5 +1,6 @@
 import { emit } from './events';
 import { schedule } from './scheduler';
+import { ptvSafeConsole } from './safeConsole';
 
 const OBSERVER_STATE_KEY = '__PTV_OBSERVERS__';
 
@@ -10,7 +11,7 @@ function isDebugEnabled() {
 function debugLog(message, detail) {
     if (!isDebugEnabled()) return;
 
-    console.debug(`[PiggieTV Observer] ${message}`, detail);
+    ptvSafeConsole.debug(`[PiggieTV Observer] ${message}`, detail);
 }
 
 function createObserverState() {
@@ -79,7 +80,7 @@ function runWatcherCallback(watcher, root) {
     try {
         watcher.callback(root);
     } catch (err) {
-        console.error(`[PiggieTV] DOM watcher failed: ${watcher.selector}`, err);
+        ptvSafeConsole.error(`[PiggieTV] DOM watcher failed: ${watcher.selector}`, err);
     }
 }
 

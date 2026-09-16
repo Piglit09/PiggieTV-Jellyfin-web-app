@@ -21,6 +21,10 @@ import { recordPtvEvent } from '../../core/observability';
 import { focusPtvTvElement } from '../../core/tvFocus';
 import { usePtvAuthenticatedIdentity } from '../../api/usePtvAuthenticatedIdentity';
 import { parsePtvBrowseRoute } from '../../pages/browse/browseRoute';
+import {
+    recordPtvRequestLedgerStaleRejected,
+    recordPtvRequestLedgerVisibleRetry
+} from '../../services/requestCoordinator';
 import PTVShell from '../../shell/PTVShell';
 import {
     buildPtvCollectionLandingSections,
@@ -40,7 +44,8 @@ import {
     getPtvCollectionRetryHref,
     getPtvCollectionSurfaceFocusKey,
     loadPtvCollectionRouteMemory,
-    observePtvCollectionRouteMemory
+    observePtvCollectionRouteMemory,
+    restorePtvCollectionRouteMemory
 } from './collectionRoutes';
 import {
     flushPtvCollectionPreferenceDocument,
@@ -663,6 +668,12 @@ export default function CollectionsPage() {
         const controller = createPtvAbortController();
         const ownedRetryGate = retryGate.current;
         const startedAt = performance.now();
+        const rejectStaleCompletion = () => {
+            if (!controller.signal.aborted && ownedGeneration === generation.current) return false;
+
+            recordPtvRequestLedgerStaleRejected();
+            return true;
+        };
 
         routeStartedAt.current = startedAt;
         setLoading(true);
@@ -676,7 +687,7 @@ export default function CollectionsPage() {
             if (route.view === 'details') {
                 const collection = await loadPtvCollectionDetails(route.collectionId || '', controller.signal);
 
-                if (controller.signal.aborted || ownedGeneration !== generation.current) return;
+                if (rejectStaleCompletion()) return;
 
                 setDetails(collection);
                 setLoading(false);
@@ -691,7 +702,7 @@ export default function CollectionsPage() {
 
             const criticalResult = await loadPtvCollectionCritical(controller.signal);
 
-            if (controller.signal.aborted || ownedGeneration !== generation.current) return;
+            if (rejectStaleCompletion()) return;
 
             setCritical(criticalResult.collections);
             setLoading(false);
@@ -705,7 +716,7 @@ export default function CollectionsPage() {
             try {
                 const deferredResult = await loadPtvCollectionDeferred(controller.signal);
 
-                if (controller.signal.aborted || ownedGeneration !== generation.current) return;
+                if (rejectStaleCompletion()) return;
 
                 setDeferred(deferredResult);
                 recordPtvEvent('route', 'collections-deferred-ready', {
@@ -714,7 +725,7 @@ export default function CollectionsPage() {
                     sourceCount: deferredResult.sources.length
                 });
             } catch (error) {
-                if (controller.signal.aborted || ownedGeneration !== generation.current) return;
+                if (rejectStaleCompletion()) return;
 
                 recordPtvEvent('route', 'collections-deferred-failed', {
                     category: error instanceof Error ? 'source' : 'unknown'
@@ -725,7 +736,7 @@ export default function CollectionsPage() {
         };
 
         void run().catch(error => {
-            if (controller.signal.aborted || ownedGeneration !== generation.current) return;
+            if (rejectStaleCompletion()) return;
 
             setLoading(false);
             setRouteError(error instanceof Error ? 'Collections could not be loaded. Try again.' : 'Collections are unavailable.');
@@ -820,14 +831,14 @@ export default function CollectionsPage() {
             const page = document.getElementById('ptvCollectionsPage');
             if (!page) return;
 
-            page.scrollTop = memory.scrollTop;
-
             if (memory.focusKey) {
                 const target = Array.from(page.querySelectorAll<HTMLElement>('[data-ptv-focus-key]'))
                     .find(element => element.dataset.ptvFocusKey === memory.focusKey);
 
                 if (target) focusPtvTvElement(target, 'collections-back-forward-restore');
             }
+
+            restorePtvCollectionRouteMemory(page, memory);
         });
 
         return () => window.cancelAnimationFrame(frame);
@@ -866,6 +877,7 @@ export default function CollectionsPage() {
                                 onClick={event => {
                                     event.preventDefault();
                                     if (!retryGate.current.claim()) return;
+                                    recordPtvRequestLedgerVisibleRetry();
                                     setRouteError('');
                                     setRetryGeneration(value => value + 1);
                                 }}

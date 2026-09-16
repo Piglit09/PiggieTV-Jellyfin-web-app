@@ -159,6 +159,7 @@ public sealed class RemoteDiagnosticsStoreTests
         };
         const string clientId = "client_12345";
         var authorizationValue = CreateSyntheticAuthorizationValue();
+        var syntheticOpenAiCredential = string.Concat("sk", "-proj-", new string('A', 48));
         var url = CreateSyntheticPrivateUrl();
 
         Assert.IsType<OkObjectResult>(controller.CheckIn(CreatePresence(clientId, "webos", "home")).Result);
@@ -181,6 +182,8 @@ public sealed class RemoteDiagnosticsStoreTests
                     detail = new
                     {
                         authorization = authorizationValue,
+                        openAiCredential = syntheticOpenAiCredential,
+                        note = syntheticOpenAiCredential,
                         url
                     },
                     kind = "network"
@@ -194,9 +197,19 @@ public sealed class RemoteDiagnosticsStoreTests
         var detail = stored.Report.GetProperty("samples")[0].GetProperty("detail");
 
         Assert.Equal("[redacted]", detail.GetProperty("authorization").GetString());
+        Assert.Equal("[redacted]", detail.GetProperty("openAiCredential").GetString());
+        Assert.Equal("[redacted]", detail.GetProperty("note").GetString());
         Assert.Equal("[redacted]", detail.GetProperty("url").GetString());
         Assert.DoesNotContain(authorizationValue, stored.Report.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain(syntheticOpenAiCredential, stored.Report.GetRawText(), StringComparison.Ordinal);
         Assert.DoesNotContain(url, stored.Report.GetRawText(), StringComparison.Ordinal);
+
+        var downloadResult = await controller.DownloadReport(clientId, CancellationToken.None);
+        var download = Assert.IsType<FileContentResult>(downloadResult);
+
+        Assert.StartsWith("piggie-tv-diagnostics-", download.FileDownloadName, StringComparison.Ordinal);
+        Assert.EndsWith(".json", download.FileDownloadName, StringComparison.Ordinal);
+        Assert.DoesNotContain(clientId, download.FileDownloadName, StringComparison.Ordinal);
     }
 
     [Fact]

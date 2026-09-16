@@ -2,7 +2,11 @@ import escapeHtml from 'escape-html';
 
 import cardBuilder from 'components/cardbuilder/cardBuilder';
 import imageLoader from 'components/images/imageLoader';
-import { ServerConnections } from 'lib/jellyfin-apiclient';
+import {
+    getPtvApiClient,
+    getPtvCurrentUserId,
+    requestPtvJson
+} from 'ptv/api/client';
 import { getPtvPerformanceProfile } from 'ptv/core/clientProfile';
 import {
     getPtvImageFailureDiagnostics,
@@ -17,16 +21,19 @@ import {
     loadPtvImage,
     observePtvLazyImages
 } from 'ptv/core/imageManager';
+import { createPtvAbortController } from 'ptv/core/abortController';
 import { recordPtvEvent, shouldCollectDiagnostics, timePtvAsync } from 'ptv/core/observability';
 import { getCurrentPtvPluginApiClient } from 'ptv/core/pluginApi';
 import { getFeaturedContent } from 'ptv/modules/cache/featuredContentCache';
 import { getPtvQualityTags } from 'ptv/modules/cards/qualityTags';
 import { loadSharedHeroItems } from 'ptv/modules/hero/useHeroItems';
+import { getPtvDisplayIdentityKey } from 'ptv/services/displayIdentity';
 import { getBackdropShape, getPortraitShape, getSquareShape } from 'utils/card';
 import {
     getProgressiveHomeRowPlan,
     runBoundedHomeWork
 } from './homeWorkPlan';
+import { isLegacyConfiguredRow } from './legacyConfiguredPresentation';
 import {
     isAnimeItem,
     isFamilyAnimationItem,
@@ -58,13 +65,99 @@ let backdropSeed = Date.now();
 const rowBackdropObservers = new WeakMap();
 const rowBackdropLoads = new WeakMap();
 const rowBackdropTokens = new WeakMap();
+const rowBackdropTimers = new WeakMap();
+const forcedRowImageLoads = new WeakMap();
 const continueRowCache = new Map();
-const continueRowInFlight = new Map();
 const failedRowBackdropUrls = new Set();
 const MAX_FAILED_ROW_BACKDROP_URLS = 400;
 
 function getHomePerformanceProfile(options = {}) {
     return options.performanceProfile || getPtvPerformanceProfile();
+}
+
+function getHomeRouteOwnerIdentity(options = {}) {
+    return options.routeOwnerRef?.lifetime?.identity || '';
+}
+
+function isHomeRouteCurrent(options = {}, expectedIdentity = getHomeRouteOwnerIdentity(options)) {
+    if (expectedIdentity && getHomeRouteOwnerIdentity(options) !== expectedIdentity) return false;
+
+    const dataOwner = options.dataOwner;
+
+    if (typeof dataOwner?.isDataOwnerCurrent === 'function') {
+        return dataOwner.ptvDataOwner === expectedIdentity
+            && dataOwner.isDataOwnerCurrent() === true;
+    }
+
+    return typeof options.isRouteCurrent !== 'function' || options.isRouteCurrent() === true;
+}
+
+function bindHomeRowDataOwner(itemsContainer, options = {}) {
+    const identity = getHomeRouteOwnerIdentity(options);
+
+    if (!identity) return;
+
+    itemsContainer.ptvDataOwner = identity;
+    itemsContainer.isDataOwnerCurrent = options.isRouteCurrent;
+    itemsContainer.ptvRowOptions = options;
+    options.dataOwner = itemsContainer;
+}
+
+function createRetiredRowWorkError() {
+    const error = new Error('PTV Home row work was retired.');
+
+    error.name = 'AbortError';
+    return error;
+}
+
+export function createOwnedHomeApiClient(apiClient, options = {}) {
+    const serverId = apiClient.serverId?.() || options.serverId || '';
+    const ownerSignal = options.signal;
+    const scope = options.scope || (ownerSignal ? 'route' : 'background');
+    const activeControllers = new Set();
+    const request = (path, params) => {
+        if (!ownerSignal) {
+            return requestPtvJson(path, {
+                params,
+                scope,
+                serverId
+            });
+        }
+
+        const controller = createPtvAbortController();
+        const forwardAbort = () => controller.abort();
+
+        if (ownerSignal.aborted) {
+            controller.abort();
+        } else {
+            ownerSignal.addEventListener('abort', forwardAbort, { once: true });
+        }
+        activeControllers.add(controller);
+
+        return requestPtvJson(path, {
+            params,
+            scope,
+            serverId,
+            signal: controller.signal
+        }).finally(() => {
+            ownerSignal.removeEventListener('abort', forwardAbort);
+            activeControllers.delete(controller);
+        });
+    };
+
+    return {
+        cancelOwnedRequests: () => {
+            activeControllers.forEach(controller => {
+                controller.abort();
+            });
+        },
+        getItem: (userId, itemId) => request(`Users/${userId}/Items/${itemId}`),
+        getItems: (userId, query) => request(`Users/${userId}/Items`, query),
+        getResumableItems: (userId, query) => request(`Users/${userId}/Items/Resume`, query),
+        getScaledImageUrl: apiClient.getScaledImageUrl?.bind(apiClient),
+        getUrl: apiClient.getUrl?.bind(apiClient),
+        serverId: () => serverId
+    };
 }
 
 function rememberFailedRowBackdropUrl(url) {
@@ -448,6 +541,7 @@ function applyRowComposition(rows) {
 
 function normalizeFeaturedSection(section) {
     if (!section || typeof section !== 'object' || !section.id || !section.title) return null;
+    if (isLegacyConfiguredRow(section)) return null;
 
     const type = section.type || 'featured';
 
@@ -477,10 +571,12 @@ export function getRowsFromFeaturedPayload(payload, fallbackRows = PTV_HOME_ROWS
     const dynamicRows = Array.isArray(payload?.sections) ?
         payload.sections.map(normalizeFeaturedSection).filter(Boolean) :
         [];
-    const fixedRows = fallbackRows.filter(row => row.type === 'libraries');
+    const safeFallbackRows = fallbackRows.filter(row => !isLegacyConfiguredRow(row));
+    const fixedRows = safeFallbackRows.filter(row => row.type === 'libraries');
 
     if (!dynamicRows.length) {
-        return applyRowComposition(payload?.rowConfigApplied === true ? fixedRows : fallbackRows);
+        const configuredSectionsOmitted = payload?.sections?.some(isLegacyConfiguredRow);
+        return applyRowComposition(payload?.rowConfigApplied === true || configuredSectionsOmitted ? fixedRows : safeFallbackRows);
     }
 
     const seenIds = new Set(fixedRows.map(row => row.id));
@@ -819,11 +915,12 @@ function setCachedContinueItems(cacheKey, items) {
     }
 }
 
-function withRowTimeout(promise, timeoutMs, fallback, detail) {
+function withRowTimeout(promise, timeoutMs, fallback, detail, onTimeout) {
     let timer = 0;
     const timeout = new Promise(resolve => {
         timer = window.setTimeout(() => {
             recordPtvEvent('row-fetch', 'timeout-fallback', detail);
+            onTimeout?.();
             resolve(fallback);
         }, timeoutMs);
     });
@@ -925,7 +1022,7 @@ function getFallbackServerId(options = {}) {
     const apiServerId = options.apiClient?.serverId?.();
     if (apiServerId) return apiServerId;
 
-    return ServerConnections.currentApiClient?.()?.serverId?.() || '';
+    return '';
 }
 
 function ensureItemsHaveServerId(items, options = {}) {
@@ -1104,22 +1201,26 @@ function getBackdropUrls(apiClient, item, options = {}) {
     });
 }
 
-function loadBackdropCandidate(urls) {
-    const [url, ...fallbackUrls] = urls;
+function createBackdropCandidateLoad(urls, isCurrent = () => true) {
+    let activeHandle = null;
+    let cancelled = false;
+    const loadCandidate = ([url, ...fallbackUrls]) => {
+        if (cancelled || !isCurrent()) return Promise.resolve('');
 
-    if (!url) {
-        if (shouldCollectDiagnostics()) {
-            recordPtvEvent('image', 'row-backdrop-fallback-exhausted', {
-                imageDiagnostics: getPtvImageFailureDiagnostics()
-            });
+        if (!url) {
+            if (shouldCollectDiagnostics()) {
+                recordPtvEvent('image', 'row-backdrop-fallback-exhausted', {
+                    imageDiagnostics: getPtvImageFailureDiagnostics()
+                });
+            }
+
+            return Promise.resolve('');
         }
 
-        return Promise.resolve('');
-    }
+        activeHandle = loadPtvImage(url, 'decorative', 'row-backdrop');
 
-    return loadPtvImage(url, 'decorative', 'row-backdrop')
-        .promise
-        .then(didLoad => {
+        return activeHandle.promise.then(didLoad => {
+            if (cancelled || !isCurrent()) return '';
             if (didLoad) return url;
 
             rememberFailedRowBackdropUrl(url);
@@ -1137,17 +1238,40 @@ function loadBackdropCandidate(urls) {
                 });
             }
 
-            return loadBackdropCandidate(fallbackUrls);
+            return loadCandidate(fallbackUrls);
         });
+    };
+
+    return {
+        cancel: () => {
+            cancelled = true;
+            activeHandle?.cancel();
+        },
+        promise: loadCandidate(urls),
+        url: urls[0] || ''
+    };
+}
+
+function retireRowBackdropLoad(elem) {
+    const token = (rowBackdropTokens.get(elem) || 0) + 1;
+
+    rowBackdropTokens.set(elem, token);
+    rowBackdropLoads.get(elem)?.cancel();
+    rowBackdropLoads.delete(elem);
+
+    return token;
 }
 
 function applyRowBackdropNow(elem, apiClient, items, options = {}) {
+    const ownerIdentity = getHomeRouteOwnerIdentity(options);
+
+    if (!isHomeRouteCurrent(options, ownerIdentity)) return;
+
     const backdropElement = elem.querySelector('.ptv-row-backdrop');
     if (!backdropElement) return;
 
     if (!getHomePerformanceProfile(options).enableRowBackdrops) {
-        rowBackdropLoads.get(elem)?.cancel();
-        rowBackdropLoads.delete(elem);
+        retireRowBackdropLoad(elem);
         elem.classList.remove('ptv-row-has-backdrop');
         elem.style.removeProperty('--ptv-row-backdrop-image');
         backdropElement.removeAttribute('style');
@@ -1162,8 +1286,7 @@ function applyRowBackdropNow(elem, apiClient, items, options = {}) {
         .filter(entry => entry.urls.length);
 
     if (!backdropItems.length) {
-        rowBackdropLoads.get(elem)?.cancel();
-        rowBackdropLoads.delete(elem);
+        retireRowBackdropLoad(elem);
         elem.classList.remove('ptv-row-has-backdrop');
         elem.style.removeProperty('--ptv-row-backdrop-image');
         backdropElement.removeAttribute('style');
@@ -1175,20 +1298,20 @@ function applyRowBackdropNow(elem, apiClient, items, options = {}) {
     }
 
     const entry = backdropItems[getRandomIndex(backdropItems.length)];
-    const token = (rowBackdropTokens.get(elem) || 0) + 1;
-    const handle = {
-        cancel: () => undefined,
-        promise: loadBackdropCandidate(entry.urls),
-        url: entry.urls[0]
-    };
+    const token = retireRowBackdropLoad(elem);
+    const handle = createBackdropCandidateLoad(
+        entry.urls,
+        () => isHomeRouteCurrent(options, ownerIdentity)
+    );
 
-    rowBackdropTokens.set(elem, token);
-    rowBackdropLoads.get(elem)?.cancel();
     rowBackdropLoads.set(elem, handle);
 
     void handle.promise
         .then((loadedUrl) => {
-            if (!loadedUrl || rowBackdropTokens.get(elem) !== token || !elem.isConnected) return;
+            if (!loadedUrl
+                || rowBackdropTokens.get(elem) !== token
+                || !elem.isConnected
+                || !isHomeRouteCurrent(options, ownerIdentity)) return;
 
             const safeUrl = loadedUrl.replace(/"/g, '%22');
             backdropElement.setAttribute('style', `background-image: url("${safeUrl}");`);
@@ -1213,6 +1336,12 @@ function applyRowBackdropNow(elem, apiClient, items, options = {}) {
 }
 
 function applyRowBackdrop(elem, apiClient, items, options = {}) {
+    const ownerIdentity = getHomeRouteOwnerIdentity(options);
+
+    if (!isHomeRouteCurrent(options, ownerIdentity)) return;
+
+    retireRowBackdropLoad(elem);
+
     if (!getHomePerformanceProfile(options).enableRowBackdrops) {
         applyRowBackdropNow(elem, apiClient, items, options);
         return;
@@ -1234,6 +1363,7 @@ function applyRowBackdrop(elem, apiClient, items, options = {}) {
     }
 
     const observer = new IntersectionObserver((entries) => {
+        if (!isHomeRouteCurrent(options, ownerIdentity)) return;
         if (!entries.some(entry => entry.isIntersecting) && !isRowNearViewport(elem)) return;
 
         observer.disconnect();
@@ -1247,7 +1377,16 @@ function applyRowBackdrop(elem, apiClient, items, options = {}) {
     rowBackdropObservers.set(elem, observer);
     observer.observe(elem);
 
-    window.setTimeout(() => {
+    const existingTimer = rowBackdropTimers.get(elem);
+
+    if (existingTimer) {
+        window.clearTimeout(existingTimer);
+    }
+
+    const timer = window.setTimeout(() => {
+        rowBackdropTimers.delete(elem);
+
+        if (!isHomeRouteCurrent(options, ownerIdentity)) return;
         if (rowBackdropObservers.get(elem) !== observer || !isRowNearViewport(elem)) return;
 
         observer.disconnect();
@@ -1255,9 +1394,15 @@ function applyRowBackdrop(elem, apiClient, items, options = {}) {
         elem.dataset.ptvRowBackdropLoaded = 'true';
         applyRowBackdropNow(elem, apiClient, items, options);
     }, 300);
+    rowBackdropTimers.set(elem, timer);
 }
 
-export function cleanupPtvRowBackdrops(root = document) {
+/**
+ * @param {Document | HTMLElement} root
+ * @param {{ preserveStyles?: boolean }} options
+ */
+export function cleanupPtvRowBackdrops(root = document, options = {}) {
+    const preserveStyles = options.preserveStyles === true;
     const rootRow = root instanceof HTMLElement && root.classList.contains('ptv-dynamic-row') ? [root] : [];
     const descendantRows = Array.from(root.querySelectorAll?.('.ptv-dynamic-row') || []);
 
@@ -1266,22 +1411,34 @@ export function cleanupPtvRowBackdrops(root = document) {
 
         observer?.disconnect();
         rowBackdropObservers.delete(row);
-        rowBackdropLoads.get(row)?.cancel();
-        rowBackdropLoads.delete(row);
-        rowBackdropTokens.delete(row);
-        row.classList.remove('ptv-row-has-backdrop');
-        row.style.removeProperty('--ptv-row-backdrop-image');
-        row.querySelector('.ptv-row-backdrop')?.removeAttribute('style');
+        const timer = rowBackdropTimers.get(row);
+
+        if (timer) {
+            window.clearTimeout(timer);
+            rowBackdropTimers.delete(row);
+        }
+        retireRowBackdropLoad(row);
+
+        if (!preserveStyles) {
+            row.classList.remove('ptv-row-has-backdrop');
+            row.style.removeProperty('--ptv-row-backdrop-image');
+            row.querySelector('.ptv-row-backdrop')?.removeAttribute('style');
+        }
     });
 
-    root.querySelectorAll?.('.itemsContainer').forEach((itemsContainer) => {
+    const rootItemsContainer = root instanceof HTMLElement && root.classList.contains('itemsContainer') ? [root] : [];
+    const descendantItemsContainers = Array.from(root.querySelectorAll?.('.itemsContainer') || []);
+
+    [...rootItemsContainer, ...descendantItemsContainers].forEach((itemsContainer) => {
+        retireForcedRowImageLoads(itemsContainer);
+
         if (typeof itemsContainer.ptvLazyImageCleanup === 'function') {
             itemsContainer.ptvLazyImageCleanup();
             itemsContainer.ptvLazyImageCleanup = null;
         }
     });
 
-    if (root instanceof HTMLElement && root.classList.contains('homeSectionsContainer')) {
+    if (!preserveStyles && root instanceof HTMLElement && root.classList.contains('homeSectionsContainer')) {
         root.style.removeProperty('--ptv-home-backdrop-image');
         root.classList.remove('ptv-home-has-backdrop');
     }
@@ -1289,7 +1446,23 @@ export function cleanupPtvRowBackdrops(root = document) {
     cleanupPtvLazyImages(root);
 }
 
+function retireForcedRowImageLoads(itemsContainer) {
+    const loads = forcedRowImageLoads.get(itemsContainer);
+
+    if (!loads) return;
+
+    loads.forEach(entry => {
+        entry.handle.cancel();
+    });
+    loads.clear();
+    forcedRowImageLoads.delete(itemsContainer);
+}
+
 function prepareManagedRowImages(itemsContainer, options = {}) {
+    const ownerIdentity = getHomeRouteOwnerIdentity(options);
+
+    if (!isHomeRouteCurrent(options, ownerIdentity)) return;
+
     const performanceProfile = getHomePerformanceProfile(options);
     const rootMargin = performanceProfile.isLowPower || performanceProfile.isWebOs ?
         '180px 0px' :
@@ -1301,6 +1474,8 @@ function prepareManagedRowImages(itemsContainer, options = {}) {
         priority: performanceProfile.isLowPower ? 'below-fold-poster' : 'visible-poster',
         rootMargin,
         loadElement: (imageElement) => {
+            if (!isHomeRouteCurrent(options, ownerIdentity)) return;
+
             if (
                 imageElement instanceof HTMLElement
                 && imageElement.classList.contains('lazy')
@@ -1312,22 +1487,71 @@ function prepareManagedRowImages(itemsContainer, options = {}) {
     });
 }
 
-function loadRowImageElementsNow(itemsContainer) {
+function loadRowImageElementsNow(itemsContainer, options = {}) {
+    const ownerIdentity = getHomeRouteOwnerIdentity(options);
+
+    if (!isHomeRouteCurrent(options, ownerIdentity)) return;
+
     const imageElements = Array.from(itemsContainer.querySelectorAll?.('.lazy[data-src], img[data-src]') || []);
     const rowId = itemsContainer.dataset.ptvRowId || 'row';
+    const currentElements = new Set(imageElements);
+    let loads = forcedRowImageLoads.get(itemsContainer);
+
+    if (!loads) {
+        loads = new Map();
+        forcedRowImageLoads.set(itemsContainer, loads);
+    }
+
+    loads.forEach((entry, imageElement) => {
+        const imageUrl = imageElement instanceof HTMLElement ? imageElement.dataset.src : '';
+
+        if (
+            currentElements.has(imageElement)
+            && imageUrl === entry.url
+            && ownerIdentity === entry.ownerIdentity
+        ) return;
+
+        entry.handle.cancel();
+        loads.delete(imageElement);
+    });
 
     imageElements.forEach(imageElement => {
+        if (!isHomeRouteCurrent(options, ownerIdentity)) return;
         if (!(imageElement instanceof HTMLElement) || !imageElement.dataset.src) return;
 
         const imageUrl = imageElement.dataset.src;
+        const existingEntry = loads.get(imageElement);
+
+        if (existingEntry?.url === imageUrl && existingEntry.ownerIdentity === ownerIdentity) return;
+
         const handle = loadPtvImage(imageUrl, 'visible-poster', `viewport:${rowId}`);
+        const entry = {
+            handle,
+            ownerIdentity,
+            url: imageUrl
+        };
 
-        void handle.promise
-            .finally(() => {
-                if (!imageElement.isConnected || !imageElement.dataset.src) return;
+        loads.set(imageElement, entry);
 
-                imageLoader.lazyImage(imageElement);
-            });
+        const settle = () => {
+            const activeLoads = forcedRowImageLoads.get(itemsContainer);
+
+            if (activeLoads?.get(imageElement) !== entry) return;
+
+            activeLoads.delete(imageElement);
+
+            if (!activeLoads.size) {
+                forcedRowImageLoads.delete(itemsContainer);
+            }
+
+            if (!imageElement.isConnected
+                || imageElement.dataset.src !== imageUrl
+                || !isHomeRouteCurrent(options, ownerIdentity)) return;
+
+            imageLoader.lazyImage(imageElement);
+        };
+
+        void handle.promise.then(settle, settle);
     });
 
     debugRowBackdrop('forced row image load', {
@@ -1338,11 +1562,30 @@ function loadRowImageElementsNow(itemsContainer) {
 }
 
 function forceLoadRowImages(itemsContainer, options = {}) {
+    if (!isHomeRouteCurrent(options)) return;
+
     prepareManagedRowImages(itemsContainer, options);
 
     if (!getHomePerformanceProfile(options).forceLoadRowImages) return;
 
-    loadRowImageElementsNow(itemsContainer);
+    loadRowImageElementsNow(itemsContainer, options);
+}
+
+export function resumePtvRowVisuals(root = document) {
+    root.querySelectorAll?.('.itemsContainer').forEach(itemsContainer => {
+        const options = itemsContainer.ptvRowOptions;
+
+        if (!options || !isHomeRouteCurrent(options)) return;
+
+        forceLoadRowImages(itemsContainer, options);
+
+        const row = itemsContainer.parentContainer;
+        const items = itemsContainer.ptvLastRowItems;
+
+        if (row && Array.isArray(items) && items.length) {
+            applyRowBackdrop(row, options.apiClient, items, options);
+        }
+    });
 }
 
 function getMoreCardHtml(row, options) {
@@ -1455,8 +1698,11 @@ function getLibraryParentId(row, userViews) {
 }
 
 function fetchRowResultCore(currentApiClient, userId, row, genresByName, studiosByName, userViews, options = {}) {
+    if (!isHomeRouteCurrent(options)) return Promise.resolve({ Items: [] });
+
     if (row.type === 'seerr-requests') {
         const pluginApi = getCurrentPtvPluginApiClient();
+        const signal = options.routeOwnerRef?.lifetime?.signal;
 
         if (!pluginApi?.getSeerrRequests || !userId) {
             return Promise.resolve({ Items: [] });
@@ -1466,7 +1712,8 @@ function fetchRowResultCore(currentApiClient, userId, row, genresByName, studios
             params: {
                 limit: getRowCandidateLimit(row, options),
                 userId
-            }
+            },
+            signal
         })
             .then(result => ({
                 Items: getItems(result)
@@ -1486,48 +1733,39 @@ function fetchRowResultCore(currentApiClient, userId, row, genresByName, studios
             return Promise.resolve({ Items: cachedItems });
         }
 
-        let request = continueRowInFlight.get(cacheKey);
-
-        if (!request) {
-            request = currentApiClient.getResumableItems(userId, {
-                Limit: getRowCandidateLimit(row, options),
-                Recursive: true,
-                Fields: MEDIA_FIELDS,
-                EnableImages: true,
-                ImageTypeLimit: 1,
-                EnableImageTypes: 'Primary,Backdrop,Thumb',
-                EnableTotalRecordCount: false,
-                MediaTypes: 'Video'
-            })
-                .then(result => {
+        const request = currentApiClient.getResumableItems(userId, {
+            Limit: getRowCandidateLimit(row, options),
+            Recursive: true,
+            Fields: MEDIA_FIELDS,
+            EnableImages: true,
+            ImageTypeLimit: 1,
+            EnableImageTypes: 'Primary,Backdrop,Thumb',
+            EnableTotalRecordCount: false,
+            MediaTypes: 'Video'
+        })
+            .then(result => {
+                if (isHomeRouteCurrent(options)) {
                     setCachedContinueItems(cacheKey, getItems(result));
+                }
 
-                    return result;
-                })
-                .catch(err => {
+                return result;
+            })
+            .catch(err => {
+                if (!(err instanceof Error && err.name === 'AbortError')) {
                     recordPtvEvent('row-fetch', 'continue-error', {
                         error: err instanceof Error ? err.message : String(err),
                         row: row.id
                     });
+                }
 
-                    return { Items: [] };
-                })
-                .finally(() => {
-                    continueRowInFlight.delete(cacheKey);
-                });
-            continueRowInFlight.set(cacheKey, request);
-        } else {
-            recordPtvEvent('cache', 'hit', {
-                row: row.id,
-                source: 'continue-in-flight'
+                return { Items: [] };
             });
-        }
 
         return withRowTimeout(request, CONTINUE_ROW_FETCH_TIMEOUT_MS, { Items: [] }, {
             row: row.id,
             rowType: row.type,
             timeoutMs: CONTINUE_ROW_FETCH_TIMEOUT_MS
-        });
+        }, currentApiClient.cancelOwnedRequests);
     }
 
     if (row.type === 'library') {
@@ -1639,6 +1877,7 @@ function fetchSectionItems(currentApiClient, userId, row, lookupMaps, userViews,
 
 export function createFeaturedContentFetcher(apiClient, userId, rows, lookupMaps, userViews, options = {}) {
     const serverId = apiClient.serverId();
+    const displayIdentityKey = getPtvDisplayIdentityKey(serverId, userId);
     const performanceProfile = getHomePerformanceProfile(options);
     const contentRows = rows
         .filter(row => row.type !== 'libraries' && row.type !== 'continue' && !row.userScoped)
@@ -1648,48 +1887,84 @@ export function createFeaturedContentFetcher(apiClient, userId, rows, lookupMaps
         performanceProfile.homeInitialRowCount || 4
     );
     const fetchConcurrency = Math.min(2, performanceProfile.featuredFetchConcurrency || 2);
+    const isCacheOwnerCurrent = () => {
+        const activeApiClient = getPtvApiClient();
+        const activeServerId = activeApiClient?.serverId?.() || '';
+        const activeDisplayIdentityKey = getPtvDisplayIdentityKey(
+            activeServerId,
+            getPtvCurrentUserId(activeServerId)
+        );
+
+        return Boolean(
+            displayIdentityKey
+            && getPtvApiClient(serverId)
+            && activeDisplayIdentityKey === displayIdentityKey
+        );
+    };
+    const cacheOptions = {
+        ...options,
+        dataOwner: undefined,
+        isRouteCurrent: isCacheOwnerCurrent,
+        routeOwnerRef: undefined
+    };
 
     return function () {
-        const currentApiClient = ServerConnections.getApiClient(serverId) || apiClient;
+        if (!isCacheOwnerCurrent()) {
+            return Promise.reject(createRetiredRowWorkError());
+        }
+
+        const currentApiClient = createOwnedHomeApiClient(apiClient, {
+            scope: 'background',
+            serverId
+        });
 
         return timePtvAsync(
             'recommendation',
             'featured-content-batch',
             () => Promise.all([
                 loadSharedHeroItems(currentApiClient, userId).catch(() => []),
-                runBoundedHomeWork(criticalRows, fetchConcurrency, row =>
-                    fetchSectionItems(currentApiClient, userId, row, lookupMaps, userViews, options)
+                runBoundedHomeWork(
+                    criticalRows,
+                    fetchConcurrency,
+                    row => fetchSectionItems(currentApiClient, userId, row, lookupMaps, userViews, cacheOptions)
                         .catch(() => [
                             row.id,
                             []
-                        ])
+                        ]),
+                    isCacheOwnerCurrent
                 )
                     .then(entries => entries.reduce((sections, [sectionId, items]) => ({
                         ...sections,
                         [sectionId]: items
                     }), {}))
             ])
-                .then(([heroItems, sectionItems]) => ({
-                    heroItems,
-                    sections: contentRows.map(row => ({
-                        groupKey: row.groupKey || '',
-                        groupKicker: row.groupKicker || '',
-                        groupTitle: row.groupTitle || '',
-                        id: row.id,
-                        includeItemTypes: row.includeItemTypes || row.itemTypes || '',
-                        itemCount: sectionItems[row.id]?.length || 0,
-                        mediaType: row.mediaType || 'mixed',
-                        presentation: row.presentation || '',
-                        rowKicker: row.rowKicker || '',
-                        shape: row.shape || '',
-                        source: row.searchTerm || row.title,
-                        sourceType: row.sourceType || row.type,
-                        tier: row.tier || '',
-                        title: row.title,
-                        type: row.type
-                    })),
-                    sectionItems
-                })),
+                .then(([heroItems, sectionItems]) => {
+                    if (!isCacheOwnerCurrent()) {
+                        throw createRetiredRowWorkError();
+                    }
+
+                    return {
+                        heroItems,
+                        sections: contentRows.map(row => ({
+                            groupKey: row.groupKey || '',
+                            groupKicker: row.groupKicker || '',
+                            groupTitle: row.groupTitle || '',
+                            id: row.id,
+                            includeItemTypes: row.includeItemTypes || row.itemTypes || '',
+                            itemCount: sectionItems[row.id]?.length || 0,
+                            mediaType: row.mediaType || 'mixed',
+                            presentation: row.presentation || '',
+                            rowKicker: row.rowKicker || '',
+                            shape: row.shape || '',
+                            source: row.searchTerm || row.title,
+                            sourceType: row.sourceType || row.type,
+                            tier: row.tier || '',
+                            title: row.title,
+                            type: row.type
+                        })),
+                        sectionItems
+                    };
+                }),
             {
                 deferredRows: deferredRows.length,
                 renderProfile: performanceProfile.renderProfile?.id,
@@ -1713,7 +1988,19 @@ function createFetchData({
     const serverId = apiClient.serverId();
 
     return function () {
-        const currentApiClient = ServerConnections.getApiClient(serverId) || apiClient;
+        if (!isHomeRouteCurrent(options)) return Promise.resolve({ Items: [] });
+
+        const lifetime = options.routeOwnerRef?.lifetime;
+
+        if (!lifetime?.signal || lifetime.signal.aborted) {
+            return Promise.reject(createRetiredRowWorkError());
+        }
+
+        const currentApiClient = createOwnedHomeApiClient(apiClient, {
+            scope: 'route',
+            serverId,
+            signal: lifetime.signal
+        });
         const fetchFallbackRow = () => fetchRowResult(
             currentApiClient,
             userId,
@@ -1855,6 +2142,10 @@ export function renderLibraryRow(elem, apiClient, userViews, options, row = PTV_
         apiClient,
         serverId: apiClient.serverId()
     };
+    const ownerIdentity = getHomeRouteOwnerIdentity(rowOptions);
+
+    if (!isHomeRouteCurrent(rowOptions, ownerIdentity)) return;
+
     const rowWithNavigation = {
         ...row,
         moreUrl: `#/home.html?serverId=${encodeURIComponent(rowOptions.serverId)}`
@@ -1864,6 +2155,9 @@ export function renderLibraryRow(elem, apiClient, userViews, options, row = PTV_
 
     const itemsContainer = elem.querySelector('.itemsContainer');
     if (!itemsContainer) return;
+
+    bindHomeRowDataOwner(itemsContainer, rowOptions);
+    itemsContainer.ptvLastRowItems = userViews;
 
     itemsContainer.dataset.ptvRowId = rowWithNavigation.id || '';
     itemsContainer.dataset.ptvRowIndex = elem.dataset.ptvRowIndex || '';
@@ -1893,11 +2187,16 @@ export function renderLibraryRow(elem, apiClient, userViews, options, row = PTV_
 }
 
 export function renderMediaRow(elem, apiClient, userId, row, lookupMaps, userViews, options) {
+    if (isLegacyConfiguredRow(row)) return;
     const rowOptions = {
         ...options,
         apiClient,
         serverId: apiClient.serverId()
     };
+    const ownerIdentity = getHomeRouteOwnerIdentity(rowOptions);
+
+    if (!isHomeRouteCurrent(rowOptions, ownerIdentity)) return;
+
     const parentId = row.type === 'library' ? getLibraryParentId(row, userViews) : '';
     const rowWithNavigation = {
         ...row,
@@ -1913,6 +2212,8 @@ export function renderMediaRow(elem, apiClient, userId, row, lookupMaps, userVie
 
     const itemsContainer = elem.querySelector('.itemsContainer');
     if (!itemsContainer) return;
+
+    bindHomeRowDataOwner(itemsContainer, rowOptions);
 
     itemsContainer.dataset.ptvRowId = rowWithNavigation.id || '';
     itemsContainer.dataset.ptvRowIndex = elem.dataset.ptvRowIndex || '';
@@ -1931,7 +2232,13 @@ export function renderMediaRow(elem, apiClient, userId, row, lookupMaps, userVie
     itemsContainer.getItemsHtml = getRowItemsHtml(rowWithNavigation, rowOptions);
     itemsContainer.parentContainer = elem;
     itemsContainer.afterRefresh = function (result) {
-        if (!getItems(result).length && rowWithNavigation.showWhenEmpty) {
+        if (!isHomeRouteCurrent(rowOptions, getHomeRouteOwnerIdentity(rowOptions))) return;
+
+        const items = getItems(result);
+
+        itemsContainer.ptvLastRowItems = items;
+
+        if (!items.length && rowWithNavigation.showWhenEmpty) {
             elem.classList.remove('hide');
             recordPtvEvent('render', 'row-empty-visible', {
                 row: rowWithNavigation.id || rowWithNavigation.title,
@@ -1939,18 +2246,23 @@ export function renderMediaRow(elem, apiClient, userId, row, lookupMaps, userVie
             });
         }
 
-        applyRowBackdrop(elem, apiClient, getItems(result), rowOptions);
+        applyRowBackdrop(elem, apiClient, items, rowOptions);
         forceLoadRowImages(itemsContainer, rowOptions);
     };
 }
 
 export function loadGenreMap(apiClient, userId) {
-    return apiClient.getGenres(userId, {
-        SortBy: 'SortName',
-        SortOrder: 'Ascending',
-        IncludeItemTypes: 'Movie,Series',
-        Recursive: true,
-        Limit: 300
+    return requestPtvJson('Genres', {
+        params: {
+            IncludeItemTypes: 'Movie,Series',
+            Limit: 300,
+            Recursive: true,
+            SortBy: 'SortName',
+            SortOrder: 'Ascending',
+            UserId: userId
+        },
+        scope: 'background',
+        serverId: apiClient.serverId()
     })
         .then(result => new Map((result.Items || [])
             .filter(genre => genre.Id && genre.Name)
@@ -1959,16 +2271,17 @@ export function loadGenreMap(apiClient, userId) {
 }
 
 export function loadStudioMap(apiClient, userId) {
-    if (!apiClient.getStudios) {
-        return Promise.resolve(new Map());
-    }
-
-    return apiClient.getStudios(userId, {
-        SortBy: 'SortName',
-        SortOrder: 'Ascending',
-        IncludeItemTypes: 'Movie,Series',
-        Recursive: true,
-        Limit: 500
+    return requestPtvJson('Studios', {
+        params: {
+            IncludeItemTypes: 'Movie,Series',
+            Limit: 500,
+            Recursive: true,
+            SortBy: 'SortName',
+            SortOrder: 'Ascending',
+            UserId: userId
+        },
+        scope: 'background',
+        serverId: apiClient.serverId()
     })
         .then(result => new Map((result.Items || [])
             .filter(studio => studio.Id && studio.Name)

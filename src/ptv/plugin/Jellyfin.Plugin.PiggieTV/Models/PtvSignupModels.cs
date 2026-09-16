@@ -162,6 +162,10 @@ public sealed class PtvSignupPolicyPresetDto
 /// </summary>
 public sealed class PtvSignupEmailSettingsDto
 {
+    /// <summary>Gets or sets the trusted public PiggieTV origin used in verification links.</summary>
+    [JsonPropertyName("publicBaseUrl")]
+    public string PublicBaseUrl { get; set; } = string.Empty;
+
     /// <summary>Gets or sets whether email delivery is enabled.</summary>
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
@@ -216,7 +220,7 @@ public sealed class PtvSignupEmailSettingsDto
 
     /// <summary>Gets or sets email verification link lifetime in minutes.</summary>
     [JsonPropertyName("verificationLinkMinutes")]
-    public int VerificationLinkMinutes { get; set; } = 30;
+    public int VerificationLinkMinutes { get; set; } = 1440;
 
     /// <summary>
     /// Creates a redacted DTO from stored settings.
@@ -230,6 +234,7 @@ public sealed class PtvSignupEmailSettingsDto
         FromName = settings.FromName,
         LogoUrl = settings.LogoUrl,
         PasswordConfigured = !string.IsNullOrWhiteSpace(settings.Password),
+        PublicBaseUrl = settings.PublicBaseUrl,
         ResetCodeMinutes = settings.ResetCodeMinutes,
         ResetSubject = settings.ResetSubject,
         SmtpHost = settings.SmtpHost,
@@ -300,7 +305,7 @@ public sealed class PtvSignupUserEmailPatch
     [JsonPropertyName("userId")]
     public string UserId { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets email address. Blank clears the mapping.</summary>
+    /// <summary>Gets or sets a legacy recovery email. Blank input is ignored and never deletes account state.</summary>
     [JsonPropertyName("email")]
     public string? Email { get; set; }
 }
@@ -340,7 +345,7 @@ public sealed class PtvSignupCreateUserRequest
     [JsonPropertyName("email")]
     public string? Email { get; set; }
 
-    /// <summary>Gets or sets verification link base URL.</summary>
+    /// <summary>Gets or sets a legacy client hint. The server ignores it and uses trusted PublicBaseUrl configuration.</summary>
     [JsonPropertyName("verificationBaseUrl")]
     public string? VerificationBaseUrl { get; set; }
 }
@@ -559,4 +564,8 @@ public sealed class PtvSignupTestEmailRequest
     /// <summary>Gets or sets recipient email address.</summary>
     [JsonPropertyName("recipient")]
     public string? Recipient { get; set; }
+
+    /// <summary>Gets or sets the public web URL used to resolve root-relative email assets.</summary>
+    [JsonPropertyName("referenceUrl")]
+    public string? ReferenceUrl { get; set; }
 }

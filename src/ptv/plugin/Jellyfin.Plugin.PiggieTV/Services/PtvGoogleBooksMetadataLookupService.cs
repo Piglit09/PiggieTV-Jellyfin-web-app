@@ -16,27 +16,26 @@ namespace Jellyfin.Plugin.PiggieTV.Services;
 /// </summary>
 public sealed partial class PtvGoogleBooksMetadataLookupService : IPtvGoogleBooksMetadataLookupService
 {
-    private static readonly HttpClient HttpClient = new()
-    {
-        Timeout = TimeSpan.FromSeconds(8)
-    };
-
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(45);
     private static readonly ConcurrentDictionary<string, CacheEntry> Cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<PtvGoogleBooksMetadataLookupService> _logger;
+    private readonly IPtvReadingMetadataRequestCoordinator _requestCoordinator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PtvGoogleBooksMetadataLookupService"/> class.
     /// </summary>
     /// <param name="logger">Logger.</param>
     /// <param name="libraryManager">Jellyfin library manager.</param>
+    /// <param name="requestCoordinator">Shared bounded provider request coordinator.</param>
     public PtvGoogleBooksMetadataLookupService(
         ILogger<PtvGoogleBooksMetadataLookupService> logger,
-        ILibraryManager libraryManager)
+        ILibraryManager libraryManager,
+        IPtvReadingMetadataRequestCoordinator requestCoordinator)
     {
         _logger = logger;
         _libraryManager = libraryManager;
+        _requestCoordinator = requestCoordinator;
     }
 
     /// <inheritdoc />
@@ -92,28 +91,46 @@ public sealed partial class PtvGoogleBooksMetadataLookupService : IPtvGoogleBook
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            using var httpResponse = string.IsNullOrWhiteSpace(volumeId)
-                ? await HttpClient.GetAsync(BuildSearchUrl(configuration, query, limit), cancellationToken).ConfigureAwait(false)
-                : await HttpClient.GetAsync(BuildVolumeUrl(configuration, volumeId), cancellationToken).ConfigureAwait(false);
+            var url = string.IsNullOrWhiteSpace(volumeId)
+                ? BuildSearchUrl(configuration, query, limit)
+                : BuildVolumeUrl(configuration, volumeId);
+            var transport = await _requestCoordinator.ExecuteAsync(
+                new PtvReadingMetadataHttpRequest
+                {
+                    Provider = "google-books",
+                    Key = PtvReadingMetadataRequestKey.Create(
+                        string.IsNullOrWhiteSpace(volumeId) ? "search" : "by-id",
+                        ("volumeId", volumeId),
+                        ("query", query),
+                        ("author", CleanText(request.Author, 120)),
+                        ("year", request.Year?.ToString(CultureInfo.InvariantCulture)),
+                        ("limit", limit.ToString(CultureInfo.InvariantCulture))),
+                    MaximumConcurrency = 2,
+                    MinimumInterval = TimeSpan.FromMilliseconds(250),
+                    Timeout = TimeSpan.FromSeconds(8),
+                    CacheTtl = CacheTtl,
+                    HeaderlessRateLimitBackoff = TimeSpan.FromSeconds(60),
+                    MaximumResponseBytes = 1_048_576,
+                    CreateRequest = () => new HttpRequestMessage(HttpMethod.Get, url)
+                },
+                cancellationToken).ConfigureAwait(false);
 
-            response.Provider.StatusCode = (int)httpResponse.StatusCode;
-            var payload = await httpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-            if (!httpResponse.IsSuccessStatusCode)
+            response.Provider.StatusCode = transport.StatusCode;
+            response.Provider.Cached = transport.CacheHit;
+            if (!transport.Succeeded || string.IsNullOrWhiteSpace(transport.Body))
             {
-                response.Provider.Error = $"google-books-http-{(int)httpResponse.StatusCode}";
-                response.Diagnostics.Add($"Google Books returned HTTP {(int)httpResponse.StatusCode}.");
+                response.Provider.Error = transport.Failure?.Code ?? "google-books-unavailable";
+                response.Diagnostics.Add("Google Books could not complete the lookup.");
                 _logger.LogWarning(
-                    "Google Books lookup failed. StatusCode={StatusCode}; Query={Query}; VolumeId={VolumeId}.",
-                    (int)httpResponse.StatusCode,
-                    query,
-                    volumeId);
+                    "Google Books lookup failed. StatusCode={StatusCode}; Failure={Failure}.",
+                    transport.StatusCode,
+                    transport.Failure?.Kind.ToString() ?? "Unknown");
                 return response;
             }
 
             response.Candidates = string.IsNullOrWhiteSpace(volumeId)
-                ? ParseSearchPayload(payload, request)
-                : ParseVolumePayload(payload, request);
+                ? ParseSearchPayload(transport.Body, request)
+                : ParseVolumePayload(transport.Body, request);
             response.Candidates = response.Candidates
                 .OrderByDescending(candidate => candidate.Confidence)
                 .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
@@ -121,7 +138,7 @@ public sealed partial class PtvGoogleBooksMetadataLookupService : IPtvGoogleBook
                 .ToList();
             response.Ok = true;
             response.Provider.CandidateCount = response.Candidates.Count;
-            response.Diagnostics.Add($"google-books-query={query}");
+            response.Diagnostics.Add("google-books-lookup-completed");
             Cache[cacheKey] = new CacheEntry(DateTimeOffset.UtcNow, response.Candidates);
             TrimCache();
         }
@@ -133,9 +150,9 @@ public sealed partial class PtvGoogleBooksMetadataLookupService : IPtvGoogleBook
         }
         catch (Exception ex)
         {
-            response.Provider.Error = ex.GetType().Name;
-            response.Diagnostics.Add($"Google Books lookup failed: {ex.Message}");
-            _logger.LogWarning(ex, "Google Books lookup failed. Query={Query}; VolumeId={VolumeId}.", query, volumeId);
+            response.Provider.Error = "google-books-unavailable";
+            response.Diagnostics.Add("Google Books lookup failed.");
+            _logger.LogWarning("Google Books lookup failed. Failure={FailureType}.", ex.GetType().Name);
         }
         finally
         {
@@ -269,7 +286,10 @@ public sealed partial class PtvGoogleBooksMetadataLookupService : IPtvGoogleBook
             Authors = authors,
             Confidence = ScoreCandidate(title, authors, year, imageUrl, request),
             Genres = categories,
-            ImageUrl = imageUrl,
+            ImageUrl = PtvReadingMetadataSafety.HttpUrl(
+                imageUrl,
+                "googleusercontent.com",
+                "google.com"),
             Language = GetString(volume, "language"),
             MatchReason = BuildMatchReason(title, authors, year, request),
             Name = CombineTitle(title, subtitle),
@@ -280,7 +300,10 @@ public sealed partial class PtvGoogleBooksMetadataLookupService : IPtvGoogleBook
             ProductionYear = year,
             Publisher = publisher,
             Tags = categories,
-            Url = canonicalUrl
+            Url = PtvReadingMetadataSafety.HttpUrl(
+                canonicalUrl,
+                "books.google.com",
+                "google.com")
         };
 
         if (!string.IsNullOrWhiteSpace(id))

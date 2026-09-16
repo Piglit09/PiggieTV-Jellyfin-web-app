@@ -21,6 +21,11 @@ import {
     isPtvVideoPlayerControlFocused,
     reconcilePtvVideoControlSurface
 } from './videoInputOwnership';
+import {
+    shouldArmPlayerChromeHide,
+    shouldDeferPlayerChromeHide
+} from './playerChromeTimer';
+import { getPlaybackStallRecoveryStrategy } from './playbackStallRecovery';
 
 import './playbackChrome';
 import './playback.scss';
@@ -925,7 +930,10 @@ function showPlayerChrome(autoHide = true) {
 
     playerChromeTimer = window.setTimeout(() => {
         playerChromeTimer = null;
-        if (hasFocusedPlayerControl()) {
+        if (shouldDeferPlayerChromeHide({
+            controlFocused: hasFocusedPlayerControl(),
+            isTv: getPtvClientProfile().isTv
+        })) {
             showPlayerChrome(true);
             return;
         }
@@ -1210,6 +1218,15 @@ function setPauseState(isPaused) {
 
     if (isPaused) {
         showPlayerChrome(false);
+    } else if (shouldArmPlayerChromeHide({
+        controlsVisible: document.documentElement.classList.contains(PLAYER_CHROME_VISIBLE_CLASS),
+        hasTimer: Boolean(playerChromeTimer),
+        paused: false,
+        playbackActive: isPlaybackUiActive()
+    })) {
+        // A transient paused state clears auto-hide during playback startup.
+        // Re-arm it as soon as the player confirms that playback is moving.
+        showPlayerChrome(true);
     }
     setPtvVideoPlaybackPresentation({
         available: isPlaybackUiActive(),
@@ -1262,38 +1279,37 @@ function retryCurrentPlaybackSource(video, reason) {
         return false;
     }
 
+    const hlsPlayer = currentPlayer?._hlsPlayer;
+    const recoveryStrategy = getPlaybackStallRecoveryStrategy(hlsPlayer, currentPlayer?._ptvIsHlsSource === true);
+
+    if (recoveryStrategy === 'hls-session-owner') {
+        recordPlaybackDiagnostic('ptv-playback-stall-retry-skipped', reason, { skippedReason: 'hls-session-owner' });
+        return false;
+    }
+
     rememberRetriedSourceKey(sourceKey);
     playbackRetryCount += 1;
 
     const restoreTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
     const wasPaused = video.paused;
-    const hlsPlayer = currentPlayer?._hlsPlayer;
 
     recordPlaybackDiagnostic('ptv-playback-stall-retry-start', reason, {
         restoreTime: Number(restoreTime.toFixed(2)),
-        strategy: hlsPlayer?.startLoad ? 'hls-start-load' : 'native-reload'
+        strategy: recoveryStrategy
     });
     setReconnectingState(true, 'recovering-playback');
 
     try {
-        if (hlsPlayer?.startLoad) {
-            hlsPlayer.startLoad(restoreTime);
+        const restorePosition = () => {
+            video.removeEventListener('loadedmetadata', restorePosition);
 
-            if (video.error && hlsPlayer.recoverMediaError) {
-                hlsPlayer.recoverMediaError();
+            if (restoreTime && Number.isFinite(video.duration) && restoreTime < video.duration) {
+                video.currentTime = restoreTime;
             }
-        } else {
-            const restorePosition = () => {
-                video.removeEventListener('loadedmetadata', restorePosition);
+        };
 
-                if (restoreTime && Number.isFinite(video.duration) && restoreTime < video.duration) {
-                    video.currentTime = restoreTime;
-                }
-            };
-
-            video.addEventListener('loadedmetadata', restorePosition);
-            video.load();
-        }
+        video.addEventListener('loadedmetadata', restorePosition);
+        video.load();
 
         if (!wasPaused) {
             const playPromise = video.play();
@@ -1314,12 +1330,19 @@ function retryCurrentPlaybackSource(video, reason) {
     }
 }
 
-function recoverFromPlaybackStall(reason) {
+function recoverFromPlaybackStall(reason, owner = {}) {
     playbackStallTimer = null;
 
     const video = currentVideo;
 
-    if (!video || !isPlaybackUiActive() || video.paused || video.ended) {
+    if (!video
+        || video !== owner.video
+        || currentPlayer !== owner.player
+        || getVideoSourceKey(video) !== owner.sourceKey
+        || !isPlaybackUiActive()
+        || video.paused
+        || video.ended
+        || video.seeking) {
         hideReconnectingStateSoon('inactive');
         return;
     }
@@ -1348,7 +1371,13 @@ function recoverFromPlaybackStall(reason) {
 function schedulePlaybackStallRecovery(reason) {
     const video = currentVideo;
 
-    if (!video || video.paused || video.ended) return;
+    if (!video || video.paused || video.ended || video.seeking) return;
+
+    const owner = {
+        player: currentPlayer,
+        sourceKey: getVideoSourceKey(video),
+        video
+    };
 
     playbackStallCount += 1;
     recordPlaybackDiagnostic('ptv-playback-stall-detected', reason, {}, true);
@@ -1359,7 +1388,14 @@ function schedulePlaybackStallRecovery(reason) {
         reconnectingShowTimer = null;
         const activeVideo = currentVideo;
 
-        if (!activeVideo || activeVideo.paused || activeVideo.ended || hasBufferedAhead(activeVideo)) {
+        if (!activeVideo
+            || activeVideo !== owner.video
+            || currentPlayer !== owner.player
+            || getVideoSourceKey(activeVideo) !== owner.sourceKey
+            || activeVideo.paused
+            || activeVideo.ended
+            || activeVideo.seeking
+            || hasBufferedAhead(activeVideo)) {
             recordPlaybackDiagnostic('ptv-false-reconnect-suppressed', reason, {
                 falseReconnectSuppressedCount: 1
             });
@@ -1370,7 +1406,7 @@ function schedulePlaybackStallRecovery(reason) {
     }, CONNECTION_WARNING_DEBOUNCE_MS);
 
     playbackStallTimer = window.setTimeout(() => {
-        recoverFromPlaybackStall(reason);
+        recoverFromPlaybackStall(reason, owner);
     }, STALL_RECOVERY_DELAY_MS);
 }
 
@@ -1711,6 +1747,7 @@ function init({ scope } = {}) {
     Events.on(document, EventType.SHOW_VIDEO_OSD, onShowVideoOsd);
     Events.on(document, 'mousemove', onPlayerActivity);
     Events.on(document, 'touchstart', onPlayerActivity);
+    Events.on(document, 'keydown', onPlayerActivity);
     Events.on(window, 'hashchange', onPlaybackRouteChanged);
     Events.on(window, 'popstate', onPlaybackRouteChanged);
     scope?.add(() => Events.off(playbackManager, 'playbackstart', onPlaybackStart), {
@@ -1739,6 +1776,10 @@ function init({ scope } = {}) {
     });
     scope?.add(() => Events.off(document, 'touchstart', onPlayerActivity), {
         label: 'player-touchstart',
+        type: 'listener'
+    });
+    scope?.add(() => Events.off(document, 'keydown', onPlayerActivity), {
+        label: 'player-keydown',
         type: 'listener'
     });
     scope?.add(() => Events.off(window, 'hashchange', onPlaybackRouteChanged), {
@@ -1779,6 +1820,7 @@ function destroy() {
     Events.off(document, EventType.SHOW_VIDEO_OSD, onShowVideoOsd);
     Events.off(document, 'mousemove', onPlayerActivity);
     Events.off(document, 'touchstart', onPlayerActivity);
+    Events.off(document, 'keydown', onPlayerActivity);
     Events.off(window, 'hashchange', onPlaybackRouteChanged);
     Events.off(window, 'popstate', onPlaybackRouteChanged);
     setPlayerOsdVisible(false);

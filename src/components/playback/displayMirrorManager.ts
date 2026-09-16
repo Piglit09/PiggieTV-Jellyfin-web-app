@@ -1,5 +1,6 @@
 import { getItemQuery } from 'hooks/useItem';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 
@@ -26,7 +27,7 @@ async function mirrorIfEnabled(serverId: string, itemId: string) {
                     ItemType: item.Type
                 }, playbackManager.getCurrentPlayer());
             } catch (err) {
-                console.error('[DisplayMirrorManager] failed to mirror item', err);
+                ptvSafeConsole.error('[DisplayMirrorManager] failed to mirror item', err);
             }
         }
     }

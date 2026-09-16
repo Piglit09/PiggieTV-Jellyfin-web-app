@@ -5,7 +5,8 @@ import {
     syncPtvManagedPreloads,
     type PtvImagePriority
 } from './imageManager';
-import { getPtvPluginApiDiagnostics } from './pluginApi';
+import { getPtvPluginApiResolvedRoot } from './pluginApi';
+import { ptvSafeConsole } from './safeConsole';
 import { resolvePtvStaticAssetUrl } from './urlOrigins';
 
 export type PtvStaticAssetProfile = 'PTV_DESKTOP' | 'PTV_FIRETV' | 'PTV_LOWPOWER' | 'PTV_TV' | 'PTV_WEBOS';
@@ -38,7 +39,7 @@ const staticAssetResolutionCache = new Map<string, Promise<string>>();
 function normalizeGenericImageUrl(url: string) {
     if (/^(?:https?:|data:|blob:)?\/\//.test(url) || url.startsWith('data:') || url.startsWith('blob:')) return url;
     if (url.startsWith('/')) {
-        const jellyfinRoot = getPtvPluginApiDiagnostics().resolvedRoot;
+        const jellyfinRoot = getPtvPluginApiResolvedRoot();
 
         return jellyfinRoot ? `${jellyfinRoot}${url}` : url;
     }
@@ -67,7 +68,7 @@ function isDebugEnabled() {
 
 function debugLog(message: string, detail?: unknown) {
     if (isDebugEnabled()) {
-        console.warn(`[PTV Image] ${message}`, detail);
+        ptvSafeConsole.warn(`[PTV Image] ${message}`, detail);
     }
 }
 

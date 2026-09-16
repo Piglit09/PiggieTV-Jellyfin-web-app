@@ -414,7 +414,8 @@ export function getPtvPhysicalLayoutSnapshot(): PtvPhysicalLayoutSnapshot {
             frontendBuildDate: buildInfo.frontendBuildDate,
             frontendBuildId: buildInfo.frontendBuildId,
             frontendCommitSha: buildInfo.frontendCommitSha,
-            jellyfinWebVersion: buildInfo.jellyfinWebVersion
+            jellyfinWebVersion: buildInfo.jellyfinWebVersion,
+            ptvWebVersion: buildInfo.ptvWebVersion
         },
         capability: 'physicalLayoutSnapshot',
         cssOwnership: {

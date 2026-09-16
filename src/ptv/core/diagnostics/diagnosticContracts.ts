@@ -98,9 +98,21 @@ export type PtvRouteLifecyclePhase =
     | 'requested'
     | 'settled';
 
+export type PtvRouteCriticalState =
+    | 'cancelled'
+    | 'empty'
+    | 'failed'
+    | 'partial'
+    | 'pending'
+    | 'success'
+    | 'undeclared';
+
 export type PtvRouteDiagnostic = Readonly<{
     activeRequestsAtSettle: number | null;
     cleanupCompletedAt: string | null;
+    criticalCompletedAt: string | null;
+    criticalStartedAt: string | null;
+    criticalState: PtvRouteCriticalState;
     firstContentAt: string | null;
     firstDirectionalMovementAt: string | null;
     firstFocusableAt: string | null;
@@ -120,6 +132,7 @@ export type PtvRouteDiagnostic = Readonly<{
     recognizedAt: string | null;
     requestedAt: string;
     routeFamily: string;
+    routeGeneration: number | null;
     routeSessionId: string;
     settledAt: string | null;
     shelvesPendingAtSettle: number | null;
@@ -407,6 +420,7 @@ export type PtvShelfDiagnostic = Readonly<{
     shelfFamily: string;
     status:
         | 'configured'
+        | 'cancelled'
         | 'data-returned'
         | 'disposed'
         | 'empty'
@@ -446,6 +460,103 @@ export type PtvRecommendationDiagnostic = Readonly<{
     sourceCount: number;
 }>;
 
+export type PtvPlaybackSessionState =
+    | 'IDLE'
+    | 'LOADING'
+    | 'BUFFERING'
+    | 'PLAYING'
+    | 'DEGRADED'
+    | 'STALLED'
+    | 'RECOVERING'
+    | 'ENDED'
+    | 'FAILED';
+
+export type PtvPlaybackMediaMode = 'Direct Play' | 'Direct Stream' | 'HLS Transcode' | 'Unknown';
+
+export type PtvPlaybackRouteClassification =
+    | 'LAN_DIRECT'
+    | 'LOCAL_VIA_PUBLIC_HOSTNAME'
+    | 'PUBLIC_PROXY'
+    | 'CLOUDFLARE_TUNNEL'
+    | 'VPN_PATH'
+    | 'UNKNOWN';
+
+export type PtvPlaybackBufferDiagnostic = Readonly<{
+    averageAheadSeconds: number;
+    belowTwoSecondsCount: number;
+    currentAheadSeconds: number;
+    maximumAheadSeconds: number;
+    minimumAheadSeconds: number;
+    sampleCount: number;
+    zeroBufferCount: number;
+}>;
+
+export type PtvPlaybackStallDiagnostic = Readonly<{
+    cumulativeDurationMs: number;
+    episodeDurationsMs: readonly number[];
+    longestDurationMs: number;
+    recoveryResults: readonly string[];
+    stalledCount: number;
+    waitingCount: number;
+}>;
+
+export type PtvPlaybackHlsDiagnostic = Readonly<{
+    droppedFragmentTrackingCount: number;
+    duplicateFragmentRequestCount: number;
+    fragmentAverageLatencyMs: number;
+    fragmentFailureCount: number;
+    fragmentLongestLatencyMs: number;
+    fragmentP95LatencyMs: number;
+    fragmentRequestCount: number;
+    fragmentRetryCount: number;
+    fragmentSuccessCount: number;
+    fragmentTimeoutCount: number;
+    manifestAverageLatencyMs: number;
+    manifestP95LatencyMs: number;
+    manifestRequestCount: number;
+    manifestSuccessCount: number;
+}>;
+
+export type PtvPlaybackPlayerDiagnostic = Readonly<{
+    activeLoadRestarts: number;
+    mediaSourceAssignments: number;
+    mountCount: number;
+    pauseCalls: number;
+    playCalls: number;
+    programmaticSeeks: number;
+    qualitySwitches: number;
+    recoveryActions: number;
+    sourceReplacements: number;
+    staleEventsIgnored: number;
+    unmountCount: number;
+}>;
+
+export type PtvPlaybackReadyStateTransition = Readonly<{
+    atMs: number;
+    from: number;
+    to: number;
+}>;
+
+export type PtvPlaybackSessionDiagnostic = Readonly<{
+    buffer: PtvPlaybackBufferDiagnostic;
+    diagnosticSessionId: string;
+    hls: PtvPlaybackHlsDiagnostic;
+    mediaMode: PtvPlaybackMediaMode;
+    player: PtvPlaybackPlayerDiagnostic;
+    readyStateTransitions: readonly PtvPlaybackReadyStateTransition[];
+    routeClassification: PtvPlaybackRouteClassification;
+    routeFamily: string;
+    sourceGeneration: number;
+    stalls: PtvPlaybackStallDiagnostic;
+    state: PtvPlaybackSessionState;
+    terminal: boolean;
+    updatedAt: string;
+}>;
+
+export type PtvPlaybackSessionSnapshotEventDetail =
+    | PtvPlaybackSessionDiagnostic
+    | Readonly<{ detail: PtvPlaybackSessionDiagnostic }>;
+
 export type PtvDiagnosticRetentionLimits = Readonly<{
     focusChanges: number;
     focusGraphs: number;
@@ -454,6 +565,7 @@ export type PtvDiagnosticRetentionLimits = Readonly<{
     frames: number;
     images: number;
     inputs: number;
+    playbackSessions: number;
     requests: number;
     routes: number;
     shelves: number;
@@ -494,6 +606,7 @@ export type PtvDiagnosticSnapshot = Readonly<{
     inputs: readonly PtvInputDiagnostic[];
     latestFocus: PtvFocusDiagnostic;
     platform: PtvPlatformDiagnostic;
+    playbackSessions: readonly PtvPlaybackSessionDiagnostic[];
     plugin: PtvPluginDiagnostic;
     privacyClassification: PtvDiagnosticPrivacyClassification;
     recommendations: PtvRecommendationDiagnostic;

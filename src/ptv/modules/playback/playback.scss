@@ -1,7 +1,7 @@
 :is(.ptv-player-page, .ptv-playback-active) {
-    --ptv-player-glass: rgba(9, 4, 18, 0.58);
-    --ptv-player-glass-strong: rgba(10, 5, 22, 0.72);
-    --ptv-player-line: rgba(205, 174, 255, 0.14);
+    --ptv-player-glass: var(--ptv-glass-bg, rgba(9, 4, 18, 0.58));
+    --ptv-player-glass-strong: var(--ptv-glass-bg-strong, rgba(10, 5, 22, 0.72));
+    --ptv-player-line: var(--ptv-glass-border, rgba(205, 174, 255, 0.14));
     --ptv-player-gradient: linear-gradient(90deg, #7dd6ff, #a78bfa 52%, #ff8dc3);
 }
 
@@ -213,32 +213,48 @@ html:not(.ptv-player-osd-visible) :is(#videoOsdPage.ptv-player-page, .videoOsdPa
 
 .ptv-player-reconnecting {
     position: fixed;
-    top: 92px;
-    left: 50%;
+    top: max(18px, env(safe-area-inset-top));
+    right: max(18px, env(safe-area-inset-right));
     z-index: 4;
 
     display: inline-flex;
     align-items: center;
+    gap: 9px;
+    max-width: min(360px, calc(100vw - 36px));
     min-height: 38px;
     padding: 0 16px;
-    border: 1px solid rgba(125, 214, 255, 0.22);
-    border-radius: 999px;
-    background: rgba(5, 4, 12, 0.78);
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
+    border: 1px solid var(--ptv-glass-border, rgba(125, 214, 255, 0.22));
+    border-radius: var(--ptv-radius-pill, 999px);
+    background: var(--ptv-glass-bg-strong, rgba(5, 4, 12, 0.78));
+    box-shadow: var(--ptv-shadow-float, 0 14px 36px rgba(0, 0, 0, 0.34));
     color: rgba(248, 250, 255, 0.96);
     font-size: 13px;
     font-weight: 760;
     opacity: 0;
-    transform: translate(-50%, -8px);
+    transform: translateY(-8px);
     transition:
         opacity var(--ptv-motion-fast) var(--ptv-motion-ease-standard),
         transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
     backdrop-filter: blur(16px) saturate(1.1);
 }
 
+.ptv-player-reconnecting::before {
+    content: '';
+    width: 13px;
+    height: 13px;
+    border: 2px solid rgba(255, 255, 255, 0.24);
+    border-top-color: #7dd6ff;
+    border-radius: 50%;
+    animation: ptvPlayerRecoverySpin 0.8s linear infinite;
+}
+
 .ptv-player-reconnecting-visible .ptv-player-reconnecting {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translateY(0);
+}
+
+@keyframes ptvPlayerRecoverySpin {
+    to { transform: rotate(360deg); }
 }
 
 .ptv-player-topbar {
@@ -422,19 +438,26 @@ html:not(.ptv-player-osd-visible) :is(#videoOsdPage.ptv-player-page, .videoOsdPa
     bottom: 14px !important;
     padding: 0 !important;
 
-    border: 1px solid var(--ptv-player-line) !important;
-    border-radius: 22px !important;
-    background:
-        radial-gradient(ellipse at 48% 0%, rgba(255, 255, 255, 0.08), transparent 42%),
-        linear-gradient(180deg, rgba(8, 5, 15, 0.38), rgba(0, 0, 0, 0.74)) !important;
-    box-shadow:
-        0 -18px 54px rgba(0, 0, 0, 0.32),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
-    backdrop-filter: blur(24px) saturate(1.2) !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
 }
 
 :is(.ptv-player-page, .ptv-playback-active) .osdControls {
     padding: 10px 14px 12px !important;
+    border: 1px solid var(--ptv-player-line) !important;
+    border-radius: var(--ptv-radius-panel, 22px) !important;
+    background: var(--ptv-player-glass-strong) !important;
+    box-shadow: var(--ptv-glass-shadow, 0 14px 46px rgba(0, 0, 0, 0.34)) !important;
+    backdrop-filter: blur(20px) saturate(1.32) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-player-reconnecting::before {
+        animation: none;
+    }
 }
 
 .videoOsdPage.ptv-player-page .videoOsdBottom.ptv-player-chrome-forced-visible,

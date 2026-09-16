@@ -316,6 +316,11 @@ ItemsContainerPrototype.attachedCallback = function () {
 ItemsContainerPrototype.detachedCallback = function () {
     clearRefreshInterval(this);
 
+    if (this.refreshTimeout) {
+        clearTimeout(this.refreshTimeout);
+        this.refreshTimeout = null;
+    }
+
     this.enableMultiSelect(false);
     this.enableDragReordering(false);
     this.removeEventListener('click', onClick);
@@ -335,10 +340,26 @@ ItemsContainerPrototype.detachedCallback = function () {
     this.fetchData = null;
     this.getItemsHtml = null;
     this.parentContainer = null;
+    this.afterRefresh = null;
+    this.ptvDataOwner = null;
+    this.isDataOwnerCurrent = null;
+    this.ptvLastRowItems = null;
+    this.ptvRefreshGeneration = (Number(this.ptvRefreshGeneration) || 0) + 1;
+    this.ptvRefreshInFlightGeneration = 0;
+    this.ptvRowOptions = null;
 };
 
 ItemsContainerPrototype.pause = function () {
     clearRefreshInterval(this, true);
+
+    if (this.ptvDataOwner && (this.refreshTimeout || this.ptvRefreshInFlightGeneration)) {
+        if (this.refreshTimeout) {
+            clearTimeout(this.refreshTimeout);
+            this.refreshTimeout = null;
+        }
+        this.needsRefresh = true;
+    }
+
     this.paused = true;
 };
 
@@ -375,7 +396,33 @@ ItemsContainerPrototype.refreshItems = function () {
 
     this.needsRefresh = false;
 
-    return this.fetchData().then(onDataFetched.bind(this));
+    const fetchData = this.fetchData;
+    const dataOwner = this.ptvDataOwner;
+    const isDataOwnerCurrent = this.isDataOwnerCurrent;
+    const refreshGeneration = dataOwner ? (Number(this.ptvRefreshGeneration) || 0) + 1 : 0;
+    const fetchPromise = fetchData();
+
+    if (refreshGeneration) {
+        this.ptvRefreshGeneration = refreshGeneration;
+        this.ptvRefreshInFlightGeneration = refreshGeneration;
+    }
+
+    return fetchPromise.then(result => {
+        if (dataOwner && (
+            this.ptvDataOwner !== dataOwner
+            || this.ptvRefreshInFlightGeneration !== refreshGeneration
+            || typeof isDataOwnerCurrent !== 'function'
+            || isDataOwnerCurrent() !== true
+        )) {
+            return undefined;
+        }
+
+        return onDataFetched.call(this, result);
+    }).finally(() => {
+        if (refreshGeneration && this.ptvRefreshInFlightGeneration === refreshGeneration) {
+            this.ptvRefreshInFlightGeneration = 0;
+        }
+    });
 };
 
 ItemsContainerPrototype.notifyRefreshNeeded = function (isInForeground) {
@@ -476,4 +523,3 @@ document.registerElement('emby-itemscontainer', {
     prototype: ItemsContainerPrototype,
     extends: 'div'
 });
-

@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
     buildReadingMetadataPreview,
     buildRemoteSearchPayload,
+    getReadingIdentifyFieldControlState,
     getReadingIdentifyInfo,
+    getReadingIdentifyWritableFields,
     getSafeReadingProviderLink,
     normalizeReadingMetadataCandidate,
     rankMetadataSearchResults
@@ -17,6 +19,26 @@ const sakiSearch = {
 };
 
 describe('Reading metadata normalization', () => {
+    it('keeps an inferred standalone series out of the writable provider fields', () => {
+        const result = normalizeReadingMetadataCandidate({
+            Name: 'Standalone Field Guide',
+            ProviderIds: { GoogleBooks: 'standalone-book' }
+        }, {
+            Name: 'Standalone Field Guide.epub',
+            Path: '/Books/Standalone Field Guide.epub'
+        });
+        const seriesField = buildReadingMetadataPreview({
+            Name: 'Standalone Field Guide'
+        }, result).find(field => field.key === 'SeriesName');
+
+        expect(result.PtvReadingSeriesTitle).toBe('Standalone Field Guide');
+        expect(result.SeriesName).toBe('');
+        expect(seriesField).toMatchObject({
+            proposedValue: '',
+            selected: false
+        });
+    });
+
     it('keeps ComicVine marketing copy out of the canonical title', () => {
         const result = normalizeReadingMetadataCandidate({
             IndexNumber: 3,
@@ -37,6 +59,7 @@ describe('Reading metadata normalization', () => {
             seriesTitle: 'Saki the Succubus Hungers Tonight',
             volumeNumber: 3
         });
+        expect(result.SeriesName).toBe('Saki the Succubus Hungers Tonight');
         expect(result.ProviderIds.ComicVine).toBe('saki-the-succubus-hungers-tonight-3-does-she-have-/4000-790398');
     });
 
@@ -197,6 +220,45 @@ describe('Reading metadata preview safety', () => {
 
         expect(preview.find(field => field.key === 'PrimaryImage')).toMatchObject({ selected: true });
         expect(preview.find(field => field.key === 'Overview')).toMatchObject({ selected: false });
+    });
+
+    it('marks only locked fields unsafe and disables locked metadata and artwork controls', () => {
+        const current = {
+            LockedFields: [ 'Name', 'Cast', 'PrimaryImage' ],
+            Name: 'Saki the Succubus Hungers Tonight Vol. 2',
+            Path: '/Manga/Saki the Succubus Hungers Tonight v02.cbz',
+            People: [ { Name: 'Original Author', Type: 'Author' } ]
+        };
+        const preview = buildReadingMetadataPreview(current, {
+            ImageUrl: 'https://example.test/cover.jpg',
+            Name: 'Saki the Succubus Hungers Tonight Vol. 02',
+            Overview: 'A provider summary.',
+            People: [ { Name: 'Provider Author', Type: 'Author' } ]
+        });
+        const name = preview.find(field => field.key === 'Name');
+        const people = preview.find(field => field.key === 'People');
+        const image = preview.find(field => field.key === 'PrimaryImage');
+        const overview = preview.find(field => field.key === 'Overview');
+
+        expect(name).toMatchObject({ locked: true, safe: false, selected: false });
+        expect(people).toMatchObject({ locked: true, safe: false, selected: false });
+        expect(image).toMatchObject({ locked: true, safe: false, selected: false });
+        expect(overview).toMatchObject({ locked: false, safe: true, selected: true });
+        expect(getReadingIdentifyFieldControlState(name)).toEqual({ checked: false, disabled: true });
+        expect(getReadingIdentifyFieldControlState(image, 'https://example.test/cover.jpg')).toEqual({
+            checked: false,
+            disabled: true
+        });
+        expect(getReadingIdentifyWritableFields(current, [ 'Name', 'People', 'Overview', 'PrimaryImage' ])).toEqual([ 'Overview' ]);
+    });
+
+    it('treats a globally locked item as locked for artwork too', () => {
+        const [ image ] = buildReadingMetadataPreview({ LockData: true }, {
+            ImageUrl: 'https://example.test/cover.jpg'
+        }).filter(field => field.key === 'PrimaryImage');
+
+        expect(image).toMatchObject({ locked: true, selected: false });
+        expect(getReadingIdentifyFieldControlState(image, image.proposedValue)).toMatchObject({ disabled: true });
     });
 });
 

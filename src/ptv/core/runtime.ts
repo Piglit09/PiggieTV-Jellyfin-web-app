@@ -1,4 +1,5 @@
 import { dispatchPtvCustomEvent } from './events';
+import { ptvSafeConsole } from './safeConsole';
 
 type PtvRuntimeFeatureDisposer = () => void;
 
@@ -129,7 +130,7 @@ function publishRuntimeApi() {
 function warnDuplicateRuntimeCreation(owner: string) {
     if (!/^(localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(window.location.hostname || '')) return;
 
-    console.warn('[PiggieTV Runtime] Duplicate runtime creation attempt suppressed.', {
+    ptvSafeConsole.warn('[PiggieTV Runtime] Duplicate runtime creation attempt suppressed.', {
         owner,
         runtimeOwner: getRuntimeState().runtimeOwner
     });

@@ -1,0 +1,558 @@
+/* Shared PiggieTV Administration explicit-save configuration surfaces. */
+/* stylelint-disable no-descending-specificity */
+
+.ptv-admin-configuration {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-admin-configuration-header {
+    display: flex;
+    gap: 24px;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+
+.ptv-admin-configuration-header h1 {
+    margin: 0;
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent, inherit);
+    font-size: clamp(2.15rem, 3.3vw, 3.45rem);
+    font-weight: 900;
+    letter-spacing: -0.042em;
+    line-height: 0.98;
+}
+
+.ptv-admin-configuration-header p {
+    max-width: 64ch;
+    margin: 9px 0 0;
+    color: var(--ptv-color-text-muted);
+    line-height: 1.5;
+}
+
+.ptv-admin-configuration-refreshing {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    min-height: 36px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+
+.ptv-admin-configuration-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+}
+
+.ptv-admin-configuration-panel.is-wide {
+    grid-column: 1 / -1;
+}
+
+.ptv-admin-configuration-panel,
+.ptv-admin-configuration-error,
+.ptv-admin-configuration-notice,
+.ptv-admin-configuration-actions {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 20px);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    backdrop-filter: blur(var(--ptv-elevation-2-blur, 12px)) saturate(1.08);
+}
+
+.ptv-admin-configuration-panel > header {
+    padding: 15px 17px 12px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-configuration-panel > header h2 {
+    margin: 0;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.94rem;
+}
+
+.ptv-admin-configuration-panel > header p {
+    margin: 5px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.73rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-configuration-panel-body {
+    display: grid;
+    min-width: 0;
+    padding: 4px 17px;
+}
+
+.ptv-admin-configuration-field,
+.ptv-admin-configuration-toggle {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 0.52fr);
+    gap: 18px;
+    align-items: center;
+    min-height: 76px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-configuration-toggle {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.ptv-admin-configuration-field:last-child,
+.ptv-admin-configuration-toggle:last-child {
+    border-bottom: 0;
+}
+
+.ptv-admin-configuration-field > span:first-child,
+.ptv-admin-configuration-field > label:first-child,
+.ptv-admin-configuration-toggle > span:first-child {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-configuration-field strong,
+.ptv-admin-configuration-toggle strong {
+    color: var(--ptv-color-text-soft);
+    font-size: 0.8rem;
+}
+
+.ptv-admin-configuration-field small,
+.ptv-admin-configuration-toggle small {
+    margin-top: 4px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-configuration-field small.is-error {
+    grid-column: 2;
+    margin-top: -5px;
+    color: var(--ptv-state-danger-text);
+}
+
+.ptv-admin-configuration-field :is(select, input),
+.ptv-admin-configuration-number,
+.ptv-admin-configuration-text {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--ptv-touch-target-min, 44px);
+    box-sizing: border-box;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-primary);
+    background: var(--ptv-component-input-bg, rgba(var(--ptv-palette-black-rgb), 0.28));
+    font: inherit;
+    font-size: 0.8rem;
+}
+
+.ptv-admin-configuration-field :is(select, input) {
+    padding: 10px 12px;
+}
+
+.ptv-admin-configuration-number,
+.ptv-admin-configuration-text {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+}
+
+.ptv-admin-configuration-number input {
+    min-height: 42px;
+    border: 0;
+    background: transparent;
+}
+
+.ptv-admin-configuration-text input {
+    min-height: 42px;
+    border: 0;
+    background: transparent;
+}
+
+.ptv-admin-configuration-text > :not(input) {
+    flex: none;
+    min-width: var(--ptv-touch-target-min, 44px);
+    min-height: 42px;
+    padding: 7px 11px;
+    border-width: 0 0 0 1px;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.ptv-admin-configuration-text input:read-only {
+    color: var(--ptv-color-text-muted);
+    cursor: default;
+}
+
+.ptv-admin-configuration-number > span {
+    padding-right: 12px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+}
+
+.ptv-admin-configuration-field :is(select, input):focus,
+.ptv-admin-configuration-number:focus-within,
+.ptv-admin-configuration-text:focus-within {
+    border-color: var(--ptv-state-focus-border);
+    box-shadow: var(--ptv-state-focus-shadow);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 1px;
+}
+
+.ptv-admin-configuration-number input:focus,
+.ptv-admin-configuration-text input:focus {
+    box-shadow: none;
+    outline: 0;
+}
+
+.ptv-admin-configuration-field :is(select, input):disabled {
+    color: var(--ptv-color-text-disabled);
+    cursor: not-allowed;
+    opacity: var(--ptv-state-disabled-opacity, 0.58);
+}
+
+.ptv-admin-configuration-switch {
+    position: relative;
+    display: inline-flex;
+    width: 45px;
+    min-width: 45px;
+    height: var(--ptv-touch-target-min, 44px);
+    align-items: center;
+    justify-content: center;
+}
+
+.ptv-admin-configuration-switch input {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.ptv-admin-configuration-switch > span {
+    position: relative;
+    width: 45px;
+    height: 25px;
+    box-sizing: border-box;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: 999px;
+    background: var(--ptv-component-field-bg);
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-configuration-switch > span::after {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: var(--ptv-color-text-muted);
+    content: '';
+    transition: transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard), background var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+.ptv-admin-configuration-switch input:checked + span {
+    border-color: var(--ptv-state-selected-border);
+    background: var(--ptv-state-selected);
+    box-shadow: var(--ptv-state-selected-shadow);
+}
+
+.ptv-admin-configuration-switch input:checked + span::after {
+    background: var(--ptv-color-text-strong);
+    transform: translateX(20px);
+}
+
+.ptv-admin-configuration-switch input:focus-visible + span {
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 3px;
+}
+
+.ptv-admin-configuration-switch input:disabled {
+    cursor: not-allowed;
+}
+
+.ptv-admin-configuration-switch input:disabled + span {
+    opacity: var(--ptv-state-disabled-opacity, 0.58);
+}
+
+.ptv-admin-configuration :is(button, .ptv-admin-configuration-link) {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--ptv-touch-target-min, 44px);
+    box-sizing: border-box;
+    padding: 9px 15px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-soft);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 820;
+    text-decoration: none;
+    cursor: pointer;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-configuration :is(button, .ptv-admin-configuration-link):hover:not(:disabled),
+.ptv-admin-configuration :is(button, .ptv-admin-configuration-link):focus-visible {
+    border-color: var(--ptv-state-hover-border);
+    color: var(--ptv-state-hover-text);
+    background: var(--ptv-state-hover);
+    box-shadow: var(--ptv-state-hover-shadow);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+.ptv-admin-configuration button:disabled {
+    color: var(--ptv-color-text-disabled);
+    cursor: not-allowed;
+    opacity: 0.68;
+}
+
+.ptv-admin-configuration button.is-primary {
+    border-color: var(--ptv-state-focus-border);
+    color: var(--ptv-color-text-strong);
+    background: var(--ptv-state-selected);
+}
+
+.ptv-admin-configuration-notice {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 13px 15px;
+    color: var(--ptv-color-text-muted);
+}
+
+.ptv-admin-configuration-notice.is-warning {
+    border-color: var(--ptv-state-warning-border, rgba(242, 200, 120, 0.34));
+    color: var(--ptv-state-warning-text, #f2c878);
+    background: var(--ptv-state-warning-bg, rgba(92, 63, 18, 0.25));
+}
+
+.ptv-admin-configuration-notice strong {
+    color: var(--ptv-color-text-soft);
+    font-size: 0.82rem;
+}
+
+.ptv-admin-configuration-notice p {
+    margin: 3px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.ptv-admin-configuration-related {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 13px 0;
+}
+
+.ptv-admin-configuration-related > span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-configuration-related strong {
+    color: var(--ptv-color-text-soft);
+    font-size: 0.8rem;
+}
+
+.ptv-admin-configuration-related small {
+    margin-top: 4px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-configuration-actions {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 13px 15px;
+}
+
+.ptv-admin-configuration-actions > div {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.ptv-admin-configuration-feedback {
+    min-height: 1.2em;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.75rem;
+    font-weight: 760;
+}
+
+.ptv-admin-configuration-feedback.is-saved {
+    color: var(--ptv-state-success-text, #8ee8b5);
+}
+
+.ptv-admin-configuration-feedback.is-error {
+    color: var(--ptv-state-danger-text);
+}
+
+.ptv-admin-configuration-note {
+    margin: -4px 4px 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-configuration-error {
+    display: grid;
+    gap: 8px;
+    min-height: 250px;
+    padding: 30px;
+    text-align: center;
+    place-content: center;
+}
+
+.ptv-admin-configuration-error h2,
+.ptv-admin-configuration-error p {
+    margin: 0;
+}
+
+.ptv-admin-configuration-error p {
+    max-width: 54ch;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.ptv-admin-configuration-error button {
+    justify-self: center;
+    margin-top: 7px;
+}
+
+.ptv-admin-configuration-panel.is-skeleton {
+    pointer-events: none;
+}
+
+.ptv-admin-configuration-skeleton-line,
+.ptv-admin-configuration-skeleton-row {
+    display: block;
+    height: 10px;
+    border-radius: 8px;
+    background: linear-gradient(90deg, rgba(var(--ptv-palette-white-rgb), 0.045), rgba(var(--ptv-palette-white-rgb), 0.1), rgba(var(--ptv-palette-white-rgb), 0.045));
+    background-size: 220% 100%;
+    animation: ptv-admin-configuration-shimmer 1.6s ease-in-out infinite;
+}
+
+.ptv-admin-configuration-skeleton-line.is-heading {
+    width: min(180px, 58%);
+    height: 13px;
+}
+
+.ptv-admin-configuration-skeleton-line.is-description {
+    width: min(320px, 82%);
+    margin-top: 10px;
+}
+
+.ptv-admin-configuration-skeleton-row {
+    height: 46px;
+    margin: 13px 0;
+}
+
+@keyframes ptv-admin-configuration-shimmer {
+    0% { background-position: 160% 0; }
+    100% { background-position: -60% 0; }
+}
+
+@media (max-width: 900px) {
+    .ptv-admin-configuration-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-admin-configuration-panel.is-wide {
+        grid-column: auto;
+    }
+}
+
+@media (max-width: 760px) {
+    .ptv-admin-configuration-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .ptv-admin-configuration-header h1 {
+        font-size: clamp(2rem, 9vw, 2.65rem);
+    }
+
+    .ptv-admin-configuration-field {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .ptv-admin-configuration-field small.is-error {
+        grid-column: auto;
+        margin-top: 0;
+    }
+
+    .ptv-admin-configuration-notice {
+        grid-template-columns: 22px minmax(0, 1fr);
+    }
+
+    .ptv-admin-configuration-notice > :last-child:not(div) {
+        grid-column: 1 / -1;
+    }
+
+    .ptv-admin-configuration-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ptv-admin-configuration-actions > div {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 520px) {
+    .ptv-admin-configuration-related {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ptv-admin-configuration-link {
+        width: 100%;
+    }
+}
+
+@media (max-width: 420px) {
+    .ptv-admin-configuration-panel-body {
+        padding-right: 14px;
+        padding-left: 14px;
+    }
+
+    .ptv-admin-configuration-actions > div {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-admin-configuration-skeleton-line,
+    .ptv-admin-configuration-skeleton-row {
+        animation: none;
+    }
+}

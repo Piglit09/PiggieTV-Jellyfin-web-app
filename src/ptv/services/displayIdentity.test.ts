@@ -5,6 +5,7 @@ import {
 } from 'vitest';
 
 import {
+    getPtvAuthenticatedDisplayIdentityKey,
     getPtvDisplayIdentityKey,
     PtvIdentityScopedCache
 } from './displayIdentity';
@@ -14,6 +15,23 @@ describe('display identity ownership', () => {
         expect(getPtvDisplayIdentityKey('', 'user-a')).toBeNull();
         expect(getPtvDisplayIdentityKey('server-a', '')).toBeNull();
         expect(getPtvDisplayIdentityKey('server-a', 'user-a')).toBe('server-a:user-a');
+    });
+
+    it('uses one authoritative server and user identity and rejects ambiguity', () => {
+        expect(getPtvAuthenticatedDisplayIdentityKey({
+            getCurrentUserId: () => ' User-A ',
+            serverId: () => ' Server-A ',
+            serverInfo: () => ({ Id: 'server-a' })
+        })).toBe('server-a:user-a');
+        expect(getPtvAuthenticatedDisplayIdentityKey({
+            getCurrentUserId: () => 'user-a',
+            serverId: () => 'server-a',
+            serverInfo: () => ({ Id: 'server-b' })
+        })).toBeNull();
+        expect(getPtvAuthenticatedDisplayIdentityKey({
+            getCurrentUserId: () => '',
+            serverId: () => 'server-a'
+        })).toBeNull();
     });
 
     it('never exposes one account snapshot to another account or server', () => {

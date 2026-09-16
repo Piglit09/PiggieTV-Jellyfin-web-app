@@ -1,16 +1,31 @@
 /* eslint-disable @typescript-eslint/no-shadow, react/jsx-no-bind, sonarjs/prefer-read-only-props */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { redactPtvCoreText } from '../../core/diagnostics/redaction';
 import { recordPtvEvent } from '../../core/observability';
 
 import { ReaderProgress } from './ReaderProgress';
 import { ReaderSettingsPanel } from './ReaderSettingsPanel';
 import { ReaderToolbar } from './ReaderToolbar';
 import { ReaderView, type ReaderNavigator } from './ReaderView';
-import type { LoadedReaderDocument, ReaderBookmark, ReaderProgressState, ReaderSettings, ReaderSource } from './readerModels';
+import type {
+    LoadedReaderDocument,
+    ReaderBookmark,
+    ReaderProgressState,
+    ReaderSettings,
+    ReaderSource,
+    ReaderZoomState
+} from './readerModels';
 import { loadReaderDocument } from './readerRepository';
 import { addReaderBookmark, loadReaderBookmarks, loadReaderProgress, saveReaderProgress } from './readerProgressStore';
 import { loadReaderSettings, saveReaderSettings } from './readerSettingsStore';
+import {
+    getReaderZoomCapabilities,
+    resetReaderZoom,
+    setReaderFitMode,
+    stepReaderZoom
+} from './readerZoomModel';
+import { loadReaderZoomSession, saveReaderZoomSession } from './readerZoomSessionStore';
 
 interface ReaderAppProps {
     openedAt?: number;
@@ -37,6 +52,21 @@ function openExternal(source: ReaderSource) {
     window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+type ReaderZoomShortcut = 'in' | 'out' | 'reset';
+
+function getReaderZoomShortcut(event: KeyboardEvent): ReaderZoomShortcut | null {
+    if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') return 'in';
+    if (event.key === '-' || event.code === 'NumpadSubtract') return 'out';
+    if (event.key === '0' || event.code === 'Numpad0') return 'reset';
+    return null;
+}
+
+function getReaderNavigationShortcut(event: KeyboardEvent): 'next' | 'previous' | null {
+    if (event.key === 'ArrowRight' || event.key === ' ') return 'next';
+    if (event.key === 'ArrowLeft') return 'previous';
+    return null;
+}
+
 export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppProps) {
     const [settings, setSettings] = useState<ReaderSettings>(() => ({
         ...loadReaderSettings(),
@@ -52,11 +82,22 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
     const [position, setPosition] = useState(() => progressFromSource(source).position || '');
     const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>(() => loadReaderBookmarks(source.metadata.stableId));
     const [navigator, setNavigator] = useState<ReaderNavigator | null>(null);
+    const [zoom, setZoom] = useState<ReaderZoomState>(() => loadReaderZoomSession(source.metadata.stableId, source.format));
+    const [effectiveScale, setEffectiveScale] = useState(zoom.manualScale);
+    const zoomStateRef = useRef(zoom);
+    const lastAppliedZoomRef = useRef(zoom);
     const currentProgress = useMemo(() => progressFromSource(source), [source]);
+    const zoomCapabilities = useMemo(() => getReaderZoomCapabilities(source.format), [source.format]);
+
+    zoomStateRef.current = zoom;
 
     useEffect(() => {
         saveReaderSettings(settings);
     }, [settings]);
+
+    useEffect(() => {
+        saveReaderZoomSession(source.metadata.stableId, source.format, zoom);
+    }, [source.format, source.metadata.stableId, zoom]);
 
     useEffect(() => {
         if (!source.supported) {
@@ -65,6 +106,8 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
         }
 
         let cancelled = false;
+        // The application boot path installs the AbortController polyfill for legacy WebViews.
+        // eslint-disable-next-line compat/compat
         const abortController = typeof AbortController === 'function' ? new AbortController() : null;
 
         setLoading(true);
@@ -90,7 +133,12 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
             })
             .catch(error => {
                 if (cancelled) return;
-                setLoadError(error?.message || 'PiggieTV Reader could not open this item.');
+                const safeMessage = redactPtvCoreText(
+                    error instanceof Error ? error.message : '',
+                    500
+                );
+
+                setLoadError(safeMessage || 'PiggieTV Reader could not open this item.');
                 setLoading(false);
             });
 
@@ -151,6 +199,55 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
         goToPage(settings.direction === 'rtl' ? pageIndex + step : pageIndex - step);
     }, [goToPage, navigator, pageIndex, readerDocument?.format, settings.direction, settings.spreadMode]);
 
+    const applyZoom = useCallback((nextZoom: ReaderZoomState) => {
+        if (
+            nextZoom.mode === zoomStateRef.current.mode
+            && Math.abs(nextZoom.manualScale - zoomStateRef.current.manualScale) < 0.001
+        ) return;
+
+        zoomStateRef.current = nextZoom;
+        setZoom(nextZoom);
+    }, []);
+
+    const zoomIn = useCallback(() => {
+        applyZoom(stepReaderZoom(source.format, zoomStateRef.current, effectiveScale, 1));
+    }, [applyZoom, effectiveScale, source.format]);
+
+    const zoomOut = useCallback(() => {
+        applyZoom(stepReaderZoom(source.format, zoomStateRef.current, effectiveScale, -1));
+    }, [applyZoom, effectiveScale, source.format]);
+
+    const resetZoom = useCallback(() => {
+        applyZoom(resetReaderZoom(source.format));
+    }, [applyZoom, source.format]);
+
+    const fitPage = useCallback(() => {
+        applyZoom(setReaderFitMode(source.format, zoomStateRef.current, 'fit-page'));
+    }, [applyZoom, source.format]);
+
+    const fitWidth = useCallback(() => {
+        applyZoom(setReaderFitMode(source.format, zoomStateRef.current, 'fit-width'));
+    }, [applyZoom, source.format]);
+
+    const updateEffectiveScale = useCallback((scale: number) => {
+        if (!Number.isFinite(scale) || scale <= 0) return;
+        lastAppliedZoomRef.current = zoomStateRef.current;
+        setEffectiveScale(current => Math.abs(current - scale) < 0.001 ? current : scale);
+    }, []);
+
+    const handleScaleApplyFailed = useCallback(() => {
+        const fallbackZoom = lastAppliedZoomRef.current;
+        const currentZoom = zoomStateRef.current;
+
+        if (
+            fallbackZoom.mode === currentZoom.mode
+            && Math.abs(fallbackZoom.manualScale - currentZoom.manualScale) < 0.001
+        ) return;
+
+        zoomStateRef.current = fallbackZoom;
+        setZoom(fallbackZoom);
+    }, []);
+
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -160,18 +257,41 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
                 if (settingsOpen) setSettingsOpen(false);
                 else if (controlsVisible) setControlsVisible(false);
                 else onClose();
-            } else if (event.key === 'ArrowRight' || event.key === ' ') {
-                event.preventDefault();
-                next();
-            } else if (event.key === 'ArrowLeft') {
-                event.preventDefault();
-                previous();
+                return;
             }
+
+            const target = event.target;
+            if (target instanceof Element && target.closest('a, button, input, select, textarea, [contenteditable="true"]')) return;
+
+            const navigationShortcut = getReaderNavigationShortcut(event);
+            if (navigationShortcut) {
+                event.preventDefault();
+                if (navigationShortcut === 'next') next();
+                else previous();
+                return;
+            }
+
+            const zoomShortcut = getReaderZoomShortcut(event);
+            if (!zoomShortcut) return;
+
+            const zoomEnabled = {
+                in: zoomCapabilities.canZoomIn,
+                out: zoomCapabilities.canZoomOut,
+                reset: zoomCapabilities.canResetZoom
+            }[zoomShortcut];
+            if (!zoomEnabled) return;
+
+            event.preventDefault();
+            ({
+                in: zoomIn,
+                out: zoomOut,
+                reset: resetZoom
+            })[zoomShortcut]();
         };
 
         window.document.addEventListener('keydown', onKeyDown);
         return () => window.document.removeEventListener('keydown', onKeyDown);
-    }, [controlsVisible, next, onClose, previous, settingsOpen]);
+    }, [controlsVisible, next, onClose, previous, resetZoom, settingsOpen, zoomCapabilities, zoomIn, zoomOut]);
 
     const addBookmark = useCallback(() => {
         const nextBookmarks = addReaderBookmark({
@@ -192,6 +312,17 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
             goToPage(bookmark.pageIndex);
         }
     }, [goToPage, navigator, readerDocument?.format]);
+
+    const toolbarZoom = useMemo(() => ({
+        capabilities: zoomCapabilities,
+        effectiveScale,
+        state: zoom,
+        onFitPage: fitPage,
+        onFitWidth: fitWidth,
+        onReset: resetZoom,
+        onZoomIn: zoomIn,
+        onZoomOut: zoomOut
+    }), [effectiveScale, fitPage, fitWidth, resetZoom, zoom, zoomCapabilities, zoomIn, zoomOut]);
 
     if (!source.supported) {
         return (
@@ -227,9 +358,16 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
                 onSettings={() => setSettingsOpen(value => !value)}
                 onOpenExternal={() => openExternal(source)}
                 onJumpToBookmark={jumpToBookmark}
+                zoom={toolbarZoom}
             />
 
-            {settingsOpen && <ReaderSettingsPanel settings={settings} onChange={setSettings} />}
+            {settingsOpen && (
+                <ReaderSettingsPanel
+                    format={readerDocument?.format || source.format}
+                    settings={settings}
+                    onChange={setSettings}
+                />
+            )}
 
             {loading && (
                 <div className='ptv-reader-loading'>
@@ -254,7 +392,10 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
                     document={readerDocument}
                     progress={currentProgress}
                     settings={settings}
+                    zoom={zoom}
                     pageIndex={pageIndex}
+                    onEffectiveScaleChange={updateEffectiveScale}
+                    onScaleApplyFailed={handleScaleApplyFailed}
                     onNavigate={updateProgress}
                     onNavigatorReady={setNavigator}
                     onToggleControls={() => setControlsVisible(value => !value)}

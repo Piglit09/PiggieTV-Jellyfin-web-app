@@ -9,7 +9,7 @@ import {
 import { createPtvAbortController } from '../core/abortController';
 import { recordPtvEvent } from '../core/observability';
 import Events from '../../utils/events';
-import { redactPtvCoreText } from '../core/diagnostics/redaction';
+import { redactPtvCoreText, redactPtvSensitiveValue } from '../core/diagnostics/redaction';
 import {
     coordinatePtvJsonRequest,
     getPtvRequestCoordinatorKey
@@ -35,18 +35,22 @@ export class PtvApiError extends Error {
     responseBody: string;
 
     constructor(message: string, endpoint: string, statusCode: number | null = null, responseBody = '') {
-        super(message);
+        const safeMessage = redactPtvCoreText(message, 1000);
+        const safeEndpoint = redactPtvCoreText(endpoint, 1000);
+        const safeResponseBody = redactPtvCoreText(responseBody, 4000);
+
+        super(safeMessage);
         this.name = 'PtvApiError';
-        this.endpoint = endpoint;
+        this.endpoint = safeEndpoint;
         this.statusCode = statusCode;
-        this.responseBody = responseBody;
+        this.responseBody = safeResponseBody;
         this.coreError = createPtvCoreError({
             code: statusCode ? `API_HTTP_${statusCode}` : 'API_REQUEST_FAILED',
-            developerDetail: responseBody || undefined,
+            developerDetail: safeResponseBody || undefined,
             httpStatus: statusCode || undefined,
             kind: statusCode ? getPtvCoreErrorKindForHttpStatus(statusCode) : 'unknown',
-            message,
-            operation: endpoint,
+            message: safeMessage,
+            operation: safeEndpoint,
             retryable: statusCode === null || statusCode === 408 || statusCode === 429 || statusCode >= 500
         });
     }
@@ -73,8 +77,25 @@ export function getCurrentPtvApiClient(): PtvApiClientLike | null {
 
 export function getPtvApiClient(serverId?: string | null): PtvApiClientLike | null {
     if (serverId) {
-        return (ServerConnections.getApiClient?.(serverId) as unknown as PtvApiClientLike | null)
-            || getCurrentPtvApiClient();
+        const candidate = (ServerConnections.getApiClient?.(serverId) as unknown as PtvApiClientLike | null)
+            || null;
+
+        if (!candidate) return null;
+
+        try {
+            const candidateIds = [
+                candidate.serverId?.(),
+                candidate.serverInfo?.()?.Id
+            ].filter((value): value is string => Boolean(value));
+
+            if (!candidateIds.length || candidateIds.some(candidateId => candidateId !== serverId)) {
+                return null;
+            }
+        } catch {
+            return null;
+        }
+
+        return candidate;
     }
 
     return getCurrentPtvApiClient();
@@ -216,7 +237,7 @@ function getErrorResponseBody(error: unknown): string {
 
         if (isRecord(candidate)) {
             try {
-                return redactDiagnosticText(JSON.stringify(candidate)).slice(0, 2000);
+                return redactDiagnosticText(JSON.stringify(redactPtvSensitiveValue(candidate))).slice(0, 2000);
             } catch {
                 return '[unserializable response body]';
             }
@@ -252,8 +273,8 @@ export function normalizePtvApiLayerError(error: unknown, endpoint: string): Ptv
     if (error instanceof PtvApiError) return error;
 
     return new PtvApiError(
-        getErrorMessage(error, 'Jellyfin API request failed.'),
-        endpoint,
+        redactDiagnosticText(getErrorMessage(error, 'Jellyfin API request failed.')),
+        redactDiagnosticText(endpoint),
         getErrorStatus(error),
         getErrorResponseBody(error)
     );
@@ -263,8 +284,8 @@ async function normalizePtvApiLayerErrorAsync(error: unknown, endpoint: string):
     if (error instanceof PtvApiError) return error;
 
     return new PtvApiError(
-        getErrorMessage(error, 'Jellyfin API request failed.'),
-        endpoint,
+        redactDiagnosticText(getErrorMessage(error, 'Jellyfin API request failed.')),
+        redactDiagnosticText(endpoint),
         getErrorStatus(error),
         await getErrorResponseBodyAsync(error)
     );
@@ -290,19 +311,15 @@ function getPtvJsonWithSignal<T>(
     includeAuthorization: boolean,
     signal: AbortSignal
 ): Promise<T> {
-    const getJson = apiClient.getJSON?.bind(apiClient) as
-        | (<TResult = unknown>(requestUrl: string, includeAuth?: boolean) => Promise<TResult>)
-        | undefined;
-
     if (
         typeof globalThis.fetch !== 'function'
         || (includeAuthorization && typeof apiClient.setRequestHeaders !== 'function')
     ) {
-        if (!getJson) {
-            return Promise.reject(new PtvApiError('Jellyfin API client cannot make JSON requests.', url, null));
-        }
+        const message = includeAuthorization ?
+            'An owned authenticated request transport is unavailable.' :
+            'An owned request transport is unavailable.';
 
-        return getJson<T>(url, includeAuthorization);
+        return Promise.reject(new PtvApiError(message, url, null));
     }
 
     const headers: Record<string, string> = {
@@ -314,8 +331,14 @@ function getPtvJsonWithSignal<T>(
     }
 
     const transportController = createPtvAbortController();
-    let timedOut = false;
-    const forwardAbort = () => transportController.abort();
+    let abortCause: 'route' | 'timeout' | null = null;
+    const forwardAbort = () => {
+        if (!abortCause) {
+            abortCause = 'route';
+        }
+
+        transportController.abort();
+    };
 
     if (signal.aborted) {
         forwardAbort();
@@ -324,7 +347,9 @@ function getPtvJsonWithSignal<T>(
     }
 
     const timeoutId = globalThis.setTimeout(() => {
-        timedOut = true;
+        if (abortCause) return;
+
+        abortCause = 'timeout';
         transportController.abort();
     }, PTV_ABORTABLE_GET_TIMEOUT_MS);
     let failureReported = false;
@@ -359,9 +384,15 @@ function getPtvJsonWithSignal<T>(
 
         return response.json() as Promise<T>;
     }).catch(error => {
-        const transportError = timedOut && isPtvAbortError(error) ?
-            createPtvTransportTimeoutError(url) :
-            error;
+        let transportError = error;
+
+        if (isPtvAbortError(error)) {
+            if (abortCause === 'timeout') {
+                transportError = createPtvTransportTimeoutError(url);
+            } else if (abortCause !== 'route') {
+                transportError = new PtvApiError('Jellyfin request transport ended unexpectedly.', url, null);
+            }
+        }
 
         reportFailure(transportError);
         throw transportError;
@@ -376,6 +407,7 @@ export function requestPtvJson<T = unknown>(
     options: {
         includeAuthorization?: boolean;
         params?: PtvApiQuery | null;
+        scope?: 'background' | 'route';
         serverId?: string | null;
         signal?: AbortSignal;
     } = {}
@@ -383,14 +415,18 @@ export function requestPtvJson<T = unknown>(
     const apiClient = requirePtvApiClient(options.serverId);
     const url = getPtvApiUrl(pathOrUrl, options.params, options.serverId);
 
+    if (options.scope === 'route' && !options.signal) {
+        return Promise.reject(new PtvApiError(
+            'A route-scoped PTV request requires an AbortSignal.',
+            url,
+            null
+        ));
+    }
+
     recordPtvEvent('api', 'jellyfin-api-request', {
         method: 'GET',
         path: pathOrUrl
     });
-
-    if (typeof apiClient.getJSON !== 'function') {
-        return Promise.reject(new PtvApiError('Jellyfin API client cannot make JSON requests.', url, null));
-    }
 
     const includeAuthorization = options.includeAuthorization !== false;
     const displayIdentity = includeAuthorization ? getPtvDisplayIdentityKey(
@@ -409,12 +445,8 @@ export function requestPtvJson<T = unknown>(
         includeAuthorization,
         authorizationIdentity
     );
-    const getJson = apiClient.getJSON.bind(apiClient) as <TResult = unknown>(requestUrl: string, includeAuth?: boolean) => Promise<TResult>;
-
     return coordinatePtvJsonRequest<T>(requestKey, signal => (
-        options.signal ?
-            getPtvJsonWithSignal<T>(apiClient, url, includeAuthorization, signal) :
-            getJson<T>(url, includeAuthorization)
+        getPtvJsonWithSignal<T>(apiClient, url, includeAuthorization, signal)
     ), {
         endpoint: pathOrUrl,
         includeAuthorization,

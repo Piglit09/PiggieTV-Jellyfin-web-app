@@ -11,8 +11,10 @@ export type PtvItemActionMenuCommand = Readonly<{
 export type PtvItemActionMenuResult = Readonly<{
     command?: string;
     deleted?: boolean;
+    identifyReadbackCode?: string | null;
     itemId?: string;
     updated?: boolean;
+    updatedItem?: PtvItem | null;
 }> | unknown;
 
 export type ShowPtvItemActionMenuOptions = Readonly<{

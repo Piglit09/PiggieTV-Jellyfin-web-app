@@ -1,8 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const featuredCacheMocks = vi.hoisted(() => ({
+    currentApiClient: {
+        getCurrentUserId: () => 'user-a',
+        serverId: () => 'server-a',
+        serverInfo: () => ({ Id: 'server-a' })
+    },
+    getPluginApiClient: vi.fn()
+}));
+
 vi.mock('lib/jellyfin-apiclient', () => ({
     ServerConnections: {
-        currentApiClient: vi.fn(() => null)
+        currentApiClient: vi.fn(() => featuredCacheMocks.currentApiClient),
+        getLocalApiClient: vi.fn(() => featuredCacheMocks.currentApiClient)
     }
 }));
 
@@ -14,7 +24,7 @@ vi.mock('../../core/observability', () => ({
 }));
 
 vi.mock('../../core/pluginApi', () => ({
-    getCurrentPtvPluginApiClient: vi.fn(() => null),
+    getCurrentPtvPluginApiClient: featuredCacheMocks.getPluginApiClient,
     normalizePtvApiError: vi.fn((error: unknown) => ({
         message: error instanceof Error ? error.message : 'Unknown plugin API error'
     })),
@@ -25,6 +35,17 @@ async function loadFeaturedCache() {
     vi.resetModules();
 
     return import('./featuredContentCache');
+}
+
+function hydrateFeaturedCache(
+    cache: Awaited<ReturnType<typeof loadFeaturedCache>>,
+    document: unknown,
+    reason: string
+) {
+    const hydrate = cache.createFeaturedContentCacheDocumentHydrator(reason);
+
+    expect(hydrate).not.toBeNull();
+    return hydrate?.(document) || null;
 }
 
 function createPayload(sectionCount = 25, itemCount = 340) {
@@ -65,21 +86,68 @@ function createCacheEntry(version: number | string | undefined = 7) {
         payload: createPayload()
     };
 
-    if (version !== undefined) entry.version = version;
+    if (version) entry.version = version;
 
     return entry;
+}
+
+function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>(resolvePromise => {
+        resolve = resolvePromise;
+    });
+
+    return { promise, resolve };
 }
 
 describe('featuredContentCache server document adoption', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
+        featuredCacheMocks.getPluginApiClient.mockReset();
+        featuredCacheMocks.getPluginApiClient.mockReturnValue(null);
+    });
+
+    it('reads featured content without waiting for the diagnostic status request', async () => {
+        const pendingStatus = deferred<Record<string, unknown>>();
+        const pluginApi = {
+            getFeaturedContentCacheDocument: vi.fn().mockResolvedValue({
+                featuredContent: createCacheEntry(7),
+                version: 1
+            }),
+            getStatus: vi.fn(() => pendingStatus.promise)
+        };
+
+        featuredCacheMocks.getPluginApiClient.mockReturnValue(pluginApi);
+        const cache = await loadFeaturedCache();
+
+        cache.invalidateFeaturedContentMemoryCache('test');
+        const payloadPromise = cache.getCachedFeaturedContentPayload();
+        const earlyResult = await Promise.race([
+            payloadPromise.then(payload => ({ payload, source: 'featured' })),
+            new Promise(resolve => window.setTimeout(() => resolve({ payload: null, source: 'deadline' }), 100))
+        ]);
+
+        pendingStatus.resolve({
+            featureFlags: { featuredContent: true },
+            ok: true
+        });
+
+        expect(earlyResult).toMatchObject({
+            source: 'featured'
+        });
+        await expect(payloadPromise).resolves.toMatchObject({
+            heroItems: expect.any(Array),
+            sectionItems: expect.any(Object)
+        });
+        expect(pluginApi.getFeaturedContentCacheDocument).toHaveBeenCalledTimes(1);
+        expect(pluginApi.getStatus).toHaveBeenCalledTimes(1);
     });
 
     it('adopts numeric featured cache version 7 from the plugin document', async () => {
         const cache = await loadFeaturedCache();
 
         cache.invalidateFeaturedContentMemoryCache('test');
-        cache.hydrateFeaturedContentCacheFromDocument({
+        hydrateFeaturedCache(cache, {
             version: 1,
             featuredContent: createCacheEntry(7),
             updatedAt: Date.now()
@@ -101,7 +169,7 @@ describe('featuredContentCache server document adoption', () => {
         const entry = createCacheEntry('7');
 
         cache.invalidateFeaturedContentMemoryCache('test');
-        cache.hydrateFeaturedContentCacheFromDocument({
+        hydrateFeaturedCache(cache, {
             Document: {
                 FeaturedContent: {
                     ...entry,
@@ -126,11 +194,11 @@ describe('featuredContentCache server document adoption', () => {
         const cache = await loadFeaturedCache();
 
         cache.invalidateFeaturedContentMemoryCache('test');
-        cache.hydrateFeaturedContentCacheFromDocument({
+        hydrateFeaturedCache(cache, {
             version: 1,
             featuredContent: createCacheEntry(7)
         }, 'valid');
-        cache.hydrateFeaturedContentCacheFromDocument({
+        hydrateFeaturedCache(cache, {
             version: 1,
             featuredContent: createCacheEntry(99)
         }, 'future-version');
@@ -152,7 +220,7 @@ describe('featuredContentCache server document adoption', () => {
         delete entry.version;
 
         cache.invalidateFeaturedContentMemoryCache('test');
-        cache.hydrateFeaturedContentCacheFromDocument({
+        hydrateFeaturedCache(cache, {
             version: 1,
             featuredContent: entry
         }, 'legacy-missing-version');
@@ -178,8 +246,8 @@ describe('featuredContentCache server document adoption', () => {
         };
         emptyEntry.createdAt = Date.now();
         cache.invalidateFeaturedContentMemoryCache('test');
-        cache.hydrateFeaturedContentCacheFromDocument({ version: 1, featuredContent: createCacheEntry(7) }, 'populated');
-        cache.hydrateFeaturedContentCacheFromDocument({ version: 1, featuredContent: emptyEntry }, 'empty-plugin');
+        hydrateFeaturedCache(cache, { version: 1, featuredContent: createCacheEntry(7) }, 'populated');
+        hydrateFeaturedCache(cache, { version: 1, featuredContent: emptyEntry }, 'empty-plugin');
 
         expect(cache.getFeaturedContentCacheStatus()).toMatchObject({
             adoptionResult: 'preserved-memory',
@@ -199,7 +267,7 @@ describe('featuredContentCache server document adoption', () => {
             sectionItems: Object.fromEntries(Array.from({ length: 6 }, (_value, index) => [ `empty-${index}`, [] ]))
         };
         cache.invalidateFeaturedContentMemoryCache('test');
-        cache.hydrateFeaturedContentCacheFromDocument({ version: 1, featuredContent: emptyEntry }, 'empty-plugin');
+        hydrateFeaturedCache(cache, { version: 1, featuredContent: emptyEntry }, 'empty-plugin');
 
         expect(cache.getFeaturedContentCacheStatus()).toMatchObject({
             adoptionResult: 'rejected',
@@ -217,7 +285,7 @@ describe('featuredContentCache server document adoption', () => {
 
         staleEntry.expiresAt = Date.now() - 1;
         cache.invalidateFeaturedContentMemoryCache('test');
-        cache.hydrateFeaturedContentCacheFromDocument({ version: 1, featuredContent: staleEntry }, 'stale-populated');
+        hydrateFeaturedCache(cache, { version: 1, featuredContent: staleEntry }, 'stale-populated');
 
         const payload = await cache.getFeaturedContent(async () => ({
             generationState: 'timed-out',

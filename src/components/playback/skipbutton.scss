@@ -2,28 +2,40 @@
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 8rem;
+    bottom: clamp(9.5rem, 18vh, 12rem);
     pointer-events: none;
-    z-index: 10000;
+    z-index: 2305;
 }
 
 .skip-button {
-    display: flex;
+    display: inline-flex;
     align-items: center;
+    gap: 8px;
+    min-height: 44px;
     margin-left: auto;
-    margin-right: 6rem;
-    z-index: 10000;
-    padding: 12px 20px;
-    background-color: #303030;
-    color: rgba(255, 255, 255, 0.87);
-    border: none;
-    border-radius: 0.2em;
-    font-weight: bold;
-    font-size: 1.2em;
-    transition: opacity 200ms ease-out;
-    gap: 3px;
+    margin-right: clamp(1rem, 4vw, 6rem);
+    padding: 10px 18px;
+    background: var(--ptv-glass-bg-strong, rgb(18 10 34 / 88%));
+    color: var(--ptv-color-text-primary, rgb(255 255 255 / 94%));
+    border: 1px solid var(--ptv-glass-border, rgb(210 170 255 / 28%));
+    border-radius: var(--ptv-radius-pill, 999px);
+    box-shadow: var(--ptv-shadow-float, 0 12px 34px rgb(0 0 0 / 42%));
+    font-weight: 800;
+    font-size: 1rem;
+    transition:
+        opacity var(--ptv-motion-fast, 200ms) ease-out,
+        transform var(--ptv-motion-fast, 200ms) ease-out;
+    backdrop-filter: blur(16px) saturate(1.2);
     cursor: pointer;
     pointer-events: auto;
+}
+
+.skip-button:hover,
+.skip-button:focus-visible {
+    border-color: var(--ptv-border-focus, rgb(125 214 255 / 52%));
+    color: #fff;
+    outline: 0;
+    transform: translateY(-2px);
 }
 
 .no-transition {
@@ -32,4 +44,21 @@
 
 .skip-button-hidden {
     opacity: 0;
+    transform: translateY(8px);
+}
+
+@media (max-width: 700px) {
+    .skip-button-container {
+        bottom: 8.5rem;
+    }
+
+    .skip-button {
+        margin-right: 1rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skip-button {
+        transition: none;
+    }
 }

@@ -10,6 +10,8 @@ const WEBOS_PLAYER_SELECTOR = 'html.ptv-render-tv.ptv-platform-webos .ptv-music-
 const WEBOS_SHELL_SELECTOR = 'html.ptv-render-tv.ptv-platform-webos .ptv-shell-frame-fullscreen-music';
 const WEBOS_REGULAR_MUSIC_SELECTOR = 'html.ptv-render-tv.ptv-platform-webos .ptv-music-shell:not(.ptv-shell-frame-fullscreen-music)';
 const WEBOS_MUSIC_SHELL_SELECTOR = 'html.ptv-render-tv.ptv-platform-webos .ptv-music-shell';
+const FULL_PLAYER_SELECTOR = "html[data-ptv-playback-surface='full-screen-player'] .ptv-music-fullscreen-player";
+const FULL_PLAYER_PAGE_SELECTOR = "html[data-ptv-playback-surface='full-screen-player'] #ptvMusicPage";
 
 function escapePattern(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -30,6 +32,14 @@ function getLastRuleBody(selector: string) {
     const match = matches[matches.length - 1];
 
     expect(match, `Expected a style rule for ${selector}`).not.toBeUndefined();
+
+    return match?.[1] || '';
+}
+
+function getStandaloneRuleBody(selector: string) {
+    const match = new RegExp(`(?:^|\\n)${escapePattern(selector)}\\s*\\{([^}]*)\\}`).exec(musicStyles);
+
+    expect(match, `Expected a standalone style rule for ${selector}`).not.toBeNull();
 
     return match?.[1] || '';
 }
@@ -66,7 +76,7 @@ describe('WebOS full-screen Music layout', () => {
         expect(renderedWidth).toBeLessThanOrEqual(400);
     });
 
-    it('keeps a 24-item queue inside its own scrolling region', () => {
+    it('lets a long queue consume the bounded remainder through one scrolling region', () => {
         const panelRule = getRuleBody(`${WEBOS_PLAYER_SELECTOR} .ptv-music-player-panel`);
         const listRule = getRuleBody(`${WEBOS_PLAYER_SELECTOR} .ptv-music-queue-list`);
         const viewportHeight = 1080;
@@ -75,10 +85,11 @@ describe('WebOS full-screen Music layout', () => {
 
         expect(panelRule).toMatch(/max-height:\s*100%/);
         expect(panelRule).toMatch(/overflow:\s*hidden/);
+        expect(listRule).toMatch(/flex:\s*1 1 auto/);
         expect(listRule).toMatch(/gap:\s*6px/);
-        expect(listRule).toMatch(/max-height:\s*56vh/);
+        expect(listRule).toMatch(/min-height:\s*0/);
+        expect(listRule).toMatch(/max-height:\s*none/);
         expect(listRule).toMatch(/overflow-y:\s*auto/);
-        expect(listRule).not.toMatch(/max-height:\s*min\(/);
         expect(longQueueContentHeight).toBeGreaterThan(queueViewportHeight);
     });
 
@@ -128,6 +139,69 @@ describe('WebOS full-screen Music layout', () => {
     });
 });
 
+describe('Browser full-screen Music layout', () => {
+    it('fixes the player to the viewport and clips every outer route surface', () => {
+        const playerRule = getRuleBody(FULL_PLAYER_SELECTOR);
+        const pageRule = getRuleBody(FULL_PLAYER_PAGE_SELECTOR);
+
+        expect(playerRule).toMatch(/position:\s*fixed/);
+        expect(playerRule).toMatch(/top:\s*0/);
+        expect(playerRule).toMatch(/right:\s*0/);
+        expect(playerRule).toMatch(/bottom:\s*0/);
+        expect(playerRule).toMatch(/left:\s*0/);
+        expect(playerRule).toMatch(/height:\s*100%/);
+        expect(playerRule).toMatch(/max-height:\s*100vh/);
+        expect(playerRule).toMatch(/overflow:\s*hidden/);
+        expect(pageRule).toMatch(/height:\s*100vh/);
+        expect(pageRule).toMatch(/overflow:\s*hidden !important/);
+    });
+
+    it('uses the panel remainder as the only full-player queue scroll owner', () => {
+        const panelRule = getStandaloneRuleBody('.ptv-music-player-panel');
+        const tabPanelRule = getRuleBody('.ptv-music-list-up-next');
+        const queueRule = getRuleBody('.ptv-music-player-panel .ptv-music-queue-list');
+
+        expect(panelRule).toMatch(/display:\s*flex/);
+        expect(panelRule).toMatch(/flex-direction:\s*column/);
+        expect(panelRule).toMatch(/height:\s*100%/);
+        expect(panelRule).toMatch(/min-height:\s*0/);
+        expect(panelRule).toMatch(/overflow:\s*hidden/);
+        expect(tabPanelRule).toMatch(/flex:\s*1 1 auto/);
+        expect(tabPanelRule).toMatch(/overflow:\s*hidden/);
+        expect(queueRule).toMatch(/flex:\s*1 1 auto/);
+        expect(queueRule).toMatch(/max-height:\s*none/);
+        expect(queueRule).toMatch(/overflow-y:\s*auto/);
+    });
+
+    it('keeps row actions at the shared target size and hides quick mutations on phones', () => {
+        const actionRule = getLastRuleBody('.ptv-music-queue-item-actions button');
+
+        expect(actionRule).toMatch(/width:\s*44px/);
+        expect(actionRule).toMatch(/min-width:\s*44px/);
+        expect(actionRule).toMatch(/height:\s*44px/);
+        expect(actionRule).toMatch(/min-height:\s*44px/);
+        expect(musicStyles).toMatch(
+            /html\[data-ptv-playback-surface='full-screen-player'\] \.ptv-music-queue-quick-action\s*\{\s*display:\s*none;/
+        );
+    });
+
+    it('keeps queue, panel, and menu controls at or above the shared touch target', () => {
+        const queuePrimaryRule = getRuleBody('.ptv-music-player-panel .ptv-music-queue-item-main');
+        const panelActionRule = getRuleBody('.ptv-music-player-panel-actions button');
+        const menuItemRule = getRuleBody(
+            '.ptv-music-item-menu-popover button,\n.ptv-music-item-menu-popover a'
+        );
+        const nestedMenuItemRule = getRuleBody(
+            '.ptv-music-card-actions .ptv-music-item-menu-popover button,\n.ptv-music-track-actions .ptv-music-item-menu-popover button'
+        );
+
+        expect(queuePrimaryRule).toMatch(/min-height:\s*48px/);
+        expect(panelActionRule).toMatch(/min-height:\s*var\(--ptv-touch-target-min\)/);
+        expect(menuItemRule).toMatch(/min-height:\s*var\(--ptv-touch-target-min\)/);
+        expect(nestedMenuItemRule).toMatch(/min-height:\s*var\(--ptv-touch-target-min\)/);
+    });
+});
+
 describe('WebOS regular Music header layout', () => {
     it('restores the intended context row, page reserve, and bounded content width', () => {
         const contextRule = getRuleBody(`${WEBOS_REGULAR_MUSIC_SELECTOR} > .ptv-shell-context-nav`);
@@ -139,8 +213,8 @@ describe('WebOS regular Music header layout', () => {
         expect(contextRule).toMatch(/left:\s*66px/);
         expect(bodyRule).toMatch(/padding-top:\s*164px/);
         expect(scrollRule).toMatch(/width:\s*100%/);
-        expect(scrollRule).toMatch(/max-width:\s*1760px/);
-        expect(scrollRule).toMatch(/padding:\s*28px 46px 120px/);
+        expect(scrollRule).toMatch(/max-width:\s*none/);
+        expect(scrollRule).toMatch(/padding:\s*28px var\(--ptv-content-edge[^;]*120px/);
         expect(contextRule).not.toMatch(/clamp\(|min\(/);
         expect(bodyRule).not.toMatch(/clamp\(|min\(/);
         expect(scrollRule).not.toMatch(/clamp\(|min\(/);

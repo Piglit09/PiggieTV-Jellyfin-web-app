@@ -37,26 +37,39 @@ describe('PTV details render lifecycle', () => {
         expect(renderDetailImage).not.toContain('preloadImage(');
     });
 
-    it('routes only the series-details season list through the Core metadata facade', () => {
-        expect(controllerSource).toContain("import { getPtvSeriesSeasons } from '../../ptv/api/seriesSeasons'");
-        expect(controllerSource).toContain('getPtvSeriesSeasons(apiClient, item.Id, {');
+    it('renders the series-details season list only from Core-approved rows', () => {
+        expect(controllerSource).toContain("import { getPtvSeriesSeasonItems } from '../../ptv/api/seriesSeasons'");
+        expect(controllerSource).toContain('getPtvSeriesSeasonItems(apiClient, item.Id, {');
+        expect(controllerSource).not.toContain('getPtvSeriesSeasons(');
         expect(controllerSource).not.toContain('apiClient.getSeasons(item.Id, {');
     });
 
-    it('routes only the season-details episode list through its Core metadata facade', () => {
+    it('renders the season-details episode list only from Core-approved rows', () => {
         const renderChildren = /function renderChildren[\s\S]*?\n}\n\nfunction renderItemsByName/
             .exec(controllerSource)?.[0] || '';
 
-        expect(controllerSource).toContain("import { getPtvSeasonEpisodes } from '../../ptv/api/seasonEpisodes'");
-        expect(renderChildren).toContain('getPtvSeasonEpisodes(apiClient, item.SeriesId, item.Id, {');
+        expect(controllerSource).toContain("import { getPtvSeasonEpisodeItems } from '../../ptv/api/seasonEpisodes'");
+        expect(renderChildren).toContain('getPtvSeasonEpisodeItems(apiClient, item.SeriesId, item.Id, {');
         expect(renderChildren).toContain("fields += ',Overview,MediaSources'");
         expect(renderChildren).toContain('seasonId: item.Id');
         expect(renderChildren).toContain('userId: userId');
         expect(renderChildren).toContain('Fields: fields');
         expect(renderChildren).not.toContain('apiClient.getEpisodes(');
+        expect(controllerSource).not.toContain('getPtvSeasonEpisodes(');
         expect(controllerSource).not.toContain('apiClient.getEpisodes(item.SeriesId, {');
-        expect(renderChildren).toContain('result.Items = result.Items.map(normalizeItemMediaSources)');
+        expect(renderChildren).toContain('const normalizedItems = items.map(normalizeItemMediaSources)');
         expect(renderChildren).toContain('html = listView.getListViewHtml({');
+    });
+
+    it('keeps child shelves route-cancellable without a shorter wrapper deadline', () => {
+        const renderChildren = /function renderChildren[\s\S]*?\n}\n\nfunction renderItemsByName/
+            .exec(controllerSource)?.[0] || '';
+
+        expect(renderChildren.match(/signal: childLoadController\.signal/g)?.length)
+            .toBeGreaterThanOrEqual(3);
+        expect(renderChildren).toContain('promise.then(function (items)');
+        expect(renderChildren).not.toContain('awaitPtvDetailLoad(');
+        expect(renderChildren).not.toContain('childLoadController.abort()');
     });
 
     it('paints direct item artwork before optional parent artwork resolves', () => {
@@ -83,6 +96,8 @@ describe('PTV details render lifecycle', () => {
             "import { getCoordinatedLegacyItemDetail } from '../../services/coordinatedLegacyItemDetail'"
         );
         expect(integrationSource).toContain('getCoordinatedLegacyItemDetail(apiClient, itemId)');
+        expect(integrationSource).toContain('getCacheKey(serverId, userId, itemId)');
+        expect(integrationSource).toContain('getApiClient(serverId)?.getCurrentUserId?.() !== userId');
     });
 
     it('retires enhancement work and item-local state when the details module exits', () => {
@@ -95,6 +110,7 @@ describe('PTV details render lifecycle', () => {
         expect(destroy).toContain('resetDetailEnhancementState(page)');
         expect(enhancementSource).toContain("image.removeEventListener('load', handleDetailImageLoad)");
         expect(enhancementSource).toContain("image.removeEventListener('error', handleDetailImageError)");
+        expect(integrationSource).toContain('itemCache.clear()');
     });
 
     it('rehydrates the same type-specific progressive pipeline on restore without resetting primary content', () => {
@@ -229,11 +245,12 @@ describe('PTV details render lifecycle', () => {
         expect(lyrics).toContain('requestPtvJson(`Audio/${encodeURIComponent(item.Id)}/Lyrics`');
         expect(lyrics).toContain('signal');
         expect(lyrics).not.toContain('apiClient.ajax');
-        expect(moreFromSeason).toContain('getPtvSeasonEpisodes(apiClient, item.SeriesId, item.SeasonId');
+        expect(moreFromSeason).toContain('getPtvSeasonEpisodeItems(apiClient, item.SeriesId, item.SeasonId');
         expect(moreFromSeason).toContain('Limit: 100');
         expect(moreFromSeason).toContain('signal');
+        expect(moreFromSeason).toContain('const normalizedItems = items.map(normalizeItemMediaSources)');
         expect(moreFromSeason).not.toContain('apiClient.getEpisodes');
-        expect(similar).toContain('requestPtvJson(`Items/${encodeURIComponent(item.Id)}/Similar`');
+        expect(similar).toContain('loadPtvDetailRelatedItems(item, {');
         expect(similar).toContain('signal');
         expect(similar).not.toContain('apiClient.getSimilarItems');
     });

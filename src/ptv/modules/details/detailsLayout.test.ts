@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    applyPtvEpisodeDetailsPresentation,
     preparePtvDetailsLayout,
     releasePtvDetailsLayout,
     resetPtvDetailsBackdrop,
-    setPtvDetailsBackdropCandidates
+    resetPtvEpisodeDetailsPresentation,
+    setPtvDetailsBackdropCandidates,
+    setPtvDetailsHeroArtworkCandidates
 } from './detailsLayout';
 
 function createDetailsPage() {
@@ -20,18 +23,33 @@ function createDetailsPage() {
                 <div class="detailImageContainer hide-mobile"></div>
                 <div class="detailRibbon">
                     <div class="infoWrapper">
-                        <div class="detailNameContainer"></div>
+                        <div class="detailNameContainer">
+                            <h1 class="parentName">Fixture Series</h1>
+                            <h3 class="itemName">Season 1 - Fixture Episode</h3>
+                        </div>
                     </div>
-                    <div class="mainDetailButtons"></div>
+                    <div class="mainDetailButtons">
+                        <button class="detailButton btnPlay"></button>
+                        <button class="detailButton btnReplay"></button>
+                        <button class="detailButton btnMoreCommands"></button>
+                    </div>
                 </div>
                 <div class="detailPagePrimaryContent padded-right">
-                    <div class="detailSection"></div>
+                    <div class="detailSection">
+                        <div class="detailSectionContent">
+                            <p class="itemGenres"></p>
+                            <p class="overview">Fixture overview.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="detailVerticalSection" id="castCollapsible"></div>
-            <div class="verticalSection" id="similarCollapsible"></div>
+            <div class="detailPageSecondaryContainer">
+                <div class="detailPageContent">
+                    <div class="detailVerticalSection" id="castCollapsible"></div>
+                    <div class="verticalSection" id="similarCollapsible"></div>
+                </div>
+            </div>
         </div>
-        <div class="detailPageSecondaryContainer"></div>
     `;
     document.body.append(page);
     return page;
@@ -159,6 +177,67 @@ describe('native PTV details layout ownership', () => {
         expect(image?.src).toBe('https://example.test/episode-two-primary.jpg');
 
         releasePtvDetailsLayout(page);
+        page.remove();
+    });
+
+    it('renders episode identity, readable metadata, genres, actions, and recommendation order', () => {
+        const page = createDetailsPage();
+
+        preparePtvDetailsLayout(page);
+        expect(applyPtvEpisodeDetailsPresentation(page, {
+            CommunityRating: 8.34,
+            Genres: ['Action', 'Adventure', 'Comedy'],
+            Id: 'episode-one',
+            IndexNumber: 1,
+            Name: 'Romance Dawn',
+            OfficialRating: 'TV-14',
+            ParentIndexNumber: 1,
+            ProductionYear: 2023,
+            RunTimeTicks: 38660000000,
+            Type: 'Episode',
+            UserData: { PlaybackPositionTicks: 120000000 }
+        })).toBe(true);
+
+        expect(page.classList.contains('ptv-details--episode')).toBe(true);
+        expect(page.querySelector('.ptv-episode-context')?.textContent).toBe('S1 E1 • EPISODE');
+        expect(page.querySelector('.ptv-episode-title')?.textContent).toBe('Romance Dawn');
+        expect(page.querySelector('.ptv-episode-metadata')?.textContent).toContain('1h 4m');
+        expect(page.querySelector('.ptv-episode-metadata')?.textContent).toContain('TV-14');
+        expect(page.querySelector('.itemGenres')?.textContent).toBe('Action / Adventure / Comedy');
+        expect(page.querySelector('.btnPlay .ptv-detail-action-label')?.textContent).toBe('Resume');
+        expect(page.querySelector('.btnReplay .ptv-detail-action-label')?.textContent).toBe('Restart');
+        expect(page.querySelector('.detailSectionContent')?.lastElementChild?.classList.contains('mainDetailButtons')).toBe(true);
+        expect(page.querySelector('.detailPageContent')?.firstElementChild?.id).toBe('similarCollapsible');
+
+        resetPtvEpisodeDetailsPresentation(page);
+        expect(page.classList.contains('ptv-details--episode')).toBe(false);
+        expect(page.querySelector('.detailRibbon')?.lastElementChild?.classList.contains('mainDetailButtons')).toBe(true);
+        expect(page.querySelector('.detailPageContent')?.lastElementChild?.id).toBe('similarCollapsible');
+        releasePtvDetailsLayout(page);
+        page.remove();
+    });
+
+    it('prefers landscape episode art and falls back to the series poster', () => {
+        const page = createDetailsPage();
+
+        preparePtvDetailsLayout(page);
+        setPtvDetailsHeroArtworkCandidates(page, [
+            { requestedType: 'Thumb', url: 'https://example.test/episode-thumb.jpg' },
+            { requestedType: 'SeriesPrimary', url: 'https://example.test/series-poster.jpg' }
+        ], 'episode-one');
+        const image = page.querySelector<HTMLImageElement>('.ptv-details-hero-artwork__image');
+        const container = page.querySelector<HTMLElement>('.detailImageContainer');
+
+        expect(image?.src).toBe('https://example.test/episode-thumb.jpg');
+        expect(container?.dataset.ptvHeroArtworkShape).toBe('landscape');
+        image?.dispatchEvent(new Event('error'));
+        expect(image?.src).toBe('https://example.test/series-poster.jpg');
+        expect(container?.dataset.ptvHeroArtworkShape).toBe('portrait');
+        image?.dispatchEvent(new Event('load'));
+        expect(container?.classList.contains('ptv-details-hero-artwork--ready')).toBe(true);
+
+        releasePtvDetailsLayout(page);
+        expect(page.querySelector('.ptv-details-hero-artwork__image')).toBeNull();
         page.remove();
     });
 });

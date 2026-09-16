@@ -7,8 +7,9 @@ import type { HeroApiClient } from 'ptv/modules/hero/useHeroItem';
 
 type MountHeroOptions = {
     apiClient?: HeroApiClient;
-    user?: { Id?: string };
     featuredContentPromise?: Promise<FeaturedPayload>;
+    isCurrent?: () => boolean;
+    user?: { Id?: string };
 };
 
 const heroRoots = new Map<Element, Root>();
@@ -27,8 +28,9 @@ export default function mountPtvHomeHero(
     root.render(
         <Hero
             apiClient={options.apiClient}
-            user={options.user}
             featuredContentPromise={options.featuredContentPromise}
+            isCurrent={options.isCurrent}
+            user={options.user}
         />
     );
 }

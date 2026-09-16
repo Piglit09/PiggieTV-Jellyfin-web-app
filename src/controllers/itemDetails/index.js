@@ -38,8 +38,8 @@ import { getItemBackdropImageUrl } from 'utils/jellyfin-apiclient/backdropImage'
 import { emit as emitPtvEvent } from '../../ptv/core/events';
 import { requestPtvJson } from '../../ptv/api/client';
 import { getPtvItems } from '../../ptv/api/items';
-import { getPtvSeasonEpisodes } from '../../ptv/api/seasonEpisodes';
-import { getPtvSeriesSeasons } from '../../ptv/api/seriesSeasons';
+import { getPtvSeasonEpisodeItems } from '../../ptv/api/seasonEpisodes';
+import { getPtvSeriesSeasonItems } from '../../ptv/api/seriesSeasons';
 import { getCoordinatedLegacyItemDetail } from '../../ptv/services/coordinatedLegacyItemDetail';
 import { DetailRequestGate } from './detailRequestGate';
 import {
@@ -61,6 +61,11 @@ import {
     renderPtvDetailLoadFailure
 } from './detailLoadRecovery';
 import { normalizeItemMediaSources } from './mediaSourceDeduplication';
+import {
+    PTV_RELATED_VIDEO_DISPLAY_LIMIT,
+    rankPtvRelatedVideoItems
+} from '../../ptv/modules/details/detailsRelatedRecommendations';
+import { loadPtvDetailRelatedItems } from '../../ptv/modules/details/detailsRelatedSource';
 
 import 'elements/emby-itemscontainer/emby-itemscontainer';
 import 'elements/emby-checkbox/emby-checkbox';
@@ -1327,20 +1332,15 @@ function renderTagline(page, item) {
     }
 }
 
-function renderDetails(page, item, apiClient, context, childLoadController) {
-    renderSimilarItems(page, item, context, childLoadController.signal);
-    renderMoreFromSeason(page, item, apiClient, childLoadController.signal);
-    renderMoreFromArtist(page, item, apiClient, childLoadController.signal);
+function renderLocalItemDetails(page, item, context) {
     renderDirector(page, item, context);
     renderStudio(page, item, context);
     renderWriter(page, item, context);
     renderGenres(page, item, context);
-    renderChannelGuide(page, apiClient, item);
     renderTagline(page, item);
     renderOverview(page, item);
     renderMiscInfo(page, item);
     reloadUserDataButtons(page, item);
-    renderLyricsContainer(page, item, childLoadController.signal);
 
     // Don't allow redirection to other websites from the TV layout
     if (!layoutManager.tv && appHost.supports(AppFeature.ExternalLinks)) {
@@ -1349,6 +1349,15 @@ function renderDetails(page, item, apiClient, context, childLoadController) {
 
     renderTags(page, item);
     renderSeriesAirTime(page, item);
+}
+
+function renderDetails(page, item, apiClient, context, childLoadController) {
+    renderSimilarItems(page, item, context, childLoadController.signal);
+    renderMoreFromSeason(page, item, apiClient, childLoadController.signal);
+    renderMoreFromArtist(page, item, apiClient, childLoadController.signal);
+    renderChannelGuide(page, apiClient, item);
+    renderLyricsContainer(page, item, childLoadController.signal);
+    renderLocalItemDetails(page, item, context);
 }
 
 function enableScrollX() {
@@ -1399,7 +1408,7 @@ function renderMoreFromSeason(view, item, apiClient, signal) {
         }
 
         const userId = apiClient.getCurrentUserId();
-        getPtvSeasonEpisodes(apiClient, item.SeriesId, item.SeasonId, {
+        getPtvSeasonEpisodeItems(apiClient, item.SeriesId, item.SeasonId, {
             Limit: 100,
             SeasonId: item.SeasonId,
             UserId: userId,
@@ -1407,11 +1416,11 @@ function renderMoreFromSeason(view, item, apiClient, signal) {
         }, {
             serverId: item.ServerId,
             signal
-        }).then(function (result) {
+        }).then(function (items) {
             if (!isDetailItemCurrent(view, item)) return;
 
-            result.Items = result.Items.map(normalizeItemMediaSources);
-            if (result.Items.length < 2) {
+            const normalizedItems = items.map(normalizeItemMediaSources);
+            if (normalizedItems.length < 2) {
                 section.classList.add('hide');
                 return;
             }
@@ -1419,7 +1428,7 @@ function renderMoreFromSeason(view, item, apiClient, signal) {
             section.classList.remove('hide');
             section.querySelector('h2').innerText = globalize.translate('MoreFromValue', item.SeasonName);
             const itemsContainer = section.querySelector('.itemsContainer');
-            cardBuilder.buildCards(result.Items, {
+            cardBuilder.buildCards(normalizedItems, {
                 parentContainer: section,
                 itemsContainer: itemsContainer,
                 shape: 'autooverflow',
@@ -1519,31 +1528,25 @@ function renderSimilarItems(page, item, context, signal) {
     const similarCollapsible = page.querySelector('#similarCollapsible');
 
     if (similarCollapsible) {
-        if (item.Type != 'Movie' && item.Type != 'Trailer' && item.Type != 'Series' && item.Type != 'Program' && item.Type != 'Recording' && item.Type != 'MusicAlbum' && item.Type != 'MusicArtist' && item.Type != 'Playlist' && item.Type != 'Audio') {
+        if (item.Type != 'Movie' && item.Type != 'Trailer' && item.Type != 'Series' && item.Type != 'Episode' && item.Type != 'Program' && item.Type != 'Recording' && item.Type != 'MusicAlbum' && item.Type != 'MusicArtist' && item.Type != 'Playlist' && item.Type != 'Audio') {
             similarCollapsible.classList.add('hide');
             return;
         }
 
         similarCollapsible.classList.remove('hide');
-        const apiClient = ServerConnections.getApiClient(item.ServerId);
-        const options = {
-            userId: apiClient.getCurrentUserId(),
-            limit: 12,
-            fields: 'PrimaryImageAspectRatio,CanDelete'
-        };
-
-        if (item.Type == 'MusicAlbum' && item.AlbumArtists && item.AlbumArtists.length) {
-            options.ExcludeArtistIds = item.AlbumArtists[0].Id;
-        }
-
-        requestPtvJson(`Items/${encodeURIComponent(item.Id)}/Similar`, {
-            params: options,
+        loadPtvDetailRelatedItems(item, {
             serverId: item.ServerId,
             signal
-        }).then(function (result) {
+        }).then(function (relatedItems) {
             if (!isDetailItemCurrent(page, item)) return;
 
-            if (!result.Items.length) {
+            const similarItems = rankPtvRelatedVideoItems(
+                item,
+                relatedItems,
+                PTV_RELATED_VIDEO_DISPLAY_LIMIT
+            );
+
+            if (!similarItems.length) {
                 similarCollapsible.classList.add('hide');
                 return;
             }
@@ -1551,7 +1554,7 @@ function renderSimilarItems(page, item, context, signal) {
             similarCollapsible.classList.remove('hide');
             let html = '';
             html += cardBuilder.getCardsHtml({
-                items: result.Items,
+                items: similarItems,
                 shape: 'autooverflow',
                 showParentTitle: item.Type == 'MusicAlbum',
                 centerText: true,
@@ -1672,7 +1675,7 @@ function renderChildren(page, item, childLoadController = beginPtvDetailChildLoa
     const userId = apiClient.getCurrentUserId();
 
     if (item.Type == 'Series') {
-        promise = getPtvSeriesSeasons(apiClient, item.Id, {
+        promise = getPtvSeriesSeasonItems(apiClient, item.Id, {
             userId: userId,
             Fields: fields
         }, {
@@ -1681,7 +1684,7 @@ function renderChildren(page, item, childLoadController = beginPtvDetailChildLoa
         });
     } else if (item.Type == 'Season') {
         fields += ',Overview,MediaSources';
-        promise = getPtvSeasonEpisodes(apiClient, item.SeriesId, item.Id, {
+        promise = getPtvSeasonEpisodeItems(apiClient, item.SeriesId, item.Id, {
             seasonId: item.Id,
             userId: userId,
             Fields: fields
@@ -1697,29 +1700,26 @@ function renderChildren(page, item, childLoadController = beginPtvDetailChildLoa
         serverId: item.ServerId,
         signal: childLoadController.signal,
         userId
-    });
-    awaitPtvDetailLoad(promise, {
-        onTimeout: () => childLoadController.abort(),
-        signal: childLoadController.signal
-    }).then(function (result) {
+    }).then(result => result.Items);
+    promise.then(function (items) {
         if (!isDetailItemCurrent(page, item)) return;
 
-        result.Items = result.Items.map(normalizeItemMediaSources);
+        const normalizedItems = items.map(normalizeItemMediaSources);
         let html = '';
         let scrollX = false;
         let isList = false;
 
         if (item.Type == 'MusicAlbum') {
             let showArtist = false;
-            for (const track of result.Items) {
+            for (const track of normalizedItems) {
                 if (!isEqual(track.ArtistItems.map(x => x.Id).sort(), track.AlbumArtists.map(x => x.Id).sort())) {
                     showArtist = true;
                     break;
                 }
             }
-            const discNumbers = result.Items.map(x => x.ParentIndexNumber);
+            const discNumbers = normalizedItems.map(x => x.ParentIndexNumber);
             html = listView.getListViewHtml({
-                items: result.Items,
+                items: normalizedItems,
                 smallIcon: true,
                 showIndex: new Set(discNumbers).size > 1 || (discNumbers.length >= 1 && discNumbers[0] > 1),
                 index: 'disc',
@@ -1734,7 +1734,7 @@ function renderChildren(page, item, childLoadController = beginPtvDetailChildLoa
         } else if (item.Type == 'Series') {
             scrollX = enableScrollX();
             html = cardBuilder.getCardsHtml({
-                items: result.Items,
+                items: normalizedItems,
                 shape: 'overflowPortrait',
                 showTitle: true,
                 centerText: true,
@@ -1747,13 +1747,13 @@ function renderChildren(page, item, childLoadController = beginPtvDetailChildLoa
                 isList = true;
             }
             scrollX = item.Type == 'Episode';
-            if (result.Items.length < 2 && item.Type === 'Episode') {
+            if (normalizedItems.length < 2 && item.Type === 'Episode') {
                 return;
             }
 
             if (item.Type === 'Episode') {
                 html = cardBuilder.getCardsHtml({
-                    items: result.Items,
+                    items: normalizedItems,
                     shape: 'overflowBackdrop',
                     showTitle: true,
                     displayAsSpecial: item.Type == 'Season' && item.IndexNumber,
@@ -1767,7 +1767,7 @@ function renderChildren(page, item, childLoadController = beginPtvDetailChildLoa
                 });
             } else if (item.Type === 'Season') {
                 html = listView.getListViewHtml({
-                    items: result.Items,
+                    items: normalizedItems,
                     showIndexNumber: false,
                     enableOverview: true,
                     enablePlayedButton: !layoutManager.mobile,
@@ -1830,7 +1830,7 @@ function renderChildren(page, item, childLoadController = beginPtvDetailChildLoa
                 name: globalize.translate('Collections'),
                 type: 'BoxSet'
             }];
-            renderCollectionItems(page, item, collectionItemTypes, result.Items);
+            renderCollectionItems(page, item, collectionItemTypes, normalizedItems);
         }
     }).catch(error => {
         if (error?.name === 'AbortError') return;
@@ -2367,6 +2367,38 @@ export default function (view, params) {
         });
     }
 
+    function reconcileAuthoritativeIdentifyItem(instance, page, pageParams, updatedItem, identifyOwnerItem) {
+        if (!updatedItem?.Id
+            || updatedItem.Id !== identifyOwnerItem?.Id
+            || currentItem !== identifyOwnerItem
+            || !isDetailItemCurrent(page, identifyOwnerItem)
+            || !currentUser) {
+            return false;
+        }
+
+        const apiClient = getApiClient();
+        const normalizedItem = normalizeItemMediaSources({
+            ...currentItem,
+            ...updatedItem
+        });
+        const activeGeneration = Number(page.dataset.ptvDetailGeneration);
+
+        stampPtvDetailItemGeneration(normalizedItem, activeGeneration);
+
+        currentItem = normalizedItem;
+        renderImage(page, normalizedItem, apiClient);
+        renderLogo(page, normalizedItem, apiClient);
+        if (layoutManager.mobile) renderHeaderBackdrop(page, normalizedItem, apiClient);
+        renderBackdrop(page, normalizedItem);
+        renderName(normalizedItem, page.querySelector('.nameContainer'), pageParams.context);
+        renderLocalItemDetails(page, normalizedItem, pageParams.context);
+        renderTrackSelections(page, instance, normalizedItem);
+        reloadPlayButtons(page, normalizedItem);
+        setTrailerButtonVisibility(page, normalizedItem);
+
+        return true;
+    }
+
     function retireActiveDetailLoad(page) {
         const ownedPrimaryLoad = Boolean(activeDetailLoadController)
             || page.classList.contains('ptv-detail-data-loading');
@@ -2483,16 +2515,23 @@ export default function (view, params) {
 
     function onMoreCommandsClick() {
         const button = this;
+        const identifyOwnerItem = currentItem;
         let selectedItem = view.querySelector('.selectSource').value || currentItem.Id;
 
         const apiClient = getApiClient();
 
         apiClient.getItem(apiClient.getCurrentUserId(), selectedItem).then(function (item) {
+            if (currentItem !== identifyOwnerItem || !isDetailItemCurrent(view, identifyOwnerItem)) return;
+
             selectedItem = item;
 
             apiClient.getCurrentUser().then(function (user) {
+                if (currentItem !== identifyOwnerItem || !isDetailItemCurrent(view, identifyOwnerItem)) return;
+
                 itemContextMenu.show(getContextMenuOptions(selectedItem, user, button))
                     .then(function (result) {
+                        if (currentItem !== identifyOwnerItem || !isDetailItemCurrent(view, identifyOwnerItem)) return;
+
                         if (result.deleted) {
                             const parentId = selectedItem.SeasonId || selectedItem.SeriesId || selectedItem.ParentId;
 
@@ -2501,6 +2540,9 @@ export default function (view, params) {
                             } else {
                                 appRouter.goHome();
                             }
+                        } else if (result.command === 'identify') {
+                            // Confirmed Identify adopts the bounded item; unconfirmed Identify keeps the current owner state.
+                            reconcileAuthoritativeIdentifyItem(self, view, params, result.updatedItem, identifyOwnerItem);
                         } else if (result.updated) {
                             reload(self, view, params);
                         }

@@ -11,6 +11,7 @@ import { ServerConnections } from 'lib/jellyfin-apiclient';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 import { history } from 'RootAppRouter';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 /** Pages of "no return" (when "Go back" should behave differently, probably quitting the application). */
 const START_PAGE_PATHS = ['/home', '/login', '/selectserver'];
@@ -169,7 +170,7 @@ class AppRouter {
                     this.showItem(itemObject, options);
                 })
                 .catch(err => {
-                    console.error('[AppRouter] Failed to fetch item', err);
+                    ptvSafeConsole.error('[AppRouter] Failed to fetch item', err);
                 });
         } else {
             if (arguments.length === 2) {
@@ -279,7 +280,7 @@ class AppRouter {
         }
 
         if (item === 'manageserver') {
-            return '#/dashboard';
+            return '#/settings/admin';
         }
 
         if (item === 'recordedtv') {

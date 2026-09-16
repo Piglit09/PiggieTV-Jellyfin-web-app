@@ -36,6 +36,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     private const int MaxRecommendationSeriesRepeats = 2;
     private const string RowVariantDelimiter = "||";
     private static readonly TimeSpan TmdbMetadataTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan RefreshFailureRetryDelay = TimeSpan.FromMinutes(15);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
@@ -151,16 +152,21 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         "romulan"
     ];
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly object _scheduleGate = new();
+    private TaskCompletionSource _scheduleChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<PtvFeaturedContentRefreshService> _logger;
     private readonly IPtvFeaturedContentStore _store;
     private readonly IPtvTmdbMetadataService _tmdbMetadataService;
+    private readonly PtvConfiguredRowAssociationService? _associations;
+    private readonly TimeProvider _timeProvider;
     private long? _lastRefreshCompletedAt;
     private long? _lastRefreshDurationMs;
     private string? _lastRefreshError;
     private string? _lastRefreshWarning;
     private long? _lastRefreshStartedAt;
     private long? _nextRefreshAt;
+    private long? _trustRecoveryRetryAt;
     private bool _refreshInProgress;
 
     private sealed record PtvHeroCacheItem(BaseItem Item, string Label);
@@ -195,16 +201,22 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     /// <param name="libraryManager">Jellyfin library manager.</param>
     /// <param name="logger">Logger.</param>
     /// <param name="tmdbMetadataService">Optional TMDb metadata enrichment service.</param>
+    /// <param name="associations">Optional process-local configured-row provenance owner.</param>
+    /// <param name="timeProvider">Refresh scheduling clock; defaults to the system clock.</param>
     public PtvFeaturedContentRefreshService(
         IPtvFeaturedContentStore store,
         ILibraryManager libraryManager,
         ILogger<PtvFeaturedContentRefreshService> logger,
-        IPtvTmdbMetadataService tmdbMetadataService)
+        IPtvTmdbMetadataService tmdbMetadataService,
+        PtvConfiguredRowAssociationService? associations = null,
+        TimeProvider? timeProvider = null)
     {
         _store = store;
         _libraryManager = libraryManager;
         _logger = logger;
         _tmdbMetadataService = tmdbMetadataService;
+        _associations = associations;
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         _logger.LogInformation("PiggieTV featured-content refresh service constructed.");
     }
@@ -227,16 +239,32 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     /// <inheritdoc />
     public async Task<PtvFeaturedContentStoreStatus> RefreshIfNeededAsync(CancellationToken cancellationToken)
     {
-        var storeStatus = await _store.GetStatusAsync(cancellationToken).ConfigureAwait(false);
-
-        if (!NeedsRefresh(storeStatus))
+        await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _nextRefreshAt = storeStatus.FeaturedCacheExpiresAt;
+            // Recheck after acquiring the existing generation gate. Another caller may already
+            // have repaired the process binding while this conditional request was waiting.
+            var storeStatus = await _store.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            var untrusted = _associations is not null && !_associations.HasCurrentStoreBinding(storeStatus.Document);
+            if (untrusted && _trustRecoveryRetryAt > _timeProvider.GetUtcNow().ToUnixTimeMilliseconds())
+            {
+                _nextRefreshAt = _trustRecoveryRetryAt;
+                return storeStatus;
+            }
 
-            return storeStatus;
+            if (!untrusted) _trustRecoveryRetryAt = null;
+            if (!NeedsRefresh(storeStatus) && !untrusted)
+            {
+                _nextRefreshAt = storeStatus.FeaturedCacheExpiresAt;
+                return storeStatus;
+            }
+
+            return await RefreshUnderGateAsync(cancellationToken).ConfigureAwait(false);
         }
-
-        return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+        finally
+        {
+            _refreshGate.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -254,6 +282,18 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 queuedAt.ElapsedMilliseconds);
         }
 
+        try
+        {
+            return await RefreshUnderGateAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
+
+    private async Task<PtvFeaturedContentStoreStatus> RefreshUnderGateAsync(CancellationToken cancellationToken)
+    {
         var startedAt = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         var refreshIntervalMs = DefaultRefreshIntervalMs;
@@ -268,7 +308,8 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(GetRefreshTimeout());
             var refreshToken = timeoutSource.Token;
-            var configuration = GetConfiguration();
+            var generation = _associations?.CaptureGeneration();
+            var configuration = generation?.CreateConfiguration() ?? GetConfiguration();
 
             _logger.LogInformation("PiggieTV featured-content refresh started.");
 
@@ -307,7 +348,9 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 preWriteStatus.SectionCount,
                 preWriteStatus.ItemCount);
 
-            var storedDocument = await _store.WriteAsync(document, refreshToken).ConfigureAwait(false);
+            var storedDocument = generation is not null && _store is PtvFeaturedContentStore generatedStore
+                ? await generatedStore.WriteGeneratedAsync(document, generation, refreshToken).ConfigureAwait(false)
+                : await _store.WriteAsync(document, refreshToken).ConfigureAwait(false);
             var status = await _store.GetStatusAsync(refreshToken).ConfigureAwait(false);
             var storedContentStatus = PtvFeaturedContentStatus.FromDocument(storedDocument);
             var completedAt = DateTimeOffset.UtcNow;
@@ -317,20 +360,21 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             _lastRefreshDurationMs = stopwatch.ElapsedMilliseconds;
             _lastRefreshError = null;
             _nextRefreshAt = PtvFeaturedContentStatus.FromDocument(storedDocument).ExpiresAt;
+            UpdateTrustRecoverySchedule(status);
 
             _logger.LogInformation(
-                "PiggieTV featured-content cache refreshed in {DurationMs} ms. CacheExists={CacheExists}. CachePayloadBytes={CachePayloadBytes}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}. CacheWriteError={CacheWriteError}.",
+                "PiggieTV featured-content cache refreshed. Category=success; DurationMs={DurationMs}; CacheExists={CacheExists}; CachePayloadBytes={CachePayloadBytes}; HeroCount={HeroCount}; SectionCount={SectionCount}; ItemCount={ItemCount}; CacheWriteHealthy={CacheWriteHealthy}.",
                 _lastRefreshDurationMs,
                 status.FeaturedCacheExists,
                 status.CachePayloadBytes,
                 storedContentStatus.HeroCount,
                 storedContentStatus.SectionCount,
                 storedContentStatus.ItemCount,
-                status.CacheWriteError);
+                string.IsNullOrWhiteSpace(status.CacheWriteError));
 
             return status;
         }
-        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             stopwatch.Stop();
             _lastRefreshCompletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -338,26 +382,50 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             _lastRefreshError = $"Featured-content refresh timed out after {FormatDuration(stopwatch.ElapsedMilliseconds)}.";
             _nextRefreshAt = DateTimeOffset.UtcNow.AddMilliseconds(refreshIntervalMs).ToUnixTimeMilliseconds();
 
-            _logger.LogWarning(ex, "PiggieTV featured-content cache refresh timed out after {DurationMs} ms.", stopwatch.ElapsedMilliseconds);
+            _logger.LogWarning(
+                "PiggieTV featured-content cache refresh failed. Category=timeout; DurationMs={DurationMs}.",
+                stopwatch.ElapsedMilliseconds);
 
-            return await _store.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+            var status = await _store.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+            UpdateTrustRecoverySchedule(status);
+            return status;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             stopwatch.Stop();
             _lastRefreshCompletedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             _lastRefreshDurationMs = stopwatch.ElapsedMilliseconds;
-            _lastRefreshError = ex.Message;
+            _lastRefreshError = "Featured-content refresh failed.";
             _nextRefreshAt = DateTimeOffset.UtcNow.AddMilliseconds(refreshIntervalMs).ToUnixTimeMilliseconds();
 
-            _logger.LogWarning(ex, "PiggieTV featured-content cache refresh failed. Existing stale cache will continue to be served.");
+            _logger.LogWarning("PiggieTV featured-content cache refresh failed. Category=refresh-failure; StaleCacheRetained=true.");
 
-            return await _store.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+            var status = await _store.GetStatusAsync(CancellationToken.None).ConfigureAwait(false);
+            UpdateTrustRecoverySchedule(status);
+            return status;
         }
         finally
         {
             _refreshInProgress = false;
-            _refreshGate.Release();
+        }
+    }
+
+    private void UpdateTrustRecoverySchedule(PtvFeaturedContentStoreStatus status)
+    {
+        // Successful persistence can still belong to a retired configuration. Observe the real
+        // store/issuer pair; never confer trust here or replace the existing generated-write gate.
+        var retryAt = _associations is not null && !_associations.HasCurrentStoreBinding(status.Document)
+            ? _timeProvider.GetUtcNow().Add(RefreshFailureRetryDelay).ToUnixTimeMilliseconds()
+            : (long?)null;
+        lock (_scheduleGate)
+        {
+            _trustRecoveryRetryAt = retryAt;
+            if (retryAt is not null) _nextRefreshAt = retryAt;
+            // An administrator refresh may finish while the hosted owner is asleep on an old
+            // content TTL. Retire that wait so the same owner observes its new retry/expiry.
+            var previous = _scheduleChanged;
+            _scheduleChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            previous.TrySetResult();
         }
     }
 
@@ -411,24 +479,22 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             try
             {
                 var status = await RefreshIfNeededAsync(stoppingToken).ConfigureAwait(false);
-                var delay = GetDelayUntilNextRefresh(status);
-
-                await DelayQuietly(delay, stoppingToken).ConfigureAwait(false);
+                await WaitForNextRefreshAsync(status, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _lastRefreshError = ex.Message;
-                _logger.LogWarning(ex, "PiggieTV featured-content refresh loop failed.");
-                await DelayQuietly(TimeSpan.FromMinutes(15), stoppingToken).ConfigureAwait(false);
+                _lastRefreshError = "Featured-content refresh loop failed.";
+                _logger.LogWarning("PiggieTV featured-content refresh loop failed. Category=background-loop.");
+                await DelayQuietly(RefreshFailureRetryDelay, stoppingToken).ConfigureAwait(false);
             }
         }
     }
 
-    private static bool NeedsRefresh(PtvFeaturedContentStoreStatus storeStatus)
+    private bool NeedsRefresh(PtvFeaturedContentStoreStatus storeStatus)
     {
         if (!storeStatus.FeaturedCacheExists || !storeStatus.FeaturedCacheFresh)
         {
@@ -436,23 +502,43 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         }
 
         return storeStatus.FeaturedCacheExpiresAt is null
-            || storeStatus.FeaturedCacheExpiresAt.Value <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            || storeStatus.FeaturedCacheExpiresAt.Value <= _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
     }
 
-    private static TimeSpan GetDelayUntilNextRefresh(PtvFeaturedContentStoreStatus storeStatus)
+    private TimeSpan GetDelayUntilNextRefresh(PtvFeaturedContentStoreStatus storeStatus)
     {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var nextRefreshAt = storeStatus.FeaturedCacheExpiresAt ?? now + DefaultRefreshIntervalMs;
+        var now = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+        var nextRefreshAt = _trustRecoveryRetryAt ?? storeStatus.FeaturedCacheExpiresAt ?? now + DefaultRefreshIntervalMs;
         var delayMs = Math.Max(60 * 1000, nextRefreshAt - now);
 
         return TimeSpan.FromMilliseconds(delayMs);
     }
 
-    private static async Task DelayQuietly(TimeSpan delay, CancellationToken cancellationToken)
+    private async Task WaitForNextRefreshAsync(PtvFeaturedContentStoreStatus status, CancellationToken stoppingToken)
+    {
+        Task changed;
+        TimeSpan delay;
+        lock (_scheduleGate)
+        {
+            changed = _scheduleChanged.Task;
+            delay = GetDelayUntilNextRefresh(status);
+        }
+
+        try
+        {
+            await changed.WaitAsync(delay, _timeProvider, stoppingToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // The scheduled refresh is due. WaitAsync retires the timer on either terminal path.
+        }
+    }
+
+    private async Task DelayQuietly(TimeSpan delay, CancellationToken cancellationToken)
     {
         try
         {
-            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(delay, _timeProvider, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -917,16 +1003,10 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 if (string.Equals(rule.SourceType, "studio", StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogInformation(
-                        "PiggieTV studio row generated. RowId={RowId}; RowTitle={RowTitle}; RuleType={RuleType}; StudioFilter={StudioFilter}; QueryUsed={QueryUsed}; CandidateCount={CandidateCount}; MatchedCount={MatchedCount}; FallbackUsed={FallbackUsed}; First10ItemNames={First10ItemNames}.",
-                        rule.Id,
-                        rowTitle,
-                        rule.SourceType,
-                        source,
-                        queryUsed,
+                        "PiggieTV row generated. Category=studio; CandidateCount={CandidateCount}; MatchedCount={MatchedCount}; FallbackUsed={FallbackUsed}.",
                         ruleCandidates.Length,
                         selectionItems.Length,
-                        fallbackUsed,
-                        string.Join(" | ", matchingItems.Take(10).Select(item => item.Name)));
+                        fallbackUsed);
                 }
 
                 if (!includeEmptyRows && selectedItems.Count == 0)
@@ -1042,7 +1122,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                             StartDay = rule.Seasonal.StartDay,
                             EndMonth = rule.Seasonal.EndMonth,
                             EndDay = rule.Seasonal.EndDay
-                    },
+                        },
                     ProviderHints = rule.ProviderHints.ToList(),
                     SortPriority = rule.SortPriority,
                     Tier = rule.Tier,
@@ -1069,27 +1149,14 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     private void LogGeneratedRows(string stage, IReadOnlyList<GeneratedRow> rows)
     {
         _logger.LogInformation(
-            "PiggieTV Row Rules {Stage}: {Rows}",
+            "PiggieTV row generation complete. Stage={Stage}; RowCount={RowCount}; ItemCount={ItemCount}; CandidateCount={CandidateCount}; MatchedCount={MatchedCount}; FallbackRowCount={FallbackRowCount}; DroppedRowCount={DroppedRowCount}.",
             stage,
-            JsonSerializer.Serialize(rows.Select(row => new
-            {
-                row.Id,
-                row.Title,
-                RuleId = row.Rule.Id,
-                row.Rule.SourceType,
-                row.Rule.SourceValue,
-                row.Source,
-                row.QueryUsed,
-                ItemCount = row.Items.Count,
-                row.CandidateCount,
-                row.MatchedCount,
-                row.FallbackUsed,
-                row.PlannedRowCount,
-                row.GeneratedSourceCount,
-                row.SourceIndex,
-                row.DropReason,
-                row.EmptyResultReason
-            }), JsonOptions));
+            rows.Count,
+            rows.Sum(row => row.Items.Count),
+            rows.Sum(row => row.CandidateCount),
+            rows.Sum(row => row.MatchedCount),
+            rows.Count(row => row.FallbackUsed),
+            rows.Count(row => !string.IsNullOrWhiteSpace(row.DropReason)));
     }
 
     private static List<GeneratedRow> DeduplicateRowsById(IEnumerable<GeneratedRow> rows)
@@ -1597,9 +1664,9 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                     peopleByItemId[item.Id] = values;
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogDebug(ex, "PiggieTV could not read people metadata for item {ItemId}.", item.Id);
+                _logger.LogDebug("PiggieTV people metadata read failed. Category=item-metadata.");
             }
         }
 
@@ -2685,18 +2752,8 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     private void LogFinalSections(JsonArray sectionDefinitions)
     {
         _logger.LogInformation(
-            "PiggieTV Row Rules finalSections: {FinalSections}",
-            JsonSerializer.Serialize(sectionDefinitions
-                .OfType<JsonObject>()
-                .Select(section => new
-                {
-                    Id = section["id"]?.ToString(),
-                    Title = section["title"]?.ToString(),
-                    RuleId = section["ruleId"]?.ToString(),
-                    SourceType = section["sourceType"]?.ToString(),
-                    RowKicker = section["rowKicker"]?.ToString(),
-                    ItemCount = section["itemCount"]?.ToString()
-                }), JsonOptions));
+            "PiggieTV row generation finalized. Category=sections; SectionCount={SectionCount}.",
+            sectionDefinitions.Count);
     }
 
     private static string GetRowKicker(RowBuilderRule rule)
@@ -3067,8 +3124,8 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
             if (IsFatalTmdbStatus(status))
             {
-                _lastRefreshWarning = $"TMDb metadata failed: {NormalizeTmdbStatusMessage(status)}";
-                _logger.LogWarning("PiggieTV featured-content refresh continued without TMDb metadata. Reason={Reason}", status.LastError);
+                _lastRefreshWarning = "TMDb metadata was unavailable; Featured content used Jellyfin metadata only.";
+                _logger.LogWarning("PiggieTV Featured enrichment degraded. Category=provider-unavailable; JellyfinFallback=true.");
             }
             else if (status.LastPartial)
             {
@@ -3089,9 +3146,9 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         {
             _logger.LogInformation("PiggieTV TMDb metadata enrichment reached its time budget. Featured-content refresh will continue with Jellyfin metadata only.");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.LogWarning(ex, "PiggieTV TMDb metadata enrichment failed. Featured-content refresh will continue with Jellyfin metadata only.");
+            _logger.LogWarning("PiggieTV Featured enrichment degraded. Category=provider-failure; JellyfinFallback=true.");
         }
 
         return new Dictionary<Guid, PtvTmdbItemFacts>();
@@ -3131,9 +3188,9 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             children = _libraryManager.RootFolder.GetRecursiveChildren().ToArray();
             _logger.LogInformation("PiggieTV featured-content recursive item count: {ItemCount}.", children.Count);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.LogError(ex, "PiggieTV featured-content item fetch failed.");
+            _logger.LogError("PiggieTV featured-content item fetch failed. Category=library-enumeration.");
             throw;
         }
 
@@ -3168,14 +3225,14 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         {
             var items = selector();
 
-            _logger.LogInformation("PiggieTV featured-content section {SectionName}: {ItemCount} items.", sectionName, items.Count);
+            _logger.LogInformation("PiggieTV featured-content section built. Category=section; ItemCount={ItemCount}.", items.Count);
 
             return ToJsonArray(items);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _lastRefreshWarning = $"Section {sectionName} failed and was returned empty.";
-            _logger.LogWarning(ex, "PiggieTV featured-content section {SectionName} failed. Returning an empty partial row.", sectionName);
+            _lastRefreshWarning = "A Featured section failed and was returned empty.";
+            _logger.LogWarning("PiggieTV featured-content section failed. Category=section; EmptyPartialRow=true.");
 
             return [];
         }

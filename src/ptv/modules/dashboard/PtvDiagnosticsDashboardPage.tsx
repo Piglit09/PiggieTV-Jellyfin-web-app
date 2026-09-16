@@ -21,8 +21,6 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import React, { useEffect, useRef, useState } from 'react';
 
-import Page from 'components/Page';
-
 import type {
     PtvDiagnosticHealth,
     PtvDiagnosticSnapshot
@@ -32,15 +30,21 @@ import {
     setPtvDiagnosticPreferences,
     subscribePtvDiagnosticPreferences
 } from '../../services/diagnostics/diagnosticPreferences';
-import { getPtvDiagnosticStore } from '../../services/diagnostics/diagnosticStore';
+import {
+    PTV_SEVERE_FRAME_JANK_WARNING,
+    getPtvDiagnosticStore
+} from '../../services/diagnostics/diagnosticStore';
 import { refreshPtvWebDiagnosticExternalStatus } from '../../services/diagnostics/webDiagnosticPlatform';
+import { RemoteDiagnosticsPanel } from './RemoteDiagnosticsPanel';
 
 import './ptvDiagnosticsDashboard.scss';
 
 const SECTIONS = [
     'Overview',
     'Performance',
+    'Playback',
     'Requests',
+    'Remote',
     'Navigation & Focus',
     'Routes',
     'Images & Shelves',
@@ -59,6 +63,9 @@ function shouldRefreshSection(section: SectionName, stream: string) {
     }
     if (section === 'Performance') {
         return [ 'frames', 'requests', 'routes' ].includes(stream);
+    }
+    if (section === 'Playback') {
+        return stream === 'playbackSessions';
     }
     if (section === 'Requests') {
         return stream === 'requests';
@@ -160,6 +167,9 @@ function Overview({
 
     return (
         <>
+            {snapshot.warnings.includes(PTV_SEVERE_FRAME_JANK_WARNING) && (
+                <Alert severity='error'>SEVERE_FRAME_JANK: sustained severe rendering degradation was observed after route settlement.</Alert>
+            )}
             <div className='ptv-diagnostics-card-grid'>
                 <MetricCard title='Overall health' value={snapshot.health.status} caption={snapshot.health.reason} health={snapshot.health} />
                 <MetricCard title='Client / platform' value={snapshot.platform.platform} caption={`${snapshot.platform.profile} · ${snapshot.platform.deviceClass}`} />
@@ -167,7 +177,7 @@ function Overview({
                 <MetricCard title='Jellyfin server' value={snapshot.server.reachable === null ? 'unknown' : snapshot.server.reachable ? 'reachable' : 'unreachable'} caption={`version ${snapshot.server.version}`} health={snapshot.server.health} />
                 <MetricCard title='Plugin' value={snapshot.plugin.status} caption={`version ${snapshot.plugin.version}`} health={snapshot.plugin.health} />
                 <MetricCard title='Active requests' value={requestSummary.active} caption={`peak ${requestSummary.peakConcurrency} · ${requestSummary.coalesced} coalesced`} />
-                <MetricCard title='Recent request p95' value={formatNumber(requestSummary.p95Ms, ' ms')} caption={`${requestSummary.total} retained request events`} />
+                <MetricCard title='Recent request p95' value={formatNumber(requestSummary.p95Ms, ' ms')} caption={`${requestSummary.total} retained · ${requestSummary.cancellations} cancelled`} />
                 <MetricCard title='Frame health' value={frame ? `${frame.approximateFps} FPS` : 'collecting'} caption={frame ? `${frame.jankyFramePercentage}% janky · p95 ${frame.p95FrameMs} ms` : 'Browser-observed timing, not GPU timing.'} />
                 <MetricCard title='Focus engine' value={snapshot.latestFocus.engineEnabled ? 'enabled' : 'disabled'} caption={snapshot.latestFocus.health.reason} health={snapshot.latestFocus.health} />
                 <MetricCard title='Current route' value={route?.routeFamily || 'unknown'} valueClassName='ptv-diagnostics-metric-value--route' caption={route ? route.status : 'No route lifecycle sample yet.'} />
@@ -211,7 +221,7 @@ function Performance({
                 <MetricCard title='Frame p95 / p99' value={`${formatNumber(frame?.p95FrameMs)} / ${formatNumber(frame?.p99FrameMs)} ms`} caption={`Longest ${formatNumber(frame?.longestFrameMs, ' ms')}`} />
                 <MetricCard title='Long tasks' value={formatNumber(frame?.longTaskCount)} caption={snapshot.collectorCapabilities.longTasks ? 'Long Task API available' : 'Unsupported in this browser'} />
                 <MetricCard title='Route usable' value={formatNumber(route?.navigationToSettledMs, ' ms')} caption={`Content ${formatNumber(route?.navigationToFirstContentMs, ' ms')} · focusable ${formatNumber(route?.navigationToFocusableMs, ' ms')}`} />
-                <MetricCard title='Request p50 / p95' value={`${requestSummary.p50Ms} / ${requestSummary.p95Ms} ms`} caption={`${requestSummary.active} active · peak ${requestSummary.peakConcurrency}`} />
+                <MetricCard title='Request p50 / p95' value={`${requestSummary.p50Ms} / ${requestSummary.p95Ms} ms`} caption={`${requestSummary.active} active · ${requestSummary.failures} failed · ${requestSummary.cancellations} cancelled`} />
             </div>
             <TechnicalDetails
                 title='Latest frame sample'
@@ -222,6 +232,73 @@ function Performance({
                     'Frame p90': formatNumber(frame?.p90FrameMs, ' ms'),
                     'Collector overhead': formatNumber(frame?.collectorOverheadMs, ' ms'),
                     'Sample time': frame?.sampledAt
+                }}
+            />
+        </>
+    );
+}
+
+function Playback({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
+    const latest = snapshot.playbackSessions.at(-1);
+
+    if (!latest) {
+        return (
+            <Alert severity='info'>No privacy-safe playback session snapshot has been observed.</Alert>
+        );
+    }
+
+    const latestRecovery = latest.stalls.recoveryResults.at(-1) || 'not observed';
+    const readyStateTimeline = latest.readyStateTransitions
+        .map(transition => `${transition.from}→${transition.to} @ ${formatNumber(transition.atMs, ' ms')}`)
+        .join(' · ') || 'No transitions retained';
+
+    return (
+        <>
+            <Alert severity='info'>Playback diagnostics retain bounded aggregates only. Media identity, titles, URLs, and Jellyfin session identifiers are never stored.</Alert>
+            <div className='ptv-diagnostics-card-grid ptv-diagnostics-card-grid--compact'>
+                <MetricCard title='Playback state' value={latest.state} caption={`${latest.mediaMode} · ${latest.terminal ? 'terminal' : 'active'}`} />
+                <MetricCard title='Buffer ahead' value={formatNumber(latest.buffer.currentAheadSeconds, ' s')} caption={`avg ${formatNumber(latest.buffer.averageAheadSeconds, ' s')} · min ${formatNumber(latest.buffer.minimumAheadSeconds, ' s')}`} />
+                <MetricCard title='Stall episodes' value={latest.stalls.waitingCount + latest.stalls.stalledCount} caption={`${formatNumber(latest.stalls.cumulativeDurationMs, ' ms')} cumulative · longest ${formatNumber(latest.stalls.longestDurationMs, ' ms')}`} />
+                <MetricCard title='HLS fragments' value={`${latest.hls.fragmentSuccessCount} / ${latest.hls.fragmentRequestCount}`} caption={`${latest.hls.fragmentFailureCount} failed · ${latest.hls.fragmentTimeoutCount} timed out`} />
+                <MetricCard title='Fragment p95' value={formatNumber(latest.hls.fragmentP95LatencyMs, ' ms')} caption={`avg ${formatNumber(latest.hls.fragmentAverageLatencyMs, ' ms')} · longest ${formatNumber(latest.hls.fragmentLongestLatencyMs, ' ms')}`} />
+                <MetricCard title='Route' value={latest.routeClassification} caption={`${latest.routeFamily} · generation ${latest.sourceGeneration}`} />
+                <MetricCard title='Source lifecycle' value={`${latest.player.mediaSourceAssignments} assign · ${latest.player.sourceReplacements} replace`} caption={`${latest.player.mountCount} mount · ${latest.player.unmountCount} unmount`} />
+                <MetricCard title='Recovery' value={latestRecovery} caption={`${latest.player.recoveryActions} actions · ${latest.player.activeLoadRestarts} load restarts`} />
+            </div>
+            <TechnicalDetails
+                title='Buffer and stall aggregates'
+                values={{
+                    'Buffer samples': latest.buffer.sampleCount,
+                    'Buffer min / max': `${formatNumber(latest.buffer.minimumAheadSeconds)} / ${formatNumber(latest.buffer.maximumAheadSeconds)} s`,
+                    'Below two seconds': latest.buffer.belowTwoSecondsCount,
+                    'Zero-buffer samples': latest.buffer.zeroBufferCount,
+                    'Waiting / stalled': `${latest.stalls.waitingCount} / ${latest.stalls.stalledCount}`,
+                    'Episode durations': latest.stalls.episodeDurationsMs.map(duration => `${duration} ms`).join(', ') || 'None',
+                    'Recovery results': latest.stalls.recoveryResults.join(', ') || 'None'
+                }}
+            />
+            <TechnicalDetails
+                title='HLS request aggregates'
+                values={{
+                    'Manifest success / request': `${latest.hls.manifestSuccessCount} / ${latest.hls.manifestRequestCount}`,
+                    'Manifest avg / p95': `${formatNumber(latest.hls.manifestAverageLatencyMs)} / ${formatNumber(latest.hls.manifestP95LatencyMs)} ms`,
+                    'Fragment success / request': `${latest.hls.fragmentSuccessCount} / ${latest.hls.fragmentRequestCount}`,
+                    'Fragment failure / timeout': `${latest.hls.fragmentFailureCount} / ${latest.hls.fragmentTimeoutCount}`,
+                    'Retries / duplicates': `${latest.hls.fragmentRetryCount} / ${latest.hls.duplicateFragmentRequestCount}`,
+                    'Dropped tracking': latest.hls.droppedFragmentTrackingCount
+                }}
+            />
+            <TechnicalDetails
+                title='Player and route aggregates'
+                values={{
+                    'Play / pause calls': `${latest.player.playCalls} / ${latest.player.pauseCalls}`,
+                    'Programmatic seeks': latest.player.programmaticSeeks,
+                    'Quality switches': latest.player.qualitySwitches,
+                    'Stale events ignored': latest.player.staleEventsIgnored,
+                    'Ready-state transitions': readyStateTimeline,
+                    'Route family': latest.routeFamily,
+                    'Route classification': latest.routeClassification,
+                    'Updated': latest.updatedAt
                 }}
             />
         </>
@@ -252,7 +329,7 @@ function Requests({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
                             <TableCell>{request.requestFamily}</TableCell>
                             <TableCell>{request.method}</TableCell>
                             <TableCell>{request.durationMs} ms</TableCell>
-                            <TableCell>{request.status ?? (request.success ? 'success' : 'failed')}</TableCell>
+                            <TableCell>{request.cancellation ? 'cancelled' : request.status ?? (request.success ? 'success' : 'failed')}</TableCell>
                             <TableCell>{request.activeConcurrencyAtStart}</TableCell>
                             <TableCell>{request.coordinatorHit ? 'coalesced' : request.cacheClassification}</TableCell>
                             <TableCell>{request.routeFamily}</TableCell>
@@ -386,13 +463,14 @@ function ImagesShelves({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
     const failed = snapshot.images.filter(image => image.status === 'errored');
     const fallback = snapshot.images.filter(image => image.fallbackUsed);
     const shelfFailures = snapshot.shelves.filter(shelf => shelf.status === 'failed');
+    const shelfCancellations = snapshot.shelves.filter(shelf => shelf.status === 'cancelled');
 
     return (
         <>
             <div className='ptv-diagnostics-card-grid ptv-diagnostics-card-grid--compact'>
                 <MetricCard title='Images loaded' value={loaded.length} caption={`${snapshot.images.length} lifecycle events retained`} />
                 <MetricCard title='Image failures' value={failed.length} caption={`${fallback.length} fallback events`} />
-                <MetricCard title='Shelves observed' value={snapshot.shelves.length} caption={`${shelfFailures.length} failed shelf events`} />
+                <MetricCard title='Shelves observed' value={snapshot.shelves.length} caption={`${shelfFailures.length} failed · ${shelfCancellations.length} cancelled`} />
                 <MetricCard title='Settled shelves' value={snapshot.shelves.filter(shelf => shelf.status === 'settled').length} caption={`${snapshot.shelves.filter(shelf => shelf.status === 'empty').length} empty`} />
             </div>
             <TableContainer className='ptv-diagnostics-table'>
@@ -584,6 +662,7 @@ function ExportPanel({
                     'Request events': snapshot.requests.length,
                     'Route events': snapshot.routes.length,
                     'Frame samples': snapshot.frames.length,
+                    'Playback sessions': snapshot.playbackSessions.length,
                     'Dropped events': snapshot.droppedEvents.total
                 }}
             />
@@ -641,8 +720,14 @@ export default function PtvDiagnosticsDashboardPage() {
         case 'Performance':
             content = <Performance snapshot={snapshot} requestSummary={requestSummary} />;
             break;
+        case 'Playback':
+            content = <Playback snapshot={snapshot} />;
+            break;
         case 'Requests':
             content = <Requests snapshot={snapshot} />;
+            break;
+        case 'Remote':
+            content = <RemoteDiagnosticsPanel />;
             break;
         case 'Navigation & Focus':
             content = <NavigationFocus snapshot={snapshot} />;
@@ -671,16 +756,16 @@ export default function PtvDiagnosticsDashboardPage() {
     }
 
     return (
-        <Page
+        <section
             id='ptvDiagnosticsDashboardPage'
-            className='mainAnimatedPage ptv-diagnostics-dashboard-page'
-            title='PiggieTV Diagnostics'
+            className='ptv-admin-piggietv-page ptv-diagnostics-dashboard-page'
+            data-testid='ptv-admin-piggietv-diagnostics'
         >
             <Box className='ptv-diagnostics-dashboard'>
-                <header className='ptv-diagnostics-header'>
+                <header className='ptv-admin-piggietv-header ptv-diagnostics-header'>
                     <div>
-                        <Typography component='h1' variant='h4'>PiggieTV Diagnostics</Typography>
-                        <Typography>Local, bounded observability for this PTV Web session.</Typography>
+                        <Typography variant='h1'>PiggieTV Diagnostics</Typography>
+                        <Typography color='text.secondary'>Local, bounded observability for this PTV Web session.</Typography>
                     </div>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                         <FormControlLabel
@@ -724,7 +809,7 @@ export default function PtvDiagnosticsDashboardPage() {
                     {content}
                 </section>
             </Box>
-        </Page>
+        </section>
     );
 }
 

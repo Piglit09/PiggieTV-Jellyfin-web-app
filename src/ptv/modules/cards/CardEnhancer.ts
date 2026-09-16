@@ -1,4 +1,16 @@
-const CARD_SELECTOR = '.homeSectionsContainer .itemsContainer .card';
+const CARD_SELECTOR = '.itemsContainer .card, .scrollSlider .card, .card.ptv-card';
+const INLINE_PLAYBACK_SELECTOR = [
+    '.ptv-card-play-pill',
+    '.cardOverlayButton[data-action="play"]',
+    '.cardOverlayButton[data-action="resume"]',
+    '.cardOverlayFab-primary[data-action="resume"]'
+].join(', ');
+
+type CardEnhancerOptions = {
+    isCurrent?: () => boolean;
+};
+
+const accentProbes = new WeakMap<HTMLElement, HTMLImageElement>();
 
 function isLibraryTile(card: Element) {
     const type = card.getAttribute('data-type')?.toLowerCase();
@@ -15,18 +27,9 @@ function isLibraryTile(card: Element) {
     );
 }
 
-function removePlayPill(card: Element) {
-    card.querySelectorAll('.ptv-card-play-pill').forEach(pill => {
-        pill.remove();
-    });
-}
-
-function normalizeOverlayButtons(card: Element) {
-    card.querySelectorAll<HTMLElement>(
-        '.cardOverlayButton[data-action="play"], .cardOverlayButton[data-action="resume"], .cardOverlayFab-primary[data-action="resume"]'
-    ).forEach((button) => {
-        button.removeAttribute('title');
-        button.setAttribute('aria-label', 'Play');
+function removeInlinePlaybackControls(card: Element) {
+    card.querySelectorAll(INLINE_PLAYBACK_SELECTOR).forEach(control => {
+        control.remove();
     });
 }
 
@@ -36,7 +39,7 @@ function getImage(card: Element): HTMLImageElement | null {
     );
 }
 
-function applyImageAccent(card: HTMLElement) {
+function applyImageAccent(card: HTMLElement, options: CardEnhancerOptions = {}) {
     const img = getImage(card);
 
     if (!img) return;
@@ -46,10 +49,15 @@ function applyImageAccent(card: HTMLElement) {
     if (!src) return;
 
     const probe = new Image();
+
+    accentProbes.get(card)?.removeAttribute('src');
     probe.crossOrigin = 'anonymous';
     probe.src = src;
+    accentProbes.set(card, probe);
 
     probe.onload = () => {
+        if (!card.isConnected || options.isCurrent?.() === false || accentProbes.get(card) !== probe) return;
+
         try {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -95,14 +103,26 @@ function applyImageAccent(card: HTMLElement) {
 
             card.style.setProperty('--ptv-card-accent', `${r}, ${g}, ${b}`);
         } catch {
-            card.style.setProperty('--ptv-card-accent', '168, 85, 247');
+            if (card.isConnected && options.isCurrent?.() !== false && accentProbes.get(card) === probe) {
+                card.style.setProperty('--ptv-card-accent', '168, 85, 247');
+            }
+        } finally {
+            if (accentProbes.get(card) === probe) {
+                accentProbes.delete(card);
+            }
+        }
+    };
+    probe.onerror = () => {
+        if (accentProbes.get(card) === probe) {
+            accentProbes.delete(card);
         }
     };
 }
 
-function enhanceCard(card: Element) {
+function enhanceCard(card: Element, options: CardEnhancerOptions = {}) {
+    removeInlinePlaybackControls(card);
+
     if (isLibraryTile(card)) {
-        removePlayPill(card);
         return;
     }
     if (card.classList.contains('ptv-card-enhanced')) return;
@@ -114,14 +134,36 @@ function enhanceCard(card: Element) {
 
     card.classList.add('ptv-card-enhanced');
     card.classList.add('ptv-card');
-    normalizeOverlayButtons(card);
-    removePlayPill(card);
 
     htmlCard.style.setProperty('--ptv-card-accent', '168, 85, 247');
 
-    applyImageAccent(htmlCard);
+    applyImageAccent(htmlCard, options);
 }
 
-export function enhancePtvCards(parent: Element = document.body) {
-    parent.querySelectorAll(CARD_SELECTOR).forEach(enhanceCard);
+export function enhancePtvCards(parent: Element = document.body, options: CardEnhancerOptions = {}) {
+    if (parent.matches(CARD_SELECTOR)) {
+        enhanceCard(parent, options);
+    }
+
+    parent.querySelectorAll(CARD_SELECTOR).forEach(card => {
+        enhanceCard(card, options);
+    });
+}
+
+export function cleanupPtvCardEnhancements(parent: Element = document.body) {
+    const cards = parent.matches(CARD_SELECTOR) ?
+        [parent] :
+        Array.from(parent.querySelectorAll(CARD_SELECTOR));
+
+    cards.forEach(card => {
+        const htmlCard = card as HTMLElement;
+        const probe = accentProbes.get(htmlCard);
+
+        if (!probe) return;
+
+        probe.onload = null;
+        probe.onerror = null;
+        probe.removeAttribute('src');
+        accentProbes.delete(htmlCard);
+    });
 }

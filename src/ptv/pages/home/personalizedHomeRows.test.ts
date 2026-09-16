@@ -65,12 +65,13 @@ describe('personalized Home rows', () => {
         expect(rows.map(row => row.id)).toEqual([
             'personalized-recommended-for-you',
             'personalized-because-you-watched',
+            'personalized-ptv-discovery',
             'personalized-rediscover'
         ]);
         expect(rows.every(row => row.source === 'recommendation')).toBe(true);
     });
 
-    it('uses discovery when rediscover is unavailable and omits empty rows', () => {
+    it('keeps aggregate discovery evidence bounded and omits empty rows', () => {
         const rows = createNativeHomePersonalizedRows({
             rows: [
                 recommendationRow('recommended-for-you', []),

@@ -1,0 +1,3520 @@
+{
+  "schemaVersion": "1.1.0",
+  "purpose": "Machine-readable navigation, dependency, active-deviation, and stabilization map for the Jellyfin 10.11.11 stock baseline and the current PiggieTV comparison.",
+  "interpretation": {
+    "baselineRule": "Stock behavior means Jellyfin Web and Jellyfin Server 10.11.11 only.",
+    "citationRule": "Resolve every chapterRefs entry and inspect the exact source citation before changing code.",
+    "evidenceStatuses": [
+      "VERIFIED_FROM_SOURCE",
+      "VERIFIED_BY_TEST",
+      "INFERRED",
+      "UNKNOWN",
+      "UPSTREAM_NEWER_THAN_10.11.11"
+    ],
+    "ptvModificationClasses": [
+      "STOCK_UNCHANGED",
+      "STOCK_STYLED",
+      "STOCK_WRAPPED",
+      "STOCK_EXTENDED",
+      "STOCK_REPLACED",
+      "STOCK_BYPASSED",
+      "DUPLICATE_IMPLEMENTATION",
+      "NEW_PTV_SYSTEM"
+    ],
+    "conflictClasses": [
+      "SAFE_REDUNDANCY",
+      "INTENTIONAL_WRAPPER",
+      "ACTIVE_CONFLICT",
+      "RACE_RISK",
+      "LEGACY_BYPASS",
+      "UNKNOWN"
+    ],
+    "riskLevels": [
+      "LOW",
+      "MEDIUM",
+      "HIGH",
+      "CRITICAL"
+    ],
+    "deviationSeverities": [
+      "P0",
+      "P1",
+      "P2"
+    ],
+    "deviationStatuses": [
+      "OPEN",
+      "PASS",
+      "VALIDATION_PENDING",
+      "UNKNOWN"
+    ],
+    "implementationGates": [
+      "PASS",
+      "HOLD",
+      "FAIL",
+      "UNKNOWN"
+    ],
+    "deploymentStatuses": [
+      "DEPLOYED",
+      "NOT_DEPLOYED",
+      "UNKNOWN"
+    ],
+    "physicalValidationStatuses": [
+      "PASS",
+      "PARTIAL_PASS",
+      "FAIL",
+      "VALIDATION_PENDING",
+      "UNKNOWN"
+    ]
+  },
+  "baselineIdentities": {
+    "jellyfinWeb": {
+      "version": "10.11.11",
+      "commit": "35c0793ece3adbd247eab290ae1effab851f3d37",
+      "localTree": "C:/Users/Piggie/Documents/GitHub/jellyfin-web-stock-10.11.11",
+      "identityStatus": "VERIFIED_BY_TEST",
+      "identityDetail": "1132 local source/runtime files matched official Git blobs; .gitattributes and .gitignore were absent; zero content mismatches and zero extras.",
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11",
+          "file": "package.json",
+          "symbol": "name/version",
+          "lines": "2-3",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Web official Git tree",
+          "version": "35c0793ece3adbd247eab290ae1effab851f3d37",
+          "file": "recursive tree/blob comparison",
+          "symbol": "whole runtime/source tree",
+          "lines": "not applicable",
+          "status": "VERIFIED_BY_TEST"
+        }
+      ],
+      "chapterRefs": [
+        "00-README.md"
+      ]
+    },
+    "jellyfinServer": {
+      "version": "10.11.11",
+      "commit": "1fbd8739292cce610231be93daf43368733edf63",
+      "localTree": "C:/Users/Piggie/Documents/GitHub/jellyfin-server-stock-10.11.11",
+      "identityStatus": "VERIFIED_BY_TEST",
+      "identityDetail": "2327 of 2327 files matched the official Git tree with zero missing, extra, or mismatched files.",
+      "evidence": [
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11",
+          "file": "SharedVersion.cs",
+          "symbol": "AssemblyVersion/FileVersion",
+          "lines": "3-4",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Server official Git tree",
+          "version": "1fbd8739292cce610231be93daf43368733edf63",
+          "file": "recursive tree/blob comparison",
+          "symbol": "whole tree",
+          "lines": "not applicable",
+          "status": "VERIFIED_BY_TEST"
+        }
+      ],
+      "chapterRefs": [
+        "00-README.md"
+      ]
+    },
+    "ptvWeb": {
+      "version": "0.5.57",
+      "versionAuthority": "ptv-version.json",
+      "worktreeState": "dirty",
+      "identityStatus": "VERIFIED_FROM_SOURCE",
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "ptv-version.json",
+          "symbol": "version",
+          "lines": "2",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ],
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md"
+      ]
+    },
+    "ptvPlugin": {
+      "version": "0.5.16.0",
+      "targetFramework": "net9.0",
+      "jellyfinPackageVersion": "10.11.11",
+      "identityStatus": "VERIFIED_FROM_SOURCE",
+      "evidence": [
+        {
+          "repository": "PTV Plugin embedded source",
+          "version": "0.5.16.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj",
+          "symbol": "TargetFramework/Version/PackageReference",
+          "lines": "4, 9-20",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ],
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "24-stock-api-contract-reference.md"
+      ]
+    }
+  },
+  "components": {
+    "jellyfinServerHost": {
+      "repository": "Jellyfin Server",
+      "kind": "authoritative server process",
+      "responsibilities": [
+        "host boot and dependency injection",
+        "HTTP middleware and controller composition",
+        "plugin service registration"
+      ],
+      "systemRefs": [
+        "applicationStartup",
+        "authenticationAndSession"
+      ],
+      "chapterRefs": [
+        "01-system-overview.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.applicationStartup.evidence[0]",
+        "$.systems.permissionsAndLibraryAccess.evidence[0]"
+      ]
+    },
+    "jellyfinWebBootstrap": {
+      "repository": "Jellyfin Web",
+      "kind": "browser bootstrap and connection composition",
+      "responsibilities": [
+        "initialize host and server connection",
+        "render root application",
+        "start platform/navigation features"
+      ],
+      "systemRefs": [
+        "applicationStartup",
+        "authenticationAndSession"
+      ],
+      "chapterRefs": [
+        "01-system-overview.md",
+        "02-startup-session-auth.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.applicationStartup.evidence[1]",
+        "$.systems.authenticationAndSession.evidence[0]"
+      ]
+    },
+    "jellyfinWebRouting": {
+      "repository": "Jellyfin Web",
+      "kind": "route and compatibility lifecycle",
+      "responsibilities": [
+        "hash route ownership",
+        "authentication/admin UX gate",
+        "modern and legacy page composition"
+      ],
+      "systemRefs": [
+        "routingAndViewLifecycle"
+      ],
+      "chapterRefs": [
+        "03-routing-navigation-lifecycle.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.routingAndViewLifecycle.evidence[0]",
+        "$.systems.routingAndViewLifecycle.evidence[1]",
+        "$.routes.stock.evidence[1]"
+      ]
+    },
+    "jellyfinAuthorization": {
+      "repository": "Jellyfin Server",
+      "kind": "security authority",
+      "responsibilities": [
+        "authenticate request principal",
+        "apply policies",
+        "filter user-visible library and item data"
+      ],
+      "systemRefs": [
+        "authenticationAndSession",
+        "permissionsAndLibraryAccess"
+      ],
+      "chapterRefs": [
+        "04-user-permissions-library-access.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.authenticationAndSession.evidence[1]",
+        "$.systems.permissionsAndLibraryAccess.evidence[0]"
+      ]
+    },
+    "jellyfinDtoProjection": {
+      "repository": "Jellyfin Server",
+      "kind": "derived item projection",
+      "responsibilities": [
+        "attach requested item fields",
+        "attach relationship/image/UserData projections under DtoOptions"
+      ],
+      "systemRefs": [
+        "libraryAndItemProjection"
+      ],
+      "chapterRefs": [
+        "05-library-item-relationships.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.libraryAndItemProjection.evidence[0]"
+      ]
+    },
+    "jellyfinImageDelivery": {
+      "repository": "Jellyfin Server",
+      "kind": "artwork authority and HTTP delivery",
+      "responsibilities": [
+        "serve item images",
+        "apply image cache identity and transforms"
+      ],
+      "systemRefs": [
+        "images"
+      ],
+      "chapterRefs": [
+        "12-images-artwork-cache.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.images.evidence[1]"
+      ]
+    },
+    "jellyfinPlaybackServices": {
+      "repository": "Jellyfin Server",
+      "kind": "playback negotiation, delivery and session authority",
+      "responsibilities": [
+        "negotiate PlaybackInfo",
+        "serve direct/direct-stream/transcode media",
+        "record session playback reports"
+      ],
+      "systemRefs": [
+        "playback"
+      ],
+      "chapterRefs": [
+        "14-playback-session-transcoding.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.playback.evidence[0]"
+      ]
+    },
+    "ptvCoreAndShell": {
+      "repository": "PTV Web",
+      "kind": "stock extension and native route shell",
+      "responsibilities": [
+        "initialize PTV runtime modules",
+        "classify and coordinate native/enhanced/fallback routes from canonical browser URL state rather than presentation state",
+        "publish route generation state",
+        "own immutable PTV route-family lifetimes and terminal retirement"
+      ],
+      "systemRefs": [
+        "applicationStartup",
+        "routingAndViewLifecycle"
+      ],
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidenceRefs": [
+        "$.ptvOverrides.bootstrapAndCoreRuntime.evidence[1]",
+        "$.ptvOverrides.routing.evidence[0]"
+      ]
+    },
+    "ptvRequestCoordinator": {
+      "repository": "PTV Web",
+      "kind": "request coalescing/cache observer",
+      "responsibilities": [
+        "key transport by method, identity and URL",
+        "share in-flight transport across consumers",
+        "retire unowned or invalidated work",
+        "preserve independent consumer leases and abort the final-consumer transport once",
+        "reject ignored-abort stale completions before reuse or publication"
+      ],
+      "systemRefs": [
+        "cacheAndInvalidation"
+      ],
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidenceRefs": [
+        "$.ptvOverrides.requestCoordination.evidence[0]"
+      ]
+    },
+    "ptvMusic": {
+      "repository": "PTV Web",
+      "kind": "native PTV system",
+      "responsibilities": [
+        "music discovery and relationship reconciliation",
+        "Music Identify adoption",
+        "native audio queue and playback view state"
+      ],
+      "systemRefs": [
+        "music",
+        "playback"
+      ],
+      "chapterRefs": [
+        "10-music.md",
+        "20-ptv-vs-stock-map.md"
+      ],
+      "evidenceRefs": [
+        "$.ptvOverrides.music.evidence[0]",
+        "$.ptvOverrides.music.evidence[1]"
+      ]
+    },
+    "ptvReading": {
+      "repository": "PTV Web",
+      "kind": "native PTV system",
+      "responsibilities": [
+        "Reading page and reader lifecycle",
+        "local reader progress/bookmark persistence"
+      ],
+      "systemRefs": [
+        "reading"
+      ],
+      "chapterRefs": [
+        "11-reading.md",
+        "20-ptv-vs-stock-map.md"
+      ],
+      "evidenceRefs": [
+        "$.ptvOverrides.reading.evidence[0]",
+        "$.ptvOverrides.reading.evidence[1]"
+      ]
+    },
+    "ptvPlugin": {
+      "repository": "PTV Plugin embedded source",
+      "kind": "Jellyfin plugin and PTV API contract",
+      "responsibilities": [
+        "register PTV services, scheduled and hosted workers",
+        "serve authenticated PTV API routes",
+        "reuse Jellyfin identity/library/configuration authorities where applicable"
+      ],
+      "systemRefs": [
+        "permissionsAndLibraryAccess",
+        "libraryAndItemProjection"
+      ],
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidenceRefs": [
+        "$.ptvOverrides.pluginApi.evidence[0]",
+        "$.ptvOverrides.pluginApi.evidence[1]"
+      ]
+    }
+  },
+  "systems": {
+    "applicationStartup": {
+      "authoritativeOwners": [
+        "Jellyfin Server Program/ApplicationHost for server process",
+        "Jellyfin Web index/connection bootstrap for browser process"
+      ],
+      "dependsOn": [
+        "configuration",
+        "dependencyInjection",
+        "serverConnection",
+        "authentication",
+        "routing"
+      ],
+      "chapterRefs": [
+        "01-system-overview.md",
+        "02-startup-session-auth.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Jellyfin.Server/Program.cs",
+          "symbol": "StartServer",
+          "lines": "136-152,157-238",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/index.jsx",
+          "symbol": "module initialization/startup sequence",
+          "lines": "1-125",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "authenticationAndSession": {
+      "authoritativeOwners": [
+        "Jellyfin Server authentication/authorization pipeline for request identity",
+        "Jellyfin Web ConnectionManager/Credentials for browser session material"
+      ],
+      "dependsOn": [
+        "serverConnection",
+        "deviceIdentity",
+        "userPolicy",
+        "cacheIdentity"
+      ],
+      "invalidatedBy": [
+        "logout",
+        "token rejection",
+        "server switch",
+        "user switch"
+      ],
+      "chapterRefs": [
+        "02-startup-session-auth.md",
+        "04-user-permissions-library-access.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/lib/jellyfin-apiclient/connectionManager.js",
+          "symbol": "saved-server selection/token validation/connection completion",
+          "lines": "78-128,204-258,424-628",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Jellyfin.Server/Startup.cs",
+          "symbol": "Configure authentication and authorization middleware",
+          "lines": "208-227",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "routingAndViewLifecycle": {
+      "authoritativeOwners": [
+        "React Router hash history for browser URL",
+        "legacy ViewManager for legacy view instances"
+      ],
+      "derivedOwners": [
+        "modern Page lifecycle events",
+        "dialog history tokens",
+        "header/navigation observers"
+      ],
+      "dependsOn": [
+        "authenticationAndSession",
+        "routeAccessGate",
+        "asyncWorkRetirement"
+      ],
+      "chapterRefs": [
+        "03-routing-navigation-lifecycle.md",
+        "19-failure-race-lifecycle.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/RootAppRouter.tsx",
+          "symbol": "createHashRouter/RootAppRouter",
+          "lines": "21-65",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/components/viewManager/viewManager.js",
+          "symbol": "view cache/show-hide-destroy lifecycle",
+          "lines": "8-65,101-145",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "permissionsAndLibraryAccess": {
+      "authoritativeOwners": [
+        "Jellyfin Server authenticated user policy",
+        "Jellyfin Server user-aware library/item query path"
+      ],
+      "derivedOwners": [
+        "Web route and feature gates"
+      ],
+      "securityRule": "Client visibility is not the authorization boundary; sensitive HTTP payloads must be filtered server-side.",
+      "chapterRefs": [
+        "04-user-permissions-library-access.md",
+        "05-library-item-relationships.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Jellyfin.Server/Startup.cs",
+          "symbol": "Configure middleware ordering",
+          "lines": "145-234",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/components/ConnectionRequired.tsx",
+          "symbol": "route access checks",
+          "lines": "53-226",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "libraryAndItemProjection": {
+      "authoritativeOwners": [
+        "Jellyfin Server entities/repositories and library managers"
+      ],
+      "derivedOwners": [
+        "DtoService request/user-specific projections",
+        "Web list/detail/card projections"
+      ],
+      "dependsOn": [
+        "permissionsAndLibraryAccess",
+        "DtoOptions",
+        "requested fields",
+        "requested image limits"
+      ],
+      "nonGuarantee": "One DTO response is not guaranteed to contain every relationship or field needed by another view.",
+      "chapterRefs": [
+        "05-library-item-relationships.md",
+        "07-cards-and-item-state.md",
+        "08-details-seasons-episodes.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Emby.Server.Implementations/Dto/DtoService.cs",
+          "symbol": "AttachBasicFields/relationship attachment",
+          "lines": "818-882,1010-1097",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/hooks/useFetchItems.ts",
+          "symbol": "fetchGetItems",
+          "lines": "35-71",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "home": {
+      "authoritativeOwners": [
+        "Jellyfin Server user-scoped query results",
+        "Jellyfin user Home-section preferences"
+      ],
+      "viewOwners": [
+        "stock Home controllers/components"
+      ],
+      "dependsOn": [
+        "permissionsAndLibraryAccess",
+        "userViews",
+        "libraryAndItemProjection",
+        "images",
+        "cacheAndInvalidation"
+      ],
+      "chapterRefs": [
+        "06-home-data-flow.md",
+        "20-ptv-vs-stock-map.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/controllers/home.js",
+          "symbol": "Home initialization/refresh lifecycle",
+          "lines": "27-61",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "cardsAndDetails": {
+      "viewOwners": [
+        "legacy card builder",
+        "React Card",
+        "Details page/controllers"
+      ],
+      "dependsOn": [
+        "libraryAndItemProjection",
+        "images",
+        "userData",
+        "playback",
+        "routingAndViewLifecycle"
+      ],
+      "chapterRefs": [
+        "07-cards-and-item-state.md",
+        "08-details-seasons-episodes.md",
+        "12-images-artwork-cache.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/components/cardbuilder/Card/useCardImageUrl.ts",
+          "symbol": "card image selection",
+          "lines": "156-290",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "search": {
+      "viewOwners": [
+        "search input/controller and result views"
+      ],
+      "dependsOn": [
+        "permissionsAndLibraryAccess",
+        "libraryAndItemProjection",
+        "requestCancellation",
+        "routingAndViewLifecycle"
+      ],
+      "chapterRefs": [
+        "09-search.md",
+        "19-failure-race-lifecycle.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/apps/stable/routes/search.tsx",
+          "symbol": "Search",
+          "lines": "13-41",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "music": {
+      "authoritativeOwners": [
+        "Jellyfin Server music entities and item relationships"
+      ],
+      "derivedOwners": [
+        "album/artist/track projections",
+        "Web playback queue and Now Playing views"
+      ],
+      "dependsOn": [
+        "libraryAndItemProjection",
+        "AlbumId and AlbumIds relationship queries",
+        "images",
+        "metadataIdentify",
+        "playback"
+      ],
+      "chapterRefs": [
+        "05-library-item-relationships.md",
+        "10-music.md",
+        "13-metadata-identify.md",
+        "14-playback-session-transcoding.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/controllers/music/musicalbums.js",
+          "symbol": "album controller/view lifecycle",
+          "lines": "31-110",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "reading": {
+      "authoritativeOwners": [
+        "Jellyfin Server book item/file metadata"
+      ],
+      "viewOwners": [
+        "stock book details/download/open behavior"
+      ],
+      "dependsOn": [
+        "libraryAndItemProjection",
+        "images",
+        "metadataIdentify",
+        "routingAndViewLifecycle"
+      ],
+      "chapterRefs": [
+        "11-reading.md",
+        "20-ptv-vs-stock-map.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/plugins/bookPlayer/plugin.js",
+          "symbol": "BookPlayer/setCurrentSrc/canPlayItem",
+          "lines": "29-60,99-115,327-349,390-395",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "images": {
+      "authoritativeOwners": [
+        "Jellyfin Server item/image storage and ImageController delivery"
+      ],
+      "derivedOwners": [
+        "DTO ImageTags/parent image data",
+        "Web image resolver and lazy-load state",
+        "browser HTTP cache"
+      ],
+      "cacheIdentity": [
+        "owner item ID",
+        "image type",
+        "image index",
+        "cache tag",
+        "transform parameters"
+      ],
+      "chapterRefs": [
+        "07-cards-and-item-state.md",
+        "12-images-artwork-cache.md",
+        "16-caching-invalidation.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/components/cardbuilder/Card/useCardImageUrl.ts",
+          "symbol": "useCardImageUrl",
+          "lines": "156-290",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Jellyfin.Api/Controllers/ImageController.cs",
+          "symbol": "image response/cache delivery",
+          "lines": "1819-1916,1992-2048",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "metadataIdentify": {
+      "authoritativeOwners": [
+        "Jellyfin Server metadata/provider pipeline and persisted item state"
+      ],
+      "viewOwners": [
+        "Web provider-search and apply dialog"
+      ],
+      "completionRule": "Apply acknowledgment does not itself guarantee that every metadata, relationship, image, cache, and view projection has converged.",
+      "dependsOn": [
+        "provider search",
+        "metadata mutation",
+        "image mutation",
+        "authoritative readback",
+        "cacheAndInvalidation"
+      ],
+      "chapterRefs": [
+        "13-metadata-identify.md",
+        "24-stock-api-contract-reference.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Jellyfin.Api/Controllers/ItemLookupController.cs",
+          "symbol": "ApplySearchCriteria",
+          "lines": "244-280",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/components/itemidentifier/itemidentifier.js",
+          "symbol": "submitIdentficationResult",
+          "lines": "258-282",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "playback": {
+      "authoritativeOwners": [
+        "Jellyfin Server playback-info, session and encoding services",
+        "active Web player for client media-element state"
+      ],
+      "derivedOwners": [
+        "queue",
+        "controls",
+        "Now Playing view",
+        "remote session observers"
+      ],
+      "dependsOn": [
+        "media source selection",
+        "device profile",
+        "stream delivery",
+        "session reporting",
+        "webSocketEvents"
+      ],
+      "chapterRefs": [
+        "10-music.md",
+        "14-playback-session-transcoding.md",
+        "17-websocket-events.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Jellyfin.Api/Controllers/MediaInfoController.cs",
+          "symbol": "playback-info GET/POST and live-source actions",
+          "lines": "64-248,251-319",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "settingsAndAdmin": {
+      "authoritativeOwners": [
+        "Jellyfin Server configuration managers/documents and admin controllers"
+      ],
+      "derivedOwners": [
+        "dashboard forms",
+        "query/form baselines"
+      ],
+      "dependsOn": [
+        "administrator policy",
+        "configuration read",
+        "mutation acknowledgment",
+        "authoritative readback",
+        "cacheAndInvalidation"
+      ],
+      "chapterRefs": [
+        "15-settings-admin-mutations.md",
+        "16-caching-invalidation.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Jellyfin.Api/Controllers/ConfigurationController.cs",
+          "symbol": "configuration read/write/branding actions",
+          "lines": "23-162",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "cacheAndInvalidation": {
+      "cacheOwners": [
+        "TanStack QueryClient",
+        "legacy view/controller state",
+        "browser image cache",
+        "connection/session persistence"
+      ],
+      "retiredBy": [
+        "owner-specific mutation invalidation",
+        "route/view teardown",
+        "logout/user switch",
+        "new image tag",
+        "new build/service-worker generation"
+      ],
+      "nonGuarantee": "No single stock cache manager owns all React, legacy, image, session, and service-worker state.",
+      "chapterRefs": [
+        "16-caching-invalidation.md",
+        "18-build-service-worker-assets.md",
+        "19-failure-race-lifecycle.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/utils/query/queryClient.ts",
+          "symbol": "QueryClient",
+          "lines": "1-12",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/utils/dashboard.js",
+          "symbol": "logout",
+          "lines": "104-111",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "webSocketEvents": {
+      "authoritativeOwners": [
+        "Jellyfin Server WebSocket/session managers for emitted state",
+        "Web ApiClient connection for browser transport"
+      ],
+      "derivedOwners": [
+        "feature-specific event listeners and cache invalidators"
+      ],
+      "dependsOn": [
+        "authenticationAndSession",
+        "server availability",
+        "reconnect lifecycle",
+        "subscriber cleanup"
+      ],
+      "chapterRefs": [
+        "17-websocket-events.md",
+        "19-failure-race-lifecycle.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Server",
+          "version": "10.11.11@1fbd873",
+          "file": "Jellyfin.Api/Middleware/WebSocketHandlerMiddleware.cs",
+          "symbol": "Invoke",
+          "lines": "29-38",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "buildServiceWorkerAssets": {
+      "authoritativeOwners": [
+        "Webpack build output for asset generation",
+        "active browser service worker for controlled cache generation"
+      ],
+      "dependsOn": [
+        "chunk identity",
+        "deployment atomicity",
+        "service-worker activation",
+        "browser cache"
+      ],
+      "chapterRefs": [
+        "18-build-service-worker-assets.md",
+        "19-failure-race-lifecycle.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "webpack.common.js",
+          "symbol": "entry/output/chunk configuration",
+          "lines": "35-55,122-145",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    }
+  },
+  "owners": {
+    "configuredHomePresentation": {
+      "authoritativeOwner": "PTV Plugin configuration issuer and trusted generated store binding, observed through an explicit final protected status read",
+      "recoveryOwner": "PtvFeaturedContentRefreshService existing semaphore and hosted scheduler; missing current generation/document binding triggers normal regeneration independently of content TTL, with a bounded missing-trust retry and replaceable schedule wakeup",
+      "recoveryEvidenceRef": "$.ptvOverrides.configuredHomePresentation.evidence[3]",
+      "derivedOwners": [
+        "configuredRowFreshness single active server/user proof and local revision",
+        "Native Home current/last-good rows and derived Hero presentation",
+        "Native Home focused/pending/active preview state",
+        "legacy Home generic-only HTML restore"
+      ],
+      "invalidation": [
+        "observed authority mismatch or uncertainty; ordinary observations never promote",
+        "configuration mutation, connection uncertainty, route or authenticated identity retirement"
+      ],
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md",
+        "23-before-you-modify-checklists.md"
+      ],
+      "evidenceRefs": [
+        "$.ptvOverrides.configuredHomePresentation.evidence[0]",
+        "$.ptvOverrides.configuredHomePresentation.evidence[1]"
+      ]
+    },
+    "authenticatedPrincipal": {
+      "authoritativeOwner": "Jellyfin Server authentication context",
+      "creator": "authentication middleware",
+      "readers": [
+        "authorized controllers",
+        "user-aware managers"
+      ],
+      "writers": [
+        "authentication/session endpoints"
+      ],
+      "cacheOwners": [
+        "Web ConnectionManager/Credentials for client token material"
+      ],
+      "cleanup": [
+        "logout",
+        "token rejection",
+        "server/user switch"
+      ],
+      "chapterRefs": [
+        "02-startup-session-auth.md",
+        "04-user-permissions-library-access.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.authenticationAndSession.evidence[0]",
+        "$.systems.authenticationAndSession.evidence[1]"
+      ]
+    },
+    "userPermissions": {
+      "authoritativeOwner": "Jellyfin Server User policy and library/item access path",
+      "readers": [
+        "Server controllers/managers",
+        "Web feature gates as non-authoritative views"
+      ],
+      "cleanup": [
+        "user-scoped refetch",
+        "logout/user switch"
+      ],
+      "chapterRefs": [
+        "04-user-permissions-library-access.md",
+        "05-library-item-relationships.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.permissionsAndLibraryAccess.evidence[0]",
+        "$.systems.libraryAndItemProjection.evidence[0]"
+      ]
+    },
+    "route": {
+      "authoritativeOwner": "React Router hash history",
+      "derivedOwners": [
+        "legacy AppRouter bridge",
+        "view manager",
+        "dialog history state"
+      ],
+      "observers": [
+        "header/navigation",
+        "page lifecycle listeners"
+      ],
+      "cleanup": [
+        "route transition",
+        "view destroy",
+        "dialog close/back"
+      ],
+      "chapterRefs": [
+        "03-routing-navigation-lifecycle.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.routingAndViewLifecycle.evidence[0]",
+        "$.systems.routingAndViewLifecycle.evidence[1]"
+      ]
+    },
+    "itemMetadata": {
+      "authoritativeOwner": "Jellyfin Server persisted item/domain state",
+      "derivedOwners": [
+        "DtoService projections",
+        "Web route/list/detail/card state"
+      ],
+      "writers": [
+        "metadata update and provider refresh endpoints",
+        "library scans"
+      ],
+      "invalidation": [
+        "authoritative readback",
+        "item events",
+        "query/view refresh"
+      ],
+      "chapterRefs": [
+        "05-library-item-relationships.md",
+        "13-metadata-identify.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.libraryAndItemProjection.evidence[0]",
+        "$.systems.metadataIdentify.evidence[0]"
+      ]
+    },
+    "artwork": {
+      "authoritativeOwner": "Jellyfin Server image storage/item image data",
+      "derivedOwners": [
+        "DTO image tags",
+        "Web image resolvers",
+        "browser cache"
+      ],
+      "writers": [
+        "image upload/delete/provider image operations",
+        "metadata providers/scans"
+      ],
+      "invalidation": [
+        "new image tag",
+        "new URL transform identity",
+        "browser cache policy"
+      ],
+      "chapterRefs": [
+        "12-images-artwork-cache.md",
+        "13-metadata-identify.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.images.evidence[0]",
+        "$.systems.images.evidence[1]",
+        "$.systems.metadataIdentify.evidence[0]"
+      ]
+    },
+    "playbackState": {
+      "authoritativeOwner": "split: Jellyfin Server session/media-source state and active Web player media-element state",
+      "derivedOwners": [
+        "queue",
+        "controls",
+        "Now Playing",
+        "remote-session observers"
+      ],
+      "writers": [
+        "play/pause/seek/stop",
+        "playback progress/stop reports",
+        "session commands"
+      ],
+      "cleanup": [
+        "player stop/teardown",
+        "session end",
+        "route-specific teardown where applicable"
+      ],
+      "chapterRefs": [
+        "14-playback-session-transcoding.md",
+        "17-websocket-events.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.playback.evidence[0]",
+        "$.systems.webSocketEvents.evidence[0]"
+      ]
+    },
+    "configurationDocument": {
+      "authoritativeOwner": "Jellyfin Server configuration manager/document",
+      "derivedOwners": [
+        "dashboard form and comparison baseline"
+      ],
+      "writers": [
+        "authorized configuration endpoints"
+      ],
+      "invalidation": [
+        "save acknowledgment followed by reload/readback",
+        "configuration events where implemented"
+      ],
+      "chapterRefs": [
+        "15-settings-admin-mutations.md",
+        "16-caching-invalidation.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.settingsAndAdmin.evidence[0]",
+        "$.systems.cacheAndInvalidation.evidence[0]"
+      ]
+    },
+    "builtAssetGeneration": {
+      "authoritativeOwner": "deployed Web build output",
+      "derivedOwners": [
+        "service-worker cache",
+        "browser HTTP cache",
+        "open document/chunk graph"
+      ],
+      "cleanup": [
+        "service-worker generation activation/retirement",
+        "browser reload/update flow"
+      ],
+      "chapterRefs": [
+        "18-build-service-worker-assets.md"
+      ],
+      "evidenceRefs": [
+        "$.systems.buildServiceWorkerAssets.evidence[0]"
+      ]
+    }
+  },
+  "dependencies": {
+    "edges": [
+      {
+        "from": "settingsAndAdmin",
+        "to": "home",
+        "reason": "Configured presentation requires an explicit point-in-time final status proof after settings and Featured inputs; observed retirement fences derived rows and previews.",
+        "evidenceRefs": [
+          "$.ptvOverrides.configuredHomePresentation.evidence[0]",
+          "$.ptvOverrides.configuredHomePresentation.evidence[1]"
+        ]
+      },
+      {
+        "from": "authenticationAndSession",
+        "to": "permissionsAndLibraryAccess",
+        "reason": "The authenticated request principal selects policy and user-scoped data.",
+        "evidenceRefs": [
+          "$.systems.authenticationAndSession.evidence[1]",
+          "$.systems.permissionsAndLibraryAccess.evidence[0]"
+        ]
+      },
+      {
+        "from": "permissionsAndLibraryAccess",
+        "to": "libraryAndItemProjection",
+        "reason": "Visible items and DTOs are user-aware.",
+        "evidenceRefs": [
+          "$.systems.permissionsAndLibraryAccess.evidence[0]",
+          "$.systems.libraryAndItemProjection.evidence[0]"
+        ]
+      },
+      {
+        "from": "libraryAndItemProjection",
+        "to": "home",
+        "reason": "Home rows consume user-scoped item projections.",
+        "evidenceRefs": [
+          "$.systems.home.evidence[0]",
+          "$.systems.libraryAndItemProjection.evidence[1]"
+        ]
+      },
+      {
+        "from": "libraryAndItemProjection",
+        "to": "cardsAndDetails",
+        "reason": "Cards and Details render different projections of item state.",
+        "evidenceRefs": [
+          "$.systems.libraryAndItemProjection.evidence[0]",
+          "$.systems.cardsAndDetails.evidence[0]"
+        ]
+      },
+      {
+        "from": "libraryAndItemProjection",
+        "to": "music",
+        "reason": "Music album, artist, track and parent/child relationships are item-query projections.",
+        "evidenceRefs": [
+          "$.systems.libraryAndItemProjection.evidence[0]",
+          "$.systems.music.evidence[0]"
+        ]
+      },
+      {
+        "from": "metadataIdentify",
+        "to": "libraryAndItemProjection",
+        "reason": "Identify mutates server state; later reads project the result.",
+        "evidenceRefs": [
+          "$.systems.metadataIdentify.evidence[0]",
+          "$.systems.metadataIdentify.evidence[1]",
+          "$.systems.libraryAndItemProjection.evidence[0]"
+        ]
+      },
+      {
+        "from": "metadataIdentify",
+        "to": "images",
+        "reason": "Identify can trigger separate artwork mutation and cache-tag changes.",
+        "evidenceRefs": [
+          "$.systems.metadataIdentify.evidence[0]",
+          "$.systems.images.evidence[1]"
+        ]
+      },
+      {
+        "from": "images",
+        "to": "home",
+        "reason": "Home cards and hero surfaces consume resolved image identities.",
+        "evidenceRefs": [
+          "$.systems.images.evidence[0]",
+          "$.systems.home.evidence[0]"
+        ]
+      },
+      {
+        "from": "images",
+        "to": "cardsAndDetails",
+        "reason": "Cards and Details use image tags, parent fallbacks and browser cache.",
+        "evidenceRefs": [
+          "$.systems.images.evidence[0]",
+          "$.systems.cardsAndDetails.evidence[0]"
+        ]
+      },
+      {
+        "from": "routingAndViewLifecycle",
+        "to": "cacheAndInvalidation",
+        "reason": "Navigation/unmount determines which async results and view caches remain valid.",
+        "evidenceRefs": [
+          "$.systems.routingAndViewLifecycle.evidence[1]",
+          "$.systems.cacheAndInvalidation.evidence[0]"
+        ]
+      },
+      {
+        "from": "webSocketEvents",
+        "to": "cacheAndInvalidation",
+        "reason": "Feature observers translate selected server events into local refresh/invalidation.",
+        "evidenceRefs": [
+          "$.systems.webSocketEvents.evidence[0]"
+        ]
+      },
+      {
+        "from": "playback",
+        "to": "webSocketEvents",
+        "reason": "Session updates and remote commands use the event/session channel.",
+        "evidenceRefs": [
+          "$.systems.playback.evidence[0]",
+          "$.systems.webSocketEvents.evidence[0]"
+        ]
+      },
+      {
+        "from": "buildServiceWorkerAssets",
+        "to": "routingAndViewLifecycle",
+        "reason": "A loaded document and its lazy chunks must belong to a compatible asset generation.",
+        "evidenceRefs": [
+          "$.systems.buildServiceWorkerAssets.evidence[0]"
+        ]
+      }
+    ],
+    "hotspots": {
+      "itemAdoption": {
+        "affectedSystems": [
+          "libraryAndItemProjection",
+          "cardsAndDetails",
+          "music",
+          "images",
+          "metadataIdentify",
+          "playback",
+          "cacheAndInvalidation"
+        ],
+        "chapterRefs": [
+          "05-library-item-relationships.md",
+          "10-music.md",
+          "13-metadata-identify.md",
+          "22-change-impact-matrix.md"
+        ]
+      },
+      "userViewsAndDiscovery": {
+        "affectedSystems": [
+          "permissionsAndLibraryAccess",
+          "libraryAndItemProjection",
+          "home",
+          "search",
+          "music",
+          "reading"
+        ],
+        "chapterRefs": [
+          "04-user-permissions-library-access.md",
+          "05-library-item-relationships.md",
+          "06-home-data-flow.md",
+          "22-change-impact-matrix.md"
+        ]
+      },
+      "routeTeardown": {
+        "affectedSystems": [
+          "routingAndViewLifecycle",
+          "search",
+          "reading",
+          "playback",
+          "webSocketEvents",
+          "cacheAndInvalidation"
+        ],
+        "chapterRefs": [
+          "03-routing-navigation-lifecycle.md",
+          "19-failure-race-lifecycle.md",
+          "21-ownership-conflicts.md"
+        ]
+      },
+      "configurationMutation": {
+        "affectedSystems": [
+          "settingsAndAdmin",
+          "cacheAndInvalidation",
+          "permissionsAndLibraryAccess",
+          "libraryAndItemProjection"
+        ],
+        "chapterRefs": [
+          "15-settings-admin-mutations.md",
+          "16-caching-invalidation.md",
+          "22-change-impact-matrix.md"
+        ]
+      }
+    }
+  },
+  "mutations": {
+    "identifyApply": {
+      "authority": "Jellyfin Server ItemLookupController/provider pipeline",
+      "acknowledgment": "HTTP completion acknowledges the apply operation, not universal client convergence.",
+      "requiredReconciliation": [
+        "authoritative item readback",
+        "relationship preservation for omitted fields",
+        "image tag/readback handling",
+        "owner-specific cache invalidation",
+        "stale-generation rejection"
+      ],
+      "chapterRefs": [
+        "13-metadata-identify.md",
+        "19-failure-race-lifecycle.md",
+        "22-change-impact-matrix.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ]
+    },
+    "userData": {
+      "authority": "Jellyfin Server user item data",
+      "examples": [
+        "favorite",
+        "played state",
+        "playback position"
+      ],
+      "requiredReconciliation": [
+        "user-scoped invalidation",
+        "card/details state update",
+        "event/refetch convergence"
+      ],
+      "chapterRefs": [
+        "05-library-item-relationships.md",
+        "07-cards-and-item-state.md",
+        "16-caching-invalidation.md"
+      ]
+    },
+    "configurationSave": {
+      "authority": "Jellyfin Server configuration manager/document",
+      "requiredReconciliation": [
+        "terminal mutation state",
+        "authoritative reload/readback",
+        "new form baseline",
+        "dirty-state and route-blocker cleanup"
+      ],
+      "chapterRefs": [
+        "15-settings-admin-mutations.md",
+        "16-caching-invalidation.md",
+        "19-failure-race-lifecycle.md"
+      ]
+    },
+    "libraryRefresh": {
+      "authority": "Jellyfin Server library/refresh task mechanisms",
+      "completionRule": "An accepted asynchronous refresh start is not proof of completion.",
+      "chapterRefs": [
+        "05-library-item-relationships.md",
+        "15-settings-admin-mutations.md",
+        "24-stock-api-contract-reference.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ]
+    },
+    "playbackReports": {
+      "authority": "Jellyfin Server session manager consumes start/progress/stopped reports",
+      "requiredReconciliation": [
+        "active player state",
+        "session state",
+        "UserData progress",
+        "WebSocket/observer updates"
+      ],
+      "chapterRefs": [
+        "14-playback-session-transcoding.md",
+        "17-websocket-events.md",
+        "24-stock-api-contract-reference.md"
+      ]
+    }
+  },
+  "routes": {
+    "stock": {
+      "urlOwner": "React Router hash history",
+      "routeFamilies": [
+        "stable",
+        "experimental",
+        "legacy ViewManagerPage bridges"
+      ],
+      "accessGate": "ConnectionRequired",
+      "chapterRefs": [
+        "03-routing-navigation-lifecycle.md"
+      ],
+      "evidence": [
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/RootAppRouter.tsx",
+          "symbol": "route composition",
+          "lines": "21-65",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "Jellyfin Web",
+          "version": "10.11.11@35c0793",
+          "file": "src/components/ConnectionRequired.tsx",
+          "symbol": "route access gate",
+          "lines": "53-226",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "ptv": {
+      "urlOwner": "stock-derived React Router hash history with PTV route registrations and route-generation controller",
+      "ptvOwners": [
+        "src/apps/stable/routes PTV component mappings",
+        "src/ptv/shell/routeController.ts native/enhanced/fallback ownership",
+        "src/ptv/modules/index.js route observers"
+      ],
+      "conflictClass": "INTENTIONAL_WRAPPER",
+      "risk": "HIGH",
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/shell/routeController.ts",
+          "symbol": "registerNativeRoute/resolveRouteController/registerRouteObservers",
+          "lines": "78-134,217-290,538-639",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    }
+  },
+  "apiContracts": {
+    "authentication": {
+      "authority": "Jellyfin Server authenticated request pipeline",
+      "completion": "A usable client session requires a valid current connection/user, not only stored credentials.",
+      "chapterRefs": [
+        "02-startup-session-auth.md",
+        "04-user-permissions-library-access.md",
+        "24-stock-api-contract-reference.md"
+      ]
+    },
+    "items": {
+      "authority": "Jellyfin Server Items/user-aware query controllers and DtoService",
+      "projectionRule": "Fields, images, relationships and UserData depend on endpoint, DtoOptions and user context.",
+      "chapterRefs": [
+        "05-library-item-relationships.md",
+        "24-stock-api-contract-reference.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ]
+    },
+    "persistedRecommendations": {
+      "authority": "Jellyfin 10.11.11 IUserManager and ILibraryManager.GetItemById<BaseItem>(Guid, User)",
+      "responseOwner": "PtvRecommendationController.GetPersistedRecommendations",
+      "route": "GET /Ptv/v1/recommendations",
+      "version": "Plugin 0.5.18.0 isolated derivative; frozen Web 0.5.57",
+      "classification": "STOCK_WRAPPED",
+      "securityRule": "Resolve the authenticated actual user and validate requested scope before projecting shared candidates. Missing/inaccessible/non-library items fail closed; no raw row-subject metadata or hidden-position scores survive serialization.",
+      "projectionRule": "Eager detached authorized-item projection, preserving survivor occurrence order and duplicates. Neutral row text, response-local ordinals after empty-row removal, and survivor-based scores; JSON schema unchanged.",
+      "lifetimeRule": "Per request, private/no-store, no shared allow/deny cache or filtered-state writeback. Existing configuration gate protects only the read snapshot; no item resolution runs under it. Next request rechecks current Jellyfin authority.",
+      "preservedOwners": ["v2 recommendation ranking", "Featured SEC-01", "configured-row issuer and startup refresh owner", "Web Home/settings/Rows/Featured paths"],
+      "implementationGate": "PASS_LOCAL",
+      "localValidation": "35/35 actual-controller serialized authorization cases; 17/17 existing recommendation cases; 629 full Plugin tests passed with two pre-existing opt-in performance skips in Debug and Release; 3778 repository tests passed; ten authorization repeats passed (350/350). Real hosted Jellyfin policy remains separately untested.",
+      "physicalValidationStatus": "NOT_RUN_SEPARATE_AUTHORIZATION_REQUIRED",
+      "deploymentStatus": "NOT_DEPLOYED",
+      "chapterRefs": ["04-user-permissions-library-access.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidence": [
+        {"repository":"PTV Plugin isolated derivative","version":"0.5.18.0","file":"src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvRecommendationController.cs","symbol":"GetPersistedRecommendations and ResolvePersistedRecommendationUser","status":"VERIFIED_FROM_SOURCE"},
+        {"repository":"PTV Plugin isolated derivative","version":"0.5.18.0","file":"src/ptv/plugin/Jellyfin.Plugin.PiggieTV.Tests/PtvPersistedRecommendationAuthorizationTests.cs","symbol":"Public-controller DI, serialized output and exact user-aware resolver assertions","status":"VERIFIED_FROM_SOURCE"}
+      ]
+    },
+    "images": {
+      "authority": "Jellyfin Server ImageController",
+      "identityInputs": [
+        "owner",
+        "type",
+        "index",
+        "tag",
+        "transform"
+      ],
+      "chapterRefs": [
+        "12-images-artwork-cache.md",
+        "24-stock-api-contract-reference.md"
+      ]
+    },
+    "identify": {
+      "authority": "Jellyfin Server ItemLookupController/provider pipeline",
+      "completion": "Mutation acknowledgment is distinct from final DTO/image/cache convergence.",
+      "chapterRefs": [
+        "13-metadata-identify.md",
+        "24-stock-api-contract-reference.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ]
+    },
+    "playback": {
+      "authority": "Jellyfin Server playback-info, media delivery and session endpoints",
+      "completion": "PlaybackInfo negotiation precedes direct/direct-stream/transcode delivery and periodic reporting.",
+      "chapterRefs": [
+        "14-playback-session-transcoding.md",
+        "24-stock-api-contract-reference.md"
+      ]
+    },
+    "ptvV1": {
+      "authority": "PTV Plugin authenticated controllers plus Jellyfin services used by each route",
+      "routeRegistry": "PtvApiRoutes",
+      "securityRule": "Plugin payload authorization must be complete before serialization; Web filtering is defense-in-depth only.",
+      "configuredPresentationCandidate": "Isolated PATCHED response-only currentPresentationAuthority {version:1,scope:hex64,generation:hex64} on protected status, administrator settings/rows and authorized Featured payload. Status atomically includes administrator-only exact configuredPresentationBindings. This is presentation provenance, not item authorization or a payload signature; absent trusted binding fails closed.",
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Plugin embedded source",
+          "version": "0.5.16.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvApiRoutes.cs",
+          "symbol": "v1/v2 and legacy route constants",
+          "lines": "6-116",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    }
+  },
+  "riskBoundaries": {
+    "configuredPresentationFreshness": {
+      "risk": "HIGH",
+      "rule": "Matching old Settings and Featured responses cannot self-validate CURRENT. Only an explicit protected status request initiated after both inputs, bypassing cached/pre-input in-flight results, can grant point-in-time CURRENT. Observed mismatch or uncertainty retires configured rows, last-good/HTML and derived previews; unobserved later remote changes are not a continuous-consistency guarantee. Fresh persisted content is not current-process trust: only normal generated persistence under a current captured generation can restore missing binding; bounded recovery must not bless old content, loop on reads, or change ordinary expiry cadence.",
+      "affected": [
+        "home",
+        "cacheAndInvalidation",
+        "settingsAndAdmin",
+        "webSocketEvents"
+      ],
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md",
+        "22-change-impact-matrix.md",
+        "23-before-you-modify-checklists.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ]
+    },
+    "serverAuthorizationVsWebVisibility": {
+      "risk": "CRITICAL",
+      "rule": "Do not expose a server-wide payload and rely on later Web filtering; after server-side projection, preserve the same immutable server+user security identity through every Web response cache, coalesced request, in-flight owner, dashboard/readback hydrator and publication generation. An authenticated per-user response must not fall through to another server root.",
+      "affected": [
+        "permissionsAndLibraryAccess",
+        "home",
+        "search",
+        "PTV Plugin endpoints and caches"
+      ],
+      "chapterRefs": [
+        "04-user-permissions-library-access.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md",
+        "24-stock-api-contract-reference.md"
+      ]
+    },
+    "sparseDtoReplacement": {
+      "risk": "CRITICAL",
+      "rule": "Do not replace a relationship-rich owner with a sparse mutation/readback DTO without explicit reconciliation.",
+      "affected": [
+        "music",
+        "cardsAndDetails",
+        "metadataIdentify",
+        "images",
+        "playback"
+      ],
+      "chapterRefs": [
+        "05-library-item-relationships.md",
+        "10-music.md",
+        "13-metadata-identify.md",
+        "22-change-impact-matrix.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ]
+    },
+    "dualRouteLifecycle": {
+      "risk": "HIGH",
+      "rule": "Use browser URL/hash as route identity authority; keep DOM/presentation state derived, and retire route-scoped async work and listeners across both React and legacy/PTV lifecycle owners.",
+      "affected": [
+        "routingAndViewLifecycle",
+        "search",
+        "home",
+        "reading",
+        "cardsAndDetails"
+      ],
+      "chapterRefs": [
+        "03-routing-navigation-lifecycle.md",
+        "19-failure-race-lifecycle.md",
+        "21-ownership-conflicts.md"
+      ]
+    },
+    "imageIdentityAndFailureCaches": {
+      "risk": "HIGH",
+      "rule": "Image fallback and failure suppression must preserve owner/type/index/tag/transform identity and have bounded retirement.",
+      "affected": [
+        "home",
+        "cardsAndDetails",
+        "music",
+        "reading",
+        "metadataIdentify"
+      ],
+      "chapterRefs": [
+        "12-images-artwork-cache.md",
+        "16-caching-invalidation.md",
+        "21-ownership-conflicts.md",
+        "22-change-impact-matrix.md"
+      ]
+    },
+    "mutationAcknowledgmentVsConvergence": {
+      "risk": "HIGH",
+      "rule": "A successful write must reach a terminal UI state, but optional refetch failure must not be misreported as total mutation failure.",
+      "affected": [
+        "metadataIdentify",
+        "settingsAndAdmin",
+        "userData",
+        "library refresh"
+      ],
+      "chapterRefs": [
+        "13-metadata-identify.md",
+        "15-settings-admin-mutations.md",
+        "19-failure-race-lifecycle.md",
+        "25-known-jellyfin-non-guarantees.md"
+      ]
+    },
+    "mixedAssetGeneration": {
+      "risk": "HIGH",
+      "rule": "HTML, runtime, lazy chunks and service-worker caches must represent one compatible build generation.",
+      "affected": [
+        "buildServiceWorkerAssets",
+        "routingAndViewLifecycle"
+      ],
+      "chapterRefs": [
+        "18-build-service-worker-assets.md",
+        "19-failure-race-lifecycle.md",
+        "22-change-impact-matrix.md"
+      ]
+    }
+  },
+  "activeKnownDeviations": {
+    "asOf": "2026-09-04",
+    "operationalGate": "HOLD",
+    "gateReason": "The exact PTV Web 0.5.56 generation is DEPLOYED and remains installed. READ-01 failed-timeout semantics and DIAG-02 observed route settlement physically pass, but DIAG-01 physically fails because one direct Manga navigation produced route-69 then route-6h 50 ms apart. The root cause is confirmed: stale ptv-request-active presentation state acted as Request route authority until deferred teardown. The Web 0.5.57 local release candidate now derives Request ownership from the canonical hash and passes the focused 6-file/86-test matrix, full PTV 364-file/3056-test matrix, full repository 438-file/3589-test matrix, TypeScript, targeted and repository ESLint, Stylelint baseline, version/provenance tests, diff checks, and production build. The two Music sonarjs/void-use findings were cleared by annotating loadMusicLibraryIndex with its existing Promise<null | void> return contract; both fire-and-forget void call sites remain and runtime behavior is unchanged. Web 0.5.57 is not deployed and physical validation is pending. The DIAG-01 implementation and local release gates are PASS, but the operational and production gates remain HOLD. DIAG-03 is a physical partial pass because failure stickiness was observed but successful recovery was not; DIAG-04 is UNKNOWN at its seven-request threshold because peak physical concurrency was 5. DIAG-05 and IMG-01 remain open. Movies and Shows timeouts also reproduced on 0.5.55, so the prompted rollback was cancelled before authorization and is not treated as a new 0.5.56 regression.",
+    "statusRule": "A local implementation PASS does not close an operational finding whose deployment or required physical validation is pending.",
+    "sourceReports": [
+      {
+        "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+        "scope": "Production stability audit and canonical finding ledger",
+        "lines": "3-7,57-95,439-461,489-491",
+        "status": "VERIFIED_BY_TEST"
+      },
+      {
+        "file": "C:/Users/Piggie/Documents/PTV_PLUGIN_FEATURED_PER_USER_AUTHORIZATION_P0_REPORT.md",
+        "scope": "SEC-01 local source/component closure and remaining operational validation",
+        "lines": "3-9,68-83,141-179",
+        "status": "VERIFIED_BY_TEST"
+      },
+      {
+        "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.56_PRODUCTION_DEPLOYMENT_ACCEPTANCE_REPORT.md",
+        "scope": "PTV Web 0.5.56 deployment and physical READ-01/DIAG-01 through DIAG-04 acceptance",
+        "lines": "6-22,73-125,199-203,247-279",
+        "status": "VERIFIED_BY_TEST"
+      }
+    ],
+    "items": {
+      "HOME-CONFIG-01": {
+        "title": "Configured Home presentation freshness and retained-owner retirement",
+        "severity": "P1",
+        "conflictClass": "RACE_RISK",
+        "reportedClassification": "Isolated candidate presentation freshness boundary, distinct from item authorization",
+        "status": "VALIDATION_PENDING",
+        "implementationGate": "PASS",
+        "deploymentStatus": "NOT_DEPLOYED",
+        "physicalValidationStatus": "VALIDATION_PENDING",
+        "summary": "Frozen matched PATCHED failed CT103 restart acceptance: fresh old-process content skipped generation and lacked trusted Latest associations. Its isolated startup-recovery derivative uses the existing serialized generator/hosted schedule to rebuild current trust without blessing old cache; failed/config-retired recovery gets a bounded retry and active-wait wakeup, with ordinary expiry behavior preserved. Web final-read verification and observed retirement, generic rows and item authorization are unchanged. Current local gates are recorded in startup-recovery/REPORT.md; post-fix CT103 physical proof remains pending. No production closure or unrelated backlog reorder is claimed.",
+        "nodeRefs": {
+          "components": ["ptvCoreAndShell", "ptvPlugin"],
+          "systems": ["home", "cacheAndInvalidation", "settingsAndAdmin", "webSocketEvents"],
+          "owners": ["configuredHomePresentation", "authenticatedPrincipal", "configurationDocument", "route"],
+          "mutations": ["configurationSave"],
+          "apiContracts": ["ptvV1"],
+          "riskBoundaries": ["configuredPresentationFreshness", "serverAuthorizationVsWebVisibility"],
+          "ptvOverrides": ["configuredHomePresentation", "home", "pluginApi"],
+          "dependencyHotspots": []
+        },
+        "relatedDeviationRefs": ["SEC-01", "SEC-02", "HOME-01", "NET-01"],
+        "evidence": [
+          {
+            "repository": "PTV Web isolated matched PATCHED candidate",
+            "version": "0.5.57 unchanged",
+            "file": "src/ptv/pages/home/configuredRowFreshness.ts; src/ptv/pages/home/hooks.ts; src/ptv/core/pluginApi.ts",
+            "symbol": "verifyConfiguredRowFreshness / retainCurrentNativeHomePresentation / authority observations and uncached final status read",
+            "lines": "named symbols",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV Web isolated matched PATCHED candidate",
+            "version": "0.5.57 unchanged",
+            "file": "src/ptv/pages/home/useConfiguredHomePreview.test.tsx; src/ptv/pages/home/legacyConfiguredPresentation.test.ts; src/ptv/pages/home/homesections.lifecycle.test.ts; src/ptv/pages/home/ptvRows.lifecycle.test.ts; src/ptv/shell/PTVShellBackdrop.test.tsx",
+            "symbol": "5-file / 57-test focused retained-presentation run; full release gates not inferred",
+            "lines": "full focused test files",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md"],
+        "closureCriteria": [
+          "Complete required issuer, final-read/bypass, retained-owner, privacy and full local release gates.",
+          "After local gates, prove unchanged matched fixture membership and bounded pressure in the authorized CT103 lab, with exact normal restoration.",
+          "Preserve item authorization and explicitly report the point-in-time observation limitation; do not claim production closure."
+        ]
+      },
+      "SEC-01": {
+        "title": "Featured response per-user authorization boundary",
+        "severity": "P0",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "P0 / ACTIVE_CONFLICT / HIGH-CONFIDENCE before the local fix",
+        "status": "OPEN",
+        "implementationGate": "PASS",
+        "deploymentStatus": "DEPLOYED",
+        "physicalValidationStatus": "VALIDATION_PENDING",
+        "summary": "Plugin 0.5.16.0 projects the shared Featured document through Jellyfin's request-user access policy before response serialization and is deployed in production. The implementation and deterministic user-isolation matrix pass. A prior production acceptance proved the restricted response boundary; the bounded Web 0.5.56 smoke preserved anonymous rejection and showed no cross-user flash but stopped before a fresh raw restricted payload comparison, so the current-release physical status remains pending.",
+        "nodeRefs": {
+          "components": [
+            "ptvPlugin"
+          ],
+          "systems": [
+            "permissionsAndLibraryAccess",
+            "libraryAndItemProjection",
+            "home",
+            "cacheAndInvalidation"
+          ],
+          "owners": [
+            "authenticatedPrincipal",
+            "userPermissions"
+          ],
+          "mutations": [],
+          "apiContracts": [
+            "ptvV1"
+          ],
+          "riskBoundaries": [
+            "serverAuthorizationVsWebVisibility"
+          ],
+          "ptvOverrides": [
+            "pluginApi"
+          ],
+          "dependencyHotspots": []
+        },
+        "relatedDeviationRefs": [
+          "SEC-02"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV Plugin embedded source",
+            "version": "0.5.16.0 current worktree",
+            "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs",
+            "symbol": "GetFeaturedContent",
+            "lines": "329-396",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV Plugin embedded source",
+            "version": "0.5.16.0 current worktree",
+            "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentAuthorizationService.cs",
+            "symbol": "AuthorizeForUser",
+            "lines": "215-305",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV security report",
+            "version": "Plugin 0.5.16.0",
+            "file": "C:/Users/Piggie/Documents/PTV_PLUGIN_FEATURED_PER_USER_AUTHORIZATION_P0_REPORT.md",
+            "symbol": "restricted-user matrix/deployment status",
+            "lines": "68-83,150-179",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "04-user-permissions-library-access.md",
+          "06-home-data-flow.md",
+          "20-ptv-vs-stock-map.md",
+          "21-ownership-conflicts.md",
+          "24-stock-api-contract-reference.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Deploy the exact validated Plugin 0.5.16.0 artifact through a separately authorized safe deployment.",
+          "Prove with real administrator and restricted Jellyfin users that the final HTTP payload contains only authorized item metadata.",
+          "Confirm the restricted request neither mutates nor poisons the shared cache and the following administrator response remains complete."
+        ]
+      },
+      "SEC-02": {
+        "title": "Featured Web response cache identity isolation",
+        "severity": "P0",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "P0 / ACTIVE_CONFLICT / VERIFIED_FROM_SOURCE",
+        "status": "VALIDATION_PENDING",
+        "implementationGate": "PASS",
+        "deploymentStatus": "DEPLOYED",
+        "physicalValidationStatus": "VALIDATION_PENDING",
+        "summary": "The deployed Web 0.5.56 generation preserves Plugin 0.5.16.0's per-user Featured projection through a canonical immutable Jellyfin serverId+userId identity. Authenticated Plugin GET response/coalescing keys include that scope and Featured candidates are restricted to the active ApiClient root plus same-root compatibility routes; featuredContentCache retains one active identity generation; missing or contradictory identity cannot share; login/logout/user/server transition retires state; queued memory hits reassert their owner; owner-bound dashboard readback cannot hydrate after transition; and prior-owner late completion cannot publish into the new owner. Identity-transition listeners bind on first runtime Plugin client access so retirement remains intact without dereferencing the partially initialized Jellyfin connection barrel during bootstrap. Deterministic isolation, storage-bound and partial-barrel tests pass; the bounded 0.5.56 physical smoke stopped at DIAG-01 before a fresh raw restricted/user-switch comparison.",
+        "nodeRefs": {
+          "components": [
+            "ptvRequestCoordinator",
+            "ptvCoreAndShell"
+          ],
+          "systems": [
+            "permissionsAndLibraryAccess",
+            "home",
+            "cacheAndInvalidation"
+          ],
+          "owners": [
+            "authenticatedPrincipal",
+            "userPermissions"
+          ],
+          "mutations": [],
+          "apiContracts": [
+            "ptvV1"
+          ],
+          "riskBoundaries": [
+            "serverAuthorizationVsWebVisibility"
+          ],
+          "ptvOverrides": [
+            "home",
+            "pluginApi",
+            "requestCoordination"
+          ],
+          "dependencyHotspots": [
+            "routeTeardown",
+            "userViewsAndDiscovery"
+          ]
+        },
+        "relatedDeviationRefs": [
+          "SEC-01",
+          "HOME-01",
+          "NET-01"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.56 current worktree",
+            "file": "src/ptv/modules/cache/featuredContentCache.ts",
+            "symbol": "canonical active Featured identity owner/generation, queued-memory assertion, owner-bound hydrator and guarded asynchronous adoption",
+            "lines": "122-229,985-1416,1712-2032",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.56 current worktree",
+            "file": "src/ptv/core/pluginApi.ts",
+            "symbol": "authenticated Plugin GET active-root-only candidates, response/coalescing identity, runtime-lazy transition retirement and bounded response cache",
+            "lines": "666-710,781-792,929-946,1306-1321,1491-1516",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.56 current worktree",
+            "file": "src/ptv/services/displayIdentity.ts",
+            "symbol": "getPtvAuthenticatedDisplayIdentityKey/getPtvDisplayIdentityKey",
+            "lines": "1-48",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.56 current worktree",
+            "file": "src/ptv/modules/cache/featuredContentCacheIdentity.test.ts; src/ptv/core/pluginApiIdentityCache.test.ts; src/ptv/core/pluginApiBootstrap.test.ts",
+            "symbol": "admin/restricted/server/active-root/concurrent/queued-memory/delayed-hydrator/stale/logout/missing-identity/bounded-retention matrix plus partial connection-barrel bootstrap import",
+            "lines": "full test files",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/modules/dashboard/PiggieTvRowsPage.tsx",
+            "symbol": "identity-guarded Featured readback/retry and owner-bound hydration",
+            "lines": "606-900",
+            "status": "VERIFIED_FROM_SOURCE"
+          }
+        ],
+        "chapterRefs": [
+          "04-user-permissions-library-access.md",
+          "06-home-data-flow.md",
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Deploy the exact validated Web generation through a separately authorized production pass.",
+          "Physically validate administrator/restricted-user, server/user transition and active-server-root-only behavior against the deployed per-user Plugin contract.",
+          "Confirm the deployed response/cache chain preserves field-level non-disclosure and following-administrator isolation."
+        ]
+      },
+      "HOME-01": {
+        "title": "Legacy Home async work can outlive route destruction",
+        "severity": "P1",
+        "conflictClass": "RACE_RISK",
+        "reportedClassification": "RACE_RISK / HIGH-CONFIDENCE",
+        "status": "VALIDATION_PENDING",
+        "implementationGate": "PASS",
+        "deploymentStatus": "DEPLOYED",
+        "physicalValidationStatus": "VALIDATION_PENDING",
+        "summary": "The deployed Web 0.5.56 generation carries one routeController lifetime across the active legacy Home publication chain. Deterministic delayed A/B, churn, callback, cleanup and cache-identity tests pass. Forced row-image consumer handles are retained by exact container/element/URL/route owner, cancelled on cleanup or replacement, and guarded against late DOM publication. SEC-02 also passes its local isolation gate. The bounded 0.5.56 physical run stopped at DIAG-01 before the complete Home acceptance matrix, so physical status remains pending.",
+        "nodeRefs": {
+          "components": [
+            "ptvCoreAndShell"
+          ],
+          "systems": [
+            "home",
+            "routingAndViewLifecycle",
+            "cacheAndInvalidation"
+          ],
+          "owners": [
+            "route"
+          ],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [
+            "dualRouteLifecycle"
+          ],
+          "ptvOverrides": [
+            "home",
+            "routing"
+          ],
+          "dependencyHotspots": [
+            "routeTeardown"
+          ]
+        },
+        "relatedDeviationRefs": [
+          "NET-01",
+          "SEC-02"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/pages/home/homesections.js",
+            "symbol": "Home exact-lifetime publication/cleanup lifecycle",
+            "lines": "95-217,1394-1875",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/controllers/hometab.js",
+            "symbol": "active Home lifetime and route-owned current-user read",
+            "lines": "28-129",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/controllers/hometab.lifecycle.test.ts; src/ptv/pages/home/homesections.lifecycle.test.ts; src/ptv/pages/home/ptvRows.lifecycle.test.ts",
+            "symbol": "delayed generation/churn/cleanup/transport isolation matrix",
+            "lines": "full test files",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/pages/home/ptvRows.js; src/ptv/core/imageManager.ts",
+            "symbol": "forced row-image exact consumer retention, cancellation and shared-task lease behavior",
+            "lines": "ptvRows.js 68,1429-1454,1486-1551; imageManager consumer cancellation",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/modules/cache/featuredContentCacheIdentity.test.ts; src/ptv/core/pluginApiIdentityCache.test.ts",
+            "symbol": "SEC-02 current-identity publication and transport-cache isolation",
+            "lines": "full test files",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "03-routing-navigation-lifecycle.md",
+          "06-home-data-flow.md",
+          "12-images-artwork-cache.md",
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "20-ptv-vs-stock-map.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Deploy the exact validated Web generation through a separately authorized production pass.",
+          "Physically verify repeated Home navigation/retirement is quiet and no stale row/image publication occurs.",
+          "Confirm production Featured adoption retains the same deployed server/user identity boundary."
+        ]
+      },
+      "NET-01": {
+        "title": "Route request transport retirement depends on caller signal",
+        "severity": "P1",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "ACTIVE_CONFLICT / VERIFIED",
+        "status": "VALIDATION_PENDING",
+        "implementationGate": "PASS",
+        "deploymentStatus": "DEPLOYED",
+        "physicalValidationStatus": "VALIDATION_PENDING",
+        "summary": "The deployed Web 0.5.56 generation makes requestPtvJson own bounded authenticated fetch, fails route scope without a signal, preserves independent coalesced consumers, aborts final-consumer work, and rejects ignored-abort stale completion. Active legacy Home reads use route-owned signals, and the separate Featured response-cache layer preserves the same canonical server/user identity with transition and stale-owner guards. Deterministic tests pass. The bounded 0.5.56 physical run observed route-retirement cancellations but stopped at DIAG-01 before the complete ownership matrix, so physical status remains pending.",
+        "nodeRefs": {
+          "components": [
+            "ptvRequestCoordinator"
+          ],
+          "systems": [
+            "routingAndViewLifecycle",
+            "cacheAndInvalidation",
+            "home"
+          ],
+          "owners": [
+            "route"
+          ],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [
+            "dualRouteLifecycle"
+          ],
+          "ptvOverrides": [
+            "requestCoordination"
+          ],
+          "dependencyHotspots": [
+            "routeTeardown",
+            "userViewsAndDiscovery"
+          ]
+        },
+        "relatedDeviationRefs": [
+          "HOME-01",
+          "SEC-02"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/api/client.ts",
+            "symbol": "requestPtvJson owned transport and route-signal requirement",
+            "lines": "74-103,405-462",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "live request-retirement evidence",
+            "lines": "137-173,443",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/services/requestCoordinator.test.ts; src/ptv/api/client.test.ts; src/ptv/pages/home/ptvRows.lifecycle.test.ts",
+            "symbol": "single/shared/all-consumer retirement, stale rejection, timeout/route and identity matrix",
+            "lines": "full test files",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "03-routing-navigation-lifecycle.md",
+          "06-home-data-flow.md",
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "20-ptv-vs-stock-map.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Deploy the exact validated Web generation through a separately authorized production pass.",
+          "Physically verify route retirement, shared-consumer continuity and final-consumer cancellation in production.",
+          "Confirm the deployed Featured response-cache layer preserves the same server/user identity contract."
+        ]
+      },
+      "READ-01": {
+        "title": "Reading page conflates failed shelves with authoritative empty state",
+        "severity": "P1",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "ACTIVE_CONFLICT / VERIFIED",
+        "status": "PASS",
+        "implementationGate": "PASS",
+        "deploymentStatus": "DEPLOYED",
+        "physicalValidationStatus": "PASS",
+        "summary": "The Web 0.5.56 production build derives Reading loading, populated, partial, failed, and authoritative-empty states from existing authoritative section, cache, and library-read outcomes. Failed reads cannot render authoritative empty, cached content plus refresh failure remains partial, and a route-owned Reading lifecycle publishes the aggregate terminal outcome. Deterministic tests pass with zero added network requests. Production Books, Manga, and Comics timeout cases rendered explicit failure and no false empty state. That closes the reported failure-versus-empty invariant; true-empty, populated, and cached-refresh-failure physical variants remain UNKNOWN.",
+        "nodeRefs": {
+          "components": [
+            "ptvReading"
+          ],
+          "systems": [
+            "reading",
+            "routingAndViewLifecycle",
+            "libraryAndItemProjection"
+          ],
+          "owners": [
+            "route"
+          ],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [],
+          "ptvOverrides": [
+            "reading"
+          ],
+          "dependencyHotspots": [
+            "userViewsAndDiscovery"
+          ]
+        },
+        "relatedDeviationRefs": [],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/modules/books/booksPage.tsx",
+            "symbol": "Reading page empty-state predicate",
+            "lines": "1830-1861",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "live Reading failure/empty result",
+            "lines": "286-297,445",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.56 current worktree",
+            "file": "src/ptv/modules/books/readingHomeState.ts; src/ptv/modules/books/readingHomeState.test.ts; src/ptv/modules/books/readingRouteCriticalLifecycle.ts; src/ptv/modules/books/readingRouteCriticalLifecycle.test.ts; src/ptv/modules/books/booksPage.tsx",
+            "symbol": "Reading authority-state classification and route-owned terminal lifecycle",
+            "lines": "full helper/test files; booksPage.tsx 2568-2654,2916-3092",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web production acceptance",
+            "version": "0.5.56 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.56_PRODUCTION_DEPLOYMENT_ACCEPTANCE_REPORT.md",
+            "symbol": "Books, Manga, and Comics failed-timeout presentation without false authoritative empty",
+            "lines": "73-90",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "05-library-item-relationships.md",
+          "11-reading.md",
+          "19-failure-race-lifecycle.md",
+          "20-ptv-vs-stock-map.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Page state distinguishes true empty, partial success, and failed authority reads.",
+          "All-failed, mixed-result, and genuine-empty tests reach distinct terminal UI states."
+        ]
+      },
+      "DIAG-01": {
+        "title": "One navigation creates duplicate route diagnostic sessions",
+        "severity": "P1",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "STALE_PRESENTATION_ROUTE_AUTHORITY / VERIFIED",
+        "status": "OPEN",
+        "implementationGate": "PASS",
+        "deploymentStatus": "NOT_DEPLOYED",
+        "physicalValidationStatus": "VALIDATION_PENDING",
+        "summary": "Production Web 0.5.56 remains FAIL/HOLD: one direct Manga navigation created route-69 generation 9 and route-6h generation 10 only 50 ms apart. Source tracing confirmed that the Request matcher treated stale ptv-request-active presentation state as route authority during deferred teardown, briefly claiming the Manga URL before Reading. The Web 0.5.57 local release candidate makes the canonical hash authoritative through isPtvRequestFeatureRoute(hash); Request presentation cleanup can no longer change Manga ownership or generation. Focused 6-file/86-test, full PTV 364-file/3056-test, full repository 438-file/3589-test, TypeScript, targeted and repository ESLint, Stylelint baseline, version/provenance, diff-check, and production-build gates pass with zero added requests. The two Music sonarjs/void-use findings were cleared by a type-only Promise<null | void> return annotation; both void call sites remain and no Music runtime owner changed. DIAG-01 implementation and local release gates are PASS, Web is 0.5.57, no deployment occurred, and physical validation remains pending.",
+        "nodeRefs": {
+          "components": [
+            "ptvCoreAndShell"
+          ],
+          "systems": [
+            "routingAndViewLifecycle"
+          ],
+          "owners": [
+            "route"
+          ],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [
+            "dualRouteLifecycle"
+          ],
+          "ptvOverrides": [
+            "bootstrapAndCoreRuntime",
+            "routing"
+          ],
+          "dependencyHotspots": [
+            "routeTeardown"
+          ]
+        },
+        "relatedDeviationRefs": [
+          "DIAG-02",
+          "DIAG-05"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/services/diagnostics/webDiagnosticPlatform.ts",
+            "symbol": "startRoute/navigation listeners",
+            "lines": "1325-1347,1495-1498",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "duplicate abandoned route sessions",
+            "lines": "315-328,446",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.57 current worktree",
+            "file": "src/ptv/services/diagnostics/webDiagnosticPlatform.ts; src/ptv/services/diagnostics/webDiagnosticPlatform.test.ts; src/ptv/services/diagnostics/webDiagnosticRouteLifecycle.test.ts",
+            "symbol": "canonical navigation and controller-generation diagnostic session ownership",
+            "lines": "webDiagnosticPlatform.ts 1614-1664; focused test files",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.57 current worktree / local release candidate",
+            "file": "src/ptv/shell/routes.js; src/ptv/modules/extendedFeatureRoutes.ts",
+            "symbol": "URL-authoritative Request route ownership",
+            "lines": "routes.js 8,132-141; extendedFeatureRoutes.ts 5-7",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.57 current worktree / local release candidate",
+            "file": "src/ptv/shell/routes.test.ts; src/ptv/shell/routeController.test.ts; src/ptv/shell/routeIdentity.test.ts; src/ptv/modules/request/requestRouteMounting.test.ts; src/ptv/services/diagnostics/webDiagnosticRouteLifecycle.test.ts; src/ptv/services/diagnostics/webDiagnosticPlatform.test.ts",
+            "symbol": "Request-before-mount, Request-to-Manga teardown lag, and single-generation regression matrix",
+            "lines": "routes.test.ts 44-82; routeController.test.ts 182-215; focused suites",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.57 current worktree / local release candidate",
+            "file": "repository validation commands",
+            "symbol": "DIAG-01 focused, full PTV, full repository, static, version, diff, and production-build gates",
+            "lines": "focused 6 files/86 tests; PTV 364/3056; repository 438/3589; TypeScript, targeted and repository ESLint, Stylelint baseline, version/provenance and diff checks, production build PASS; Music lint delta cleared by a type-only Promise<null | void> return annotation with both void call sites retained",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web production acceptance",
+            "version": "0.5.56 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.56_PRODUCTION_DEPLOYMENT_ACCEPTANCE_REPORT.md",
+            "symbol": "single direct Manga navigation produced duplicate Reading route sessions",
+            "lines": "92-101",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "03-routing-navigation-lifecycle.md",
+          "19-failure-race-lifecycle.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "One logical navigation creates exactly one route diagnostic generation.",
+          "Controller/hash/pop compatibility events cannot create duplicate abandoned sessions.",
+          "Transient DOM or presentation state cannot override a different canonical browser URL.",
+          "The repository lint baseline passes without broadening this task into Music, and the URL-authoritative candidate passes physical Request-to-Manga acceptance after deployment."
+        ]
+      },
+      "DIAG-02": {
+        "title": "Route diagnostics settle before route-owned data is terminal",
+        "severity": "P1",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "ACTIVE_CONFLICT / VERIFIED",
+        "status": "PASS",
+        "implementationGate": "PASS",
+        "deploymentStatus": "DEPLOYED",
+        "physicalValidationStatus": "PASS",
+        "summary": "Web 0.5.56 uses routeController identity plus explicit route-owned critical lifecycle events for diagnostic settlement. Deterministic tests pass with zero added requests. In production, two failed Reading routes and one successful Calendar route reached terminal critical state before settlement, then settled after 586-694 ms with zero active requests. The repeated global 55-image pending value cannot prove route-scoped image accounting; DIAG-05 remains separate and open.",
+        "nodeRefs": {
+          "components": [
+            "ptvCoreAndShell",
+            "ptvRequestCoordinator"
+          ],
+          "systems": [
+            "routingAndViewLifecycle",
+            "cacheAndInvalidation"
+          ],
+          "owners": [
+            "route"
+          ],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [
+            "dualRouteLifecycle"
+          ],
+          "ptvOverrides": [
+            "bootstrapAndCoreRuntime",
+            "requestCoordination"
+          ],
+          "dependencyHotspots": [
+            "routeTeardown"
+          ]
+        },
+        "relatedDeviationRefs": [
+          "DIAG-01",
+          "DIAG-05"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/services/diagnostics/webDiagnosticPlatform.ts",
+            "symbol": "evaluateRouteSettlement/startRoute",
+            "lines": "1287-1347",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "pending-work route settlement matrix",
+            "lines": "195-208,447",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.56 current worktree",
+            "file": "src/ptv/shell/routeCriticalLifecycle.ts; src/ptv/services/diagnostics/webDiagnosticPlatform.ts; src/ptv/services/diagnostics/diagnosticStore.ts; src/ptv/pages/home/homesections.js; src/ptv/modules/calendar/PiggieTvCalendarPage.tsx; src/ptv/modules/books/readingRouteCriticalLifecycle.ts; src/ptv/services/diagnostics/webDiagnosticRouteLifecycle.test.ts",
+            "symbol": "canonical route critical owner, terminal aggregation, and generation-safe diagnostic settlement",
+            "lines": "routeCriticalLifecycle.ts full file; webDiagnosticPlatform.ts 1589-1712; focused lifecycle tests",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web production acceptance",
+            "version": "0.5.56 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.56_PRODUCTION_DEPLOYMENT_ACCEPTANCE_REPORT.md",
+            "symbol": "route-owned failed/success terminal state followed by passive settlement",
+            "lines": "103-113",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "03-routing-navigation-lifecycle.md",
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Each route declares its critical lifecycle and terminal success, partial, empty, or failed state.",
+          "Diagnostics cannot settle a route while declared critical work remains active."
+        ]
+      },
+      "DIAG-03": {
+        "title": "Recommendation diagnostics can overwrite observed failure with healthy",
+        "severity": "P1",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "ACTIVE_CONFLICT / VERIFIED",
+        "status": "VALIDATION_PENDING",
+        "implementationGate": "PASS",
+        "deploymentStatus": "DEPLOYED",
+        "physicalValidationStatus": "PARTIAL_PASS",
+        "summary": "Web 0.5.56 assigns one diagnostic generation to each recommendation run and propagates it through existing engine/provider events. Deterministic tests pass with zero added requests. In production, a source failure remained degraded with zero rows and was not cleared by completion-shaped state. No authoritative complete-success recovery occurred during the bounded run, so that physical recovery path remains UNKNOWN.",
+        "nodeRefs": {
+          "components": [
+            "ptvCoreAndShell"
+          ],
+          "systems": [
+            "home",
+            "cacheAndInvalidation"
+          ],
+          "owners": [],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [],
+          "ptvOverrides": [
+            "bootstrapAndCoreRuntime",
+            "home"
+          ],
+          "dependencyHotspots": []
+        },
+        "relatedDeviationRefs": [
+          "DIAG-02"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "recommendation failure/health conflict",
+            "lines": "319-328,448",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.56 current worktree",
+            "file": "src/ptv/modules/recommendations/engine/recommendationEngine.ts; src/ptv/modules/recommendations/providers/jellyfinRecommendationProvider.ts; src/ptv/services/diagnostics/webDiagnosticPlatform.ts; src/ptv/modules/recommendations/engine/recommendationEngine.feedback.test.ts; src/ptv/modules/recommendations/providers/jellyfinRecommendationProvider.test.ts; src/ptv/services/diagnostics/webDiagnosticPlatform.test.ts",
+            "symbol": "recommendation diagnostic generation propagation, sticky failure, and authoritative recovery",
+            "lines": "producer/collector generation symbols and focused test files",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web production acceptance",
+            "version": "0.5.56 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.56_PRODUCTION_DEPLOYMENT_ACCEPTANCE_REPORT.md",
+            "symbol": "failed recommendation generation remained degraded; complete-success recovery unobserved",
+            "lines": "115-119",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "06-home-data-flow.md",
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Recommendation health is generation-scoped and failure remains sticky until authoritative recovery is proven.",
+          "A failure followed by a completion-shaped zero-row event cannot report unconditional healthy."
+        ]
+      },
+      "DIAG-04": {
+        "title": "High-concurrency health waits for a completed success",
+        "severity": "P1",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "ACTIVE_CONFLICT / HIGH-CONFIDENCE",
+        "status": "VALIDATION_PENDING",
+        "implementationGate": "PASS",
+        "deploymentStatus": "DEPLOYED",
+        "physicalValidationStatus": "UNKNOWN",
+        "summary": "Web 0.5.56 derives high-concurrency health from active physical transports immediately, before completion. Deterministic seven-request, coalescing, and cancellation tests pass with zero added requests. The production export separated 50 physical transports from 12 coalesced consumers, but peak physical concurrency was 5; the required seven-active-transport production threshold was not exercised and remains UNKNOWN.",
+        "nodeRefs": {
+          "components": [
+            "ptvCoreAndShell",
+            "ptvRequestCoordinator"
+          ],
+          "systems": [
+            "cacheAndInvalidation",
+            "routingAndViewLifecycle"
+          ],
+          "owners": [
+            "route"
+          ],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [],
+          "ptvOverrides": [
+            "bootstrapAndCoreRuntime",
+            "requestCoordination"
+          ],
+          "dependencyHotspots": []
+        },
+        "relatedDeviationRefs": [
+          "DIAG-02"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/services/diagnostics/diagnosticStore.ts",
+            "symbol": "high-concurrency health classification",
+            "lines": "393-399,651-697",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "high-concurrency blind-window finding",
+            "lines": "319-328,449",
+            "status": "INFERRED"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.56 current worktree",
+            "file": "src/ptv/services/diagnostics/diagnosticStore.ts; src/ptv/services/diagnostics/diagnosticStore.test.ts",
+            "symbol": "active physical transport concurrency health and coalesced-consumer exclusion",
+            "lines": "diagnosticStore.ts 529-671; diagnosticStore.test.ts 315-405",
+            "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web production acceptance",
+            "version": "0.5.56 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.56_PRODUCTION_DEPLOYMENT_ACCEPTANCE_REPORT.md",
+            "symbol": "physical versus coalesced request counts and peak physical concurrency below threshold",
+            "lines": "121-125,199-203",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Seven active requests before any completion produce a bounded degraded/high-concurrency signal.",
+          "Cancellation-only and short harmless bursts remain accurately classified."
+        ]
+      },
+      "DIAG-05": {
+        "title": "Image diagnostics retain stale pending entries across routes",
+        "severity": "P2",
+        "conflictClass": "UNKNOWN",
+        "reportedClassification": "VERIFIED symptom; no conflict class assigned",
+        "status": "OPEN",
+        "implementationGate": "UNKNOWN",
+        "deploymentStatus": "UNKNOWN",
+        "physicalValidationStatus": "UNKNOWN",
+        "summary": "Nineteen image requests remained counted as pending after route changes because pending arithmetic is session-global and has no explicit disposed terminal.",
+        "nodeRefs": {
+          "components": [
+            "ptvCoreAndShell"
+          ],
+          "systems": [
+            "images",
+            "routingAndViewLifecycle",
+            "cacheAndInvalidation"
+          ],
+          "owners": [
+            "route",
+            "artwork"
+          ],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [
+            "dualRouteLifecycle",
+            "imageIdentityAndFailureCaches"
+          ],
+          "ptvOverrides": [
+            "bootstrapAndCoreRuntime",
+            "images"
+          ],
+          "dependencyHotspots": [
+            "routeTeardown"
+          ]
+        },
+        "relatedDeviationRefs": [
+          "DIAG-01",
+          "DIAG-02"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "stale pending image lifecycle",
+            "lines": "109-111,319-328,461",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "03-routing-navigation-lifecycle.md",
+          "12-images-artwork-cache.md",
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Image lifecycle is scoped to route/generation and records disposal on owner removal.",
+          "Pending counts exclude retired-route images and known terminal entries."
+        ]
+      },
+      "SET-01": {
+        "title": "Live TV full-document configuration has split mutation ownership",
+        "severity": "P1",
+        "conflictClass": "RACE_RISK",
+        "reportedClassification": "RACE_RISK / HIGH-CONFIDENCE",
+        "status": "OPEN",
+        "implementationGate": "UNKNOWN",
+        "deploymentStatus": "UNKNOWN",
+        "physicalValidationStatus": "UNKNOWN",
+        "summary": "DVR writes use the shared serializer while tuner/provider actions use hook-local flights and independent snapshots over the same full configuration document; lost-update behavior is not yet deterministically tested.",
+        "nodeRefs": {
+          "components": [],
+          "systems": [
+            "settingsAndAdmin",
+            "cacheAndInvalidation"
+          ],
+          "owners": [
+            "configurationDocument"
+          ],
+          "mutations": [
+            "configurationSave"
+          ],
+          "apiContracts": [],
+          "riskBoundaries": [
+            "mutationAcknowledgmentVsConvergence"
+          ],
+          "ptvOverrides": [
+            "settings"
+          ],
+          "dependencyHotspots": [
+            "configurationMutation"
+          ]
+        },
+        "relatedDeviationRefs": [],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/modules/settings/admin/liveTv/useAdminLiveTv.ts",
+            "symbol": "Live TV full-document mutation owners",
+            "lines": "101-313",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "SET-01 finding ledger",
+            "lines": "450",
+            "status": "INFERRED"
+          }
+        ],
+        "chapterRefs": [
+          "15-settings-admin-mutations.md",
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "20-ptv-vs-stock-map.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "24-stock-api-contract-reference.md",
+          "25-known-jellyfin-non-guarantees.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "One resource-level owner serializes every Live TV full-document mutation and adopts authoritative readback.",
+          "Two concurrent hook instances preserve both changes or surface a conflict without silent loss."
+        ]
+      },
+      "IMG-01": {
+        "title": "Hero image failures have unbounded process lifetime",
+        "severity": "P1",
+        "conflictClass": "ACTIVE_CONFLICT",
+        "reportedClassification": "ACTIVE_CONFLICT / HIGH-CONFIDENCE",
+        "status": "OPEN",
+        "implementationGate": "UNKNOWN",
+        "deploymentStatus": "UNKNOWN",
+        "physicalValidationStatus": "UNKNOWN",
+        "summary": "A transient failed Hero URL is retained in a module-global unbounded set until document reload, preventing recovery in the same SPA session.",
+        "nodeRefs": {
+          "components": [],
+          "systems": [
+            "images",
+            "home",
+            "cacheAndInvalidation"
+          ],
+          "owners": [
+            "artwork"
+          ],
+          "mutations": [],
+          "apiContracts": [],
+          "riskBoundaries": [
+            "imageIdentityAndFailureCaches"
+          ],
+          "ptvOverrides": [
+            "images",
+            "home"
+          ],
+          "dependencyHotspots": []
+        },
+        "relatedDeviationRefs": [
+          "READ-01"
+        ],
+        "evidence": [
+          {
+            "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+            "file": "src/ptv/modules/hero/Hero.tsx",
+            "symbol": "failedHeroUrls/failure suppression",
+            "lines": "24,123-136,290-297",
+            "status": "VERIFIED_FROM_SOURCE"
+          },
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "IMG-01 finding ledger",
+            "lines": "451",
+            "status": "INFERRED"
+          }
+        ],
+        "chapterRefs": [
+          "06-home-data-flow.md",
+          "12-images-artwork-cache.md",
+          "16-caching-invalidation.md",
+          "19-failure-race-lifecycle.md",
+          "21-ownership-conflicts.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Failure suppression has a bounded TTL/LRU and owner/tag/identity retirement contract.",
+          "A transient failure can recover without document reload and the registry cannot grow without bound."
+        ]
+      },
+      "MUSIC-01": {
+        "title": "Exact Music album Identify physical acceptance gap",
+        "severity": "P1",
+        "conflictClass": "UNKNOWN",
+        "reportedClassification": "VALIDATION_GAP / VERIFIED",
+        "status": "VALIDATION_PENDING",
+        "implementationGate": "UNKNOWN",
+        "deploymentStatus": "UNKNOWN",
+        "physicalValidationStatus": "VALIDATION_PENDING",
+        "summary": "The exact 0.5.53 The Surface album result was not physically certified because authority reads timed out. This is a validation gap, not a proven code defect; artist, 18-track, Identify, playback, navigation, and refresh outcomes remain UNKNOWN for that run.",
+        "nodeRefs": {
+          "components": [
+            "ptvMusic"
+          ],
+          "systems": [
+            "music",
+            "metadataIdentify",
+            "playback",
+            "libraryAndItemProjection"
+          ],
+          "owners": [
+            "itemMetadata",
+            "artwork",
+            "playbackState"
+          ],
+          "mutations": [
+            "identifyApply"
+          ],
+          "apiContracts": [],
+          "riskBoundaries": [
+            "sparseDtoReplacement"
+          ],
+          "ptvOverrides": [
+            "music",
+            "identify"
+          ],
+          "dependencyHotspots": [
+            "itemAdoption"
+          ]
+        },
+        "relatedDeviationRefs": [],
+        "evidence": [
+          {
+            "repository": "PTV stability audit",
+            "version": "PTV Web 0.5.53 production",
+            "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+            "symbol": "Music physical acceptance result/finding ledger",
+            "lines": "268-284,454",
+            "status": "VERIFIED_BY_TEST"
+          }
+        ],
+        "chapterRefs": [
+          "05-library-item-relationships.md",
+          "10-music.md",
+          "13-metadata-identify.md",
+          "14-playback-session-transcoding.md",
+          "19-failure-race-lifecycle.md",
+          "20-ptv-vs-stock-map.md",
+          "22-change-impact-matrix.md",
+          "23-before-you-modify-checklists.md",
+          "25-known-jellyfin-non-guarantees.md",
+          "CHANGE-PROTOCOL.md"
+        ],
+        "closureCriteria": [
+          "Run the exact album acceptance only in a separately proven healthy API window.",
+          "Verify artist, 18 tracks, Identify, artwork, playback, queue/Now Playing, navigation, and hard refresh without changing product code to manufacture success."
+        ]
+      }
+    }
+  },
+  "stabilizationBacklog": {
+    "asOf": "2026-09-04",
+    "orderingRule": "This order preserves security isolation first, then shared lifecycle/transport ownership, diagnostic truth, user-facing failure semantics, configuration mutation ownership, and bounded physical validation.",
+    "orderingEvidence": [
+      {
+        "repository": "PTV stability audit",
+        "version": "PTV Web 0.5.53 production",
+        "file": "C:/Users/Piggie/Documents/PTV_WEB_0.5.53_FULL_STABILITY_QUALITY_PERFORMANCE_AUDIT.md",
+        "symbol": "recommended stabilization order",
+        "lines": "391-417",
+        "status": "VERIFIED_FROM_SOURCE"
+      },
+      {
+        "repository": "PTV security report",
+        "version": "Plugin 0.5.16.0",
+        "file": "C:/Users/Piggie/Documents/PTV_PLUGIN_FEATURED_PER_USER_AUTHORIZATION_P0_REPORT.md",
+        "symbol": "remaining validation/deployment status",
+        "lines": "163-181",
+        "status": "VERIFIED_FROM_SOURCE"
+      }
+    ],
+    "orderedWork": [
+      {
+        "order": 0,
+        "id": "STAB-00-FEATURED-LIVE-CLOSURE",
+        "deviationRefs": [
+          "SEC-01",
+          "SEC-02"
+        ],
+        "status": "OPEN",
+        "mustIsolate": true,
+        "objective": "Web Featured memory/in-flight/GET response isolation now passes deterministic source tests. Separately deploy the exact validated Plugin 0.5.16.0 and Web artifacts, then close the real administrator/restricted-user HTTP boundary.",
+        "completionEvidenceRequired": [
+          "Prepopulated, queued-memory, delayed-hydrator and concurrent cross-user Web cache isolation (local deterministic PASS)",
+          "Server/user switch, active-server-root-only transport and cache retirement (local deterministic PASS; deployed permission-change acceptance pending)",
+          "Exact artifact/rollback verification",
+          "A+B administrator response",
+          "A-only restricted response with zero B metadata",
+          "Cache non-mutation and following-administrator isolation"
+        ]
+      },
+      {
+        "order": 1,
+        "id": "STAB-01-ROUTE-REQUEST-LIFETIME",
+        "deviationRefs": [
+          "HOME-01",
+          "NET-01"
+        ],
+        "status": "VALIDATION_PENDING",
+        "mustIsolate": false,
+        "objective": "The local route generation, AbortSignal, transport-retirement and forced row-image consumer contract passes deterministic tests while preserving safe coalescing; deployment and physical acceptance remain pending.",
+        "completionEvidenceRequired": [
+          "Delayed old-route completion cannot publish (local deterministic PASS)",
+          "No-signal and signaled transport retirement (local deterministic PASS)",
+          "Listener/timer/DOM/cache ownership counts (local deterministic PASS)",
+          "Forced row-image consumers physically cancel on retirement (local deterministic PASS)",
+          "STAB-00 cache isolation prevents cross-identity Featured adoption (local deterministic PASS)"
+        ]
+      },
+      {
+        "order": 2,
+        "id": "STAB-02-DIAGNOSTIC-TRUTH",
+        "deviationRefs": [
+          "DIAG-01",
+          "DIAG-02",
+          "DIAG-03",
+          "DIAG-04",
+          "DIAG-05"
+        ],
+        "status": "OPEN",
+        "mustIsolate": false,
+        "objective": "DIAG-02 through DIAG-04 retain their deployed Web 0.5.56 evidence. DIAG-01 production remains FAIL/HOLD, while its Web 0.5.57 URL-authoritative local release candidate passes focused, full PTV, full repository, static, version/provenance, diff, and production-build gates. The Music lint delta is cleared by a type-only Promise<null | void> return annotation with both void call sites and runtime behavior preserved. Keep the operational gate HOLD because Web 0.5.57 is not deployed and physical validation is pending. Also keep this backlog item open because DIAG-03 complete-success recovery and the DIAG-04 seven-request threshold were not physically exercised, and DIAG-05 route-scoped image terminal/disposed accounting remains open.",
+        "completionEvidenceRequired": [
+          "One route session per logical navigation (Web 0.5.57 URL-authoritative implementation and local release gates PASS; production 0.5.56 FAIL/HOLD; deployment and physical validation pending)",
+          "Route-owned terminal readiness (local and observed production PASS)",
+          "Sticky failure until authoritative recovery (local PASS; physical failure-stickiness PASS; recovery UNKNOWN)",
+          "Active physical concurrency classification before success (local PASS; production threshold UNKNOWN because peak was 5)",
+          "Route-scoped image terminal/disposed accounting (DIAG-05 OPEN)"
+        ]
+      },
+      {
+        "order": 3,
+        "id": "STAB-03-READING-IMAGE-STATE",
+        "deviationRefs": [
+          "READ-01",
+          "IMG-01"
+        ],
+        "status": "OPEN",
+        "mustIsolate": false,
+        "objective": "READ-01 is local PASS, deployed in Web 0.5.56, and physically passes the Books/Manga/Comics failed-timeout versus authoritative-empty invariant. Keep this backlog item open for IMG-01 image failure lifetime; true-empty, populated, and cached-refresh-failure production variants remain UNKNOWN.",
+        "completionEvidenceRequired": [
+          "All-failed, mixed, and true-empty Reading tests (local deterministic PASS)",
+          "Transient image recovery (IMG-01 OPEN)",
+          "Failure-registry cap and retirement proof (IMG-01 OPEN)"
+        ]
+      },
+      {
+        "order": 4,
+        "id": "STAB-04-LIVE-TV-MUTATION-OWNER",
+        "deviationRefs": [
+          "SET-01"
+        ],
+        "status": "OPEN",
+        "mustIsolate": true,
+        "objective": "Create one resource-level owner for every Live TV full-document mutation and authoritative readback/conflict decision.",
+        "completionEvidenceRequired": [
+          "Two-hook concurrent mutation test",
+          "No silent field loss",
+          "Terminal success/failure/conflict lifecycle"
+        ]
+      },
+      {
+        "order": 5,
+        "id": "STAB-05-MUSIC-PHYSICAL-ACCEPTANCE",
+        "deviationRefs": [
+          "MUSIC-01"
+        ],
+        "status": "VALIDATION_PENDING",
+        "mustIsolate": false,
+        "objective": "Re-run the exact album acceptance in a proven healthy API window without treating the validation gap as a code defect.",
+        "completionEvidenceRequired": [
+          "Artist and exact 18-track preservation",
+          "Identify and artwork convergence",
+          "Playback, queue, and Now Playing preservation",
+          "Navigation and hard-refresh persistence"
+        ]
+      }
+    ],
+    "longTermOwnershipConsolidation": {
+      "kind": "PLANNING_GUIDANCE_ONLY",
+      "rule": "Do not start a broad refactor from this ordering alone. Run CHANGE-PROTOCOL.md, prove the active owners and arbitration boundaries, and consolidate one owner at a time.",
+      "evidenceStatus": "INFERRED",
+      "orderedBoundaries": [
+        {
+          "order": 1,
+          "boundary": "route and lifecycle ownership",
+          "mapRefs": [
+            "$.systems.routingAndViewLifecycle",
+            "$.riskBoundaries.dualRouteLifecycle",
+            "$.dependencies.hotspots.routeTeardown"
+          ]
+        },
+        {
+          "order": 2,
+          "boundary": "image resolution and failure-state ownership",
+          "mapRefs": [
+            "$.systems.images",
+            "$.owners.artwork",
+            "$.riskBoundaries.imageIdentityAndFailureCaches"
+          ]
+        },
+        {
+          "order": 3,
+          "boundary": "request coordination and library-discovery ownership",
+          "mapRefs": [
+            "$.ptvOverrides.requestCoordination",
+            "$.dependencies.hotspots.userViewsAndDiscovery",
+            "$.systems.cacheAndInvalidation"
+          ]
+        },
+        {
+          "order": 4,
+          "boundary": "configuration writer ownership",
+          "mapRefs": [
+            "$.owners.configurationDocument",
+            "$.mutations.configurationSave",
+            "$.dependencies.hotspots.configurationMutation"
+          ]
+        },
+        {
+          "order": 5,
+          "boundary": "playback and session ownership",
+          "mapRefs": [
+            "$.systems.playback",
+            "$.owners.playbackState",
+            "$.ptvOverrides.music"
+          ]
+        },
+        {
+          "order": 6,
+          "boundary": "legacy card and Details DOM enhancement where native ownership exists",
+          "mapRefs": [
+            "$.systems.cardsAndDetails",
+            "$.ptvOverrides.cards",
+            "$.ptvOverrides.details"
+          ]
+        }
+      ]
+    }
+  },
+  "ptvOverrides": {
+    "configuredHomePresentation": {
+      "classification": ["NEW_PTV_SYSTEM", "STOCK_EXTENDED"],
+      "ptvChange": "Isolated candidate adds response-only issuer binding plus one bounded Web point-in-time configured-presentation proof, final post-input protected status verification, observed retirement and derived-preview/legacy omission guards. Startup-recovery derivative additionally checks missing current binding under the existing refresh semaphore, regenerates through the same owner, and schedules bounded trust-recovery retries with active-wait wakeup. Ordinary content TTL/failure cadence, query behavior and Web cache/coordinator/timeout/concurrency policies are unchanged.",
+      "stockContractPreserved": "Jellyfin remains authenticated item-access authority; HTTP snapshots and advisory WebSocket events do not guarantee continuous currentness.",
+      "risk": "HIGH",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md"],
+      "evidence": [
+        {
+          "repository": "PTV Web isolated matched PATCHED candidate",
+          "version": "0.5.57 unchanged",
+          "file": "src/ptv/pages/home/configuredRowFreshness.ts; src/ptv/pages/home/hooks.ts; src/ptv/core/pluginApi.ts",
+          "symbol": "verifyConfiguredRowFreshness / isConfiguredSectionVerified / retainCurrentNativeHomePresentation / getStatus bypass and observations",
+          "lines": "named symbols",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Plugin isolated matched PATCHED candidate",
+          "version": "0.5.16.0 unchanged",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvConfiguredRowAssociationService.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs",
+          "symbol": "CaptureCurrentPresentationProof / CreateRowsResponse / Projection.CreateAuthority / GetStatus",
+          "lines": "named symbols",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web isolated matched PATCHED candidate",
+          "version": "0.5.57 unchanged",
+          "file": "src/ptv/pages/home/useConfiguredHomePreview.ts; src/ptv/pages/home/legacyConfiguredPresentation.ts; src/ptv/pages/home/homesections.js; src/ptv/shell/PTVShell.tsx",
+          "symbol": "exact proof-bound preview / generic-only HTML restoration / backdrop-child retirement key",
+          "lines": "named symbols",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Plugin isolated startup-recovery derivative of matched PATCHED",
+          "version": "0.5.17.0; Web remains 0.5.57",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentRefreshService.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvConfiguredRowAssociationService.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV.Tests/PtvConfiguredRowAssociationTests.cs",
+          "symbol": "RefreshIfNeededAsync / RefreshUnderGateAsync / UpdateTrustRecoverySchedule / WaitForNextRefreshAsync / HasCurrentStoreBinding; process-restart and scheduler regression tests",
+          "lines": "named symbols; evidence report release-recovery-20260907/startup-recovery/REPORT.md",
+          "status": "VERIFIED_BY_TEST"
+        }
+      ]
+    },
+    "bootstrapAndCoreRuntime": {
+      "classification": [
+        "STOCK_EXTENDED",
+        "NEW_PTV_SYSTEM"
+      ],
+      "stockContractPreserved": "Stock server connection and React render sequence remain present.",
+      "ptvChange": "PTV styles, modules, shell, observability and runtime initialize around the stock-derived bootstrap. Connection-dependent Plugin identity listeners are installed only after module evaluation reaches a runtime client access, avoiding eager reads through the existing Jellyfin connection-barrel cycle.",
+      "risk": "HIGH",
+      "conflictClass": "INTENTIONAL_WRAPPER",
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/index.jsx",
+          "symbol": "PTV imports/startup integration",
+          "lines": "68-78,82-165",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/core/app.js",
+          "symbol": "PTV core initialization",
+          "lines": "28-89",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "0.5.56 current worktree",
+          "file": "src/ptv/core/pluginApiBootstrap.test.ts; scripts/ptv-production-bootstrap-smoke.cjs",
+          "symbol": "partial-barrel module-evaluation regression and emitted production-dist cold-bootstrap gate",
+          "lines": "full test/harness files",
+          "status": "VERIFIED_BY_TEST"
+        }
+      ]
+    },
+    "routing": {
+      "classification": [
+        "STOCK_WRAPPED",
+        "STOCK_REPLACED"
+      ],
+      "ptvChange": "PTV maps stable routes to native PTV pages from canonical browser URL/hash state and uses routeController as the immutable route-family lifetime/generation/AbortSignal owner while keeping hash-router compatibility. Transient presentation classes are not route identity authority.",
+      "risk": "HIGH",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "0.5.57 current worktree / local release candidate",
+          "file": "src/ptv/shell/routes.js; src/ptv/modules/extendedFeatureRoutes.ts",
+          "symbol": "URL-authoritative Request route classification",
+          "lines": "routes.js 8,132-141; extendedFeatureRoutes.ts 5-7",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/shell/routeController.ts",
+          "symbol": "route ownership/generation/lifetime and observers",
+          "lines": "51-134,217-290,581-670,727-780",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "authentication": {
+      "classification": "STOCK_WRAPPED",
+      "stockContractPreserved": "Dashboard.logout and ServerConnections remain authoritative for stock session teardown/current client.",
+      "ptvChange": "PTV classifies auth routes and retires PTV state around delegated stock logout/switch-user actions.",
+      "risk": "HIGH",
+      "conflictClass": "INTENTIONAL_WRAPPER",
+      "chapterRefs": [
+        "02-startup-session-auth.md",
+        "20-ptv-vs-stock-map.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/services/jellyfinLogoutAction.ts",
+          "symbol": "logout/switch-user delegation",
+          "lines": "12-61",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/shell/authenticationRoutes.ts",
+          "symbol": "route classification/post-login target",
+          "lines": "12-72,152-167",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "home": {
+      "classification": [
+        "STOCK_REPLACED",
+        "NEW_PTV_SYSTEM"
+      ],
+      "ptvChange": "NativeHome and PTV hooks compose/cache featured and stock-derived row data. The active legacy-compatible Home path adopts routeController lifetimes for requests, publication, Hero/rows, listeners, observers, timers, cards and images. Featured transport/memory/dashboard-readback owners preserve canonical server+user identity, authenticated Featured transport stays on the active ApiClient root, queued memory reasserts ownership, and forced row-image consumer handles retire with their exact row/route owner.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": [
+        "06-home-data-flow.md",
+        "12-images-artwork-cache.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/pages/home/NativeHome.tsx",
+          "symbol": "NativeHome",
+          "lines": "3095-3891",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/pages/home/hooks.ts",
+          "symbol": "useNativeHomeData/route-scoped controllers",
+          "lines": "3469-4532",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "0.5.54 worktree snapshot",
+          "file": "src/ptv/pages/home/homesections.js",
+          "symbol": "legacy Home exact-lifetime publication and cleanup",
+          "lines": "95-217,1394-1875",
+          "status": "VERIFIED_BY_TEST"
+        },
+        {
+          "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+          "file": "src/ptv/modules/cache/featuredContentCache.ts; src/ptv/modules/dashboard/PiggieTvRowsPage.tsx; src/ptv/pages/home/ptvRows.js",
+          "symbol": "Featured identity generation/owner-bound dashboard hydration and forced row-image consumer retirement",
+          "lines": "featuredContentCache.ts 122-229,1377-1416; PiggieTvRowsPage.tsx 606-900; ptvRows.js 68,1429-1551",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "cards": {
+      "classification": "STOCK_EXTENDED",
+      "ptvChange": "PTV observes and mutates stock-rendered card DOM and performs separate image loading for accent enhancement.",
+      "risk": "HIGH",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": [
+        "07-cards-and-item-state.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/cards/CardEnhancer.ts",
+          "symbol": "card DOM/image enhancement",
+          "lines": "1-126",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "details": {
+      "classification": "STOCK_WRAPPED",
+      "ptvChange": "PTV observes stock Details rendering, reconciles item/readback state, and applies route-generation-aware enhancements.",
+      "risk": "HIGH",
+      "conflictClass": "INTENTIONAL_WRAPPER",
+      "chapterRefs": [
+        "08-details-seasons-episodes.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/details/index.js",
+          "symbol": "details enhancement/readback/lifecycle",
+          "lines": "648-860",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "requestCoordination": {
+      "classification": "NEW_PTV_SYSTEM",
+      "ptvChange": "requestPtvJson owns a bounded authenticated fetch; PTV coalesces it by method, authorization identity and URL, gives each caller an independent consumer lease, aborts final-consumer work once, and rejects ignored-abort stale completions. Route scope fails closed without a signal. The Plugin GET response cache/coalescer separately includes the same canonical immutable Jellyfin server+user identity and declines sharing when that identity is unavailable. Authenticated Featured candidate discovery is restricted to the active ApiClient root and same-root compatibility routes, preventing fallback transport to another server.",
+      "risk": "HIGH",
+      "conflictClass": "SAFE_REDUNDANCY",
+      "chapterRefs": [
+        "16-caching-invalidation.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/services/requestCoordinator.ts",
+          "symbol": "identity key/consumer coordination/retirement/stale-completion rejection",
+          "lines": "358-375,385-744,815-865",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+            "version": "0.5.54 worktree snapshot",
+          "file": "src/ptv/core/pluginApi.ts; src/ptv/services/displayIdentity.ts",
+          "symbol": "authenticated Plugin GET active-root-only candidates, response/coalescing identity and canonical identity resolver",
+          "lines": "pluginApi.ts 666-710,781-792,940-955,1306-1321,1491-1516; displayIdentity.ts 1-48",
+          "status": "VERIFIED_BY_TEST"
+        }
+      ]
+    },
+    "images": {
+      "classification": [
+        "STOCK_WRAPPED",
+        "DUPLICATE_IMPLEMENTATION"
+      ],
+      "ptvChange": "PTV adds a global candidate/failure registry plus specialized Home, Music, Reading and Details failure/repair owners.",
+      "risk": "HIGH",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": [
+        "12-images-artwork-cache.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/api/images.ts",
+          "symbol": "failure identity/candidate generation/stable key",
+          "lines": "35-197,489-724",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/music/musicArtworkSourceCoordinator.ts",
+          "symbol": "Music artwork failure/source coordinator",
+          "lines": "1-106",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "identify": {
+      "classification": "STOCK_EXTENDED",
+      "ptvChange": "PTV extends the stock Identify module with generation/readback and Reading-specific metadata/artwork behavior.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": [
+        "13-metadata-identify.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/components/itemidentifier/itemidentifier.js",
+          "symbol": "PTV authority/readback/Reading extensions",
+          "lines": "23-116",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "music": {
+      "classification": [
+        "STOCK_REPLACED",
+        "NEW_PTV_SYSTEM"
+      ],
+      "ptvChange": "PTV owns native Music discovery, relationship reconciliation, queue and native audio playback surfaces while using Jellyfin item/stream/report APIs.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": [
+        "10-music.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/music/musicIdentifyAdoption.ts",
+          "symbol": "generation guards/relationship and queue reconciliation",
+          "lines": "159-280,368-471",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/music/musicQueue.ts",
+          "symbol": "native audio/queue ownership",
+          "lines": "1010-1085,1309-1453",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "reading": {
+      "classification": [
+        "STOCK_REPLACED",
+        "NEW_PTV_SYSTEM"
+      ],
+      "ptvChange": "PTV provides a native Reading page/reader and stores reader progress/bookmarks locally.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": [
+        "11-reading.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/reader/readerProgressStore.ts",
+          "symbol": "progress/bookmark persistence",
+          "lines": "4-47",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/reader/ReaderApp.tsx",
+          "symbol": "reader load/progress lifecycle",
+          "lines": "37-306",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "settings": {
+      "classification": [
+        "STOCK_REPLACED",
+        "STOCK_WRAPPED"
+      ],
+      "ptvChange": "PTV native admin forms use server/user-scoped query keys, mutation cancellation and authoritative baselines around stock Jellyfin configuration APIs.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": [
+        "15-settings-admin-mutations.md",
+        "20-ptv-vs-stock-map.md",
+        "21-ownership-conflicts.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/settings/admin/playback/useAdminPlaybackResource.ts",
+          "symbol": "scoped query/mutation baseline lifecycle",
+          "lines": "57-172",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "pluginApi": {
+      "classification": "NEW_PTV_SYSTEM",
+      "ptvChange": "The Plugin registers PTV services/controllers and exposes authenticated PTV API routes while reusing Jellyfin DI, identity and library services. The Web Plugin client preserves each authenticated per-user response under a canonical immutable Jellyfin server+user GET cache/coalescing identity; missing identity disables sharing rather than using a global fallback. Authenticated Featured GETs use only the active ApiClient root plus compatibility route names on that root. Login/logout identity-retirement listeners bind lazily on runtime client access so this contract does not eagerly dereference the Jellyfin connection barrel during bootstrap.",
+      "risk": "CRITICAL",
+      "conflictClass": "INTENTIONAL_WRAPPER",
+      "chapterRefs": [
+        "20-ptv-vs-stock-map.md",
+        "24-stock-api-contract-reference.md"
+      ],
+      "evidence": [
+        {
+          "repository": "PTV Plugin embedded source",
+          "version": "0.5.16.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/PluginServiceRegistrator.cs",
+          "symbol": "RegisterServices",
+          "lines": "13-68",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Plugin embedded source",
+          "version": "0.5.16.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs",
+          "symbol": "controller authorization/route",
+          "lines": "26-27",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "0.5.56 current worktree",
+          "file": "src/ptv/core/pluginApi.ts; src/ptv/core/pluginApiIdentityCache.test.ts; src/ptv/core/pluginApiBootstrap.test.ts",
+          "symbol": "authenticated active-root-only Featured response-cache/coalescing identity, runtime-lazy transition retirement, isolation matrix and partial-barrel bootstrap guard",
+          "lines": "pluginApi.ts 666-710,781-792,929-946,1306-1321,1491-1516; full test files",
+          "status": "VERIFIED_BY_TEST"
+        }
+      ]
+    }
+  },
+  "chapters": [
+    "00-README.md",
+    "CHANGE-PROTOCOL.md",
+    "01-system-overview.md",
+    "02-startup-session-auth.md",
+    "03-routing-navigation-lifecycle.md",
+    "04-user-permissions-library-access.md",
+    "05-library-item-relationships.md",
+    "06-home-data-flow.md",
+    "07-cards-and-item-state.md",
+    "08-details-seasons-episodes.md",
+    "09-search.md",
+    "10-music.md",
+    "11-reading.md",
+    "12-images-artwork-cache.md",
+    "13-metadata-identify.md",
+    "14-playback-session-transcoding.md",
+    "15-settings-admin-mutations.md",
+    "16-caching-invalidation.md",
+    "17-websocket-events.md",
+    "18-build-service-worker-assets.md",
+    "19-failure-race-lifecycle.md",
+    "20-ptv-vs-stock-map.md",
+    "21-ownership-conflicts.md",
+    "22-change-impact-matrix.md",
+    "23-before-you-modify-checklists.md",
+    "24-stock-api-contract-reference.md",
+    "25-known-jellyfin-non-guarantees.md",
+    "26-upstream-post-10.11.11-differences.md",
+    "INDEX.md"
+  ]
+}

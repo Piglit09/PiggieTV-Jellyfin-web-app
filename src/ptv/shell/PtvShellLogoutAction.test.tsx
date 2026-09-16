@@ -4,11 +4,28 @@ import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const logoutMocks = vi.hoisted(() => ({
-    request: vi.fn<() => Promise<void>>()
+    request: vi.fn<() => Promise<void>>(),
+    switchUser: vi.fn<() => Promise<void>>()
+}));
+
+const runtimeMocks = vi.hoisted(() => ({
+    registerShell: vi.fn(() => vi.fn())
+}));
+
+const calendarAvailabilityMocks = vi.hoisted(() => ({
+    snapshot: {
+        capabilityAvailable: false,
+        configuredServices: [] as string[],
+        error: '',
+        identityKey: 'server:user',
+        showEntry: false,
+        status: String('not-configured')
+    }
 }));
 
 vi.mock('../services/jellyfinLogoutAction', () => ({
-    requestJellyfinLogout: logoutMocks.request
+    requestJellyfinLogout: logoutMocks.request,
+    requestJellyfinUserSwitch: logoutMocks.switchUser
 }));
 
 vi.mock('../services/notificationService', () => ({
@@ -34,12 +51,16 @@ vi.mock('../services/performanceMonitor', () => ({
 }));
 
 vi.mock('../services/runtimeStability', () => ({
-    registerPtvNativeShellInstance: vi.fn(() => vi.fn()),
+    registerPtvNativeShellInstance: runtimeMocks.registerShell,
     runPtvClientCacheMigration: vi.fn()
 }));
 
 vi.mock('../core/observability', () => ({
     recordPtvEvent: vi.fn()
+}));
+
+vi.mock('../modules/calendar/arrCalendarAvailability', () => ({
+    usePtvArrCalendarAvailability: () => calendarAvailabilityMocks.snapshot
 }));
 
 vi.mock('../utils/usePtvAdminDebugVisibility', () => ({
@@ -68,6 +89,18 @@ describe('PTV shell logout control', () => {
         resetPtvRuntimeOverlayOcclusionsForTests();
         logoutMocks.request.mockReset();
         logoutMocks.request.mockResolvedValue(undefined);
+        logoutMocks.switchUser.mockReset();
+        logoutMocks.switchUser.mockResolvedValue(undefined);
+        runtimeMocks.registerShell.mockClear();
+        runtimeMocks.registerShell.mockImplementation(() => vi.fn());
+        calendarAvailabilityMocks.snapshot = {
+            capabilityAvailable: false,
+            configuredServices: [],
+            error: '',
+            identityKey: 'server:user',
+            showEntry: false,
+            status: 'not-configured'
+        };
         window.location.hash = '#/home';
         container = document.createElement('div');
         document.body.appendChild(container);
@@ -80,10 +113,10 @@ describe('PTV shell logout control', () => {
         resetPtvRuntimeOverlayOcclusionsForTests();
     });
 
-    function renderUserMenu(onPanelToggle = vi.fn()) {
+    function renderUserMenu(onPanelToggle = vi.fn(), isAdmin = false) {
         flushSync(() => root.render(
             <PtvShellActions
-                isAdmin={false}
+                isAdmin={isAdmin}
                 onPanelToggle={onPanelToggle}
                 openPanel='user'
                 searchExpanded={false}
@@ -120,6 +153,29 @@ describe('PTV shell logout control', () => {
             .toBeLessThan(logoutMocks.request.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
     });
 
+    it('renders the premium user-menu order and routes Profile to the actual profile page', () => {
+        renderUserMenu();
+
+        const items = Array.from(container.querySelectorAll<HTMLElement>('#ptv-shell-user-panel [role="menuitem"]'));
+
+        expect(items.map(item => item.textContent?.trim())).toEqual([
+            'Profile',
+            'Quick Connect',
+            'Settings',
+            'Sign Out'
+        ]);
+        expect(items[0]?.getAttribute('href')).toBe('#/settings/profile');
+    });
+
+    it('keeps the same focused menu for administrators', () => {
+        renderUserMenu(vi.fn(), true);
+
+        const labels = Array.from(container.querySelectorAll<HTMLElement>('#ptv-shell-user-panel [role="menuitem"]'))
+            .map(item => item.textContent?.trim());
+
+        expect(labels).toEqual(['Profile', 'Quick Connect', 'Settings', 'Sign Out']);
+    });
+
     it('acquires and releases runtime occlusion with a real shell panel lifecycle', () => {
         const shellContainer = document.createElement('div');
         const shellRoot = createRoot(shellContainer);
@@ -144,6 +200,26 @@ describe('PTV shell logout control', () => {
         shellContainer.remove();
     });
 
+    it('supports the shared fallback header without claiming native route ownership', () => {
+        const onMenuClick = vi.fn();
+
+        flushSync(() => root.render(
+            <PTVShell
+                headerOnly
+                menuLabel='Open dashboard navigation'
+                onMenuClick={onMenuClick}
+                registerRuntimeShell={false}
+            >
+                <div />
+            </PTVShell>
+        ));
+
+        container.querySelector<HTMLButtonElement>('[aria-label="Open dashboard navigation"]')?.click();
+
+        expect(onMenuClick).toHaveBeenCalledTimes(1);
+        expect(runtimeMocks.registerShell).not.toHaveBeenCalled();
+    });
+
     it('marks the full-screen Music route so physical TV navigation can stay pinned', () => {
         window.location.hash = '#/music/player';
 
@@ -154,6 +230,89 @@ describe('PTV shell logout control', () => {
         ));
 
         expect(container.querySelector('.ptv-shell-frame-fullscreen-music')).not.toBeNull();
+    });
+
+    it('shows Release Calendar navigation only after saved configuration and Plugin capability are verified', () => {
+        calendarAvailabilityMocks.snapshot = {
+            capabilityAvailable: true,
+            configuredServices: ['sonarr'],
+            error: '',
+            identityKey: 'server:user',
+            showEntry: true,
+            status: 'available'
+        };
+
+        flushSync(() => root.render(
+            <PTVShell headerOnly>
+                <div />
+            </PTVShell>
+        ));
+
+        const calendarLink = Array.from(container.querySelectorAll<HTMLAnchorElement>('.ptv-shell-nav-button'))
+            .find(link => link.textContent?.trim() === 'Calendar');
+        expect(calendarLink?.getAttribute('href')).toBe('#/calendar');
+    });
+
+    it('does not force Calendar navigation visible without authoritative availability', () => {
+        flushSync(() => root.render(
+            <PTVShell headerOnly>
+                <div />
+            </PTVShell>
+        ));
+
+        const labels = Array.from(container.querySelectorAll<HTMLAnchorElement>('.ptv-shell-nav-button'))
+            .map(link => link.textContent?.trim());
+        expect(labels).not.toContain('Calendar');
+    });
+
+    it('applies the same Calendar gate to Request page context navigation', () => {
+        flushSync(() => root.render(
+            <PTVShell section='request' title='Requests'>
+                <div />
+            </PTVShell>
+        ));
+
+        const getContextLabels = () => Array.from(container.querySelectorAll<HTMLAnchorElement>('.ptv-shell-context-link'))
+            .map(link => link.textContent?.trim());
+        expect(getContextLabels()).not.toContain('Calendar');
+
+        calendarAvailabilityMocks.snapshot = {
+            capabilityAvailable: true,
+            configuredServices: ['sonarr'],
+            error: '',
+            identityKey: 'server:user',
+            showEntry: true,
+            status: 'available'
+        };
+        flushSync(() => root.render(
+            <PTVShell section='request' title='Requests'>
+                <div />
+            </PTVShell>
+        ));
+
+        const calendarLink = Array.from(container.querySelectorAll<HTMLAnchorElement>('.ptv-shell-context-link'))
+            .find(link => link.textContent?.trim() === 'Calendar');
+        expect(calendarLink?.getAttribute('href')).toBe('#/calendar');
+    });
+
+    it('keeps the shell search field synchronized with the active Search page query', async () => {
+        const renderShellSearch = (searchQuery: string) => flushSync(() => root.render(
+            <PTVShell headerOnly searchQuery={searchQuery}>
+                <div />
+            </PTVShell>
+        ));
+        const getSearchInput = () => container.querySelector<HTMLInputElement>(
+            'input[aria-label="Search PiggieTV"]'
+        );
+
+        renderShellSearch('Digimon');
+        await vi.waitFor(() => expect(getSearchInput()?.value).toBe('Digimon'));
+
+        renderShellSearch('Marvel');
+        await vi.waitFor(() => expect(getSearchInput()?.value).toBe('Marvel'));
+
+        renderShellSearch('');
+        await vi.waitFor(() => expect(getSearchInput()?.value).toBe(''));
     });
 
     it.each([

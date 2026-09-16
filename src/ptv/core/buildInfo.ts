@@ -35,12 +35,13 @@ export type PtvBuildInfo = {
     jellyfinWebVersion: string;
     pluginApiVersion: number | 'unknown';
     pluginVersion: string;
+    ptvWebVersion: string;
     readingSeriesOverrides: PtvPluginCapabilityCompatibility;
 };
 
 type PtvBuildInfoOverrides = Partial<Pick<
     PtvBuildInfo,
-    'environment' | 'frontendBuildDate' | 'frontendBuildId' | 'frontendCommitSha' | 'jellyfinWebVersion'
+    'environment' | 'frontendBuildDate' | 'frontendBuildId' | 'frontendCommitSha' | 'jellyfinWebVersion' | 'ptvWebVersion'
 >> & {
     pluginConnected?: boolean;
 };
@@ -66,13 +67,9 @@ function readCompileTimeValues() {
         frontendBuildDate: typeof __PTV_BUILD_DATE__ === 'string' ? __PTV_BUILD_DATE__ : fallbackLabel,
         frontendBuildId: typeof __PTV_BUILD_ID__ === 'string' ? __PTV_BUILD_ID__ : fallbackLabel,
         frontendCommitSha: typeof __COMMIT_SHA__ === 'string' ? __COMMIT_SHA__ : fallbackLabel,
-        jellyfinWebVersion: typeof __PACKAGE_JSON_VERSION__ === 'string' ? __PACKAGE_JSON_VERSION__ : fallbackLabel
+        jellyfinWebVersion: typeof __PACKAGE_JSON_VERSION__ === 'string' ? __PACKAGE_JSON_VERSION__ : fallbackLabel,
+        ptvWebVersion: typeof __PTV_VERSION__ === 'string' ? __PTV_VERSION__ : fallbackLabel
     };
-}
-
-function getVersionParts(value: string) {
-    const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(value);
-    return match ? match.slice(1, 4).map(Number) : null;
 }
 
 export function classifyPtvPluginCapability(
@@ -101,7 +98,7 @@ export function classifyPtvPluginCapability(
 
 export function classifyPtvBuildCompatibility(
     pluginStatus: PtvPluginBuildStatus | null | undefined,
-    options: { jellyfinWebVersion?: string; pluginConnected?: boolean } = {}
+    options: { pluginConnected?: boolean } = {}
 ): Pick<PtvBuildInfo, 'compatibility' | 'compatibilityMessage'> {
     if (options.pluginConnected === false) {
         return {
@@ -134,27 +131,16 @@ export function classifyPtvBuildCompatibility(
         };
     }
 
-    const pluginVersion = pluginStatus.pluginVersion || pluginStatus.version || '';
-    const webParts = getVersionParts(options.jellyfinWebVersion || '');
-    const pluginParts = getVersionParts(pluginVersion);
-
-    if (webParts && pluginParts && (webParts[0] !== pluginParts[0] || webParts[1] !== pluginParts[1])) {
-        return {
-            compatibility: 'version-mismatch',
-            compatibilityMessage: `Plugin ${pluginVersion} does not target the Jellyfin ${webParts[0]}.${webParts[1]} compatibility line.`
-        };
-    }
-
     if (classifyPtvPluginCapability(pluginStatus, 'readingSeriesOverrides') !== 'available') {
         return {
             compatibility: 'capability-upgrade-required',
-            compatibilityMessage: 'Plugin connected, but an upgrade to PiggieTV 10.11.8.2 or newer is required for server-persisted Reading corrections.'
+            compatibilityMessage: 'Plugin connected, but Reading persistence support is required for server-persisted Reading corrections.'
         };
     }
 
     return {
         compatibility: 'compatible',
-        compatibilityMessage: 'Frontend, plugin API, cache schema, and Reading persistence capability are compatible.'
+        compatibilityMessage: 'PTV Web, plugin API, cache schema, and required capabilities are compatible.'
     };
 }
 
@@ -169,7 +155,6 @@ export function getPtvBuildInfo(
         compileTime.fallbackLabel
     );
     const compatibility = classifyPtvBuildCompatibility(pluginStatus, {
-        jellyfinWebVersion,
         pluginConnected: overrides.pluginConnected
     });
 
@@ -192,6 +177,7 @@ export function getPtvBuildInfo(
         jellyfinWebVersion,
         pluginApiVersion: pluginStatus?.apiVersion ?? 'unknown',
         pluginVersion: safeBuildValue(pluginStatus?.pluginVersion || pluginStatus?.version),
+        ptvWebVersion: safeBuildValue(overrides.ptvWebVersion || compileTime.ptvWebVersion, compileTime.fallbackLabel),
         readingSeriesOverrides: classifyPtvPluginCapability(pluginStatus, 'readingSeriesOverrides')
     };
 }
@@ -200,6 +186,7 @@ export function formatPtvBuildInfoCompact(buildInfo: PtvBuildInfo) {
     return [
         `frontend=${buildInfo.frontendBuildId}`,
         `commit=${buildInfo.frontendCommitSha}`,
+        `ptvWeb=${buildInfo.ptvWebVersion}`,
         `web=${buildInfo.jellyfinWebVersion}`,
         `mode=${buildInfo.environment}`,
         `plugin=${buildInfo.pluginVersion}`,

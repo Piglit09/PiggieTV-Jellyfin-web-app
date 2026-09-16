@@ -323,7 +323,7 @@ export class UserSettings {
             return this.set('enableThemeSongs', val.toString(), false);
         }
 
-        return toBoolean(this.get('enableThemeSongs', false), false);
+        return toBoolean(this.get('enableThemeSongs', false), true);
     }
 
     /**

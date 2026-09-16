@@ -2,6 +2,7 @@
 import type { Router, RouterState } from '@remix-run/router';
 import type { History, Listener, To } from 'history';
 
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import Events, { type Event } from 'utils/events';
 
 const HISTORY_UPDATE_EVENT = 'HISTORY_UPDATE';
@@ -14,7 +15,7 @@ export class RouterHistory implements History {
         this._router = router;
 
         this._router.subscribe(state => {
-            console.debug('[RouterHistory] history update', state);
+            ptvSafeConsole.debug('[RouterHistory] history update', state);
             Events.trigger(document, HISTORY_UPDATE_EVENT, [ state ]);
         });
 

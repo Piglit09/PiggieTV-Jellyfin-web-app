@@ -17,8 +17,9 @@ import { useHeroItems } from './useHeroItems';
 
 type HeroProps = {
     apiClient?: HeroApiClient;
-    user?: { Id?: string };
     featuredContentPromise?: Promise<FeaturedPayload>;
+    isCurrent?: () => boolean;
+    user?: { Id?: string };
 };
 
 const failedHeroImageUrls = new Set<string>();
@@ -233,7 +234,7 @@ function getEndsAt(item?: HeroItem | null) {
 }
 
 // eslint-disable-next-line sonarjs/cognitive-complexity
-const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
+const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise, isCurrent }) => {
     const performanceProfile = useMemo(() => getPtvPerformanceProfile(), []);
     const heroItems = useHeroItems(apiClient, user, featuredContentPromise);
     const [heroIndex, setHeroIndex] = useState(0);
@@ -315,10 +316,12 @@ const Hero: FC<HeroProps> = ({ apiClient, user, featuredContentPromise }) => {
             serverId: heroItem.ServerId,
             startPositionTicks
         }).catch((err: unknown) => {
+            if (isCurrent?.() === false) return;
+
             console.warn('[PTV Hero] Failed to start playback', err);
             window.location.hash = detailsUrl.replace(/^#/, '');
         });
-    }, [detailsUrl, heroItem]);
+    }, [detailsUrl, heroItem, isCurrent]);
 
     useEffect(() => {
         return syncPtvImagePreloads('hero-backdrop', [backdropUrl, nextBackdropUrl]);

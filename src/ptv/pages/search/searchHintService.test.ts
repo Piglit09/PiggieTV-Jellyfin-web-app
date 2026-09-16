@@ -86,23 +86,54 @@ describe('searchHintService', () => {
             { Id: 'series-1', Name: 'Query Series', Type: 'Series' },
             { Id: 'album-1', Name: 'Query Album', Type: 'MusicAlbum' },
             { Id: 'artist-1', Name: 'Query Artist', Type: 'MusicArtist' },
-            { Id: 'unsupported-1', Name: 'Query Genre', Type: 'Genre' }
+            { Id: 'facet-1', Name: 'Query Genre', Type: 'Genre' },
+            { Id: 'facet-1', Name: 'Query Music Genre', Type: 'MusicGenre' },
+            { Id: 'studio-1', Name: 'Query Studio', Type: 'Studio' }
         ], 'query', 14);
 
         expect(grouped.movies.map(item => item.Id)).toEqual(['movie-1', 'movie-2']);
         expect(grouped.shows.map(item => item.Id)).toEqual(['series-1']);
         expect(grouped.albums.map(item => item.Id)).toEqual(['album-1']);
         expect(grouped.artists.map(item => item.Id)).toEqual(['artist-1']);
-        expect(Object.values(grouped).flat()).toHaveLength(5);
+        expect(grouped.genres.map(item => item.Type)).toEqual(['Genre', 'MusicGenre']);
+        expect(grouped.studios.map(item => item.Id)).toEqual(['studio-1']);
+        expect(Object.values(grouped).flat()).toHaveLength(8);
+    });
+
+    it('removes proven-empty duplicate Series and prefers the indexed exact-title copy', () => {
+        const grouped = groupPtvSearchHints([
+            { EpisodeCount: 0, Id: 'series-empty', Name: 'Digimon', ProductionYear: 1999, Type: 'Series' },
+            { Id: 'series-unknown', Name: 'Digimon', ProductionYear: 1999, Type: 'Series' },
+            { EpisodeCount: 54, Id: 'series-indexed', Name: 'Digimon', ProductionYear: 1999, Type: 'Series' },
+            { EpisodeCount: 20, Id: 'series-remake', Name: 'Digimon', ProductionYear: 2020, Type: 'Series' }
+        ], 'digimon', 14);
+
+        expect(grouped.shows.map(item => item.Id)).toEqual(['series-indexed', 'series-remake']);
+        expect(grouped.shows[0]?.RecursiveItemCount).toBe(54);
+    });
+
+    it('ranks Episode series context and music artist context without dropping unknown counts', () => {
+        const grouped = groupPtvSearchHints([
+            { Id: 'series-unknown', Name: 'Legacy Show', Type: 'Series' },
+            { Id: 'episode-context', Name: 'Pilot', Series: 'Digimon', Type: 'Episode' },
+            { Artists: ['Digimon'], Id: 'song-context', Name: 'Theme', Type: 'Audio' },
+            { Id: 'episode-loose', Name: 'A Digimon Story', Type: 'Episode' }
+        ], 'digimon', 14);
+
+        expect(grouped.shows.map(item => item.Id)).toEqual(['series-unknown']);
+        expect(grouped.episodes.map(item => item.Id)).toEqual(['episode-context', 'episode-loose']);
+        expect(grouped.music.map(item => item.Id)).toEqual(['song-context']);
     });
 
     it('uses one coordinated Search Hints request for every supported group', async () => {
         requestPtvJson.mockResolvedValue({
             SearchHints: [
                 { Id: 'movie-1', Name: 'Query', Type: 'Movie' },
-                { Id: 'episode-1', Name: 'Query episode', Type: 'Episode' }
+                { Id: 'episode-1', Name: 'Query episode', Type: 'Episode' },
+                { Id: 'genre-1', Name: 'Query genre', Type: 'Genre' },
+                { Id: 'studio-1', Name: 'Query studio', Type: 'Studio' }
             ],
-            TotalRecordCount: 2
+            TotalRecordCount: 4
         });
         const controller = createPtvAbortController();
 
@@ -114,6 +145,9 @@ describe('searchHintService', () => {
                 'Episode',
                 'Person',
                 'Book',
+                'Genre',
+                'MusicGenre',
+                'Studio',
                 'Audio',
                 'MusicAlbum',
                 'MusicArtist'
@@ -129,7 +163,9 @@ describe('searchHintService', () => {
         expect(requestPtvJson).toHaveBeenCalledTimes(1);
         expect(requestPtvJson).toHaveBeenCalledWith('Search/Hints', expect.objectContaining({
             params: expect.objectContaining({
+                IncludeGenres: true,
                 IncludeItemTypes: expect.stringContaining('MusicArtist'),
+                IncludeStudios: true,
                 SearchTerm: 'query',
                 UserId: 'user-1'
             }),
@@ -138,6 +174,12 @@ describe('searchHintService', () => {
         }));
         expect(result.groups.movies).toHaveLength(1);
         expect(result.groups.episodes).toHaveLength(1);
+        expect(result.groups.genres).toEqual([
+            expect.objectContaining({ Id: 'genre-1', ServerId: 'server-1' })
+        ]);
+        expect(result.groups.studios).toEqual([
+            expect.objectContaining({ Id: 'studio-1', ServerId: 'server-1' })
+        ]);
     });
 
     it('rejects with the coordinated request error so the page owns retry state', async () => {
@@ -174,10 +216,67 @@ describe('searchHintService', () => {
         expect(requestPtvJson).toHaveBeenCalledTimes(1);
         expect(requestPtvJson).toHaveBeenCalledWith('Search/Hints', expect.objectContaining({
             params: expect.objectContaining({
+                IncludeArtists: false,
+                IncludeGenres: false,
                 IncludeItemTypes: 'Person',
+                IncludeMedia: false,
+                IncludePeople: true,
+                IncludeStudios: false,
                 Limit: 14
             })
         }));
+    });
+
+    it.each([
+        {
+            expectedGenres: true,
+            expectedStudios: false,
+            includeItemTypes: ['Genre', 'MusicGenre'],
+            serializedTypes: 'Genre,MusicGenre'
+        },
+        {
+            expectedGenres: false,
+            expectedStudios: true,
+            includeItemTypes: ['Studio'],
+            serializedTypes: 'Studio'
+        }
+    ])('scopes a focused directory filter to its dedicated hint flags', async testCase => {
+        requestPtvJson.mockResolvedValue({ SearchHints: [], TotalRecordCount: 0 });
+
+        await searchPtvHints({
+            includeItemTypes: testCase.includeItemTypes,
+            limit: 14,
+            perGroupLimit: 14,
+            query: 'query',
+            serverId: 'server-1',
+            signal: createPtvAbortController().signal,
+            userId: 'user-1'
+        });
+
+        expect(requestPtvJson).toHaveBeenCalledWith('Search/Hints', expect.objectContaining({
+            params: expect.objectContaining({
+                IncludeGenres: testCase.expectedGenres,
+                IncludeItemTypes: testCase.serializedTypes,
+                IncludeMedia: false,
+                IncludePeople: false,
+                IncludeStudios: testCase.expectedStudios,
+                Limit: 14
+            })
+        }));
+    });
+
+    it('rejects malformed successful responses instead of caching them as empty', async () => {
+        requestPtvJson.mockResolvedValue({ TotalRecordCount: 0 });
+
+        await expect(searchPtvHints({
+            includeItemTypes: ['Series'],
+            limit: 14,
+            perGroupLimit: 14,
+            query: 'digimon',
+            serverId: 'server-1',
+            signal: createPtvAbortController().signal,
+            userId: 'user-1'
+        })).rejects.toThrow('invalid response');
     });
 
     it('classifies aborts and transpiled timeout errors without relying on instanceof', () => {

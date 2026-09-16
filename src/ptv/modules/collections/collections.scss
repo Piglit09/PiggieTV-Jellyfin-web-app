@@ -23,9 +23,9 @@
 .ptv-collection-members,
 .ptv-collection-preferences,
 .ptv-collection-genreDirectory {
-    margin-inline: auto;
-    max-width: 112rem;
-    width: calc(100% - clamp(2rem, 7vw, 8rem));
+    margin-inline: var(--ptv-content-edge, 1.5rem);
+    max-width: none;
+    width: auto;
 }
 
 .ptv-collections-masthead {
@@ -144,11 +144,11 @@
     display: flex;
     flex-direction: column;
     justify-content: end;
-    margin-inline: auto;
+    margin-inline: var(--ptv-content-edge, 1.5rem);
     min-height: inherit;
     padding: clamp(2rem, 6vw, 7rem) 0;
     position: relative;
-    width: calc(100% - clamp(2rem, 7vw, 8rem));
+    width: auto;
     z-index: 2;
 }
 
@@ -319,7 +319,7 @@
 
 .ptv-collection-detailsCopy {
     justify-content: center;
-    max-width: 112rem;
+    max-width: none;
 }
 
 .ptv-collection-backLink {
@@ -483,9 +483,9 @@
 
 .ptv-collection-deferred {
     color: var(--ptv-collection-muted);
-    margin: -2rem auto 3rem;
-    max-width: 112rem;
-    width: calc(100% - clamp(2rem, 7vw, 8rem));
+    margin: -2rem var(--ptv-content-edge, 1.5rem) 3rem;
+    max-width: none;
+    width: auto;
 }
 
 @keyframes ptv-collections-pulse {

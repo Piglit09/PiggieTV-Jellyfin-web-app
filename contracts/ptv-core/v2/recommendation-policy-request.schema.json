@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v2/recommendation-policy-request.schema.json",
+  "title": "PTV Recommendation Policy Request v2",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "policyVersion",
+    "surface",
+    "serverId",
+    "userId",
+    "candidates"
+  ],
+  "properties": {
+    "contractVersion": { "const": "2.0" },
+    "policyVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "algorithmId": { "type": "string", "minLength": 1, "maxLength": 96 },
+    "requestId": { "type": "string", "maxLength": 128 },
+    "cohort": { "type": "string", "maxLength": 64 },
+    "surface": {
+      "enum": ["home", "made-for-you", "radio", "related", "discovery"]
+    },
+    "serverId": { "type": "string", "minLength": 1 },
+    "userId": { "type": "string", "minLength": 1 },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+    "seed": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "artistIds": { "type": "array", "items": { "type": "string" }, "maxItems": 32 },
+        "albumId": { "type": "string" },
+        "genres": { "type": "array", "items": { "type": "string" }, "maxItems": 32 }
+      },
+      "additionalProperties": false
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "mediaType", "source", "classification"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "mediaType": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1 },
+          "classification": { "enum": ["affinity", "discovery", "mixed"] },
+          "baseScore": { "type": "number" },
+          "artistIds": { "type": "array", "items": { "type": "string" }, "maxItems": 32 },
+          "albumId": { "type": "string" },
+          "genres": { "type": "array", "items": { "type": "string" }, "maxItems": 32 },
+          "familiar": {
+            "type": "boolean",
+            "description": "Optional legacy hint. The v2 classification field is authoritative for sequencing."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "surface": { "const": "radio" } },
+        "required": ["surface"]
+      },
+      "then": {
+        "required": ["seed"],
+        "properties": {
+          "seed": {
+            "anyOf": [
+              { "type": "object", "required": ["albumId"], "properties": { "albumId": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" } } },
+              { "type": "object", "required": ["artistIds"], "properties": { "artistIds": { "type": "array", "minItems": 1, "contains": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" } } } },
+              { "type": "object", "required": ["genres"], "properties": { "genres": { "type": "array", "minItems": 1, "contains": { "type": "string", "minLength": 1, "pattern": ".*\\S.*" } } } }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

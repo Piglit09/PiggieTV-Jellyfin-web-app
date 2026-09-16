@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
-async function expectStandaloneShellSurfaces(page: Page) {
+async function expectStandaloneShellSurfaces(page: Page, detailsNavigation = false) {
     const header = page.locator('.ptv-shell-header');
     const navigation = page.locator('.ptv-shell-nav-primary');
     const utility = page.locator('.ptv-shell-icon-button').first();
@@ -10,7 +10,13 @@ async function expectStandaloneShellSurfaces(page: Page) {
     await expect(header).toBeVisible();
     await expect(navigation).toBeVisible();
     await expect(utility).toBeVisible();
-    await expect(search).toBeVisible();
+    if (detailsNavigation) {
+        await expect(search).toHaveCount(0);
+        await expect(navigation.getByRole('link', { name: 'Search' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Back' })).toBeVisible();
+    } else {
+        await expect(search).toBeVisible();
+    }
 
     const readSurface = (locator: Locator) => locator.evaluate(element => {
         const styles = getComputedStyle(element);
@@ -34,7 +40,11 @@ async function expectStandaloneShellSurfaces(page: Page) {
         borderTopWidth: '0px',
         boxShadow: 'none'
     });
-    expect(navigationSurface.backgroundImage).not.toBe('none');
+    if (detailsNavigation) {
+        expect(navigationSurface.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+    } else {
+        expect(navigationSurface.backgroundImage).not.toBe('none');
+    }
     expect(navigationSurface.borderTopWidth).toBe('1px');
     expect(navigationSurface.backdropFilter).toContain('blur');
     expect(utilitySurface.backgroundImage).not.toBe('none');
@@ -43,14 +53,16 @@ async function expectStandaloneShellSurfaces(page: Page) {
 
     const navigationBox = await navigation.boundingBox();
     const utilityBox = await utility.boundingBox();
-    const searchBox = await search.boundingBox();
+    const searchBox = detailsNavigation ? null : await search.boundingBox();
 
     expect(navigationBox).not.toBeNull();
     expect(utilityBox).not.toBeNull();
-    expect(searchBox).not.toBeNull();
+    if (!detailsNavigation) expect(searchBox).not.toBeNull();
     expect(Math.abs(navigationBox!.x + navigationBox!.width / 2 - page.viewportSize()!.width / 2)).toBeLessThan(3);
-    expect(searchBox!.width).toBeGreaterThanOrEqual(utilityBox!.width);
-    expect(searchBox!.height).toBeGreaterThanOrEqual(utilityBox!.height);
+    if (searchBox) {
+        expect(searchBox.width).toBeGreaterThanOrEqual(utilityBox!.width);
+        expect(searchBox.height).toBeGreaterThanOrEqual(utilityBox!.height);
+    }
 }
 
 test.describe('PiggieTV shell surface hierarchy', () => {
@@ -63,7 +75,7 @@ test.describe('PiggieTV shell surface hierarchy', () => {
             await page.setViewportSize({ height: 1271, width: 2560 });
             await page.goto(`/${route}`);
 
-            await expectStandaloneShellSurfaces(page);
+            await expectStandaloneShellSurfaces(page, route.startsWith('#/details'));
         });
     }
 
@@ -84,7 +96,7 @@ test.describe('PiggieTV shell surface hierarchy', () => {
         await page.setViewportSize({ height: 1366, width: 1024 });
         await page.goto('/#/details?id=fixture-item');
 
-        await expectStandaloneShellSurfaces(page);
+        await expectStandaloneShellSurfaces(page, true);
         const overflow = await page.evaluate(() => ({
             clientWidth: document.documentElement.clientWidth,
             scrollWidth: document.documentElement.scrollWidth

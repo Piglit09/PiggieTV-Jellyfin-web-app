@@ -15,6 +15,10 @@ export default defineConfig({
             // eslint-disable-next-line compat/compat
             constants: fileURLToPath(new URL('./src/constants', import.meta.url)),
             // eslint-disable-next-line compat/compat
+            elements: fileURLToPath(new URL('./src/elements', import.meta.url)),
+            // eslint-disable-next-line compat/compat
+            hooks: fileURLToPath(new URL('./src/hooks', import.meta.url)),
+            // eslint-disable-next-line compat/compat
             lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
             // eslint-disable-next-line compat/compat
             ptv: fileURLToPath(new URL('./src/ptv', import.meta.url)),

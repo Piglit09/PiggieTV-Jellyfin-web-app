@@ -5,6 +5,7 @@ import React, {
     type RefObject,
     useCallback,
     useEffect,
+    useLayoutEffect,
     useRef,
     useState
 } from 'react';
@@ -147,6 +148,13 @@ export default function PtvMusicItemMenuOverlay({
             trigger.focus();
         }
     }, [triggerRef]);
+    const focusFirstEnabledItem = useCallback(() => {
+        const items = getEnabledMenuItems(panelRef.current);
+
+        if (items.length) {
+            focusMenuItem(items, 0);
+        }
+    }, []);
     const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
         if (event.key === 'Escape') {
             event.preventDefault();
@@ -205,8 +213,15 @@ export default function PtvMusicItemMenuOverlay({
                 visibility: 'visible',
                 width: `${position.width}px`
             });
+
+            // A button activation may restore focus to its trigger after React
+            // commits the portal. Reassert the menu scope on the already-owned
+            // positioning frame without stealing focus that moved elsewhere.
+            if (document.activeElement === trigger) {
+                focusFirstEnabledItem();
+            }
         });
-    }, [triggerRef]);
+    }, [focusFirstEnabledItem, triggerRef]);
 
     useEffect(() => {
         schedulePosition();
@@ -232,15 +247,11 @@ export default function PtvMusicItemMenuOverlay({
         };
     }, [schedulePosition]);
 
-    useEffect(() => {
-        const items = getEnabledMenuItems(panelRef.current);
-
-        if (items.length) {
-            focusMenuItem(items, 0);
-        }
+    useLayoutEffect(() => {
+        focusFirstEnabledItem();
 
         return restoreTriggerFocus;
-    }, [restoreTriggerFocus]);
+    }, [focusFirstEnabledItem, restoreTriggerFocus]);
 
     if (typeof document === 'undefined' || !document.body) return null;
 

@@ -2,6 +2,12 @@ import {
     normalizePtvReadingComparisonKey,
     parsePtvReadingFilename
 } from '../../ptv/modules/books/readingFilename';
+import {
+    createIdentifyExpectedEffectProjection,
+    evaluateIdentifyExpectedEffects,
+    pollIdentifyExpectedEffectReadback,
+    withIdentifyReadbackDeadline
+} from './itemIdentifierExpectedEffects';
 
 const REMOTE_SEARCH_RESULT_KEYS = [
     'SearchResults',
@@ -165,11 +171,8 @@ export function getReadingIdentifyInfo(item) {
     };
 }
 
-function getReadingCandidateIdentity(result, searchInfo = {}) {
-    const queryInfo = getReadingIdentifyInfo(searchInfo);
-    const resultName = String(getFirstText(result?.Name, result?.name, result?.Title, result?.title)).trim();
-    const resultParsed = parsePtvReadingFilename(resultName);
-    const providerSeries = String(getFirstText(
+function getExplicitReadingProviderSeries(result) {
+    return String(getFirstText(
         result?.SeriesName,
         result?.seriesName,
         result?.VolumeName,
@@ -177,6 +180,13 @@ function getReadingCandidateIdentity(result, searchInfo = {}) {
         result?.Series,
         result?.series
     )).trim();
+}
+
+function getReadingCandidateIdentity(result, searchInfo = {}) {
+    const queryInfo = getReadingIdentifyInfo(searchInfo);
+    const resultName = String(getFirstText(result?.Name, result?.name, result?.Title, result?.title)).trim();
+    const resultParsed = parsePtvReadingFilename(resultName);
+    const providerSeries = getExplicitReadingProviderSeries(result);
     const querySeries = String(getFirstText(searchInfo?.SeriesName, queryInfo.SeriesName)).trim();
     const resultNumber = getReadingNumber(result?.IndexNumber)
         ?? getReadingNumber(result?.IssueNumber)
@@ -221,6 +231,7 @@ function getReadingCandidateIdentity(result, searchInfo = {}) {
 export function normalizeReadingMetadataCandidate(result, searchInfo = {}) {
     const normalizedResult = normalizeRemoteSearchResultForApply(result);
     const identity = getReadingCandidateIdentity(normalizedResult, searchInfo);
+    const providerSeries = getExplicitReadingProviderSeries(normalizedResult);
     const resultOverview = String(normalizedResult.Overview || normalizedResult.overview || '').trim();
     const providerDisplayTitle = identity.providerDisplayTitle;
     const providerIds = normalizedResult.ProviderIds || {};
@@ -257,7 +268,9 @@ export function normalizeReadingMetadataCandidate(result, searchInfo = {}) {
         PtvReadingSeriesTitle: identity.seriesTitle,
         PtvReadingTitleWasNormalized: identity.canonicalTitle !== providerDisplayTitle,
         PtvReadingVolumeNumber: identity.volumeNumber,
-        SeriesName: normalizedResult.SeriesName || identity.seriesTitle || ''
+        // Inferred series remains useful for ranking and display, but only an
+        // explicit provider series is safe to offer as a writable Jellyfin field.
+        SeriesName: providerSeries
     };
 }
 
@@ -767,6 +780,7 @@ export function buildReadingMetadataPreview(currentItem, proposedResult) {
         const currentValue = getReadingPreviewValue(currentItem, key);
         const proposedValue = getReadingPreviewValue(proposedResult, key);
         const changed = normalizePtvReadingComparisonKey(currentValue) !== normalizePtvReadingComparisonKey(proposedValue);
+        const locked = isReadingIdentifyFieldLocked(currentItem, key);
         let safe = Boolean(proposedValue) && changed;
         let warning = '';
 
@@ -780,17 +794,374 @@ export function buildReadingMetadataPreview(currentItem, proposedResult) {
             warning = 'An existing primary image will be kept unless replacement is selected.';
         }
 
+        if (locked) {
+            safe = false;
+            warning = `${label} is locked in Jellyfin and cannot be changed by Identify.`;
+        }
+
         return {
             changed,
             currentValue,
             key,
             label,
+            locked,
             proposedValue,
             safe,
-            selected: safe,
+            selected: safe && !locked,
             warning
         };
     });
+}
+
+export function getReadingIdentifyFieldControlState(field, proposedValue = field?.proposedValue) {
+    const disabled = Boolean(field?.locked) || !field?.changed || !proposedValue;
+
+    return {
+        checked: Boolean(field?.selected) && !disabled,
+        disabled
+    };
+}
+
+export const READING_IDENTIFY_APPLY_OUTCOMES = Object.freeze({
+    failure: 'FAILURE',
+    fullSuccess: 'FULL_SUCCESS',
+    partialSuccess: 'PARTIAL_SUCCESS'
+});
+
+function getReadingIdentifyArtworkCode(status) {
+    if (status === 'failed') return 'ARTWORK_WRITE_FAILED';
+    if (status === 'skipped') return 'ARTWORK_SKIPPED';
+
+    return 'ARTWORK_SAVED';
+}
+
+function getReadingIdentifyMetadataCode(status) {
+    if (status === 'failed') return 'METADATA_WRITE_FAILED';
+    if (status === 'skipped') return 'METADATA_SKIPPED';
+
+    return 'METADATA_SAVED';
+}
+
+function getReadingIdentifyReadbackCode(status, readbackState) {
+    if (status === 'failed') return 'READBACK_FAILED';
+    if (status === 'refresh-failed') {
+        if (readbackState?.artworkSettled === true && readbackState?.metadataSettled === false) {
+            return 'METADATA_REFRESH_FAILED';
+        }
+
+        if (readbackState?.artworkSettled === false && readbackState?.metadataSettled === true) {
+            return 'ARTWORK_REFRESH_FAILED';
+        }
+
+        return 'REFRESH_FAILED';
+    }
+    if (status === 'not-required') return 'READBACK_NOT_REQUIRED';
+
+    return 'READBACK_CONFIRMED';
+}
+
+export function getReadingIdentifyApplyDisposition({
+    artworkStatus,
+    metadataStatus,
+    readbackState,
+    readbackStatus = 'confirmed'
+}) {
+    const artworkCommitted = artworkStatus === 'saved';
+    const metadataCommitted = metadataStatus === 'saved';
+    const committed = artworkCommitted || metadataCommitted;
+    const metadataWriteFailed = metadataStatus === 'failed';
+    const optionalOperationFailed = artworkStatus === 'failed'
+        || readbackStatus === 'failed'
+        || readbackStatus === 'refresh-failed';
+    let outcome = READING_IDENTIFY_APPLY_OUTCOMES.fullSuccess;
+
+    if (!committed) {
+        outcome = READING_IDENTIFY_APPLY_OUTCOMES.failure;
+    } else if (metadataWriteFailed || optionalOperationFailed) {
+        outcome = READING_IDENTIFY_APPLY_OUTCOMES.partialSuccess;
+    }
+
+    return {
+        artworkCode: getReadingIdentifyArtworkCode(artworkStatus),
+        committed,
+        metadataCode: getReadingIdentifyMetadataCode(metadataStatus),
+        outcome,
+        readbackCode: getReadingIdentifyReadbackCode(readbackStatus, readbackState),
+        shouldClose: committed && !metadataWriteFailed
+    };
+}
+
+export function getReadingIdentifyCompletionMessage(disposition, metadataStatus, artworkStatus) {
+    if (disposition.outcome === READING_IDENTIFY_APPLY_OUTCOMES.fullSuccess) {
+        if (metadataStatus === 'saved' && artworkStatus === 'saved') return 'Metadata and artwork updated.';
+        if (metadataStatus === 'saved') return 'Metadata saved. Artwork was not requested.';
+
+        return 'Artwork updated.';
+    }
+
+    if (disposition.readbackCode === 'READBACK_FAILED') {
+        if (metadataStatus === 'saved' && artworkStatus === 'failed') {
+            return 'Metadata saved, but artwork could not be updated and the latest item could not be read back. Refresh if values appear stale; you can retry artwork from Images.';
+        }
+
+        if (metadataStatus === 'failed' && artworkStatus === 'saved') {
+            return 'Artwork was accepted, but metadata could not be updated and the latest item could not be read back. Review the metadata selections and refresh before retrying.';
+        }
+
+        return 'The requested changes were saved, but the latest item could not be read back. Refresh if values appear stale.';
+    }
+
+    if (disposition.readbackCode === 'REFRESH_FAILED') {
+        if (metadataStatus === 'saved' && artworkStatus === 'failed') {
+            return 'Metadata saved, but artwork could not be updated and the refreshed item could not be fully confirmed. Refresh if values appear stale; you can retry artwork from Images.';
+        }
+
+        if (metadataStatus === 'failed' && artworkStatus === 'saved') {
+            return 'Artwork was accepted, but metadata could not be updated and the refreshed item could not be fully confirmed. Review the metadata selections and refresh before retrying.';
+        }
+
+        return 'The requested changes were saved, but the refreshed item could not be fully confirmed. Refresh if values appear stale.';
+    }
+
+    if (disposition.readbackCode === 'METADATA_REFRESH_FAILED') {
+        if (artworkStatus === 'failed') {
+            return 'The metadata update was accepted, but Jellyfin did not retain one or more selected fields and artwork could not be updated. Confirmed values were refreshed; you can retry artwork from Images.';
+        }
+
+        return artworkStatus === 'saved' ?
+            'Artwork updated, but Jellyfin did not retain one or more selected metadata fields. Confirmed metadata was refreshed.' :
+            'Metadata was saved, but Jellyfin did not retain one or more selected fields. Confirmed values were refreshed.';
+    }
+
+    if (disposition.readbackCode === 'ARTWORK_REFRESH_FAILED') {
+        if (metadataStatus === 'failed') {
+            return 'Metadata could not be saved, and the artwork update could not be confirmed after readback. Review the metadata selections and refresh before retrying.';
+        }
+
+        return 'The requested changes were saved, but refreshed artwork could not be confirmed. Refresh if it appears stale.';
+    }
+
+    if (metadataStatus === 'failed' && artworkStatus === 'saved') {
+        return 'Artwork saved, but metadata could not be updated. Review the metadata selections and retry.';
+    }
+
+    if (metadataStatus === 'saved' && artworkStatus === 'failed') {
+        return 'Metadata saved, but artwork could not be updated. You can retry artwork from Images.';
+    }
+
+    if (metadataStatus === 'failed') return 'Metadata could not be saved. Review the selections and retry.';
+
+    return 'Artwork could not be updated. Retry or cancel.';
+}
+
+export function isReadingIdentifyFieldLocked(item, field) {
+    if (item?.LockData === true) return true;
+
+    const normalizedField = normalizeProviderKey(field);
+    const matchingFields = normalizedField === 'people' ? [ 'people', 'cast' ] : [ normalizedField ];
+
+    return (Array.isArray(item?.LockedFields) ? item.LockedFields : []).some(lockedField => (
+        matchingFields.includes(normalizeProviderKey(lockedField))
+    ));
+}
+
+export function getReadingIdentifyWritableFields(item, selectedFields = []) {
+    return selectedFields.filter(field => !isReadingIdentifyFieldLocked(item, field));
+}
+
+export function getReadingIdentifyReadbackState({
+    applyResult,
+    artworkStatus,
+    beforeItem,
+    expectedArtworkChanges,
+    expectedItem = applyResult,
+    item,
+    metadataStatus,
+    selectedMetadataFields = []
+}) {
+    const metadataFields = selectedMetadataFields.filter(field => field !== 'PrimaryImage');
+    const hasSelectedLockedMetadata = metadataFields.some(field => isReadingIdentifyFieldLocked(beforeItem, field));
+    let expectedImageChanges = [];
+
+    if (Array.isArray(expectedArtworkChanges)) {
+        expectedImageChanges = expectedArtworkChanges;
+    } else if (artworkStatus === 'saved') {
+        expectedImageChanges = [ 'Primary' ];
+    }
+
+    const authoritativeMetadataFields = metadataStatus === 'saved' ? metadataFields : [];
+
+    if (!authoritativeMetadataFields.length && !expectedImageChanges.length) {
+        return {
+            artworkSettled: true,
+            metadataSettled: true,
+            settled: Boolean(item)
+        };
+    }
+
+    const projection = createIdentifyExpectedEffectProjection({
+        beforeItem,
+        expectedImageChanges,
+        expectedProviderIds: expectedItem?.ProviderIds,
+        intendedFields: authoritativeMetadataFields,
+        itemType: 'Book',
+        outboundItem: expectedItem,
+        peopleMode: 'names',
+        requireObservableTransition: false,
+        semanticText: true
+    });
+    const state = evaluateIdentifyExpectedEffects(projection, item);
+    const hasSelectedLockedArtwork = expectedImageChanges.some(imageType => (
+        isReadingIdentifyFieldLocked(beforeItem, imageType === 'Primary' ? 'PrimaryImage' : `${imageType}Image`)
+    ));
+    const metadataSettled = !hasSelectedLockedMetadata && state.metadataSettled;
+    const artworkSettled = !hasSelectedLockedArtwork && state.artworkSettled;
+
+    return {
+        artworkSettled,
+        metadataSettled,
+        settled: Boolean(item) && projection.supported && artworkSettled && metadataSettled
+    };
+}
+
+export function createIdentifyTerminalCoordinator({
+    close,
+    dispatch,
+    onPendingChange,
+    onRetryable,
+    onTerminalClosed
+}) {
+    let closed = false;
+    let closeRequested = false;
+    let pending = false;
+    let terminal = false;
+    let terminalCloseHandled = false;
+    let resolveTerminalClosed;
+    const terminalClosed = new Promise(resolve => {
+        resolveTerminalClosed = resolve;
+    });
+
+    function handleTerminalClosed() {
+        if (terminalCloseHandled) return;
+
+        terminalCloseHandled = true;
+        try {
+            onTerminalClosed?.();
+        } finally {
+            resolveTerminalClosed();
+        }
+    }
+
+    return {
+        handleClosed() {
+            closed = true;
+            if (!terminal) return false;
+
+            handleTerminalClosed();
+            return true;
+        },
+
+        isPending() {
+            return pending;
+        },
+
+        requestClose() {
+            if (pending && !terminal) return false;
+
+            if (!closeRequested && !closed) {
+                closeRequested = true;
+                close?.();
+            }
+            return true;
+        },
+
+        settle({ disposition, eventDetail = null }) {
+            if (terminal) return;
+
+            terminal = true;
+            pending = false;
+            onPendingChange?.(false);
+
+            if (disposition.committed && eventDetail) {
+                dispatch?.(eventDetail);
+            }
+
+            if (closed) {
+                handleTerminalClosed();
+            } else if (disposition.shouldClose) {
+                if (!closeRequested) {
+                    closeRequested = true;
+                    close?.();
+                }
+            } else {
+                onRetryable?.();
+            }
+        },
+
+        start() {
+            if (terminal) return;
+
+            pending = true;
+            onPendingChange?.(true);
+        },
+
+        whenTerminalClosed() {
+            return terminalClosed;
+        }
+    };
+}
+
+export const createReadingIdentifyTerminalCoordinator = createIdentifyTerminalCoordinator;
+
+export function withReadingIdentifyDeadline(promise, timeoutMs) {
+    return withIdentifyReadbackDeadline(promise, timeoutMs, () => {
+        const error = new Error(`Reading Identify operation timed out after ${timeoutMs}ms`);
+
+        error.name = 'PtvReadingIdentifyTimeoutError';
+        error.code = 'READING_IDENTIFY_TIMEOUT';
+
+        return error;
+    });
+}
+
+export async function pollReadingIdentifyReadback({
+    delays = [0],
+    isSettled,
+    loadItem,
+    timeoutMs,
+    waitFor = delayMs => new Promise(resolve => globalThis.setTimeout(resolve, delayMs))
+}) {
+    const result = await pollIdentifyExpectedEffectReadback({
+        createTimeoutError: () => {
+            const error = new Error(`Reading Identify operation timed out after ${timeoutMs}ms`);
+
+            error.name = 'PtvReadingIdentifyTimeoutError';
+            error.code = 'READING_IDENTIFY_TIMEOUT';
+
+            return error;
+        },
+        delays,
+        isSettled,
+        loadItem,
+        retainLastUnconfirmedItem: true,
+        timeoutMs,
+        waitFor
+    });
+
+    let status = 'failed';
+
+    if (result.status === 'confirmed') {
+        status = 'confirmed';
+    } else if (result.item) {
+        status = 'refresh-failed';
+    }
+
+    return {
+        attempts: result.attempts,
+        error: result.error,
+        item: result.item,
+        status
+    };
 }
 
 export function getRemoteSearchApplyPayload(resultOrViewModel) {

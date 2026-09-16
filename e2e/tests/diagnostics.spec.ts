@@ -3,12 +3,14 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 const ANDROID_TV_UA = 'Mozilla/5.0 (Linux; Android 11; SHIELD Android TV) AppleWebKit/537.36 Chrome/124.0 Safari/537.36';
 const WEBOS_UA = 'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 Chrome/87.0 Safari/537.36 WebAppManager';
 const FIRE_TV_UA = 'Mozilla/5.0 (Linux; U; Android 9; en-us; AFTMM) AppleWebKit/537.36 Silk/112.3 like Chrome Safari/537.36';
+const DIAGNOSTICS_ROUTE = '/#/settings/admin/piggietv/diagnostics';
+const LEGACY_DIAGNOSTICS_ROUTE = '/#/dashboard/piggietv/diagnostics';
 
 async function openTvDiagnostics(browser: Browser, userAgent = ANDROID_TV_UA) {
     const context = await browser.newContext({ userAgent });
     const page = await context.newPage();
 
-    await page.goto('/#/dashboard/piggietv/diagnostics');
+    await page.goto(DIAGNOSTICS_ROUTE);
     await expect(page.locator('#diagnostics-focus-status')).toContainText('TV focus: healthy; isTv=true');
 
     return { context, page };
@@ -21,8 +23,16 @@ async function exportDiagnostics(page: Page) {
 }
 
 test.describe('PiggieTV diagnostics browser integration', () => {
+    test('replacement-redirects the exact legacy diagnostics route', async ({ page }) => {
+        await page.goto(LEGACY_DIAGNOSTICS_ROUTE);
+
+        await expect.poll(() => page.evaluate(() => window.location.hash))
+            .toBe('#/settings/admin/piggietv/diagnostics');
+        await expect(page.getByRole('heading', { name: 'PiggieTV Diagnostics' })).toBeVisible();
+    });
+
     test('updates real bounded route/request metrics, exports safely, resets, and cleans up', async ({ page }) => {
-        await page.goto('/#/dashboard/piggietv/diagnostics');
+        await page.goto(DIAGNOSTICS_ROUTE);
 
         await expect(page.getByRole('heading', { name: 'PiggieTV Diagnostics' })).toBeVisible();
         await expect(page.locator('#diagnostics-health')).toContainText('Overall health');
@@ -56,7 +66,7 @@ test.describe('PiggieTV diagnostics browser integration', () => {
     });
 
     test('toggles the overlay without creating a focus target or stealing focus', async ({ page }) => {
-        await page.goto('/#/dashboard/piggietv/diagnostics');
+        await page.goto(DIAGNOSTICS_ROUTE);
         const toggle = page.getByRole('button', { name: 'Toggle diagnostics overlay' });
 
         await toggle.focus();
@@ -69,13 +79,13 @@ test.describe('PiggieTV diagnostics browser integration', () => {
     });
 
     test('reports non-TV focus as unsupported rather than failing', async ({ page }) => {
-        await page.goto('/#/dashboard/piggietv/diagnostics');
+        await page.goto(DIAGNOSTICS_ROUTE);
 
         await expect(page.locator('#diagnostics-focus-status')).toContainText('TV focus: unsupported; isTv=false');
     });
 
     test('keeps the desktop mini-player pointer-active above the route shell', async ({ page }) => {
-        await page.goto('/#/dashboard/piggietv/diagnostics');
+        await page.goto(DIAGNOSTICS_ROUTE);
         await page.evaluate(() => {
             const shell = document.querySelector<HTMLElement>('#app');
             const host = document.createElement('div');
@@ -151,7 +161,7 @@ test.describe('PiggieTV diagnostics browser integration', () => {
         });
         const page = await context.newPage();
 
-        await page.goto('/#/dashboard/piggietv/diagnostics');
+        await page.goto(DIAGNOSTICS_ROUTE);
         await expect.poll(() => page.evaluate(() => /android tv/i.test(navigator.userAgent))).toBe(true);
         await expect(page.locator('#diagnostics-focus-status')).toContainText('TV focus: healthy; isTv=true');
         await context.close();
@@ -264,7 +274,7 @@ test.describe('PiggieTV diagnostics browser integration', () => {
             window.location.hash = '#/home';
         });
         await page.evaluate(() => {
-            window.location.hash = '#/dashboard/piggietv/diagnostics';
+            window.location.hash = '#/settings/admin/piggietv/diagnostics';
         });
         await expect(page.getByRole('heading', { name: 'PiggieTV Diagnostics' })).toBeVisible();
         exported = await exportDiagnostics(page);

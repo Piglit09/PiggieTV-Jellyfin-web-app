@@ -196,6 +196,7 @@ describe('video input ownership', () => {
         nativeControls.className = 'videoOsdBottom';
         videoPage.id = 'videoOsdPage';
         ptvPauseStage.className = 'ptv-player-pause-stage';
+        ptvPauseStage.setAttribute('aria-hidden', 'false');
         nativeControls.append(nativeButton);
         videoPage.append(nativeControls);
         ptvPauseStage.append(ptvButton);
@@ -204,6 +205,12 @@ describe('video input ownership', () => {
         expect(isPtvVideoPlayerControlFocused(nativeButton)).toBe(true);
         expect(isPtvVideoPlayerControlFocused(ptvButton)).toBe(true);
         expect(isPtvVideoPlayerControlFocused(pageButton)).toBe(false);
+
+        ptvPauseStage.setAttribute('aria-hidden', 'true');
+        expect(isPtvVideoPlayerControlFocused(ptvButton)).toBe(false);
+
+        nativeControls.classList.add('videoOsdBottom-hidden');
+        expect(isPtvVideoPlayerControlFocused(nativeButton)).toBe(false);
 
         videoPage.remove();
         ptvPauseStage.remove();

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.PiggieTV.Models;
@@ -19,6 +20,20 @@ public sealed class PtvStatusResponse
     /// </summary>
     [JsonPropertyName("ok")]
     public bool Ok { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the response-only current presentation authority at the final server read.
+    /// Null means unknown; this metadata never grants item access or a future consistency lease.
+    /// </summary>
+    [JsonPropertyName("currentPresentationAuthority")]
+    public JsonObject? CurrentPresentationAuthority { get; set; }
+
+    /// <summary>
+    /// Gets or sets exact opaque rule/section pairs from the same authority snapshot, for administrators only.
+    /// </summary>
+    [JsonPropertyName("configuredPresentationBindings")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonArray? ConfiguredPresentationBindings { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the status response contains degraded subsystem data.
@@ -107,6 +122,8 @@ public sealed class PtvStatusResponse
         ["pluginApi"] = true,
         ["featuredContentCache"] = true,
         ["recommendations"] = true,
+        ["detailsRelationships"] = true,
+        ["mediaReports"] = true,
         ["remoteDiagnostics"] = true
     };
 
@@ -117,6 +134,8 @@ public sealed class PtvStatusResponse
     public string[] SupportedFeatureFlags { get; set; } = [
         "featuredContent",
         "featuredContentRefresh",
+        "detailsRelationships",
+        "mediaReports",
         "physicalLayoutSnapshot",
         "readingSeriesOverrides",
         "remoteDiagnostics",
@@ -156,10 +175,12 @@ public sealed class PtvStatusResponse
         "status",
         "featuredContent",
         "featuredContentRefresh",
+        "detailsRelationships",
         "readingSeriesOverrides",
         "settings",
         "rows",
         "integrations",
+        "mediaReports",
         "signup",
         "tags",
         "random",
@@ -176,10 +197,12 @@ public sealed class PtvStatusResponse
         ["status"] = true,
         ["featuredContent"] = true,
         ["featuredContentRefresh"] = true,
+        ["detailsRelationships"] = true,
         ["readingSeriesOverrides"] = true,
         ["settings"] = true,
         ["rows"] = true,
         ["integrations"] = true,
+        ["mediaReports"] = true,
         ["signup"] = true,
         ["tags"] = true,
         ["random"] = true,
@@ -376,9 +399,9 @@ public sealed class PtvStatusResponse
         return new PtvStatusResponse
         {
             CanWriteFeaturedContent = canWriteFeaturedContent,
-            CacheFilePath = storeStatus.CacheFilePath,
+            CacheFilePath = null,
             CacheHealthy = string.IsNullOrWhiteSpace(storeStatus.CacheWriteError),
-            CachePath = storeStatus.CachePath,
+            CachePath = null,
             CachePathExists = storeStatus.CachePathExists,
             CachePathWritable = storeStatus.CachePathWritable,
             CachePayloadBytes = storeStatus.CachePayloadBytes,
@@ -479,6 +502,10 @@ public sealed class PtvStatusSignup
     /// <summary>Gets or sets whether a branded email logo URL is configured.</summary>
     [JsonPropertyName("logoUrlConfigured")]
     public bool LogoUrlConfigured { get; set; }
+
+    /// <summary>Gets or sets whether a trusted public link origin is configured.</summary>
+    [JsonPropertyName("publicBaseUrlConfigured")]
+    public bool PublicBaseUrlConfigured { get; set; }
 
     /// <summary>Gets or sets the sender domain only, not the full address.</summary>
     [JsonPropertyName("fromDomain")]
@@ -623,6 +650,7 @@ public sealed class PtvStatusSignup
             PendingResetCount = activeResetCodes.Count,
             PendingVerificationCount = activePendingVerifications.Count,
             PolicyPresetCount = settings.PolicyPresets?.Count ?? 0,
+            PublicBaseUrlConfigured = !string.IsNullOrWhiteSpace(email.PublicBaseUrl),
             ResetCodeMinutes = email.ResetCodeMinutes,
             Routes = PtvSignupRouteStatus.Create(),
             SmtpHostConfigured = !string.IsNullOrWhiteSpace(email.SmtpHost),

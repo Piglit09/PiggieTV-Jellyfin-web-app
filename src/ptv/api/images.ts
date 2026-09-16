@@ -183,7 +183,7 @@ export function clearPtvImageFailuresForItem(itemId: string | null | undefined) 
     }
 
     for (const key of Array.from(failedPtvImageCandidateKeys.keys())) {
-        if (key.toLowerCase().startsWith(`${normalizedItemId}:`)) {
+        if (key.toLowerCase().includes(`:${normalizedItemId}:`)) {
             failedPtvImageCandidateKeys.delete(key);
         }
     }
@@ -365,6 +365,56 @@ function addTaggedAndUntaggedCandidate(
     }, options.tag ? options.fallbackMode : options.untaggedMode, options.requestedType, options.tag);
 }
 
+function addOwnedImageCandidates(
+    candidates: PtvItemImageCandidate[],
+    seenUrls: Set<string>,
+    baseOptions: PtvImageOptions,
+    options: Readonly<{
+        fallbackImageItemId: string;
+        imageIndex?: number;
+        imageType: 'Backdrop' | 'Thumb';
+        includeUntagged?: boolean;
+        sources: readonly Readonly<{
+            imageItemId: string;
+            mode: 'own' | 'parent';
+            tag: string;
+        }>[];
+    }>
+) {
+    const imageTypeLabel = options.imageType.toLowerCase();
+    const validSources = options.sources.filter(source => source.imageItemId && source.tag);
+    const addSource = (source: typeof options.sources[number], includeUntagged = false) => {
+        addTaggedAndUntaggedCandidate(candidates, seenUrls, source.imageItemId, baseOptions, {
+            fallbackMode: `untagged-${source.mode}-${imageTypeLabel}-fallback`,
+            imageIndex: options.imageIndex,
+            imageType: options.imageType,
+            includeUntagged,
+            requestedType: options.imageType,
+            tag: source.tag,
+            taggedMode: source.mode === 'own' ? `tagged-${imageTypeLabel}` : `parent-${imageTypeLabel}`,
+            untaggedMode: `untagged-${source.mode}-${imageTypeLabel}`
+        });
+    };
+
+    validSources.forEach(source => {
+        addSource(source);
+    });
+    if (!options.includeUntagged) return;
+
+    if (validSources.length) {
+        validSources.forEach(source => {
+            addSource(source, true);
+        });
+        return;
+    }
+
+    addSource({
+        imageItemId: options.fallbackImageItemId,
+        mode: options.fallbackImageItemId === options.sources[1]?.imageItemId ? 'parent' : 'own',
+        tag: ''
+    }, true);
+}
+
 function getPrimaryImageTag(item?: PtvItem | null): string | null {
     return getImageTagValue(item, 'Primary')
         || getStringValue(item, 'PrimaryImageTag', 'primaryImageTag')
@@ -489,13 +539,26 @@ export function getPtvItemImageCandidates(
         || getPtvServerId();
 
     if (!itemId || !serverId) return [];
-    const primaryItemId = getPtvImageRequestItemId(item, 'Primary') || itemId;
-    const thumbItemId = getPtvImageRequestItemId(item, 'Thumb') || itemId;
-    const backdropItemId = getPtvImageRequestItemId(item, 'Backdrop') || itemId;
-    const primaryTag = getPrimaryImageTag(item) || '';
-    const thumbTag = getThumbTag(item) || '';
-    const backdropTags = getStringArrayValue(item, 'BackdropImageTags', 'backdropImageTags');
-    const backdropTag = backdropTags[0] || getBackdropTag(item) || '';
+    const ownPrimaryTag = getImageTagValue(item, 'Primary');
+    const primaryItemId = ownPrimaryTag ? itemId : getPtvImageRequestItemId(item, 'Primary') || itemId;
+    const primaryTag = ownPrimaryTag || getPrimaryImageTag(item) || '';
+    const ownThumbTag = getImageTagValue(item, 'Thumb')
+        || getStringValue(item, 'ThumbImageTag', 'thumbImageTag');
+    const parentThumbTag = getStringValue(item, 'ParentThumbImageTag', 'parentThumbImageTag');
+    const parentThumbItemId = getStringValue(item, 'ParentThumbItemId', 'parentThumbItemId');
+    const ownBackdropTags = getStringArrayValue(item, 'BackdropImageTags', 'backdropImageTags');
+    const ownBackdropTag = ownBackdropTags[0]
+        || getStringValue(item, 'BackdropImageTag', 'backdropImageTag');
+    const parentBackdropTags = getStringArrayValue(item, 'ParentBackdropImageTags', 'parentBackdropImageTags');
+    const parentBackdropTag = parentBackdropTags[0]
+        || getStringValue(item, 'ParentBackdropImageTag', 'parentBackdropImageTag');
+    const parentBackdropItemId = getStringValue(
+        item,
+        'ParentBackdropItemId',
+        'parentBackdropItemId',
+        'BackdropItemId',
+        'backdropItemId'
+    );
     const seriesPrimaryTag = getStringValue(item, 'SeriesPrimaryImageTag', 'seriesPrimaryImageTag');
     const seriesId = getStringValue(item, 'SeriesId', 'seriesId');
     const parentPrimaryTag = getStringValue(
@@ -545,15 +608,15 @@ export function getPtvItemImageCandidates(
         },
         Backdrop: () => {
             if (!includeBackdrop) return;
-            addTaggedAndUntaggedCandidate(candidates, seenUrls, backdropItemId, baseOptions, {
-                fallbackMode: 'untagged-backdrop-fallback',
-                includeUntagged: options.includeUntagged,
+            addOwnedImageCandidates(candidates, seenUrls, baseOptions, {
+                fallbackImageItemId: parentBackdropItemId || itemId,
                 imageIndex: 0,
                 imageType: 'Backdrop',
-                requestedType: 'Backdrop',
-                tag: backdropTag,
-                taggedMode: 'tagged-backdrop',
-                untaggedMode: 'untagged-backdrop'
+                includeUntagged: options.includeUntagged,
+                sources: [
+                    { imageItemId: itemId, mode: 'own', tag: ownBackdropTag },
+                    { imageItemId: parentBackdropItemId, mode: 'parent', tag: parentBackdropTag }
+                ]
             });
         },
         ParentPrimary: () => {
@@ -594,14 +657,14 @@ export function getPtvItemImageCandidates(
         },
         Thumb: () => {
             if (!includeThumb) return;
-            addTaggedAndUntaggedCandidate(candidates, seenUrls, thumbItemId, baseOptions, {
-                fallbackMode: 'untagged-thumb-fallback',
-                includeUntagged: options.includeUntagged,
+            addOwnedImageCandidates(candidates, seenUrls, baseOptions, {
+                fallbackImageItemId: parentThumbItemId || itemId,
                 imageType: 'Thumb',
-                requestedType: 'Thumb',
-                tag: thumbTag,
-                taggedMode: 'tagged-thumb',
-                untaggedMode: 'untagged-thumb'
+                includeUntagged: options.includeUntagged,
+                sources: [
+                    { imageItemId: itemId, mode: 'own', tag: ownThumbTag },
+                    { imageItemId: parentThumbItemId, mode: 'parent', tag: parentThumbTag }
+                ]
             });
         }
     };

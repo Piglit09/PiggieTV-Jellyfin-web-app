@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-core/v2/recommendation-policy-response.schema.json",
+  "title": "PTV Recommendation Policy Response v2",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "policyVersion",
+    "algorithmId",
+    "requestId",
+    "cohort",
+    "surface",
+    "generatedAt",
+    "generationLatencyMs",
+    "constraints",
+    "items"
+  ],
+  "properties": {
+    "contractVersion": { "const": "2.0" },
+    "policyVersion": { "type": "string", "minLength": 1 },
+    "algorithmId": { "type": "string", "minLength": 1 },
+    "requestId": { "type": "string", "minLength": 1 },
+    "cohort": { "type": "string" },
+    "surface": { "enum": ["home", "made-for-you", "radio", "related", "discovery"] },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "generationLatencyMs": { "type": "number", "minimum": 0 },
+    "fallbackReason": { "type": ["string", "null"] },
+    "constraints": {
+      "type": "object",
+      "required": [
+        "discoveryTarget",
+        "familiarTarget",
+        "maxItemsPerArtist",
+        "maxItemsPerAlbum",
+        "maxConsecutiveArtist",
+        "maxConsecutiveAlbum"
+      ],
+      "properties": {
+        "discoveryTarget": { "type": "number", "minimum": 0, "maximum": 1 },
+        "familiarTarget": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxItemsPerArtist": { "type": "integer", "minimum": 1 },
+        "maxItemsPerAlbum": { "type": "integer", "minimum": 1 },
+        "maxConsecutiveArtist": { "type": "integer", "minimum": 1 },
+        "maxConsecutiveAlbum": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "mediaType",
+          "source",
+          "classification",
+          "rank",
+          "score",
+          "transitionScore",
+          "reasons"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "mediaType": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1 },
+          "classification": { "enum": ["affinity", "discovery", "mixed"] },
+          "rank": { "type": "integer", "minimum": 1 },
+          "score": { "type": "number" },
+          "transitionScore": { "type": "number" },
+          "reasons": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "maxItems": 16
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

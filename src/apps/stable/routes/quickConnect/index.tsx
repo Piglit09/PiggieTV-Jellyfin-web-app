@@ -7,6 +7,7 @@ import globalize from 'lib/globalize';
 import Input from 'elements/emby-input/Input';
 import Button from 'elements/emby-button/Button';
 import { useApi } from 'hooks/useApi';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 import './quickConnect.scss';
 
@@ -32,14 +33,14 @@ const QuickConnectPage: FC = () => {
         }
 
         if (!api) {
-            console.error('[QuickConnect] cannot authorize, missing api instance');
+            ptvSafeConsole.error('[QuickConnect] cannot authorize, missing api instance');
             setError('UnknownError');
             return;
         }
 
         const userId = searchParams.get('userId') ?? user?.Id;
         const normalizedCode = code.replace(/\s/g, '');
-        console.log('[QuickConnect] authorizing code %s as user %s', normalizedCode, userId);
+        ptvSafeConsole.debug('[QuickConnect] authorization requested');
 
         getQuickConnectApi(api)
             .authorizeQuickConnect({

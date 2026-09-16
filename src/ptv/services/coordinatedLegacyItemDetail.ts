@@ -10,6 +10,8 @@ type LegacyItemDetailApiClient<TItem> = {
     serverId?: () => string;
 };
 
+const LEGACY_ITEM_DETAIL_REUSE_MS = 3000;
+
 export function getCoordinatedLegacyItemDetail<TItem>(
     apiClient: LegacyItemDetailApiClient<TItem>,
     itemId: string,
@@ -25,7 +27,7 @@ export function getCoordinatedLegacyItemDetail<TItem>(
         userId,
         itemId
     ].join(':');
-    const requestKey = getPtvRequestCoordinatorKey('GET', requestIdentity, true);
+    const requestKey = getPtvRequestCoordinatorKey('GET', requestIdentity, true, `${serverId}:${userId}`);
     const loadItem = (signal: AbortSignal) => {
         if (!options.signal) return apiClient.getItem(userId, itemId);
 
@@ -43,6 +45,7 @@ export function getCoordinatedLegacyItemDetail<TItem>(
             endpoint: 'Items/{item}',
             includeAuthorization: true,
             method: 'GET',
+            reuseSuccessfulForMs: LEGACY_ITEM_DETAIL_REUSE_MS,
             signal: options.signal,
             source: 'legacy-item-details'
         }

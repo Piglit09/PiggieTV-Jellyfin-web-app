@@ -24,8 +24,10 @@ import {
     getRequestedPtvServerUrl
 } from 'ptv/core/serverOriginSelection';
 import { isPtvWebpackDevServerOrigin } from 'ptv/core/urlOrigins';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 const SERVER_DISCOVERY_TIMEOUT_MS = 2200;
+const SERVER_DISCOVERY_HEDGE_DELAY_MS = 150;
 
 function getCurrentApiClientForDiscovery() {
     try {
@@ -52,7 +54,7 @@ export async function serverAddress() {
         null;
 
     if (requestedServerUrl) {
-        console.info('[PTV] Using explicit server override from shell query:', requestedServerUrl);
+        ptvSafeConsole.info('[PTV] Using explicit server override from shell query', requestedServerUrl);
     }
     const apiClient = getCurrentApiClientForDiscovery();
     const development = PTV_CONFIG.runtime.mode === 'development';
@@ -89,13 +91,52 @@ export async function serverAddress() {
 
     console.debug(`[PTV] Discovering Jellyfin server from ${urls.length} candidate(s).`);
 
-    for (const url of urls) {
-        const response = await fetchServerInfoWithTimeout(url);
+    const response = await findFirstResponsiveServer(urls);
 
-        if (response?.config) return response.url;
-    }
+    if (response?.config) return response.url;
 
     return getFallbackServerUrl(urls);
+}
+
+function findFirstResponsiveServer(urls) {
+    if (!urls.length) return Promise.resolve(undefined);
+
+    return new Promise(resolve => {
+        let remaining = urls.length;
+        let settled = false;
+        const hedgeTimers = [];
+        const finish = response => {
+            if (settled) return;
+
+            if (response?.config) {
+                settled = true;
+                hedgeTimers.forEach(timerId => {
+                    window.clearTimeout(timerId);
+                });
+                resolve(response);
+                return;
+            }
+
+            remaining -= 1;
+            if (!remaining) {
+                settled = true;
+                resolve(undefined);
+            }
+        };
+
+        urls.forEach((url, index) => {
+            const startProbe = () => {
+                if (settled) return;
+                void fetchServerInfoWithTimeout(url).then(finish, () => finish(undefined));
+            };
+
+            if (index === 0) {
+                startProbe();
+            } else {
+                hedgeTimers.push(window.setTimeout(startProbe, index * SERVER_DISCOVERY_HEDGE_DELAY_MS));
+            }
+        });
+    });
 }
 
 function fetchServerInfo(url) {
@@ -122,15 +163,19 @@ function fetchServerInfo(url) {
 }
 
 function fetchServerInfoWithTimeout(url) {
+    let timeoutId;
+
     return Promise.race([
         fetchServerInfo(url),
         new Promise(resolve => {
-            window.setTimeout(() => {
+            timeoutId = window.setTimeout(() => {
                 console.debug('[PTV] Jellyfin server discovery candidate timed out.');
                 resolve(undefined);
             }, SERVER_DISCOVERY_TIMEOUT_MS);
         })
-    ]);
+    ]).finally(() => {
+        window.clearTimeout(timeoutId);
+    });
 }
 
 function getFallbackServerUrl(urls) {
@@ -165,15 +210,30 @@ export function onServerChanged(_userId, _accessToken, apiClient) {
     ServerConnections.setLocalApiClient(apiClient);
 }
 
-export function logout() {
+function logoutAndNavigate(getNextRoute) {
     return ServerConnections.logout().then(function () {
         // Clear the query cache
         queryClient.clear();
         // Reset cached views
         viewContainer.reset();
-        appHost.supports(AppFeature.MultiServer) ?
-            navigate('selectserver') : navigate('login');
+        navigate(getNextRoute());
     });
+}
+
+export function logout() {
+    return logoutAndNavigate(() => appHost.supports(AppFeature.MultiServer) ? 'selectserver' : 'login');
+}
+
+export function switchUser() {
+    let currentServerId = '';
+
+    try {
+        currentServerId = ServerConnections.currentApiClient()?.serverId?.() || '';
+    } catch {
+        currentServerId = '';
+    }
+
+    return logoutAndNavigate(() => currentServerId ? `login?serverid=${encodeURIComponent(currentServerId)}` : 'login');
 }
 
 export function getPluginUrl(name) {
@@ -315,6 +375,7 @@ const Dashboard = {
     selectServer,
     serverAddress,
     showLoadingMsg,
+    switchUser,
     datetime,
     DirectoryBrowser,
     dialogHelper,

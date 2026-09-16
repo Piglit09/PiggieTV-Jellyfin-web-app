@@ -6,6 +6,22 @@ Maintenance rule: after every completed project prompt, update `HANDOFF.md`, `PR
 
 ## Current Status
 
+### 2026-08-31 Native Shows library: physically accepted on LAN
+
+Native `PiggieTV-WebOS` version `0.1.19` is committed at `4ff9d29`, packaged, and installed on the LG 70UN7070PUA. The installed chunk is `main-legacy-ZXj1APVw.js`. Shows discovery is now scoped to all typed `tvshows` user views with a maximum concurrency of three, lean scalar sort fields, no exact-count expansion, merged identity deduplication, and the unchanged 12-second request deadline.
+
+The TV is signed in against `http://10.16.0.50:8096`. Physical acceptance rendered 72 cards from three libraries, reported 1,065 titles, held 72 cards for 20 seconds, and restored 72 cards after Home -> Shows. A fresh A-Z request set completed HTTP 200 in 2.4, 7.8, and 9.9 seconds with no runtime exception or library error. Focus remained visible, but the route-return sample retained focus on Home while Shows was current.
+
+The focused Shows suite passes 11/11, and TypeScript plus the production package build pass with only the established large-chunk warning. Status remains **HOLD** for overall production: the public proxy produced 12-second aborts and a 102.1-second 504, successful LAN requests still approach the deadline, other catalog routes retain their existing contracts, and complete physical playback/Back/focus acceptance remains unfinished. This task changed the native package only; no Jellyfin Web release version changed.
+
+### 2026-08-31 Native webOS recovery: deployed with partial physical acceptance
+
+The native `PiggieTV-WebOS` client is now version `0.1.18`, committed at `08d8848`, packaged successfully, and installed on the LG 70UN7070PUA. The installed build identity is `main-legacy-B92NAWM6.js`. A successful server test now retires stale startup-connectivity errors without clearing or masking independent authentication errors.
+
+Physical evidence confirms that the installed app can restore an authenticated session, render populated Home rows, maintain visible focus, navigate routes, and recover an initially timed-out row through Retry without a runtime exception. This closes the specific stale timeout-banner defect and confirms the corrected native package is running on the TV.
+
+Overall production status remains **HOLD**. Backend response latency remains nondeterministic on the physical client, with observed requests taking roughly 4.3 to 9.3 seconds and lower rows initially timing out. Full route, playback, Back, focus-restoration, and long-duration physical acceptance is still required. The native package and Jellyfin Web frontend are separate deployment artifacts; no PTV Web source or Web release version changed in this task.
+
 Web reliability and performance work through Phase F2D-B1 is **APPROVED**.
 Phase H1 is a repository hygiene and commit-boundary pass. It preserves all
 approved PiggieTV behavior and does not expand features or change playback,
@@ -1290,3 +1306,7 @@ route reruns, and physical webOS.
 ## Phase F3 current state
 
 Premium Collections and cross-library discovery implementation is present on the local branch. Existing router, request coordinator, cache, settings transport, recommendation, playback, authentication, and focus owners remain authoritative. Acceptance status must be taken from the final F3 validation report; implementation alone is not an approval claim.
+
+## Current status: F3A2 HOLD
+
+Authenticated latency attribution shows fast frontend route recognition and request admission, with backend/proxy transport dominating slow Collections settlement. A one-shot browser transport failure recovered through one visible retry. Browser-TV focus passed in development and frozen production, but three-cycle acceptance, live Collection Search capability, production deep-scroll proof, and real second-user isolation are incomplete. Product source is unchanged; only validation tooling, tests, and documentation were added. The sole next phase is F3A3 - Collection Search Capability and Backend Latency Closure.

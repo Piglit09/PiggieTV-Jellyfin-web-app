@@ -18,6 +18,7 @@ html.ptv-render-tv {
     --ptv-tv-title-size: 36px;
     --ptv-tv-action-size: 50px;
     --ptv-shell-header-height: var(--ptv-tv-header-height);
+    --ptv-shell-header-safe-y: var(--ptv-tv-safe-y);
 
     font-size: var(--ptv-tv-body-size);
 }

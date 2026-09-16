@@ -5,12 +5,15 @@ import {
     getPtvSearchFilterConfig,
     getPtvSearchPresentation,
     normalizePtvSearchFilter,
-    serializePtvSearchParams
+    serializePtvSearchParams,
+    shouldRestartPtvCommittedSearch
 } from './nativeSearchState';
 
 describe('native Search state', () => {
     it('normalizes supported filters and safely restores unknown values to All', () => {
         expect(normalizePtvSearchFilter(' MUSIC ')).toBe('music');
+        expect(normalizePtvSearchFilter(' Genres ')).toBe('genres');
+        expect(normalizePtvSearchFilter('STUDIOS')).toBe('studios');
         expect(normalizePtvSearchFilter('unsupported')).toBe('all');
         expect(normalizePtvSearchFilter(null)).toBe('all');
     });
@@ -18,7 +21,10 @@ describe('native Search state', () => {
     it('maps compound and focused filters to the authoritative result groups', () => {
         expect(getPtvSearchFilterConfig('music').groups).toEqual(['music', 'albums', 'artists']);
         expect(getPtvSearchFilterConfig('people').groups).toEqual(['people']);
+        expect(getPtvSearchFilterConfig('genres').groups).toEqual(['genres']);
+        expect(getPtvSearchFilterConfig('studios').groups).toEqual(['studios']);
         expect(getPtvSearchFilterConfig('all').groups).toContain('reading');
+        expect(getPtvSearchFilterConfig('all').groups).toEqual(expect.arrayContaining(['genres', 'studios']));
     });
 
     it('serializes trimmed query and filter state for route restoration', () => {
@@ -31,6 +37,8 @@ describe('native Search state', () => {
         });
         expect(serializePtvSearchParams('example title', 'episodes'))
             .toBe('filter=episodes&ptvGrouped=true&query=example%20title');
+        expect(serializePtvSearchParams('Pixar & Disney', 'studios'))
+            .toBe('filter=studios&ptvGrouped=true&query=Pixar%20%26%20Disney');
     });
 
     it('distinguishes progressive, empty, and retryable result states', () => {
@@ -52,5 +60,26 @@ describe('native Search state', () => {
             isSettled: true,
             itemCount: 0
         });
+    });
+
+    it('restarts a committed search after a dirty draft returns to the same query', () => {
+        let draftWasInvalidated = false;
+        const committedQuery = 'Batman';
+        const updateDraft = (draftQuery: string) => {
+            if (draftQuery.trim() !== committedQuery) draftWasInvalidated = true;
+
+            const shouldRestart = shouldRestartPtvCommittedSearch(
+                draftWasInvalidated,
+                draftQuery,
+                committedQuery
+            );
+
+            if (shouldRestart) draftWasInvalidated = false;
+            return shouldRestart;
+        };
+
+        expect(updateDraft('Batman Returns')).toBe(false);
+        expect(updateDraft('Batman')).toBe(true);
+        expect(updateDraft('Batman')).toBe(false);
     });
 });

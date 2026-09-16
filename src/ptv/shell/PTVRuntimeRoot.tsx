@@ -7,6 +7,8 @@ import { registerPtvPersistentRuntimeRoot } from '../services/runtimeStability';
 import PTVMediaDock from './PTVMediaDock';
 import PTVUpdateNotice from './PTVUpdateNotice';
 import PtvDiagnosticsOverlay from '../modules/diagnostics/PtvDiagnosticsOverlay';
+import AccountEmailEnrollmentPrompt from '../modules/account/AccountEmailEnrollmentPrompt';
+import { startPtvAccountProfileService } from '../modules/account/accountProfileStore';
 
 import './ptvShell.scss';
 
@@ -22,8 +24,12 @@ function PTVRuntimeRoot() {
 
         startPtvPlaybackStateService();
         startPtvPlaybackPresentationService();
+        const stopAccountProfileService = startPtvAccountProfileService();
 
-        return unregisterRuntimeRoot;
+        return () => {
+            stopAccountProfileService();
+            unregisterRuntimeRoot();
+        };
     }, []);
 
     return (
@@ -32,6 +38,7 @@ function PTVRuntimeRoot() {
                 <PTVMediaDock />
             </div>
             <PTVUpdateNotice />
+            <AccountEmailEnrollmentPrompt />
             <PtvDiagnosticsOverlay />
         </div>
     );

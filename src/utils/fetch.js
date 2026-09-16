@@ -1,3 +1,5 @@
+import { ptvSafeConsole } from '../ptv/core/safeConsole';
+
 export function getFetchPromise(request) {
     const headers = request.headers || {};
 
@@ -44,7 +46,7 @@ export function getFetchPromise(request) {
 }
 
 function fetchWithTimeout(url, options, timeoutMs) {
-    console.debug(`fetchWithTimeout: timeoutMs: ${timeoutMs}, url: ${url}`);
+    ptvSafeConsole.debug(`fetchWithTimeout: timeoutMs: ${timeoutMs}, url: ${url}`);
 
     return new Promise(function (resolve, reject) {
         const timeout = setTimeout(reject, timeoutMs);
@@ -55,13 +57,13 @@ function fetchWithTimeout(url, options, timeoutMs) {
         fetch(url, options).then(function (response) {
             clearTimeout(timeout);
 
-            console.debug(`fetchWithTimeout: succeeded connecting to url: ${url}`);
+            ptvSafeConsole.debug(`fetchWithTimeout: succeeded connecting to url: ${url}`);
 
             resolve(response);
         }, function (error) {
             clearTimeout(timeout);
 
-            console.debug(`fetchWithTimeout: timed out connecting to url: ${url}`);
+            ptvSafeConsole.debug(`fetchWithTimeout: timed out connecting to url: ${url}`);
 
             reject(error);
         });
@@ -87,10 +89,10 @@ export function ajax(request) {
 
     request.headers = request.headers || {};
 
-    console.debug(`requesting url: ${request.url}`);
+    ptvSafeConsole.debug(`requesting url: ${request.url}`);
 
     return getFetchPromise(request).then(function (response) {
-        console.debug(`response status: ${response.status}, url: ${request.url}`);
+        ptvSafeConsole.debug(`response status: ${response.status}, url: ${request.url}`);
         if (response.status < 400) {
             if (request.dataType === 'json' || request.headers.accept === 'application/json') {
                 return response.json();
@@ -103,7 +105,7 @@ export function ajax(request) {
             return Promise.reject(response);
         }
     }, function (err) {
-        console.error(`request failed to url: ${request.url}`);
+        ptvSafeConsole.error(`request failed to url: ${request.url}`);
         throw err;
     });
 }

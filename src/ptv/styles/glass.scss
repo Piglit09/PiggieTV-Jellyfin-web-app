@@ -1,1 +1,28 @@
-$ptv-glass-placeholder: true !default;
+/* Shared elevation utility for route-level surfaces that cannot use a component primitive. */
+[data-ptv-elevation='1'],
+[data-ptv-elevation='2'] {
+    border: 1px solid var(--ptv-current-elevation-border);
+    background: var(--ptv-current-elevation-surface);
+    box-shadow: var(--ptv-current-elevation-shadow);
+    backdrop-filter: blur(var(--ptv-current-elevation-blur)) saturate(1.08);
+}
+
+[data-ptv-elevation='1'] {
+    --ptv-current-elevation-surface: var(--ptv-elevation-1-surface);
+    --ptv-current-elevation-border: var(--ptv-elevation-1-border);
+    --ptv-current-elevation-shadow: var(--ptv-elevation-1-shadow);
+    --ptv-current-elevation-blur: var(--ptv-elevation-1-blur);
+}
+
+[data-ptv-elevation='2'] {
+    --ptv-current-elevation-surface: var(--ptv-elevation-2-surface);
+    --ptv-current-elevation-border: var(--ptv-elevation-2-border);
+    --ptv-current-elevation-shadow: var(--ptv-elevation-2-shadow);
+    --ptv-current-elevation-blur: var(--ptv-elevation-2-blur);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    [data-ptv-elevation] {
+        backdrop-filter: none;
+    }
+}

@@ -9,6 +9,7 @@ import Divider from '@mui/material/Divider';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Grid from '@mui/material/Grid2';
 import MenuItem from '@mui/material/MenuItem';
+import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
@@ -16,25 +17,22 @@ import Typography from '@mui/material/Typography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import Page from 'components/Page';
 import { getUserViewsQuery } from 'hooks/useUserViews';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
-import Events from 'utils/events';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 
 import { getPtvClientProfile, getPtvPerformanceProfile } from '../../core/clientProfile';
 import { formatPtvBuildInfoCompact, getPtvBuildInfo, type PtvBuildInfo } from '../../core/buildInfo';
-import { PTV_CACHE, PTV_PLUGIN_API } from '../../core/config';
+import { PTV_CACHE, PTV_PLUGIN_API, PTV_ROUTES } from '../../core/config';
 import {
+    applyPtvFeatureSettings,
     getPtvFeatureSettings,
     isPtvPlaybackMode,
-    PTV_FEATURE_SETTINGS_CHANGE_EVENT,
-    setPtvFeatureSetting,
-    type PtvFeatureSettings,
     type PtvPlaybackMode
 } from '../../core/featureSettings';
-import { getPtvDebugReport, isPtvDebugEnabled, setPtvDebug } from '../../core/observability';
+import { getPtvDebugReport, isPtvDebugEnabled } from '../../core/observability';
+import { ptvSafeConsole } from '../../core/safeConsole';
 import { getPtvPerformanceReport } from '../../services/performanceMonitor';
 import {
     getCurrentPtvPluginApiClient,
@@ -43,11 +41,10 @@ import {
     isPtvPluginApiCoolingDown,
     normalizePtvApiError,
     resetPtvPluginApiAvailability,
-    waitForCurrentPtvPluginApiClient
+    subscribePtvPluginStatus
 } from '../../core/pluginApi';
 import {
     clearFeaturedContentCache,
-    FEATURED_CACHE_UPDATED_EVENT,
     forceRefreshFeaturedContentCache,
     getFeaturedContentCacheStatus,
     setFeaturedContentCacheTtlMs,
@@ -60,11 +57,21 @@ import {
     PTV_HOME_ROWS
 } from '../../pages/home/ptvRows';
 import { clearPtvIntegrationSettingsCache } from '../integrations/integrationsConfig';
+import {
+    invalidatePtvArrCalendarAvailability,
+    usePtvArrCalendarAvailability
+} from '../calendar/arrCalendarAvailability';
+import { applyPtvArrApiKeyInputs } from './arrSettingsLifecycle';
 import { normalizePtvRecommendationRowSettings } from '../recommendations/recommendationSettings';
 import { serializeSanitizedPtvDebugExport } from './debugExportSanitizer';
 import { getPtvDashboardRuntimeDiagnostics } from './dashboardRuntimeDiagnostics';
-import { RemoteDiagnosticsPanel } from './RemoteDiagnosticsPanel';
+import {
+    arePtvAdminSnapshotsEqual,
+    loadPtvConfigurationSources,
+    shouldApplyPtvAdminMutationResult
+} from './piggietvConfigurationData';
 import { getPtvShellFoundationStatus } from '../../shell/foundation';
+import { useAdminUnsavedChanges } from '../settings/admin/configuration/useAdminUnsavedChanges';
 
 type PtvPluginFeaturedStatus = {
     cacheVersion?: number;
@@ -341,10 +348,8 @@ type PtvSettingsSection =
     | 'tagSettings'
     | 'tmdbSettings';
 
-const PTV_ROW_BUILDER_HASH = '#/dashboard/piggietv/rows';
-const PTV_RECOMMENDATIONS_HASH = '#/dashboard/piggietv/recommendations';
-const PTV_ROW_BUILDER_PATH = '/dashboard/piggietv/rows';
-const PTV_RECOMMENDATIONS_PATH = '/dashboard/piggietv/recommendations';
+const PTV_ROW_BUILDER_HASH = '#/settings/admin/piggietv/rows';
+const PTV_ROW_BUILDER_PATH = '/settings/admin/piggietv/rows';
 
 type ApplyPluginSettingsStateOptions = {
     forceDraftHydration?: boolean;
@@ -432,7 +437,6 @@ const PTV_SETTINGS_LIMITS = {
     rowRefreshHours: [1, 168]
 } as const;
 const ARR_SERVICE_NAMES = ['sonarr', 'radarr', 'lidarr', 'prowlarr'] as const;
-const ARR_CALENDAR_SERVICE_NAMES = ['sonarr', 'radarr', 'lidarr'] as const;
 type PtvIntegrationTestKey = 'discogs' | 'googleBooks' | 'seerr' | 'tmdb' | typeof ARR_SERVICE_NAMES[number];
 const DEFAULT_PLUGIN_SETTINGS: PtvPluginSettings = {
     arrSettings: {
@@ -724,32 +728,77 @@ function normalizePluginSettings(settings: Partial<PtvPluginSettings>): PtvPlugi
         nextSettings.googleBooksSettings.maxResults,
         ...PTV_SETTINGS_LIMITS.googleBooksMetadataResults
     );
-    nextSettings.googleBooksSettings.googleBooksApiKey = nextSettings.googleBooksSettings.googleBooksApiKey?.trim() || null;
+    // Provider credentials are write-only. Fail closed if an older or malformed
+    // backend unexpectedly echoes them instead of the configured-state flag.
+    nextSettings.googleBooksSettings.googleBooksApiKey = null;
     nextSettings.tmdbSettings.tmdbLanguage = nextSettings.tmdbSettings.tmdbLanguage.trim() || 'en-US';
     nextSettings.tmdbSettings.tmdbRegion = nextSettings.tmdbSettings.tmdbRegion.trim() || 'US';
-    nextSettings.tmdbSettings.tmdbApiToken = nextSettings.tmdbSettings.tmdbApiToken?.trim() || null;
+    nextSettings.tmdbSettings.tmdbApiToken = null;
     nextSettings.seerrSettings.apiKey = null;
     nextSettings.arrSettings.sonarr.apiKey = null;
     nextSettings.arrSettings.radarr.apiKey = null;
     nextSettings.arrSettings.lidarr.apiKey = null;
     nextSettings.arrSettings.prowlarr.apiKey = null;
-    ARR_SERVICE_NAMES.forEach(serviceName => {
-        if (nextSettings.arrSettings[serviceName].apiKeyConfigured) {
-            nextSettings.arrSettings[serviceName].enabled = true;
-        }
-    });
     nextSettings.downloadSettings.username = null;
     nextSettings.downloadSettings.password = null;
 
     return nextSettings;
 }
 
+class PtvSettingsConflictError extends Error {
+    constructor() {
+        super('PiggieTV settings changed on the server while this page was open.');
+        this.name = 'PtvSettingsConflictError';
+    }
+}
+
+function getPluginSettingsSectionSnapshot(
+    settings: PtvPluginSettings,
+    section: PtvSettingsSection
+) {
+    if (section === 'refreshInterval') {
+        return JSON.stringify(settings.cacheSettings.refreshIntervalHours);
+    }
+
+    const resolvedSection = section === 'cacheSettings' ? 'cacheSettings' : section;
+
+    return JSON.stringify(settings[resolvedSection]);
+}
+
+function createPluginSettingsSectionBaselines(settings: PtvPluginSettings) {
+    const baselines = new Map<PtvSettingsSection, string>();
+    const sections: PtvSettingsSection[] = [
+        'arrSettings',
+        'cacheSettings',
+        'downloadSettings',
+        'featureSettings',
+        'googleBooksSettings',
+        'heroSettings',
+        'musicMetadataSettings',
+        'performanceSettings',
+        'randomSettings',
+        'refreshInterval',
+        'rowSettings',
+        'seerrSettings',
+        'tagSettings',
+        'tmdbSettings'
+    ];
+
+    sections.forEach(section => {
+        baselines.set(section, getPluginSettingsSectionSnapshot(settings, section));
+    });
+
+    return baselines;
+}
+
 function applyPluginFeatureSettings(settings: PtvFeatureSettingsDto) {
-    setPtvFeatureSetting('heroEnabled', settings.heroEnabled);
-    setPtvFeatureSetting('homeRowsEnabled', settings.homeRowsEnabled);
-    setPtvFeatureSetting('dynamicBackdropsEnabled', settings.dynamicBackdropsEnabled);
-    setPtvFeatureSetting('tvLowPowerModeEnabled', settings.tvLowPowerModeEnabled);
-    setPtvFeatureSetting('playbackMode', settings.playbackMode);
+    applyPtvFeatureSettings({
+        dynamicBackdropsEnabled: settings.dynamicBackdropsEnabled,
+        heroEnabled: settings.heroEnabled,
+        homeRowsEnabled: settings.homeRowsEnabled,
+        playbackMode: settings.playbackMode,
+        tvLowPowerModeEnabled: settings.tvLowPowerModeEnabled
+    });
 }
 
 function getIntegrationTestResultMessage(serviceName: string, result: Record<string, unknown>) {
@@ -828,18 +877,7 @@ function createArrSettingsPayload(
     });
     const arrSettings = clonePluginSettings(nextSettings).arrSettings;
 
-    (Object.keys(arrSettings) as Array<keyof PtvArrSettingsDto>).forEach(serviceName => {
-        const apiKey = apiKeyInputs[serviceName]?.trim();
-
-        if (apiKey) {
-            arrSettings[serviceName].apiKey = apiKey;
-            arrSettings[serviceName].enabled = true;
-        } else {
-            delete arrSettings[serviceName].apiKey;
-        }
-    });
-
-    return arrSettings;
+    return applyPtvArrApiKeyInputs(arrSettings, apiKeyInputs);
 }
 
 function createArrServiceSettingsPayload(
@@ -922,36 +960,16 @@ type PtvGoogleBooksLookupResponse = {
     };
 };
 
-function redactSettingsForDebug<T>(value: T): T {
-    if (Array.isArray(value)) {
-        return value.map(item => redactSettingsForDebug(item)) as T;
-    }
-
-    if (!isRecord(value)) {
-        return value;
-    }
-
-    return Object.entries(value).reduce<Record<string, unknown>>((redacted, [key, entry]) => {
-        if (/apiKey|token|password|secret|credential/i.test(key)) {
-            redacted[key] = entry ? '[redacted]' : entry;
-            return redacted;
-        }
-
-        redacted[key] = redactSettingsForDebug(entry);
-        return redacted;
-    }, {}) as T;
-}
-
 function debugPluginSettingsSave(message: string, details?: Record<string, unknown>) {
     if (!isDebugLoggingEnabled()) return;
 
-    console.debug(`[PTV Dashboard] ${message}`, details ? redactSettingsForDebug(details) : undefined);
+    ptvSafeConsole.debug(`[PTV Dashboard] ${message}`, details);
 }
 
 function debugFeaturedRefresh(message: string, details?: Record<string, unknown>) {
     if (!isDebugLoggingEnabled()) return;
 
-    console.debug(`[PTV Dashboard] featured cache ${message}`, details ? redactSettingsForDebug(details) : undefined);
+    ptvSafeConsole.debug(`[PTV Dashboard] featured cache ${message}`, details);
 }
 
 function createDashboardAbortController() {
@@ -1099,9 +1117,27 @@ function getTmdbMetadataWarning(status: PtvTmdbMetadataStatus | null | undefined
         return `TMDb metadata failed: unauthorized.${statusCode} ${expectation}`;
     }
 
-    if (!status.lastError) return '';
+    if (status.credentialStatus === 'timeout') {
+        return 'TMDb metadata validation timed out. Try again later.';
+    }
 
-    return `TMDb metadata failed: ${status.lastError}`;
+    if (status.lastError || status.credentialStatus === 'error' || status.credentialStatus === 'invalid') {
+        return 'TMDb metadata could not be validated. Review the credential and try again.';
+    }
+
+    return '';
+}
+
+function getSafeTmdbTestFailure(status: PtvTmdbMetadataStatus) {
+    const statusCode = status.lastStatusCode ? ` HTTP ${status.lastStatusCode}.` : '';
+    const credentialStatus = status.credentialStatus || (status.configured ? 'unknown' : 'missing');
+
+    if (credentialStatus === 'unauthorized') return `TMDb rejected the configured credential.${statusCode}`;
+    if (credentialStatus === 'missing') return 'No TMDb credential is configured.';
+    if (credentialStatus === 'timeout') return 'The TMDb connection test timed out.';
+    if (credentialStatus === 'disabled') return 'TMDb metadata is disabled.';
+
+    return `The TMDb connection test could not be completed.${statusCode}`;
 }
 
 function getFeaturedRefreshSuccessMessage(status: PtvPluginStatus | null | undefined, elapsedMs: number) {
@@ -1115,6 +1151,7 @@ function getFeaturedRefreshSuccessMessage(status: PtvPluginStatus | null | undef
 }
 
 function getPluginStatusChipColor(pluginState: PluginState) {
+    if (pluginState.loading) return 'default';
     if (pluginState.connectionState === 'degraded') return 'warning';
 
     return pluginState.connected ? 'success' : 'error';
@@ -1280,6 +1317,12 @@ function formatBytes(bytes?: number) {
     return `${value.toFixed(unitIndex ? 1 : 0)} ${units[unitIndex]}`;
 }
 
+function formatReportedBoolean(value: boolean | null | undefined) {
+    if (value === true) return 'Yes';
+    if (value === false) return 'No';
+    return 'Not reported';
+}
+
 function getNestedRecord(source: unknown, key: string) {
     if (!isRecord(source)) return null;
 
@@ -1382,22 +1425,6 @@ function getDashboardDebugStateMessage(state: DashboardDebugState, report: unkno
     }[state];
 }
 
-function getDashboardDebugStateColor(state: DashboardDebugState): 'default' | 'error' | 'info' | 'success' | 'warning' {
-    return {
-        active: 'success',
-        degraded: 'warning',
-        disabled: 'default',
-        disconnected: 'error',
-        initializing: 'info'
-    }[state] as 'default' | 'error' | 'info' | 'success' | 'warning';
-}
-
-function getDashboardDebugAlertSeverity(state: DashboardDebugState): 'error' | 'info' | 'success' | 'warning' {
-    const color = getDashboardDebugStateColor(state);
-
-    return color === 'default' ? 'info' : color;
-}
-
 function getDashboardDebugSectionSources(
     report: unknown,
     pluginState: PluginState,
@@ -1477,18 +1504,6 @@ function mergeDashboardDebugReport(options: {
     };
 }
 
-function getDebugSectionSourceText(sources: unknown, key: string) {
-    const source = getNestedRecord(sources, key);
-
-    if (!source) return 'source: n/a';
-
-    const label = typeof source.source === 'string' ? source.source : 'n/a';
-    const timestamp = typeof source.timestamp === 'string' ? source.timestamp : 'n/a';
-    const note = typeof source.note === 'string' && source.note ? `, ${source.note}` : '';
-
-    return `source: ${label}, captured: ${timestamp}${note}`;
-}
-
 function getPerformanceSnapshot() {
     const browserReport = getPtvGlobal()?.performance?.report?.();
     const runtimeReport = getPtvPerformanceReport();
@@ -1509,33 +1524,6 @@ function getPerformanceSnapshot() {
         largestLongTaskMs: runtimeReport.largestLongTaskMs,
         runtimeMonitor: runtimeReport
     };
-}
-
-function getMemoryLabel(performanceReport: unknown) {
-    const memory = getNestedRecord(performanceReport, 'memory');
-
-    if (!memory) return 'n/a';
-
-    const usedJsHeap = getNumberValue(memory, 'usedJsHeap');
-    const jsHeapLimit = getNumberValue(memory, 'jsHeapLimit');
-    const deviceMemory = getNumberValue(memory, 'deviceMemory');
-
-    if (usedJsHeap) {
-        const limitLabel = jsHeapLimit ? ` / ${formatBytes(jsHeapLimit)}` : '';
-
-        return `${formatBytes(usedJsHeap)}${limitLabel}`;
-    }
-
-    return deviceMemory ? `${deviceMemory} GB device` : 'n/a';
-}
-
-function getCacheTimingLabel(debugReport: unknown) {
-    const cache = getNestedRecord(debugReport, 'cache');
-    const timings = getNestedRecord(cache, 'timings');
-    const count = getNumberValue(timings, 'count') || 0;
-    const averageMs = getNumberValue(timings, 'averageMs') || 0;
-
-    return count ? `${count} samples / ${averageMs} ms avg` : 'n/a';
 }
 
 function isDebugLoggingEnabled() {
@@ -1559,10 +1547,6 @@ function copyTextToClipboard(text: string) {
     textarea.remove();
 
     return Promise.resolve();
-}
-
-function isPerformanceOverlayActive() {
-    return document.documentElement.classList.contains('ptv-performance-overlay-active');
 }
 
 function getPtvGlobal() {
@@ -1697,12 +1681,6 @@ function getPluginHelpSeverity(state: PluginConnectionState) {
     return state === 'connected' ? 'info' : 'warning';
 }
 
-function getFpsLabel(currentFps: number | null, averageFps: number | null) {
-    if (!averageFps) return currentFps === null ? 'n/a' : String(currentFps);
-
-    return `${currentFps ?? 'n/a'} avg ${averageFps}`;
-}
-
 function StatusMessageAlert({ message }: Readonly<{ message: string }>) {
     if (!message) return null;
 
@@ -1800,27 +1778,15 @@ function WarningAlert({ message }: Readonly<{ message: string }>) {
     return <Alert severity='warning'>{message}</Alert>;
 }
 
-function DebugReportPreview({ text }: Readonly<{ text: string }>) {
-    if (!text) return null;
-
-    return (
-        <Box component='pre' className='ptv-debug-report-preview'>
-            {text}
-        </Box>
-    );
-}
-
 // eslint-disable-next-line sonarjs/cognitive-complexity
 const PiggieTvDashboardPage = () => {
     const navigate = useNavigate();
     const [pluginState, setPluginState] = useState<PluginState>(EMPTY_PLUGIN_STATE);
     const [cacheStatus, setCacheStatus] = useState(getFeaturedContentCacheStatus);
     const [debugEnabled, setDebugEnabledState] = useState(isPtvDebugEnabled);
-    const [overlayEnabled, setOverlayEnabled] = useState(isPerformanceOverlayActive);
     const [featureSettings, setFeatureSettingsState] = useState(getPtvFeatureSettings);
     const [statusMessage, setStatusMessage] = useState('');
     const [debugReport, setDebugReport] = useState<unknown>(null);
-    const [performanceReport, setPerformanceReport] = useState<unknown>(getPerformanceSnapshot);
     const [persistedRecommendationRows, setPersistedRecommendationRows] = useState(0);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [featuredRefreshState, setFeaturedRefreshState] = useState<FeaturedRefreshState>('idle');
@@ -1838,7 +1804,8 @@ const PiggieTvDashboardPage = () => {
     const [seerrSettingsDraft, setSeerrSettingsDraft] = useState<PtvSeerrSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.seerrSettings }));
     const [arrSettingsDraft, setArrSettingsDraft] = useState<PtvArrSettingsDto>(() => clonePluginSettings(DEFAULT_PLUGIN_SETTINGS).arrSettings);
     const [downloadSettingsDraft, setDownloadSettingsDraft] = useState<PtvDownloadSettingsDto>(() => ({ ...DEFAULT_PLUGIN_SETTINGS.downloadSettings }));
-    const [settingsLoading, setSettingsLoading] = useState(false);
+    const [settingsLoading, setSettingsLoading] = useState(true);
+    const [settingsLoadError, setSettingsLoadError] = useState('');
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [settingsSavingSection, setSettingsSavingSection] = useState<PtvSettingsSection | null>(null);
     const [settingsResetting, setSettingsResetting] = useState(false);
@@ -1860,57 +1827,48 @@ const PiggieTvDashboardPage = () => {
     const [integrationTestMessages, setIntegrationTestMessages] = useState<Partial<Record<PtvIntegrationTestKey, string>>>({});
     const [integrationTesting, setIntegrationTesting] = useState<Partial<Record<PtvIntegrationTestKey, boolean>>>({});
     const pluginSettingsRequestRef = useRef<Promise<PtvPluginSettings | null> | null>(null);
+    const settingsMutationRequestRef = useRef<Promise<unknown> | null>(null);
     const pluginStatusRequestRef = useRef<Promise<void> | null>(null);
     const featuredRefreshStateRef = useRef<FeaturedRefreshState>('idle');
     const featuredRefreshRequestRef = useRef<Promise<void> | null>(null);
     const integrationTestRequestRef = useRef<Partial<Record<PtvIntegrationTestKey, Promise<void>>>>({});
     const integrationTestAbortRef = useRef<Partial<Record<PtvIntegrationTestKey, AbortController>>>({});
     const settingsDirtyRef = useRef(settingsDirty);
+    const settingsDirtySectionsRef = useRef<Set<PtvSettingsSection>>(new Set());
+    const settingsSectionRevisionRef = useRef<Map<PtvSettingsSection, number>>(new Map());
+    const settingsSectionBaselineRef = useRef<Map<PtvSettingsSection, string>>(new Map());
     const hydratedRef = useRef(false);
-    const initialHydrationStartedRef = useRef(false);
     const pluginSettingsLoadedRef = useRef(false);
 
-    const openPtvDashboardRoute = useCallback((
-        path: string,
-        hash: string,
-        event?: React.MouseEvent<HTMLElement>
-    ) => {
+    const openPtvRowBuilder = useCallback((event?: React.MouseEvent<HTMLElement>) => {
         event?.preventDefault();
-        console.info('[PTV Recommendations] Dashboard navigation requested', {
-            currentHash: window.location.hash,
-            currentPathname: window.location.pathname,
-            targetHash: hash,
-            targetPath: path
-        });
-        navigate(path);
-        window.setTimeout(() => {
-            if (window.location.hash !== hash) {
-                window.location.hash = hash;
-            }
-
-            const routeController = (window as unknown as {
-                PTV?: {
-                    routeController?: {
-                        refresh?: () => unknown;
-                    };
-                };
-            }).PTV?.routeController;
-
-            routeController?.refresh?.();
-        }, 0);
+        navigate(PTV_ROW_BUILDER_PATH);
     }, [navigate]);
 
-    const openPtvRowBuilder = useCallback((event?: React.MouseEvent<HTMLElement>) => {
-        openPtvDashboardRoute(PTV_ROW_BUILDER_PATH, PTV_ROW_BUILDER_HASH, event);
-    }, [openPtvDashboardRoute]);
+    const setSettingsDirty = useCallback((nextValue: boolean, section?: PtvSettingsSection) => {
+        if (!nextValue) {
+            settingsDirtySectionsRef.current.clear();
+            settingsDirtyRef.current = false;
+            setSettingsDirtyState(false);
+            return;
+        }
 
-    const openPtvRecommendations = useCallback((event?: React.MouseEvent<HTMLElement>) => {
-        openPtvDashboardRoute(PTV_RECOMMENDATIONS_PATH, PTV_RECOMMENDATIONS_HASH, event);
-    }, [openPtvDashboardRoute]);
+        if (section) {
+            settingsDirtySectionsRef.current.add(section);
+            settingsSectionRevisionRef.current.set(
+                section,
+                (settingsSectionRevisionRef.current.get(section) || 0) + 1
+            );
+        }
+        settingsDirtyRef.current = true;
+        setSettingsDirtyState(true);
+    }, []);
 
-    const setSettingsDirty = useCallback((nextValue: boolean) => {
-        settingsDirtyRef.current = nextValue;
-        setSettingsDirtyState(nextValue);
+    const clearSettingsDirtySection = useCallback((section: PtvSettingsSection) => {
+        settingsDirtySectionsRef.current.delete(section);
+        const isDirty = settingsDirtySectionsRef.current.size > 0;
+        settingsDirtyRef.current = isDirty;
+        setSettingsDirtyState(isDirty);
     }, []);
 
     const setFeaturedRefreshStateValue = useCallback((nextState: FeaturedRefreshState) => {
@@ -1927,23 +1885,108 @@ const PiggieTvDashboardPage = () => {
         };
     }, [settingsDirty]);
 
+    useAdminUnsavedChanges(
+        settingsDirty,
+        'Leave PiggieTV Configuration without saving your changes?'
+    );
+
     const clientProfile = useMemo(() => getPtvClientProfile(), []);
     const performanceProfile = useMemo(() => getPtvPerformanceProfile(), []);
-    const arrCalendarReady = ARR_CALENDAR_SERVICE_NAMES.some(serviceName => {
-        const service = arrSettingsDraft[serviceName];
+    const arrCalendarAvailability = usePtvArrCalendarAvailability();
+    const arrCalendarReady = arrCalendarAvailability.showEntry;
+    let arrCalendarAlertSeverity: 'info' | 'success' | 'warning' = 'info';
+    if (arrCalendarAvailability.status === 'error' || arrCalendarAvailability.status === 'unsupported') {
+        arrCalendarAlertSeverity = 'warning';
+    } else if (arrCalendarReady) {
+        arrCalendarAlertSeverity = 'success';
+    }
+    const arrCalendarMessage = (() => {
+        if (arrCalendarAvailability.status === 'loading') {
+            return 'Checking saved Servarr configuration and Plugin calendar capability...';
+        }
+        if (arrCalendarAvailability.status === 'error') {
+            return arrCalendarReady ?
+                'Release Calendar remains available from the last verified configuration, but availability could not be refreshed.' :
+                'Release Calendar availability could not be verified. Check the PiggieTV Plugin connection and retry.';
+        }
+        if (arrCalendarAvailability.status === 'unsupported') {
+            return 'The connected PiggieTV Plugin does not advertise a supported Release Calendar endpoint.';
+        }
+        if (arrCalendarReady) {
+            const services = arrCalendarAvailability.configuredServices
+                .map(serviceName => `${serviceName.charAt(0).toUpperCase()}${serviceName.slice(1)}`)
+                .join(', ');
 
-        return Boolean(
-            service.internalUrl.trim()
-            && (service.apiKeyConfigured || arrApiKeyInputs[serviceName]?.trim())
+            return `Release Calendar is available for the saved ${services} integration${arrCalendarAvailability.configuredServices.length === 1 ? '' : 's'}.`;
+        }
+
+        return 'Save an enabled Sonarr, Radarr, or Lidarr URL and API key to enable Release Calendar.';
+    })();
+    let arrCalendarAlertAction: React.ReactNode;
+    if (arrCalendarReady) {
+        arrCalendarAlertAction = (
+            <Button color='inherit' href={PTV_ROUTES.calendar} size='small'>
+                Open Calendar
+            </Button>
         );
-    });
+    } else if (arrCalendarAvailability.status === 'error') {
+        arrCalendarAlertAction = (
+            <Button
+                color='inherit'
+                onClick={() => {
+                    invalidatePtvArrCalendarAvailability().catch(() => undefined);
+                }}
+                size='small'
+            >
+                Retry
+            </Button>
+        );
+    }
 
     const syncCacheStatus = useCallback(() => {
         setCacheStatus(getFeaturedContentCacheStatus());
     }, []);
 
-    const syncPerformanceReport = useCallback(() => {
-        setPerformanceReport(getPerformanceSnapshot());
+    const hydratePluginSettingsSection = useCallback((
+        settings: PtvPluginSettings,
+        section: PtvSettingsSection
+    ) => {
+        if (section === 'featureSettings') setFeatureSettingsDraft({ ...settings.featureSettings });
+        if (section === 'heroSettings') setHeroSettingsDraft({ ...settings.heroSettings });
+        if (section === 'rowSettings') setRowSettingsDraft({ ...settings.rowSettings });
+        if (section === 'performanceSettings') setPerformanceSettingsDraft({ ...settings.performanceSettings });
+        if (section === 'tmdbSettings') {
+            setTmdbSettingsDraft({ ...settings.tmdbSettings });
+            setTmdbTokenInput('');
+        }
+        if (section === 'musicMetadataSettings') {
+            setMusicMetadataSettingsDraft({ ...settings.musicMetadataSettings });
+            setDiscogsTokenInput('');
+        }
+        if (section === 'googleBooksSettings') {
+            setGoogleBooksSettingsDraft({ ...settings.googleBooksSettings });
+            setGoogleBooksApiKeyInput('');
+        }
+        if (section === 'cacheSettings' || section === 'refreshInterval') {
+            setCacheSettingsDraft({ ...settings.cacheSettings });
+            setRefreshIntervalHours(String(settings.cacheSettings.refreshIntervalHours));
+        }
+        if (section === 'seerrSettings') {
+            setSeerrSettingsDraft({ ...settings.seerrSettings });
+            setSeerrApiKeyInput('');
+        }
+        if (section === 'arrSettings') {
+            setArrSettingsDraft(clonePluginSettings(settings).arrSettings);
+            setArrApiKeyInputs({ lidarr: '', prowlarr: '', radarr: '', sonarr: '' });
+        }
+        if (section === 'downloadSettings') {
+            setDownloadSettingsDraft({ ...settings.downloadSettings });
+            setDownloadCredentialInputs({ password: '', username: '' });
+        }
+        settingsSectionBaselineRef.current.set(
+            section,
+            getPluginSettingsSectionSnapshot(settings, section)
+        );
     }, []);
 
     const applyPluginSettingsState = useCallback((
@@ -1957,6 +2000,7 @@ const PiggieTvDashboardPage = () => {
         setPluginSettings(normalizedSettings);
 
         if (shouldHydrateDrafts) {
+            settingsSectionBaselineRef.current = createPluginSettingsSectionBaselines(normalizedSettings);
             setFeatureSettingsDraft({ ...normalizedSettings.featureSettings });
             setHeroSettingsDraft({ ...normalizedSettings.heroSettings });
             setRowSettingsDraft({ ...normalizedSettings.rowSettings });
@@ -2014,9 +2058,14 @@ const PiggieTvDashboardPage = () => {
 
         const pluginApi = getCurrentPtvPluginApiClient();
 
-        if (!pluginApi?.getSettings) return Promise.resolve(null);
+        if (!pluginApi?.getSettings) {
+            setSettingsLoadError('PiggieTV settings could not be loaded.');
+            setSettingsLoading(false);
+            return Promise.resolve(null);
+        }
 
         setSettingsLoading(true);
+        setSettingsLoadError('');
         debugPluginSettingsSave('plugin settings hydration started', {
             dirty: settingsDirtyRef.current,
             force: Boolean(options.force),
@@ -2034,11 +2083,12 @@ const PiggieTvDashboardPage = () => {
                 });
 
                 const normalizedSettings = applyPluginSettingsState(settings, {
-                    forceDraftHydration: options.force,
+                    forceDraftHydration: options.force && options.hydrateDrafts !== false,
                     hydrateDrafts: options.hydrateDrafts
                 });
                 pluginSettingsLoadedRef.current = true;
                 hydratedRef.current = true;
+                setSettingsLoadError('');
                 debugPluginSettingsSave('plugin settings hydration finished', {
                     dirtyAfterHydration: settingsDirtyRef.current,
                     hydrated: hydratedRef.current,
@@ -2053,6 +2103,7 @@ const PiggieTvDashboardPage = () => {
                     error: normalizePtvApiError(err),
                     origin
                 });
+                setSettingsLoadError('PiggieTV settings could not be loaded.');
 
                 return null;
             })
@@ -2081,6 +2132,16 @@ const PiggieTvDashboardPage = () => {
             });
         }
     }, [setFeaturedRefreshStateValue]);
+
+    useEffect(() => subscribePtvPluginStatus(status => {
+        if (
+            pluginStatusRequestRef.current
+            || !status
+            || typeof status !== 'object'
+        ) return;
+
+        applyPluginStatus(status as PtvPluginStatus);
+    }), [applyPluginStatus]);
 
     const refreshPluginStatus = useCallback(() => {
         if (pluginStatusRequestRef.current) return pluginStatusRequestRef.current;
@@ -2143,6 +2204,13 @@ const PiggieTvDashboardPage = () => {
         return statusRequest;
     }, [applyPluginStatus]);
 
+    useEffect(() => {
+        void loadPtvConfigurationSources({
+            loadSettings: () => loadPluginSettings({ origin: 'mount' }),
+            loadStatus: refreshPluginStatus
+        });
+    }, [loadPluginSettings, refreshPluginStatus]);
+
     const fetchFullPluginStatus = useCallback(() => {
         const pluginApi = getCurrentPtvPluginApiClient();
 
@@ -2167,7 +2235,6 @@ const PiggieTvDashboardPage = () => {
             const status = await fetchFullPluginStatus();
             latestStatus = status;
             syncCacheStatus();
-            syncPerformanceReport();
             debugFeaturedRefresh('poll status', {
                 elapsedMs: Date.now() - startedAt,
                 featuredCacheExists: status.featuredCacheExists,
@@ -2206,15 +2273,14 @@ const PiggieTvDashboardPage = () => {
         throw Object.assign(new Error('Featured cache refresh did not finish before the polling timeout.'), {
             code: 'PTV_FEATURED_REFRESH_POLL_TIMEOUT'
         });
-    }, [fetchFullPluginStatus, syncCacheStatus, syncPerformanceReport]);
+    }, [fetchFullPluginStatus, syncCacheStatus]);
 
     const refreshCacheWithClientFallback = useCallback(() => forceRefreshFeaturedContentCache(fetchDashboardFeaturedContent)
         .then(() => {
             syncCacheStatus();
-            syncPerformanceReport();
             void refreshPluginStatus();
             setStatusMessage('Featured cache refresh finished.');
-        }), [refreshPluginStatus, syncCacheStatus, syncPerformanceReport]);
+        }), [refreshPluginStatus, syncCacheStatus]);
 
     const refreshCache = useCallback(() => {
         const backendRefreshBlocking = Boolean(pluginState.status?.refreshInProgress && !hasUsableFeaturedCache(pluginState.status));
@@ -2300,7 +2366,6 @@ const PiggieTvDashboardPage = () => {
         })()
             .then(() => {
                 syncCacheStatus();
-                syncPerformanceReport();
                 void refreshPluginStatus();
             })
             .catch((err: unknown) => {
@@ -2326,32 +2391,37 @@ const PiggieTvDashboardPage = () => {
         refreshPluginStatus,
         setFeaturedRefreshStateValue,
         syncCacheStatus,
-        syncPerformanceReport,
         waitForFeaturedRefreshCompletion
     ]);
 
     const clearCache = useCallback(() => {
+        if (!window.confirm('Clear the featured content cache? PiggieTV may need to rebuild Home content before it is available again.')) return;
+
         setIsClearing(true);
         setStatusMessage('Clearing featured cache...');
         clearFeaturedContentCache();
 
         window.setTimeout(() => {
             syncCacheStatus();
-            syncPerformanceReport();
             void refreshPluginStatus();
             setIsClearing(false);
             setStatusMessage('Featured cache clear requested.');
         }, 250);
-    }, [refreshPluginStatus, syncCacheStatus, syncPerformanceReport]);
+    }, [refreshPluginStatus, syncCacheStatus]);
 
     const savePluginSettings = useCallback((
         settingsPatch: PtvPluginSettingsPatch,
         section: PtvSettingsSection,
         successMessage: string
     ) => {
+        if (settingsMutationRequestRef.current) {
+            setStatusMessage('Another PiggieTV settings change is still in progress.');
+            return Promise.resolve(undefined);
+        }
+
         const pluginApi = getCurrentPtvPluginApiClient();
 
-        if (!pluginApi?.saveSettings) {
+        if (!pluginApi?.getSettings || !pluginApi.saveSettings) {
             setStatusMessage('Plugin settings API is unavailable.');
             return Promise.resolve();
         }
@@ -2359,6 +2429,7 @@ const PiggieTvDashboardPage = () => {
         setSettingsSaving(true);
         setSettingsSavingSection(section);
         setStatusMessage('Saving PiggieTV plugin settings...');
+        const submittedRevision = settingsSectionRevisionRef.current.get(section) || 0;
         debugPluginSettingsSave('plugin settings save started', {
             dirtyBeforeSave: settingsDirtyRef.current,
             endpoint: PTV_PLUGIN_API.endpoints.settings,
@@ -2367,7 +2438,19 @@ const PiggieTvDashboardPage = () => {
             section
         });
 
-        return pluginApi.saveSettings<PtvPluginSettings, PtvPluginSettingsPatch>(settingsPatch)
+        const request = pluginApi.getSettings<PtvPluginSettings>()
+            .then(currentSettings => {
+                const normalizedCurrentSettings = normalizePluginSettings(currentSettings);
+                const confirmedBaseline = settingsSectionBaselineRef.current.get(section);
+                const authoritativeBaseline = getPluginSettingsSectionSnapshot(normalizedCurrentSettings, section);
+
+                if (!confirmedBaseline || !arePtvAdminSnapshotsEqual(confirmedBaseline, authoritativeBaseline)) {
+                    setSettingsLoadError('These settings changed on the server while you were editing. Reload settings before saving.');
+                    throw new PtvSettingsConflictError();
+                }
+
+                return pluginApi.saveSettings<PtvPluginSettings, PtvPluginSettingsPatch>(settingsPatch);
+            })
             .then(savedSettings => {
                 debugPluginSettingsSave('plugin settings save response received', {
                     dirtyBeforeApply: settingsDirtyRef.current,
@@ -2377,15 +2460,17 @@ const PiggieTvDashboardPage = () => {
                 });
 
                 const normalizedSavedSettings = applyPluginSettingsState(savedSettings, {
-                    forceDraftHydration: true
+                    hydrateDrafts: false
                 });
                 pluginSettingsLoadedRef.current = true;
                 hydratedRef.current = true;
+                setSettingsLoadError('');
                 clearPtvIntegrationSettingsCache();
+                void invalidatePtvArrCalendarAvailability();
 
                 return loadPluginSettings({
                     force: true,
-                    hydrateDrafts: true,
+                    hydrateDrafts: false,
                     origin: `save verification:${section}`
                 })
                     .then(reloadedSettings => reloadedSettings || normalizedSavedSettings)
@@ -2400,6 +2485,18 @@ const PiggieTvDashboardPage = () => {
                     });
             })
             .then(normalizedSettings => {
+                settingsSectionBaselineRef.current.set(
+                    section,
+                    getPluginSettingsSectionSnapshot(normalizedSettings, section)
+                );
+                if (shouldApplyPtvAdminMutationResult(
+                    submittedRevision,
+                    settingsSectionRevisionRef.current.get(section) || 0
+                )) {
+                    hydratePluginSettingsSection(normalizedSettings, section);
+                    clearSettingsDirtySection(section);
+                }
+
                 if (section === 'refreshInterval' || section === 'cacheSettings') {
                     setFeaturedContentCacheTtlMs(
                         normalizedSettings.cacheSettings.refreshIntervalHours * 60 * 60 * 1000,
@@ -2408,7 +2505,6 @@ const PiggieTvDashboardPage = () => {
                 }
 
                 syncCacheStatus();
-                syncPerformanceReport();
                 debugPluginSettingsSave('plugin settings save finished', {
                     dirtyAfterSave: settingsDirtyRef.current,
                     section,
@@ -2418,26 +2514,42 @@ const PiggieTvDashboardPage = () => {
                 return normalizedSettings;
             })
             .catch((err: unknown) => {
+                if (err instanceof PtvSettingsConflictError) {
+                    setStatusMessage('PiggieTV settings were not saved because the server has newer values.');
+                    return;
+                }
                 debugPluginSettingsSave('plugin settings save failed', {
                     dirtyAfterFailure: settingsDirtyRef.current,
                     error: getErrorMessage(err),
                     section,
                     status: 'failed'
                 });
-                setStatusMessage(`PiggieTV plugin settings save failed: ${getErrorMessage(err)}`);
+                setStatusMessage('PiggieTV plugin settings could not be saved. Review the form and try again.');
             })
             .finally(() => {
+                if (settingsMutationRequestRef.current === request) settingsMutationRequestRef.current = null;
                 setSettingsSaving(false);
                 setSettingsSavingSection(null);
             });
+
+        settingsMutationRequestRef.current = request;
+
+        return request;
     }, [
         applyPluginSettingsState,
+        clearSettingsDirtySection,
+        hydratePluginSettingsSection,
         loadPluginSettings,
-        syncCacheStatus,
-        syncPerformanceReport
+        syncCacheStatus
     ]);
 
     const resetPluginSettings = useCallback(() => {
+        if (settingsMutationRequestRef.current || settingsLoading || !pluginSettings) {
+            setStatusMessage('PiggieTV settings must finish loading before they can be reset.');
+            return;
+        }
+        if (!window.confirm('Reset all PiggieTV plugin settings to their defaults? This changes the server configuration immediately.')) return;
+
         const pluginApi = getCurrentPtvPluginApiClient();
 
         if (!pluginApi?.resetSettings) {
@@ -2448,24 +2560,28 @@ const PiggieTvDashboardPage = () => {
         setSettingsResetting(true);
         setStatusMessage('Resetting PiggieTV plugin settings...');
 
-        pluginApi.resetSettings<PtvPluginSettings>()
+        const request = pluginApi.resetSettings<PtvPluginSettings>()
             .then(settings => {
                 applyPluginSettingsState(settings, {
                     forceDraftHydration: true
                 });
                 pluginSettingsLoadedRef.current = true;
                 hydratedRef.current = true;
+                clearPtvIntegrationSettingsCache();
+                void invalidatePtvArrCalendarAvailability();
                 syncCacheStatus();
-                syncPerformanceReport();
                 setStatusMessage('PiggieTV plugin settings reset.');
             })
-            .catch((err: unknown) => {
-                setStatusMessage(`PiggieTV plugin settings reset failed: ${getErrorMessage(err)}`);
+            .catch(() => {
+                setStatusMessage('PiggieTV plugin settings could not be reset. Try again.');
             })
             .finally(() => {
+                if (settingsMutationRequestRef.current === request) settingsMutationRequestRef.current = null;
                 setSettingsResetting(false);
             });
-    }, [applyPluginSettingsState, syncCacheStatus, syncPerformanceReport]);
+
+        settingsMutationRequestRef.current = request;
+    }, [applyPluginSettingsState, pluginSettings, settingsLoading, syncCacheStatus]);
 
     const saveFeatureSettings = useCallback(() => {
         const nextSettings = normalizePluginSettings({
@@ -2752,19 +2868,15 @@ const PiggieTvDashboardPage = () => {
                         previousState.status
                 }));
 
-                const statusCode = result.lastStatusCode ? ` HTTP ${result.lastStatusCode}.` : '';
-                const credentialStatus = result.credentialStatus || (result.configured ? 'unknown' : 'missing');
                 const expectation = getTmdbCredentialExpectation(result);
-                const tmdbErrorBody = result.lastErrorBody ? ` TMDb said: ${result.lastErrorBody}` : '';
-                const fallbackMessage = `TMDb credential status: ${credentialStatus}.${statusCode}`;
                 const message = result.credentialStatus === 'valid' ?
                     `TMDb credential validated successfully. ${expectation}` :
-                    `${result.lastError || fallbackMessage} ${expectation}${tmdbErrorBody}`;
+                    `${getSafeTmdbTestFailure(result)} ${expectation}`;
                 const saveHint = hasUnsavedToken ? ' Save TMDB settings before testing the new token.' : '';
 
                 setIntegrationTestMessages(previous => ({ ...previous, tmdb: `${message}${saveHint}` }));
             })
-            .catch((err: unknown) => {
+            .catch(() => {
                 if (abortController?.signal.aborted) {
                     debugPluginSettingsSave('integration test aborted', {
                         origin: 'abort',
@@ -2775,7 +2887,7 @@ const PiggieTvDashboardPage = () => {
 
                 setIntegrationTestMessages(previous => ({
                     ...previous,
-                    tmdb: `TMDb test failed: ${getErrorMessage(err)}`
+                    tmdb: 'The TMDb connection test could not be completed. Try again.'
                 }));
             })
             .finally(() => {
@@ -2833,27 +2945,27 @@ const PiggieTvDashboardPage = () => {
 
     const handleHeroEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setFeatureSettingsDraft(previousSettings => ({ ...previousSettings, heroEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'featureSettings');
     }, [setSettingsDirty]);
 
     const handleHomeRowsEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setFeatureSettingsDraft(previousSettings => ({ ...previousSettings, homeRowsEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'featureSettings');
     }, [setSettingsDirty]);
 
     const handleRecommendedRowsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setRowSettingsDraft(previousSettings => ({ ...previousSettings, enableRecommendedRows: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'rowSettings');
     }, [setSettingsDirty]);
 
     const handleDynamicBackdropsEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setFeatureSettingsDraft(previousSettings => ({ ...previousSettings, dynamicBackdropsEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'featureSettings');
     }, [setSettingsDirty]);
 
     const handleTvLowPowerModeEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setFeatureSettingsDraft(previousSettings => ({ ...previousSettings, tvLowPowerModeEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'featureSettings');
     }, [setSettingsDirty]);
 
     const handlePlaybackModeChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -2861,127 +2973,127 @@ const PiggieTvDashboardPage = () => {
             ...previousSettings,
             playbackMode: normalizePtvPlaybackMode(event.target.value)
         }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'featureSettings');
     }, [setSettingsDirty]);
 
     const handleDebugModeEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setFeatureSettingsDraft(previousSettings => ({ ...previousSettings, debugModeEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'featureSettings');
     }, [setSettingsDirty]);
 
     const handleHeroAutoRotateChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setHeroSettingsDraft(previousSettings => ({ ...previousSettings, heroAutoRotateEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'heroSettings');
     }, [setSettingsDirty]);
 
     const handleHeroRotationSecondsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setHeroSettingsDraft(previousSettings => ({ ...previousSettings, heroRotationSeconds: Number(event.target.value || 0) }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'heroSettings');
     }, [setSettingsDirty]);
 
     const handleHeroMaxItemsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setHeroSettingsDraft(previousSettings => ({ ...previousSettings, heroMaxItems: Number(event.target.value || 0) }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'heroSettings');
     }, [setSettingsDirty]);
 
     const handleHeroBackdropMaxWidthChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setHeroSettingsDraft(previousSettings => ({ ...previousSettings, heroBackdropMaxWidth: Number(event.target.value || 0) }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'heroSettings');
     }, [setSettingsDirty]);
 
     const handleHeroLogoMaxWidthChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setHeroSettingsDraft(previousSettings => ({ ...previousSettings, heroLogoMaxWidth: Number(event.target.value || 0) }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'heroSettings');
     }, [setSettingsDirty]);
 
     const handleMaxCachePayloadBytesChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setPerformanceSettingsDraft(previousSettings => ({ ...previousSettings, maxCachePayloadBytes: Number(event.target.value || 0) }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'performanceSettings');
     }, [setSettingsDirty]);
 
     const handleImagePreloadLimitChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setPerformanceSettingsDraft(previousSettings => ({ ...previousSettings, imagePreloadLimit: Number(event.target.value || 0) }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'performanceSettings');
     }, [setSettingsDirty]);
 
     const handleAnimatedRowsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setPerformanceSettingsDraft(previousSettings => ({ ...previousSettings, enableAnimatedRows: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'performanceSettings');
     }, [setSettingsDirty]);
 
     const handleBackdropBlurChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setPerformanceSettingsDraft(previousSettings => ({ ...previousSettings, enableBackdropBlur: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'performanceSettings');
     }, [setSettingsDirty]);
 
     const handleLowPowerDisableBlurChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setPerformanceSettingsDraft(previousSettings => ({ ...previousSettings, lowPowerDisableBlur: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'performanceSettings');
     }, [setSettingsDirty]);
 
     const handleLowPowerDisableAnimationsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setPerformanceSettingsDraft(previousSettings => ({ ...previousSettings, lowPowerDisableAnimations: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'performanceSettings');
     }, [setSettingsDirty]);
 
     const handleTmdbEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setTmdbSettingsDraft(previousSettings => ({ ...previousSettings, tmdbEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'tmdbSettings');
     }, [setSettingsDirty]);
 
     const handleTmdbRowAccuracyChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setTmdbSettingsDraft(previousSettings => ({ ...previousSettings, useTmdbForRowAccuracy: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'tmdbSettings');
     }, [setSettingsDirty]);
 
     const handleTmdbLanguageChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setTmdbSettingsDraft(previousSettings => ({ ...previousSettings, tmdbLanguage: event.target.value }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'tmdbSettings');
     }, [setSettingsDirty]);
 
     const handleTmdbRegionChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setTmdbSettingsDraft(previousSettings => ({ ...previousSettings, tmdbRegion: event.target.value }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'tmdbSettings');
     }, [setSettingsDirty]);
 
     const handleTmdbTokenInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setTmdbTokenInput(event.target.value);
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'tmdbSettings');
     }, [setSettingsDirty]);
 
     const handleMusicBrainzEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setMusicMetadataSettingsDraft(previousSettings => ({ ...previousSettings, musicBrainzEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'musicMetadataSettings');
     }, [setSettingsDirty]);
 
     const handleDiscogsEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setMusicMetadataSettingsDraft(previousSettings => ({ ...previousSettings, discogsEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'musicMetadataSettings');
     }, [setSettingsDirty]);
 
     const handleMusicMetadataMaxResultsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setMusicMetadataSettingsDraft(previousSettings => ({ ...previousSettings, maxResults: Number(event.target.value || 0) }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'musicMetadataSettings');
     }, [setSettingsDirty]);
 
     const handleDiscogsTokenInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setDiscogsTokenInput(event.target.value);
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'musicMetadataSettings');
     }, [setSettingsDirty]);
 
     const handleGoogleBooksEnabledChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setGoogleBooksSettingsDraft(previousSettings => ({ ...previousSettings, googleBooksEnabled: event.target.checked }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'googleBooksSettings');
     }, [setSettingsDirty]);
 
     const handleGoogleBooksMaxResultsChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setGoogleBooksSettingsDraft(previousSettings => ({ ...previousSettings, maxResults: Number(event.target.value || 0) }));
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'googleBooksSettings');
     }, [setSettingsDirty]);
 
     const handleGoogleBooksApiKeyInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setGoogleBooksApiKeyInput(event.target.value);
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'googleBooksSettings');
     }, [setSettingsDirty]);
 
     const testSeerrConnection = useCallback(() => {
@@ -3143,22 +3255,8 @@ const PiggieTvDashboardPage = () => {
     const handleRefreshIntervalChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         setRefreshIntervalHours(event.target.value);
         setCacheSettingsDraft({ refreshIntervalHours: Number(event.target.value || 0) });
-        setSettingsDirty(true);
+        setSettingsDirty(true, 'refreshInterval');
     }, [setSettingsDirty]);
-
-    const toggleDebug = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-        const enabled = event.target.checked;
-
-        setPtvDebug(enabled);
-        setDebugEnabledState(enabled);
-    }, []);
-
-    const togglePerformanceOverlay = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-        const enabled = event.target.checked;
-
-        getPtvGlobal()?.performanceOverlay?.(enabled);
-        setOverlayEnabled(isPerformanceOverlayActive());
-    }, []);
 
     const getMergedDebugReport = useCallback((report?: unknown, overrides: {
         cacheStatus?: ReturnType<typeof getFeaturedContentCacheStatus>;
@@ -3181,17 +3279,6 @@ const PiggieTvDashboardPage = () => {
         persistedRecommendationRows,
         pluginState
     ]);
-
-    const runDebugReport = useCallback(() => {
-        const report = getMergedDebugReport();
-
-        setDebugReport(report);
-        setPerformanceReport(getPerformanceSnapshot());
-
-        if (isDebugLoggingEnabled()) {
-            console.info('[PTV Debug Report]', report);
-        }
-    }, [getMergedDebugReport]);
 
     const buildDebugSnapshot = useCallback(() => {
         const liveCacheStatus = getFeaturedContentCacheStatus();
@@ -3229,18 +3316,6 @@ const PiggieTvDashboardPage = () => {
             });
     }, [buildDebugSnapshot]);
 
-    const copyDebugReport = useCallback(() => {
-        const report = getMergedDebugReport(debugReport);
-
-        copyTextToClipboard(serializeSanitizedPtvDebugExport(report))
-            .then(() => {
-                setStatusMessage('Debug report copied.');
-            })
-            .catch((err: unknown) => {
-                setStatusMessage(`Debug report copy failed: ${getErrorMessage(err)}`);
-            });
-    }, [debugReport, getMergedDebugReport]);
-
     const copyPluginInstallNote = useCallback(() => {
         copyTextToClipboard(PTV_PLUGIN_INSTALL_NOTE)
             .then(() => {
@@ -3266,94 +3341,10 @@ const PiggieTvDashboardPage = () => {
     }, [pluginState]);
 
     useEffect(() => {
-        const clientWaitController = createDashboardAbortController();
-        const hydratePluginState = (origin: string) => {
-            void waitForCurrentPtvPluginApiClient({ signal: clientWaitController?.signal })
-                .then(() => {
-                    resetPtvPluginApiAvailability();
-                    return Promise.all([
-                        refreshPluginStatus(),
-                        loadPluginSettings({
-                            hydrateDrafts: true,
-                            origin
-                        })
-                    ]);
-                })
-                .catch((err: unknown) => {
-                    if (clientWaitController?.signal.aborted) return;
-
-                    setPluginState({
-                        connected: false,
-                        connectionState: 'endpoint-unreachable',
-                        error: getErrorMessage(err),
-                        loading: false,
-                        status: null
-                    });
-                });
-        };
-        const handleLocalUserSignedIn = () => hydratePluginState('authenticated client ready');
-
-        Events.on(ServerConnections, 'localusersignedin', handleLocalUserSignedIn);
-
-        if (!initialHydrationStartedRef.current) {
-            initialHydrationStartedRef.current = true;
-            hydratePluginState('dashboard mount');
-        }
-
-        syncCacheStatus();
-        syncPerformanceReport();
-
-        const handleCacheUpdate = () => {
-            syncCacheStatus();
-            syncPerformanceReport();
-        };
-
-        const handleDebugChange = () => {
-            setDebugEnabledState(isPtvDebugEnabled());
-            setOverlayEnabled(isPerformanceOverlayActive());
-            syncPerformanceReport();
-        };
-
-        const handleFeatureSettingsChange = (event: Event) => {
-            const nextSettings = (event as CustomEvent<PtvFeatureSettings>).detail;
-
-            setFeatureSettingsState(nextSettings || getPtvFeatureSettings());
-        };
-        const handleVisibilityChange = () => {
-            if (document.hidden) return;
-
-            syncCacheStatus();
-            syncPerformanceReport();
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, handleCacheUpdate);
-        window.addEventListener('ptv:debug:change', handleDebugChange);
-        window.addEventListener(PTV_FEATURE_SETTINGS_CHANGE_EVENT, handleFeatureSettingsChange);
-
-        return () => {
-            clientWaitController?.abort();
-            Object.values(integrationTestAbortRef.current).forEach(controller => {
-                controller?.abort();
-            });
-            integrationTestAbortRef.current = {};
-            integrationTestRequestRef.current = {};
-            Events.off(ServerConnections, 'localusersignedin', handleLocalUserSignedIn);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleCacheUpdate);
-            window.removeEventListener('ptv:debug:change', handleDebugChange);
-            window.removeEventListener(PTV_FEATURE_SETTINGS_CHANGE_EVENT, handleFeatureSettingsChange);
-        };
-    // The dashboard bootstraps plugin settings once; explicit reloads go through save/reset handlers.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    useEffect(() => {
         if (pluginState.loading) return undefined;
 
         const timeoutId = window.setTimeout(() => {
             setDebugReport(getMergedDebugReport());
-            setPerformanceReport(getPerformanceSnapshot());
         }, 0);
 
         return () => {
@@ -3384,69 +3375,75 @@ const PiggieTvDashboardPage = () => {
         cacheSource,
         pluginState.connectionState
     );
-    const statusLabel = getPluginStateLabel(pluginConnectionState);
+    const statusLabel = pluginState.loading ? 'checking' : getPluginStateLabel(pluginConnectionState);
     const pluginHelpMessage = getPluginHelpMessage(pluginConnectionState, pluginStatus, cacheSource);
-    const statusError = pluginStatus?.lastRefreshError || pluginStatus?.cacheWriteError || cacheStatus.lastRefreshError || cacheStatus.writeError || pluginState.error;
+    const hasCacheWriteError = Boolean(pluginStatus?.cacheWriteError || cacheStatus.writeError);
+    const hasCacheRefreshError = Boolean(pluginStatus?.lastRefreshError || cacheStatus.lastRefreshError);
     const attemptedPluginApiUrl = pluginApiDiagnostics.resolvedUrl || pluginApiDiagnostics.attemptedUrl;
     const statusPluginApiUrl = getPtvPluginApiResolvedUrl() || attemptedPluginApiUrl;
-    const pluginVersion = pluginStatus?.pluginVersion || pluginStatus?.version || 'n/a';
+    const pluginVersion = pluginState.loading ? 'Checking...' : pluginStatus?.pluginVersion || pluginStatus?.version || 'Not reported';
     const buildInfo = getPtvBuildInfo(pluginStatus, { pluginConnected: pluginState.connected });
     const pluginName = pluginStatus?.pluginName || pluginStatus?.name || 'PiggieTV';
     const createdAt = cacheStatus.createdAt || pluginFeaturedStatus?.createdAt || pluginStatus?.featuredCacheCreatedAt;
     const expiresAt = cacheStatus.expiresAt || pluginFeaturedStatus?.expiresAt || pluginStatus?.featuredCacheExpiresAt;
     const nextRefreshAt = pluginStatus?.nextRefreshAt || expiresAt;
-    const heroCount = cacheStatus.heroCount || pluginFeaturedStatus?.heroCount || 0;
-    const itemCount = cacheStatus.itemCount || pluginFeaturedStatus?.itemCount || 0;
-    const sectionCount = cacheStatus.sectionCount || pluginFeaturedStatus?.sectionCount || 0;
+    const cacheSummaryAvailable = hasUsableDashboardCacheStatus(cacheStatus) || Boolean(pluginStatus);
+    const cacheStatusPending = pluginState.loading && !cacheSummaryAvailable;
+    const heroCount = cacheSummaryAvailable ? cacheStatus.heroCount || pluginFeaturedStatus?.heroCount || 0 : null;
+    const itemCount = cacheSummaryAvailable ? cacheStatus.itemCount || pluginFeaturedStatus?.itemCount || 0 : null;
+    const sectionCount = cacheSummaryAvailable ? cacheStatus.sectionCount || pluginFeaturedStatus?.sectionCount || 0 : null;
     const lastRefreshDurationMs = pluginStatus?.lastRefreshDurationMs || cacheStatus.lastRefreshDurationMs;
-    const mergedDebugReport = getMergedDebugReport(debugReport || getPtvDebugReport());
-    const dashboardDebugState = getDashboardDebugState(mergedDebugReport, pluginState, cacheStatus, debugEnabled);
-    const dashboardDebugMessage = getDashboardDebugStateMessage(dashboardDebugState, mergedDebugReport, pluginState);
-    const debugSectionSources = getNestedRecord(mergedDebugReport, 'sectionSources');
-    const debugRecommendations = getNestedRecord(mergedDebugReport, 'recommendations');
-    const recommendationEngineLoaded = getNestedBoolean(debugRecommendations, 'recommendationEngineLoaded') === true;
-    const performanceDebug = getNestedRecord(performanceReport, 'debug') || mergedDebugReport;
-    const imageManagerMetrics = getNestedRecord(performanceReport, 'imageManager');
-    const currentFps = getNumberValue(performanceReport, 'currentFps');
-    const averageFps = getNumberValue(performanceReport, 'averageFps');
-    const droppedFrames = getNumberValue(performanceReport, 'droppedFrameCount');
-    const longTaskCount = getNumberValue(performanceReport, 'longTaskCount');
-    const longTaskTotalMs = getNumberValue(performanceReport, 'longTaskTotalMs');
-    const largestLongTaskMs = getNumberValue(performanceReport, 'largestLongTaskMs');
-    const activeImageRequests = getNumberValue(imageManagerMetrics, 'activeRequests');
-    const queuedImageRequests = getNumberValue(imageManagerMetrics, 'queuedRequests');
-    const imageCacheHits = getNumberValue(imageManagerMetrics, 'cacheHits');
-    const imageCacheMisses = getNumberValue(imageManagerMetrics, 'cacheMisses');
-    const imageDedupeHits = getNumberValue(imageManagerMetrics, 'dedupeHits');
-    const imageFailedSuppressions = getNumberValue(imageManagerMetrics, 'failedImageSuppressions');
-    const debugReportText = mergedDebugReport ? JSON.stringify(mergedDebugReport, null, 2) : '';
     const canEditPluginSettings = pluginState.connected && pluginStatus?.canWriteFeaturedContent !== false;
-    const settingsActionDisabled = settingsSaving || settingsLoading || !canEditPluginSettings || !pluginSettings;
+    const settingsActionDisabled = settingsSaving || settingsResetting || settingsLoading || !canEditPluginSettings || !pluginSettings;
+    const settingsConflict = settingsLoadError.startsWith('These settings changed on the server');
+    let lastWriteFailureLabel = 'None reported';
+
+    if (cacheStatusPending) lastWriteFailureLabel = 'Not reported';
+    else if (hasCacheWriteError) lastWriteFailureLabel = 'Reported';
 
     return (
-        <Page
+        <section
             id='ptvDashboardPage'
-            title='PiggieTV'
-            className='mainAnimatedPage type-interior ptv-dashboard-control-page'
+            className='ptv-admin-piggietv-page'
+            data-testid='ptv-admin-piggietv-configuration'
         >
-            <Box className='content-primary ptv-dashboard-control-content'>
+            <Box className='ptv-admin-piggietv-content'>
                 <Stack spacing={2}>
-                    <Box>
+                    <Box className='ptv-admin-piggietv-header'>
                         <Typography variant='h1'>PiggieTV</Typography>
                         <Typography variant='body1' color='text.secondary'>
-                            Plugin, cache, status, and performance controls.
+                            Configure plugin services, metadata integrations, featured content and PiggieTV server behavior.
                         </Typography>
                         <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap sx={{ mt: 1 }}>
                             <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} variant='outlined' className='ptv-button'>
                                 Open Row Builder
                             </Button>
-                            <Button href={PTV_RECOMMENDATIONS_HASH} onClick={openPtvRecommendations} variant='outlined' className='ptv-button'>
-                                Open Recommendations
-                            </Button>
                         </Stack>
                     </Box>
 
                     <StatusMessageAlert message={statusMessage} />
+                    {settingsLoadError ? (
+                        <Alert
+                            severity='warning'
+                            action={(
+                                <Button
+                                    color='inherit'
+                                    size='small'
+                                    onClick={() => {
+                                        if (settingsConflict && !window.confirm('Reload PiggieTV settings and discard all unsaved changes on this page?')) return;
+                                        loadPluginSettings({
+                                            force: true,
+                                            origin: 'settings retry'
+                                        }).catch(() => undefined);
+                                    }}
+                                >
+                                    {settingsConflict ? 'Reload Settings' : 'Retry'}
+                                </Button>
+                            )}
+                        >
+                            {settingsLoadError}
+                        </Alert>
+                    ) : null}
 
                     <Grid container spacing={2}>
                         <Grid size={{ xs: 12, lg: 6 }}>
@@ -3471,43 +3468,51 @@ const PiggieTvDashboardPage = () => {
                                             <Chip className='ptv-status-badge ptv-status-badge-path' label={pluginStatus?.apiPath || `/${PTV_PLUGIN_API.endpoints.status}`} size='small' />
                                             <Chip className='ptv-status-badge ptv-status-badge-backend' label={pluginStatus?.cacheBackend || cacheSource} size='small' />
                                         </Box>
-                                        <WarningAlert message={pluginState.error} />
-                                        <PluginHelpAlert message={pluginHelpMessage} state={pluginConnectionState} />
-                                        <PluginInstallGuidance
-                                            attemptedUrl={attemptedPluginApiUrl}
-                                            onCopy={copyPluginInstallNote}
-                                            state={pluginConnectionState}
-                                        />
+                                        <WarningAlert message={pluginState.error ? 'PiggieTV plugin status is unavailable. Retry the connection.' : ''} />
+                                        {!pluginState.loading ? <PluginHelpAlert message={pluginHelpMessage} state={pluginConnectionState} /> : null}
+                                        {!pluginState.loading ? (
+                                            <PluginInstallGuidance
+                                                attemptedUrl={attemptedPluginApiUrl}
+                                                onCopy={copyPluginInstallNote}
+                                                state={pluginConnectionState}
+                                            />
+                                        ) : null}
                                         <Divider />
-                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
-                                            <Typography>Plugin: {pluginName}</Typography>
+                                        <Stack className='ptv-dashboard-status-summary' spacing={0.5}>
                                             <Typography>Plugin version: {pluginVersion}</Typography>
-                                            <Typography>Frontend build: {buildInfo.frontendBuildId}</Typography>
-                                            <Typography>Frontend commit: {buildInfo.frontendCommitSha}</Typography>
-                                            <Typography>Built: {buildInfo.frontendBuildDate}</Typography>
-                                            <Typography>Jellyfin Web: {buildInfo.jellyfinWebVersion}</Typography>
-                                            <Typography>Build mode: {buildInfo.environment}</Typography>
+                                            <Typography>PTV Web: {buildInfo.ptvWebVersion}</Typography>
                                             <Typography>Compatibility: {buildInfo.compatibility}</Typography>
                                             <Typography>{buildInfo.compatibilityMessage}</Typography>
-                                            <Typography>Reading series overrides: {buildInfo.readingSeriesOverrides}</Typography>
-                                            <Typography>API endpoint: {statusPluginApiUrl || 'n/a'}</Typography>
-                                            <Typography>Connection state: {pluginState.connectionState}</Typography>
-                                            <Typography>Server UTC: {pluginStatus?.serverTimeUtc || 'n/a'}</Typography>
-                                            <Typography>Cache path exists: {String(pluginStatus?.cachePathExists ?? false)}</Typography>
-                                            <Typography>Cache path writable: {String(pluginStatus?.cachePathWritable ?? false)}</Typography>
-                                            <Typography>Featured cache exists: {String(pluginStatus?.featuredCacheExists ?? false)}</Typography>
-                                            <Typography>Cache storage mode: {cacheSource}</Typography>
-                                            <Typography>Cache payload: {formatBytes(pluginStatus?.cachePayloadBytes)}</Typography>
-                                            <Typography>Max payload: {formatBytes(pluginStatus?.maxCachePayloadBytes)}</Typography>
-                                            <Typography>Refresh in progress: {String(pluginStatus?.refreshInProgress ?? false)}</Typography>
-                                            <Typography>settingsAvailable: {String(pluginStatus?.settingsAvailable ?? false)}</Typography>
-                                            <Typography>canReadFeaturedContent: {String(pluginStatus?.canReadFeaturedContent ?? false)}</Typography>
-                                            <Typography>canWriteFeaturedContent: {String(pluginStatus?.canWriteFeaturedContent ?? false)}</Typography>
-                                            <Typography>Signup enabled: {String(pluginStatus?.signup?.enabled ?? false)}</Typography>
-                                            <Typography>Signup email configured: {String(pluginStatus?.signup?.emailConfigured ?? false)}</Typography>
-                                            <Typography>Signup pending verify/reset: {pluginStatus?.signup?.pendingVerificationCount ?? 0}/{pluginStatus?.signup?.pendingResetCount ?? 0}</Typography>
                                         </Stack>
-                                        <WarningAlert message={pluginStatus?.cacheWriteError ? `Cache write error: ${pluginStatus.cacheWriteError}` : ''} />
+                                        <details className='ptv-admin-piggietv-advanced-details'>
+                                            <summary>Advanced details</summary>
+                                            <Stack className='ptv-dashboard-status-list' spacing={0.5}>
+                                                <Typography>Plugin: {pluginName}</Typography>
+                                                <Typography>Frontend build: {buildInfo.frontendBuildId}</Typography>
+                                                <Typography>Frontend commit: {buildInfo.frontendCommitSha}</Typography>
+                                                <Typography>Built: {buildInfo.frontendBuildDate}</Typography>
+                                                <Typography>Jellyfin Web: {buildInfo.jellyfinWebVersion}</Typography>
+                                                <Typography>Build mode: {buildInfo.environment}</Typography>
+                                                <Typography>Reading series overrides: {buildInfo.readingSeriesOverrides}</Typography>
+                                                <Typography>API endpoint: {statusPluginApiUrl || 'Not reported'}</Typography>
+                                                <Typography>Connection state: {pluginState.connectionState}</Typography>
+                                                <Typography>Server UTC: {pluginStatus?.serverTimeUtc || 'Not reported'}</Typography>
+                                                <Typography>Cache path exists: {formatReportedBoolean(pluginStatus?.cachePathExists)}</Typography>
+                                                <Typography>Cache path writable: {formatReportedBoolean(pluginStatus?.cachePathWritable)}</Typography>
+                                                <Typography>Featured cache exists: {formatReportedBoolean(pluginStatus?.featuredCacheExists)}</Typography>
+                                                <Typography>Cache storage mode: {cacheSource}</Typography>
+                                                <Typography>Cache payload: {formatBytes(pluginStatus?.cachePayloadBytes)}</Typography>
+                                                <Typography>Max payload: {formatBytes(pluginStatus?.maxCachePayloadBytes)}</Typography>
+                                                <Typography>Refresh in progress: {formatReportedBoolean(pluginStatus?.refreshInProgress)}</Typography>
+                                                <Typography>Settings available: {formatReportedBoolean(pluginStatus?.settingsAvailable)}</Typography>
+                                                <Typography>Can read Featured Content: {formatReportedBoolean(pluginStatus?.canReadFeaturedContent)}</Typography>
+                                                <Typography>Can write Featured Content: {formatReportedBoolean(pluginStatus?.canWriteFeaturedContent)}</Typography>
+                                                <Typography>Signup enabled: {formatReportedBoolean(pluginStatus?.signup?.enabled)}</Typography>
+                                                <Typography>Signup email configured: {formatReportedBoolean(pluginStatus?.signup?.emailConfigured)}</Typography>
+                                                <Typography>Signup pending verify/reset: {pluginStatus?.signup?.pendingVerificationCount ?? 'Not reported'}/{pluginStatus?.signup?.pendingResetCount ?? 'Not reported'}</Typography>
+                                            </Stack>
+                                        </details>
+                                        <WarningAlert message={pluginStatus?.cacheWriteError ? 'The Featured Content cache could not be written.' : ''} />
                                         <Button
                                             type='button'
                                             variant='outlined'
@@ -3536,69 +3541,73 @@ const PiggieTvDashboardPage = () => {
                                             <Chip
                                                 className='ptv-cache-state-chip'
                                                 icon={getCacheChipIcon(isCacheRefreshing)}
-                                                label={getCacheChipLabel(isCacheRefreshing, cacheFreshness)}
+                                                label={cacheStatusPending ? 'Checking' : getCacheChipLabel(isCacheRefreshing, cacheFreshness)}
                                                 size='small'
                                             />
                                         </Stack>
                                         <Divider />
-                                        <CacheStateAlerts cacheFreshness={cacheFreshness} cacheSource={cacheSource} />
-                                        <Stack
-                                            direction={{ xs: 'column', sm: 'row' }}
-                                            spacing={1.5}
-                                            alignItems={{ xs: 'stretch', sm: 'center' }}
-                                        >
-                                            <TextField
-                                                className='ptv-featured-cache-interval-field'
-                                                slotProps={{
-                                                    htmlInput: {
-                                                        max: formatIntervalHours(PTV_CACHE.maxFeaturedContentTtlMs),
-                                                        min: formatIntervalHours(PTV_CACHE.minFeaturedContentTtlMs),
-                                                        step: 1
-                                                    }
-                                                }}
-                                                label='Refresh interval'
-                                                onChange={handleRefreshIntervalChange}
-                                                size='small'
-                                                type='number'
-                                                value={refreshIntervalHours}
-                                            />
-                                            <Typography color='text.secondary'>hours</Typography>
-                                            <Button
-                                                type='button'
-                                                variant='outlined'
-                                                onClick={saveRefreshInterval}
-                                                disabled={settingsActionDisabled || (pluginState.connected && pluginStatus?.canWriteFeaturedContent === false)}
+                                        {!cacheStatusPending ? <CacheStateAlerts cacheFreshness={cacheFreshness} cacheSource={cacheSource} /> : null}
+                                        {pluginSettings ? (
+                                            <Stack
+                                                direction={{ xs: 'column', sm: 'row' }}
+                                                spacing={1.5}
+                                                alignItems={{ xs: 'stretch', sm: 'center' }}
                                             >
-                                                {settingsSavingSection === 'refreshInterval' ? 'Saving...' : 'Save Interval'}
-                                            </Button>
-                                        </Stack>
+                                                <TextField
+                                                    className='ptv-featured-cache-interval-field'
+                                                    slotProps={{
+                                                        htmlInput: {
+                                                            max: formatIntervalHours(PTV_CACHE.maxFeaturedContentTtlMs),
+                                                            min: formatIntervalHours(PTV_CACHE.minFeaturedContentTtlMs),
+                                                            step: 1
+                                                        }
+                                                    }}
+                                                    label='Refresh interval'
+                                                    onChange={handleRefreshIntervalChange}
+                                                    size='small'
+                                                    type='number'
+                                                    value={refreshIntervalHours}
+                                                />
+                                                <Typography color='text.secondary'>hours</Typography>
+                                                <Button
+                                                    type='button'
+                                                    variant='outlined'
+                                                    onClick={saveRefreshInterval}
+                                                    disabled={settingsActionDisabled || (pluginState.connected && pluginStatus?.canWriteFeaturedContent === false)}
+                                                >
+                                                    {settingsSavingSection === 'refreshInterval' ? 'Saving...' : 'Save Interval'}
+                                                </Button>
+                                            </Stack>
+                                        ) : null}
+                                        {!pluginSettings && settingsLoading ? <Skeleton height={56} variant='rounded' /> : null}
+                                        {!pluginSettings && !settingsLoading ? <Typography color='text.secondary'>Refresh settings are unavailable.</Typography> : null}
                                         <Grid container spacing={1.5}>
                                             <Grid size={{ xs: 12, sm: 6 }}>
-                                                <Typography>Source: {cacheSource}</Typography>
-                                                <Typography>Stored on plugin: {String(pluginStatus?.featuredCacheExists ?? cacheStatus.isStored)}</Typography>
-                                                <Typography>Memory fallback: {String(cacheSource === 'memory')}</Typography>
+                                                <Typography>Source: {cacheStatusPending ? 'Not reported' : cacheSource}</Typography>
+                                                <Typography>Stored on plugin: {cacheStatusPending ? 'Not reported' : formatReportedBoolean(pluginStatus?.featuredCacheExists ?? cacheStatus.isStored)}</Typography>
+                                                <Typography>Memory fallback: {cacheStatusPending ? 'Not reported' : String(cacheSource === 'memory')}</Typography>
                                                 <Typography>Created: {formatDate(createdAt)}</Typography>
                                                 <Typography>Expires: {formatDate(expiresAt)}</Typography>
                                                 <Typography>Next refresh: {formatCountdown(nextRefreshAt)}</Typography>
                                             </Grid>
                                             <Grid size={{ xs: 12, sm: 6 }}>
-                                                <Typography>Hero items: {heroCount}</Typography>
-                                                <Typography>Row items: {itemCount}</Typography>
-                                                <Typography>Sections: {sectionCount}</Typography>
+                                                <Typography>Hero items: {heroCount ?? 'Not reported'}</Typography>
+                                                <Typography>Row items: {itemCount ?? 'Not reported'}</Typography>
+                                                <Typography>Sections: {sectionCount ?? 'Not reported'}</Typography>
                                                 <Typography>Last refresh: {formatDuration(lastRefreshDurationMs)}</Typography>
                                                 <Typography>Completed: {formatDate(pluginStatus?.lastRefreshCompletedAt)}</Typography>
-                                                <Typography>Last write failure: {pluginStatus?.cacheWriteError || cacheStatus.writeError || 'none'}</Typography>
+                                                <Typography>Last write failure: {lastWriteFailureLabel}</Typography>
                                             </Grid>
                                         </Grid>
-                                        <WarningAlert message={statusError ? `Last error: ${statusError}` : ''} />
-                                        <WarningAlert message={pluginStatus?.lastRefreshWarning ? `Warning: ${pluginStatus.lastRefreshWarning}` : ''} />
+                                        <WarningAlert message={hasCacheRefreshError ? 'The last Featured Content refresh did not complete successfully.' : ''} />
+                                        <WarningAlert message={pluginStatus?.lastRefreshWarning ? 'The last Featured Content refresh completed with a warning.' : ''} />
                                         <WarningAlert message={tmdbMetadataWarning} />
                                         <Stack direction='row' spacing={2} flexWrap='wrap' useFlexGap>
                                             <Button
                                                 type='button'
                                                 variant='contained'
                                                 onClick={refreshCache}
-                                                disabled={isCacheRefreshing}
+                                                disabled={pluginState.loading || isCacheRefreshing}
                                             >
                                                 {getRefreshCacheButtonLabel(isCacheRefreshing)}
                                             </Button>
@@ -3607,7 +3616,7 @@ const PiggieTvDashboardPage = () => {
                                                 variant='outlined'
                                                 color='warning'
                                                 onClick={clearCache}
-                                                disabled={isClearing || (pluginState.connected && pluginStatus?.canWriteFeaturedContent === false)}
+                                                disabled={pluginState.loading || isClearing || (pluginState.connected && pluginStatus?.canWriteFeaturedContent === false)}
                                             >
                                                 {getClearCacheButtonLabel(isClearing)}
                                             </Button>
@@ -3624,944 +3633,850 @@ const PiggieTvDashboardPage = () => {
                             </Card>
                         </Grid>
 
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card ptv-control-card-compact ptv-control-card-debug'>
-                                <CardContent>
-                                    <Stack className='ptv-control-stack ptv-control-stack-compact' spacing={1.25}>
-                                        <Stack direction='row' justifyContent='space-between' alignItems='center'>
-                                            <Typography variant='h2'>Performance / Debug</Typography>
-                                            <Stack direction='row' spacing={1} flexWrap='wrap' justifyContent='flex-end'>
-                                                <Chip
-                                                    className='ptv-live-status-chip'
-                                                    color={getDashboardDebugStateColor(dashboardDebugState)}
-                                                    label={dashboardDebugState}
-                                                    size='small'
+                        {pluginSettings ? (
+                            <>
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
+                                                    <Typography variant='h2'>Music Metadata</Typography>
+                                                    <Chip
+                                                        className='ptv-status-badge ptv-status-badge-info'
+                                                        label={getDiscogsCredentialLabel(musicMetadataSettingsDraft, discogsTokenInput)}
+                                                        size='small'
+                                                    />
+                                                </Stack>
+                                                <Divider />
+                                                <WarningAlert message={integrationTestMessages.discogs || ''} />
+                                                <Stack className='ptv-dashboard-status-list' spacing={0.5}>
+                                                    <Typography>MusicBrainz enabled: {String(musicMetadataSettingsDraft.musicBrainzEnabled)}</Typography>
+                                                    <Typography>Discogs enabled: {String(musicMetadataSettingsDraft.discogsEnabled)}</Typography>
+                                                    <Typography>Discogs token configured: {String(musicMetadataSettingsDraft.discogsTokenConfigured)}</Typography>
+                                                    <Typography>Lookup candidates per provider: {musicMetadataSettingsDraft.maxResults}</Typography>
+                                                </Stack>
+                                                <FormControlLabel
+                                                    control={<Switch checked={musicMetadataSettingsDraft.musicBrainzEnabled} disabled={settingsActionDisabled} onChange={handleMusicBrainzEnabledChange} />}
+                                                    label='Enable MusicBrainz'
                                                 />
-                                                <Chip
-                                                    className='ptv-render-profile-badge'
-                                                    data-ptv-render-profile={performanceProfile.renderProfile.id}
-                                                    label={performanceProfile.renderProfile.id}
-                                                    size='small'
+                                                <FormControlLabel
+                                                    control={<Switch checked={musicMetadataSettingsDraft.discogsEnabled} disabled={settingsActionDisabled} onChange={handleDiscogsEnabledChange} />}
+                                                    label='Enable Discogs'
                                                 />
+                                                <TextField
+                                                    label='Lookup results per provider'
+                                                    size='small'
+                                                    type='number'
+                                                    value={musicMetadataSettingsDraft.maxResults}
+                                                    disabled={settingsActionDisabled}
+                                                    slotProps={{ htmlInput: { min: PTV_SETTINGS_LIMITS.musicMetadataResults[0], max: PTV_SETTINGS_LIMITS.musicMetadataResults[1] } }}
+                                                    onChange={handleMusicMetadataMaxResultsChange}
+                                                />
+                                                <TextField
+                                                    label='Discogs personal access token'
+                                                    size='small'
+                                                    type='password'
+                                                    value={discogsTokenInput}
+                                                    disabled={settingsActionDisabled}
+                                                    placeholder={musicMetadataSettingsDraft.discogsTokenConfigured ? 'Token configured - enter a new token to replace it' : 'Paste Discogs token'}
+                                                    onChange={handleDiscogsTokenInputChange}
+                                                    autoComplete='off'
+                                                />
+                                                <Typography variant='body2' color='text.secondary'>
+                                                    MusicBrainz works without a token. Discogs requires a personal access token and is called only from the PiggieTV backend.
+                                                </Typography>
+                                                <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
+                                                    <Button
+                                                        type='button'
+                                                        variant='contained'
+                                                        onClick={saveMusicMetadataSettings}
+                                                        disabled={settingsActionDisabled}
+                                                    >
+                                                        {settingsSavingSection === 'musicMetadataSettings' ? 'Saving...' : 'Save Music Metadata Settings'}
+                                                    </Button>
+                                                </Stack>
                                             </Stack>
-                                        </Stack>
-                                        <Divider />
-                                        <Alert severity={getDashboardDebugAlertSeverity(dashboardDebugState)}>
-                                            {dashboardDebugMessage}
-                                        </Alert>
-                                        <Box className='ptv-badge-row'>
-                                            <Chip className='ptv-status-badge ptv-status-badge-info' label={`client: ${clientProfile.kind}`} size='small' />
-                                            <Chip className='ptv-status-badge ptv-status-badge-backend' label={`cache: ${getCacheTimingLabel(performanceDebug)}`} size='small' />
-                                            <Chip className='ptv-status-badge ptv-status-badge-info' label={`persisted rec rows: ${persistedRecommendationRows}`} size='small' />
-                                        </Box>
-                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
-                                            <Typography>Debug state: {dashboardDebugState}</Typography>
-                                            <Typography>Debug collector active: {String(getNestedBoolean(mergedDebugReport, 'active') === true)}</Typography>
-                                            <Typography>Runtime connected: {String(pluginState.connected)}</Typography>
-                                            <Typography>Plugin state source: {getDebugSectionSourceText(debugSectionSources, 'pluginState')}</Typography>
-                                            <Typography>Plugin API source: {getDebugSectionSourceText(debugSectionSources, 'pluginApi')}</Typography>
-                                            <Typography>Cache source: {getDebugSectionSourceText(debugSectionSources, 'cache')}</Typography>
-                                            <Typography>Client profile source: {getDebugSectionSourceText(debugSectionSources, 'clientProfile')}</Typography>
-                                            <Typography>Render profile source: {getDebugSectionSourceText(debugSectionSources, 'renderProfile')}</Typography>
-                                            <Typography>Shell source: {getDebugSectionSourceText(debugSectionSources, 'shell')}</Typography>
-                                            <Typography>Recommendation engine loaded: {String(recommendationEngineLoaded)}</Typography>
-                                            <Typography>Persisted recommendation rows: {persistedRecommendationRows}</Typography>
-                                        </Stack>
-                                        <Typography>Render profile: {performanceProfile.renderProfile.id}</Typography>
-                                        <Typography>Render profile reason: {performanceProfile.renderProfile.matchReason || 'n/a'}</Typography>
-                                        <Typography>Render profile selection: {performanceProfile.renderProfile.selectionReason || 'n/a'}</Typography>
-                                        <Typography>Client profile: {clientProfile.kind}</Typography>
-                                        <Typography>
-                                            Low-power decision: {performanceProfile.lowPowerProfileDecision}
-                                            {' | '}
-                                            {performanceProfile.lowPowerProfileDecisionReason}
-                                        </Typography>
-                                        <Typography>
-                                            TV: platform={clientProfile.tvPlatform}, reason={clientProfile.tvDetectionReason}, tv={String(clientProfile.isTv)}, tenFoot={String(clientProfile.isTenFootClient)}
-                                        </Typography>
-                                        <Typography>
-                                            Flags: androidTv={String(clientProfile.isAndroidTv)}, fireTv={String(clientProfile.isFireTv)}, webOs={String(clientProfile.isWebOs)}, tizen={String(clientProfile.isTizen)}, roku={String(clientProfile.isRoku)}, coarsePointer={String(clientProfile.isCoarsePointer)}, hover={String(clientProfile.hasHover)}, mobile={String(clientProfile.isMobile)}, lowPower={String(performanceProfile.isLowPower)}
-                                        </Typography>
-                                        <Typography>
-                                            CSS capabilities: backdropFilter={String(clientProfile.supportsBackdropFilter)}, containerQueries={String(clientProfile.supportsContainerQueries)}, aspectRatio={String(clientProfile.supportsAspectRatio)}, contentVisibility={String(clientProfile.supportsContentVisibility)}
-                                        </Typography>
-                                        <Typography>FPS: {getFpsLabel(currentFps, averageFps)}</Typography>
-                                        <Typography>Dropped frames: {droppedFrames ?? 'n/a'}</Typography>
-                                        <Typography>Long tasks: {longTaskCount ?? 0} ({formatDuration(longTaskTotalMs)}, largest {formatDuration(largestLongTaskMs)})</Typography>
-                                        <Typography>Memory: {getMemoryLabel(performanceReport)}</Typography>
-                                        <Typography>
-                                            Image requests: {activeImageRequests ?? 0} active / {queuedImageRequests ?? 0} queued
-                                        </Typography>
-                                        <Typography>
-                                            Image cache: {imageCacheHits ?? 0} hits / {imageCacheMisses ?? 0} misses / {imageDedupeHits ?? 0} deduped
-                                        </Typography>
-                                        <Typography>
-                                            Failed image suppressions: {imageFailedSuppressions ?? 0}
-                                        </Typography>
-                                        <FormControlLabel
-                                            control={<Switch checked={debugEnabled} onChange={toggleDebug} />}
-                                            label='Enable PTV_DEBUG'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={overlayEnabled} onChange={togglePerformanceOverlay} />}
-                                            label='Enable performance overlay'
-                                        />
-                                        <Button
-                                            type='button'
-                                            variant='outlined'
-                                            onClick={runDebugReport}
-                                        >
-                                            Run Debug Report
-                                        </Button>
-                                        <Button
-                                            type='button'
-                                            variant='outlined'
-                                            onClick={copyDebugReport}
-                                        >
-                                            Copy Debug Report
-                                        </Button>
-                                        {debugEnabled || debugReport ? (
-                                            <DebugReportPreview text={debugReportText} />
-                                        ) : (
-                                            <Typography color='text.secondary'>Enable PTV_DEBUG to collect detailed event history. Live plugin, cache, profile, and persisted recommendation state is shown above.</Typography>
-                                        )}
-                                        {statusSupportsFeature(pluginStatus, 'remoteDiagnostics') ? (
-                                            <RemoteDiagnosticsPanel />
-                                        ) : (
-                                            <Typography color='text.secondary'>
-                                                Remote client diagnostics require a connected PiggieTV plugin that advertises the remoteDiagnostics capability.
-                                            </Typography>
-                                        )}
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
 
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
-                                            <Typography variant='h2'>Music Metadata</Typography>
-                                            <Chip
-                                                className='ptv-status-badge ptv-status-badge-info'
-                                                label={getDiscogsCredentialLabel(musicMetadataSettingsDraft, discogsTokenInput)}
-                                                size='small'
-                                            />
-                                        </Stack>
-                                        <Divider />
-                                        <WarningAlert message={integrationTestMessages.discogs || ''} />
-                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
-                                            <Typography>MusicBrainz enabled: {String(musicMetadataSettingsDraft.musicBrainzEnabled)}</Typography>
-                                            <Typography>Discogs enabled: {String(musicMetadataSettingsDraft.discogsEnabled)}</Typography>
-                                            <Typography>Discogs token configured: {String(musicMetadataSettingsDraft.discogsTokenConfigured)}</Typography>
-                                            <Typography>Lookup candidates per provider: {musicMetadataSettingsDraft.maxResults}</Typography>
-                                        </Stack>
-                                        <FormControlLabel
-                                            control={<Switch checked={musicMetadataSettingsDraft.musicBrainzEnabled} disabled={settingsActionDisabled} onChange={handleMusicBrainzEnabledChange} />}
-                                            label='Enable MusicBrainz'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={musicMetadataSettingsDraft.discogsEnabled} disabled={settingsActionDisabled} onChange={handleDiscogsEnabledChange} />}
-                                            label='Enable Discogs'
-                                        />
-                                        <TextField
-                                            label='Lookup results per provider'
-                                            size='small'
-                                            type='number'
-                                            value={musicMetadataSettingsDraft.maxResults}
-                                            disabled={settingsActionDisabled}
-                                            slotProps={{ htmlInput: { min: PTV_SETTINGS_LIMITS.musicMetadataResults[0], max: PTV_SETTINGS_LIMITS.musicMetadataResults[1] } }}
-                                            onChange={handleMusicMetadataMaxResultsChange}
-                                        />
-                                        <TextField
-                                            label='Discogs personal access token'
-                                            size='small'
-                                            type='password'
-                                            value={discogsTokenInput}
-                                            disabled={settingsActionDisabled}
-                                            placeholder={musicMetadataSettingsDraft.discogsTokenConfigured ? 'Token configured - enter a new token to replace it' : 'Paste Discogs token'}
-                                            onChange={handleDiscogsTokenInputChange}
-                                            autoComplete='off'
-                                        />
-                                        <Typography variant='body2' color='text.secondary'>
-                                            MusicBrainz works without a token. Discogs requires a personal access token and is called only from the PiggieTV backend.
-                                        </Typography>
-                                        <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
-                                            <Button
-                                                type='button'
-                                                variant='contained'
-                                                onClick={saveMusicMetadataSettings}
-                                                disabled={settingsActionDisabled}
-                                            >
-                                                {settingsSavingSection === 'musicMetadataSettings' ? 'Saving...' : 'Save Music Metadata Settings'}
-                                            </Button>
-                                        </Stack>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
-                                            <Typography variant='h2'>Google Books Metadata</Typography>
-                                            <Chip
-                                                className='ptv-status-badge ptv-status-badge-info'
-                                                label={getGoogleBooksCredentialLabel(googleBooksSettingsDraft, googleBooksApiKeyInput)}
-                                                size='small'
-                                            />
-                                        </Stack>
-                                        <Divider />
-                                        <WarningAlert message={integrationTestMessages.googleBooks || ''} />
-                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
-                                            <Typography>Google Books enabled: {String(googleBooksSettingsDraft.googleBooksEnabled)}</Typography>
-                                            <Typography>API key configured: {String(googleBooksSettingsDraft.googleBooksApiKeyConfigured)}</Typography>
-                                            <Typography>Lookup candidates per search: {googleBooksSettingsDraft.maxResults}</Typography>
-                                        </Stack>
-                                        <FormControlLabel
-                                            control={<Switch checked={googleBooksSettingsDraft.googleBooksEnabled} disabled={settingsActionDisabled} onChange={handleGoogleBooksEnabledChange} />}
-                                            label='Enable Google Books'
-                                        />
-                                        <TextField
-                                            label='Lookup results per search'
-                                            size='small'
-                                            type='number'
-                                            value={googleBooksSettingsDraft.maxResults}
-                                            disabled={settingsActionDisabled}
-                                            slotProps={{ htmlInput: { min: PTV_SETTINGS_LIMITS.googleBooksMetadataResults[0], max: PTV_SETTINGS_LIMITS.googleBooksMetadataResults[1] } }}
-                                            onChange={handleGoogleBooksMaxResultsChange}
-                                        />
-                                        <TextField
-                                            label='Google Books API key'
-                                            size='small'
-                                            type='password'
-                                            value={googleBooksApiKeyInput}
-                                            disabled={settingsActionDisabled}
-                                            placeholder={googleBooksSettingsDraft.googleBooksApiKeyConfigured ? 'Key configured - enter a new key to replace it' : 'Optional Google Books API key'}
-                                            onChange={handleGoogleBooksApiKeyInputChange}
-                                            autoComplete='off'
-                                        />
-                                        <Typography variant='body2' color='text.secondary'>
-                                            Google Books can run without a key. Add a restricted API key for higher quota; PiggieTV stores it only in the server plugin settings and never returns it to the browser.
-                                        </Typography>
-                                        <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
-                                            <Button
-                                                type='button'
-                                                variant='contained'
-                                                onClick={saveGoogleBooksSettings}
-                                                disabled={settingsActionDisabled}
-                                            >
-                                                {settingsSavingSection === 'googleBooksSettings' ? 'Saving...' : 'Save Google Books Settings'}
-                                            </Button>
-                                            <Button
-                                                type='button'
-                                                variant='outlined'
-                                                color='warning'
-                                                onClick={clearGoogleBooksApiKey}
-                                                disabled={settingsActionDisabled || (!googleBooksSettingsDraft.googleBooksApiKeyConfigured && !googleBooksApiKeyInput)}
-                                            >
-                                                Clear API Key
-                                            </Button>
-                                            <Button
-                                                type='button'
-                                                variant='outlined'
-                                                onClick={testGoogleBooksConnection}
-                                                disabled={settingsActionDisabled || Boolean(integrationTesting.googleBooks)}
-                                            >
-                                                {integrationTesting.googleBooks ? 'Testing...' : 'Test Google Books Connection'}
-                                            </Button>
-                                            <Button
-                                                component='a'
-                                                href='https://developers.google.com/books/docs/v1/getting_started'
-                                                target='_blank'
-                                                rel='noreferrer'
-                                                type='button'
-                                                variant='outlined'
-                                            >
-                                                Google Books API Docs
-                                            </Button>
-                                        </Stack>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
-                                            <Typography variant='h2'>Feature Toggles</Typography>
-                                            <Chip
-                                                className='ptv-status-badge ptv-status-badge-backend'
-                                                label={settingsDirty ? 'unsaved' : 'saved'}
-                                                size='small'
-                                            />
-                                        </Stack>
-                                        <Divider />
-                                        <FormControlLabel
-                                            control={<Switch checked={featureSettingsDraft.heroEnabled} disabled={settingsActionDisabled} onChange={handleHeroEnabledChange} />}
-                                            label='Hero enabled'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={featureSettingsDraft.homeRowsEnabled} disabled={settingsActionDisabled} onChange={handleHomeRowsEnabledChange} />}
-                                            label='PTV home rows enabled'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={featureSettingsDraft.dynamicBackdropsEnabled} disabled={settingsActionDisabled} onChange={handleDynamicBackdropsEnabledChange} />}
-                                            label='Dynamic backdrops enabled'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={featureSettingsDraft.tvLowPowerModeEnabled} disabled={settingsActionDisabled} onChange={handleTvLowPowerModeEnabledChange} />}
-                                            label='TV low-power mode enabled'
-                                        />
-                                        <TextField
-                                            select
-                                            fullWidth
-                                            helperText='Auto lets Jellyfin decide, Compatible favors stable H264/AAC playback, Performance favors direct play/direct stream.'
-                                            label='PTV Playback Mode'
-                                            value={featureSettingsDraft.playbackMode}
-                                            onChange={handlePlaybackModeChange}
-                                            disabled={settingsActionDisabled}
-                                        >
-                                            <MenuItem value='auto'>Auto</MenuItem>
-                                            <MenuItem value='compatible'>Compatible</MenuItem>
-                                            <MenuItem value='performance'>Performance</MenuItem>
-                                        </TextField>
-                                        <FormControlLabel
-                                            control={<Switch checked={featureSettingsDraft.debugModeEnabled} disabled={settingsActionDisabled} onChange={handleDebugModeEnabledChange} />}
-                                            label='Debug mode enabled'
-                                        />
-                                        <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
-                                            <Button
-                                                type='button'
-                                                variant='contained'
-                                                onClick={saveFeatureSettings}
-                                                disabled={settingsActionDisabled}
-                                            >
-                                                {settingsSavingSection === 'featureSettings' ? 'Saving...' : 'Save Feature Toggles'}
-                                            </Button>
-                                            <Button
-                                                type='button'
-                                                variant='outlined'
-                                                color='warning'
-                                                onClick={resetPluginSettings}
-                                                disabled={settingsResetting || !canEditPluginSettings}
-                                            >
-                                                {settingsResetting ? 'Resetting...' : 'Reset Defaults'}
-                                            </Button>
-                                        </Stack>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Typography variant='h2'>Hero Settings</Typography>
-                                        <Divider />
-                                        <FormControlLabel
-                                            control={<Switch checked={heroSettingsDraft.heroAutoRotateEnabled} disabled={settingsActionDisabled} onChange={handleHeroAutoRotateChange} />}
-                                            label='Auto rotate enabled'
-                                        />
-                                        <Box className='ptv-settings-field-grid'>
-                                            <TextField
-                                                label='Rotation seconds'
-                                                size='small'
-                                                type='number'
-                                                value={heroSettingsDraft.heroRotationSeconds}
-                                                disabled={settingsActionDisabled}
-                                                onChange={handleHeroRotationSecondsChange}
-                                                slotProps={{ htmlInput: { min: 5, max: 120, step: 1 } }}
-                                            />
-                                            <TextField
-                                                label='Max hero items'
-                                                size='small'
-                                                type='number'
-                                                value={heroSettingsDraft.heroMaxItems}
-                                                disabled={settingsActionDisabled}
-                                                onChange={handleHeroMaxItemsChange}
-                                                slotProps={{ htmlInput: { min: 1, max: 50, step: 1 } }}
-                                            />
-                                            <TextField
-                                                label='Backdrop max width'
-                                                size='small'
-                                                type='number'
-                                                value={heroSettingsDraft.heroBackdropMaxWidth}
-                                                disabled={settingsActionDisabled}
-                                                onChange={handleHeroBackdropMaxWidthChange}
-                                                slotProps={{ htmlInput: { min: 480, max: 3840, step: 40 } }}
-                                            />
-                                            <TextField
-                                                label='Logo max width'
-                                                size='small'
-                                                type='number'
-                                                value={heroSettingsDraft.heroLogoMaxWidth}
-                                                disabled={settingsActionDisabled}
-                                                onChange={handleHeroLogoMaxWidthChange}
-                                                slotProps={{ htmlInput: { min: 160, max: 1600, step: 20 } }}
-                                            />
-                                        </Box>
-                                        <Button
-                                            type='button'
-                                            variant='contained'
-                                            onClick={saveHeroSettings}
-                                            disabled={settingsActionDisabled}
-                                        >
-                                            {settingsSavingSection === 'heroSettings' ? 'Saving...' : 'Save Hero Settings'}
-                                        </Button>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Typography variant='h2'>Rows</Typography>
-                                        <Divider />
-                                        <Typography variant='body2' color='text.secondary'>
-                                            Row categories, random generation, recommendation rows, preview, and diagnostics live in the dedicated Row Builder.
-                                        </Typography>
-                                        <FormControlLabel
-                                            control={<Switch checked={rowSettingsDraft.enableRecommendedRows} disabled={settingsActionDisabled} onChange={handleRecommendedRowsChange} />}
-                                            label='Recommendation rows'
-                                        />
-                                        <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
-                                            <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
-                                                Open Row Builder
-                                            </Button>
-                                            <Button href={PTV_RECOMMENDATIONS_HASH} onClick={openPtvRecommendations} type='button' variant='outlined'>
-                                                Open Recommendations
-                                            </Button>
-                                            <Button
-                                                type='button'
-                                                variant='outlined'
-                                                onClick={saveRowSettings}
-                                                disabled={settingsActionDisabled}
-                                            >
-                                                {settingsSavingSection === 'rowSettings' ? 'Saving...' : 'Save Row Settings'}
-                                            </Button>
-                                        </Stack>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Typography variant='h2'>Performance</Typography>
-                                        <Divider />
-                                        <Box className='ptv-settings-field-grid'>
-                                            <TextField
-                                                label='Max cache payload bytes'
-                                                size='small'
-                                                type='number'
-                                                value={performanceSettingsDraft.maxCachePayloadBytes}
-                                                disabled={settingsActionDisabled}
-                                                onChange={handleMaxCachePayloadBytesChange}
-                                                slotProps={{ htmlInput: { min: 1048576, max: 52428800, step: 262144 } }}
-                                            />
-                                            <TextField
-                                                label='Image preload limit'
-                                                size='small'
-                                                type='number'
-                                                value={performanceSettingsDraft.imagePreloadLimit}
-                                                disabled={settingsActionDisabled}
-                                                onChange={handleImagePreloadLimitChange}
-                                                slotProps={{ htmlInput: { min: 1, max: 10, step: 1 } }}
-                                            />
-                                        </Box>
-                                        <FormControlLabel
-                                            control={<Switch checked={performanceSettingsDraft.enableAnimatedRows} disabled={settingsActionDisabled} onChange={handleAnimatedRowsChange} />}
-                                            label='Animated rows'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={performanceSettingsDraft.enableBackdropBlur} disabled={settingsActionDisabled} onChange={handleBackdropBlurChange} />}
-                                            label='Backdrop blur'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={performanceSettingsDraft.lowPowerDisableBlur} disabled={settingsActionDisabled} onChange={handleLowPowerDisableBlurChange} />}
-                                            label='Low power disables blur'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={performanceSettingsDraft.lowPowerDisableAnimations} disabled={settingsActionDisabled} onChange={handleLowPowerDisableAnimationsChange} />}
-                                            label='Low power disables animations'
-                                        />
-                                        <Button
-                                            type='button'
-                                            variant='contained'
-                                            onClick={savePerformanceSettings}
-                                            disabled={settingsActionDisabled}
-                                        >
-                                            {settingsSavingSection === 'performanceSettings' ? 'Saving...' : 'Save Performance Settings'}
-                                        </Button>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
-                                            <Typography variant='h2'>TMDB Settings</Typography>
-                                            <Chip
-                                                className='ptv-status-badge ptv-status-badge-info'
-                                                label={getTmdbCredentialLabel(tmdbMetadataStatus, tmdbSettingsDraft)}
-                                                size='small'
-                                            />
-                                        </Stack>
-                                        <Divider />
-                                        <WarningAlert message={tmdbMetadataWarning} />
-                                        <WarningAlert message={integrationTestMessages.tmdb || ''} />
-                                        <Stack className='ptv-dashboard-status-list' spacing={0.5}>
-                                            <Typography>Metadata enabled: {String(tmdbMetadataStatus?.enabled ?? tmdbSettingsDraft.tmdbEnabled)}</Typography>
-                                            <Typography>Credential configured: {String(tmdbMetadataStatus?.configured ?? tmdbSettingsDraft.tmdbApiTokenConfigured)}</Typography>
-                                            <Typography>Credential status: {tmdbMetadataStatus?.credentialStatus || 'not tested'}</Typography>
-                                            <Typography>Credential type: {tmdbMetadataStatus?.credentialType || 'not detected'}</Typography>
-                                            <Typography>Credential length: {tmdbMetadataStatus?.credentialLength ?? 'n/a'}</Typography>
-                                            <Typography>Last TMDb status code: {tmdbMetadataStatus?.lastStatusCode ?? 'n/a'}</Typography>
-                                            <Typography>Last validated: {formatDateTimeString(tmdbMetadataStatus?.lastValidatedAt)}</Typography>
-                                            <Typography>Cache hits: {tmdbMetadataStatus?.cacheHits ?? 0}</Typography>
-                                            <Typography>Cache misses: {tmdbMetadataStatus?.cacheMisses ?? 0}</Typography>
-                                            <Typography>Negative cache: {tmdbMetadataStatus?.negativeCacheSize ?? 0} entries / {tmdbMetadataStatus?.negativeCacheHits ?? 0} hits / {tmdbMetadataStatus?.negativeCacheWrites ?? 0} writes</Typography>
-                                            <Typography>Last TMDb duration: {formatDuration(tmdbMetadataStatus?.lastDurationMs)}</Typography>
-                                            <Typography>Last TMDb error: {tmdbMetadataStatus?.lastError || 'none'}</Typography>
-                                            <Typography>Last TMDb error body: {tmdbMetadataStatus?.lastErrorBody || 'none'}</Typography>
-                                        </Stack>
-                                        <FormControlLabel
-                                            control={<Switch checked={tmdbSettingsDraft.tmdbEnabled} disabled={settingsActionDisabled} onChange={handleTmdbEnabledChange} />}
-                                            label='Enable TMDB'
-                                        />
-                                        <FormControlLabel
-                                            control={<Switch checked={tmdbSettingsDraft.useTmdbForRowAccuracy} disabled={settingsActionDisabled} onChange={handleTmdbRowAccuracyChange} />}
-                                            label='Use TMDB for row accuracy'
-                                        />
-                                        <Box className='ptv-settings-field-grid'>
-                                            <TextField
-                                                label='Language'
-                                                size='small'
-                                                value={tmdbSettingsDraft.tmdbLanguage}
-                                                disabled={settingsActionDisabled}
-                                                onChange={handleTmdbLanguageChange}
-                                            />
-                                            <TextField
-                                                label='Region'
-                                                size='small'
-                                                value={tmdbSettingsDraft.tmdbRegion}
-                                                disabled={settingsActionDisabled}
-                                                onChange={handleTmdbRegionChange}
-                                            />
-                                        </Box>
-                                        <TextField
-                                            label='TMDB API token'
-                                            size='small'
-                                            type='password'
-                                            value={tmdbTokenInput}
-                                            disabled={settingsActionDisabled}
-                                            placeholder={tmdbSettingsDraft.tmdbApiTokenConfigured ? 'Token configured - enter a new token to replace it' : 'Paste TMDB read access token'}
-                                            onChange={handleTmdbTokenInputChange}
-                                            autoComplete='off'
-                                        />
-                                        <Typography variant='body2' color='text.secondary'>
-                                            Paste a TMDb v4 Read Access Token when possible. Legacy v3 API keys are only used when the saved value looks like a 32-character hex key. You can paste with or without &quot;Bearer&quot;; whitespace and newlines are removed before saving.
-                                        </Typography>
-                                        <Typography variant='body2' color='text.secondary'>
-                                            {getTmdbCredentialExpectation(tmdbMetadataStatus)}
-                                        </Typography>
-                                        <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
-                                            <Button
-                                                type='button'
-                                                variant='contained'
-                                                onClick={saveTmdbSettings}
-                                                disabled={settingsActionDisabled}
-                                            >
-                                                {settingsSavingSection === 'tmdbSettings' ? 'Saving...' : 'Save TMDB Settings'}
-                                            </Button>
-                                            <Button
-                                                type='button'
-                                                variant='outlined'
-                                                onClick={testTmdbConnection}
-                                                disabled={settingsActionDisabled || Boolean(integrationTesting.tmdb)}
-                                            >
-                                                {integrationTesting.tmdb ? 'Testing...' : 'Test TMDB Connection'}
-                                            </Button>
-                                        </Stack>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
-                                            <Typography variant='h2'>Jellyseerr</Typography>
-                                            <Chip
-                                                className='ptv-status-badge ptv-status-badge-info'
-                                                label={seerrSettingsDraft.apiKeyConfigured ? 'Token configured' : 'No token'}
-                                                size='small'
-                                            />
-                                        </Stack>
-                                        <Divider />
-                                        <FormControlLabel
-                                            control={(
-                                                <Switch
-                                                    checked={seerrSettingsDraft.enabled}
-                                                    disabled={settingsActionDisabled}
-                                                    onChange={event => {
-                                                        setSeerrSettingsDraft(previous => ({ ...previous, enabled: event.target.checked }));
-                                                        setSettingsDirty(true);
-                                                    }}
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
+                                                    <Typography variant='h2'>Google Books Metadata</Typography>
+                                                    <Chip
+                                                        className='ptv-status-badge ptv-status-badge-info'
+                                                        label={getGoogleBooksCredentialLabel(googleBooksSettingsDraft, googleBooksApiKeyInput)}
+                                                        size='small'
+                                                    />
+                                                </Stack>
+                                                <Divider />
+                                                <WarningAlert message={integrationTestMessages.googleBooks || ''} />
+                                                <Stack className='ptv-dashboard-status-list' spacing={0.5}>
+                                                    <Typography>Google Books enabled: {String(googleBooksSettingsDraft.googleBooksEnabled)}</Typography>
+                                                    <Typography>API key configured: {String(googleBooksSettingsDraft.googleBooksApiKeyConfigured)}</Typography>
+                                                    <Typography>Lookup candidates per search: {googleBooksSettingsDraft.maxResults}</Typography>
+                                                </Stack>
+                                                <FormControlLabel
+                                                    control={<Switch checked={googleBooksSettingsDraft.googleBooksEnabled} disabled={settingsActionDisabled} onChange={handleGoogleBooksEnabledChange} />}
+                                                    label='Enable Google Books'
                                                 />
-                                            )}
-                                            label='Enable Jellyseerr'
-                                        />
-                                        <Box className='ptv-settings-field-grid'>
-                                            <TextField
-                                                label='Display name'
-                                                size='small'
-                                                value={seerrSettingsDraft.displayName}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setSeerrSettingsDraft(previous => ({ ...previous, displayName: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                            <TextField
-                                                label='Internal URL'
-                                                size='small'
-                                                value={seerrSettingsDraft.internalUrl}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setSeerrSettingsDraft(previous => ({ ...previous, internalUrl: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                            <TextField
-                                                label='External URL'
-                                                size='small'
-                                                value={seerrSettingsDraft.externalUrl}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setSeerrSettingsDraft(previous => ({ ...previous, externalUrl: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                        </Box>
-                                        <TextField
-                                            label='Jellyseerr API key'
-                                            size='small'
-                                            type='password'
-                                            value={seerrApiKeyInput}
-                                            disabled={settingsActionDisabled}
-                                            placeholder={seerrSettingsDraft.apiKeyConfigured ? 'Token configured - enter a new key to replace it' : 'Paste Jellyseerr API key'}
-                                            onChange={event => {
-                                                setSeerrApiKeyInput(event.target.value);
-                                                setSettingsDirty(true);
-                                            }}
-                                            autoComplete='off'
-                                        />
-                                        <FormControlLabel
-                                            control={(
-                                                <Switch
-                                                    checked={seerrSettingsDraft.enableSearchIntegration}
+                                                <TextField
+                                                    label='Lookup results per search'
+                                                    size='small'
+                                                    type='number'
+                                                    value={googleBooksSettingsDraft.maxResults}
                                                     disabled={settingsActionDisabled}
-                                                    onChange={event => {
-                                                        setSeerrSettingsDraft(previous => ({ ...previous, enableSearchIntegration: event.target.checked }));
-                                                        setSettingsDirty(true);
-                                                    }}
+                                                    slotProps={{ htmlInput: { min: PTV_SETTINGS_LIMITS.googleBooksMetadataResults[0], max: PTV_SETTINGS_LIMITS.googleBooksMetadataResults[1] } }}
+                                                    onChange={handleGoogleBooksMaxResultsChange}
                                                 />
-                                            )}
-                                            label='Search integration'
-                                        />
-                                        <FormControlLabel
-                                            control={(
-                                                <Switch
-                                                    checked={seerrSettingsDraft.enableRequestsPage}
+                                                <TextField
+                                                    label='Google Books API key'
+                                                    size='small'
+                                                    type='password'
+                                                    value={googleBooksApiKeyInput}
                                                     disabled={settingsActionDisabled}
-                                                    onChange={event => {
-                                                        setSeerrSettingsDraft(previous => ({ ...previous, enableRequestsPage: event.target.checked }));
-                                                        setSettingsDirty(true);
-                                                    }}
+                                                    placeholder={googleBooksSettingsDraft.googleBooksApiKeyConfigured ? 'Key configured - enter a new key to replace it' : 'Optional Google Books API key'}
+                                                    onChange={handleGoogleBooksApiKeyInputChange}
+                                                    autoComplete='off'
                                                 />
-                                            )}
-                                            label='Requests page'
-                                        />
-                                        <FormControlLabel
-                                            control={(
-                                                <Switch
-                                                    checked={seerrSettingsDraft.enableAutoRequest}
-                                                    disabled={settingsActionDisabled}
-                                                    onChange={event => {
-                                                        setSeerrSettingsDraft(previous => ({ ...previous, enableAutoRequest: event.target.checked }));
-                                                        setSettingsDirty(true);
-                                                    }}
-                                                />
-                                            )}
-                                            label='Auto-request'
-                                        />
-                                        <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
-                                            <Button type='button' variant='contained' onClick={saveSeerrSettings} disabled={settingsActionDisabled}>
-                                                {settingsSavingSection === 'seerrSettings' ? 'Saving...' : 'Save Jellyseerr Settings'}
-                                            </Button>
-                                            <Button type='button' variant='outlined' onClick={testSeerrConnection} disabled={settingsActionDisabled || Boolean(integrationTesting.seerr)}>
-                                                {integrationTesting.seerr ? 'Testing...' : 'Test Connection'}
-                                            </Button>
-                                            <Button type='button' variant='outlined' href={seerrSettingsDraft.externalUrl} target='_blank' rel='noreferrer'>
-                                                Open Jellyseerr
-                                            </Button>
-                                        </Stack>
-                                        <WarningAlert message={integrationTestMessages.seerr || ''} />
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
+                                                <Typography variant='body2' color='text.secondary'>
+                                                    Google Books can run without a key. Add a restricted API key for higher quota; PiggieTV stores it only in the server plugin settings and never returns it to the browser.
+                                                </Typography>
+                                                <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
+                                                    <Button
+                                                        type='button'
+                                                        variant='contained'
+                                                        onClick={saveGoogleBooksSettings}
+                                                        disabled={settingsActionDisabled}
+                                                    >
+                                                        {settingsSavingSection === 'googleBooksSettings' ? 'Saving...' : 'Save Google Books Settings'}
+                                                    </Button>
+                                                    <Button
+                                                        type='button'
+                                                        variant='outlined'
+                                                        color='warning'
+                                                        onClick={clearGoogleBooksApiKey}
+                                                        disabled={settingsActionDisabled || (!googleBooksSettingsDraft.googleBooksApiKeyConfigured && !googleBooksApiKeyInput)}
+                                                    >
+                                                        Clear API Key
+                                                    </Button>
+                                                    <Button
+                                                        type='button'
+                                                        variant='outlined'
+                                                        onClick={testGoogleBooksConnection}
+                                                        disabled={settingsActionDisabled || Boolean(integrationTesting.googleBooks)}
+                                                    >
+                                                        {integrationTesting.googleBooks ? 'Testing...' : 'Test Google Books Connection'}
+                                                    </Button>
+                                                    <Button
+                                                        component='a'
+                                                        href='https://developers.google.com/books/docs/v1/getting_started'
+                                                        target='_blank'
+                                                        rel='noreferrer'
+                                                        type='button'
+                                                        variant='outlined'
+                                                    >
+                                                        Google Books API Docs
+                                                    </Button>
+                                                </Stack>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
 
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Typography variant='h2'>*Arr Integrations</Typography>
-                                        <Divider />
-                                        <Alert severity={arrCalendarReady ? 'success' : 'info'}>
-                                            {arrCalendarReady ?
-                                                'Calendar is enabled automatically for configured Sonarr, Radarr, and Lidarr services.' :
-                                                'Save a Sonarr, Radarr, or Lidarr API key to enable the PiggieTV calendar.'}
-                                        </Alert>
-                                        {ARR_SERVICE_NAMES.map(serviceName => {
-                                            const service = arrSettingsDraft[serviceName];
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
+                                                    <Typography variant='h2'>Feature Toggles</Typography>
+                                                    <Chip
+                                                        className='ptv-status-badge ptv-status-badge-backend'
+                                                        label={settingsDirty ? 'unsaved' : 'saved'}
+                                                        size='small'
+                                                    />
+                                                </Stack>
+                                                <Divider />
+                                                <FormControlLabel
+                                                    control={<Switch checked={featureSettingsDraft.heroEnabled} disabled={settingsActionDisabled} onChange={handleHeroEnabledChange} />}
+                                                    label='Hero enabled'
+                                                />
+                                                <FormControlLabel
+                                                    control={<Switch checked={featureSettingsDraft.homeRowsEnabled} disabled={settingsActionDisabled} onChange={handleHomeRowsEnabledChange} />}
+                                                    label='PTV home rows enabled'
+                                                />
+                                                <FormControlLabel
+                                                    control={<Switch checked={featureSettingsDraft.dynamicBackdropsEnabled} disabled={settingsActionDisabled} onChange={handleDynamicBackdropsEnabledChange} />}
+                                                    label='Dynamic backdrops enabled'
+                                                />
+                                                <FormControlLabel
+                                                    control={<Switch checked={featureSettingsDraft.tvLowPowerModeEnabled} disabled={settingsActionDisabled} onChange={handleTvLowPowerModeEnabledChange} />}
+                                                    label='TV low-power mode enabled'
+                                                />
+                                                <TextField
+                                                    select
+                                                    fullWidth
+                                                    helperText='Auto lets Jellyfin decide, Compatible favors stable H264/AAC playback, Performance favors direct play/direct stream.'
+                                                    label='PTV Playback Mode'
+                                                    value={featureSettingsDraft.playbackMode}
+                                                    onChange={handlePlaybackModeChange}
+                                                    disabled={settingsActionDisabled}
+                                                >
+                                                    <MenuItem value='auto'>Auto</MenuItem>
+                                                    <MenuItem value='compatible'>Compatible</MenuItem>
+                                                    <MenuItem value='performance'>Performance</MenuItem>
+                                                </TextField>
+                                                <FormControlLabel
+                                                    control={<Switch checked={featureSettingsDraft.debugModeEnabled} disabled={settingsActionDisabled} onChange={handleDebugModeEnabledChange} />}
+                                                    label='Debug mode enabled'
+                                                />
+                                                <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
+                                                    <Button
+                                                        type='button'
+                                                        variant='contained'
+                                                        onClick={saveFeatureSettings}
+                                                        disabled={settingsActionDisabled}
+                                                    >
+                                                        {settingsSavingSection === 'featureSettings' ? 'Saving...' : 'Save Feature Toggles'}
+                                                    </Button>
+                                                    <Button
+                                                        type='button'
+                                                        variant='outlined'
+                                                        color='warning'
+                                                        onClick={resetPluginSettings}
+                                                        disabled={settingsActionDisabled}
+                                                    >
+                                                        {settingsResetting ? 'Resetting...' : 'Reset Defaults'}
+                                                    </Button>
+                                                </Stack>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
 
-                                            return (
-                                                <Box key={serviceName} className='ptv-dashboard-card ptv-control-card-compact'>
-                                                    <Stack spacing={1.25}>
-                                                        <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
-                                                            <FormControlLabel
-                                                                control={(
-                                                                    <Switch
-                                                                        checked={service.enabled}
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Typography variant='h2'>Hero Settings</Typography>
+                                                <Divider />
+                                                <FormControlLabel
+                                                    control={<Switch checked={heroSettingsDraft.heroAutoRotateEnabled} disabled={settingsActionDisabled} onChange={handleHeroAutoRotateChange} />}
+                                                    label='Auto rotate enabled'
+                                                />
+                                                <Box className='ptv-settings-field-grid'>
+                                                    <TextField
+                                                        label='Rotation seconds'
+                                                        size='small'
+                                                        type='number'
+                                                        value={heroSettingsDraft.heroRotationSeconds}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={handleHeroRotationSecondsChange}
+                                                        slotProps={{ htmlInput: { min: 5, max: 120, step: 1 } }}
+                                                    />
+                                                    <TextField
+                                                        label='Max hero items'
+                                                        size='small'
+                                                        type='number'
+                                                        value={heroSettingsDraft.heroMaxItems}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={handleHeroMaxItemsChange}
+                                                        slotProps={{ htmlInput: { min: 1, max: 50, step: 1 } }}
+                                                    />
+                                                    <TextField
+                                                        label='Backdrop max width'
+                                                        size='small'
+                                                        type='number'
+                                                        value={heroSettingsDraft.heroBackdropMaxWidth}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={handleHeroBackdropMaxWidthChange}
+                                                        slotProps={{ htmlInput: { min: 480, max: 3840, step: 40 } }}
+                                                    />
+                                                    <TextField
+                                                        label='Logo max width'
+                                                        size='small'
+                                                        type='number'
+                                                        value={heroSettingsDraft.heroLogoMaxWidth}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={handleHeroLogoMaxWidthChange}
+                                                        slotProps={{ htmlInput: { min: 160, max: 1600, step: 20 } }}
+                                                    />
+                                                </Box>
+                                                <Button
+                                                    type='button'
+                                                    variant='contained'
+                                                    onClick={saveHeroSettings}
+                                                    disabled={settingsActionDisabled}
+                                                >
+                                                    {settingsSavingSection === 'heroSettings' ? 'Saving...' : 'Save Hero Settings'}
+                                                </Button>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Typography variant='h2'>Rows</Typography>
+                                                <Divider />
+                                                <Typography variant='body2' color='text.secondary'>
+                                                    Row categories, random generation, recommendation tuning, exclusions, ordering, visibility, and preview live in the dedicated Row Builder.
+                                                </Typography>
+                                                <FormControlLabel
+                                                    control={<Switch checked={rowSettingsDraft.enableRecommendedRows} disabled={settingsActionDisabled} onChange={handleRecommendedRowsChange} />}
+                                                    label='Recommendation rows'
+                                                />
+                                                <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
+                                                    <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
+                                                        Open Row Builder
+                                                    </Button>
+                                                    <Button
+                                                        type='button'
+                                                        variant='outlined'
+                                                        onClick={saveRowSettings}
+                                                        disabled={settingsActionDisabled}
+                                                    >
+                                                        {settingsSavingSection === 'rowSettings' ? 'Saving...' : 'Save Row Settings'}
+                                                    </Button>
+                                                </Stack>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Typography variant='h2'>Performance</Typography>
+                                                <Divider />
+                                                <Box className='ptv-settings-field-grid'>
+                                                    <TextField
+                                                        label='Max cache payload bytes'
+                                                        size='small'
+                                                        type='number'
+                                                        value={performanceSettingsDraft.maxCachePayloadBytes}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={handleMaxCachePayloadBytesChange}
+                                                        slotProps={{ htmlInput: { min: 1048576, max: 52428800, step: 262144 } }}
+                                                    />
+                                                    <TextField
+                                                        label='Image preload limit'
+                                                        size='small'
+                                                        type='number'
+                                                        value={performanceSettingsDraft.imagePreloadLimit}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={handleImagePreloadLimitChange}
+                                                        slotProps={{ htmlInput: { min: 1, max: 10, step: 1 } }}
+                                                    />
+                                                </Box>
+                                                <FormControlLabel
+                                                    control={<Switch checked={performanceSettingsDraft.enableAnimatedRows} disabled={settingsActionDisabled} onChange={handleAnimatedRowsChange} />}
+                                                    label='Animated rows'
+                                                />
+                                                <FormControlLabel
+                                                    control={<Switch checked={performanceSettingsDraft.enableBackdropBlur} disabled={settingsActionDisabled} onChange={handleBackdropBlurChange} />}
+                                                    label='Backdrop blur'
+                                                />
+                                                <FormControlLabel
+                                                    control={<Switch checked={performanceSettingsDraft.lowPowerDisableBlur} disabled={settingsActionDisabled} onChange={handleLowPowerDisableBlurChange} />}
+                                                    label='Low power disables blur'
+                                                />
+                                                <FormControlLabel
+                                                    control={<Switch checked={performanceSettingsDraft.lowPowerDisableAnimations} disabled={settingsActionDisabled} onChange={handleLowPowerDisableAnimationsChange} />}
+                                                    label='Low power disables animations'
+                                                />
+                                                <Button
+                                                    type='button'
+                                                    variant='contained'
+                                                    onClick={savePerformanceSettings}
+                                                    disabled={settingsActionDisabled}
+                                                >
+                                                    {settingsSavingSection === 'performanceSettings' ? 'Saving...' : 'Save Performance Settings'}
+                                                </Button>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
+                                                    <Typography variant='h2'>TMDB Settings</Typography>
+                                                    <Chip
+                                                        className='ptv-status-badge ptv-status-badge-info'
+                                                        label={getTmdbCredentialLabel(tmdbMetadataStatus, tmdbSettingsDraft)}
+                                                        size='small'
+                                                    />
+                                                </Stack>
+                                                <Divider />
+                                                <WarningAlert message={tmdbMetadataWarning} />
+                                                <WarningAlert message={integrationTestMessages.tmdb || ''} />
+                                                <Stack className='ptv-dashboard-status-list' spacing={0.5}>
+                                                    <Typography>Metadata enabled: {String(tmdbMetadataStatus?.enabled ?? tmdbSettingsDraft.tmdbEnabled)}</Typography>
+                                                    <Typography>Credential configured: {String(tmdbMetadataStatus?.configured ?? tmdbSettingsDraft.tmdbApiTokenConfigured)}</Typography>
+                                                    <Typography>Credential status: {tmdbMetadataStatus?.credentialStatus || 'not tested'}</Typography>
+                                                    <Typography>Credential type: {tmdbMetadataStatus?.credentialType || 'not detected'}</Typography>
+                                                    <Typography>Last TMDb status code: {tmdbMetadataStatus?.lastStatusCode ?? 'n/a'}</Typography>
+                                                    <Typography>Last validated: {formatDateTimeString(tmdbMetadataStatus?.lastValidatedAt)}</Typography>
+                                                    <Typography>Cache hits: {tmdbMetadataStatus?.cacheHits ?? 0}</Typography>
+                                                    <Typography>Cache misses: {tmdbMetadataStatus?.cacheMisses ?? 0}</Typography>
+                                                    <Typography>Negative cache: {tmdbMetadataStatus?.negativeCacheSize ?? 0} entries / {tmdbMetadataStatus?.negativeCacheHits ?? 0} hits / {tmdbMetadataStatus?.negativeCacheWrites ?? 0} writes</Typography>
+                                                    <Typography>Last TMDb duration: {formatDuration(tmdbMetadataStatus?.lastDurationMs)}</Typography>
+                                                    <Typography>Last TMDb result: {tmdbMetadataStatus?.lastError ? 'Failed' : 'No failure reported'}</Typography>
+                                                </Stack>
+                                                <FormControlLabel
+                                                    control={<Switch checked={tmdbSettingsDraft.tmdbEnabled} disabled={settingsActionDisabled} onChange={handleTmdbEnabledChange} />}
+                                                    label='Enable TMDB'
+                                                />
+                                                <FormControlLabel
+                                                    control={<Switch checked={tmdbSettingsDraft.useTmdbForRowAccuracy} disabled={settingsActionDisabled} onChange={handleTmdbRowAccuracyChange} />}
+                                                    label='Use TMDB for row accuracy'
+                                                />
+                                                <Box className='ptv-settings-field-grid'>
+                                                    <TextField
+                                                        label='Language'
+                                                        size='small'
+                                                        value={tmdbSettingsDraft.tmdbLanguage}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={handleTmdbLanguageChange}
+                                                    />
+                                                    <TextField
+                                                        label='Region'
+                                                        size='small'
+                                                        value={tmdbSettingsDraft.tmdbRegion}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={handleTmdbRegionChange}
+                                                    />
+                                                </Box>
+                                                <TextField
+                                                    label='TMDB API token'
+                                                    size='small'
+                                                    type='password'
+                                                    value={tmdbTokenInput}
+                                                    disabled={settingsActionDisabled}
+                                                    placeholder={tmdbSettingsDraft.tmdbApiTokenConfigured ? 'Token configured - enter a new token to replace it' : 'Paste TMDB read access token'}
+                                                    onChange={handleTmdbTokenInputChange}
+                                                    autoComplete='off'
+                                                />
+                                                <Typography variant='body2' color='text.secondary'>
+                                                    Paste a TMDb v4 Read Access Token when possible. Legacy v3 API keys are only used when the saved value looks like a 32-character hex key. You can paste with or without &quot;Bearer&quot;; whitespace and newlines are removed before saving.
+                                                </Typography>
+                                                <Typography variant='body2' color='text.secondary'>
+                                                    {getTmdbCredentialExpectation(tmdbMetadataStatus)}
+                                                </Typography>
+                                                <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
+                                                    <Button
+                                                        type='button'
+                                                        variant='contained'
+                                                        onClick={saveTmdbSettings}
+                                                        disabled={settingsActionDisabled}
+                                                    >
+                                                        {settingsSavingSection === 'tmdbSettings' ? 'Saving...' : 'Save TMDB Settings'}
+                                                    </Button>
+                                                    <Button
+                                                        type='button'
+                                                        variant='outlined'
+                                                        onClick={testTmdbConnection}
+                                                        disabled={settingsActionDisabled || Boolean(integrationTesting.tmdb)}
+                                                    >
+                                                        {integrationTesting.tmdb ? 'Testing...' : 'Test TMDB Connection'}
+                                                    </Button>
+                                                </Stack>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
+                                                    <Typography variant='h2'>Jellyseerr</Typography>
+                                                    <Chip
+                                                        className='ptv-status-badge ptv-status-badge-info'
+                                                        label={seerrSettingsDraft.apiKeyConfigured ? 'Token configured' : 'No token'}
+                                                        size='small'
+                                                    />
+                                                </Stack>
+                                                <Divider />
+                                                <FormControlLabel
+                                                    control={(
+                                                        <Switch
+                                                            checked={seerrSettingsDraft.enabled}
+                                                            disabled={settingsActionDisabled}
+                                                            onChange={event => {
+                                                                setSeerrSettingsDraft(previous => ({ ...previous, enabled: event.target.checked }));
+                                                                setSettingsDirty(true, 'seerrSettings');
+                                                            }}
+                                                        />
+                                                    )}
+                                                    label='Enable Jellyseerr'
+                                                />
+                                                <Box className='ptv-settings-field-grid'>
+                                                    <TextField
+                                                        label='Display name'
+                                                        size='small'
+                                                        value={seerrSettingsDraft.displayName}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={event => {
+                                                            setSeerrSettingsDraft(previous => ({ ...previous, displayName: event.target.value }));
+                                                            setSettingsDirty(true, 'seerrSettings');
+                                                        }}
+                                                    />
+                                                    <TextField
+                                                        label='Internal URL'
+                                                        size='small'
+                                                        value={seerrSettingsDraft.internalUrl}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={event => {
+                                                            setSeerrSettingsDraft(previous => ({ ...previous, internalUrl: event.target.value }));
+                                                            setSettingsDirty(true, 'seerrSettings');
+                                                        }}
+                                                    />
+                                                    <TextField
+                                                        label='External URL'
+                                                        size='small'
+                                                        value={seerrSettingsDraft.externalUrl}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={event => {
+                                                            setSeerrSettingsDraft(previous => ({ ...previous, externalUrl: event.target.value }));
+                                                            setSettingsDirty(true, 'seerrSettings');
+                                                        }}
+                                                    />
+                                                </Box>
+                                                <TextField
+                                                    label='Jellyseerr API key'
+                                                    size='small'
+                                                    type='password'
+                                                    value={seerrApiKeyInput}
+                                                    disabled={settingsActionDisabled}
+                                                    placeholder={seerrSettingsDraft.apiKeyConfigured ? 'Token configured - enter a new key to replace it' : 'Paste Jellyseerr API key'}
+                                                    onChange={event => {
+                                                        setSeerrApiKeyInput(event.target.value);
+                                                        setSettingsDirty(true, 'seerrSettings');
+                                                    }}
+                                                    autoComplete='off'
+                                                />
+                                                <FormControlLabel
+                                                    control={(
+                                                        <Switch
+                                                            checked={seerrSettingsDraft.enableSearchIntegration}
+                                                            disabled={settingsActionDisabled}
+                                                            onChange={event => {
+                                                                setSeerrSettingsDraft(previous => ({ ...previous, enableSearchIntegration: event.target.checked }));
+                                                                setSettingsDirty(true, 'seerrSettings');
+                                                            }}
+                                                        />
+                                                    )}
+                                                    label='Search integration'
+                                                />
+                                                <FormControlLabel
+                                                    control={(
+                                                        <Switch
+                                                            checked={seerrSettingsDraft.enableRequestsPage}
+                                                            disabled={settingsActionDisabled}
+                                                            onChange={event => {
+                                                                setSeerrSettingsDraft(previous => ({ ...previous, enableRequestsPage: event.target.checked }));
+                                                                setSettingsDirty(true, 'seerrSettings');
+                                                            }}
+                                                        />
+                                                    )}
+                                                    label='Requests page'
+                                                />
+                                                <FormControlLabel
+                                                    control={(
+                                                        <Switch
+                                                            checked={seerrSettingsDraft.enableAutoRequest}
+                                                            disabled={settingsActionDisabled}
+                                                            onChange={event => {
+                                                                setSeerrSettingsDraft(previous => ({ ...previous, enableAutoRequest: event.target.checked }));
+                                                                setSettingsDirty(true, 'seerrSettings');
+                                                            }}
+                                                        />
+                                                    )}
+                                                    label='Auto-request'
+                                                />
+                                                <Stack direction='row' spacing={1.5} flexWrap='wrap' useFlexGap>
+                                                    <Button type='button' variant='contained' onClick={saveSeerrSettings} disabled={settingsActionDisabled}>
+                                                        {settingsSavingSection === 'seerrSettings' ? 'Saving...' : 'Save Jellyseerr Settings'}
+                                                    </Button>
+                                                    <Button type='button' variant='outlined' onClick={testSeerrConnection} disabled={settingsActionDisabled || Boolean(integrationTesting.seerr)}>
+                                                        {integrationTesting.seerr ? 'Testing...' : 'Test Connection'}
+                                                    </Button>
+                                                    <Button type='button' variant='outlined' href={seerrSettingsDraft.externalUrl} target='_blank' rel='noreferrer'>
+                                                        Open Jellyseerr
+                                                    </Button>
+                                                </Stack>
+                                                <WarningAlert message={integrationTestMessages.seerr || ''} />
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Typography variant='h2'>*Arr Integrations</Typography>
+                                                <Divider />
+                                                <Alert
+                                                    severity={arrCalendarAlertSeverity}
+                                                    action={arrCalendarAlertAction}
+                                                >
+                                                    {arrCalendarMessage}
+                                                </Alert>
+                                                {ARR_SERVICE_NAMES.map(serviceName => {
+                                                    const service = arrSettingsDraft[serviceName];
+
+                                                    return (
+                                                        <Box key={serviceName} className='ptv-dashboard-card ptv-control-card-compact'>
+                                                            <Stack spacing={1.25}>
+                                                                <Stack direction='row' justifyContent='space-between' alignItems='center' flexWrap='wrap' gap={1}>
+                                                                    <FormControlLabel
+                                                                        control={(
+                                                                            <Switch
+                                                                                checked={service.enabled}
+                                                                                disabled={settingsActionDisabled}
+                                                                                onChange={event => {
+                                                                                    setArrSettingsDraft(previous => ({
+                                                                                        ...previous,
+                                                                                        [serviceName]: {
+                                                                                            ...previous[serviceName],
+                                                                                            enabled: event.target.checked
+                                                                                        }
+                                                                                    }));
+                                                                                    setSettingsDirty(true, 'arrSettings');
+                                                                                }}
+                                                                            />
+                                                                        )}
+                                                                        label={serviceName}
+                                                                    />
+                                                                    <Chip
+                                                                        className='ptv-status-badge ptv-status-badge-info'
+                                                                        label={getApiTokenBadgeLabel(service, arrApiKeyInputs[serviceName])}
+                                                                        size='small'
+                                                                    />
+                                                                </Stack>
+                                                                <Box className='ptv-settings-field-grid'>
+                                                                    <TextField
+                                                                        label='Internal URL'
+                                                                        size='small'
+                                                                        value={service.internalUrl}
                                                                         disabled={settingsActionDisabled}
                                                                         onChange={event => {
                                                                             setArrSettingsDraft(previous => ({
                                                                                 ...previous,
                                                                                 [serviceName]: {
                                                                                     ...previous[serviceName],
-                                                                                    enabled: event.target.checked
+                                                                                    internalUrl: event.target.value
                                                                                 }
                                                                             }));
-                                                                            setSettingsDirty(true);
+                                                                            setSettingsDirty(true, 'arrSettings');
                                                                         }}
                                                                     />
-                                                                )}
-                                                                label={serviceName}
-                                                            />
-                                                            <Chip
-                                                                className='ptv-status-badge ptv-status-badge-info'
-                                                                label={getApiTokenBadgeLabel(service, arrApiKeyInputs[serviceName])}
-                                                                size='small'
-                                                            />
-                                                        </Stack>
-                                                        <Box className='ptv-settings-field-grid'>
-                                                            <TextField
-                                                                label='Internal URL'
-                                                                size='small'
-                                                                value={service.internalUrl}
-                                                                disabled={settingsActionDisabled}
-                                                                onChange={event => {
-                                                                    setArrSettingsDraft(previous => ({
-                                                                        ...previous,
-                                                                        [serviceName]: {
-                                                                            ...previous[serviceName],
-                                                                            internalUrl: event.target.value
-                                                                        }
-                                                                    }));
-                                                                    setSettingsDirty(true);
-                                                                }}
-                                                            />
-                                                            <TextField
-                                                                label='External URL'
-                                                                size='small'
-                                                                value={service.externalUrl}
-                                                                disabled={settingsActionDisabled}
-                                                                onChange={event => {
-                                                                    setArrSettingsDraft(previous => ({
-                                                                        ...previous,
-                                                                        [serviceName]: {
-                                                                            ...previous[serviceName],
-                                                                            externalUrl: event.target.value
-                                                                        }
-                                                                    }));
-                                                                    setSettingsDirty(true);
-                                                                }}
-                                                            />
+                                                                    <TextField
+                                                                        label='External URL'
+                                                                        size='small'
+                                                                        value={service.externalUrl}
+                                                                        disabled={settingsActionDisabled}
+                                                                        onChange={event => {
+                                                                            setArrSettingsDraft(previous => ({
+                                                                                ...previous,
+                                                                                [serviceName]: {
+                                                                                    ...previous[serviceName],
+                                                                                    externalUrl: event.target.value
+                                                                                }
+                                                                            }));
+                                                                            setSettingsDirty(true, 'arrSettings');
+                                                                        }}
+                                                                    />
+                                                                </Box>
+                                                                <TextField
+                                                                    label={`${serviceName} API key`}
+                                                                    size='small'
+                                                                    type='password'
+                                                                    value={arrApiKeyInputs[serviceName]}
+                                                                    disabled={settingsActionDisabled}
+                                                                    placeholder={service.apiKeyConfigured ? 'Token configured - enter a new key to replace it' : 'Paste API key'}
+                                                                    onChange={event => {
+                                                                        setArrApiKeyInputs(previous => ({ ...previous, [serviceName]: event.target.value }));
+                                                                        setSettingsDirty(true, 'arrSettings');
+                                                                    }}
+                                                                    autoComplete='off'
+                                                                />
+                                                                <Button
+                                                                    type='button'
+                                                                    variant='outlined'
+                                                                    onClick={() => testArrConnection(serviceName)}
+                                                                    disabled={settingsActionDisabled || Boolean(integrationTesting[serviceName])}
+                                                                >
+                                                                    {integrationTesting[serviceName] ? 'Testing...' : `Test ${serviceName}`}
+                                                                </Button>
+                                                                <Button
+                                                                    type='button'
+                                                                    variant='contained'
+                                                                    onClick={() => saveArrServiceSettings(serviceName)}
+                                                                    disabled={settingsActionDisabled}
+                                                                >
+                                                                    {settingsSavingSection === 'arrSettings' ? 'Saving...' : `Save ${serviceName}`}
+                                                                </Button>
+                                                                <WarningAlert message={integrationTestMessages[serviceName] || ''} />
+                                                            </Stack>
                                                         </Box>
-                                                        <TextField
-                                                            label={`${serviceName} API key`}
-                                                            size='small'
-                                                            type='password'
-                                                            value={arrApiKeyInputs[serviceName]}
+                                                    );
+                                                })}
+                                                <Button type='button' variant='contained' onClick={saveArrSettings} disabled={settingsActionDisabled}>
+                                                    {settingsSavingSection === 'arrSettings' ? 'Saving...' : 'Save *Arr Settings'}
+                                                </Button>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Typography variant='h2'>Downloads</Typography>
+                                                <Divider />
+                                                <FormControlLabel
+                                                    control={(
+                                                        <Switch
+                                                            checked={downloadSettingsDraft.enabled}
                                                             disabled={settingsActionDisabled}
-                                                            placeholder={service.apiKeyConfigured ? 'Token configured - enter a new key to replace it' : 'Paste API key'}
                                                             onChange={event => {
-                                                                setArrApiKeyInputs(previous => ({ ...previous, [serviceName]: event.target.value }));
-                                                                setSettingsDirty(true);
+                                                                setDownloadSettingsDraft(previous => ({ ...previous, enabled: event.target.checked }));
+                                                                setSettingsDirty(true, 'downloadSettings');
                                                             }}
-                                                            autoComplete='off'
                                                         />
-                                                        <Button
-                                                            type='button'
-                                                            variant='outlined'
-                                                            onClick={() => testArrConnection(serviceName)}
-                                                            disabled={settingsActionDisabled || Boolean(integrationTesting[serviceName])}
-                                                        >
-                                                            {integrationTesting[serviceName] ? 'Testing...' : `Test ${serviceName}`}
-                                                        </Button>
-                                                        <Button
-                                                            type='button'
-                                                            variant='contained'
-                                                            onClick={() => saveArrServiceSettings(serviceName)}
-                                                            disabled={settingsActionDisabled}
-                                                        >
-                                                            {settingsSavingSection === 'arrSettings' ? 'Saving...' : `Save ${serviceName}`}
-                                                        </Button>
-                                                        <WarningAlert message={integrationTestMessages[serviceName] || ''} />
-                                                    </Stack>
-                                                </Box>
-                                            );
-                                        })}
-                                        <Button type='button' variant='contained' onClick={saveArrSettings} disabled={settingsActionDisabled}>
-                                            {settingsSavingSection === 'arrSettings' ? 'Saving...' : 'Save *Arr Settings'}
-                                        </Button>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
-
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Typography variant='h2'>Downloads</Typography>
-                                        <Divider />
-                                        <FormControlLabel
-                                            control={(
-                                                <Switch
-                                                    checked={downloadSettingsDraft.enabled}
-                                                    disabled={settingsActionDisabled}
-                                                    onChange={event => {
-                                                        setDownloadSettingsDraft(previous => ({ ...previous, enabled: event.target.checked }));
-                                                        setSettingsDirty(true);
-                                                    }}
+                                                    )}
+                                                    label='Enable qBittorrent'
                                                 />
-                                            )}
-                                            label='Enable qBittorrent'
-                                        />
-                                        <Box className='ptv-settings-field-grid'>
-                                            <TextField
-                                                label='Provider'
-                                                size='small'
-                                                value={downloadSettingsDraft.provider}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setDownloadSettingsDraft(previous => ({ ...previous, provider: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                            <TextField
-                                                label='Internal URL'
-                                                size='small'
-                                                value={downloadSettingsDraft.internalUrl}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setDownloadSettingsDraft(previous => ({ ...previous, internalUrl: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                            <TextField
-                                                label='External URL'
-                                                size='small'
-                                                value={downloadSettingsDraft.externalUrl}
-                                                disabled={settingsActionDisabled}
-                                                onChange={event => {
-                                                    setDownloadSettingsDraft(previous => ({ ...previous, externalUrl: event.target.value }));
-                                                    setSettingsDirty(true);
-                                                }}
-                                            />
-                                            <TextField
-                                                label='Username'
-                                                size='small'
-                                                value={downloadCredentialInputs.username}
-                                                disabled={settingsActionDisabled}
-                                                placeholder={downloadSettingsDraft.usernameConfigured ? 'Username configured' : 'Optional username'}
-                                                onChange={event => setDownloadCredentialInputs(previous => ({ ...previous, username: event.target.value }))}
-                                            />
-                                            <TextField
-                                                label='Password'
-                                                size='small'
-                                                type='password'
-                                                value={downloadCredentialInputs.password}
-                                                disabled={settingsActionDisabled}
-                                                placeholder={downloadSettingsDraft.passwordConfigured ? 'Password configured' : 'Optional password'}
-                                                onChange={event => setDownloadCredentialInputs(previous => ({ ...previous, password: event.target.value }))}
-                                                autoComplete='off'
-                                            />
-                                        </Box>
-                                        <Button type='button' variant='contained' onClick={saveDownloadSettings} disabled={settingsActionDisabled}>
-                                            {settingsSavingSection === 'downloadSettings' ? 'Saving...' : 'Save Download Settings'}
-                                        </Button>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
+                                                <Box className='ptv-settings-field-grid'>
+                                                    <TextField
+                                                        label='Provider'
+                                                        size='small'
+                                                        value={downloadSettingsDraft.provider}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={event => {
+                                                            setDownloadSettingsDraft(previous => ({ ...previous, provider: event.target.value }));
+                                                            setSettingsDirty(true, 'downloadSettings');
+                                                        }}
+                                                    />
+                                                    <TextField
+                                                        label='Internal URL'
+                                                        size='small'
+                                                        value={downloadSettingsDraft.internalUrl}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={event => {
+                                                            setDownloadSettingsDraft(previous => ({ ...previous, internalUrl: event.target.value }));
+                                                            setSettingsDirty(true, 'downloadSettings');
+                                                        }}
+                                                    />
+                                                    <TextField
+                                                        label='External URL'
+                                                        size='small'
+                                                        value={downloadSettingsDraft.externalUrl}
+                                                        disabled={settingsActionDisabled}
+                                                        onChange={event => {
+                                                            setDownloadSettingsDraft(previous => ({ ...previous, externalUrl: event.target.value }));
+                                                            setSettingsDirty(true, 'downloadSettings');
+                                                        }}
+                                                    />
+                                                    <TextField
+                                                        label='Username'
+                                                        size='small'
+                                                        value={downloadCredentialInputs.username}
+                                                        disabled={settingsActionDisabled}
+                                                        placeholder={downloadSettingsDraft.usernameConfigured ? 'Username configured' : 'Optional username'}
+                                                        onChange={event => {
+                                                            setDownloadCredentialInputs(previous => ({ ...previous, username: event.target.value }));
+                                                            setSettingsDirty(true, 'downloadSettings');
+                                                        }}
+                                                    />
+                                                    <TextField
+                                                        label='Password'
+                                                        size='small'
+                                                        type='password'
+                                                        value={downloadCredentialInputs.password}
+                                                        disabled={settingsActionDisabled}
+                                                        placeholder={downloadSettingsDraft.passwordConfigured ? 'Password configured' : 'Optional password'}
+                                                        onChange={event => {
+                                                            setDownloadCredentialInputs(previous => ({ ...previous, password: event.target.value }));
+                                                            setSettingsDirty(true, 'downloadSettings');
+                                                        }}
+                                                        autoComplete='off'
+                                                    />
+                                                </Box>
+                                                <Button type='button' variant='contained' onClick={saveDownloadSettings} disabled={settingsActionDisabled}>
+                                                    {settingsSavingSection === 'downloadSettings' ? 'Saving...' : 'Save Download Settings'}
+                                                </Button>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
 
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Typography variant='h2'>Tag Rows</Typography>
-                                        <Divider />
-                                        <Typography variant='body2' color='text.secondary'>
-                                            Tag/search based rows are configured as Row Builder categories with source type Custom Tag/Search.
-                                        </Typography>
-                                        <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
-                                            Open Row Builder
-                                        </Button>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Typography variant='h2'>Tag Rows</Typography>
+                                                <Divider />
+                                                <Typography variant='body2' color='text.secondary'>
+                                                    Tag/search based rows are configured as Row Builder categories with source type Custom Tag/Search.
+                                                </Typography>
+                                                <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
+                                                    Open Row Builder
+                                                </Button>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
 
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <Card className='ptv-dashboard-card ptv-control-card'>
-                                <CardContent>
-                                    <Stack spacing={2}>
-                                        <Typography variant='h2'>Random Rows</Typography>
-                                        <Divider />
-                                        <Typography variant='body2' color='text.secondary'>
-                                            Random row generation is now category based. Choose media type, source type, and row count in Row Builder.
-                                        </Typography>
-                                        <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
-                                            Open Row Builder
-                                        </Button>
-                                    </Stack>
-                                </CardContent>
-                            </Card>
-                        </Grid>
+                                <Grid size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card'>
+                                        <CardContent>
+                                            <Stack spacing={2}>
+                                                <Typography variant='h2'>Random Rows</Typography>
+                                                <Divider />
+                                                <Typography variant='body2' color='text.secondary'>
+                                                    Random row generation is now category based. Choose media type, source type, and row count in Row Builder.
+                                                </Typography>
+                                                <Button href={PTV_ROW_BUILDER_HASH} onClick={openPtvRowBuilder} type='button' variant='contained'>
+                                                    Open Row Builder
+                                                </Button>
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            </>
+                        ) : null}
+                        {!pluginSettings && settingsLoading ? (
+                            [0, 1, 2, 3].map(index => (
+                                <Grid key={`settings-skeleton-${index}`} size={{ xs: 12, lg: 6 }}>
+                                    <Card className='ptv-dashboard-card ptv-control-card' aria-label='Loading PiggieTV settings'>
+                                        <CardContent>
+                                            <Skeleton height={36} width='44%' />
+                                            <Skeleton height={24} width='72%' />
+                                            <Skeleton height={110} variant='rounded' />
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            ))
+                        ) : null}
                     </Grid>
                 </Stack>
             </Box>
-        </Page>
+        </section>
     );
 };
 

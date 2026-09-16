@@ -1,4 +1,5 @@
 import { recordPtvEvent } from '../core/observability';
+import { redactPtvCoreText, sanitizePtvCoreMetadata } from '../core/diagnostics/redaction';
 
 export type PtvNotificationSeverity = 'info' | 'success' | 'warning' | 'error';
 export type PtvNotificationSource = 'jellyfin' | 'ptv' | 'request' | 'music' | 'reading' | 'playback';
@@ -73,11 +74,11 @@ function getBoolean(value: unknown, fallback: boolean) {
 }
 
 function getTechnicalDetails(value: unknown) {
-    if (typeof value === 'string') return value;
+    if (typeof value === 'string') return redactPtvCoreText(value, 4000);
     if (!isRecord(value)) return undefined;
 
     try {
-        return JSON.stringify(value, null, 2);
+        return JSON.stringify(sanitizePtvCoreMetadata(value), null, 2);
     } catch {
         return undefined;
     }
@@ -109,19 +110,19 @@ function normalizeStoredNotification(value: unknown): PtvNotification | null {
 
     return {
         createdAt: getNumber(value.createdAt, now),
-        dedupeKey: getString(value.dedupeKey) || undefined,
+        dedupeKey: redactPtvCoreText(getString(value.dedupeKey), 500) || undefined,
         dismissible: getBoolean(value.dismissible, true),
         id,
         itemId: getString(value.itemId) || undefined,
-        message: getString(value.message) || undefined,
+        message: redactPtvCoreText(getString(value.message), 1000) || undefined,
         occurrenceCount: Math.max(1, getNumber(value.occurrenceCount, 1)),
         read: getBoolean(value.read, false),
-        retryKey: getString(value.retryKey) || undefined,
+        retryKey: redactPtvCoreText(getString(value.retryKey), 500) || undefined,
         retryLabel: getString(value.retryLabel) || undefined,
-        route: getString(value.route) || undefined,
+        route: redactPtvCoreText(getString(value.route), 500) || undefined,
         source,
-        technicalDetails: getString(value.technicalDetails) || undefined,
-        title,
+        technicalDetails: getTechnicalDetails(value.technicalDetails),
+        title: redactPtvCoreText(title, 300),
         type: isNotificationSeverity(value.type) ? value.type : 'info',
         updatedAt: getNumber(value.updatedAt, getNumber(value.createdAt, now))
     };
@@ -172,13 +173,16 @@ function hashString(value: string) {
 }
 
 function getDedupeKey(input: PtvNotificationInput) {
-    return input.dedupeKey || `${input.source}:${input.type || 'info'}:${input.title}:${input.message || ''}`;
+    return redactPtvCoreText(
+        input.dedupeKey || `${input.source}:${input.type || 'info'}:${input.title}:${input.message || ''}`,
+        500
+    );
 }
 
 function getRetryKey(input: PtvNotificationInput, dedupeKey: string) {
     if (!input.onRetry) return undefined;
 
-    return input.retryKey || dedupeKey;
+    return redactPtvCoreText(input.retryKey || dedupeKey, 500);
 }
 
 function getSnapshot(): PtvNotificationSnapshot {
@@ -197,7 +201,9 @@ function getSnapshot(): PtvNotificationSnapshot {
 function notifySubscribers() {
     const snapshot = getSnapshot();
 
-    subscribers.forEach(subscriber => subscriber(snapshot));
+    subscribers.forEach(subscriber => {
+        subscriber(snapshot);
+    });
 }
 
 export function getPtvNotificationSnapshot() {
@@ -233,12 +239,12 @@ export function addPtvNotification(input: PtvNotificationInput) {
         const existing = notifications[existingIndex];
         const nextNotification: PtvNotification = {
             ...existing,
-            message: input.message || existing.message,
+            message: input.message ? redactPtvCoreText(input.message, 1000) : existing.message,
             occurrenceCount: existing.occurrenceCount + 1,
             read: false,
             retryKey: retryKey || existing.retryKey,
             retryLabel: input.retryLabel || existing.retryLabel,
-            route: input.route || existing.route,
+            route: input.route ? redactPtvCoreText(input.route, 500) : existing.route,
             technicalDetails: getTechnicalDetails(input.technicalDetails) || existing.technicalDetails,
             updatedAt: createdAt
         };
@@ -259,15 +265,15 @@ export function addPtvNotification(input: PtvNotificationInput) {
         dismissible: input.dismissible !== false,
         id: createNotificationId(input, createdAt),
         itemId: input.itemId,
-        message: input.message,
+        message: input.message ? redactPtvCoreText(input.message, 1000) : undefined,
         occurrenceCount: 1,
         read: false,
         retryKey,
         retryLabel: input.retryLabel,
-        route: input.route,
+        route: input.route ? redactPtvCoreText(input.route, 500) : undefined,
         source: input.source,
         technicalDetails: getTechnicalDetails(input.technicalDetails),
-        title: input.title,
+        title: redactPtvCoreText(input.title, 300),
         type: input.type || 'info',
         updatedAt: createdAt
     };

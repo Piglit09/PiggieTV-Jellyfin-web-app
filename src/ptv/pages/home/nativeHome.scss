@@ -1,5 +1,5 @@
 .ptv-native-home-page {
-    --ptv-native-home-page-edge: clamp(12px, 0.95vw, 18px);
+    --ptv-native-home-page-edge: var(--ptv-content-edge, 24px);
     --ptv-native-home-hero-edge: clamp(44px, 3vw, 56px);
     --ptv-native-home-edge: var(--ptv-native-home-page-edge);
     --ptv-hero-section-overlap: 0;
@@ -46,7 +46,7 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
     pointer-events: none;
     position: absolute;
     right: var(--ptv-native-home-page-edge);
-    top: 5.25rem;
+    top: var(--ptv-utility-safe-top, 5.75rem);
     z-index: 40;
 }
 
@@ -823,8 +823,8 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 
 .ptv-native-home-row {
     animation: ptvNativeHomeRowFloatIn 220ms ease both;
-    backdrop-filter: blur(32px) saturate(170%);
-    -webkit-backdrop-filter: blur(32px) saturate(170%);
+    backdrop-filter: blur(var(--ptv-elevation-2-blur)) saturate(108%);
+    -webkit-backdrop-filter: blur(var(--ptv-elevation-2-blur)) saturate(108%);
     background:
         radial-gradient(circle at 14% 0%, rgba(216, 180, 254, 0.16), transparent 50%),
         radial-gradient(circle at 86% 100%, rgba(168, 85, 247, 0.12), transparent 55%),
@@ -1269,7 +1269,6 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 }
 
 .ptv-native-card {
-    backdrop-filter: blur(16px) saturate(1.14);
     background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.026) 42%, rgba(0, 0, 0, 0.08)),
         rgba(35, 27, 55, 0.42);
@@ -1406,7 +1405,7 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 
 .ptv-native-card-image {
     display: block;
-    filter: contrast(1.04) saturate(1.04);
+    filter: none;
     height: 100%;
     object-fit: cover;
     transition: transform 180ms ease, filter 180ms ease;
@@ -1444,7 +1443,6 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 
 .ptv-native-card-menu {
     align-items: center;
-    backdrop-filter: blur(14px) saturate(1.16);
     background: rgba(12, 8, 23, 0.76);
     border: 1px solid rgba(238, 224, 255, 0.32);
     border-radius: 999px;
@@ -1477,6 +1475,7 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 }
 
 .ptv-native-card .ptv-card-play-pill {
+    backdrop-filter: none;
     pointer-events: none;
     z-index: 8;
 }
@@ -1563,7 +1562,6 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 }
 
 .ptv-native-card-spotlight {
-    backdrop-filter: blur(18px) saturate(1.18);
     background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.035)),
         rgba(17, 9, 29, 0.7);
@@ -1583,7 +1581,8 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
     position: absolute;
     right: 0.44rem;
     transform: translateY(0.45rem) scale(0.98);
-    transition: opacity 190ms ease, transform 210ms ease;
+    transition: opacity 190ms ease, transform 210ms ease, visibility 0s linear 210ms;
+    visibility: hidden;
     z-index: 9;
 }
 
@@ -1609,6 +1608,8 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
     pointer-events: auto;
     right: auto;
     transform: translateY(0) scale(1);
+    transition-delay: 0s;
+    visibility: visible;
     width: min(31rem, 172%);
 }
 
@@ -1631,6 +1632,7 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
         right: auto;
         transform: translateY(0) scale(1);
         transition-delay: 300ms;
+        visibility: visible;
         width: min(31rem, 172%);
     }
 
@@ -1996,7 +1998,7 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
     .ptv-native-home-controls {
         justify-content: flex-end;
         max-width: calc(100% - 1.5rem);
-        top: 4.65rem;
+        top: var(--ptv-utility-safe-top, 5.75rem);
     }
 
     .ptv-native-home-customize-trigger span {

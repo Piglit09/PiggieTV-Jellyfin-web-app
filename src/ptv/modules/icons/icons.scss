@@ -80,6 +80,7 @@
 .ptv-icon[data-ptv-icon="grid"] { background-image: url('assets/icons/grid.svg'); }
 .ptv-icon[data-ptv-icon="guide"] { background-image: url('assets/icons/dvr.svg'); }
 .ptv-icon[data-ptv-icon="home"] { background-image: url('assets/icons/home.svg'); }
+.ptv-icon[data-ptv-icon="info"] { background-image: url('assets/icons/info.svg'); }
 .ptv-icon[data-ptv-icon="libraries"] { background-image: url('assets/icons/libraries.svg'); }
 .ptv-icon[data-ptv-icon="library"] { background-image: url('assets/icons/library.svg'); }
 .ptv-icon[data-ptv-icon="link"] { background-image: url('assets/icons/link.svg'); }
@@ -97,6 +98,7 @@
 .ptv-icon[data-ptv-icon="playback"] { background-image: url('assets/icons/playback.svg'); }
 .ptv-icon[data-ptv-icon="profile"] { background-image: url('assets/icons/profile.svg'); }
 .ptv-icon[data-ptv-icon="refresh"] { background-image: url('assets/icons/refresh.svg'); }
+.ptv-icon[data-ptv-icon="right"] { background-image: url('assets/icons/right.svg'); }
 .ptv-icon[data-ptv-icon="search"] { background-image: url('assets/icons/search.svg'); }
 .ptv-icon[data-ptv-icon="server"] { background-image: url('assets/icons/server.svg'); }
 .ptv-icon[data-ptv-icon="settings"] { background-image: url('assets/icons/settings.svg'); }
@@ -954,6 +956,34 @@ span.material-icons.ptv-icon-legacy.ptv-icon-users::after {
 
 .ptv-icon[data-ptv-icon="audio"] {
     --ptv-icon-url: url('assets/icons/audio.svg');
+}
+
+.ptv-icon[data-ptv-icon="image"] {
+    --ptv-icon-url: url('assets/icons/image.svg');
+}
+
+.ptv-icon[data-ptv-icon="info"] {
+    --ptv-icon-url: url('assets/icons/info.svg');
+}
+
+.ptv-icon[data-ptv-icon="piggieHub"] {
+    --ptv-icon-url: url('assets/icons/piggie-hub.svg');
+}
+
+.ptv-icon[data-ptv-icon="quality"] {
+    --ptv-icon-url: url('assets/icons/quality.svg');
+}
+
+.ptv-icon[data-ptv-icon="right"] {
+    --ptv-icon-url: url('assets/icons/right.svg');
+}
+
+.ptv-icon[data-ptv-icon="streaming"] {
+    --ptv-icon-url: url('assets/icons/streaming.svg');
+}
+
+.ptv-icon[data-ptv-icon="tasks"] {
+    --ptv-icon-url: url('assets/icons/tasks.svg');
 }
 
 .ptv-icon[data-ptv-icon="backups"],

@@ -7,6 +7,19 @@ const COMIC_EXTENSIONS = new Set(['cbz', 'cbr', 'cbt', 'cb7']);
 const EPUB_EXTENSIONS = new Set(['epub']);
 const PDF_EXTENSIONS = new Set(['pdf']);
 const UNSUPPORTED_BOOK_EXTENSIONS = new Set(['mobi', 'azw', 'azw3', 'djvu']);
+const NON_READER_ITEM_TYPES = new Set([
+    'audio',
+    'episode',
+    'movie',
+    'musicartist',
+    'musicalbum',
+    'musicvideo',
+    'season',
+    'series',
+    'trailer',
+    'video'
+]);
+const NON_READER_MEDIA_TYPES = new Set(['audio', 'video']);
 
 function cleanText(value: unknown): string {
     return String(value || '').trim();
@@ -121,6 +134,10 @@ export function isPotentialReaderItem(item: Record<string, any> | null | undefin
     const collectionType = lower(item.CollectionType);
     const extension = getExtension(item);
     const text = `${item.Name || ''} ${(item.Genres || []).join(' ')} ${(item.Tags || []).join(' ')}`.toLowerCase();
+
+    if (NON_READER_ITEM_TYPES.has(type) || NON_READER_MEDIA_TYPES.has(mediaType)) {
+        return false;
+    }
 
     return type === 'book'
         || mediaType === 'book'

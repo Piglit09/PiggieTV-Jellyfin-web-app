@@ -1,11 +1,19 @@
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import Events from '../../utils/events';
+import { getPtvAuthenticatedDisplayIdentityKey } from '../services/displayIdentity';
+import { observeConfiguredRowAuthority, readConfiguredPresentationAuthority, retireConfiguredRowFreshness } from '../pages/home/configuredRowFreshness';
 
 import { PTV_PLUGIN_API, PTV_RUNTIME } from './config';
+import { redactPtvSensitiveText, redactPtvSensitiveValue } from './diagnostics/redaction';
+import { ptvSafeConsole } from './safeConsole';
 import {
     type PtvCoreRecommendationResponse
 } from './recommendations/recommendationContracts';
 import { normalizePtvPluginRecommendationResponse } from './recommendations/pluginRecommendationBoundary';
+import type {
+    PtvRecommendationPolicyRequest,
+    PtvRecommendationPolicyResponse
+} from './recommendations/recommendationPolicyContracts';
 import {
     classifyPtvRequestUrl,
     isPtvWebpackDevServerOrigin,
@@ -32,6 +40,8 @@ type PtvJellyfinApiClient = {
     getSessions?: (options?: unknown) => Promise<unknown>;
     getUrl?: (name: string, params?: Record<string, unknown>) => string;
     serverAddress?: () => string;
+    serverId?: () => string | null | undefined;
+    serverInfo?: () => { Id?: string | null } | null | undefined;
 };
 
 type JsonResponseLike = {
@@ -88,6 +98,7 @@ export type PtvPluginRequestOptions = {
 
 export type PtvPluginPayloadRequestOptions = PtvPluginRequestOptions & {
     body?: unknown;
+    requiresAuthentication?: boolean;
 };
 
 export type PtvPluginApiDiagnostics = {
@@ -138,7 +149,10 @@ const pluginReadResponseCache = new Map<string, {
     expiresAt: number;
     value: unknown;
 }>();
+const MAX_PLUGIN_READ_RESPONSE_CACHE_ENTRIES = 64;
 let pluginReadResponseCacheRevision = 0;
+let pluginRequestIdentityGeneration = 0;
+let pluginRequestIdentityLifecycleInitialized = false;
 let pluginAuthenticationWait: Promise<PtvJellyfinApiClient> | null = null;
 let pluginApiDiagnostics: PtvPluginApiDiagnostics = {
     authenticationReadyRetryCount: 0,
@@ -204,6 +218,44 @@ function createPluginAuthenticationError() {
         code: 'PTV_PLUGIN_AUTHENTICATION_NOT_READY',
         kind: 'unauthorized' as const,
         status: 401
+    });
+}
+
+function createPluginRequestIdentityRetiredError() {
+    const error = Object.assign(new Error('The authenticated Plugin request identity was retired.'), {
+        code: 'PTV_PLUGIN_REQUEST_IDENTITY_RETIRED'
+    });
+
+    error.name = 'AbortError';
+    return error;
+}
+
+function assertPluginRequestIdentityCurrent(
+    authenticatedIdentity: string,
+    identityGeneration: number,
+    requestClient: PtvJellyfinApiClient
+) {
+    const activeClient = getCurrentApiClient();
+    const identityClient = activeClient || requestClient;
+
+    if (
+        identityGeneration === pluginRequestIdentityGeneration
+        && isPluginAuthenticationReady(identityClient)
+        && authenticatedIdentity === getPluginAuthenticatedIdentity(identityClient)
+    ) return;
+
+    throw createPluginRequestIdentityRetiredError();
+}
+
+function resolvePluginResponseForIdentity<T>(
+    value: T,
+    authenticatedIdentity: string,
+    identityGeneration: number,
+    requestClient: PtvJellyfinApiClient
+) {
+    return Promise.resolve().then(() => {
+        assertPluginRequestIdentityCurrent(authenticatedIdentity, identityGeneration, requestClient);
+        return value;
     });
 }
 
@@ -282,7 +334,7 @@ function waitForPluginAuthentication(
 
 function debugLog(message: string, detail?: unknown) {
     if (typeof window !== 'undefined' && (window as DebugWindow)['PTV_DEBUG'] === true) {
-        console.debug(`[PTV Plugin API] ${message}`, detail);
+        ptvSafeConsole.debug(`[PTV Plugin API] ${message}`, detail);
     }
 }
 
@@ -358,11 +410,7 @@ function getNestedStringByKey(value: unknown, key: string, depth = 0): string {
 }
 
 function redactDiagnosticText(value: string) {
-    return value
-        .replace(/(authorization\s*[:=]\s*)(bearer\s+)?[^\s"',;]+/gi, '$1[redacted]')
-        .replace(/(api[-_ ]?key\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]')
-        .replace(/(token\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]')
-        .replace(/(password\s*[:=]\s*)[^\s"',;]+/gi, '$1[redacted]');
+    return redactPtvSensitiveText(value, 1200);
 }
 
 function getErrorResponseBody(value: unknown): string {
@@ -380,7 +428,7 @@ function getErrorResponseBody(value: unknown): string {
 
         if (structuredBody && !isJsonResponseLike(structuredBody)) {
             try {
-                return redactDiagnosticText(JSON.stringify(structuredBody)).slice(0, 1200);
+                return redactDiagnosticText(JSON.stringify(redactPtvSensitiveValue(structuredBody))).slice(0, 1200);
             } catch {
                 return '';
             }
@@ -407,7 +455,7 @@ function getRawErrorMessage(value: unknown): string {
 export function normalizePtvApiError(error: unknown): PtvNormalizedApiError {
     const status = getHttpStatus(error) || undefined;
     const code = getErrorCode(error);
-    const rawMessage = getRawErrorMessage(error);
+    const rawMessage = redactDiagnosticText(getRawErrorMessage(error)).slice(0, 800);
     const lowerMessage = rawMessage.toLowerCase();
     const responseBody = getErrorResponseBody(error) || undefined;
 
@@ -650,10 +698,17 @@ function getPageSafeJellyfinRoot(value: string) {
 function getPluginRootCandidates(
     apiClient: PtvJellyfinApiClient,
     path: string,
-    params?: Record<string, unknown>
+    params?: Record<string, unknown>,
+    options: { requireApiClientRoot?: boolean } = {}
 ) {
     const rootCandidates: string[] = [];
     const apiClientRoot = getPluginRootFromApiClient(apiClient, path, params);
+
+    if (options.requireApiClientRoot) {
+        addCandidate(rootCandidates, apiClientRoot);
+        return rootCandidates;
+    }
+
     const activeRoot = PTV_RUNTIME.mode === 'development' && PTV_RUNTIME.devJellyfinServerUrl ?
         getPageSafeJellyfinRoot(PTV_RUNTIME.devJellyfinServerUrl) :
         apiClientRoot;
@@ -697,11 +752,11 @@ function setAuthoritativePluginApiRoot(root: string, source: string) {
     authoritativePluginApiRoot = normalizedRoot;
     resolvedPluginApiRoot = normalizedRoot;
     updatePluginApiDiagnostics({
-        authoritativePluginApiRoot,
+        authoritativePluginApiRoot: getPrivacySafePluginDiagnosticOrigin(authoritativePluginApiRoot),
         originDriftWarning: rootChanged ?
             `Plugin API root updated after ${source}.` :
             pluginApiDiagnostics.originDriftWarning,
-        resolvedRoot: resolvedPluginApiRoot
+        resolvedRoot: getPrivacySafePluginDiagnosticOrigin(resolvedPluginApiRoot)
     });
 
     return authoritativePluginApiRoot;
@@ -710,11 +765,24 @@ function setAuthoritativePluginApiRoot(root: string, source: string) {
 function getEndpointName(path: string) {
     const normalizedPath = normalizePluginPath(path).toLowerCase();
 
-    if (normalizedPath.endsWith('/status')) return 'status';
+    if (
+        normalizedPath === normalizePluginPath(PTV_PLUGIN_API.endpoints.status).toLowerCase()
+        || normalizedPath === 'ptv/status'
+    ) return 'status';
     if (normalizedPath.endsWith('/settings/reset')) return 'settings';
     if (normalizedPath.endsWith('/settings')) return 'settings';
     if (normalizedPath.endsWith('/featured/refresh') || normalizedPath.endsWith('/featuredcontent/refresh')) return 'featuredContentRefresh';
     if (normalizedPath.endsWith('/featured') || normalizedPath.endsWith('/featuredcontent')) return 'featuredContent';
+
+    const configuredEndpoint = Object.entries(PTV_PLUGIN_API.endpoints)
+        .sort((left, right) => right[1].length - left[1].length)
+        .find(([, endpointPath]) => {
+            const normalizedEndpoint = normalizePluginPath(endpointPath).toLowerCase();
+
+            return normalizedPath === normalizedEndpoint || normalizedPath.startsWith(`${normalizedEndpoint}/`);
+        });
+
+    if (configuredEndpoint) return configuredEndpoint[0];
 
     return normalizedPath;
 }
@@ -734,8 +802,42 @@ function getStableCachePart(value: unknown): string {
     return JSON.stringify(value) || 'undefined';
 }
 
-function getPluginRequestCacheKey(method: string, path: string, params?: Record<string, unknown>) {
-    return `${method}:${getEndpointName(path)}:${getStableCachePart(params || {})}`;
+function getPluginRequestServerIdentity(
+    apiClient: PtvJellyfinApiClient,
+    path: string,
+    params: Record<string, unknown> | undefined,
+    primaryCandidate: string | undefined
+) {
+    let serverId = '';
+
+    try {
+        serverId = apiClient.serverId?.()?.trim() || '';
+    } catch {
+        // Some transitional clients cannot resolve their server id yet. The
+        // concrete request root below still keeps their cache entries isolated.
+    }
+
+    const candidateRoot = primaryCandidate ? getRootForResolvedPath(primaryCandidate, path) : null;
+    const root = candidateRoot || getPluginRootFromApiClient(apiClient, path, params);
+
+    return getStableCachePart({
+        root: trimTrailingSlash(root),
+        serverId
+    });
+}
+
+function getPluginAuthenticatedIdentity(apiClient: PtvJellyfinApiClient) {
+    return getPtvAuthenticatedDisplayIdentityKey(apiClient);
+}
+
+function getPluginRequestCacheKey(
+    serverIdentity: string,
+    authorizationIdentity: string,
+    method: string,
+    path: string,
+    params?: Record<string, unknown>
+) {
+    return `${serverIdentity}:auth:${authorizationIdentity}:${method}:${normalizePluginPath(path).toLowerCase()}:${getStableCachePart(params || {})}`;
 }
 
 function getPluginCompatibilityPaths(path: string) {
@@ -774,7 +876,13 @@ function getPluginReadCacheTtlMs(method: string, path: string) {
     return 0;
 }
 
-function getPluginRequestDedupeKey(method: string, path: string, params?: Record<string, unknown>) {
+function getPluginRequestDedupeKey(
+    serverIdentity: string,
+    authorizationIdentity: string,
+    method: string,
+    path: string,
+    params?: Record<string, unknown>
+) {
     const endpoint = getEndpointName(path);
 
     if (
@@ -785,11 +893,11 @@ function getPluginRequestDedupeKey(method: string, path: string, params?: Record
             || endpoint === 'status'
         )
     ) {
-        return getPluginRequestCacheKey(method, path, params);
+        return getPluginRequestCacheKey(serverIdentity, authorizationIdentity, method, path, params);
     }
 
     if (method === 'POST' && normalizedIntegrationTestPath(path)) {
-        return `${method}:${normalizePluginPath(path).toLowerCase()}`;
+        return getPluginRequestCacheKey(serverIdentity, authorizationIdentity, method, path, params);
     }
 
     return null;
@@ -801,6 +909,41 @@ function clearPluginReadResponseCache() {
     if (pluginReadResponseCache.size) {
         pluginReadResponseCache.clear();
     }
+}
+
+function setPluginReadResponseCacheEntry(key: string, value: unknown, expiresAt: number) {
+    const now = Date.now();
+
+    pluginReadResponseCache.forEach((entry, entryKey) => {
+        if (entry.expiresAt <= now) pluginReadResponseCache.delete(entryKey);
+    });
+    pluginReadResponseCache.delete(key);
+    pluginReadResponseCache.set(key, { expiresAt, value });
+
+    while (pluginReadResponseCache.size > MAX_PLUGIN_READ_RESPONSE_CACHE_ENTRIES) {
+        const oldestKey = pluginReadResponseCache.keys().next().value;
+
+        if (oldestKey === undefined) break;
+        pluginReadResponseCache.delete(oldestKey);
+    }
+}
+
+function retirePluginRequestIdentityState() {
+    retireConfiguredRowFreshness('authenticated-identity-retired');
+    pluginRequestIdentityGeneration += 1;
+    clearPluginReadResponseCache();
+    inFlightPluginRequests.clear();
+}
+
+function ensurePluginRequestIdentityLifecycle() {
+    if (pluginRequestIdentityLifecycleInitialized) return;
+
+    // Keep this binding behind a runtime call. pluginApi is part of the
+    // ServerConnections bootstrap dependency graph, so reading the barrel export
+    // during module evaluation observes its still-uninitialized live binding.
+    Events.on(ServerConnections, 'localusersignedin', retirePluginRequestIdentityState);
+    Events.on(ServerConnections, 'localusersignedout', retirePluginRequestIdentityState);
+    pluginRequestIdentityLifecycleInitialized = true;
 }
 
 function normalizedIntegrationTestPath(path: string) {
@@ -839,11 +982,12 @@ function getJellyfinApiClientUrl(apiClient: PtvJellyfinApiClient, path: string, 
 function getPluginUrlCandidates(
     apiClient: PtvJellyfinApiClient,
     path: string,
-    params?: Record<string, unknown>
+    params?: Record<string, unknown>,
+    options: { requireApiClientRoot?: boolean } = {}
 ) {
     const candidates: string[] = [];
 
-    getPluginRootCandidates(apiClient, path, params).forEach(root => {
+    getPluginRootCandidates(apiClient, path, params, options).forEach(root => {
         addPluginApiCandidate(candidates, appendPluginPath(root, path, params));
         getPluginCompatibilityPaths(path).forEach(compatibilityPath => {
             addPluginApiCandidate(candidates, appendPluginPath(root, compatibilityPath, params));
@@ -878,8 +1022,9 @@ function updatePluginApiDiagnostics(nextDiagnostics: Partial<PtvPluginApiDiagnos
     };
 }
 
-function notePluginApiAttempt(url: string, candidates: string[]) {
-    const attemptedUrls = [...pluginApiDiagnostics.attemptedUrls, url].slice(-40);
+function notePluginApiAttempt(url: string, candidates: string[], path: string) {
+    const diagnosticUrl = getSanitizedPluginDiagnosticUrl(url, path);
+    const attemptedUrls = [...pluginApiDiagnostics.attemptedUrls, diagnosticUrl].slice(-40);
     const originDetail = classifyPtvRequestUrl(url, {
         jellyfinRoot: authoritativePluginApiRoot || resolvedPluginApiRoot || getConfiguredJellyfinRoot(),
         pluginRoot: authoritativePluginApiRoot || resolvedPluginApiRoot || getConfiguredJellyfinRoot()
@@ -888,9 +1033,9 @@ function notePluginApiAttempt(url: string, candidates: string[]) {
     const attemptedOrigins = [
         ...pluginApiDiagnostics.attemptedOrigins,
         {
-            origin: originDetail.origin,
+            origin: getPrivacySafePluginDiagnosticOrigin(originDetail.origin) || '',
             originKind,
-            url
+            url: diagnosticUrl
         }
     ].slice(-40);
     const pluginApiOrigins = Array.from(new Set(attemptedOrigins
@@ -905,36 +1050,55 @@ function notePluginApiAttempt(url: string, candidates: string[]) {
             'Plugin API server transition detected; the active root is pending a successful request.';
 
         if (pluginApiDiagnostics.originDriftWarning !== originDriftWarning) {
-            console.warn(`[PTV Plugin API] ${originDriftWarning}`);
+            ptvSafeConsole.warn(`[PTV Plugin API] ${originDriftWarning}`);
         }
     }
 
     const allCandidates = [...pluginApiDiagnostics.candidates];
 
-    candidates.forEach(candidate => {
-        if (!allCandidates.includes(candidate)) {
-            allCandidates.push(candidate);
+    candidates.forEach(() => {
+        if (!allCandidates.includes(diagnosticUrl)) {
+            allCandidates.push(diagnosticUrl);
         }
     });
 
     updatePluginApiDiagnostics({
         attemptedOrigins,
-        attemptedUrl: url,
+        attemptedUrl: diagnosticUrl,
         attemptedUrls,
-        authoritativePluginApiRoot,
+        authoritativePluginApiRoot: getPrivacySafePluginDiagnosticOrigin(authoritativePluginApiRoot),
         candidates: allCandidates.slice(-40),
         originDriftWarning
     });
 
-    debugLog('trying plugin endpoint', { originKind, url });
+    debugLog('trying plugin endpoint', { endpoint: getEndpointName(path), originKind });
 }
 
-function getSanitizedPluginDiagnosticUrl(url: string) {
-    try {
-        return getAnchorUrl(url).pathname || `/${normalizePluginPath(url)}`;
-    } catch {
-        return `/${normalizePluginPath(url)}`;
+function getPrivacySafePluginDiagnosticOrigin(origin: string | null) {
+    if (!origin) return null;
+
+    let hash = 0x811c9dc5;
+
+    for (let index = 0; index < origin.length; index += 1) {
+        hash ^= origin.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
     }
+
+    return `origin#${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function getSanitizedPluginDiagnosticUrl(_url: string, path: string) {
+    return `endpoint:${getEndpointName(path)}`;
+}
+
+function getPrivacySafePluginDiagnosticError(error: PtvNormalizedApiError, endpoint: string) {
+    return {
+        endpoint,
+        kind: error.kind,
+        message: `Plugin request failed (${error.kind}).`,
+        status: error.status,
+        url: `endpoint:${endpoint}`
+    } satisfies PtvNormalizedApiError;
 }
 
 function getPluginRequestDuration(startedAt: number) {
@@ -950,6 +1114,7 @@ function notePluginApiSuccess(
 ) {
     const resolvedRoot = getRootForResolvedPath(url, path);
     const endpoint = getEndpointName(path);
+    const diagnosticUrl = getSanitizedPluginDiagnosticUrl(url, path);
     const attemptedResponses = [
         ...pluginApiDiagnostics.attemptedResponses,
         {
@@ -958,7 +1123,7 @@ function notePluginApiSuccess(
             ok: true,
             responseBody: null,
             status,
-            url: getSanitizedPluginDiagnosticUrl(url)
+            url: diagnosticUrl
         }
     ].slice(-40);
 
@@ -969,17 +1134,17 @@ function notePluginApiSuccess(
     }
 
     updatePluginApiDiagnostics({
-        authoritativePluginApiRoot,
+        authoritativePluginApiRoot: getPrivacySafePluginDiagnosticOrigin(authoritativePluginApiRoot),
         attemptedResponses,
-        attemptedUrl: url,
-        candidates: [...candidates],
+        attemptedUrl: diagnosticUrl,
+        candidates: candidates.length ? [diagnosticUrl] : [],
         lastError: null,
         lastFailedEndpoint: null,
         lastFailedStatusCode: null,
         lastSuccessfulEndpoint: endpoint,
         originDriftWarning: null,
-        resolvedRoot: resolvedPluginApiRoot,
-        resolvedUrl: url
+        resolvedRoot: getPrivacySafePluginDiagnosticOrigin(resolvedPluginApiRoot),
+        resolvedUrl: diagnosticUrl
     });
 
     debugLog('resolved plugin endpoint', pluginApiDiagnostics);
@@ -994,33 +1159,34 @@ function notePluginApiFailure(
 ) {
     const endpoint = getEndpointName(path);
     const normalizedError = withEndpointErrorDetail(err, endpoint, url);
+    const diagnosticError = getPrivacySafePluginDiagnosticError(normalizedError, endpoint);
+    const diagnosticUrl = getSanitizedPluginDiagnosticUrl(url, path);
     const attemptedResponses = [
         ...pluginApiDiagnostics.attemptedResponses,
         {
             durationMs,
             endpoint,
             ok: false,
-            responseBody: normalizedError.responseBody || null,
+            responseBody: null,
             status: normalizedError.status || null,
-            url: getSanitizedPluginDiagnosticUrl(url)
+            url: diagnosticUrl
         }
     ].slice(-40);
 
     updatePluginApiDiagnostics({
         attemptedResponses,
-        authoritativePluginApiRoot,
-        candidates: [...candidates],
-        lastError: normalizedError,
-        lastFailedEndpoint: normalizedError.endpoint || null,
+        authoritativePluginApiRoot: getPrivacySafePluginDiagnosticOrigin(authoritativePluginApiRoot),
+        candidates: candidates.length ? [diagnosticUrl] : [],
+        lastError: diagnosticError,
+        lastFailedEndpoint: endpoint,
         lastFailedStatusCode: normalizedError.status || null,
-        lastResponseBody: normalizedError.responseBody || null
+        lastResponseBody: null
     });
 
     debugLog('plugin endpoint failed', {
-        error: normalizedError.message,
-        responseBody: normalizedError.responseBody || null,
+        errorCategory: normalizedError.kind,
         status: normalizedError.status || null,
-        url
+        endpoint
     });
 }
 
@@ -1059,13 +1225,34 @@ export function recordPtvPluginApiRetryState(retryCount: number, retryBackoffMs:
 export function getPtvPluginApiDiagnostics(): PtvPluginApiDiagnostics {
     return {
         ...pluginApiDiagnostics,
-        attemptedOrigins: [...pluginApiDiagnostics.attemptedOrigins],
-        attemptedResponses: [...pluginApiDiagnostics.attemptedResponses],
-        attemptedUrls: [...pluginApiDiagnostics.attemptedUrls],
-        candidates: [...pluginApiDiagnostics.candidates],
-        lastError: pluginApiDiagnostics.lastError ? { ...pluginApiDiagnostics.lastError } : null,
+        attemptedOrigins: pluginApiDiagnostics.attemptedOrigins.map(attempt => ({
+            origin: attempt.origin.startsWith('origin#') ? attempt.origin : getPrivacySafePluginDiagnosticOrigin(attempt.origin) || '',
+            originKind: attempt.originKind,
+            url: attempt.url.startsWith('endpoint:') ? attempt.url : 'endpoint:unknown'
+        })),
+        attemptedResponses: pluginApiDiagnostics.attemptedResponses.map(attempt => ({
+            ...attempt,
+            responseBody: null,
+            url: attempt.url.startsWith('endpoint:') ? attempt.url : 'endpoint:unknown'
+        })),
+        attemptedUrl: pluginApiDiagnostics.attemptedUrl?.startsWith('endpoint:') ? pluginApiDiagnostics.attemptedUrl : null,
+        attemptedUrls: pluginApiDiagnostics.attemptedUrls
+            .filter(value => value.startsWith('endpoint:')),
+        authoritativePluginApiRoot: pluginApiDiagnostics.authoritativePluginApiRoot ? 'state:resolved' : null,
+        candidates: pluginApiDiagnostics.candidates.filter(value => value.startsWith('endpoint:')),
+        lastError: pluginApiDiagnostics.lastError ? getPrivacySafePluginDiagnosticError(
+            pluginApiDiagnostics.lastError,
+            pluginApiDiagnostics.lastError.endpoint || 'unknown'
+        ) : null,
+        lastResponseBody: null,
+        resolvedRoot: pluginApiDiagnostics.resolvedRoot ? 'state:resolved' : null,
+        resolvedUrl: pluginApiDiagnostics.resolvedUrl?.startsWith('endpoint:') ? pluginApiDiagnostics.resolvedUrl : null,
         startupReasonCounts: { ...pluginApiDiagnostics.startupReasonCounts }
     };
+}
+
+export function getPtvPluginApiResolvedRoot() {
+    return authoritativePluginApiRoot || resolvedPluginApiRoot;
 }
 
 export function getPtvPluginApiResolvedUrl(
@@ -1084,7 +1271,12 @@ function shouldSkipPluginApi() {
 
 function markPluginUnavailable(err: unknown) {
     pluginUnavailableUntil = Date.now() + PTV_PLUGIN_API.unavailableRetryMs;
-    debugLog('temporarily disabled plugin endpoint probing', err);
+    const normalized = normalizePtvApiError(err);
+    debugLog('temporarily disabled plugin endpoint probing', {
+        code: normalized.code || null,
+        errorCategory: normalized.kind,
+        status: normalized.status || null
+    });
 }
 
 function shouldKeepPluginAvailableAfterError(err: unknown) {
@@ -1146,18 +1338,29 @@ function requestPluginJson<T>(
     }
 
     const currentClient = getCurrentApiClient() || apiClient;
+    const requiresAuthentication = options.requiresAuthentication !== false;
 
-    if (!isPluginAuthenticationReady(currentClient)) {
+    if (requiresAuthentication && !isPluginAuthenticationReady(currentClient)) {
         return waitForPluginAuthentication(currentClient, options.signal)
             .then(authenticatedClient => requestPluginJson<T>(authenticatedClient, path, options));
     }
 
     const method = options.method || 'GET';
-    const candidates = getPluginUrlCandidates(currentClient, path, options.params);
+    const isAuthenticatedFeaturedRead = requiresAuthentication
+        && method === 'GET'
+        && getEndpointName(path) === 'featuredContent';
+    const candidates = getPluginUrlCandidates(currentClient, path, options.params, {
+        requireApiClientRoot: isAuthenticatedFeaturedRead
+    });
+    const serverIdentity = getPluginRequestServerIdentity(currentClient, path, options.params, candidates[0]);
+    const authenticatedIdentity = requiresAuthentication ? getPluginAuthenticatedIdentity(currentClient) : null;
+    const requestSharingIdentity = requiresAuthentication ? authenticatedIdentity : 'public';
+    const identityGeneration = pluginRequestIdentityGeneration;
     const responseCacheTtlMs = getPluginReadCacheTtlMs(method, path);
-    const canUseResponseCache = responseCacheTtlMs > 0 && !options.bypassCache;
+    const canShareRequest = Boolean(requestSharingIdentity);
+    const canUseResponseCache = responseCacheTtlMs > 0 && !options.bypassCache && canShareRequest;
     const responseCacheKey = canUseResponseCache ?
-        getPluginRequestCacheKey(method, path, options.params) :
+        getPluginRequestCacheKey(serverIdentity, requestSharingIdentity!, method, path, options.params) :
         null;
     const responseCacheRevision = pluginReadResponseCacheRevision;
 
@@ -1172,16 +1375,28 @@ function requestPluginJson<T>(
     }
 
     if (method !== 'GET') {
+        if (/\/(?:settings|rows|featured)(?:\/|$)/i.test(path)) {
+            retireConfiguredRowFreshness('configuration-mutation');
+        }
         clearPluginReadResponseCache();
     } else if (responseCacheKey) {
         const cachedResponse = pluginReadResponseCache.get(responseCacheKey);
 
         if (cachedResponse && Date.now() < cachedResponse.expiresAt) {
             debugLog('served plugin endpoint response from short cache', {
-                cacheKey: responseCacheKey,
+                identityScope: requiresAuthentication ? 'authenticated' : 'public',
                 method,
                 path
             });
+
+            if (requiresAuthentication && authenticatedIdentity) {
+                return resolvePluginResponseForIdentity(
+                    cachedResponse.value as T,
+                    authenticatedIdentity,
+                    identityGeneration,
+                    currentClient
+                );
+            }
 
             return Promise.resolve(cachedResponse.value as T);
         }
@@ -1191,9 +1406,17 @@ function requestPluginJson<T>(
         }
     }
 
-    const dedupeKey = options.bypassCache ?
-        null :
-        getPluginRequestDedupeKey(method, path, options.params);
+    let dedupeKey: string | null = null;
+
+    if (!options.bypassCache && requestSharingIdentity) {
+        dedupeKey = getPluginRequestDedupeKey(
+            serverIdentity,
+            requestSharingIdentity,
+            method,
+            path,
+            options.params
+        );
+    }
     const inFlightRequest = dedupeKey ? inFlightPluginRequests.get(dedupeKey) : null;
 
     if (inFlightRequest) {
@@ -1201,7 +1424,7 @@ function requestPluginJson<T>(
             deduplicatedRequestCount: pluginApiDiagnostics.deduplicatedRequestCount + 1
         });
         debugLog('deduped plugin endpoint request', {
-            dedupeKey,
+            identityScope: requiresAuthentication ? 'authenticated' : 'public',
             method,
             path
         });
@@ -1216,7 +1439,7 @@ function requestPluginJson<T>(
         const startedAt = performance.now();
         let responseStatus = 200;
 
-        notePluginApiAttempt(url, candidates);
+        notePluginApiAttempt(url, candidates, path);
 
         let request: Promise<unknown> | undefined;
 
@@ -1295,10 +1518,13 @@ function requestPluginJson<T>(
                     updatePluginApiDiagnostics({
                         retryCount: pluginApiDiagnostics.retryCount + 1
                     });
+                    const normalized = normalizePtvApiError(err);
                     debugLog('plugin endpoint candidate failed, trying fallback', {
-                        error: withEndpointErrorDetail(err, getEndpointName(path), url),
+                        code: normalized.code || null,
+                        endpoint: getEndpointName(path),
+                        errorCategory: normalized.kind,
                         method,
-                        url
+                        status: normalized.status || null
                     });
 
                     return runAttempt(candidateIndex + 1);
@@ -1306,10 +1532,9 @@ function requestPluginJson<T>(
 
                 if (shouldKeepPluginAvailableAfterError(err)) {
                     debugLog('plugin endpoint denied by authorization; keeping read endpoints available', {
+                        endpoint: getEndpointName(path),
                         method,
-                        path,
-                        status: getHttpStatus(err),
-                        url
+                        status: getHttpStatus(err)
                     });
                 } else if (shouldAffectPluginAvailability(path)) {
                     markPluginUnavailable(err);
@@ -1321,6 +1546,14 @@ function requestPluginJson<T>(
 
     const request = runAttempt(0)
         .then(result => {
+            if (
+                method === 'GET'
+                && requiresAuthentication
+                && authenticatedIdentity
+            ) {
+                assertPluginRequestIdentityCurrent(authenticatedIdentity, identityGeneration, currentClient);
+            }
+
             if (method !== 'GET') {
                 clearPluginReadResponseCache();
             } else if (
@@ -1328,16 +1561,17 @@ function requestPluginJson<T>(
                 && responseCacheTtlMs > 0
                 && responseCacheRevision === pluginReadResponseCacheRevision
             ) {
-                pluginReadResponseCache.set(responseCacheKey, {
-                    expiresAt: Date.now() + responseCacheTtlMs,
-                    value: result
-                });
+                setPluginReadResponseCacheEntry(
+                    responseCacheKey,
+                    result,
+                    Date.now() + responseCacheTtlMs
+                );
             }
 
             return result;
         })
         .finally(() => {
-            if (dedupeKey) {
+            if (dedupeKey && inFlightPluginRequests.get(dedupeKey) === request) {
                 inFlightPluginRequests.delete(dedupeKey);
             }
         });
@@ -1491,10 +1725,46 @@ function createRowsValidationCompatibilityResponse(settings: unknown) {
     };
 }
 
+const pluginStatusListeners = new Set<(status: unknown) => void>();
+
+function publishPtvPluginStatus(status: unknown) {
+    observeConfiguredRowAuthority(readConfiguredPresentationAuthority(status));
+    pluginStatusListeners.forEach(listener => {
+        try {
+            listener(status);
+        } catch {
+            // A presentation consumer must never fail the authoritative request.
+        }
+    });
+}
+
+function captureConfiguredAuthorityObserver(apiClient: PtvJellyfinApiClient) {
+    const identity = getPluginAuthenticatedIdentity(apiClient);
+    const generation = pluginRequestIdentityGeneration;
+    return () => {
+        if (!identity) return false;
+        try {
+            assertPluginRequestIdentityCurrent(identity, generation, apiClient);
+        } catch {
+            return false; // A retired user's request cannot invalidate the next user's presentation.
+        }
+        return true;
+    };
+}
+
+export function subscribePtvPluginStatus(listener: (status: unknown) => void) {
+    pluginStatusListeners.add(listener);
+
+    return () => {
+        pluginStatusListeners.delete(listener);
+    };
+}
+
 export function resetPtvPluginApiAvailability() {
     pluginUnavailableUntil = 0;
     authoritativePluginApiRoot = null;
     resolvedPluginApiRoot = null;
+    clearPluginReadResponseCache();
     pluginApiDiagnostics = {
         authenticationReadyRetryCount: pluginApiDiagnostics.authenticationReadyRetryCount,
         authenticationWaitCount: pluginApiDiagnostics.authenticationWaitCount,
@@ -1528,11 +1798,82 @@ export function isPtvPluginApiCoolingDown() {
 }
 
 export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) {
+    ensurePluginRequestIdentityLifecycle();
+
     if (!apiClient?.getUrl) return null;
 
     return {
+        getCurrentServerId() {
+            return typeof apiClient.serverId === 'function' ? apiClient.serverId() : null;
+        },
         getCurrentUserId() {
             return typeof apiClient.getCurrentUserId === 'function' ? apiClient.getCurrentUserId() : null;
+        },
+        getAccountProfile<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.accountProfile, options);
+        },
+        startAccountEmailVerification<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(apiClient, PTV_PLUGIN_API.endpoints.accountEmailVerification, {
+                ...options,
+                body,
+                method: 'POST'
+            });
+        },
+        resendAccountEmailVerification<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, `${PTV_PLUGIN_API.endpoints.accountEmailVerification}/resend`, {
+                ...options,
+                body: {},
+                method: 'POST'
+            });
+        },
+        cancelAccountEmailVerification<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, `${PTV_PLUGIN_API.endpoints.accountEmailVerification}/cancel`, {
+                ...options,
+                body: {},
+                method: 'POST'
+            });
+        },
+        verifyAccountEmail<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(apiClient, PTV_PLUGIN_API.endpoints.accountEmailVerify, {
+                ...options,
+                body,
+                method: 'POST',
+                requiresAuthentication: false
+            });
+        },
+        getAccountAdminHealth<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.accountAdminHealth, options);
+        },
+        getAccountAdminUsers<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.accountAdminUsers, options);
+        },
+        cancelAccountAdminVerification<T = unknown>(jellyfinUserId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, `${PTV_PLUGIN_API.endpoints.accountAdminUsers}/${encodeURIComponent(jellyfinUserId)}/verification/cancel`, {
+                ...options,
+                body: {},
+                method: 'POST'
+            });
+        },
+        createAccountBackup<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.accountAdminBackups, {
+                ...options,
+                body: {},
+                method: 'POST'
+            });
+        },
+        verifyAccountBackup<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.accountAdminBackups}/verify`, {
+                ...options,
+                body,
+                method: 'POST'
+            });
+        },
+        restoreAccountBackup<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.accountAdminBackups}/restore`, {
+                ...options,
+                body,
+                method: 'POST'
+            });
         },
         getBackdropPreprocessStatus<T = unknown>(options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
@@ -1573,6 +1914,20 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 userId: apiClient.getCurrentUserId?.() || 'current-user'
             }) as T);
         },
+        rankRecommendations(
+            request: PtvRecommendationPolicyRequest,
+            options?: PtvPluginRequestOptions
+        ) {
+            return requestPluginJson<PtvRecommendationPolicyResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.recommendationPolicyRank,
+                {
+                    ...options,
+                    body: request,
+                    method: 'POST'
+                }
+            );
+        },
         searchMusicMetadata<T = unknown>(params: Record<string, unknown>, options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
                 apiClient,
@@ -1590,6 +1945,27 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     params
+                }
+            );
+        },
+        getReadingMetadataProviders<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.readingMetadataProviders,
+                options
+            );
+        },
+        searchReadingMetadata<TResponse = unknown, TRequest = unknown>(
+            body: TRequest,
+            options?: PtvPluginRequestOptions
+        ) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.readingMetadataSearch,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
                 }
             );
         },
@@ -1611,8 +1987,120 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 }
             );
         },
+        getItemRelationships<T = unknown>(sourceItemId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.relationships}/${encodeURIComponent(sourceItemId)}`,
+                options
+            );
+        },
+        createItemRelationship<TResponse = unknown, TBody = unknown>(body: TBody, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.relationships,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
+        },
+        updateItemRelationship<TResponse = unknown, TBody = unknown>(mappingId: string, body: TBody, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.relationships}/${encodeURIComponent(mappingId)}`,
+                {
+                    ...options,
+                    body,
+                    method: 'PUT'
+                }
+            );
+        },
+        deleteItemRelationship(mappingId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<void>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.relationships}/${encodeURIComponent(mappingId)}`,
+                {
+                    ...options,
+                    method: 'DELETE'
+                }
+            );
+        },
         getStatus<T = unknown>(options?: PtvPluginRequestOptions) {
-            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.status, options);
+            const isObservationCurrent = captureConfiguredAuthorityObserver(apiClient);
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.status, options)
+                .then(status => {
+                    if (isObservationCurrent()) publishPtvPluginStatus(status);
+                    return status;
+                }).catch(error => {
+                    if (isObservationCurrent()) retireConfiguredRowFreshness('status-authority-uncertain');
+                    throw error;
+                });
+        },
+        getMetadataQualitySummary<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.metadataQualitySummary, options);
+        },
+        getMetadataQualityStatus<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.metadataQualityStatus, options);
+        },
+        getMetadataQualityResults<T = unknown>(params: Record<string, unknown>, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.metadataQualityResults, {
+                ...options,
+                params
+            });
+        },
+        getMetadataQualityResult<T = unknown>(itemId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.metadataQualityResults}/${encodeURIComponent(itemId)}`,
+                options
+            );
+        },
+        getMetadataQualitySettings<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.metadataQualitySettings, options);
+        },
+        saveMetadataQualitySettings<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(apiClient, PTV_PLUGIN_API.endpoints.metadataQualitySettings, {
+                ...options,
+                body,
+                method: 'POST'
+            });
+        },
+        testMetadataQualityAiConnection<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(apiClient, PTV_PLUGIN_API.endpoints.metadataQualityAiTest, {
+                ...options,
+                body,
+                method: 'POST'
+            });
+        },
+        startMetadataQualityScan<TResponse = unknown, TRequest = unknown>(body: TRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<TResponse>(apiClient, PTV_PLUGIN_API.endpoints.metadataQualityScan, {
+                ...options,
+                body,
+                method: 'POST'
+            });
+        },
+        cancelMetadataQualityScan<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(apiClient, `${PTV_PLUGIN_API.endpoints.metadataQualityScan}/cancel`, {
+                ...options,
+                body: {},
+                method: 'POST'
+            });
+        },
+        resolveMetadataQualityResult<TResponse = unknown, TRequest = unknown>(
+            itemId: string,
+            body: TRequest,
+            options?: PtvPluginRequestOptions
+        ) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                `${PTV_PLUGIN_API.endpoints.metadataQualityResults}/${encodeURIComponent(itemId)}/resolve`,
+                {
+                    ...options,
+                    body,
+                    method: 'POST'
+                }
+            );
         },
         checkInRemoteDiagnostics<TResponse = unknown, TPresence = unknown>(presence: TPresence, options?: PtvPluginRequestOptions) {
             return requestPluginJson<TResponse>(
@@ -1718,7 +2206,15 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
             );
         },
         getSettings<T = unknown>(options?: PtvPluginRequestOptions) {
-            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.settings, options);
+            const isObservationCurrent = captureConfiguredAuthorityObserver(apiClient);
+            return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.settings, options).then(settings => {
+                const rows = settings && typeof settings === 'object' ? (settings as Record<string, unknown>).rows : null;
+                if (isObservationCurrent()) observeConfiguredRowAuthority(readConfiguredPresentationAuthority(rows));
+                return settings;
+            }).catch(error => {
+                if (isObservationCurrent()) retireConfiguredRowFreshness('settings-authority-uncertain');
+                throw error;
+            });
         },
         saveSettings<TResponse = unknown, TSettings = unknown>(settings: TSettings, options?: PtvPluginRequestOptions) {
             return requestPluginJson<TResponse>(
@@ -1732,6 +2228,7 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
             );
         },
         getRows<T = unknown>(options?: PtvPluginRequestOptions) {
+            const isObservationCurrent = captureConfiguredAuthorityObserver(apiClient);
             return requestPluginJson<T>(apiClient, PTV_PLUGIN_API.endpoints.rows, options)
                 .catch((err: unknown) => {
                     if (!isMissingPluginEndpointError(err)) {
@@ -1739,6 +2236,12 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                     }
 
                     return getRowsViaSettings<T>(apiClient, options);
+                }).then(rows => {
+                    if (isObservationCurrent()) observeConfiguredRowAuthority(readConfiguredPresentationAuthority(rows));
+                    return rows;
+                }).catch(error => {
+                    if (isObservationCurrent()) retireConfiguredRowFreshness('rows-authority-uncertain');
+                    throw error;
                 });
         },
         saveRows<TResponse = unknown, TSettings = unknown>(settings: TSettings, options?: PtvPluginRequestOptions) {
@@ -1811,6 +2314,13 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 PTV_PLUGIN_API.endpoints.integrationsStatus
             );
         },
+        getArrCalendarAvailability<T = unknown>(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<T>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.arrCalendarAvailability,
+                options
+            );
+        },
         testSeerr<T = unknown, TSettings = unknown>(settings?: TSettings, options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
                 apiClient,
@@ -1865,7 +2375,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body,
-                    method: 'POST'
+                    method: 'POST',
+                    requiresAuthentication: false
                 }
             );
         },
@@ -1876,7 +2387,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body,
-                    method: 'POST'
+                    method: 'POST',
+                    requiresAuthentication: false
                 }
             );
         },
@@ -1887,7 +2399,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body,
-                    method: 'POST'
+                    method: 'POST',
+                    requiresAuthentication: false
                 }
             );
         },
@@ -1898,7 +2411,8 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 {
                     ...options,
                     body,
-                    method: 'POST'
+                    method: 'POST',
+                    requiresAuthentication: false
                 }
             );
         },

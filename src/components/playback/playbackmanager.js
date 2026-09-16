@@ -22,12 +22,32 @@ import { PluginType } from '../../types/plugin.ts';
 import { includesAny } from '../../utils/container.ts';
 import { getItems } from '../../utils/jellyfin-apiclient/getItems.ts';
 import { getItemBackdropImageUrl } from '../../utils/jellyfin-apiclient/backdropImage';
+import {
+    beginPlaybackRequest,
+    beginPlayerStart,
+    cancelRetiredPlayerStart,
+    clearRetiredPlayerState,
+    completePlaybackRequest,
+    completePlayerStart,
+    isGuardedPlaybackStart,
+    isPlaybackStartAllowed,
+    stopPlayerWithoutPlaybackEvents
+} from './playbackStartGuard';
+import {
+    beginStreamChange,
+    completeStreamChange,
+    invalidateStreamChanges,
+    isCurrentStreamChange,
+    runStreamChangePlay,
+    waitForStreamChangePlays
+} from './streamChangeGuard';
 
 import { PlayerEvent } from 'apps/stable/features/playback/constants/playerEvent';
 import { bindMediaSegmentManager } from 'apps/stable/features/playback/utils/mediaSegmentManager';
 import { bindMediaSessionSubscriber } from 'apps/stable/features/playback/utils/mediaSessionSubscriber';
 import { AppFeature } from 'constants/appFeature';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import { MediaError } from 'types/mediaError';
 import { getMediaError } from 'utils/mediaError';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
@@ -654,7 +674,10 @@ function truncatePlayOptions(playOptions) {
         mediaSourceId: playOptions.mediaSourceId,
         audioStreamIndex: playOptions.audioStreamIndex,
         subtitleStreamIndex: playOptions.subtitleStreamIndex,
-        startPositionTicks: playOptions.startPositionTicks
+        startPositionTicks: playOptions.startPositionTicks,
+        playbackStartGuard: playOptions.playbackStartGuard,
+        playbackStartIsGuarded: playOptions.playbackStartIsGuarded,
+        playbackRequestGuard: playOptions.playbackRequestGuard
     };
 }
 
@@ -717,6 +740,7 @@ export class PlaybackManager {
 
         this._playNextAfterEnded = true;
         const playerStates = {};
+        const bitrateRefreshes = new WeakMap();
 
         this._playQueueManager = new PlayQueueManager();
 
@@ -1237,7 +1261,7 @@ export class PlaybackManager {
 
             nextIndex = nextIndex === -1 ? -1 : mediaStreams[nextIndex].Index;
 
-            self.setAudioStreamIndex(nextIndex, player);
+            return self.setAudioStreamIndex(nextIndex, player);
         };
 
         self.changeSubtitleStream = function (player) {
@@ -1279,7 +1303,7 @@ export class PlaybackManager {
 
             nextIndex = nextIndex === -1 ? -1 : mediaStreams[nextIndex].Index;
 
-            self.setSubtitleStreamIndex(nextIndex, player);
+            return self.setSubtitleStreamIndex(nextIndex, player);
         };
 
         self.getAudioStreamIndex = function (player) {
@@ -1329,18 +1353,31 @@ export class PlaybackManager {
             }
 
             if (self.playMethod(player) === 'Transcode' || !player.canSetAudioStreamIndex()) {
-                changeStream(player, getCurrentTicks(player), { AudioStreamIndex: index });
+                const streamChange = changeStream(player, getCurrentTicks(player), { AudioStreamIndex: index });
                 getPlayerData(player).audioStreamIndex = index;
+                return streamChange;
             } else {
                 // See if the player supports the track without transcoding
-                player.getDeviceProfile(self.currentItem(player)).then(function (profile) {
+                const playerData = getPlayerData(player);
+                const generation = beginStreamChange(playerData);
+
+                return player.getDeviceProfile(self.currentItem(player)).then(function (profile) {
+                    if (!isCurrentStreamChange(playerData, generation)) return;
+
                     if (isAudioStreamSupported(self.currentMediaSource(player), index, profile)) {
                         player.setAudioStreamIndex(index);
-                        getPlayerData(player).audioStreamIndex = index;
+                        playerData.audioStreamIndex = index;
+                        completeStreamChange(playerData, generation);
                     } else {
-                        changeStream(player, getCurrentTicks(player), { AudioStreamIndex: index });
-                        getPlayerData(player).audioStreamIndex = index;
+                        const streamChange = changeStream(player, getCurrentTicks(player), { AudioStreamIndex: index }, generation);
+                        playerData.audioStreamIndex = index;
+                        return streamChange;
                     }
+                }).catch(function (error) {
+                    if (!isCurrentStreamChange(playerData, generation)) return;
+
+                    completeStreamChange(playerData, generation);
+                    return Promise.reject(error);
                 });
             }
         };
@@ -1398,9 +1435,12 @@ export class PlaybackManager {
             }
 
             const apiClient = ServerConnections.getApiClient(self.currentItem(player).ServerId);
+            const playerData = getPlayerData(player);
+            const generation = beginStreamChange(playerData);
 
-            apiClient.getEndpointInfo().then(function (endpointInfo) {
-                const playerData = getPlayerData(player);
+            return apiClient.getEndpointInfo().then(function (endpointInfo) {
+                if (!isCurrentStreamChange(playerData, generation)) return;
+
                 const mediaType = playerData.streamInfo ? playerData.streamInfo.mediaType : null;
 
                 let promise;
@@ -1412,13 +1452,20 @@ export class PlaybackManager {
                     promise = Promise.resolve(options.maxBitrate);
                 }
 
-                promise.then(function (bitrate) {
+                return promise.then(function (bitrate) {
+                    if (!isCurrentStreamChange(playerData, generation)) return;
+
                     appSettings.maxStreamingBitrate(endpointInfo.IsInNetwork, mediaType, bitrate);
 
-                    changeStream(player, getCurrentTicks(player), {
+                    return changeStream(player, getCurrentTicks(player), {
                         MaxStreamingBitrate: bitrate
-                    });
+                    }, generation);
                 });
+            }).catch(function (error) {
+                if (!isCurrentStreamChange(playerData, generation)) return;
+
+                completeStreamChange(playerData, generation);
+                return Promise.reject(error);
             });
         };
 
@@ -1491,7 +1538,7 @@ export class PlaybackManager {
                     return player.getSecondarySubtitleStreamIndex();
                 }
             } catch (e) {
-                console.error('[playbackmanager] Failed to get secondary stream index:', e);
+                ptvSafeConsole.error('[playbackmanager] Failed to get secondary stream index', e);
             }
 
             return getPlayerData(player).secondarySubtitleStreamIndex;
@@ -1520,14 +1567,17 @@ export class PlaybackManager {
                 return;
             }
 
+            const playerData = getPlayerData(player);
+            const generation = beginStreamChange(playerData);
             let selectedTrackElementIndex = -1;
 
             const currentPlayMethod = self.playMethod(player);
+            let streamChange;
 
             if (currentStream && !newStream) {
                 if (getDeliveryMethod(currentStream) === 'Encode' || (getDeliveryMethod(currentStream) === 'Embed' && currentPlayMethod === 'Transcode')) {
                     // Need to change the transcoded stream to remove subs
-                    changeStream(player, getCurrentTicks(player), { SubtitleStreamIndex: -1 });
+                    streamChange = changeStream(player, getCurrentTicks(player), { SubtitleStreamIndex: -1 }, generation);
                 }
             } else if (!currentStream && newStream) {
                 if (getDeliveryMethod(newStream) === 'External') {
@@ -1536,7 +1586,7 @@ export class PlaybackManager {
                     selectedTrackElementIndex = index;
                 } else {
                     // Need to change the transcoded stream to add subs
-                    changeStream(player, getCurrentTicks(player), { SubtitleStreamIndex: index });
+                    streamChange = changeStream(player, getCurrentTicks(player), { SubtitleStreamIndex: index }, generation);
                 }
             } else if (currentStream && newStream) {
                 // Switching tracks
@@ -1546,12 +1596,16 @@ export class PlaybackManager {
 
                     // But in order to handle this client side, if the previous track is being added via transcoding, we'll have to remove it
                     if (getDeliveryMethod(currentStream) !== 'External' && getDeliveryMethod(currentStream) !== 'Embed') {
-                        changeStream(player, getCurrentTicks(player), { SubtitleStreamIndex: -1 });
+                        streamChange = changeStream(player, getCurrentTicks(player), { SubtitleStreamIndex: -1 }, generation);
                     }
                 } else {
                     // Need to change the transcoded stream to add subs
-                    changeStream(player, getCurrentTicks(player), { SubtitleStreamIndex: index });
+                    streamChange = changeStream(player, getCurrentTicks(player), { SubtitleStreamIndex: index }, generation);
                 }
+            }
+
+            if (!streamChange) {
+                completeStreamChange(playerData, generation);
             }
 
             player.setSubtitleStreamIndex(selectedTrackElementIndex);
@@ -1562,7 +1616,8 @@ export class PlaybackManager {
                 self.setSecondarySubtitleStreamIndex(-1);
             }
 
-            getPlayerData(player).subtitleStreamIndex = index;
+            playerData.subtitleStreamIndex = index;
+            return streamChange;
         };
 
         self.setSecondarySubtitleStreamIndex = function (index, player) {
@@ -1572,7 +1627,7 @@ export class PlaybackManager {
                 try {
                     return player.setSecondarySubtitleStreamIndex(index);
                 } catch (e) {
-                    console.error('[playbackmanager] AutoSet - Failed to set secondary track:', e);
+                    ptvSafeConsole.error('[playbackmanager] AutoSet - Failed to set secondary track', e);
                 }
             }
 
@@ -1594,7 +1649,7 @@ export class PlaybackManager {
                 player.setSecondarySubtitleStreamIndex(index);
                 getPlayerData(player).secondarySubtitleStreamIndex = index;
             } catch (e) {
-                console.error('[playbackmanager] AutoSet - Failed to set secondary track:', e);
+                ptvSafeConsole.error('[playbackmanager] AutoSet - Failed to set secondary track', e);
             }
         };
 
@@ -1652,7 +1707,7 @@ export class PlaybackManager {
                 return player.seek(ticks);
             }
 
-            changeStream(player, ticks);
+            return changeStream(player, ticks);
         };
 
         self.seekRelative = function (offsetTicks, player) {
@@ -1692,7 +1747,7 @@ export class PlaybackManager {
             return player.duration();
         }
 
-        function changeStream(player, ticks, params) {
+        async function changeStream(player, ticks, params, existingGeneration) {
             if (canPlayerSeek(player) && params == null) {
                 player.currentTime(parseInt(ticks / 10000, 10));
                 return;
@@ -1700,19 +1755,27 @@ export class PlaybackManager {
 
             params = params || {};
 
-            const liveStreamId = getPlayerData(player).streamInfo.liveStreamId;
-            const lastMediaInfoQuery = getPlayerData(player).streamInfo.lastMediaInfoQuery;
+            const playerData = getPlayerData(player);
+            const generation = existingGeneration == null ? beginStreamChange(playerData) : existingGeneration;
+
+            if (!isCurrentStreamChange(playerData, generation)) return;
+
+            const liveStreamId = playerData.streamInfo.liveStreamId;
+            const lastMediaInfoQuery = playerData.streamInfo.lastMediaInfoQuery;
 
             const playSessionId = self.playSessionId(player);
 
             const currentItem = self.currentItem(player);
 
-            player.getDeviceProfile(currentItem, {
-                isRetry: params.EnableDirectPlay === false
-            }).then(function (deviceProfile) {
-                const audioStreamIndex = params.AudioStreamIndex == null ? getPlayerData(player).audioStreamIndex : params.AudioStreamIndex;
-                const subtitleStreamIndex = params.SubtitleStreamIndex == null ? getPlayerData(player).subtitleStreamIndex : params.SubtitleStreamIndex;
-                const secondarySubtitleStreamIndex = params.SecondarySubtitleStreamIndex == null ? getPlayerData(player).secondarySubtitleStreamIndex : params.SecondarySubtitleStreamIndex;
+            try {
+                const deviceProfile = await player.getDeviceProfile(currentItem, {
+                    isRetry: params.EnableDirectPlay === false
+                });
+                if (!isCurrentStreamChange(playerData, generation)) return;
+
+                const audioStreamIndex = params.AudioStreamIndex == null ? playerData.audioStreamIndex : params.AudioStreamIndex;
+                const subtitleStreamIndex = params.SubtitleStreamIndex == null ? playerData.subtitleStreamIndex : params.SubtitleStreamIndex;
+                const secondarySubtitleStreamIndex = params.SecondarySubtitleStreamIndex == null ? playerData.secondarySubtitleStreamIndex : params.SecondarySubtitleStreamIndex;
 
                 let currentMediaSource = self.currentMediaSource(player);
                 const apiClient = ServerConnections.getApiClient(currentItem.ServerId);
@@ -1737,69 +1800,99 @@ export class PlaybackManager {
                     allowAudioStreamCopy: params.AllowAudioStreamCopy
                 };
 
-                getPlaybackInfo(player, apiClient, currentItem, deviceProfile, currentMediaSource.Id, liveStreamId, options).then(function (result) {
-                    if (validatePlaybackInfoResult(self, result)) {
-                        currentMediaSource = result.MediaSources[0];
+                const result = await getPlaybackInfo(player, apiClient, currentItem, deviceProfile, currentMediaSource.Id, liveStreamId, options);
+                if (!isCurrentStreamChange(playerData, generation)) return;
 
-                        const streamInfo = createStreamInfo(apiClient, currentItem.MediaType, currentItem, currentMediaSource, ticks, player);
-                        streamInfo.fullscreen = currentPlayOptions.fullscreen;
-                        streamInfo.lastMediaInfoQuery = lastMediaInfoQuery;
-                        streamInfo.resetSubtitleOffset = false;
+                if (!validatePlaybackInfoResult(self, result)) {
+                    completeStreamChange(playerData, generation);
+                    return;
+                }
 
-                        if (!streamInfo.url) {
-                            cancelPlayback();
-                            showPlaybackInfoErrorMessage(self, `PlaybackError.${MediaError.NO_MEDIA_ERROR}`);
-                            return;
-                        }
+                currentMediaSource = result.MediaSources[0];
 
-                        getPlayerData(player).subtitleStreamIndex = subtitleStreamIndex;
-                        getPlayerData(player).secondarySubtitleStreamIndex = secondarySubtitleStreamIndex;
-                        getPlayerData(player).audioStreamIndex = audioStreamIndex;
-                        getPlayerData(player).maxStreamingBitrate = maxBitrate;
+                const streamInfo = createStreamInfo(apiClient, currentItem.MediaType, currentItem, currentMediaSource, ticks, player);
+                streamInfo.fullscreen = currentPlayOptions.fullscreen;
+                streamInfo.lastMediaInfoQuery = lastMediaInfoQuery;
+                streamInfo.resetSubtitleOffset = false;
 
-                        changeStreamToUrl(apiClient, player, playSessionId, streamInfo);
-                    }
-                });
-            });
-        }
+                if (!streamInfo.url) {
+                    if (!completeStreamChange(playerData, generation)) return;
 
-        function changeStreamToUrl(apiClient, player, playSessionId, streamInfo) {
-            const playerData = getPlayerData(player);
+                    cancelPlayback();
+                    showPlaybackInfoErrorMessage(self, `PlaybackError.${MediaError.NO_MEDIA_ERROR}`);
+                    return;
+                }
 
-            playerData.isChangingStream = true;
+                playerData.subtitleStreamIndex = subtitleStreamIndex;
+                playerData.secondarySubtitleStreamIndex = secondarySubtitleStreamIndex;
+                playerData.audioStreamIndex = audioStreamIndex;
+                playerData.maxStreamingBitrate = maxBitrate;
 
-            if (playerData.streamInfo && playSessionId) {
-                apiClient.stopActiveEncodings(playSessionId).then(function () {
-                    // Stop the first transcoding afterwards because the player may still send requests to the original url
-                    const afterSetSrc = function () {
-                        apiClient.stopActiveEncodings(playSessionId);
-                    };
-                    setSrcIntoPlayer(apiClient, player, streamInfo).then(afterSetSrc, afterSetSrc);
-                });
-            } else {
-                setSrcIntoPlayer(apiClient, player, streamInfo);
+                await changeStreamToUrl(apiClient, player, playSessionId, streamInfo, generation);
+                if (!isCurrentStreamChange(playerData, generation)) return;
+            } catch (error) {
+                if (!isCurrentStreamChange(playerData, generation)) return;
+
+                completeStreamChange(playerData, generation);
+                throw error;
             }
         }
 
-        function setSrcIntoPlayer(apiClient, player, streamInfo) {
+        async function changeStreamToUrl(apiClient, player, playSessionId, streamInfo, generation) {
             const playerData = getPlayerData(player);
 
-            playerData.streamInfo = streamInfo;
+            if (!isCurrentStreamChange(playerData, generation)) return;
 
-            return player.play(streamInfo).then(function () {
-                playerData.isChangingStream = false;
+            if (playerData.streamInfo && playSessionId) {
+                await apiClient.stopActiveEncodings(playSessionId);
+                if (!isCurrentStreamChange(playerData, generation)) return;
+
+                await setSrcIntoPlayer(apiClient, player, streamInfo, generation);
+                if (!isCurrentStreamChange(playerData, generation)) return;
+
+                // Stop the first transcoding afterwards because the player may still send requests to the original url
+                await apiClient.stopActiveEncodings(playSessionId);
+                if (!isCurrentStreamChange(playerData, generation)) return;
+            } else {
+                await setSrcIntoPlayer(apiClient, player, streamInfo, generation);
+                if (!isCurrentStreamChange(playerData, generation)) return;
+            }
+        }
+
+        async function setSrcIntoPlayer(apiClient, player, streamInfo, generation) {
+            const playerData = getPlayerData(player);
+
+            if (!isCurrentStreamChange(playerData, generation)) return;
+
+            try {
+                const isCurrentPlay = await runStreamChangePlay(
+                    playerData,
+                    generation,
+                    () => {
+                        playerData.streamInfo = streamInfo;
+                        return player.play(streamInfo);
+                    },
+                    () => stopPlayerWithoutPlaybackEvents(player, unbindStopped, bindStopped)
+                );
+                if (!isCurrentPlay) return;
+                if (!isCurrentStreamChange(playerData, generation)) return;
+
                 streamInfo.started = true;
                 streamInfo.ended = false;
 
-                sendProgressUpdate(player, 'timeupdate');
-            }, function (e) {
-                playerData.isChangingStream = false;
+                if (completeStreamChange(playerData, generation)) {
+                    sendProgressUpdate(player, 'timeupdate');
+                }
+            } catch (e) {
+                if (!isCurrentStreamChange(playerData, generation)) return;
+                if (!completeStreamChange(playerData, generation)) return;
 
                 onPlaybackError.call(player, e, {
                     type: getMediaError(e),
-                    streamInfo
+                    streamInfo,
+                    streamChangeGeneration: generation
                 });
-            });
+            }
         }
 
         async function translateItemsForPlayback(items, options) {
@@ -2084,51 +2177,58 @@ export class PlaybackManager {
         self.getItemsForPlayback = getItemsForPlayback;
 
         self.play = async function (options) {
-            normalizePlayOptions(options);
+            const playbackRequest = beginPlaybackRequest(self, options);
+            if (!playbackRequest) return;
 
-            if (self._currentPlayer) {
-                if (options.enableRemotePlayers === false && !self._currentPlayer.isLocalPlayer) {
-                    throw new Error('Remote players are disabled');
+            try {
+                normalizePlayOptions(options);
+
+                if (self._currentPlayer) {
+                    if (options.enableRemotePlayers === false && !self._currentPlayer.isLocalPlayer) {
+                        throw new Error('Remote players are disabled');
+                    }
+
+                    if (!self._currentPlayer.isLocalPlayer) {
+                        return await self._currentPlayer.play(options);
+                    }
                 }
 
-                if (!self._currentPlayer.isLocalPlayer) {
-                    return self._currentPlayer.play(options);
-                }
-            }
-
-            if (options.fullscreen) {
-                loading.show();
-            }
-
-            let { items } = options;
-            // If items were not passed directly, fetch them by ID
-            if (!items) {
-                if (!options.serverId) {
-                    throw new Error('serverId required!');
+                if (options.fullscreen) {
+                    loading.show();
                 }
 
-                items = (await getItemsForPlayback(options.serverId, {
-                    Ids: options.ids.join(',')
-                })).Items;
-            }
+                let { items } = options;
+                // If items were not passed directly, fetch them by ID
+                if (!items) {
+                    if (!options.serverId) {
+                        throw new Error('serverId required!');
+                    }
 
-            // Prepare the list of items
-            items = await translateItemsForPlayback(items, options);
-            // Add any additional parts for movies or episodes
-            items = await getAdditionalParts(items);
-            // Adjust the start index for additional parts added to the queue
-            if (options.startIndex) {
-                let adjustedStartIndex = 0;
-                for (let i = 0; i < options.startIndex; i++) {
-                    adjustedStartIndex += items[i].length;
+                    items = (await getItemsForPlayback(options.serverId, {
+                        Ids: options.ids.join(',')
+                    })).Items;
                 }
 
-                options.startIndex = adjustedStartIndex;
-            }
-            // getAdditionalParts returns an array of arrays of items, so flatten it
-            items = items.flat();
+                // Prepare the list of items
+                items = await translateItemsForPlayback(items, options);
+                // Add any additional parts for movies or episodes
+                items = await getAdditionalParts(items);
+                // Adjust the start index for additional parts added to the queue
+                if (options.startIndex) {
+                    let adjustedStartIndex = 0;
+                    for (let i = 0; i < options.startIndex; i++) {
+                        adjustedStartIndex += items[i].length;
+                    }
 
-            return playWithIntros(items, options);
+                    options.startIndex = adjustedStartIndex;
+                }
+                // getAdditionalParts returns an array of arrays of items, so flatten it
+                items = items.flat();
+
+                return await playWithIntros(items, options);
+            } finally {
+                completePlaybackRequest(self, playbackRequest);
+            }
         };
 
         function getPlayerData(player) {
@@ -2316,7 +2416,10 @@ export class PlaybackManager {
 
                 if (introItems.length) {
                     introPlayOptions = {
-                        fullscreen: firstItem.playOptions.fullscreen
+                        fullscreen: firstItem.playOptions.fullscreen,
+                        playbackStartGuard: firstItem.playOptions.playbackStartGuard,
+                        playbackStartIsGuarded: firstItem.playOptions.playbackStartIsGuarded,
+                        playbackRequestGuard: firstItem.playOptions.playbackRequestGuard
                     };
                 } else {
                     introPlayOptions = firstItem.playOptions;
@@ -2419,6 +2522,7 @@ export class PlaybackManager {
         }
 
         function destroyPlayer(player) {
+            invalidateStreamChanges(player);
             player.destroy();
         }
 
@@ -2457,17 +2561,41 @@ export class PlaybackManager {
             }, reject);
         }
 
-        function sendPlaybackListToPlayer(player, items, deviceProfile, apiClient, mediaSourceId, options) {
+        function sendPlaybackListToPlayer(player, items, deviceProfile, apiClient, mediaSourceId, options, playOptions) {
             return setStreamUrls(items, deviceProfile, options.maxBitrate, apiClient, options.startPosition).then(function () {
-                loading.hide();
+                if (!isPlaybackStartAllowed(playOptions)) return;
 
-                return player.play({
+                loading.hide();
+                const playerStartToken = beginPlayerStart(player, {
+                    guarded: isGuardedPlaybackStart(playOptions)
+                });
+                if (!playerStartToken) return;
+                const result = player.play({
                     items,
                     startPositionTicks: options.startPosition || 0,
                     mediaSourceId,
                     audioStreamIndex: options.audioStreamIndex,
                     subtitleStreamIndex: options.subtitleStreamIndex,
                     startIndex: options.startIndex
+                });
+
+                return Promise.resolve(result).then(async value => {
+                    if (!isPlaybackStartAllowed(playOptions)) {
+                        await cancelRetiredPlayerStart(
+                            player,
+                            playerStartToken,
+                            () => stopRetiredPlayerSilently(player)
+                        );
+                        return;
+                    }
+
+                    if (!completePlayerStart(player, playerStartToken)) return;
+
+                    return value;
+                }, err => {
+                    if (!completePlayerStart(player, playerStartToken)) return;
+
+                    throw err;
                 });
             });
         }
@@ -2568,34 +2696,57 @@ export class PlaybackManager {
                     rankStreamType(prevSource.DefaultSecondarySubtitleStreamIndex, prevSource, mediaStreams, trackOptions, 'Subtitle', true);
                 }
             } catch (e) {
-                console.error(`AutoSet - Caught unexpected error: ${e}`);
+                ptvSafeConsole.error('AutoSet - Caught unexpected error', e);
             }
         }
 
-        function detectBitrate(apiClient, item, mediaType) {
-            // FIXME: This is gnarly, but don't want to change too much here in a bugfix
-            return Promise.resolve()
-                .then(() => {
-                    if (!isServerItem(item) || itemHelper.isLocalItem(item)) {
-                        return Promise.reject(new Error('skip bitrate detection'));
-                    }
+        function refreshBitrateInBackground(apiClient, item, mediaType) {
+            if (!isServerItem(item) || itemHelper.isLocalItem(item)) return;
+            if (mediaType !== 'Video' && mediaType !== 'Audio') return;
 
-                    return apiClient.getEndpointInfo()
-                        .then((endpointInfo) => {
-                            if ((mediaType === 'Video' || mediaType === 'Audio') && appSettings.enableAutomaticBitrateDetection(endpointInfo.IsInNetwork, mediaType)) {
-                                return apiClient.detectBitrate().then((bitrate) => {
-                                    appSettings.maxStreamingBitrate(endpointInfo.IsInNetwork, mediaType, bitrate);
-                                    return bitrate;
-                                });
-                            }
+            let clientRefreshes = bitrateRefreshes.get(apiClient);
 
-                            return Promise.reject(new Error('skip bitrate detection'));
-                        });
+            if (!clientRefreshes) {
+                clientRefreshes = new Map();
+                bitrateRefreshes.set(apiClient, clientRefreshes);
+            }
+            if (clientRefreshes.has(mediaType)) return;
+
+            const refresh = apiClient.getEndpointInfo()
+                .then((endpointInfo) => {
+                    if (!appSettings.enableAutomaticBitrateDetection(endpointInfo.IsInNetwork, mediaType)) return null;
+
+                    return apiClient.detectBitrate().then((bitrate) => {
+                        appSettings.maxStreamingBitrate(endpointInfo.IsInNetwork, mediaType, bitrate);
+                        return bitrate;
+                    });
                 })
-                .catch(() => getSavedMaxStreamingBitrate(apiClient, mediaType));
+                .catch((error) => {
+                    ptvSafeConsole.debug('Background bitrate refresh failed; retaining the last-known playback bitrate.', error);
+                    return null;
+                })
+                .finally(() => {
+                    if (clientRefreshes.get(mediaType) === refresh) {
+                        clientRefreshes.delete(mediaType);
+                    }
+                });
+
+            clientRefreshes.set(mediaType, refresh);
+        }
+
+        function detectBitrate(apiClient, item, mediaType) {
+            const savedBitrate = getSavedMaxStreamingBitrate(apiClient, mediaType);
+
+            // Startup uses the last-known safe value. Network detection refreshes
+            // the next request without blocking this playback negotiation.
+            refreshBitrateInBackground(apiClient, item, mediaType);
+
+            return Promise.resolve(savedBitrate);
         }
 
         function playAfterBitrateDetect(maxBitrate, item, playOptions, onPlaybackStartedFn, prevSource) {
+            if (!isPlaybackStartAllowed(playOptions)) return Promise.resolve();
+
             const startPosition = playOptions.startPositionTicks;
 
             const player = getPlayer(item, playOptions);
@@ -2615,21 +2766,56 @@ export class PlaybackManager {
                 return promise.then(() => {
                     cancelPlayback();
                     loading.hide();
-                    console.error(`No player found for the requested media: ${item.Url}`);
+                    ptvSafeConsole.error('No player found for the requested media');
                     showPlaybackInfoErrorMessage(self, 'ErrorPlayerNotFound');
                 });
             }
 
             if (!isServerItem(item) || item.MediaType === 'Book') {
-                return promise.then(function () {
+                return promise.then(async function () {
+                    if (!isPlaybackStartAllowed(playOptions)) return;
+
                     const streamInfo = createStreamInfoFromUrlItem(item);
                     streamInfo.fullscreen = playOptions.fullscreen;
-                    getPlayerData(player).isChangingStream = false;
-                    return player.play(streamInfo).then(() => {
+                    const playerStartToken = beginPlayerStart(player, {
+                        guarded: isGuardedPlaybackStart(playOptions)
+                    });
+                    if (!playerStartToken) return;
+                    invalidateStreamChanges(getPlayerData(player));
+                    await waitForStreamChangePlays(player);
+
+                    if (!isPlaybackStartAllowed(playOptions)) {
+                        completePlayerStart(player, playerStartToken);
+                        return;
+                    }
+
+                    return player.play(streamInfo).then(async () => {
+                        if (!isPlaybackStartAllowed(playOptions)) {
+                            await cancelRetiredPlayerStart(
+                                player,
+                                playerStartToken,
+                                () => stopRetiredPlayerSilently(player, streamInfo)
+                            );
+                            return;
+                        }
+
+                        if (!completePlayerStart(player, playerStartToken)) return;
+
                         loading.hide();
                         onPlaybackStartedFn();
                         onPlaybackStarted(player, playOptions, streamInfo);
-                    }).catch((errorCode) => {
+                    }, async errorCode => {
+                        if (!isPlaybackStartAllowed(playOptions)) {
+                            await cancelRetiredPlayerStart(
+                                player,
+                                playerStartToken,
+                                () => stopRetiredPlayerSilently(player, streamInfo)
+                            );
+                            return;
+                        }
+
+                        if (!completePlayerStart(player, playerStartToken)) return;
+
                         self.stop(player);
                         loading.hide();
                         showPlaybackInfoErrorMessage(self, errorCode || 'ErrorDefault');
@@ -2668,7 +2854,15 @@ export class PlaybackManager {
                 };
 
                 if (player && !enableLocalPlaylistManagement(player)) {
-                    return sendPlaybackListToPlayer(player, playOptions.items, deviceProfile, apiClient, mediaSourceId, options);
+                    return sendPlaybackListToPlayer(
+                        player,
+                        playOptions.items,
+                        deviceProfile,
+                        apiClient,
+                        mediaSourceId,
+                        options,
+                        playOptions
+                    );
                 }
 
                 // this reference was only needed by sendPlaybackListToPlayer
@@ -2692,6 +2886,8 @@ export class PlaybackManager {
                 }
 
                 return getPlaybackMediaSource(player, apiClient, deviceProfile, item, mediaSourceId, options).then(async (mediaSource) => {
+                    if (!isPlaybackStartAllowed(playOptions)) return;
+
                     if (trackOptions.DefaultSecondarySubtitleStreamIndex != null) {
                         mediaSource.DefaultSecondarySubtitleStreamIndex = trackOptions.DefaultSecondarySubtitleStreamIndex;
                     }
@@ -2716,16 +2912,49 @@ export class PlaybackManager {
                     streamInfo.fullscreen = playOptions.fullscreen;
 
                     const playerData = getPlayerData(player);
+                    const playerStartToken = beginPlayerStart(player, {
+                        guarded: isGuardedPlaybackStart(playOptions)
+                    });
+                    if (!playerStartToken) return;
 
-                    playerData.isChangingStream = false;
+                    invalidateStreamChanges(playerData);
+                    await waitForStreamChangePlays(player);
+
+                    if (!isPlaybackStartAllowed(playOptions)) {
+                        completePlayerStart(player, playerStartToken);
+                        return;
+                    }
+
                     playerData.maxStreamingBitrate = maxBitrate;
                     playerData.streamInfo = streamInfo;
 
-                    return player.play(streamInfo).then(function () {
+                    return player.play(streamInfo).then(async function () {
+                        if (!isPlaybackStartAllowed(playOptions)) {
+                            await cancelRetiredPlayerStart(
+                                player,
+                                playerStartToken,
+                                () => stopRetiredPlayerSilently(player, streamInfo)
+                            );
+                            return;
+                        }
+
+                        if (!completePlayerStart(player, playerStartToken)) return;
+
                         loading.hide();
                         onPlaybackStartedFn();
                         onPlaybackStarted(player, playOptions, streamInfo, mediaSource);
-                    }, function (err) {
+                    }, async function (err) {
+                        if (!isPlaybackStartAllowed(playOptions)) {
+                            await cancelRetiredPlayerStart(
+                                player,
+                                playerStartToken,
+                                () => stopRetiredPlayerSilently(player, streamInfo)
+                            );
+                            return;
+                        }
+
+                        if (!completePlayerStart(player, playerStartToken)) return;
+
                         // TODO: Improve this because it will report playback start on a failure
                         onPlaybackStartedFn();
                         onPlaybackStarted(player, playOptions, streamInfo, mediaSource);
@@ -2747,27 +2976,27 @@ export class PlaybackManager {
             const player = getPlayer(item, options);
             const apiClient = ServerConnections.getApiClient(item.ServerId);
 
-            // Call this just to ensure the value is recorded, it is needed with getSavedMaxStreamingBitrate
-            return apiClient.getEndpointInfo().then(function () {
-                const maxBitrate = getSavedMaxStreamingBitrate(ServerConnections.getApiClient(item.ServerId), mediaType);
+            // Refresh endpoint classification opportunistically; the cached value
+            // is sufficient to negotiate this request without another waterfall.
+            void apiClient.getEndpointInfo().catch(() => null);
+            const maxBitrate = getSavedMaxStreamingBitrate(ServerConnections.getApiClient(item.ServerId), mediaType);
 
-                return player.getDeviceProfile(item).then(function (deviceProfile) {
-                    const mediaOptions = {
-                        maxBitrate,
-                        startPosition,
-                        isPlayback: null,
-                        audioStreamIndex: options.audioStreamIndex,
-                        subtitleStreamIndex: options.subtitleStreamIndex,
-                        startIndex: null,
-                        enableDirectPlay: null,
-                        enableDirectStream: null,
-                        allowVideoStreamCopy: null,
-                        allowAudioStreamCopy: null
-                    };
+            return player.getDeviceProfile(item).then(function (deviceProfile) {
+                const mediaOptions = {
+                    maxBitrate,
+                    startPosition,
+                    isPlayback: null,
+                    audioStreamIndex: options.audioStreamIndex,
+                    subtitleStreamIndex: options.subtitleStreamIndex,
+                    startIndex: null,
+                    enableDirectPlay: null,
+                    enableDirectStream: null,
+                    allowVideoStreamCopy: null,
+                    allowAudioStreamCopy: null
+                };
 
-                    return getPlaybackMediaSource(player, apiClient, deviceProfile, item, options.mediaSourceId, mediaOptions).then(function (mediaSource) {
-                        return createStreamInfo(apiClient, item.MediaType, item, mediaSource, startPosition, player);
-                    });
+                return getPlaybackMediaSource(player, apiClient, deviceProfile, item, options.mediaSourceId, mediaOptions).then(function (mediaSource) {
+                    return createStreamInfo(apiClient, item.MediaType, item, mediaSource, startPosition, player);
                 });
             });
         };
@@ -2780,26 +3009,24 @@ export class PlaybackManager {
             const player = getPlayer(item, options, true);
             const apiClient = ServerConnections.getApiClient(item.ServerId);
 
-            // Call this just to ensure the value is recorded, it is needed with getSavedMaxStreamingBitrate
-            return apiClient.getEndpointInfo().then(function () {
-                const maxBitrate = getSavedMaxStreamingBitrate(ServerConnections.getApiClient(item.ServerId), mediaType);
+            void apiClient.getEndpointInfo().catch(() => null);
+            const maxBitrate = getSavedMaxStreamingBitrate(ServerConnections.getApiClient(item.ServerId), mediaType);
 
-                return player.getDeviceProfile(item).then(function (deviceProfile) {
-                    const mediaOptions = {
-                        maxBitrate,
-                        startPosition,
-                        isPlayback: true,
-                        audioStreamIndex: null,
-                        subtitleStreamIndex: null,
-                        enableDirectPlay: null,
-                        enableDirectStream: null,
-                        allowVideoStreamCopy: null,
-                        allowAudioStreamCopy: null
-                    };
+            return player.getDeviceProfile(item).then(function (deviceProfile) {
+                const mediaOptions = {
+                    maxBitrate,
+                    startPosition,
+                    isPlayback: true,
+                    audioStreamIndex: null,
+                    subtitleStreamIndex: null,
+                    enableDirectPlay: null,
+                    enableDirectStream: null,
+                    allowVideoStreamCopy: null,
+                    allowAudioStreamCopy: null
+                };
 
-                    return getPlaybackInfo(player, apiClient, item, deviceProfile, null, null, mediaOptions).then(function (playbackInfoResult) {
-                        return playbackInfoResult.MediaSources;
-                    });
+                return getPlaybackInfo(player, apiClient, item, deviceProfile, null, null, mediaOptions).then(function (playbackInfoResult) {
+                    return playbackInfoResult.MediaSources;
                 });
             });
         };
@@ -3417,11 +3644,26 @@ export class PlaybackManager {
             const player = this;
             error = error || {};
 
+            const playerData = getPlayerData(player);
+            const streamChangeGeneration = error.streamChangeGeneration;
+
+            if (streamChangeGeneration != null && !isCurrentStreamChange(playerData, streamChangeGeneration)) {
+                return;
+            }
+
+            if (error.streamInfo && playerData.streamInfo !== error.streamInfo) {
+                return;
+            }
+
+            if (streamChangeGeneration == null && playerData.isChangingStream) {
+                return;
+            }
+
             const errorType = error.type;
 
-            console.warn('[playbackmanager] onPlaybackError:', e, error);
+            ptvSafeConsole.warn('[playbackmanager] onPlaybackError', e, error);
 
-            const streamInfo = error.streamInfo || getPlayerData(player).streamInfo;
+            const streamInfo = error.streamInfo || playerData.streamInfo;
 
             if (streamInfo?.url) {
                 const isAlreadyFallbacking = streamInfo.url.toLowerCase().includes('transcodereasons');
@@ -3436,14 +3678,12 @@ export class PlaybackManager {
                     const tryVideoStreamCopy = isRemoteSource && !isAlreadyFallbacking;
                     const forceAudioTranscode = !tryVideoStreamCopy || currentlyPreventsAudioStreamCopy || currentlyPreventsVideoStreamCopy;
 
-                    changeStream(player, startTime, {
+                    return changeStream(player, startTime, {
                         EnableDirectPlay: false,
                         EnableDirectStream: tryVideoStreamCopy,
                         AllowVideoStreamCopy: tryVideoStreamCopy,
                         AllowAudioStreamCopy: forceAudioTranscode ? false : null
                     });
-
-                    return;
                 }
             }
 
@@ -3537,23 +3777,24 @@ export class PlaybackManager {
         }
 
         function onPlaybackChanging(activePlayer, newPlayer, newItem) {
+            invalidateStreamChanges(activePlayer);
+
             const state = self.getPlayerState(activePlayer);
 
             const serverId = self.currentItem(activePlayer).ServerId;
 
-            // User started playing something new while existing content is playing
-            let promise;
-
             stopPlaybackProgressTimer(activePlayer);
-            unbindStopped(activePlayer);
+            const promise = waitForStreamChangePlays(activePlayer).then(function () {
+                unbindStopped(activePlayer);
 
-            if (activePlayer === newPlayer) {
-                // If we're staying with the same player, stop it
-                promise = activePlayer.stop(false);
-            } else {
+                if (activePlayer === newPlayer) {
+                    // If we're staying with the same player, stop it
+                    return activePlayer.stop(false);
+                }
+
                 // If we're switching players, tear down the current one
-                promise = activePlayer.stop(true);
-            }
+                return activePlayer.stop(true);
+            });
 
             return promise.then(function () {
                 // Clear the data since we were not listening 'stopped'
@@ -3579,6 +3820,32 @@ export class PlaybackManager {
                 Events.off(player, 'stopped', onPlaybackStopped);
                 Events.on(player, 'stopped', onPlaybackStopped);
             }
+        }
+
+        async function stopRetiredPlayerSilently(player, expectedStreamInfo) {
+            const playerData = getPlayerData(player);
+
+            // The shared audio element may already belong to a newer user
+            // request. Verify ownership before invoking stop(), not afterward.
+            if (expectedStreamInfo && playerData.streamInfo !== expectedStreamInfo) {
+                return false;
+            }
+
+            try {
+                await stopPlayerWithoutPlaybackEvents(player, unbindStopped, bindStopped);
+            } finally {
+                clearRetiredPlayerState({
+                    currentPlayer: self._currentPlayer,
+                    expectedStreamInfo,
+                    player,
+                    playerData,
+                    removeCurrentPlayer,
+                    resetQueue: () => self._playQueueManager.reset(),
+                    stopProgress: stopPlaybackProgressTimer
+                });
+            }
+
+            return true;
         }
 
         function onPlaybackTimeUpdate() {
@@ -3699,12 +3966,15 @@ export class PlaybackManager {
                 throw new Error('player cannot be null');
             }
 
+            const playerData = getPlayerData(player);
+            if (playerData.isChangingStream) return;
+
             const state = self.getPlayerState(player);
 
             if (state.NowPlayingItem) {
                 const serverId = state.NowPlayingItem.ServerId;
 
-                const streamInfo = getPlayerData(player).streamInfo;
+                const streamInfo = playerData.streamInfo;
 
                 if (streamInfo?.started && !streamInfo.ended) {
                     reportPlayback(self, state, player, reportPlaylist, serverId, 'reportPlaybackProgress', progressEventName);
@@ -3967,12 +4237,18 @@ export class PlaybackManager {
     stop(player) {
         player = player || this._currentPlayer;
         if (player) {
+            const generation = invalidateStreamChanges(player);
+
             if (enableLocalPlaylistManagement(player)) {
                 this._playNextAfterEnded = false;
             }
 
-            // TODO: remove second param
-            return player.stop(true, true);
+            return waitForStreamChangePlays(player).then(() => {
+                if (!isCurrentStreamChange(player, generation)) return;
+
+                // TODO: remove second param
+                return player.stop(true, true);
+            });
         }
 
         return Promise.resolve();
@@ -4329,6 +4605,6 @@ window.addEventListener('beforeunload', function () {
     try {
         playbackManager.onAppClose();
     } catch (err) {
-        console.error('error in onAppClose: ' + err);
+        ptvSafeConsole.error('error in onAppClose', err);
     }
 });

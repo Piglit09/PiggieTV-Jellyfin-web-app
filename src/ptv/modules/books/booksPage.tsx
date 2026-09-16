@@ -4,6 +4,7 @@ import React, {
     useCallback,
     useContext,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState
@@ -15,6 +16,10 @@ import Page from 'components/Page';
 import './books.scss';
 
 import { setPtvFavorite } from '../../api';
+import {
+    clearPtvImageFailuresForItem,
+    markPtvImageCandidateFailed
+} from '../../api/images';
 import { createPtvAbortController } from '../../core/abortController';
 import { PTV_ASSETS, PTV_ROUTES } from '../../core/config';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
@@ -27,6 +32,10 @@ import {
     getPtvRouteControllerState,
     recordPtvRouteGenerationLifecycle
 } from '../../shell/routeController';
+import {
+    capturePtvRouteCriticalLifecycleOwner,
+    type PtvRouteCriticalTerminalOutcome
+} from '../../shell/routeCriticalLifecycle';
 import { usePtvAdminDebugVisibility } from '../../utils/usePtvAdminDebugVisibility';
 import { PtvIcon } from '../icons';
 import { loadReaderProgress } from '../reader/readerProgressStore';
@@ -58,14 +67,15 @@ import {
     getPtvReadingFormatLabel,
     getPtvReadingGenres,
     getPtvReadingHome,
+    getPtvReadingArtworkResolution,
     getPtvReadingImagePlaceholder,
-    getPtvReadingImageUrl,
     getPtvReadingItemKind,
     getPtvReadingRouteKind,
     getPtvReadingSeries,
     getPtvReadingStableId,
     getPtvReadingTitle,
     invalidatePtvReadingHomeCache,
+    invalidatePtvReadingMetadataCache,
     mergePtvReadingLibraryIndex,
     searchPtvReading,
     uniquePtvReadingItems
@@ -79,14 +89,43 @@ import {
     shouldPublishReadingIndexProgress
 } from './readingIndexPublishing';
 import {
+    PtvReadingArtworkImage
+} from './readingArtworkImage';
+import type {
+    PtvReadingArtworkLifecycleOutcome
+} from './readingArtworkLifecycle';
+import {
     createPtvReadingImageFailureRegistry,
     normalizePtvReadingImageRoute
 } from './readingImageFailures';
+import {
+    createPtvReadingIdentifyReconciliationCoordinator
+} from './readingIdentifyReconciliation';
+import { ReadingCardMenu, ReadingCardMenuOwner } from './readingCardMenuLifecycle';
+import { usePtvReadingGridVisibleLimit } from './readingGridLifecycle';
+import {
+    getPtvReadingAdminDialogClosePolicy,
+    getPtvReadingMetadataUpdateAuthority,
+    getPtvReadingMetadataUpdateDetail,
+    isPtvReadingMetadataUpdateOwnedBy,
+    PTV_READING_ITEM_METADATA_UPDATED_EVENT,
+    replacePtvReadingItemInHomeData,
+    replacePtvReadingItemInList
+} from './readingMetadataUpdateLifecycle';
 import { shouldPreservePtvReadingIndex } from './readingProgressiveIndex';
 import {
     getPtvReadingRouteHomeGate,
     shouldStartPtvReadingLibraryIndexImmediately
 } from './readingRoutePolicy';
+import {
+    getPtvReadingFailedReadCount,
+    getPtvReadingHomeState
+} from './readingHomeState';
+import {
+    createPtvReadingRouteCriticalLifecycle,
+    getPtvReadingRouteCriticalIdentity,
+    getPtvReadingRouteCriticalPlan
+} from './readingRouteCriticalLifecycle';
 import type {
     PtvReadingHomeData,
     PtvReadingItem,
@@ -98,6 +137,8 @@ import type {
 } from './booksTypes';
 
 type ReadingView = 'collections' | 'explore' | 'home' | 'item' | 'library' | 'series';
+
+let readingMetadataOwnerSequence = 0;
 
 type ReadingRouteState = Readonly<{
     id: string;
@@ -369,38 +410,29 @@ function getReadingImageFailureState(route?: string | null) {
     return readingImageFailures.get(getReadingImageRoute(route));
 }
 
-function clearReadingImageFailuresForItem(itemId: string | null | undefined, route?: string | null) {
-    readingImageFailures.clearForItem(getReadingImageRoute(route), itemId);
-}
-
-function applyReadingImageFallbackToItem(itemId: string | undefined, fallbackUrl: string, route?: string | null) {
-    if (!itemId || typeof document === 'undefined') return;
-
+function clearReadingImageFailuresForItem(
+    itemOrId: PtvReadingItem | null | string | undefined,
+    route?: string | null
+) {
+    const item = typeof itemOrId === 'string' ? null : itemOrId;
+    const itemId = typeof itemOrId === 'string' ? itemOrId : item?.Id;
+    const relatedItemIds = new Set([
+        itemId,
+        item?.PrimaryImageItemId as string | undefined,
+        item?.ParentPrimaryImageItemId as string | undefined,
+        item?.AlbumPrimaryImageItemId as string | undefined,
+        item?.ParentId,
+        item?.AlbumId,
+        item?.ParentBackdropItemId,
+        item?.BackdropItemId as string | undefined,
+        item?.ParentThumbItemId,
+        item?.SeriesId
+    ].filter((id): id is string => Boolean(id)));
     const routeKey = getReadingImageRoute(route);
 
-    document.querySelectorAll<HTMLImageElement>('img[data-ptv-reading-item-id]').forEach(image => {
-        if (image.dataset.ptvReadingItemId !== itemId) return;
-        if (getReadingImageRoute(image.dataset.ptvReadingRoute) !== routeKey) return;
-        if (image.dataset.ptvFallbackApplied === 'true') return;
-
-        image.dataset.ptvFallbackApplied = 'true';
-        image.src = fallbackUrl;
-    });
-}
-
-function recordReadingCachedFailureHit(url: string, itemId?: string, route?: string | null) {
-    const routeKey = getReadingImageRoute(route);
-    const imageFailures = getReadingImageFailureState(routeKey);
-
-    if (imageFailures.reportedCachedFailureUrls.has(url)) return;
-
-    imageFailures.reportedCachedFailureUrls.add(url);
-    imageFailures.cachedFailureHitCount += 1;
-    recordPtvEvent('image', 'reading-image-cached-failure-hit', {
-        cachedFailureHit: true,
-        itemId: itemId || null,
-        route: routeKey,
-        url
+    relatedItemIds.forEach(relatedItemId => {
+        readingImageFailures.clearForItem(routeKey, relatedItemId);
+        clearPtvImageFailuresForItem(relatedItemId);
     });
 }
 
@@ -408,7 +440,11 @@ function logReadingPageEvent(name: string, detail: Record<string, unknown> = {})
     recordPtvEvent('render', name, detail);
 }
 
-function openReadingAdminDialog(item: PtvReadingItem, action: ReadingAdminAction) {
+function openReadingAdminDialog(
+    item: PtvReadingItem,
+    action: ReadingAdminAction,
+    readingOwnerGeneration: number
+) {
     const itemId = item.Id;
 
     if (!itemId) return Promise.resolve();
@@ -429,7 +465,9 @@ function openReadingAdminDialog(item: PtvReadingItem, action: ReadingAdminAction
     }
 
     return import('components/itemidentifier/itemidentifier')
-        .then(itemIdentifier => itemIdentifier.show(itemId, serverId));
+        .then(itemIdentifier => itemIdentifier.show(itemId, serverId, {
+            readingOwnerGeneration
+        }));
 }
 
 function cleanupReadingRouteState() {
@@ -785,39 +823,6 @@ function replaceReadingSection(sections: PtvReadingSection[], nextSection: PtvRe
     return nextSections;
 }
 
-function replaceReadingItemInHomeData(homeData: PtvReadingHomeData, updatedItem: PtvReadingItem) {
-    if (!updatedItem.Id) return homeData;
-
-    let replaced = false;
-    const sections = homeData.sections.map(section => {
-        let sectionChanged = false;
-        const items = section.items.map(item => {
-            if (item.Id !== updatedItem.Id) return item;
-
-            replaced = true;
-            sectionChanged = true;
-            return {
-                ...item,
-                ...updatedItem,
-                PtvReadingLibraryKindHint: updatedItem.PtvReadingLibraryKindHint || item.PtvReadingLibraryKindHint,
-                PtvReadingLibraryName: updatedItem.PtvReadingLibraryName || item.PtvReadingLibraryName
-            };
-        });
-
-        return sectionChanged ? {
-            ...section,
-            items
-        } : section;
-    });
-
-    if (!replaced) return homeData;
-
-    return {
-        ...homeData,
-        sections
-    };
-}
-
 function getReadingSectionDiagnostics(sections: PtvReadingSection[]) {
     return sections
         .map(section => section.diagnostics)
@@ -1038,95 +1043,6 @@ function getMetadataProviderSummaryLabels(homeData: PtvReadingHomeData) {
     ].filter(Boolean);
 }
 
-function getReadingImageErrorHandler() {
-    return (event: React.SyntheticEvent<HTMLImageElement>) => {
-        const failedUrl = event.currentTarget.currentSrc || event.currentTarget.src;
-        const failedItemId = event.currentTarget.dataset.ptvReadingItemId;
-        const alternateUrl = event.currentTarget.dataset.ptvReadingAlternateUrl || '';
-        const route = event.currentTarget.dataset.ptvReadingRoute
-            || (typeof document !== 'undefined' ? document.body?.dataset.ptvReadingRoute : '')
-            || 'unknown';
-        const imageFailures = getReadingImageFailureState(route);
-
-        if (failedUrl && failedUrl !== getPtvReadingImagePlaceholder()) {
-            imageFailures.failedUrls.add(failedUrl);
-        }
-
-        if (
-            alternateUrl
-            && alternateUrl !== failedUrl
-            && alternateUrl !== getPtvReadingImagePlaceholder()
-            && event.currentTarget.dataset.ptvAlternateApplied !== 'true'
-            && !imageFailures.failedUrls.has(alternateUrl)
-        ) {
-            event.currentTarget.dataset.ptvAlternateApplied = 'true';
-            imageFailures.alternateImageUsedCount += 1;
-            recordPtvEvent('image', 'reading-alternate-image-used', {
-                alternateImageUsed: true,
-                failedUrl,
-                itemId: failedItemId || null,
-                nextUrl: alternateUrl,
-                route
-            });
-            event.currentTarget.src = alternateUrl;
-            return;
-        }
-
-        if (failedItemId) imageFailures.failedCoverItemIds.add(failedItemId);
-
-        if (event.currentTarget.dataset.ptvFallbackApplied === 'true') {
-            event.currentTarget.hidden = true;
-            return;
-        }
-
-        event.currentTarget.dataset.ptvFallbackApplied = 'true';
-        imageFailures.fallbackPosterRenderedCount += 1;
-        imageFailures.missingPrimaryImageCount += 1;
-        recordPtvEvent('image', 'reading-fallback-poster-rendered', {
-            fallbackPosterRendered: true,
-            failedUrl,
-            itemId: failedItemId || null,
-            missingPrimaryImage: true,
-            route
-        });
-        applyReadingImageFallbackToItem(failedItemId, getPtvReadingImagePlaceholder(), route);
-        event.currentTarget.src = getPtvReadingImagePlaceholder();
-    };
-}
-
-function getReadingBackdropErrorHandler() {
-    return (event: React.SyntheticEvent<HTMLImageElement>) => {
-        const failedUrl = event.currentTarget.currentSrc || event.currentTarget.src;
-        const failedItemId = event.currentTarget.dataset.ptvReadingItemId;
-        const route = event.currentTarget.dataset.ptvReadingRoute
-            || (typeof document !== 'undefined' ? document.body?.dataset.ptvReadingRoute : '')
-            || 'unknown';
-        const imageFailures = getReadingImageFailureState(route);
-
-        if (failedUrl && failedUrl !== PTV_READING_FALLBACK_BACKGROUND_URL) {
-            imageFailures.failedUrls.add(failedUrl);
-        }
-
-        if (failedItemId) imageFailures.failedBackdropItemIds.add(failedItemId);
-
-        applyReadingImageFallbackToItem(failedItemId, PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder(), route);
-
-        if (event.currentTarget.dataset.ptvFallbackApplied === 'true') {
-            event.currentTarget.hidden = true;
-            return;
-        }
-
-        event.currentTarget.dataset.ptvFallbackApplied = 'true';
-        recordPtvEvent('image', 'reading-backdrop-fallback-rendered', {
-            failedUrl,
-            itemId: failedItemId || null,
-            missingBackdropImage: true,
-            route
-        });
-        event.currentTarget.src = PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder();
-    };
-}
-
 function getReadingProfileImageSize(size: number, minimum = 220) {
     if (typeof document === 'undefined') return size;
 
@@ -1137,57 +1053,160 @@ function getReadingProfileImageSize(size: number, minimum = 220) {
     return isLowPower ? Math.max(minimum, Math.round(size * 0.68)) : size;
 }
 
-function getCachedReadingImageUrl(
-    item: PtvReadingItem | null | undefined,
-    size = 360,
-    preferredImageType: 'Backdrop' | 'Primary' | 'Thumb' = 'Primary'
-) {
-    const imageFailures = getReadingImageFailureState();
+function ReadingArtwork({
+    item,
+    loading = 'lazy',
+    routeKind,
+    size = 360
+}: Readonly<{
+    item: PtvReadingItem;
+    loading?: 'eager' | 'lazy';
+    routeKind: PtvReadingRouteKind;
+    size?: number;
+}>) {
+    const placeholderSrc = getPtvReadingImagePlaceholder();
+    const profileSize = getReadingProfileImageSize(size);
+    const artwork = useMemo(
+        () => getPtvReadingArtworkResolution(item, profileSize, 'cover'),
+        [ item, profileSize ]
+    );
+    const sources = artwork.candidates.map(candidate => ({
+        kind: candidate.kind,
+        src: candidate.src
+    }));
+    const stableId = getPtvReadingStableId(item);
+    const identity = `${routeKind}:cover:${stableId}`;
+    const retryEpoch = readingImageFailures.getRetryEpoch(routeKind, item.Id || stableId);
+    const recordArtworkOutcome = useCallback((outcome: PtvReadingArtworkLifecycleOutcome) => {
+        if (outcome.status === 'loaded' && outcome.source === 'primary') return;
 
-    if (item?.Id && imageFailures.failedCoverItemIds.has(item.Id)) return getPtvReadingImagePlaceholder();
+        const imageFailures = getReadingImageFailureState(routeKind);
 
-    const imageUrl = getPtvReadingImageUrl(item, getReadingProfileImageSize(size), preferredImageType);
+        if (outcome.status === 'failed' && outcome.source !== 'placeholder') {
+            const failedCandidate = artwork.candidates.find(candidate => candidate.src === outcome.src);
 
-    if (!imageUrl) {
-        imageFailures.missingPrimaryImageCount += 1;
-        return getPtvReadingImagePlaceholder();
-    }
+            if (failedCandidate) {
+                markPtvImageCandidateFailed({
+                    imageItemId: failedCandidate.imageItemId,
+                    imageType: failedCandidate.imageType,
+                    requestedType: failedCandidate.requestedType,
+                    tag: failedCandidate.tag,
+                    tagMode: 'reading-cover',
+                    url: failedCandidate.src
+                });
+            }
+        }
+        if (
+            outcome.status === 'failed'
+            && outcome.nextSource
+            && outcome.nextSource !== 'placeholder'
+        ) {
+            imageFailures.alternateImageUsedCount += 1;
+        }
+        if (outcome.status === 'failed' && outcome.nextSource === 'placeholder') {
+            imageFailures.fallbackPosterRenderedCount += 1;
+            imageFailures.missingPrimaryImageCount += 1;
+        }
 
-    if (imageFailures.failedUrls.has(imageUrl)) {
-        recordReadingCachedFailureHit(imageUrl, item?.Id);
-        return getPtvReadingImagePlaceholder();
-    }
+        recordPtvEvent('image', 'reading-artwork-generation-settled', {
+            nextSource: outcome.nextSource,
+            route: routeKind,
+            source: outcome.source,
+            status: outcome.status,
+            terminal: outcome.terminal
+        });
+    }, [ artwork.candidates, routeKind ]);
 
-    return imageUrl;
+    return (
+        <PtvReadingArtworkImage
+            alt=''
+            data-ptv-reading-artwork='cover'
+            data-ptv-reading-route={routeKind}
+            decoding='async'
+            generation={JSON.stringify([ artwork.generation, retryEpoch ])}
+            identity={identity}
+            loading={loading}
+            placeholderSrc={placeholderSrc}
+            sources={sources}
+            onCurrentGenerationFailure={recordArtworkOutcome}
+            onCurrentGenerationSuccess={recordArtworkOutcome}
+        />
+    );
 }
 
-function getReadingAlternateImageUrl(
-    item: PtvReadingItem | null | undefined,
-    size = 360,
-    preferredImageType: 'Primary' | 'Thumb' = 'Thumb'
-) {
-    const imageFailures = getReadingImageFailureState();
-    const imageUrl = getPtvReadingImageUrl(item, getReadingProfileImageSize(size), preferredImageType);
+function ReadingBackdropArtwork({
+    item,
+    loading = 'lazy',
+    route,
+    size = 1200
+}: Readonly<{
+    item: PtvReadingItem | null;
+    loading?: 'eager' | 'lazy';
+    route: PtvReadingRouteKind;
+    size?: number;
+}>) {
+    const placeholderSrc = PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder();
+    const profileSize = getReadingProfileImageSize(size, 640);
+    const artwork = useMemo(
+        () => getPtvReadingArtworkResolution(item, profileSize, 'backdrop'),
+        [ item, profileSize ]
+    );
+    const sources = artwork.candidates.map(candidate => ({
+        kind: candidate.kind,
+        src: candidate.src
+    }));
+    const stableId = getPtvReadingStableId(item);
+    const identity = `${route}:backdrop:${stableId}`;
+    const retryEpoch = readingImageFailures.getRetryEpoch(route, item?.Id || stableId);
+    const recordArtworkOutcome = useCallback((outcome: PtvReadingArtworkLifecycleOutcome) => {
+        if (outcome.status === 'loaded' && outcome.source === 'backdrop') return;
 
-    if (!imageUrl || imageFailures.failedUrls.has(imageUrl)) return '';
+        const imageFailures = getReadingImageFailureState(route);
 
-    return imageUrl;
-}
+        if (outcome.status === 'failed' && outcome.source !== 'placeholder') {
+            const failedCandidate = artwork.candidates.find(candidate => candidate.src === outcome.src);
 
-function getCachedReadingBackdropUrl(item: PtvReadingItem | null | undefined, size = 1200) {
-    const imageFailures = getReadingImageFailureState();
+            imageFailures.failedUrls.add(outcome.src);
+            if (failedCandidate) {
+                markPtvImageCandidateFailed({
+                    imageItemId: failedCandidate.imageItemId,
+                    imageType: failedCandidate.imageType,
+                    requestedType: failedCandidate.requestedType,
+                    tag: failedCandidate.tag,
+                    tagMode: 'reading-backdrop',
+                    url: failedCandidate.src
+                });
+            }
+        }
+        if (outcome.status === 'failed' && outcome.nextSource === 'placeholder') {
+            imageFailures.fallbackPosterRenderedCount += 1;
+        }
 
-    if (item?.Id && imageFailures.failedBackdropItemIds.has(item.Id)) {
-        return PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder();
-    }
+        recordPtvEvent('image', 'reading-backdrop-generation-settled', {
+            nextSource: outcome.nextSource,
+            route,
+            source: outcome.source,
+            status: outcome.status,
+            terminal: outcome.terminal
+        });
+    }, [ artwork.candidates, route ]);
 
-    const imageUrl = getPtvReadingImageUrl(item, getReadingProfileImageSize(size, 640), 'Backdrop');
-
-    if (!imageUrl || imageFailures.failedUrls.has(imageUrl)) {
-        return PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder();
-    }
-
-    return imageUrl;
+    return (
+        <PtvReadingArtworkImage
+            alt=''
+            data-ptv-reading-artwork='backdrop'
+            data-ptv-reading-item-id={item?.Id || undefined}
+            data-ptv-reading-route={route}
+            decoding='async'
+            generation={JSON.stringify([ artwork.generation, retryEpoch ])}
+            identity={identity}
+            loading={loading}
+            placeholderSrc={placeholderSrc}
+            sources={sources}
+            onCurrentGenerationFailure={recordArtworkOutcome}
+            onCurrentGenerationSuccess={recordArtworkOutcome}
+        />
+    );
 }
 
 function readPtvItem(item: PtvReadingItem) {
@@ -1213,17 +1232,13 @@ function ReadingPageBackdrop({ item, route }: Readonly<{
     item: PtvReadingItem | null;
     route: PtvReadingRouteKind;
 }>) {
-    const imageUrl = item ? getCachedReadingBackdropUrl(item, 1400) : PTV_READING_FALLBACK_BACKGROUND_URL;
-
     return (
         <div className={`ptv-books-page-backdrop ptv-books-page-backdrop-${route}`} aria-hidden='true'>
-            <img
-                alt=''
-                data-ptv-reading-item-id={item?.Id || undefined}
-                decoding='async'
+            <ReadingBackdropArtwork
+                item={item}
                 loading='eager'
-                src={imageUrl || PTV_READING_FALLBACK_BACKGROUND_URL || getPtvReadingImagePlaceholder()}
-                onError={getReadingBackdropErrorHandler()}
+                route={route}
+                size={1400}
             />
         </div>
     );
@@ -1398,15 +1413,7 @@ function ReadingCard({ item, routeKind }: Readonly<{
                 onClick={() => void readPtvItem(item)}
                 aria-label={`Read ${title}`}
             >
-                <img
-                    alt=''
-                    data-ptv-reading-alternate-url={getReadingAlternateImageUrl(item, 320, 'Thumb') || undefined}
-                    data-ptv-reading-item-id={item.Id || undefined}
-                    decoding='async'
-                    loading='lazy'
-                    src={getCachedReadingImageUrl(item, 320)}
-                    onError={getReadingImageErrorHandler()}
-                />
+                <ReadingArtwork item={item} routeKind={routeKind} size={320} />
                 <ReadingBadges item={item} />
                 <span><PtvIcon name='play' /></span>
             </button>
@@ -1427,41 +1434,39 @@ function ReadingCard({ item, routeKind }: Readonly<{
                 >
                     <PtvIcon name='favorite' />
                 </button>
-                <details className='ptv-books-card-overflow'>
-                    <summary aria-label={`More actions for ${title}`} title={`More actions for ${title}`}>
-                        <PtvIcon name='more' />
-                    </summary>
-                    <div className='ptv-books-card-overflow-menu'>
-                        <a href={href}>
-                            <PtvIcon name='books' />
-                            <span>Open</span>
-                        </a>
-                        <a href={detailsHref}>
-                            <PtvIcon name='metadata' />
-                            <span>Details</span>
-                        </a>
-                        <a href={libraryHref}>
-                            <PtvIcon name='library' />
-                            <span>Open library</span>
-                        </a>
-                        {isAdmin && item.Id ? (
-                            <>
-                                <button type='button' onClick={() => onAction(item, 'identify')}>
-                                    <PtvIcon name='search' />
-                                    <span>Identify</span>
-                                </button>
-                                <button type='button' onClick={() => onAction(item, 'metadata')}>
-                                    <PtvIcon name='metadata' />
-                                    <span>Edit metadata</span>
-                                </button>
-                                <button type='button' onClick={() => onAction(item, 'images')}>
-                                    <PtvIcon name='image' />
-                                    <span>Images</span>
-                                </button>
-                            </>
-                        ) : null}
-                    </div>
-                </details>
+                <ReadingCardMenu
+                    label={`More actions for ${title}`}
+                    trigger={<PtvIcon name='more' />}
+                >
+                    <a href={href} role='menuitem'>
+                        <PtvIcon name='books' />
+                        <span>Open</span>
+                    </a>
+                    <a href={detailsHref} role='menuitem'>
+                        <PtvIcon name='metadata' />
+                        <span>Details</span>
+                    </a>
+                    <a href={libraryHref} role='menuitem'>
+                        <PtvIcon name='library' />
+                        <span>Open library</span>
+                    </a>
+                    {isAdmin && item.Id ? (
+                        <>
+                            <button type='button' role='menuitem' onClick={() => onAction(item, 'identify')}>
+                                <PtvIcon name='search' />
+                                <span>Identify</span>
+                            </button>
+                            <button type='button' role='menuitem' onClick={() => onAction(item, 'metadata')}>
+                                <PtvIcon name='metadata' />
+                                <span>Edit metadata</span>
+                            </button>
+                            <button type='button' role='menuitem' onClick={() => onAction(item, 'images')}>
+                                <PtvIcon name='image' />
+                                <span>Images</span>
+                            </button>
+                        </>
+                    ) : null}
+                </ReadingCardMenu>
             </div>
         </article>
     );
@@ -1609,12 +1614,12 @@ function ReadingGrid({ items, routeKind }: Readonly<{
     routeKind: PtvReadingRouteKind;
 }>) {
     const allGridItems = useMemo(() => uniquePtvReadingItems(items), [items]);
-    const [visibleLimit, setVisibleLimit] = useState(PTV_READING_GRID_RENDER_LIMIT);
+    const [visibleLimit, setVisibleLimit] = usePtvReadingGridVisibleLimit(
+        allGridItems,
+        routeKind,
+        PTV_READING_GRID_RENDER_LIMIT
+    );
     const gridItems = allGridItems.slice(0, visibleLimit);
-
-    useEffect(() => {
-        setVisibleLimit(PTV_READING_GRID_RENDER_LIMIT);
-    }, [allGridItems, routeKind]);
 
     if (!gridItems.length) {
         return (
@@ -1680,15 +1685,7 @@ function ReadingSeriesCard({ onSeriesOverrideChange, routeKind, series }: Readon
                 href={href}
                 aria-label={`Open ${series.title}`}
             >
-                <img
-                    alt=''
-                    data-ptv-reading-alternate-url={getReadingAlternateImageUrl(series.coverItem, 320, 'Thumb') || undefined}
-                    data-ptv-reading-item-id={series.coverItem.Id || undefined}
-                    decoding='async'
-                    loading='lazy'
-                    src={getCachedReadingImageUrl(series.coverItem, 320)}
-                    onError={getReadingImageErrorHandler()}
-                />
+                <ReadingArtwork item={series.coverItem} routeKind={routeKind} size={320} />
                 <div className='ptv-books-badges' aria-label='Series metadata'>
                     <span>{series.itemCount} items</span>
                     {series.inProgressCount ? <span>{series.inProgressCount} in progress</span> : null}
@@ -1770,21 +1767,30 @@ function ReadingSeriesGrid({ onSeriesOverrideChange, routeKind, series }: Readon
     );
 }
 
-function ReadingHero({ homeData, routeKind }: Readonly<{
+function ReadingHero({ homeData, pageState, routeKind }: Readonly<{
     homeData: PtvReadingHomeData;
+    pageState: ReturnType<typeof getPtvReadingHomeState>;
     routeKind: PtvReadingRouteKind;
 }>) {
     const heroItem = getHeroItems(homeData, routeKind)[0] || null;
     const routeTitle = getRouteTitle(routeKind);
 
     if (!heroItem) {
+        const statusMessage = {
+            'authoritative-empty': 'Readable Jellyfin items will appear here after a books library is available.',
+            failed: 'Reading shelves are unavailable because the authoritative reads failed.',
+            loading: 'Loading latest reading shelves.',
+            partial: 'Some Reading data could not be loaded.',
+            populated: ''
+        }[pageState];
+
         return (
             <section className='ptv-books-home-hero ptv-books-home-hero-empty'>
                 <div className='ptv-books-home-hero-copy'>
                     <p className='ptv-books-kicker'>{getRouteKicker(routeKind)}</p>
                     <h2>{routeTitle}</h2>
-                    <p>{homeData.isPartial ? 'Loading latest reading shelves.' : 'Readable Jellyfin items will appear here after a books library is available.'}</p>
-                    {homeData.isPartial ? null : (
+                    <p>{statusMessage}</p>
+                    {pageState === 'loading' ? null : (
                         <a href='#/home' onClick={navigateToPtvHome}>
                             <PtvIcon name='home' />
                             <span>Back to Home</span>
@@ -1798,25 +1804,15 @@ function ReadingHero({ homeData, routeKind }: Readonly<{
     return (
         <section className='ptv-books-home-hero'>
             <div className='ptv-books-home-hero-backdrop' aria-hidden='true'>
-                <img
-                    alt=''
-                    data-ptv-reading-alternate-url={getReadingAlternateImageUrl(heroItem, 480, 'Thumb') || undefined}
-                    data-ptv-reading-item-id={heroItem.Id || undefined}
-                    decoding='async'
+                <ReadingBackdropArtwork
+                    item={heroItem}
                     loading='eager'
-                    src={getCachedReadingBackdropUrl(heroItem, 1000)}
-                    onError={getReadingBackdropErrorHandler()}
+                    route={routeKind}
+                    size={1000}
                 />
             </div>
             <div className='ptv-books-home-hero-cover'>
-                <img
-                    alt=''
-                    data-ptv-reading-item-id={heroItem.Id || undefined}
-                    decoding='async'
-                    loading='eager'
-                    src={getCachedReadingImageUrl(heroItem, 380)}
-                    onError={getReadingImageErrorHandler()}
-                />
+                <ReadingArtwork item={heroItem} loading='eager' routeKind={routeKind} size={380} />
             </div>
             <div className='ptv-books-home-hero-copy'>
                 <p className='ptv-books-kicker'>{getRouteKicker(routeKind)}</p>
@@ -1860,14 +1856,21 @@ function ReadingHomeView({ homeData, onRetrySection, routeKind }: Readonly<{
     routeKind: PtvReadingRouteKind;
 }>) {
     const rows = homeData.sections;
-    const hasItems = rows.some(section => section.items.length > 0);
+    const pageState = getPtvReadingHomeState(homeData);
 
     return (
-        <div className='ptv-books-view ptv-books-home-view'>
-            <ReadingHero homeData={homeData} routeKind={routeKind} />
+        <div className='ptv-books-view ptv-books-home-view' data-ptv-reading-state={pageState}>
+            <ReadingHero homeData={homeData} pageState={pageState} routeKind={routeKind} />
             <ReadingChips homeData={homeData} routeKind={routeKind} />
             <ReadingLibraryDebugPanel cacheDiagnostics={homeData.cacheDiagnostics} debug={homeData.libraryDebug} />
-            {!hasItems && !homeData.isPartial ? (
+            {pageState === 'failed' ? (
+                <section className='ptv-books-error' role='alert'>
+                    <PtvIcon name='alerts' />
+                    <h2>Reading Content Could Not Be Loaded</h2>
+                    <p>Jellyfin did not return an authoritative Reading result. Retry the failed sections below.</p>
+                </section>
+            ) : null}
+            {pageState === 'authoritative-empty' ? (
                 <section className='ptv-books-empty'>
                     <PtvIcon name='books' />
                     <h2>No {getRouteTitle(routeKind)} Content Found</h2>
@@ -2380,15 +2383,7 @@ function ReadingSeriesDetailView({ homeData, onSeriesOverrideChange, onSeriesOve
         <div className='ptv-books-view'>
             <section className='ptv-books-library-hero ptv-books-series-hero'>
                 <div className='ptv-books-series-hero-cover'>
-                    <img
-                        alt=''
-                        data-ptv-reading-alternate-url={getReadingAlternateImageUrl(series.coverItem, 320, 'Thumb') || undefined}
-                        data-ptv-reading-item-id={series.coverItem.Id || undefined}
-                        decoding='async'
-                        loading='eager'
-                        src={getCachedReadingImageUrl(series.coverItem, 380)}
-                        onError={getReadingImageErrorHandler()}
-                    />
+                    <ReadingArtwork item={series.coverItem} loading='eager' routeKind={routeKind} size={380} />
                 </div>
                 <div>
                     <p className='ptv-books-kicker'>Series</p>
@@ -2480,15 +2475,7 @@ function ItemDetailView({ detail, routeKind }: Readonly<{
     return (
         <div className='ptv-books-view ptv-books-detail-view'>
             <section className='ptv-books-detail-hero'>
-                <img
-                    alt=''
-                    data-ptv-reading-alternate-url={getReadingAlternateImageUrl(item, 480, 'Thumb') || undefined}
-                    data-ptv-reading-item-id={item.Id || undefined}
-                    decoding='async'
-                    loading='eager'
-                    src={getCachedReadingImageUrl(item, 420)}
-                    onError={getReadingImageErrorHandler()}
-                />
+                <ReadingArtwork item={item} loading='eager' routeKind={routeKind} size={420} />
                 <div>
                     <p className='ptv-books-kicker'>{getKindLabel(item)}</p>
                     <h1>{title}</h1>
@@ -2578,19 +2565,47 @@ function isReadingRequestAbort(error: unknown) {
     return errorRecord?.name === 'AbortError' || /abort|cancel|superseded/i.test(message);
 }
 
+function getReadingRouteCriticalOutcome(
+    homeData: PtvReadingHomeData
+): PtvRouteCriticalTerminalOutcome {
+    const state = getPtvReadingHomeState(homeData);
+
+    if (state === 'populated') return 'success';
+    if (state === 'authoritative-empty') return 'empty';
+    if (state === 'failed') return 'failed';
+
+    return 'partial';
+}
+
 export default function PiggieTvBooksPage() {
     const location = useLocation();
     const route = useMemo(() => getReadingRoute(location.pathname, location.search), [location.pathname, location.search]);
+    const readingMetadataOwnerRef = useRef({
+        generation: 0,
+        routeKey: ''
+    });
+    const readingMetadataOwnerRouteKey = `${route.kind}:${route.view}:${route.id}:${route.search}`;
+    const readingRouteCriticalIdentity = getPtvReadingRouteCriticalIdentity(route);
+
+    if (readingMetadataOwnerRef.current.routeKey !== readingMetadataOwnerRouteKey) {
+        readingMetadataOwnerSequence += 1;
+        readingMetadataOwnerRef.current = {
+            generation: readingMetadataOwnerSequence,
+            routeKey: readingMetadataOwnerRouteKey
+        };
+    }
+    const readingRouteRef = useRef(route);
+    readingRouteRef.current = route;
     const performanceProfile = useMemo(() => getPtvPerformanceProfile(), []);
     const readingLoadStartedAtRef = useRef(performance.now());
     const readingFirstShelfRecordedRef = useRef(false);
     const readingInitialRecordedRef = useRef(false);
     const readingFullyLoadedRecordedRef = useRef(false);
     const readingLibraryIndexRequestIdRef = useRef(0);
-    const readingItemRefreshControllerRef = useRef<AbortController | null>(null);
     const readingMountedRef = useRef(false);
     const readingPageRenderIdentityRef = useRef('');
     const readingRequestIdRef = useRef(0);
+    const readingRouteCriticalLifecycleRef = useRef<ReturnType<typeof createPtvReadingRouteCriticalLifecycle> | null>(null);
     const readingRouteWorkControllerRef = useRef<AbortController | null>(null);
     const readingSectionRetryControllersRef = useRef(new Map<string, AbortController>());
     const [homeData, setHomeData] = useState<PtvReadingHomeData>(EMPTY_HOME_DATA);
@@ -2604,6 +2619,39 @@ export default function PiggieTvBooksPage() {
     const heroItem = useMemo(() => (
         itemDetail.item || (homeData.kind === route.kind ? getHeroItems(homeData, route.kind)[0] : null) || null
     ), [homeData, itemDetail.item, route.kind]);
+
+    useLayoutEffect(() => {
+        const routeCriticalLifecycle = createPtvReadingRouteCriticalLifecycle(
+            capturePtvRouteCriticalLifecycleOwner('reading'),
+            getPtvReadingRouteCriticalPlan(route.view, route.search)
+        );
+
+        readingRouteCriticalLifecycleRef.current?.retire();
+        readingRouteCriticalLifecycleRef.current = routeCriticalLifecycle;
+
+        return () => {
+            routeCriticalLifecycle.retire();
+            if (readingRouteCriticalLifecycleRef.current === routeCriticalLifecycle) {
+                readingRouteCriticalLifecycleRef.current = null;
+            }
+        };
+    }, [readingRouteCriticalIdentity, route.search, route.view]);
+
+    useEffect(() => {
+        if (route.view !== 'item' && !(route.view === 'explore' && route.search)) return;
+
+        const homeGate = getPtvReadingRouteHomeGate(route.view, {
+            hasError: Boolean(errorMessage),
+            hasHomeSections: homeData.kind === route.kind && homeData.sections.length > 0,
+            isLoading
+        });
+
+        if (homeGate === 'loading') return;
+        readingRouteCriticalLifecycleRef.current?.complete(
+            'initial-home-gate',
+            homeGate === 'error' ? 'failed' : 'success'
+        );
+    }, [errorMessage, homeData.kind, homeData.sections.length, isLoading, readingRouteCriticalIdentity, route.kind, route.search, route.view]);
 
     const recordReadingLoadMetrics = useCallback((nextHomeData: PtvReadingHomeData, stage: string) => {
         const elapsedMs = Math.max(0, Math.round(performance.now() - readingLoadStartedAtRef.current));
@@ -2696,12 +2744,14 @@ export default function PiggieTvBooksPage() {
             .then(libraryIndex => {
                 applyLibraryIndex(libraryIndex, 'reading-library-index-background-loaded');
 
-                if (!libraryIndex.items.length && libraryIndex.debug.dropReasons.length) {
+                if (!libraryIndex.items.length && getPtvReadingFailedReadCount(libraryIndex.debug)) {
                     throw new Error(libraryIndex.debug.dropReasons[0]);
                 }
+
+                return libraryIndex;
             })
             .catch(error => {
-                if (signal?.aborted || isReadingRequestAbort(error)) return;
+                if (signal?.aborted || isReadingRequestAbort(error)) return null;
 
                 recordPtvEvent('api', 'reading-library-index-background-failed', {
                     error: getReadingErrorMessage(error),
@@ -2712,49 +2762,51 @@ export default function PiggieTvBooksPage() {
             });
     }, []);
 
-    const refreshReadingItemDetail = useCallback((itemId: string) => {
-        readingItemRefreshControllerRef.current?.abort();
-        const controller = createPtvAbortController();
-        const isCurrent = () => readingMountedRef.current
-            && readingItemRefreshControllerRef.current === controller
-            && route.view === 'item'
-            && route.id === itemId
-            && !controller.signal.aborted;
+    const applyAuthoritativeReadingItem = useCallback((_itemId: string, item: PtvReadingItem) => {
+        if (!readingMountedRef.current || !item.Id) return;
+        const currentRoute = readingRouteRef.current;
 
-        readingItemRefreshControllerRef.current = controller;
-        setItemDetail(previous => ({
-            ...previous,
-            error: '',
-            isLoading: true
-        }));
+        clearReadingImageFailuresForItem(item, currentRoute.kind);
+        invalidatePtvReadingMetadataCache(item);
+        setHomeData(previous => replacePtvReadingItemInHomeData(previous, item));
+        setSearchResults(previous => replacePtvReadingItemInList(previous, item));
 
-        return fetchPtvReadingItem(itemId, {
-            signal: controller.signal
-        })
-            .then(item => {
-                if (!isCurrent()) return;
-
-                setItemDetail({
-                    error: '',
-                    isLoading: false,
-                    item
-                });
-            })
-            .catch(error => {
-                if (!isCurrent() || isReadingRequestAbort(error)) return;
-
-                setItemDetail({
-                    ...getInitialItemDetail(),
-                    error: getReadingErrorMessage(error) || 'Item could not be loaded.',
-                    isLoading: false
-                });
-            })
-            .finally(() => {
-                if (readingItemRefreshControllerRef.current === controller) {
-                    readingItemRefreshControllerRef.current = null;
-                }
+        if (currentRoute.view === 'item' && currentRoute.id === item.Id) {
+            setItemDetail({
+                error: '',
+                isLoading: false,
+                item
             });
-    }, [route.id, route.view]);
+        }
+    }, []);
+
+    const readingIdentifyReconciliation = useMemo(() => (
+        createPtvReadingIdentifyReconciliationCoordinator<PtvReadingItem>({
+            onDiagnostic: event => {
+                recordPtvEvent('api', 'reading-identify-reconciliation', event);
+            },
+            publish: applyAuthoritativeReadingItem,
+            read: (itemId, options) => fetchPtvReadingItem(itemId, options)
+        })
+    ), [ applyAuthoritativeReadingItem ]);
+
+    const publishAuthoritativeReadingItem = useCallback((item: PtvReadingItem) => {
+        if (!item.Id) return;
+
+        readingIdentifyReconciliation.publishAuthoritative(item.Id, item);
+    }, [ readingIdentifyReconciliation ]);
+
+    const refreshReadingMetadataItem = useCallback((itemId: string, reason: string) => {
+        return readingIdentifyReconciliation.requestReadback(itemId)
+            .then(result => {
+                recordPtvEvent('api', 'reading-metadata-item-readback-settled', {
+                    reason,
+                    status: result.status
+                });
+
+                return result;
+            });
+    }, [ readingIdentifyReconciliation ]);
 
     const saveReadingSeriesOverrideUpdates = useCallback((updates: ReadingSeriesOverrideUpdate[]) => {
         if (!updates.length) return;
@@ -2861,6 +2913,7 @@ export default function PiggieTvBooksPage() {
         readingRouteWorkControllerRef.current = routeWorkController;
         const { signal } = routeWorkController;
         const requestId = ++readingRequestIdRef.current;
+        const routeCriticalLifecycle = readingRouteCriticalLifecycleRef.current;
         const isCurrentRequest = () => readingMountedRef.current
             && requestId === readingRequestIdRef.current
             && !signal.aborted;
@@ -2883,10 +2936,32 @@ export default function PiggieTvBooksPage() {
             window.setTimeout(() => {
                 if (isCurrentRequest()) {
                     void loadReadingLibraryIndex(route.kind, forceRefresh, requestId, signal)
+                        .then(libraryIndex => {
+                            if (!startsLibraryIndexImmediately) return;
+                            if (!isCurrentRequest() || !libraryIndex) {
+                                routeCriticalLifecycle?.retire();
+                                return;
+                            }
+
+                            const failedReadCount = getPtvReadingFailedReadCount(libraryIndex.debug);
+                            let outcome: PtvRouteCriticalTerminalOutcome = failedReadCount ? 'failed' : 'empty';
+
+                            if (libraryIndex.items.length > 0) {
+                                outcome = failedReadCount ? 'partial' : 'success';
+                            }
+
+                            routeCriticalLifecycle?.complete('library-index', outcome);
+                        })
                         .catch(error => {
-                            if (!isCurrentRequest() || isReadingRequestAbort(error)) return;
+                            if (!isCurrentRequest() || isReadingRequestAbort(error)) {
+                                routeCriticalLifecycle?.retire();
+                                return;
+                            }
 
                             setErrorMessage(getReadingErrorMessage(error) || 'Reading library could not be loaded.');
+                            if (startsLibraryIndexImmediately) {
+                                routeCriticalLifecycle?.complete('library-index', 'failed');
+                            }
                         })
                         .finally(() => {
                             if (isCurrentRequest()) setLoading(false);
@@ -2901,7 +2976,11 @@ export default function PiggieTvBooksPage() {
             return Promise.resolve();
         }
 
-        const loadFullReadingData = (bypassCacheForRefresh = false) => {
+        const loadFullReadingData = (
+            bypassCacheForRefresh = false,
+            completesCriticalLifecycle = false,
+            initialHomeData?: PtvReadingHomeData
+        ) => {
             const refreshStartedAt = performance.now();
 
             setHomeData(previous => previous.kind === route.kind ? {
@@ -2953,9 +3032,15 @@ export default function PiggieTvBooksPage() {
                         readingFreshRenderApplied: true,
                         staleCacheRevalidated: bypassCacheForRefresh
                     });
+                    if (completesCriticalLifecycle) {
+                        routeCriticalLifecycle?.complete('home', getReadingRouteCriticalOutcome(refreshedHomeData));
+                    }
                 })
                 .catch(error => {
-                    if (!isCurrentRequest() || isReadingRequestAbort(error)) return;
+                    if (!isCurrentRequest() || isReadingRequestAbort(error)) {
+                        if (completesCriticalLifecycle) routeCriticalLifecycle?.retire();
+                        return;
+                    }
 
                     const refreshErrorMessage = getReadingErrorMessage(error);
 
@@ -2976,6 +3061,11 @@ export default function PiggieTvBooksPage() {
                         readingRefreshError: refreshErrorMessage,
                         stage: 'reading-shell-background-data'
                     });
+                    if (completesCriticalLifecycle) {
+                        const retainedItems = initialHomeData ? getAllReadingItems(initialHomeData).length : 0;
+
+                        routeCriticalLifecycle?.complete('home', retainedItems ? 'partial' : 'failed');
+                    }
                 });
         };
 
@@ -2994,8 +3084,15 @@ export default function PiggieTvBooksPage() {
                 setLoading(false);
                 if (!startsLibraryIndexImmediately) scheduleLibraryIndex();
                 recordReadingLoadMetrics(nextHomeData, nextHomeData.cacheDiagnostics?.source || 'initial');
+                const requiresAuthoritativeRefresh = Boolean(
+                    nextHomeData.isPartial || nextHomeData.cacheDiagnostics?.staleHit
+                );
 
-                if (nextHomeData.isPartial || nextHomeData.cacheDiagnostics?.staleHit) {
+                if (!requiresAuthoritativeRefresh) {
+                    routeCriticalLifecycle?.complete('home', getReadingRouteCriticalOutcome(nextHomeData));
+                }
+
+                if (requiresAuthoritativeRefresh) {
                     const bypassCacheForRefresh = Boolean(nextHomeData.cacheDiagnostics?.staleHit);
 
                     if (bypassCacheForRefresh) {
@@ -3009,12 +3106,17 @@ export default function PiggieTvBooksPage() {
                     }
 
                     window.setTimeout(() => {
-                        if (isCurrentRequest()) loadFullReadingData(bypassCacheForRefresh);
+                        if (isCurrentRequest()) {
+                            loadFullReadingData(bypassCacheForRefresh, true, nextHomeData);
+                        }
                     }, PTV_READING_FULL_HOME_LOAD_DELAY_MS);
                 }
             })
             .catch(error => {
-                if (!isCurrentRequest() || isReadingRequestAbort(error)) return;
+                if (!isCurrentRequest() || isReadingRequestAbort(error)) {
+                    routeCriticalLifecycle?.retire();
+                    return;
+                }
 
                 setErrorMessage(getReadingErrorMessage(error) || 'Reading library could not be loaded.');
                 recordPtvEvent('render', 'reading-page-error', {
@@ -3023,6 +3125,7 @@ export default function PiggieTvBooksPage() {
                     stage: 'reading-shell-data'
                 });
                 setLoading(false);
+                routeCriticalLifecycle?.complete('home', 'failed');
             });
     }, [loadReadingLibraryIndex, recordReadingLoadMetrics, route.kind, route.view]);
 
@@ -3137,58 +3240,42 @@ export default function PiggieTvBooksPage() {
         if (!item.Id) return;
 
         const itemId = item.Id;
+        const ownerRequestId = readingRequestIdRef.current;
 
         recordPtvEvent('render', 'reading-admin-action-opened', {
             action,
-            itemId,
             kind: getPtvReadingItemKind(item)
         });
 
-        void openReadingAdminDialog(item, action)
+        void openReadingAdminDialog(item, action, readingMetadataOwnerRef.current.generation)
             .then(updatedItem => {
+                if (!readingMountedRef.current || ownerRequestId !== readingRequestIdRef.current) return;
+
                 const refreshedItem = updatedItem as PtvReadingItem | undefined;
+                const closePolicy = getPtvReadingAdminDialogClosePolicy(action, refreshedItem);
 
-                clearReadingImageFailuresForItem(itemId);
-                invalidatePtvReadingHomeCache();
+                clearReadingImageFailuresForItem(item, readingRouteRef.current.kind);
+                // Identify publishes a typed event whose readback code determines
+                // whether its item is authoritative. Never bypass that guard with
+                // the dialog's best-effort fallback value.
+                if (closePolicy === 'identify-event') return;
 
-                if (refreshedItem?.Id) {
-                    clearReadingImageFailuresForItem(refreshedItem.Id);
-                    setHomeData(previous => replaceReadingItemInHomeData(previous, refreshedItem));
-
-                    if (route.view === 'item' && route.id === itemId) {
-                        setItemDetail({
-                            error: '',
-                            isLoading: false,
-                            item: refreshedItem
-                        });
-                    }
-                }
-
-                void loadReadingData(true);
-
-                if ((action !== 'identify' || !refreshedItem?.Id) && route.view === 'item' && route.id === itemId) {
-                    void refreshReadingItemDetail(itemId);
-                }
-
-                if (action === 'identify') {
-                    window.setTimeout(() => {
-                        clearReadingImageFailuresForItem(itemId);
-                        invalidatePtvReadingHomeCache();
-                        void loadReadingData(true);
-
-                        if (route.view === 'item' && route.id === itemId) {
-                            void refreshReadingItemDetail(itemId);
-                        }
-                    }, 3500);
+                if (closePolicy === 'publish-item' && refreshedItem) {
+                    publishAuthoritativeReadingItem(refreshedItem);
+                } else {
+                    // Upstream admin dialogs resolve without an item on both
+                    // cancel and save. A targeted authoritative readback is safe
+                    // for either outcome and avoids replacing the whole grid with
+                    // a lightweight library-index snapshot.
+                    void refreshReadingMetadataItem(itemId, `${action}-dialog-closed`);
                 }
             })
             .catch(() => {
                 recordPtvEvent('render', 'reading-admin-action-closed', {
-                    action,
-                    itemId
+                    action
                 });
             });
-    }, [loadReadingData, refreshReadingItemDetail, route.id, route.view]);
+    }, [publishAuthoritativeReadingItem, refreshReadingMetadataItem]);
 
     const adminControls = useMemo<ReadingAdminContextValue>(() => ({
         canShowDebug,
@@ -3196,6 +3283,49 @@ export default function PiggieTvBooksPage() {
         isAdmin,
         onAction: openAdminAction
     }), [canShowDebug, debugEnabled, isAdmin, openAdminAction]);
+
+    useEffect(() => {
+        const handleMetadataUpdate = (event: Event) => {
+            const detail = getPtvReadingMetadataUpdateDetail(event);
+
+            if (!detail) return;
+            if (!isPtvReadingMetadataUpdateOwnedBy(
+                detail,
+                readingMetadataOwnerRef.current.generation
+            )) {
+                recordPtvEvent('render', 'reading-metadata-item-update-retired', {
+                    reason: 'owner-generation-mismatch'
+                });
+                return;
+            }
+            const authority = getPtvReadingMetadataUpdateAuthority(detail);
+
+            recordPtvEvent('render', 'reading-metadata-item-update-received', {
+                authority,
+                artworkStatus: detail.artworkStatus || null,
+                metadataStatus: detail.metadataStatus || null,
+                operationGeneration: detail.operationGeneration || null,
+                outcome: detail.outcome || null,
+                readbackCode: detail.readbackCode || null
+            });
+
+            if (detail.operationGeneration) {
+                readingIdentifyReconciliation.reconcileMutation(detail.itemId, detail.item, {
+                    authority: authority === 'READBACK_CONFIRMED_MUTATION' ? 'confirmed' : 'unconfirmed',
+                    operationGeneration: detail.operationGeneration
+                });
+            }
+
+            // An event without operation identity cannot be ordered against a
+            // newer local reconciliation, so retain the current item.
+        };
+
+        window.addEventListener(PTV_READING_ITEM_METADATA_UPDATED_EVENT, handleMetadataUpdate);
+
+        return () => {
+            window.removeEventListener(PTV_READING_ITEM_METADATA_UPDATED_EVENT, handleMetadataUpdate);
+        };
+    }, [readingIdentifyReconciliation]);
 
     useEffect(() => {
         setSeriesOverridesByKind(loadReadingSeriesOverridesForRoute(route.kind));
@@ -3237,8 +3367,7 @@ export default function PiggieTvBooksPage() {
             readingMountedRef.current = false;
             readingRouteWorkControllerRef.current?.abort();
             readingRouteWorkControllerRef.current = null;
-            readingItemRefreshControllerRef.current?.abort();
-            readingItemRefreshControllerRef.current = null;
+            readingIdentifyReconciliation.cancelAll();
             sectionRetryControllers.forEach(controller => {
                 controller.abort();
             });
@@ -3259,7 +3388,7 @@ export default function PiggieTvBooksPage() {
                 scheduleRouteCheck(true);
             }, 0);
         };
-    }, [loadReadingData, route.kind]);
+    }, [loadReadingData, readingIdentifyReconciliation, route.kind]);
 
     useEffect(() => {
         if (!homeData.generatedAt) return;
@@ -3287,6 +3416,7 @@ export default function PiggieTvBooksPage() {
     useEffect(() => {
         let isMounted = true;
         const controller = createPtvAbortController();
+        const routeCriticalLifecycle = readingRouteCriticalLifecycleRef.current;
 
         setSearchResults([]);
 
@@ -3298,10 +3428,14 @@ export default function PiggieTvBooksPage() {
             .then(results => {
                 if (isMounted) {
                     setSearchResults(results);
+                    routeCriticalLifecycle?.complete('search', results.length ? 'success' : 'empty');
                 }
             })
             .catch(error => {
-                if (controller.signal.aborted || isReadingRequestAbort(error)) return;
+                if (controller.signal.aborted || isReadingRequestAbort(error)) {
+                    routeCriticalLifecycle?.retire();
+                    return;
+                }
 
                 recordPtvEvent('api', 'reading-search-failed', {
                     error: getReadingErrorMessage(error),
@@ -3311,18 +3445,21 @@ export default function PiggieTvBooksPage() {
 
                 if (isMounted) {
                     setSearchResults([]);
+                    routeCriticalLifecycle?.complete('search', 'failed');
                 }
             });
 
         return () => {
             isMounted = false;
             controller.abort();
+            routeCriticalLifecycle?.retire();
         };
     }, [route.kind, route.search, route.view]);
 
     useEffect(() => {
         let isMounted = true;
         const controller = createPtvAbortController();
+        const routeCriticalLifecycle = readingRouteCriticalLifecycleRef.current;
 
         if (route.view !== 'item' || !route.id) {
             setItemDetail(getInitialItemDetail());
@@ -3344,10 +3481,14 @@ export default function PiggieTvBooksPage() {
                         isLoading: false,
                         item
                     });
+                    routeCriticalLifecycle?.complete('item', item ? 'success' : 'failed');
                 }
             })
             .catch(error => {
-                if (controller.signal.aborted || isReadingRequestAbort(error)) return;
+                if (controller.signal.aborted || isReadingRequestAbort(error)) {
+                    routeCriticalLifecycle?.retire();
+                    return;
+                }
 
                 if (isMounted) {
                     setItemDetail({
@@ -3355,12 +3496,14 @@ export default function PiggieTvBooksPage() {
                         error: getReadingErrorMessage(error) || 'Item could not be loaded.',
                         isLoading: false
                     });
+                    routeCriticalLifecycle?.complete('item', 'failed');
                 }
             });
 
         return () => {
             isMounted = false;
             controller.abort();
+            routeCriticalLifecycle?.retire();
         };
     }, [route.id, route.view]);
 
@@ -3420,6 +3563,11 @@ export default function PiggieTvBooksPage() {
         }
     };
     const showToolbarTitle = shouldShowReadingToolbarTitle(route.view);
+    const readingCardMenuContentVersion = useMemo(() => ({
+        homeData,
+        itemDetail,
+        searchResults
+    }), [homeData, itemDetail, searchResults]);
 
     return (
         <Page
@@ -3430,18 +3578,19 @@ export default function PiggieTvBooksPage() {
         >
             <PTVShell
                 backdropSource={`reading-${route.kind}`}
-                backdropUrl={heroItem ? getCachedReadingBackdropUrl(heroItem, 1400) : ''}
                 className='ptv-books-shell'
                 contextualLinks={getReadingContextLinks(route)}
                 section='reading'
                 title='Reading'
             >
+                {route.view === 'home' ? null : (
+                    <ReadingPageBackdrop item={heroItem} route={route.kind} />
+                )}
                 <main
                     className={`ptv-books-app ptv-books-app-shell ptv-books-route-${route.view} ptv-books-kind-${route.kind}${performanceProfile.isLowPower ? ' ptv-books-low-power' : ''}`}
                     data-ptv-client-profile={performanceProfile.clientKind}
                     data-ptv-render-profile={performanceProfile.renderProfile.id}
                 >
-                    <ReadingPageBackdrop item={heroItem} route={route.kind} />
                     <div className='ptv-books-body'>
                         <section className='ptv-books-main' aria-label='PiggieTV Reading'>
                             <div className='ptv-books-main-scroll'>
@@ -3466,9 +3615,14 @@ export default function PiggieTvBooksPage() {
                                         ) : null}
                                     </div>
                                 ) : null}
-                                <READING_ADMIN_CONTEXT.Provider value={adminControls}>
-                                    {renderView()}
-                                </READING_ADMIN_CONTEXT.Provider>
+                                <ReadingCardMenuOwner
+                                    contentVersion={readingCardMenuContentVersion}
+                                    routeKey={`${route.kind}:${route.view}:${route.id}:${route.search}`}
+                                >
+                                    <READING_ADMIN_CONTEXT.Provider value={adminControls}>
+                                        {renderView()}
+                                    </READING_ADMIN_CONTEXT.Provider>
+                                </ReadingCardMenuOwner>
                             </div>
                         </section>
                     </div>

@@ -154,6 +154,12 @@ ScrollerPrototype.attachedCallback = function () {
 
 function loadScrollButtons(buttonsScroller) {
     import('../emby-scrollbuttons/emby-scrollbuttons').then(() => {
+        const existingScrollButtons = buttonsScroller.previousElementSibling;
+
+        if (existingScrollButtons?.getAttribute('is') === 'emby-scrollbuttons') {
+            return;
+        }
+
         buttonsScroller.insertAdjacentHTML('beforebegin', '<div is="emby-scrollbuttons" class="emby-scrollbuttons padded-right"></div>');
     });
 }

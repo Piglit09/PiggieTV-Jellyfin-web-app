@@ -14,7 +14,9 @@ const mocks = vi.hoisted(() => {
         actionSheetShow: vi.fn(),
         apiClient,
         appRouterShowItem: vi.fn(),
+        canIdentify: vi.fn(() => false),
         getApiClient: vi.fn(() => apiClient),
+        itemIdentifierShowWithAuthority: vi.fn(),
         toast: vi.fn()
     };
 });
@@ -72,7 +74,7 @@ vi.mock('./itemHelper', () => {
         canEditImages: vi.fn(() => false),
         canEditLyrics: vi.fn(() => false),
         canEditSubtitles: vi.fn(() => false),
-        canIdentify: vi.fn(() => false),
+        canIdentify: mocks.canIdentify,
         canMarkPlayed: vi.fn(item => item.MediaType === 'Video'),
         canRate: vi.fn(item => Boolean(item.UserData)),
         canRefreshMetadata: vi.fn(() => false),
@@ -98,6 +100,10 @@ vi.mock('./playback/playbackmanager', () => ({
 
 vi.mock('./toast/toast', () => ({
     default: mocks.toast
+}));
+
+vi.mock('./itemidentifier/itemidentifier', () => ({
+    showWithAuthority: mocks.itemIdentifierShowWithAuthority
 }));
 
 vi.mock('../scripts/settings/userSettings', () => ({
@@ -145,6 +151,8 @@ describe('item context menu user actions', () => {
         mocks.apiClient.markPlayed.mockResolvedValue(undefined);
         mocks.apiClient.markUnplayed.mockResolvedValue(undefined);
         mocks.apiClient.updateFavoriteStatus.mockResolvedValue(undefined);
+        mocks.canIdentify.mockReturnValue(false);
+        mocks.itemIdentifierShowWithAuthority.mockReset();
     });
 
     it('adds capability-gated details, favorite, and played commands', async () => {
@@ -256,6 +264,41 @@ describe('item context menu user actions', () => {
             deleted: undefined,
             itemId: undefined,
             updated: undefined
+        });
+    });
+
+    it('publishes only a readback-confirmed Identify item to the menu owner', async () => {
+        const updatedItem = getMovie({ Name: 'Confirmed title' });
+
+        mocks.canIdentify.mockReturnValue(true);
+        mocks.actionSheetShow.mockResolvedValueOnce('identify');
+        mocks.itemIdentifierShowWithAuthority.mockResolvedValueOnce({
+            item: updatedItem,
+            readbackCode: 'READBACK_CONFIRMED'
+        });
+
+        await expect(show({ item: getMovie(), user })).resolves.toEqual({
+            command: 'identify',
+            deleted: false,
+            identifyReadbackCode: 'READBACK_CONFIRMED',
+            itemId: 'movie-1',
+            updated: true,
+            updatedItem
+        });
+    });
+
+    it('keeps accepted-but-unconfirmed Identify state out of the menu owner', async () => {
+        mocks.canIdentify.mockReturnValue(true);
+        mocks.actionSheetShow.mockResolvedValueOnce('identify');
+        mocks.itemIdentifierShowWithAuthority.mockResolvedValueOnce({
+            item: null,
+            readbackCode: 'REFRESH_FAILED'
+        });
+
+        await expect(show({ item: getMovie(), user })).resolves.toMatchObject({
+            command: 'identify',
+            identifyReadbackCode: 'REFRESH_FAILED',
+            updatedItem: null
         });
     });
 

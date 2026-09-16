@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
-using System.Runtime.CompilerServices;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -27,6 +27,9 @@ namespace Jellyfin.Plugin.PiggieTV.Api;
 [Route("Ptv/v1")]
 public sealed class PtvStatusController : BaseJellyfinApiController
 {
+    private const int ArrCalendarMaxSpanDays = 360;
+    private const string ArrCalendarMalformedResponse = "Calendar provider returned malformed data.";
+
     private static readonly JsonSerializerOptions SettingsPatchJsonOptions = new(JsonSerializerDefaults.Web)
     {
         AllowTrailingCommas = true,
@@ -50,7 +53,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         _serviceProvider = serviceProvider;
 
         _logger.LogInformation(
-            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET/PUT /Ptv/v1/reading/series-overrides/{{routeKind}}, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET /Ptv/v1/reading/metadata/googlebooks/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
+            "PtvStatusController loaded. Routes: GET /Ptv/v1/status, GET/POST /Ptv/v1/rows, GET /Ptv/v1/settings, GET /Ptv/v1/featured, POST /Ptv/v1/featured/refresh, GET/PUT /Ptv/v1/reading/series-overrides/{{routeKind}}, GET /Ptv/v1/diagnostics/images/{{itemId}}, GET /Ptv/v1/music/metadata/search, GET /Ptv/v1/reading/metadata/googlebooks/search, GET /Ptv/v1/reading/metadata/providers, POST /Ptv/v1/reading/metadata/search, GET/POST /Ptv/v1/tmdb/test, GET /Ptv/v1/integrations/status, GET /Ptv/v1/integrations/calendar-availability, GET /Ptv/v1/calendar, GET /Ptv/v1/integrations/arr/calendar, GET /Ptv/v1/tags, GET /Ptv/v1/random/movie.");
     }
 
     /// <summary>
@@ -61,29 +64,43 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     /// <returns>Plugin status.</returns>
     [HttpGet("status")]
     [HttpGet("~/Ptv/Status")]
+    [ResponseCache(Location = ResponseCacheLocation.None, NoStore = true)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> GetStatus([FromQuery] bool full, CancellationToken cancellationToken)
     {
+        // Preserve direct-controller test seams that intentionally have no HTTP context.
+        if (HttpContext is not null)
+        {
+            Response.Headers.CacheControl = "private, no-store";
+            Response.Headers.Pragma = "no-cache";
+            Response.Headers.Expires = "0";
+        }
         _logger.LogInformation("PiggieTV status endpoint called. Full={FullDiagnostics}.", full);
 
         try
         {
             if (!full)
             {
-                _logger.LogInformation("PiggieTV status safe-mode: skipping cache/config/settings/DTO hydration.");
+                _logger.LogInformation("PiggieTV status safe-mode: skipping cache/settings diagnostics; reading optional presentation authority only.");
                 _logger.LogInformation("Advertising feature: status");
                 _logger.LogInformation("Advertising feature: settings");
                 _logger.LogInformation("Advertising feature: rows");
                 _logger.LogInformation("Advertising feature: featuredContent");
                 _logger.LogInformation("Advertising feature: featuredContentRefresh");
+                _logger.LogInformation("Advertising feature: detailsRelationships");
+                _logger.LogInformation("Advertising feature: recommendationPolicyV2");
                 _logger.LogInformation("Advertising feature: readingSeriesOverrides");
+                _logger.LogInformation("Advertising feature: mediaReports");
                 _logger.LogInformation("Advertising feature: integrations");
                 _logger.LogInformation("Advertising feature: tags");
                 _logger.LogInformation("Advertising feature: random");
                 _logger.LogInformation("Advertising feature: remoteDiagnostics");
 
+                var presentationProof = await GetCurrentPresentationProofAsync().ConfigureAwait(false);
                 var safeResponse = new
                 {
+                    currentPresentationAuthority = presentationProof?.Authority,
+                    configuredPresentationBindings = presentationProof?.Bindings,
                     apiPath = $"/{PtvApiRoutes.Root}/{PtvApiRoutes.V1}",
                     apiVersion = PtvApiRoutes.CurrentVersion,
                     buildTimestampUtc = Plugin.BuildTimestampUtc,
@@ -96,9 +113,12 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         ["rows"] = true,
                         ["featuredContent"] = true,
                         ["featuredContentRefresh"] = true,
+                        ["detailsRelationships"] = true,
+                        ["recommendationPolicyV2"] = true,
                         ["readingSeriesOverrides"] = true,
                         ["musicMetadata"] = true,
                         ["readingMetadata"] = true,
+                        ["mediaReports"] = true,
                         ["integrations"] = true,
                         ["signup"] = true,
                         ["tags"] = true,
@@ -112,9 +132,12 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                         "rows",
                         "featuredContent",
                         "featuredContentRefresh",
+                        "detailsRelationships",
+                        "recommendationPolicyV2",
                         "readingSeriesOverrides",
                         "musicMetadata",
                         "readingMetadata",
+                        "mediaReports",
                         "integrations",
                         "signup",
                         "tags",
@@ -143,8 +166,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             var statusFeatured = PtvFeaturedContentStatus.FromDocument(storeStatus.Document);
 
             _logger.LogInformation(
-                "PiggieTV status full diagnostics: cache loaded. CacheFilePath={CacheFilePath}. CachePayloadBytes={CachePayloadBytes}. CachePathExists={CachePathExists}. FeaturedCacheExists={FeaturedCacheExists}. FeaturedCacheFresh={FeaturedCacheFresh}. CacheVersion={CacheVersion}. HasPayload={HasPayload}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}. CacheWriteError={CacheWriteError}.",
-                storeStatus.CacheFilePath,
+                "PiggieTV status full diagnostics: cache loaded. Category=featured-cache; CachePayloadBytes={CachePayloadBytes}; CachePathExists={CachePathExists}; FeaturedCacheExists={FeaturedCacheExists}; FeaturedCacheFresh={FeaturedCacheFresh}; CacheVersion={CacheVersion}; HasPayload={HasPayload}; HeroCount={HeroCount}; SectionCount={SectionCount}; ItemCount={ItemCount}; CacheWriteHealthy={CacheWriteHealthy}.",
                 storeStatus.CachePayloadBytes,
                 storeStatus.CachePathExists,
                 storeStatus.FeaturedCacheExists,
@@ -154,7 +176,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 statusFeatured.HeroCount,
                 statusFeatured.SectionCount,
                 statusFeatured.ItemCount,
-                storeStatus.CacheWriteError);
+                string.IsNullOrWhiteSpace(storeStatus.CacheWriteError));
 
             _logger.LogInformation("PiggieTV status full diagnostics: loading authorization/write capability.");
             var canWriteFeaturedContent = await CanWriteFeaturedContentSafeAsync(PtvApiRoutes.V1StatusLower, failures).ConfigureAwait(false);
@@ -180,6 +202,9 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             response.Signup = GetStatusSignup(PtvApiRoutes.V1StatusLower);
             ApplyDegradedStatus(response, failures);
 
+            var presentationProofFull = await GetCurrentPresentationProofAsync().ConfigureAwait(false);
+            response.CurrentPresentationAuthority = presentationProofFull?.Authority;
+            response.ConfiguredPresentationBindings = presentationProofFull?.Bindings;
             var serializedStatusBytes = JsonSerializer.SerializeToUtf8Bytes(response).Length;
             _logger.LogInformation(
                 "PiggieTV status full diagnostics: DTO built. Ok={Ok}. Degraded={Degraded}. CacheHealthy={CacheHealthy}. SerializedResponseBytes={SerializedResponseBytes}. Preparing JSON serialization.",
@@ -316,47 +341,72 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     }
 
     /// <summary>
-    /// Gets the shared PiggieTV featured-content cache document.
+    /// Gets a per-user authorized projection of the PiggieTV featured-content cache document.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Featured-content cache document.</returns>
+    /// <returns>Per-user authorized featured-content cache document.</returns>
     [HttpGet("featured")]
     [HttpGet("FeaturedContent")]
     [HttpGet("~/Ptv/FeaturedContent")]
+    [ResponseCache(Location = ResponseCacheLocation.None, NoStore = true)]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<PtvFeaturedContentDocument>> GetFeaturedContent(CancellationToken cancellationToken)
     {
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers.Pragma = "no-cache";
+        Response.Headers.Expires = "0";
+
+        if (!TryGetAuthenticatedUserId(out var userId))
+        {
+            _logger.LogWarning("PiggieTV featured response denied. Category=unresolved-request-user.");
+            return Unauthorized(Error(
+                "PTV_FEATURED_USER_UNRESOLVED",
+                "The authenticated Jellyfin user could not be resolved."));
+        }
+
         try
         {
             var featuredContentStore = GetRequiredService<IPtvFeaturedContentStore>(PtvApiRoutes.V1Featured);
+            var authorizationService = GetRequiredService<IPtvFeaturedContentAuthorizationService>(PtvApiRoutes.V1Featured);
             var storeStatus = await featuredContentStore.GetStatusAsync(cancellationToken).ConfigureAwait(false);
-            var document = storeStatus.Document;
+            var authorization = authorizationService.AuthorizeForUser(storeStatus.Document, userId);
+            if (!authorization.UserResolved || authorization.Document is null)
+            {
+                _logger.LogWarning("PiggieTV featured response denied. Category=unresolved-jellyfin-user.");
+                return Unauthorized(Error(
+                    "PTV_FEATURED_USER_UNRESOLVED",
+                    "The authenticated Jellyfin user could not be resolved."));
+            }
+
+            var document = authorization.Document;
             var featuredStatus = PtvFeaturedContentStatus.FromDocument(document);
             var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(document).Length;
 
             _logger.LogInformation(
-                "PiggieTV featured endpoint read cache. StoreInstance={StoreInstance}. CacheFilePath={CacheFilePath}. CachePayloadBytes={CachePayloadBytes}. FeaturedCacheExists={FeaturedCacheExists}. FeaturedCacheFresh={FeaturedCacheFresh}. CacheVersion={CacheVersion}. HasPayload={HasPayload}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}. SerializedResponseBytes={SerializedResponseBytes}.",
-                RuntimeHelpers.GetHashCode(featuredContentStore),
-                storeStatus.CacheFilePath,
+                "PiggieTV featured response authorized. Category=per-user. CachePayloadBytes={CachePayloadBytes}. FeaturedCacheExists={FeaturedCacheExists}. FeaturedCacheFresh={FeaturedCacheFresh}. CacheVersion={CacheVersion}. HasPayload={HasPayload}. CandidateCount={CandidateCount}. AuthorizedCount={AuthorizedCount}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}. SerializedResponseBytes={SerializedResponseBytes}.",
                 storeStatus.CachePayloadBytes,
                 storeStatus.FeaturedCacheExists,
                 storeStatus.FeaturedCacheFresh,
                 featuredStatus.CacheVersion,
                 featuredStatus.HasPayload,
+                authorization.CandidateCount,
+                authorization.AuthorizedCount,
                 featuredStatus.HeroCount,
                 featuredStatus.SectionCount,
                 featuredStatus.ItemCount,
                 serializedBytes);
 
+            GetOptionalService<PtvConfiguredRowAssociationService>(PtvApiRoutes.V1Featured)?.FinalizeResponse(document);
             return Ok(document);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            LogEndpointFailure(PtvApiRoutes.V1Featured, ex);
+            _logger.LogError("PiggieTV featured response failed. Category=authorization-or-cache-read.");
 
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
-                DiagnosticError("PTV_FEATURED_READ_FAILED", PtvApiRoutes.V1Featured, ex));
+                Error("PTV_FEATURED_READ_FAILED", "The Featured response could not be authorized."));
         }
     }
 
@@ -398,15 +448,15 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         }
         catch (PtvFeaturedContentValidationException ex)
         {
-            return BadRequest(Error(ex.Code, ex.Message));
+            return BadRequest(Error(ex.Code, "The Featured cache document is invalid."));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            LogEndpointFailure(PtvApiRoutes.V1FeaturedContent, ex);
+            _logger.LogError("PiggieTV Featured cache write failed. Category=cache-write.");
 
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
-                DiagnosticError("PTV_FEATURED_WRITE_FAILED", PtvApiRoutes.V1FeaturedContent, ex));
+                Error("PTV_FEATURED_WRITE_FAILED", "The Featured cache could not be written."));
         }
     }
 
@@ -437,13 +487,13 @@ public sealed class PtvStatusController : BaseJellyfinApiController
 
             return Ok(PtvFeaturedContentValidator.CreateEmptyDocument());
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            LogEndpointFailure(PtvApiRoutes.V1FeaturedContent, ex);
+            _logger.LogError("PiggieTV Featured cache clear failed. Category=cache-clear.");
 
             return StatusCode(
                 StatusCodes.Status500InternalServerError,
-                DiagnosticError("PTV_FEATURED_CLEAR_FAILED", PtvApiRoutes.V1FeaturedContent, ex));
+                Error("PTV_FEATURED_CLEAR_FAILED", "The Featured cache could not be cleared."));
         }
     }
 
@@ -479,9 +529,9 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 refreshStatus: GetRefreshStatusOrFallback(PtvApiRoutes.V1FeaturedRefresh, storeStatus, []),
                 tmdbMetadata: GetTmdbStatusOrFallback(PtvApiRoutes.V1FeaturedRefresh, [])));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            LogEndpointFailure(PtvApiRoutes.V1FeaturedRefresh, ex);
+            _logger.LogError("PiggieTV Featured cache refresh failed. Category=cache-refresh.");
 
             var storeStatus = await GetStoreStatusOrFallbackAsync(PtvApiRoutes.V1FeaturedRefresh, [], CancellationToken.None).ConfigureAwait(false);
             var response = PtvStatusResponse.FromStoreStatus(
@@ -492,7 +542,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
 
             response.Ok = false;
             response.Degraded = true;
-            response.Error = $"Featured content refresh failed: {ex.Message}";
+            response.Error = "Featured content refresh failed.";
             response.LastRefreshError = response.LastRefreshError ?? response.Error;
 
             return Ok(response);
@@ -520,13 +570,29 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         {
             var settingsService = GetOptionalService<IPtvPluginSettingsService>(PtvApiRoutes.V1Settings);
 
-            return Ok(settingsService?.GetSettings() ?? PtvPluginSettingsDto.FromConfiguration(new Configuration.PluginConfiguration()));
+            if (settingsService is null)
+            {
+                return StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    Error("PTV_SETTINGS_UNAVAILABLE", "PiggieTV settings are temporarily unavailable."));
+            }
+
+            lock (PtvConfiguredRowAssociationService.ConfigurationGate)
+            {
+                var settings = settingsService.GetSettings();
+                var associations = GetOptionalService<PtvConfiguredRowAssociationService>(PtvApiRoutes.V1Settings);
+                return Ok(associations is not null && TryGetAuthenticatedUserId(out var userId)
+                    ? associations.CreateSettingsResponse(settings, userId)
+                    : JsonSerializer.SerializeToNode(settings, SettingsPatchJsonOptions));
+            }
         }
         catch (Exception ex)
         {
             LogEndpointFailure(PtvApiRoutes.V1Settings, ex);
 
-            return Ok(PtvPluginSettingsDto.FromConfiguration(new Configuration.PluginConfiguration()));
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                Error("PTV_SETTINGS_READ_FAILED", "PiggieTV settings could not be loaded."));
         }
     }
 
@@ -827,9 +893,34 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 Error("PTV_ROWS_READ_FORBIDDEN", "Only Jellyfin administrators can read PiggieTV row settings."));
         }
 
-        var settingsService = GetOptionalService<IPtvPluginSettingsService>("rows");
+        try
+        {
+            var settingsService = GetOptionalService<IPtvPluginSettingsService>("rows");
 
-        return Ok(settingsService?.GetSettings().Rows ?? RowBuilderSettings.CreateDefault());
+            if (settingsService is null)
+            {
+                return StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    Error("PTV_ROWS_UNAVAILABLE", "PiggieTV Home Row settings are temporarily unavailable."));
+            }
+
+            lock (PtvConfiguredRowAssociationService.ConfigurationGate)
+            {
+                var rows = settingsService.GetSettings().Rows;
+                var associations = GetOptionalService<PtvConfiguredRowAssociationService>("rows");
+                return Ok(associations is not null && TryGetAuthenticatedUserId(out var userId)
+                    ? associations.CreateRowsResponse(rows, userId)
+                    : JsonSerializer.SerializeToNode(rows, SettingsPatchJsonOptions));
+            }
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure("rows", ex);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                Error("PTV_ROWS_READ_FAILED", "PiggieTV Home Row settings could not be loaded."));
+        }
     }
 
     /// <summary>
@@ -1023,8 +1114,15 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     /// <returns>Integration status.</returns>
     [HttpGet("integrations/status")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult GetIntegrationsStatus()
+    public async Task<ActionResult> GetIntegrationsStatus()
     {
+        if (!await CanWriteFeaturedContentSafeAsync("integrations/status").ConfigureAwait(false))
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                Error("PTV_INTEGRATIONS_STATUS_FORBIDDEN", "Only Jellyfin administrators can read detailed integration status."));
+        }
+
         try
         {
             var configuration = GetNormalizedConfiguration();
@@ -1057,7 +1155,12 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                     signupPasswordResetConfirm = "/Ptv/v1/signup/password-reset/confirm",
                     signupAdminInvites = "/Ptv/v1/signup/admin/invites",
                     signupAdminSettings = "/Ptv/v1/signup/admin/settings",
-                    signupAdminTestEmail = "/Ptv/v1/signup/admin/email/test"
+                    signupAdminTestEmail = "/Ptv/v1/signup/admin/email/test",
+                    accountProfile = "/Ptv/v1/account/profile",
+                    accountEmailVerification = "/Ptv/v1/account/email/verification",
+                    accountEmailVerify = "/Ptv/v1/account/email/verify",
+                    accountAdminHealth = "/Ptv/v1/account/admin/health",
+                    accountAdminBackups = "/Ptv/v1/account/admin/backups"
                 },
                 signup = PtvStatusSignup.Create(configuration.SignupSettings),
                 tags = configuration.TagSettings,
@@ -1071,10 +1174,84 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             return Ok(new
             {
                 ok = false,
-                error = "PiggieTV integration status is degraded.",
-                detail = RedactSecrets(ex.Message)
+                error = "PiggieTV integration status is degraded."
             });
         }
+    }
+
+    /// <summary>
+    /// Gets the secret-free Calendar capability and configured-provider state used by authenticated clients.
+    /// </summary>
+    /// <returns>Calendar availability without integration URLs or credentials.</returns>
+    [HttpGet("integrations/calendar-availability")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult GetArrCalendarAvailability()
+    {
+        try
+        {
+            return Ok(CreateArrCalendarAvailability(GetNormalizedConfiguration().ArrSettings));
+        }
+        catch (Exception ex)
+        {
+            LogEndpointFailure("integrations/calendar-availability", ex);
+
+            return Ok(new
+            {
+                ok = false,
+                error = "PiggieTV Calendar availability is degraded."
+            });
+        }
+    }
+
+    internal static object CreateArrCalendarAvailability(ArrSettings settings)
+    {
+        var services = new[]
+        {
+            new
+            {
+                service = "sonarr",
+                configured = IsArrServiceConfigured(settings.Sonarr),
+                enabled = IsArrServiceEnabled(settings.Sonarr),
+                supported = true
+            },
+            new
+            {
+                service = "radarr",
+                configured = IsArrServiceConfigured(settings.Radarr),
+                enabled = IsArrServiceEnabled(settings.Radarr),
+                supported = true
+            },
+            new
+            {
+                service = "lidarr",
+                configured = IsArrServiceConfigured(settings.Lidarr),
+                enabled = IsArrServiceEnabled(settings.Lidarr),
+                supported = true
+            },
+            new
+            {
+                service = "prowlarr",
+                configured = IsArrServiceConfigured(settings.Prowlarr),
+                enabled = IsArrServiceEnabled(settings.Prowlarr),
+                supported = false
+            }
+        };
+
+        return new
+        {
+            ok = true,
+            capability = new
+            {
+                available = true,
+                canonicalRoute = "/Ptv/v1/calendar",
+                compatibilityRoute = "/Ptv/v1/integrations/arr/calendar"
+            },
+            configuredServices = services
+                .Where(service => service.supported && service.enabled && service.configured)
+                .Select(service => service.service)
+                .ToArray(),
+            services
+        };
     }
 
     /// <summary>
@@ -1315,14 +1492,12 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         [FromQuery] int daysAfter = 30,
         CancellationToken cancellationToken = default)
     {
-        var now = DateTimeOffset.UtcNow.UtcDateTime.Date;
-        var startDate = (start?.UtcDateTime.Date ?? now.AddDays(-Math.Clamp(daysBefore, 0, 120)));
-        var endDate = (end?.UtcDateTime.Date ?? now.AddDays(Math.Clamp(daysAfter, 1, 240)));
-
-        if (endDate < startDate)
-        {
-            (startDate, endDate) = (endDate, startDate);
-        }
+        var (startDate, endDate) = NormalizeArrCalendarRange(
+            start,
+            end,
+            daysBefore,
+            daysAfter,
+            DateTimeOffset.UtcNow.UtcDateTime.Date);
 
         var serviceResults = new List<PtvArrCalendarServiceResultDto>();
         var items = new List<PtvArrCalendarItemDto>();
@@ -1340,6 +1515,10 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             error: "Prowlarr does not expose a media release calendar."));
 
         var sortedItems = items
+            .GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderBy(item => item.SortDate ?? item.Date ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .First())
             .OrderBy(item => item.SortDate ?? item.Date ?? string.Empty, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -1550,10 +1729,8 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         CancellationToken cancellationToken)
     {
         var isSupported = IsArrCalendarSupported(serviceName);
-        var isConfigured = IsArrServiceConfigured(settings);
-        var isEnabled = IsArrServiceEffectivelyEnabled(settings);
 
-        if (!isSupported || !isEnabled || !isConfigured)
+        if (!ShouldFetchArrCalendarService(serviceName, settings))
         {
             serviceResults.Add(CreateArrCalendarServiceResult(
                 serviceName,
@@ -1584,7 +1761,23 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             return;
         }
 
-        var serviceItems = ExtractArrCalendarItems(serviceName, result.Payload, settings.ExternalUrl)
+        if (!TryGetArrCalendarSourceItems(result.Payload, out var sourceItems, out var shapeError))
+        {
+            serviceResults.Add(CreateArrCalendarServiceResult(
+                serviceName,
+                settings,
+                isSupported,
+                itemCount: 0,
+                error: shapeError,
+                statusCode: result.StatusCode));
+            return;
+        }
+
+        var serviceItems = ExtractArrCalendarItems(
+                serviceName,
+                sourceItems,
+                startDate,
+                endDate)
             .ToArray();
 
         foreach (var item in serviceItems)
@@ -1612,7 +1805,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         return new PtvArrCalendarServiceResultDto
         {
             Configured = IsArrServiceConfigured(settings),
-            Enabled = IsArrServiceEffectivelyEnabled(settings),
+            Enabled = IsArrServiceEnabled(settings),
             Error = error,
             ItemCount = itemCount,
             Service = serviceName,
@@ -1627,9 +1820,16 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             && !string.IsNullOrWhiteSpace(settings.ApiKey);
     }
 
-    private static bool IsArrServiceEffectivelyEnabled(ArrServiceSettings settings)
+    private static bool IsArrServiceEnabled(ArrServiceSettings settings)
     {
-        return settings.Enabled || !string.IsNullOrWhiteSpace(settings.ApiKey);
+        return settings.Enabled;
+    }
+
+    internal static bool ShouldFetchArrCalendarService(string serviceName, ArrServiceSettings settings)
+    {
+        return IsArrCalendarSupported(serviceName)
+            && IsArrServiceEnabled(settings)
+            && IsArrServiceConfigured(settings);
     }
 
     private static bool IsArrCalendarSupported(string serviceName)
@@ -1642,7 +1842,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     private static string GetArrCalendarSkipReason(string serviceName, ArrServiceSettings settings, bool supported)
     {
         if (!supported) return $"{serviceName} does not expose a supported PiggieTV calendar adapter.";
-        if (!IsArrServiceEffectivelyEnabled(settings)) return $"{serviceName} integration is disabled.";
+        if (!IsArrServiceEnabled(settings)) return $"{serviceName} integration is disabled.";
         if (string.IsNullOrWhiteSpace(settings.InternalUrl)) return $"{serviceName} internal URL is not configured.";
         if (string.IsNullOrWhiteSpace(settings.ApiKey)) return $"{serviceName} API key is not configured.";
 
@@ -1657,16 +1857,47 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             : "/api/v1/system/status";
     }
 
-    private static string GetArrCalendarPath(string serviceName, DateTime startDate, DateTime endDate)
+    internal static (DateTime StartDate, DateTime EndDate) NormalizeArrCalendarRange(
+        DateTimeOffset? start,
+        DateTimeOffset? end,
+        int daysBefore,
+        int daysAfter,
+        DateTime utcToday)
+    {
+        var today = DateTime.SpecifyKind(utcToday.Date, DateTimeKind.Utc);
+        var startDate = start?.UtcDateTime.Date ?? today.AddDays(-Math.Clamp(daysBefore, 0, 120));
+        var endDate = end?.UtcDateTime.Date ?? today.AddDays(Math.Clamp(daysAfter, 1, 240));
+
+        if (endDate < startDate)
+        {
+            (startDate, endDate) = (endDate, startDate);
+        }
+
+        if ((endDate - startDate).TotalDays > ArrCalendarMaxSpanDays)
+        {
+            endDate = startDate.AddDays(ArrCalendarMaxSpanDays);
+        }
+
+        return (startDate, endDate);
+    }
+
+    internal static string GetArrCalendarPath(string serviceName, DateTime startDate, DateTime endDate)
     {
         var apiVersion = serviceName.Equals("lidarr", StringComparison.OrdinalIgnoreCase)
             ? "v1"
             : "v3";
-        var start = startDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var end = endDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var includeParameters = serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase)
-            ? "&includeSeries=true&includeEpisodeFile=true"
-            : string.Empty;
+        var startBoundary = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
+        var endBoundary = endDate.Date == DateTime.MaxValue.Date
+            ? DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc)
+            : DateTime.SpecifyKind(endDate.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
+        var start = Uri.EscapeDataString(startBoundary.ToString("O", CultureInfo.InvariantCulture));
+        var end = Uri.EscapeDataString(endBoundary.ToString("O", CultureInfo.InvariantCulture));
+        var includeParameters = serviceName.ToLowerInvariant() switch
+        {
+            "sonarr" => "&includeSeries=true&includeEpisodeFile=true",
+            "lidarr" => "&includeArtist=true",
+            _ => string.Empty
+        };
 
         return $"/api/{apiVersion}/calendar?start={start}&end={end}{includeParameters}";
     }
@@ -1694,46 +1925,83 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 return (null, (int)response.StatusCode, $"{routeName} returned an empty response.");
             }
 
-            return (JsonNode.Parse(payload), (int)response.StatusCode, null);
+            var parsedPayload = JsonNode.Parse(payload);
+
+            return parsedPayload is null
+                ? (null, (int)response.StatusCode, ArrCalendarMalformedResponse)
+                : (parsedPayload, (int)response.StatusCode, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             LogEndpointFailure(routeName, ex);
 
-            return (null, null, RedactSecrets(ex.Message));
+            return (null, null, ClassifyArrCalendarFailure(ex));
         }
+    }
+
+    internal static string ClassifyArrCalendarFailure(Exception exception)
+    {
+        return exception switch
+        {
+            OperationCanceledException => "Calendar provider timed out.",
+            TimeoutException => "Calendar provider timed out.",
+            HttpRequestException => "Calendar provider is unreachable.",
+            JsonException => ArrCalendarMalformedResponse,
+            _ => "Calendar provider request failed."
+        };
+    }
+
+    internal static bool TryGetArrCalendarSourceItems(
+        JsonNode payload,
+        out IReadOnlyList<JsonObject> items,
+        out string? error)
+    {
+        JsonArray? sourceArray = payload as JsonArray;
+
+        if (sourceArray is null && payload is JsonObject root)
+        {
+            sourceArray = new[] { "records", "items", "results" }
+                .Select(key => root[key])
+                .OfType<JsonArray>()
+                .FirstOrDefault();
+        }
+
+        if (sourceArray is null || sourceArray.Any(item => item is not JsonObject))
+        {
+            items = [];
+            error = ArrCalendarMalformedResponse;
+            return false;
+        }
+
+        items = sourceArray.OfType<JsonObject>().ToArray();
+        error = null;
+        return true;
     }
 
     private static IEnumerable<PtvArrCalendarItemDto> ExtractArrCalendarItems(
         string serviceName,
-        JsonNode payload,
-        string externalUrl)
+        IEnumerable<JsonObject> sourceItems,
+        DateTime startDate,
+        DateTime endDate)
     {
-        if (payload is JsonArray rootArray)
-        {
-            return rootArray.OfType<JsonObject>().Select(item => ToArrCalendarItem(serviceName, item, externalUrl));
-        }
-
-        if (payload is JsonObject root)
-        {
-            foreach (var key in new[] { "records", "items", "results" })
-            {
-                if (root[key] is JsonArray nestedArray)
-                {
-                    return nestedArray.OfType<JsonObject>().Select(item => ToArrCalendarItem(serviceName, item, externalUrl));
-                }
-            }
-        }
-
-        return [];
+        return sourceItems
+            .Select(item => ToArrCalendarItem(serviceName, item, startDate, endDate))
+            .OfType<PtvArrCalendarItemDto>();
     }
 
-    private static PtvArrCalendarItemDto ToArrCalendarItem(
+    private static PtvArrCalendarItemDto? ToArrCalendarItem(
         string serviceName,
         JsonObject item,
-        string externalUrl)
+        DateTime startDate,
+        DateTime endDate)
     {
-        var date = GetArrCalendarDate(serviceName, item);
+        var date = SelectArrCalendarDate(serviceName, item, startDate, endDate);
+        if (string.IsNullOrWhiteSpace(date)) return null;
+
         var title = GetArrCalendarTitle(serviceName, item);
         var seriesTitle = ReadJsonString(item["series"], "title");
         var artistTitle = ReadJsonString(item["artist"], "artistName")
@@ -1748,7 +2016,6 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             Date = date,
             EpisodeNumber = episodeNumber,
             EpisodeTitle = serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase) ? ReadJsonString(item, "title") : null,
-            ExternalUrl = string.IsNullOrWhiteSpace(externalUrl) ? null : externalUrl.TrimEnd('/'),
             HasFile = ReadJsonBool(item, "hasFile") ?? ReadJsonBool(item["movieFile"], "id") ?? ReadJsonBool(item["episodeFile"], "id"),
             Id = $"{serviceName}-{arrId}",
             Monitored = ReadJsonBool(item, "monitored"),
@@ -1785,25 +2052,61 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             ?? "Upcoming movie";
     }
 
-    private static string? GetArrCalendarDate(string serviceName, JsonObject item)
+    internal static string? SelectArrCalendarDate(
+        string serviceName,
+        JsonObject item,
+        DateTime startDate,
+        DateTime endDate)
     {
+        IEnumerable<string?> candidates;
+
         if (serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase))
         {
-            return ReadJsonString(item, "airDateUtc")
-                ?? ReadJsonString(item, "airDate");
+            candidates =
+            [
+                ReadJsonString(item, "airDateUtc"),
+                ReadJsonString(item, "airDate")
+            ];
         }
-
-        if (serviceName.Equals("lidarr", StringComparison.OrdinalIgnoreCase))
+        else if (serviceName.Equals("lidarr", StringComparison.OrdinalIgnoreCase))
         {
-            return ReadJsonString(item, "releaseDate")
-                ?? ReadJsonString(item, "physicalRelease")
-                ?? ReadJsonString(item, "digitalRelease");
+            candidates =
+            [
+                ReadJsonString(item, "releaseDate")
+            ];
+        }
+        else
+        {
+            candidates =
+            [
+                ReadJsonString(item, "inCinemas"),
+                ReadJsonString(item, "digitalRelease"),
+                ReadJsonString(item, "physicalRelease"),
+                ReadJsonString(item, "releaseDate")
+            ];
         }
 
-        return ReadJsonString(item, "inCinemas")
-            ?? ReadJsonString(item, "digitalRelease")
-            ?? ReadJsonString(item, "physicalRelease")
-            ?? ReadJsonString(item, "releaseDate");
+        foreach (var candidate in candidates.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            if (!DateTimeOffset.TryParse(
+                candidate,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal,
+                out var parsed))
+            {
+                continue;
+            }
+
+            var candidateDate = parsed.UtcDateTime.Date;
+            if (candidateDate >= startDate.Date && candidateDate <= endDate.Date)
+            {
+                return serviceName.Equals("sonarr", StringComparison.OrdinalIgnoreCase)
+                    ? candidate
+                    : candidateDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+        }
+
+        return null;
     }
 
     private static string? NormalizeDateForSort(string? value)
@@ -2590,8 +2893,6 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         [JsonPropertyName("overview")]
         public string? Overview { get; init; }
 
-        [JsonPropertyName("externalUrl")]
-        public string? ExternalUrl { get; init; }
     }
 
     private sealed record PtvSeerrRequestedMedia(
@@ -2757,6 +3058,82 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         return result.Succeeded;
     }
 
+    private async Task<PtvConfiguredRowAssociationService.PresentationProof?> GetCurrentPresentationProofAsync()
+    {
+        try
+        {
+            if (HttpContext is null || !TryGetAuthenticatedUserId(out var userId)) return null;
+            var users = GetOptionalService<IUserManager>(PtvApiRoutes.V1StatusLower);
+            if (users?.GetUserById(userId) is null) return null;
+            var associations = GetOptionalService<PtvConfiguredRowAssociationService>(PtvApiRoutes.V1StatusLower);
+            if (associations is null) return null;
+            var administrator = await CanWriteFeaturedContentSafeAsync(PtvApiRoutes.V1StatusLower).ConfigureAwait(false);
+            // Capture only after user/policy resolution. Both fields come from this one locked
+            // current binding read; no stored response, item query or client-supplied proof is used.
+            return associations.CaptureCurrentPresentationProof(userId, administrator);
+        }
+        catch (Exception)
+        {
+            // Preserve status availability while failing the optional presentation proof closed.
+            // Do not expose/log private configuration, identity, token or exception content here.
+            _logger.LogWarning("PiggieTV presentation authority unavailable. Category=authority-uncertain.");
+            return null;
+        }
+    }
+
+    private bool TryGetAuthenticatedUserId(out Guid userId)
+    {
+        userId = Guid.Empty;
+        var authenticatedIdentities = User.Identities
+            .Where(identity => identity.IsAuthenticated)
+            .ToArray();
+        if (authenticatedIdentities.Length == 0)
+        {
+            return false;
+        }
+
+        var jellyfinUserClaims = authenticatedIdentities
+            .SelectMany(identity => identity.FindAll("Jellyfin-UserId"))
+            .ToArray();
+        if (jellyfinUserClaims.Length > 0)
+        {
+            return TryResolveUniqueUserId(jellyfinUserClaims, out userId);
+        }
+
+        var fallbackClaims = authenticatedIdentities
+            .SelectMany(identity => identity.FindAll(ClaimTypes.NameIdentifier).Concat(identity.FindAll("sub")))
+            .ToArray();
+        return TryResolveUniqueUserId(fallbackClaims, out userId);
+    }
+
+    private static bool TryResolveUniqueUserId(IEnumerable<Claim> claims, out Guid userId)
+    {
+        userId = Guid.Empty;
+        var resolvedUserIds = new HashSet<Guid>();
+        foreach (var claim in claims)
+        {
+            if (!Guid.TryParse(claim.Value.Trim(), out var resolvedUserId)
+                || resolvedUserId == Guid.Empty)
+            {
+                return false;
+            }
+
+            resolvedUserIds.Add(resolvedUserId);
+            if (resolvedUserIds.Count > 1)
+            {
+                return false;
+            }
+        }
+
+        if (resolvedUserIds.Count != 1)
+        {
+            return false;
+        }
+
+        userId = resolvedUserIds.Single();
+        return true;
+    }
+
     private async Task<bool> CanWriteFeaturedContentSafeAsync(string routeName, ICollection<string>? failures = null)
     {
         try
@@ -2786,20 +3163,13 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 return CreateFallbackStoreStatus("Featured cache store service is not registered.");
             }
 
-            _logger.LogInformation(
-                "PiggieTV cache store resolved. Route={RouteName}. StoreInstance={StoreInstance}. StoreType={StoreType}.",
-                routeName,
-                RuntimeHelpers.GetHashCode(featuredContentStore),
-                featuredContentStore.GetType().FullName);
+            _logger.LogInformation("PiggieTV cache store resolved. Category=featured-cache.");
 
             var status = await featuredContentStore.GetStatusAsync(cancellationToken).ConfigureAwait(false);
             var featuredStatus = PtvFeaturedContentStatus.FromDocument(status.Document);
 
             _logger.LogInformation(
-                "PiggieTV cache store status read. Route={RouteName}. StoreInstance={StoreInstance}. CacheFilePath={CacheFilePath}. FileLength={FileLength}. CacheVersion={CacheVersion}. HasPayload={HasPayload}. HeroCount={HeroCount}. SectionCount={SectionCount}. ItemCount={ItemCount}.",
-                routeName,
-                RuntimeHelpers.GetHashCode(featuredContentStore),
-                status.CacheFilePath,
+                "PiggieTV cache store status read. Category=featured-cache; FileLength={FileLength}; CacheVersion={CacheVersion}; HasPayload={HasPayload}; HeroCount={HeroCount}; SectionCount={SectionCount}; ItemCount={ItemCount}.",
                 status.CachePayloadBytes,
                 featuredStatus.CacheVersion,
                 featuredStatus.HasPayload,
@@ -2809,12 +3179,12 @@ public sealed class PtvStatusController : BaseJellyfinApiController
 
             return status;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            failures.Add($"Featured cache status failed: {ex.Message}");
-            LogEndpointFailure(routeName, ex);
+            failures.Add("Featured cache status failed.");
+            _logger.LogError("PiggieTV cache store status failed. Category=featured-cache.");
 
-            return CreateFallbackStoreStatus($"Featured cache status failed: {ex.Message}");
+            return CreateFallbackStoreStatus("Featured cache status failed.");
         }
     }
 
@@ -3016,11 +3386,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
 
     private void LogEndpointFailure(string routeName, Exception exception)
     {
-        _logger.LogError(
-            "PiggieTV API endpoint failed. Route: {RouteName}. ExceptionType: {ExceptionType}. Exception: {Exception}",
-            routeName,
-            exception.GetType().FullName,
-            RedactSecrets(exception.ToString()));
+        _logger.LogError("PiggieTV API endpoint failed. Route={RouteName}; Category=endpoint-failure.", routeName);
     }
 
     private static int GetJsonPayloadByteCount(JsonElement payload)
@@ -3187,10 +3553,8 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         return new
         {
             code,
-            error = RedactSecrets(exception.Message),
-            inner = exception.InnerException is null ? null : RedactSecrets(exception.InnerException.Message),
-            route = routeName,
-            stack = exception.StackTrace is null ? null : RedactSecrets(exception.StackTrace)
+            error = "The request failed.",
+            route = routeName
         };
     }
 }

@@ -9,7 +9,7 @@
     display: grid;
     gap: clamp(1.4rem, 2vw, 2.3rem);
     min-height: 100vh;
-    padding: clamp(8rem, 12vw, 11rem) clamp(1rem, 2vw, 2rem) 4rem;
+    padding: clamp(8rem, 12vw, 11rem) var(--ptv-content-edge, 1.5rem) 4rem;
 }
 
 .ptv-search-hero {

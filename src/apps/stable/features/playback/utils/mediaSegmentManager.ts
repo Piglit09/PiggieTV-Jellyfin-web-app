@@ -10,6 +10,7 @@ import { currentSettings as userSettings } from 'scripts/settings/userSettings';
 import type { PlayerState } from 'types/playbackStopInfo';
 import type { Event } from 'utils/events';
 import { toApi } from 'utils/jellyfin-apiclient/compat';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 import { getMediaSegmentAction } from './mediaSegmentSettings';
 import { findCurrentSegment } from './mediaSegments';
@@ -30,7 +31,7 @@ class MediaSegmentManager extends PlaybackSubscriber {
                 .getItemSegments({ itemId, includeSegmentTypes });
             this.mediaSegments = mediaSegments.Items || [];
         } catch (err) {
-            console.error('[MediaSegmentManager] failed to fetch segments', err);
+            ptvSafeConsole.error('[MediaSegmentManager] failed to fetch segments', err);
             this.mediaSegments = [];
         }
     }

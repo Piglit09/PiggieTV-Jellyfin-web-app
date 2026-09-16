@@ -1,11 +1,15 @@
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import Events from '../../../utils/events';
 
 import { PTV_CACHE, PTV_EVENTS } from '../../core/config';
 import { dispatchPtvCustomEvent } from '../../core/events';
 import { ptvLogger } from '../../core/logger';
 import { recordPtvEvent, registerPtvDebugCacheStatusProvider, timePtvAsync } from '../../core/observability';
 import { getCurrentPtvPluginApiClient, normalizePtvApiError, recordPtvPluginApiRetryState } from '../../core/pluginApi';
+import { ptvSafeConsole } from '../../core/safeConsole';
 import { getRuntimeScope } from '../../core/scope';
+import { getPtvAuthenticatedDisplayIdentityKey } from '../../services/displayIdentity';
+import { observeConfiguredRowAuthority, readConfiguredPresentationAuthority, retireConfiguredRowFreshness } from '../../pages/home/configuredRowFreshness';
 import {
     summarizeFeaturedContentPayload,
     type FeaturedContentSemanticSummary
@@ -21,6 +25,7 @@ const SERVER_CACHE_DOCUMENT_VERSION = 1;
 const SUPPORTED_FEATURED_CACHE_VERSIONS: number[] = [FEATURED_CACHE_VERSION];
 
 export type FeaturedPayload = {
+    currentPresentationAuthority?: unknown;
     emptyLibraryConfirmed?: boolean;
     generationState?: string;
     heroItems: unknown[];
@@ -78,6 +83,11 @@ type PtvAbortControllerLike = {
     signal: AbortSignal;
 };
 
+type FeaturedCacheIdentityOwner = Readonly<{
+    generation: number;
+    key: string;
+}>;
+
 type FeaturedCacheAdoptionResult =
     | 'adopted'
     | 'empty'
@@ -111,6 +121,8 @@ let serverReadRetryBackoffMs = 0;
 let serverReadRetryCount = 0;
 let nextServerReadAllowedAt = 0;
 let startupPrimeAttemptCount = 0;
+let activeFeaturedCacheIdentityKey: string | null = null;
+let featuredCacheIdentityGeneration = 0;
 
 const FEATURED_CACHE_PRIME_DELAYS = [300, 1200, 3200, 8000, 15000];
 const MAX_SERVER_READ_RETRY_COUNT = 5;
@@ -121,6 +133,105 @@ const SERVER_CACHE_READ_TIMEOUT_MS = 12000;
 const SERVER_STATUS_READ_TIMEOUT_MS = 6000;
 const PLUGIN_STATUS_CACHE_MS = 30000;
 const featuredCacheScope = getRuntimeScope('featured-cache');
+
+function createFeaturedCacheIdentityError(message = 'The authenticated Featured cache identity is unavailable.') {
+    return Object.assign(new Error(message), {
+        code: 'PTV_FEATURED_CACHE_IDENTITY_UNAVAILABLE'
+    });
+}
+
+function createRetiredFeaturedCacheOwnerError() {
+    const error = new Error('The Featured cache identity owner was retired.');
+
+    error.name = 'AbortError';
+    return error;
+}
+
+function readCurrentFeaturedCacheIdentityKey() {
+    const apiClient = getCurrentApiClient() as null | {
+        getCurrentUserId?: () => string | null | undefined;
+        serverId?: () => string | null | undefined;
+        serverInfo?: () => { Id?: string | null } | null | undefined;
+    };
+
+    return getPtvAuthenticatedDisplayIdentityKey(apiClient);
+}
+
+function resetFeaturedCacheIdentityState() {
+    inflightFeaturedContent = null;
+    inflightServerRead = null;
+    inflightPluginStatus = null;
+    lastFeaturedContentFetcher = null;
+    lastPluginStatus = null;
+    lastPluginStatusReadAt = 0;
+    memoryCacheEntry = null;
+    memoryCacheSettings = {};
+    lastCacheStorage = null;
+    lastCacheWriteError = null;
+    lastCacheReadError = null;
+    lastRefreshDurationMs = null;
+    lastRefreshError = null;
+    lastServerCacheAdoptionResult = 'none';
+    lastServerCacheRejectionReason = null;
+    lastServerCacheRawByteSize = null;
+    lastServerCacheRawTopLevelKeys = [];
+    lastServerCacheNormalizedTopLevelKeys = [];
+    lastServerCacheRenderSource = 'none';
+    lastServerCacheDetectedVersion = null;
+    lastServerCachePayloadSummary = null;
+    serverReadRetryBackoffMs = 0;
+    serverReadRetryCount = 0;
+    nextServerReadAllowedAt = 0;
+    startupPrimeAttemptCount = 0;
+}
+
+function retireActiveFeaturedCacheIdentity() {
+    retireConfiguredRowFreshness('featured-cache-identity-retired');
+    featuredCacheIdentityGeneration += 1;
+    activeFeaturedCacheIdentityKey = null;
+    resetFeaturedCacheIdentityState();
+}
+
+function requireCurrentFeaturedCacheOwner(): FeaturedCacheIdentityOwner {
+    const key = readCurrentFeaturedCacheIdentityKey();
+
+    if (!key) {
+        if (activeFeaturedCacheIdentityKey) retireActiveFeaturedCacheIdentity();
+        throw createFeaturedCacheIdentityError();
+    }
+
+    if (key !== activeFeaturedCacheIdentityKey) {
+        // Initial cache ownership is not a transition away from a verified identity.
+        if (activeFeaturedCacheIdentityKey) retireConfiguredRowFreshness('featured-cache-identity-changed');
+        featuredCacheIdentityGeneration += 1;
+        resetFeaturedCacheIdentityState();
+        activeFeaturedCacheIdentityKey = key;
+    }
+
+    return Object.freeze({
+        generation: featuredCacheIdentityGeneration,
+        key
+    });
+}
+
+function isFeaturedCacheOwnerCurrent(owner: FeaturedCacheIdentityOwner) {
+    return owner.generation === featuredCacheIdentityGeneration
+        && owner.key === activeFeaturedCacheIdentityKey
+        && owner.key === readCurrentFeaturedCacheIdentityKey();
+}
+
+function assertFeaturedCacheOwnerCurrent(owner: FeaturedCacheIdentityOwner) {
+    if (!isFeaturedCacheOwnerCurrent(owner)) {
+        throw createRetiredFeaturedCacheOwnerError();
+    }
+}
+
+function resolveForFeaturedCacheOwner<T>(owner: FeaturedCacheIdentityOwner, value: T) {
+    return Promise.resolve().then(() => {
+        assertFeaturedCacheOwnerCurrent(owner);
+        return value;
+    });
+}
 
 const CACHE_ITEM_FIELDS = new Set([
     'Album',
@@ -171,7 +282,6 @@ const CACHE_ITEM_FIELDS = new Set([
     'PrimaryImageTag',
     'ProductionYear',
     'PtvQualityTags',
-    'PtvHeroRecommendationLabel',
     'PtvHeroSource',
     'RecursiveItemCount',
     'RunTimeTicks',
@@ -189,8 +299,7 @@ const CACHE_ITEM_FIELDS = new Set([
     'VideoCodec',
     'VideoRange',
     'Height',
-    'Width',
-    'UserData'
+    'Width'
 ]);
 
 const CACHE_MEDIA_SOURCE_FIELDS = new Set([
@@ -227,7 +336,7 @@ function isDebugEnabled() {
 
 function debugLog(message: string, detail?: unknown) {
     if (isDebugEnabled()) {
-        console.debug(`[PTV Featured Cache] ${message}`, detail);
+        ptvSafeConsole.debug(`[PTV Featured Cache] ${message}`, detail);
     }
 }
 
@@ -332,6 +441,11 @@ function getPayloadField(payload: unknown, ...keys: string[]) {
     return isRecord(payload) ? getRecordField(payload, ...keys) : undefined;
 }
 
+function normalizePresentationAuthority(payload: FeaturedPayload | Record<string, unknown>) {
+    // Do not canonicalize malformed/case-ambiguous proof into a valid cached envelope.
+    return readConfiguredPresentationAuthority(payload) || undefined;
+}
+
 function normalizePayload(payload: FeaturedPayload | Record<string, unknown>): FeaturedPayload {
     const emptyLibraryConfirmed = getPayloadField(payload, 'emptyLibraryConfirmed', 'EmptyLibraryConfirmed');
     const generationState = getPayloadField(payload, 'generationState', 'GenerationState');
@@ -346,6 +460,7 @@ function normalizePayload(payload: FeaturedPayload | Record<string, unknown>): F
     const sectionItems = getPayloadField(payload, 'sectionItems', 'SectionItems');
 
     return {
+        currentPresentationAuthority: normalizePresentationAuthority(payload),
         emptyLibraryConfirmed: emptyLibraryConfirmed === true ? true : undefined,
         generationState: typeof generationState === 'string' && generationState.trim() ? generationState.trim() : undefined,
         heroItems: Array.isArray(heroItems) ? heroItems : [],
@@ -373,6 +488,26 @@ function compactCacheItem(item: unknown): unknown {
         }
 
         return compactItem;
+    }, {});
+}
+
+const SHARED_PAYLOAD_USER_FIELDS = new Set([
+    'PtvHeroRecommendationLabel',
+    'PtvRecommendationExplanation',
+    'RecommendationReason',
+    'UserData'
+]);
+
+function sanitizeSharedPayloadValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(sanitizeSharedPayloadValue);
+    if (!isRecord(value)) return value;
+
+    return Object.keys(value).reduce<Record<string, unknown>>((sanitized, key) => {
+        if (!SHARED_PAYLOAD_USER_FIELDS.has(key)) {
+            sanitized[key] = sanitizeSharedPayloadValue(value[key]);
+        }
+
+        return sanitized;
     }, {});
 }
 
@@ -412,6 +547,7 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
     const normalizedPayload = normalizePayload(payload);
 
     return {
+        currentPresentationAuthority: normalizedPayload.currentPresentationAuthority,
         emptyLibraryConfirmed: normalizedPayload.emptyLibraryConfirmed,
         generationState: normalizedPayload.generationState,
         heroItems: normalizedPayload.heroItems.map(compactCacheItem),
@@ -420,8 +556,8 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
         rowConfigApplied: normalizedPayload.rowConfigApplied,
         rowConfigHash: normalizedPayload.rowConfigHash,
         rowConfigVersion: normalizedPayload.rowConfigVersion,
-        rowDiagnostics: normalizedPayload.rowDiagnostics,
-        sections: normalizedPayload.sections,
+        rowDiagnostics: sanitizeSharedPayloadValue(normalizedPayload.rowDiagnostics) as unknown[],
+        sections: sanitizeSharedPayloadValue(normalizedPayload.sections) as unknown[],
         sectionItems: Object.keys(normalizedPayload.sectionItems).reduce<Record<string, unknown[]>>(
             (sectionItems, sectionId) => {
                 sectionItems[sectionId] = normalizedPayload.sectionItems[sectionId].map(compactCacheItem);
@@ -431,6 +567,10 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
             {}
         )
     };
+}
+
+export function sanitizeFeaturedPayloadForSharedCache(payload: FeaturedPayload) {
+    return compactPayload(payload);
 }
 
 function getPayloadItemCount(payload: FeaturedPayload) {
@@ -617,7 +757,7 @@ function explainCacheEntryRejection(value: unknown) {
     return 'unknown-cache-entry-rejection';
 }
 
-function explainServerDocumentRejection(rawDocument: unknown, normalizedDocument: FeaturedServerCacheDocument) {
+function explainServerDocumentRejection(rawDocument: unknown) {
     if (!isRecord(rawDocument)) return 'server-response-not-object';
     if (!getTopLevelKeys(rawDocument).length) return 'empty-object-response';
 
@@ -676,6 +816,11 @@ function mergePayload(payload: FeaturedPayload, fallbackPayload?: FeaturedPayloa
     if (!fallbackPayload) return normalizedPayload;
 
     const normalizedFallbackPayload = normalizePayload(fallbackPayload);
+    const primaryAuthority = normalizePresentationAuthority(normalizedPayload);
+    const fallbackAuthority = normalizePresentationAuthority(normalizedFallbackPayload);
+    const matchingAuthority = primaryAuthority && fallbackAuthority
+        && primaryAuthority.scope === fallbackAuthority.scope
+        && primaryAuthority.generation === fallbackAuthority.generation;
     const sectionItems = {
         ...normalizedFallbackPayload.sectionItems
     };
@@ -689,6 +834,8 @@ function mergePayload(payload: FeaturedPayload, fallbackPayload?: FeaturedPayloa
     });
 
     return {
+        // Mixed/fallback-derived content cannot inherit one side's presentation proof.
+        currentPresentationAuthority: matchingAuthority ? primaryAuthority : undefined,
         heroItems: normalizedPayload.heroItems.length ?
             normalizedPayload.heroItems :
             normalizedFallbackPayload.heroItems,
@@ -723,7 +870,7 @@ function parseCacheEntryValue(value: unknown): FeaturedCacheEntry | null {
         version: FEATURED_CACHE_VERSION,
         createdAt,
         expiresAt,
-        payload: normalizePayload(payload)
+        payload: compactPayload(normalizePayload(payload))
     };
 }
 
@@ -748,7 +895,6 @@ function getRecordField(source: Record<string, unknown>, ...keys: string[]) {
 function getServerDocumentSource(value: unknown) {
     if (!isRecord(value)) return null;
 
-    const directFeaturedContent = getRecordField(value, 'featuredContent', 'FeaturedContent');
     const directSettings = getRecordField(value, 'featuredContentSettings', 'FeaturedContentSettings');
     const directUpdatedAt = getRecordField(value, 'updatedAt', 'UpdatedAt');
     const nestedDocument = getRecordField(value, 'document', 'Document');
@@ -844,9 +990,11 @@ function hasPluginFeature(status: PtvPluginStatusForCache | null, feature: strin
     return false;
 }
 
-function readPluginStatusForCache() {
+function readPluginStatusForCache(owner: FeaturedCacheIdentityOwner) {
+    assertFeaturedCacheOwnerCurrent(owner);
+
     if (lastPluginStatus && Date.now() - lastPluginStatusReadAt < PLUGIN_STATUS_CACHE_MS) {
-        return Promise.resolve(lastPluginStatus);
+        return resolveForFeaturedCacheOwner(owner, lastPluginStatus);
     }
 
     if (inflightPluginStatus) return inflightPluginStatus;
@@ -854,21 +1002,24 @@ function readPluginStatusForCache() {
     const pluginApi = getCurrentPtvPluginApiClient();
 
     if (!pluginApi) {
-        return Promise.resolve(null);
+        return resolveForFeaturedCacheOwner(owner, null);
     }
 
-    inflightPluginStatus = runPluginRequestWithTimeout(
+    const statusRequest = runPluginRequestWithTimeout(
         signal => pluginApi.getStatus<PtvPluginStatusForCache>({ signal }),
         SERVER_STATUS_READ_TIMEOUT_MS,
         'PiggieTV plugin status request timed out.'
     )
         .then(status => {
+            assertFeaturedCacheOwnerCurrent(owner);
             lastPluginStatus = status;
             lastPluginStatusReadAt = Date.now();
 
             return status;
         })
         .catch((err: unknown) => {
+            if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
+
             debugLog('plugin status unavailable for cache capability check', err);
             lastPluginStatus = null;
             lastPluginStatusReadAt = Date.now();
@@ -876,92 +1027,113 @@ function readPluginStatusForCache() {
             return null;
         })
         .finally(() => {
-            inflightPluginStatus = null;
+            if (isFeaturedCacheOwnerCurrent(owner) && inflightPluginStatus === statusRequest) {
+                inflightPluginStatus = null;
+            }
         });
 
-    return inflightPluginStatus;
+    inflightPluginStatus = statusRequest;
+    return statusRequest;
 }
 
-function readPluginDocument() {
+function recordPluginCacheCapabilities(status: PtvPluginStatusForCache | null) {
+    const isFeaturedContentAdvertised = hasPluginFeature(status, 'featuredContent');
+    const hasStatusCapabilities = Boolean(
+        status
+        && (
+            status.featureFlags
+            || status.features
+        )
+    );
+
+    recordPtvEvent('cache', 'featured-cache-feature-advertised', {
+        featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
+        features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
+        hasStatusCapabilities,
+        isFeaturedContentAdvertised,
+        statusOk: status?.ok ?? null
+    });
+
+    if (hasStatusCapabilities && !isFeaturedContentAdvertised) {
+        recordPtvEvent('cache', 'featured-cache-feature-not-advertised', {
+            action: 'try-featured-directly',
+            featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
+            features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
+            statusOk: status?.ok ?? null
+        });
+    }
+
+    if (!hasStatusCapabilities) {
+        recordPtvEvent('cache', 'featured-cache-status-unavailable', {
+            action: 'try-featured-directly'
+        });
+    }
+}
+
+function readPluginDocument(owner: FeaturedCacheIdentityOwner) {
+    assertFeaturedCacheOwnerCurrent(owner);
     const pluginApi = getCurrentPtvPluginApiClient();
 
     if (!pluginApi) {
         return Promise.reject(new Error('PTV plugin API client is unavailable.'));
     }
 
-    return readPluginStatusForCache()
+    // Status is diagnostic only: the cache endpoint is attempted regardless of
+    // the advertised capability. Do not serialize these independent requests.
+    void readPluginStatusForCache(owner)
         .then(status => {
-            const isFeaturedContentAdvertised = hasPluginFeature(status, 'featuredContent');
-            const hasStatusCapabilities = Boolean(
-                status
-                && (
-                    status.featureFlags
-                    || status.features
-                )
-            );
+            if (isFeaturedCacheOwnerCurrent(owner)) recordPluginCacheCapabilities(status);
+        })
+        .catch(() => undefined);
 
-            recordPtvEvent('cache', 'featured-cache-feature-advertised', {
-                featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
-                features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
-                hasStatusCapabilities,
-                isFeaturedContentAdvertised,
-                statusOk: status?.ok ?? null
+    return runPluginRequestWithTimeout(
+        signal => pluginApi.getFeaturedContentCacheDocument({ signal }),
+        SERVER_CACHE_READ_TIMEOUT_MS,
+        'PiggieTV featured cache read timed out.'
+    )
+        .then(document => {
+            assertFeaturedCacheOwnerCurrent(owner);
+            const rawResponseByteSize = getSerializedByteSize(document);
+            const rawTopLevelKeys = getTopLevelKeys(document);
+            const normalizedDocument = normalizeServerDocument(document);
+            const entry = parseCacheEntryValue(normalizedDocument.featuredContent);
+            // A newly received response can retire CURRENT even when this read is
+            // only persistence readback. Its captured identity was checked above.
+            observeConfiguredRowAuthority(readConfiguredPresentationAuthority(entry?.payload));
+            const normalizedTopLevelKeys = getTopLevelKeys(normalizedDocument);
+            const rejectionReason = entry ? null : explainServerDocumentRejection(document);
+
+            lastServerCacheRawByteSize = rawResponseByteSize;
+            lastServerCacheRawTopLevelKeys = rawTopLevelKeys;
+            lastServerCacheNormalizedTopLevelKeys = normalizedTopLevelKeys;
+            lastServerCacheRejectionReason = rejectionReason;
+
+            recordPtvEvent('cache', 'featured-cache-document-read', {
+                cacheVersion: entry?.version ?? null,
+                hasFeaturedContent: Boolean(entry),
+                heroCount: entry?.payload.heroItems.length || 0,
+                itemCount: entry ? getPayloadItemCount(entry.payload) : 0,
+                normalizedTopLevelKeys,
+                payloadSize: getSerializedByteSize(normalizedDocument.featuredContent),
+                rawResponseByteSize,
+                rawTopLevelKeys,
+                rejectionReason,
+                sectionCount: entry ? Object.keys(entry.payload.sectionItems).length : 0,
+                storage: getSuccessfulServerStorage(),
+                updatedAt: normalizedDocument.updatedAt ?? null
             });
 
-            if (hasStatusCapabilities && !isFeaturedContentAdvertised) {
-                recordPtvEvent('cache', 'featured-cache-feature-not-advertised', {
-                    action: 'try-featured-directly',
-                    featureFlagKeys: status?.featureFlags ? Object.keys(status.featureFlags) : [],
-                    features: Array.isArray(status?.features) ? status.features : Object.keys(status?.features || {}),
-                    statusOk: status?.ok ?? null
-                });
-            }
-
-            if (!hasStatusCapabilities) {
-                recordPtvEvent('cache', 'featured-cache-status-unavailable', {
-                    action: 'try-featured-directly'
-                });
-            }
-
-            return runPluginRequestWithTimeout(
-                signal => pluginApi.getFeaturedContentCacheDocument({ signal }),
-                SERVER_CACHE_READ_TIMEOUT_MS,
-                'PiggieTV featured cache read timed out.'
-            )
-                .then(document => {
-                    const rawResponseByteSize = getSerializedByteSize(document);
-                    const rawTopLevelKeys = getTopLevelKeys(document);
-                    const normalizedDocument = normalizeServerDocument(document);
-                    const entry = parseCacheEntryValue(normalizedDocument.featuredContent);
-                    const normalizedTopLevelKeys = getTopLevelKeys(normalizedDocument);
-                    const rejectionReason = entry ? null : explainServerDocumentRejection(document, normalizedDocument);
-
-                    lastServerCacheRawByteSize = rawResponseByteSize;
-                    lastServerCacheRawTopLevelKeys = rawTopLevelKeys;
-                    lastServerCacheNormalizedTopLevelKeys = normalizedTopLevelKeys;
-                    lastServerCacheRejectionReason = rejectionReason;
-
-                    recordPtvEvent('cache', 'featured-cache-document-read', {
-                        cacheVersion: entry?.version ?? null,
-                        hasFeaturedContent: Boolean(entry),
-                        heroCount: entry?.payload.heroItems.length || 0,
-                        itemCount: entry ? getPayloadItemCount(entry.payload) : 0,
-                        normalizedTopLevelKeys,
-                        payloadSize: getSerializedByteSize(normalizedDocument.featuredContent),
-                        rawResponseByteSize,
-                        rawTopLevelKeys,
-                        rejectionReason,
-                        sectionCount: entry ? Object.keys(entry.payload.sectionItems).length : 0,
-                        storage: getSuccessfulServerStorage(),
-                        updatedAt: normalizedDocument.updatedAt ?? null
-                    });
-
-                    return normalizedDocument;
-                });
+            return normalizedDocument;
+        })
+        .catch((error: unknown) => {
+            if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
+            observeConfiguredRowAuthority(null);
+            throw error;
         });
 }
 
-function writePluginDocument(nextDocument: FeaturedServerCacheDocument) {
+function writePluginDocument(owner: FeaturedCacheIdentityOwner, nextDocument: FeaturedServerCacheDocument) {
+    assertFeaturedCacheOwnerCurrent(owner);
     const pluginApi = getCurrentPtvPluginApiClient();
 
     if (!pluginApi) {
@@ -972,21 +1144,29 @@ function writePluginDocument(nextDocument: FeaturedServerCacheDocument) {
         ...nextDocument,
         version: SERVER_CACHE_DOCUMENT_VERSION,
         updatedAt: Date.now()
+    }).then(result => {
+        assertFeaturedCacheOwnerCurrent(owner);
+        return result;
     });
 }
 
-function clearPluginDocument() {
+function clearPluginDocument(owner: FeaturedCacheIdentityOwner) {
+    assertFeaturedCacheOwnerCurrent(owner);
     const pluginApi = getCurrentPtvPluginApiClient();
 
     if (!pluginApi?.clearFeaturedContentCacheDocument) {
         return Promise.reject(new Error('PTV plugin cache clear endpoint is unavailable.'));
     }
 
-    return pluginApi.clearFeaturedContentCacheDocument();
+    return pluginApi.clearFeaturedContentCacheDocument()
+        .then(result => {
+            assertFeaturedCacheOwnerCurrent(owner);
+            return result;
+        });
 }
 
-function readServerDocument() {
-    return readPluginDocument()
+function readServerDocument(owner: FeaturedCacheIdentityOwner) {
+    return readPluginDocument(owner)
         .then(document => document);
 }
 
@@ -1021,16 +1201,24 @@ function noteServerReadSuccess(hasCache: boolean) {
     recordPtvPluginApiRetryState(serverReadRetryCount, serverReadRetryBackoffMs);
 }
 
-function applyServerCacheDocument(document: unknown, source: string) {
+function applyServerCacheDocument(
+    owner: FeaturedCacheIdentityOwner,
+    document: unknown,
+    source: string
+) {
+    assertFeaturedCacheOwnerCurrent(owner);
     const normalizedDocument = normalizeServerDocument(document);
     const previousEntry = memoryCacheEntry;
     const rawDocumentSource = isRecord(document) ? getServerDocumentSource(document) : null;
     const rawFeaturedContent = rawDocumentSource ? getRecordField(rawDocumentSource, 'featuredContent', 'FeaturedContent') : undefined;
     const detectedVersion = getCacheEntryVersion(rawFeaturedContent);
     const nextEntry = parseCacheEntryValue(normalizedDocument.featuredContent);
+    // Hydration also receives ordinary new responses. Rejected replacements must
+    // not silently preserve CURRENT merely because their old content survives.
+    observeConfiguredRowAuthority(readConfiguredPresentationAuthority(nextEntry?.payload));
     const nextPayloadSummary = nextEntry ? summarizeFeaturedContentPayload(nextEntry.payload) : null;
     const rejectionReason = getServerCacheReplacementRejection(nextEntry, previousEntry)
-        || (nextEntry ? null : explainServerDocumentRejection(document, normalizedDocument));
+        || (nextEntry ? null : explainServerDocumentRejection(document));
 
     memoryCacheSettings = parseCacheSettings(normalizedDocument.featuredContentSettings);
     lastServerCacheRawByteSize = getSerializedByteSize(document);
@@ -1107,7 +1295,8 @@ function noteServerReadFailure() {
     recordPtvPluginApiRetryState(serverReadRetryCount, serverReadRetryBackoffMs);
 }
 
-function writeServerDocument(nextDocument: FeaturedServerCacheDocument) {
+function writeServerDocument(owner: FeaturedCacheIdentityOwner, nextDocument: FeaturedServerCacheDocument) {
+    assertFeaturedCacheOwnerCurrent(owner);
     const normalizedDocument: FeaturedServerCacheDocument = {
         ...nextDocument,
         version: SERVER_CACHE_DOCUMENT_VERSION,
@@ -1120,9 +1309,13 @@ function writeServerDocument(nextDocument: FeaturedServerCacheDocument) {
         ...writeSummary,
         payloadSize
     });
-    return writePluginDocument(normalizedDocument)
-        .then(() => readPluginDocument())
+    return writePluginDocument(owner, normalizedDocument)
+        .then(() => {
+            assertFeaturedCacheOwnerCurrent(owner);
+            return readPluginDocument(owner);
+        })
         .then(readbackDocument => {
+            assertFeaturedCacheOwnerCurrent(owner);
             const normalizedReadback = normalizeServerDocument(readbackDocument);
             const readbackSummary = getDocumentPayloadSummary(normalizedReadback);
 
@@ -1150,12 +1343,13 @@ function writeServerDocument(nextDocument: FeaturedServerCacheDocument) {
         });
 }
 
-function clearServerDocument() {
-    return clearPluginDocument()
+function clearServerDocument(owner: FeaturedCacheIdentityOwner) {
+    return clearPluginDocument(owner)
         .then(() => undefined);
 }
 
-function readServerCacheEntry() {
+function readServerCacheEntry(owner: FeaturedCacheIdentityOwner) {
+    assertFeaturedCacheOwnerCurrent(owner);
     if (inflightServerRead) return inflightServerRead;
 
     if (!canReadServerCacheNow()) {
@@ -1174,14 +1368,17 @@ function readServerCacheEntry() {
             lastCacheStorage = 'memory';
         }
 
-        return Promise.resolve(memoryCacheEntry);
+        return resolveForFeaturedCacheOwner(owner, memoryCacheEntry);
     }
 
-    inflightServerRead = timePtvAsync('cache', 'read-server-cache', () => readServerDocument())
+    const serverRead = timePtvAsync('cache', 'read-server-cache', () => readServerDocument(owner))
         .then(document => {
-            return applyServerCacheDocument(document, 'server-read');
+            assertFeaturedCacheOwnerCurrent(owner);
+            return applyServerCacheDocument(owner, document, 'server-read');
         })
         .catch((err: unknown) => {
+            if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
+
             lastCacheWriteError = null;
             lastCacheReadError = getErrorMessage(err);
             noteServerReadFailure();
@@ -1198,14 +1395,22 @@ function readServerCacheEntry() {
             return memoryCacheEntry;
         })
         .finally(() => {
-            inflightServerRead = null;
+            if (isFeaturedCacheOwnerCurrent(owner) && inflightServerRead === serverRead) {
+                inflightServerRead = null;
+            }
         });
 
-    return inflightServerRead;
+    inflightServerRead = serverRead;
+    return serverRead;
 }
 
-export function hydrateFeaturedContentCacheFromDocument(document: unknown, reason = 'manual') {
-    const entry = applyServerCacheDocument(document, `hydrate:${reason}`);
+function hydrateFeaturedContentCacheFromDocument(
+    owner: FeaturedCacheIdentityOwner,
+    document: unknown,
+    reason: string
+) {
+    assertFeaturedCacheOwnerCurrent(owner);
+    const entry = applyServerCacheDocument(owner, document, `hydrate:${reason}`);
 
     recordPtvEvent('cache', 'featured-cache-memory-hydrated', {
         hasCache: Boolean(entry),
@@ -1216,13 +1421,45 @@ export function hydrateFeaturedContentCacheFromDocument(document: unknown, reaso
     return entry;
 }
 
+export function createFeaturedContentCacheDocumentHydrator(reason = 'manual') {
+    let owner: FeaturedCacheIdentityOwner;
+
+    try {
+        owner = requireCurrentFeaturedCacheOwner();
+    } catch {
+        return null;
+    }
+
+    return (document: unknown) => {
+        if (!isFeaturedCacheOwnerCurrent(owner)) return null;
+
+        return hydrateFeaturedContentCacheFromDocument(owner, document, reason);
+    };
+}
+
+export function createFeaturedContentCacheIdentityGuard() {
+    const identityKey = readCurrentFeaturedCacheIdentityKey();
+
+    if (!identityKey) return null;
+
+    return () => identityKey === readCurrentFeaturedCacheIdentityKey();
+}
+
 export function primeFeaturedContentCacheStatus() {
+    let owner: FeaturedCacheIdentityOwner;
+
+    try {
+        owner = requireCurrentFeaturedCacheOwner();
+    } catch {
+        return Promise.resolve(null);
+    }
+
     if (memoryCacheEntry || inflightServerRead) {
         recordPtvEvent('cache', 'status-prime-skipped', {
             hasMemoryCache: Boolean(memoryCacheEntry),
             reason: memoryCacheEntry ? 'memory-cache-present' : 'read-in-flight'
         });
-        return inflightServerRead || Promise.resolve(memoryCacheEntry);
+        return inflightServerRead || resolveForFeaturedCacheOwner(owner, memoryCacheEntry);
     }
 
     if (!getCurrentApiClient() || !canReadServerCacheNow()) {
@@ -1242,9 +1479,9 @@ export function primeFeaturedContentCacheStatus() {
         source: 'startup'
     });
 
-    return readServerCacheEntry()
+    return readServerCacheEntry(owner)
         .then(entry => {
-            dispatchCacheUpdated();
+            if (isFeaturedCacheOwnerCurrent(owner)) dispatchCacheUpdated();
 
             return entry;
         });
@@ -1263,23 +1500,36 @@ function updateMemoryCacheExpiry(ttlMs: number) {
     };
 }
 
-function persistServerState(entry: FeaturedCacheEntry | null) {
-    return timePtvAsync('cache', 'persist-server-cache', () => readServerDocument()
+function persistServerState(owner: FeaturedCacheIdentityOwner, entry: FeaturedCacheEntry | null) {
+    assertFeaturedCacheOwnerCurrent(owner);
+    return timePtvAsync('cache', 'persist-server-cache', () => readServerDocument(owner)
         .catch((err: unknown) => {
+            if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
+
             debugLog('plugin cache read unavailable before write; using default plugin document', err);
 
             return getDefaultServerDocument();
         })
-        .then(document => writeServerDocument({
-            ...document,
-            featuredContent: entry,
-            featuredContentSettings: memoryCacheSettings
-        })));
+        .then(document => {
+            assertFeaturedCacheOwnerCurrent(owner);
+            return writeServerDocument(owner, {
+                ...document,
+                featuredContent: entry,
+                featuredContentSettings: memoryCacheSettings
+            });
+        }));
 }
 
 export function setFeaturedContentCacheTtlMs(ttlMs: number, options: { persist?: boolean } = {}) {
     const normalizedTtlMs = clampTtlMs(ttlMs);
     const shouldPersist = options.persist !== false;
+    let owner: FeaturedCacheIdentityOwner;
+
+    try {
+        owner = requireCurrentFeaturedCacheOwner();
+    } catch {
+        return normalizedTtlMs;
+    }
 
     memoryCacheSettings = {
         ttlMs: normalizedTtlMs
@@ -1287,14 +1537,16 @@ export function setFeaturedContentCacheTtlMs(ttlMs: number, options: { persist?:
     updateMemoryCacheExpiry(normalizedTtlMs);
 
     if (shouldPersist) {
-        void persistServerState(memoryCacheEntry)
+        void persistServerState(owner, memoryCacheEntry)
             .then(() => {
+                if (!isFeaturedCacheOwnerCurrent(owner)) return;
                 lastCacheStorage = memoryCacheEntry ? getSuccessfulServerStorage() : lastCacheStorage;
                 lastCacheWriteError = null;
                 debugLog('updated server refresh interval', { ttlMs: normalizedTtlMs });
                 dispatchCacheUpdated();
             })
             .catch((err: unknown) => {
+                if (!isFeaturedCacheOwnerCurrent(owner)) return;
                 lastCacheWriteError = getErrorMessage(err);
                 lastCacheStorage = memoryCacheEntry ? 'memory' : lastCacheStorage;
                 debugLog('failed to store server refresh interval', err);
@@ -1310,9 +1562,13 @@ export function setFeaturedContentCacheTtlMs(ttlMs: number, options: { persist?:
     return normalizedTtlMs;
 }
 
-function writeCacheEntry(payload: FeaturedPayload) {
+function writeCacheEntry(owner: FeaturedCacheIdentityOwner, payload: FeaturedPayload) {
+    assertFeaturedCacheOwnerCurrent(owner);
     const createdAt = Date.now();
     const compactPayloadValue = compactPayload(payload);
+    // A mixed-generation merge intentionally has no proof. Publication cannot
+    // retain configured CURRENT from either input, nor can it grant new CURRENT.
+    observeConfiguredRowAuthority(readConfiguredPresentationAuthority(compactPayloadValue));
     const semanticSummary = summarizeFeaturedContentPayload(compactPayloadValue);
 
     if (!semanticSummary.usableForPersistence) {
@@ -1343,8 +1599,9 @@ function writeCacheEntry(payload: FeaturedPayload) {
         payloadSize
     });
 
-    return persistServerState(entry)
+    return persistServerState(owner, entry)
         .then(() => {
+            assertFeaturedCacheOwnerCurrent(owner);
             lastCacheStorage = getSuccessfulServerStorage();
             lastCacheWriteError = null;
             debugLog('stored fresh payload on server', {
@@ -1371,6 +1628,8 @@ function writeCacheEntry(payload: FeaturedPayload) {
             return entry;
         })
         .catch((err: unknown) => {
+            if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
+
             lastCacheStorage = 'memory';
             lastCacheWriteError = getErrorMessage(err);
             recordPtvEvent('cache', 'error', {
@@ -1402,16 +1661,20 @@ function dispatchCacheUpdated() {
 }
 
 function refreshFeaturedContent(
+    owner: FeaturedCacheIdentityOwner,
     fetcher: () => Promise<FeaturedPayload>,
     fallbackPayload?: FeaturedPayload,
     notifyOnSuccess = false
 ) {
+    assertFeaturedCacheOwnerCurrent(owner);
     const startedAt = performance.now();
 
     lastRefreshError = null;
 
-    inflightFeaturedContent = timePtvAsync('cache', 'refresh-featured-content', fetcher)
+    const refreshRequest = timePtvAsync('cache', 'refresh-featured-content', fetcher)
         .then(payload => {
+            assertFeaturedCacheOwnerCurrent(owner);
+            observeConfiguredRowAuthority(readConfiguredPresentationAuthority(payload));
             const refreshSummary = summarizeFeaturedContentPayload(payload);
 
             if (!refreshSummary.usableForPersistence) {
@@ -1424,8 +1687,9 @@ function refreshFeaturedContent(
 
             const normalizedPayload = mergePayload(payload, fallbackPayload);
 
-            return writeCacheEntry(normalizedPayload)
+            return writeCacheEntry(owner, normalizedPayload)
                 .then(entry => {
+                    assertFeaturedCacheOwnerCurrent(owner);
                     lastRefreshDurationMs = Math.round(performance.now() - startedAt);
                     lastRefreshError = null;
 
@@ -1437,6 +1701,9 @@ function refreshFeaturedContent(
                 });
         })
         .catch((err: unknown) => {
+            if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
+
+            observeConfiguredRowAuthority(null);
             if (fallbackPayload) {
                 recordPtvEvent('cache', 'error', {
                     error: getErrorMessage(err),
@@ -1458,27 +1725,45 @@ function refreshFeaturedContent(
             throw err;
         })
         .finally(() => {
-            inflightFeaturedContent = null;
+            if (isFeaturedCacheOwnerCurrent(owner) && inflightFeaturedContent === refreshRequest) {
+                inflightFeaturedContent = null;
+            }
         });
 
-    return inflightFeaturedContent;
+    inflightFeaturedContent = refreshRequest;
+    return refreshRequest;
 }
 
 export function isFeaturedContentCacheFresh() {
+    try {
+        requireCurrentFeaturedCacheOwner();
+    } catch {
+        return false;
+    }
+
     return Boolean(memoryCacheEntry && Date.now() < memoryCacheEntry.expiresAt);
 }
 
 export function getCachedFeaturedContentPayload(options: { allowStale?: boolean } = {}): Promise<FeaturedPayload | null> {
+    let owner: FeaturedCacheIdentityOwner;
+
+    try {
+        owner = requireCurrentFeaturedCacheOwner();
+    } catch {
+        return Promise.resolve(null);
+    }
+
     if (memoryCacheEntry && (options.allowStale || Date.now() < memoryCacheEntry.expiresAt)) {
         recordPtvEvent('cache', Date.now() < memoryCacheEntry.expiresAt ? 'hit' : 'stale-hit', {
             source: 'native-home-memory'
         });
 
-        return Promise.resolve(memoryCacheEntry.payload);
+        return resolveForFeaturedCacheOwner(owner, memoryCacheEntry.payload);
     }
 
-    return readServerCacheEntry()
+    return readServerCacheEntry(owner)
         .then(cached => {
+            assertFeaturedCacheOwnerCurrent(owner);
             if (!cached) return null;
             if (!options.allowStale && Date.now() >= cached.expiresAt) return null;
 
@@ -1492,19 +1777,43 @@ export function getCachedFeaturedContentPayload(options: { allowStale?: boolean 
 }
 
 export function clearFeaturedContentCache() {
+    let owner: FeaturedCacheIdentityOwner;
+
+    try {
+        owner = requireCurrentFeaturedCacheOwner();
+    } catch {
+        retireActiveFeaturedCacheIdentity();
+        dispatchCacheUpdated();
+        return;
+    }
+
+    const identityKey = owner.key;
+
+    retireConfiguredRowFreshness('featured-cache-cleared');
+    featuredCacheIdentityGeneration += 1;
     inflightFeaturedContent = null;
+    inflightServerRead = null;
+    inflightPluginStatus = null;
     memoryCacheEntry = null;
+    nextServerReadAllowedAt = 0;
     lastCacheWriteError = null;
     lastRefreshError = null;
+    activeFeaturedCacheIdentityKey = identityKey;
+    owner = Object.freeze({
+        generation: featuredCacheIdentityGeneration,
+        key: identityKey
+    });
 
-    void clearServerDocument()
+    void clearServerDocument(owner)
         .then(() => {
+            if (!isFeaturedCacheOwnerCurrent(owner)) return;
             lastCacheStorage = null;
             debugLog('cleared server cache');
             ptvLogger.info('Featured content server cache cleared', undefined, 'FeaturedCache');
             dispatchCacheUpdated();
         })
         .catch((err: unknown) => {
+            if (!isFeaturedCacheOwnerCurrent(owner)) return;
             lastCacheStorage = null;
             lastCacheWriteError = getErrorMessage(err);
             debugLog('failed to clear server cache', err);
@@ -1515,11 +1824,31 @@ export function clearFeaturedContentCache() {
 }
 
 export function invalidateFeaturedContentMemoryCache(reason = 'manual') {
-    inflightFeaturedContent = null;
-    inflightServerRead = null;
-    memoryCacheEntry = null;
-    nextServerReadAllowedAt = 0;
-    lastCacheReadError = null;
+    if (reason === 'identity-retired') {
+        retireActiveFeaturedCacheIdentity();
+    } else {
+        let owner: FeaturedCacheIdentityOwner;
+
+        try {
+            owner = requireCurrentFeaturedCacheOwner();
+        } catch {
+            retireActiveFeaturedCacheIdentity();
+            dispatchCacheUpdated();
+            return;
+        }
+
+        retireConfiguredRowFreshness(`featured-cache-invalidated:${reason}`);
+        featuredCacheIdentityGeneration += 1;
+        const identityKey = owner.key;
+
+        inflightFeaturedContent = null;
+        inflightServerRead = null;
+        inflightPluginStatus = null;
+        memoryCacheEntry = null;
+        nextServerReadAllowedAt = 0;
+        lastCacheReadError = null;
+        activeFeaturedCacheIdentityKey = identityKey;
+    }
 
     recordPtvEvent('cache', 'featured-cache-memory-invalidated', {
         reason
@@ -1529,12 +1858,20 @@ export function invalidateFeaturedContentMemoryCache(reason = 'manual') {
 }
 
 export function getFeaturedContentCacheStatus(options: { prime?: boolean } = {}) {
+    let hasIdentity = true;
+
+    try {
+        requireCurrentFeaturedCacheOwner();
+    } catch {
+        hasIdentity = false;
+    }
+
     const cached = memoryCacheEntry;
     const now = Date.now();
     const rowSourceSummary = getPayloadRowSourceSummary(cached?.payload);
     const semanticSummary = cached ? summarizeFeaturedContentPayload(cached.payload) : lastServerCachePayloadSummary;
 
-    if (options.prime !== false && !cached && !inflightServerRead && canReadServerCacheNow()) {
+    if (hasIdentity && options.prime !== false && !cached && !inflightServerRead && canReadServerCacheNow()) {
         void primeFeaturedContentCacheStatus();
     }
 
@@ -1574,15 +1911,25 @@ export function getFeaturedContentCacheStatus(options: { prime?: boolean } = {})
         lastRefreshError,
         retryBackoffMs: serverReadRetryBackoffMs,
         retryCount: serverReadRetryCount,
+        retainedIdentityCount: activeFeaturedCacheIdentityKey ? 1 : 0,
         ttlMs: getFeaturedContentCacheTtlMs()
     };
 }
 
 export function forceRefreshFeaturedContentCache(fetcher?: () => Promise<FeaturedPayload>) {
+    let owner: FeaturedCacheIdentityOwner;
+
+    try {
+        owner = requireCurrentFeaturedCacheOwner();
+    } catch {
+        return Promise.reject(createFeaturedCacheIdentityError());
+    }
+
     const activeFetcher = fetcher || lastFeaturedContentFetcher;
 
-    return readServerCacheEntry()
+    return readServerCacheEntry(owner)
         .then(cached => {
+            assertFeaturedCacheOwnerCurrent(owner);
             if (!activeFetcher) {
                 clearFeaturedContentCache();
                 debugLog('force refresh requested without active fetcher');
@@ -1600,11 +1947,16 @@ export function forceRefreshFeaturedContentCache(fetcher?: () => Promise<Feature
             debugLog('force refresh started');
             ptvLogger.info('Featured content cache force refresh started', undefined, 'FeaturedCache');
 
-            return refreshFeaturedContent(activeFetcher, cached?.payload, true);
+            return refreshFeaturedContent(owner, activeFetcher, cached?.payload, true);
         });
 }
 
-function resolveCachedFeaturedContent(cached: FeaturedCacheEntry | null, fetcher: () => Promise<FeaturedPayload>) {
+function resolveCachedFeaturedContent(
+    owner: FeaturedCacheIdentityOwner,
+    cached: FeaturedCacheEntry | null,
+    fetcher: () => Promise<FeaturedPayload>
+) {
+    assertFeaturedCacheOwnerCurrent(owner);
     if (cached && Date.now() < cached.expiresAt) {
         recordPtvEvent('cache', 'hit', {
             heroItems: cached.payload.heroItems.length,
@@ -1616,7 +1968,7 @@ function resolveCachedFeaturedContent(cached: FeaturedCacheEntry | null, fetcher
             sections: Object.keys(cached.payload.sectionItems).length
         });
 
-        return Promise.resolve(cached.payload);
+        return resolveForFeaturedCacheOwner(owner, cached.payload);
     }
 
     if (cached) {
@@ -1631,10 +1983,10 @@ function resolveCachedFeaturedContent(cached: FeaturedCacheEntry | null, fetcher
         });
 
         if (!inflightFeaturedContent) {
-            void refreshFeaturedContent(fetcher, cached.payload, true);
+            void refreshFeaturedContent(owner, fetcher, cached.payload, true);
         }
 
-        return Promise.resolve(cached.payload);
+        return resolveForFeaturedCacheOwner(owner, cached.payload);
     }
 
     if (inflightFeaturedContent) {
@@ -1649,24 +2001,56 @@ function resolveCachedFeaturedContent(cached: FeaturedCacheEntry | null, fetcher
     recordPtvEvent('cache', 'miss', {
         storage: lastCacheStorage
     });
-    return refreshFeaturedContent(fetcher);
+    return refreshFeaturedContent(owner, fetcher);
 }
 
 export function getFeaturedContent(fetcher: () => Promise<FeaturedPayload>): Promise<FeaturedPayload> {
-    lastFeaturedContentFetcher = fetcher;
+    let owner: FeaturedCacheIdentityOwner;
 
-    if (memoryCacheEntry && Date.now() < memoryCacheEntry.expiresAt) {
-        recordPtvEvent('cache', 'hit', {
-            source: 'memory'
-        });
-        return Promise.resolve(memoryCacheEntry.payload);
+    try {
+        owner = requireCurrentFeaturedCacheOwner();
+    } catch {
+        return Promise.reject(createFeaturedCacheIdentityError());
     }
 
-    return readServerCacheEntry()
-        .then(cached => resolveCachedFeaturedContent(cached, fetcher));
+    lastFeaturedContentFetcher = fetcher;
+
+    if (memoryCacheEntry) {
+        const isFresh = Date.now() < memoryCacheEntry.expiresAt;
+
+        recordPtvEvent('cache', isFresh ? 'hit' : 'stale-hit', {
+            source: 'memory'
+        });
+
+        if (!isFresh && !inflightFeaturedContent) {
+            void refreshFeaturedContent(owner, fetcher, memoryCacheEntry.payload, true);
+        }
+
+        return resolveForFeaturedCacheOwner(owner, memoryCacheEntry.payload);
+    }
+
+    return readServerCacheEntry(owner)
+        .then(cached => resolveCachedFeaturedContent(owner, cached, fetcher));
 }
 
 registerPtvDebugCacheStatusProvider(getFeaturedContentCacheStatus);
+
+function handleFeaturedCacheSignedIn() {
+    const currentIdentityKey = readCurrentFeaturedCacheIdentityKey();
+
+    if (currentIdentityKey && currentIdentityKey === activeFeaturedCacheIdentityKey) return;
+
+    retireActiveFeaturedCacheIdentity();
+    dispatchCacheUpdated();
+}
+
+function handleFeaturedCacheSignedOut() {
+    retireActiveFeaturedCacheIdentity();
+    dispatchCacheUpdated();
+}
+
+Events.on(ServerConnections, 'localusersignedin', handleFeaturedCacheSignedIn);
+Events.on(ServerConnections, 'localusersignedout', handleFeaturedCacheSignedOut);
 
 function scheduleInitialCachePrime() {
     if (initialCachePrimeScheduled) return;
@@ -1674,6 +2058,12 @@ function scheduleInitialCachePrime() {
     initialCachePrimeScheduled = true;
     FEATURED_CACHE_PRIME_DELAYS.forEach(delay => {
         featuredCacheScope.timeout(() => {
+            try {
+                requireCurrentFeaturedCacheOwner();
+            } catch {
+                return;
+            }
+
             if (memoryCacheEntry) return;
 
             void primeFeaturedContentCacheStatus();

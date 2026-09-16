@@ -6,6 +6,7 @@ import { ApiClient } from 'jellyfin-apiclient';
 import events from 'utils/events';
 import { ajax } from 'utils/fetch';
 import { equalsIgnoreCase } from 'utils/string';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 
 import { ConnectionMode } from './connectionMode';
 import { ConnectionState } from './connectionState';
@@ -55,7 +56,7 @@ function sortByAccess(a, b) {
 
 export default class ConnectionManager {
     constructor(credentialProvider, appName, appVersion, deviceName, deviceId, capabilities) {
-        console.log('Begin ConnectionManager constructor');
+        ptvSafeConsole.log('Begin ConnectionManager constructor');
 
         const self = this;
         this._apiClients = [];
@@ -128,7 +129,7 @@ export default class ConnectionManager {
         };
 
         self.clearData = () => {
-            console.log('connection manager clearing data');
+            ptvSafeConsole.log('connection manager clearing data');
 
             const credentials = credentialProvider.credentials();
             credentials.Servers = [];
@@ -152,7 +153,7 @@ export default class ConnectionManager {
                 events.trigger(self, 'apiclientcreated', [apiClient]);
             }
 
-            console.log('returning instance from getOrAddApiClient');
+            ptvSafeConsole.log('returning instance from getOrAddApiClient');
             return apiClient;
         };
 
@@ -208,7 +209,7 @@ export default class ConnectionManager {
             apiClient.enableAutomaticBitrateDetection = options.enableAutomaticBitrateDetection;
 
             if (options.enableWebSocket !== false) {
-                console.log('calling apiClient.ensureWebSocket');
+                ptvSafeConsole.log('calling apiClient.ensureWebSocket');
 
                 apiClient.ensureWebSocket();
             }
@@ -329,6 +330,26 @@ export default class ConnectionManager {
             });
         };
 
+        function settleRemoteLogout(apiClient) {
+            return new Promise((resolve) => {
+                let settled = false;
+                const finish = () => {
+                    if (settled) {
+                        return;
+                    }
+
+                    settled = true;
+                    clearTimeout(timeoutId);
+                    resolve();
+                };
+                const timeoutId = setTimeout(finish, 10000);
+
+                Promise.resolve()
+                    .then(() => apiClient.logout())
+                    .then(finish, finish);
+            });
+        }
+
         function logoutOfServer(apiClient) {
             const serverInfo = apiClient.serverInfo() || {};
 
@@ -336,14 +357,9 @@ export default class ConnectionManager {
                 serverId: serverInfo.Id
             };
 
-            return apiClient.logout().then(
-                () => {
-                    events.trigger(self, 'localusersignedout', [logoutInfo]);
-                },
-                () => {
-                    events.trigger(self, 'localusersignedout', [logoutInfo]);
-                }
-            );
+            return settleRemoteLogout(apiClient).then(() => {
+                events.trigger(self, 'localusersignedout', [logoutInfo]);
+            });
         }
 
         self.getSavedServers = () => {
@@ -357,7 +373,7 @@ export default class ConnectionManager {
         };
 
         self.getAvailableServers = () => {
-            console.debug('[ConnectionManager] Begin getAvailableServers');
+            ptvSafeConsole.debug('[ConnectionManager] Begin getAvailableServers');
 
             // Clone the array
             const credentials = credentialProvider.credentials();
@@ -422,13 +438,13 @@ export default class ConnectionManager {
         }
 
         self.connectToServers = (servers, options) => {
-            console.log(`Begin connectToServers, with ${servers.length} servers`);
+            ptvSafeConsole.log(`Begin connectToServers, with ${servers.length} servers`);
 
             const firstServer = servers.length ? servers[0] : null;
             // See if we have any saved credentials and can auto sign in
             if (firstServer) {
                 return self.connectToServer(firstServer, options).then((result) => {
-                    console.log('resolving connectToServers with result.State: ' + result.State);
+                    ptvSafeConsole.log('resolving connectToServers with result.State: ' + result.State);
                     return result;
                 });
             }
@@ -440,7 +456,7 @@ export default class ConnectionManager {
         };
 
         function getTryConnectPromise(url, connectionMode, state, resolve, reject) {
-            console.log('getTryConnectPromise ' + url);
+            ptvSafeConsole.log('getTryConnectPromise', url);
 
             ajax({
                 url: `${url}/System/Info/Public`,
@@ -452,7 +468,7 @@ export default class ConnectionManager {
                     if (!state.resolved) {
                         state.resolved = true;
 
-                        console.log('Reconnect succeeded to ' + url);
+                        ptvSafeConsole.log('Reconnect succeeded', url);
                         resolve({
                             url: url,
                             connectionMode: connectionMode,
@@ -461,7 +477,7 @@ export default class ConnectionManager {
                     }
                 },
                 () => {
-                    console.log('Reconnect failed to ' + url);
+                    ptvSafeConsole.log('Reconnect failed', url);
 
                     if (!state.resolved) {
                         state.rejects++;
@@ -513,7 +529,7 @@ export default class ConnectionManager {
                 addressesStrings.push(addresses[addresses.length - 1].url);
             }
 
-            console.info('[ConnectionManager] tryReconnect addresses', addressesStrings);
+            ptvSafeConsole.info('[ConnectionManager] tryReconnect addresses', addressesStrings);
 
             return new Promise((resolve, reject) => {
                 const state = {};
@@ -531,7 +547,7 @@ export default class ConnectionManager {
         };
 
         self.connectToServer = (server, options) => {
-            console.debug('[ConnectionManager] begin connectToServer');
+            ptvSafeConsole.debug('[ConnectionManager] begin connectToServer');
 
             return new Promise((resolve) => {
                 options = options || {};
@@ -543,13 +559,13 @@ export default class ConnectionManager {
                         result = result.data;
 
                         if (compareVersions(self.minServerVersion(), result.Version) === 1) {
-                            console.warn('[ConnectionManager] minServerVersion requirement not met. Server version:', result.Version);
+                            ptvSafeConsole.warn('[ConnectionManager] minServerVersion requirement not met. Server version:', result.Version);
                             resolve({
                                 State: ConnectionState.ServerUpdateNeeded,
                                 Servers: [server]
                             });
                         } else if (server.Id && result.Id !== server.Id) {
-                            console.warn(
+                            ptvSafeConsole.warn(
                                 '[ConnectionManager] http request succeeded, but found a different server Id than what was expected'
                             );
                             resolve({
@@ -676,7 +692,7 @@ export default class ConnectionManager {
             let i = 0;
 
             function onFail() {
-                console.log(`connectToAddress ${urls[i]} failed`);
+                ptvSafeConsole.log('connectToAddress failed', urls[i]);
 
                 if (++i < urls.length) {
                     return tryConnectToAddress(urls[i], options).catch(onFail);
@@ -716,7 +732,7 @@ export default class ConnectionManager {
     }
 
     connect(options) {
-        console.log('Begin connect');
+        ptvSafeConsole.log('Begin connect');
 
         return this.getAvailableServers().then((servers) => {
             return this.connectToServers(servers, options);
@@ -732,7 +748,7 @@ export default class ConnectionManager {
                     try {
                         msg.Data = JSON.parse(msg.Data);
                     } catch (err) {
-                        console.log('unable to parse json content: ' + err);
+                        ptvSafeConsole.log('unable to parse json content', err);
                     }
                 }
 

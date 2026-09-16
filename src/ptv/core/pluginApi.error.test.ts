@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('lib/jellyfin-apiclient', () => ({
     ServerConnections: {
@@ -6,7 +6,18 @@ vi.mock('lib/jellyfin-apiclient', () => ({
     }
 }));
 
-import { normalizePtvApiError } from './pluginApi';
+import {
+    getCurrentPtvPluginApiClient,
+    isPtvPluginApiCoolingDown,
+    normalizePtvApiError,
+    resetPtvPluginApiAvailability
+} from './pluginApi';
+
+afterEach(() => {
+    (window as unknown as Record<string, unknown>)['PTV_DEBUG'] = false;
+    resetPtvPluginApiAvailability();
+    vi.restoreAllMocks();
+});
 
 describe('normalizePtvApiError', () => {
     it('classifies HTTP 500 as a plugin server error and sanitizes its response body', () => {
@@ -22,7 +33,7 @@ describe('normalizePtvApiError', () => {
             message: 'Plugin server error: endpoint returned HTTP 500',
             status: 500
         });
-        expect(result.responseBody).toContain('[redacted]');
+        expect(result.responseBody).toContain('[REDACTED]');
         expect(result.responseBody).not.toContain(sampleCredential);
     });
 
@@ -32,5 +43,86 @@ describe('normalizePtvApiError', () => {
             message: 'Network failure: endpoint unreachable',
             status: undefined
         });
+    });
+
+    it('redacts credentials from raw error messages', () => {
+        const credential = [ 'private', 'plugin', 'credential' ].join('-');
+        const result = normalizePtvApiError(new Error(
+            `Plugin rejected password=${credential} token=${credential}`
+        ));
+
+        expect(result.message).toContain('[REDACTED]');
+        expect(result.message).not.toContain(credential);
+    });
+
+    it('structurally redacts provider credentials from response objects', () => {
+        const credential = [ 'private', 'provider', 'credential' ].join('-');
+        const result = normalizePtvApiError({
+            data: {
+                accessKey: credential,
+                certificatePassword: credential,
+                nested: {
+                    openAiApiKey: credential
+                }
+            },
+            message: 'Plugin request failed',
+            status: 500
+        });
+
+        expect(result.responseBody).toContain('[REDACTED]');
+        expect(result.responseBody).not.toContain(credential);
+    });
+
+    it('logs only a safe error projection when plugin probing is disabled', async () => {
+        const credential = [ 'private', 'transport', 'credential' ].join('-');
+        const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        (window as unknown as Record<string, unknown>)['PTV_DEBUG'] = true;
+        resetPtvPluginApiAvailability();
+        const failure = Object.assign(
+            new Error(`Request failed token=${credential}`),
+            {
+                config: { headers: { Authorization: `Bearer ${credential}` } },
+                status: 500
+            }
+        );
+        const client = {
+            accessToken: () => credential,
+            getCurrentUserId: () => 'admin-user',
+            getJSON: vi.fn().mockRejectedValue(failure),
+            getUrl: (path: string) => `https://private-server.example/${path}`
+        };
+
+        await expect(getCurrentPtvPluginApiClient(client)!.getStatus({ bypassCache: true }))
+            .rejects.toBe(failure);
+
+        const serialized = JSON.stringify(debug.mock.calls);
+        expect(serialized).not.toContain(credential);
+        expect(serialized).not.toContain('Authorization');
+        expect(debug).toHaveBeenCalledWith(
+            '[PTV Plugin API] temporarily disabled plugin endpoint probing',
+            expect.objectContaining({ errorCategory: 'server', status: 500 })
+        );
+    });
+
+    it('does not put unrelated Plugin APIs into cooldown when optional Calendar availability fails', async () => {
+        const failure = Object.assign(new Error('Calendar availability failed'), { status: 500 });
+        const getJSON = vi.fn((url: string) => (
+            url.includes('integrations/calendar-availability') ?
+                Promise.reject(failure) :
+                Promise.resolve({ ok: true })
+        ));
+        const client = {
+            accessToken: () => [ 'authenticated', 'token' ].join('-'),
+            getCurrentUserId: () => 'user-a',
+            getJSON,
+            getUrl: (path: string) => `https://private-server.example/${path}`,
+            serverId: () => 'server-a'
+        };
+        const pluginApi = getCurrentPtvPluginApiClient(client)!;
+
+        await expect(pluginApi.getArrCalendarAvailability({ bypassCache: true })).rejects.toBe(failure);
+        expect(isPtvPluginApiCoolingDown()).toBe(false);
+        await expect(pluginApi.getTags()).resolves.toEqual({ ok: true });
+        expect(getJSON.mock.calls.some(([url]) => String(url).includes('/Ptv/v1/tags'))).toBe(true);
     });
 });

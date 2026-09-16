@@ -127,4 +127,14 @@ describe('UserSettings serialized persistence', () => {
 
         expect(settings.getData().CustomPrefs.owner).toBe('user-b');
     });
+
+    it('enables theme songs by default while preserving an explicit opt-out', () => {
+        const settings = new UserSettings();
+
+        appSettingsMocks.get.mockReturnValueOnce(undefined);
+        expect(settings.enableThemeSongs()).toBe(true);
+
+        appSettingsMocks.get.mockReturnValueOnce('false');
+        expect(settings.enableThemeSongs()).toBe(false);
+    });
 });

@@ -2,13 +2,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dashboardMocks = vi.hoisted(() => ({
     logout: vi.fn<() => Promise<void>>(),
+    switchUser: vi.fn<() => Promise<void>>(),
     retireMusicIdentity: vi.fn()
 }));
 
 vi.mock('../../utils/dashboard', () => ({
     default: {
         logout: dashboardMocks.logout
+        ,
+        switchUser: dashboardMocks.switchUser
     }
+}));
+
+vi.mock('../api', () => ({
+    getPtvCurrentUserId: () => 'user-a',
+    getPtvServerId: () => 'server-a'
+}));
+
+vi.mock('../modules/recommendations/engine/recommendationEngine', () => ({
+    invalidatePtvRecommendationCache: vi.fn()
+}));
+
+vi.mock('../pages/home/hooks', () => ({
+    retireNativeHomeIdentityState: vi.fn()
+}));
+
+vi.mock('../modules/cache/featuredContentCache', () => ({
+    invalidateFeaturedContentMemoryCache: vi.fn()
 }));
 
 vi.mock('../modules/music/musicQueue', () => ({
@@ -17,7 +37,8 @@ vi.mock('../modules/music/musicQueue', () => ({
 
 import {
     isJellyfinLogoutInFlight,
-    requestJellyfinLogout
+    requestJellyfinLogout,
+    requestJellyfinUserSwitch
 } from './jellyfinLogoutAction';
 
 function deferred<T>() {
@@ -34,6 +55,7 @@ function deferred<T>() {
 describe('PTV Jellyfin logout action adapter', () => {
     beforeEach(() => {
         dashboardMocks.logout.mockReset();
+        dashboardMocks.switchUser.mockReset();
         dashboardMocks.retireMusicIdentity.mockReset();
     });
 
@@ -43,6 +65,17 @@ describe('PTV Jellyfin logout action adapter', () => {
         await requestJellyfinLogout();
 
         expect(dashboardMocks.logout).toHaveBeenCalledTimes(1);
+        expect(dashboardMocks.retireMusicIdentity).toHaveBeenCalledWith('logout');
+        expect(isJellyfinLogoutInFlight()).toBe(false);
+    });
+
+    it('switches users through the same Jellyfin logout owner and preserves the current server destination', async () => {
+        dashboardMocks.switchUser.mockResolvedValue(undefined);
+
+        await requestJellyfinUserSwitch();
+
+        expect(dashboardMocks.switchUser).toHaveBeenCalledTimes(1);
+        expect(dashboardMocks.logout).not.toHaveBeenCalled();
         expect(dashboardMocks.retireMusicIdentity).toHaveBeenCalledWith('logout');
         expect(isJellyfinLogoutInFlight()).toBe(false);
     });

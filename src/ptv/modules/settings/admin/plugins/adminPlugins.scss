@@ -1,0 +1,946 @@
+/* Native PiggieTV plugin administration. */
+/* stylelint-disable no-descending-specificity -- Component/state rules are grouped by responsibility. */
+
+.ptv-admin-plugins {
+    --ptv-admin-plugin-success: var(--ptv-state-success-text, #8ee8b5);
+    --ptv-admin-plugin-success-border: var(--ptv-state-success-border, rgba(142, 232, 181, 0.34));
+    --ptv-admin-plugin-success-surface: var(--ptv-state-success-bg, rgba(21, 82, 52, 0.24));
+    --ptv-admin-plugin-warning: var(--ptv-state-warning-text, #f2c878);
+    --ptv-admin-plugin-warning-border: var(--ptv-state-warning-border, rgba(242, 200, 120, 0.34));
+    --ptv-admin-plugin-warning-surface: var(--ptv-state-warning-bg, rgba(92, 63, 18, 0.25));
+    --ptv-admin-plugin-info: var(--ptv-state-info-text, #b9c9ff);
+    --ptv-admin-plugin-info-border: var(--ptv-state-info-border, rgba(185, 201, 255, 0.3));
+    --ptv-admin-plugin-info-surface: var(--ptv-state-info-bg, rgba(51, 70, 130, 0.22));
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-admin-plugins-header {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.ptv-admin-plugins-header h1,
+.ptv-admin-plugin-detail-header h1 {
+    margin: 0;
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(1.55rem, 2.4vw, 2.15rem);
+    line-height: 1.08;
+}
+
+.ptv-admin-plugins-header p,
+.ptv-admin-plugin-detail-header p {
+    max-width: 70ch;
+    margin: 7px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.86rem;
+    line-height: 1.55;
+}
+
+.ptv-admin-plugins button,
+.ptv-admin-plugins a.ptv-admin-plugin-button,
+.ptv-admin-plugin-card-actions a,
+.ptv-admin-plugin-config-links a,
+.ptv-admin-plugin-detail-back {
+    display: inline-flex;
+    min-height: var(--ptv-touch-target-min, 44px);
+    box-sizing: border-box;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 8px 14px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-soft);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    font: inherit;
+    font-size: 0.76rem;
+    font-weight: 810;
+    line-height: 1.15;
+    text-align: center;
+    text-decoration: none;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-plugins button:hover:not(:disabled),
+.ptv-admin-plugins button:focus-visible,
+.ptv-admin-plugins a.ptv-admin-plugin-button:hover,
+.ptv-admin-plugins a.ptv-admin-plugin-button:focus-visible,
+.ptv-admin-plugin-card-actions a:hover,
+.ptv-admin-plugin-card-actions a:focus-visible,
+.ptv-admin-plugin-config-links a:hover,
+.ptv-admin-plugin-config-links a:focus-visible,
+.ptv-admin-plugin-detail-back:hover,
+.ptv-admin-plugin-detail-back:focus-visible {
+    border-color: var(--ptv-state-hover-border);
+    color: var(--ptv-state-hover-text);
+    background: var(--ptv-state-hover);
+    box-shadow: var(--ptv-state-hover-shadow);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+.ptv-admin-plugins button:disabled {
+    cursor: var(--ptv-state-disabled-cursor);
+    opacity: var(--ptv-state-disabled-opacity);
+}
+
+.ptv-admin-plugins button.is-primary,
+.ptv-admin-plugin-card-actions button.is-primary {
+    border-color: var(--ptv-state-selected-border);
+    color: var(--ptv-state-selected-text);
+    background: var(--ptv-state-selected);
+    box-shadow: var(--ptv-state-selected-shadow);
+}
+
+.ptv-admin-plugins button.is-danger,
+.ptv-admin-plugin-card-actions button.is-danger,
+.ptv-admin-plugin-repository-actions button.is-danger {
+    border-color: var(--ptv-state-danger-border);
+    color: var(--ptv-state-danger-text);
+    background: var(--ptv-state-danger);
+}
+
+.ptv-admin-plugin-tabs {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    box-sizing: border-box;
+    padding: 4px;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: 15px;
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    scrollbar-width: thin;
+}
+
+.ptv-admin-plugin-tabs a {
+    display: inline-flex;
+    flex: 0 0 auto;
+    min-height: var(--ptv-touch-target-min, 44px);
+    align-items: center;
+    justify-content: center;
+    padding: 0 20px;
+    border: 1px solid transparent;
+    border-radius: 11px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.8rem;
+    font-weight: 820;
+    text-decoration: none;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-plugin-tabs a[aria-selected='true'] {
+    border-color: var(--ptv-state-selected-border);
+    color: var(--ptv-color-text-strong);
+    background: var(--ptv-state-selected);
+    box-shadow: var(--ptv-state-selected-shadow);
+}
+
+.ptv-admin-plugin-tabs a:hover,
+.ptv-admin-plugin-tabs a:focus-visible {
+    color: var(--ptv-state-hover-text);
+    background: var(--ptv-state-hover);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: -2px;
+}
+
+.ptv-admin-plugin-panel {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+
+.ptv-admin-plugin-toolbar {
+    display: grid;
+    grid-template-columns: minmax(210px, 1fr) auto minmax(140px, auto) auto;
+    gap: 12px;
+    min-width: 0;
+    align-items: center;
+    padding: 12px;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 18px);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+}
+
+.ptv-admin-plugin-search {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 9px;
+    padding: 0 12px;
+    border: 1px solid var(--ptv-border-field);
+    border-radius: var(--ptv-radius-field, 12px);
+    background: var(--ptv-component-field-bg);
+}
+
+.ptv-admin-plugin-search:focus-within {
+    border-color: var(--ptv-state-focus-border);
+    box-shadow: var(--ptv-state-focus);
+}
+
+.ptv-admin-plugin-search input {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--ptv-touch-target-min, 44px);
+    padding: 0;
+    border: 0;
+    color: var(--ptv-color-text-soft);
+    background: transparent;
+    font: inherit;
+    outline: 0;
+}
+
+.ptv-admin-plugin-filter-group {
+    display: flex;
+    min-width: 0;
+    overflow-x: auto;
+    gap: 6px;
+    scrollbar-width: thin;
+}
+
+.ptv-admin-plugin-filter-group button {
+    min-width: max-content;
+    min-height: 38px;
+    padding: 7px 12px;
+    border-radius: var(--ptv-radius-pill);
+}
+
+.ptv-admin-plugin-filter-group button[aria-pressed='true'] {
+    border-color: var(--ptv-state-selected-border);
+    color: var(--ptv-state-selected-text);
+    background: var(--ptv-state-selected);
+    box-shadow: var(--ptv-state-selected-shadow);
+}
+
+.ptv-admin-plugin-category {
+    display: grid;
+    gap: 4px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.035em;
+    text-transform: uppercase;
+}
+
+.ptv-admin-plugin-category select {
+    min-height: 38px;
+    max-width: 190px;
+    padding: 0 32px 0 11px;
+    border: 1px solid var(--ptv-border-field);
+    border-radius: var(--ptv-radius-field, 11px);
+    color: var(--ptv-color-text-soft);
+    background: var(--ptv-component-field-bg);
+    font: inherit;
+    font-size: 0.76rem;
+    text-transform: none;
+}
+
+.ptv-admin-plugin-category select:focus-visible {
+    border-color: var(--ptv-state-focus-border);
+    box-shadow: var(--ptv-state-focus);
+    outline: 0;
+}
+
+.ptv-admin-plugin-result-count {
+    min-width: max-content;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+    font-weight: 760;
+    text-align: right;
+}
+
+.ptv-admin-plugin-toolbar.is-repositories {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.ptv-admin-plugin-toolbar.is-repositories .ptv-admin-plugin-result-count {
+    text-align: left;
+}
+
+.ptv-admin-plugin-notice,
+.ptv-admin-plugin-feedback,
+.ptv-admin-plugin-restart-banner {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--ptv-border-subtle);
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-secondary);
+    background: var(--ptv-component-panel-bg-subtle);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-plugin-notice.is-error,
+.ptv-admin-plugin-feedback.is-error {
+    border-color: var(--ptv-state-danger-border);
+    color: var(--ptv-state-danger-text);
+    background: var(--ptv-state-danger);
+}
+
+.ptv-admin-plugin-feedback.is-success {
+    border-color: var(--ptv-admin-plugin-success-border);
+    color: var(--ptv-admin-plugin-success);
+    background: var(--ptv-admin-plugin-success-surface);
+}
+
+.ptv-admin-plugin-restart-banner {
+    border-color: var(--ptv-admin-plugin-warning-border);
+    color: var(--ptv-admin-plugin-warning);
+    background: var(--ptv-admin-plugin-warning-surface);
+}
+
+.ptv-admin-plugin-restart-banner strong,
+.ptv-admin-plugin-notice strong {
+    display: block;
+    margin-bottom: 2px;
+    color: inherit;
+}
+
+.ptv-admin-plugin-restart-banner p,
+.ptv-admin-plugin-notice p {
+    margin: 0;
+}
+
+.ptv-admin-plugin-notice a {
+    color: inherit;
+    font-weight: 800;
+}
+
+.ptv-admin-plugin-list {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.ptv-admin-plugin-list.is-catalog {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 370px), 1fr));
+    align-items: stretch;
+}
+
+.ptv-admin-plugin-card,
+.ptv-admin-plugin-repository,
+.ptv-admin-plugin-detail-panel {
+    min-width: 0;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 18px);
+    background: var(--ptv-component-panel-bg);
+    box-shadow: var(--ptv-elevation-2-shadow);
+    backdrop-filter: blur(var(--ptv-elevation-2-blur)) saturate(1.08);
+}
+
+.ptv-admin-plugin-card {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) minmax(124px, auto);
+    gap: 14px;
+    align-items: start;
+    padding: 15px;
+}
+
+.ptv-admin-plugin-list.is-catalog .ptv-admin-plugin-card {
+    grid-template-columns: 44px minmax(0, 1fr);
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.ptv-admin-plugin-list.is-catalog .ptv-admin-plugin-card-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: flex-end;
+}
+
+.ptv-admin-plugin-card-icon,
+.ptv-admin-plugin-repository-icon {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--ptv-state-selected-border);
+    border-radius: 13px;
+    color: var(--ptv-state-selected-text);
+    background: var(--ptv-state-selected);
+    box-shadow: var(--ptv-state-selected-shadow);
+}
+
+.ptv-admin-plugin-card-icon img {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    object-fit: cover;
+}
+
+.ptv-admin-plugin-card-copy {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ptv-admin-plugin-card-title {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 7px;
+}
+
+.ptv-admin-plugin-card-title h2,
+.ptv-admin-plugin-repository h2,
+.ptv-admin-plugin-detail-panel h2 {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    margin: 0;
+    color: var(--ptv-color-text-soft);
+    font-family: var(--ptv-font-accent);
+    font-size: 1rem;
+    line-height: 1.25;
+}
+
+.ptv-admin-plugin-card-copy > p {
+    display: -webkit-box;
+    overflow: hidden;
+    margin: 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.76rem;
+    line-height: 1.45;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.ptv-admin-plugin-badge {
+    display: inline-flex;
+    width: fit-content;
+    min-height: 24px;
+    align-items: center;
+    padding: 3px 8px;
+    border: 1px solid var(--ptv-border-subtle);
+    border-radius: var(--ptv-radius-pill);
+    color: var(--ptv-color-text-muted);
+    background: var(--ptv-component-panel-bg-subtle);
+    font-size: 0.63rem;
+    font-weight: 840;
+    line-height: 1.15;
+    white-space: nowrap;
+}
+
+.ptv-admin-plugin-badge[data-tone='success'] {
+    border-color: var(--ptv-admin-plugin-success-border);
+    color: var(--ptv-admin-plugin-success);
+    background: var(--ptv-admin-plugin-success-surface);
+}
+
+.ptv-admin-plugin-badge[data-tone='warning'] {
+    border-color: var(--ptv-admin-plugin-warning-border);
+    color: var(--ptv-admin-plugin-warning);
+    background: var(--ptv-admin-plugin-warning-surface);
+}
+
+.ptv-admin-plugin-badge[data-tone='danger'] {
+    border-color: var(--ptv-state-danger-border);
+    color: var(--ptv-state-danger-text);
+    background: var(--ptv-state-danger);
+}
+
+.ptv-admin-plugin-badge[data-tone='info'] {
+    border-color: var(--ptv-admin-plugin-info-border);
+    color: var(--ptv-admin-plugin-info);
+    background: var(--ptv-admin-plugin-info-surface);
+}
+
+.ptv-admin-plugin-card-meta,
+.ptv-admin-plugin-detail-list {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 7px 18px;
+    margin: 0;
+}
+
+.ptv-admin-plugin-card-meta > div,
+.ptv-admin-plugin-detail-list > div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.ptv-admin-plugin-card-meta dt,
+.ptv-admin-plugin-detail-list dt {
+    color: var(--ptv-color-text-muted);
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.035em;
+    text-transform: uppercase;
+}
+
+.ptv-admin-plugin-card-meta dd,
+.ptv-admin-plugin-detail-list dd {
+    overflow-wrap: anywhere;
+    margin: 0;
+    color: var(--ptv-color-text-secondary);
+    font-size: 0.71rem;
+    font-weight: 730;
+}
+
+.ptv-admin-plugin-config-links,
+.ptv-admin-plugin-card-actions,
+.ptv-admin-plugin-repository-actions,
+.ptv-admin-plugin-detail-actions {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.ptv-admin-plugin-config-links a {
+    min-height: 34px;
+    padding: 5px 10px;
+    font-size: 0.69rem;
+}
+
+.ptv-admin-plugin-card-actions {
+    align-items: stretch;
+    flex-direction: column;
+}
+
+.ptv-admin-plugin-card-actions > * {
+    min-width: 112px;
+}
+
+.ptv-admin-plugin-card-actions > span {
+    align-self: center;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.68rem;
+    text-align: center;
+}
+
+.ptv-admin-plugin-repository {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    gap: 14px;
+    align-items: center;
+    padding: 15px;
+}
+
+.ptv-admin-plugin-repository > div:not(.ptv-admin-plugin-repository-actions) {
+    min-width: 0;
+}
+
+.ptv-admin-plugin-repository code {
+    display: block;
+    overflow-wrap: anywhere;
+    margin-top: 4px;
+    color: var(--ptv-color-text-muted);
+    font-family: var(--ptv-font-mono, monospace);
+    font-size: 0.7rem;
+    white-space: normal;
+}
+
+.ptv-admin-plugin-state {
+    display: grid;
+    min-height: 230px;
+    place-items: center;
+    align-content: center;
+    gap: 9px;
+    padding: 28px;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 18px);
+    color: var(--ptv-color-text-muted);
+    background: var(--ptv-component-panel-bg-subtle);
+    text-align: center;
+}
+
+.ptv-admin-plugin-state.is-error {
+    border-color: var(--ptv-state-danger-border);
+}
+
+.ptv-admin-plugin-state h2 {
+    margin: 0;
+    color: var(--ptv-color-text-soft);
+    font-size: 1rem;
+}
+
+.ptv-admin-plugin-state p {
+    max-width: 55ch;
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.ptv-admin-plugin-skeleton-row {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 130px;
+    gap: 14px;
+    align-items: center;
+    min-height: 92px;
+    padding: 14px;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 18px);
+    background: var(--ptv-component-panel-bg-subtle);
+}
+
+.ptv-admin-plugin-skeleton-row span {
+    height: 16px;
+    border-radius: var(--ptv-radius-pill);
+    background: var(--ptv-component-skeleton-bg, var(--ptv-state-hover));
+    animation: ptv-admin-plugin-pulse 1.4s ease-in-out infinite alternate;
+}
+
+.ptv-admin-plugin-skeleton-row span:first-child {
+    height: 44px;
+    border-radius: 13px;
+}
+
+.ptv-admin-plugin-detail {
+    display: grid;
+    gap: 15px;
+    min-width: 0;
+}
+
+.ptv-admin-plugin-detail-back {
+    width: fit-content;
+    min-height: 38px;
+    padding: 6px 11px;
+}
+
+.ptv-admin-plugin-detail-header {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr) auto;
+    gap: 15px;
+    align-items: start;
+}
+
+.ptv-admin-plugin-detail-header .ptv-admin-plugin-card-icon {
+    width: 52px;
+    height: 52px;
+}
+
+.ptv-admin-plugin-detail-statuses {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 7px;
+}
+
+.ptv-admin-plugin-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.ptv-admin-plugin-detail-panel {
+    display: grid;
+    align-content: start;
+    gap: 13px;
+    padding: 16px;
+}
+
+.ptv-admin-plugin-detail-panel.is-wide {
+    grid-column: 1 / -1;
+}
+
+.ptv-admin-plugin-detail-panel > p {
+    margin: 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.77rem;
+    line-height: 1.55;
+}
+
+.ptv-admin-plugin-detail-list {
+    display: grid;
+    gap: 10px;
+}
+
+.ptv-admin-plugin-detail-list > div {
+    grid-template-columns: minmax(105px, 0.42fr) minmax(0, 1fr);
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-plugin-detail-actions {
+    align-items: center;
+}
+
+.ptv-admin-plugin-dialog .MuiPaper-root {
+    border: 1px solid var(--ptv-elevation-3-border);
+    border-radius: var(--ptv-radius-panel, 20px);
+    color: var(--ptv-color-text-primary);
+    background: var(--ptv-elevation-4-surface, var(--ptv-component-panel-bg));
+    box-shadow: var(--ptv-elevation-4-shadow);
+}
+
+.ptv-admin-plugin-dialog .MuiDialogContentText-root {
+    color: var(--ptv-color-text-secondary);
+}
+
+.ptv-admin-plugin-dialog-actions button {
+    min-height: var(--ptv-touch-target-min, 44px);
+    border-radius: var(--ptv-radius-md, 12px);
+    font-weight: 800;
+}
+
+.ptv-admin-plugin-dialog-actions button:focus-visible {
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+.ptv-admin-plugin-dialog-form {
+    display: grid;
+    gap: 16px;
+    padding-top: 8px;
+}
+
+.ptv-admin-plugin-dialog-form > label {
+    display: grid;
+    gap: 6px;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.78rem;
+    font-weight: 760;
+}
+
+.ptv-admin-plugin-dialog-form input[type='text'],
+.ptv-admin-plugin-dialog-form input[type='url'],
+.ptv-admin-plugin-dialog-form input:not([type]) {
+    min-height: var(--ptv-touch-target-min, 44px);
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid var(--ptv-border-field);
+    border-radius: var(--ptv-radius-field, 11px);
+    color: var(--ptv-color-text-soft);
+    background: var(--ptv-component-field-bg);
+    font: inherit;
+}
+
+.ptv-admin-plugin-dialog-form input:focus-visible {
+    border-color: var(--ptv-state-focus-border);
+    box-shadow: var(--ptv-state-focus);
+    outline: 0;
+}
+
+.ptv-admin-plugin-dialog-form small {
+    color: var(--ptv-color-text-muted);
+    font-size: 0.67rem;
+    font-weight: 500;
+}
+
+.ptv-admin-plugin-dialog-toggle {
+    display: flex;
+    min-height: 54px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.ptv-admin-plugin-dialog-toggle > label {
+    display: grid;
+    gap: 4px;
+}
+
+.ptv-admin-plugin-dialog-toggle input {
+    width: 22px;
+    height: 22px;
+    flex: none;
+    accent-color: var(--ptv-color-accent-secondary);
+}
+
+.ptv-admin-plugin-dialog-error {
+    margin: 0;
+    color: var(--ptv-state-danger-text);
+    font-size: 0.74rem;
+}
+
+@keyframes ptv-admin-plugin-pulse {
+    from { opacity: 0.42; }
+    to { opacity: 0.9; }
+}
+
+@media (max-width: 980px) {
+    .ptv-admin-plugin-toolbar {
+        grid-template-columns: minmax(210px, 1fr) auto;
+    }
+
+    .ptv-admin-plugin-filter-group {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+
+    .ptv-admin-plugin-category {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .ptv-admin-plugin-result-count {
+        grid-column: 1 / -1;
+        text-align: left;
+    }
+
+    .ptv-admin-plugin-card {
+        grid-template-columns: 44px minmax(0, 1fr);
+    }
+
+    .ptv-admin-plugin-card-actions {
+        grid-column: 1 / -1;
+        flex-direction: row;
+        justify-content: flex-end;
+    }
+
+    .ptv-admin-plugin-card-actions > * {
+        min-width: auto;
+    }
+
+    .ptv-admin-plugin-repository {
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+    }
+
+    .ptv-admin-plugin-repository-actions {
+        grid-column: 2 / -1;
+        justify-content: flex-end;
+    }
+}
+
+@media (max-width: 760px) {
+    .ptv-admin-plugins-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ptv-admin-plugins-header > button {
+        align-self: flex-start;
+    }
+
+    .ptv-admin-plugin-tabs {
+        width: 100%;
+    }
+
+    .ptv-admin-plugin-tabs a {
+        flex: 1 0 auto;
+        padding: 0 16px;
+    }
+
+    .ptv-admin-plugin-toolbar {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-admin-plugin-search,
+    .ptv-admin-plugin-filter-group,
+    .ptv-admin-plugin-category,
+    .ptv-admin-plugin-result-count {
+        grid-column: 1;
+        grid-row: auto;
+    }
+
+    .ptv-admin-plugin-filter-group {
+        flex-wrap: wrap;
+        overflow-x: visible;
+    }
+
+    .ptv-admin-plugin-category select {
+        width: 100%;
+        max-width: none;
+    }
+
+    .ptv-admin-plugin-list.is-catalog,
+    .ptv-admin-plugin-detail-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-admin-plugin-card,
+    .ptv-admin-plugin-list.is-catalog .ptv-admin-plugin-card {
+        grid-template-columns: 40px minmax(0, 1fr);
+        padding: 13px;
+    }
+
+    .ptv-admin-plugin-card-icon {
+        width: 40px;
+        height: 40px;
+    }
+
+    .ptv-admin-plugin-card-actions,
+    .ptv-admin-plugin-list.is-catalog .ptv-admin-plugin-card-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+
+    .ptv-admin-plugin-card-actions > button,
+    .ptv-admin-plugin-card-actions > a {
+        flex: 1 1 118px;
+    }
+
+    .ptv-admin-plugin-repository {
+        grid-template-columns: 40px minmax(0, 1fr);
+        padding: 13px;
+    }
+
+    .ptv-admin-plugin-repository > .ptv-admin-plugin-badge {
+        grid-column: 2;
+    }
+
+    .ptv-admin-plugin-repository-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+
+    .ptv-admin-plugin-repository-actions button {
+        flex: 1 1 120px;
+    }
+
+    .ptv-admin-plugin-detail-header {
+        grid-template-columns: 44px minmax(0, 1fr);
+    }
+
+    .ptv-admin-plugin-detail-statuses {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+
+    .ptv-admin-plugin-detail-panel.is-wide {
+        grid-column: auto;
+    }
+}
+
+@media (max-width: 420px) {
+    .ptv-admin-plugin-tabs a {
+        min-width: 0;
+        flex: 1 1 0;
+        padding: 0 6px;
+        font-size: 0.75rem;
+    }
+
+    .ptv-admin-plugin-card-meta {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ptv-admin-plugin-detail-list > div {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-admin-plugin-tabs a,
+    .ptv-admin-plugins button,
+    .ptv-admin-plugin-card-actions a,
+    .ptv-admin-plugin-config-links a,
+    .ptv-admin-plugin-detail-back {
+        transition: none;
+    }
+
+    .ptv-admin-plugin-skeleton-row span {
+        animation: none;
+    }
+}
+
+/* stylelint-enable no-descending-specificity */

@@ -22,7 +22,6 @@ import {
     getPtvCurrentUserId,
     getPtvServerId,
     hasPtvImageUrlFailed,
-    markPtvImageUrlFailed,
     setPtvFavorite
 } from '../../api';
 import { PTV_ASSETS } from '../../core/config';
@@ -53,6 +52,7 @@ import {
     playPtvMusicItemsNext,
     playPtvMusicTracks,
     previousPtvMusicTrack,
+    reconcilePtvMusicQueueIdentifyMetadata,
     seekPtvMusicFromClientX,
     seekPtvMusicPercent,
     setPtvMusicRepeatMode,
@@ -63,6 +63,21 @@ import {
     togglePtvMusicPlayPause,
     togglePtvMusicShuffle
 } from './musicQueue';
+import {
+    canPublishPtvMusicIdentifyResult,
+    isExactPtvMusicIdentifyItem,
+    PtvMusicIdentifyAuthorityOverlay,
+    reconcilePtvMusicIdentifyItem,
+    reconcilePtvMusicIdentifyPresentationHomeData,
+    reconcilePtvMusicIdentifyPresentationItems,
+    type PtvMusicIdentifyAuthorityResult,
+    type PtvMusicIdentifyOperation,
+    type PtvMusicIdentifyOwnerState
+} from './musicIdentifyAdoption';
+import {
+    resolvePtvMusicAlbumArtist,
+    type PtvMusicAlbumArtistSource
+} from './musicAlbumArtistResolution';
 import {
     fetchPtvMusicAlbumTracks,
     fetchPtvMusicAlbumsByArtist,
@@ -82,7 +97,9 @@ import {
     getPtvMusicTitle,
     invalidatePtvMusicHomeCache,
     isPtvMusicQualityMatch,
+    markPtvMusicImageUrlFailed,
     PTV_MUSIC_LIBRARY_RETAIN_LIMIT,
+    reconcilePtvMusicIdentifyCaches,
     searchPtvMusicMetadata,
     searchPtvMusic,
     uniquePtvMusicItems
@@ -97,6 +114,7 @@ import {
     getPtvLikedMusicItems,
     getPtvLikedMusicItemIds,
     isPtvMusicItemLiked,
+    reconcilePtvLikedMusicIdentifyMetadata,
     setPtvMusicItemLiked,
     subscribeToPtvLikedMusic
 } from './musicLikes';
@@ -223,14 +241,15 @@ const PTV_MUSIC_SKELETON_KEYS = [
     'music-skeleton-7',
     'music-skeleton-8'
 ];
-const failedMusicImageUrls = new PtvMusicIdentityResourceCache<string>(192);
-
 type MusicAdminAction = 'identify' | 'images' | 'lookup' | 'metadata';
+type MusicAdminActionOwner = Readonly<{
+    isCurrent: () => boolean;
+}>;
 
 type MusicAdminContextValue = Readonly<{
     canShowDebug: boolean;
     isAdmin: boolean;
-    onAction: (item: PtvMusicItem, action: MusicAdminAction) => void;
+    onAction: (item: PtvMusicItem, action: MusicAdminAction, owner?: MusicAdminActionOwner) => void;
 }>;
 
 type MusicMetadataLookupState = Readonly<{
@@ -356,6 +375,7 @@ async function loadProgressiveArtistDetail(
 }
 
 type ItemDetailState = Readonly<{
+    artistSource: PtvMusicAlbumArtistSource;
     error: string;
     isLoading: boolean;
     isTracksLoading: boolean;
@@ -543,7 +563,7 @@ function openMusicAdminDialog(item: PtvMusicItem, action: Exclude<MusicAdminActi
     }
 
     return import('components/itemidentifier/itemidentifier')
-        .then(itemIdentifier => itemIdentifier.show(itemId, serverId));
+        .then(itemIdentifier => itemIdentifier.showWithAuthority(itemId, serverId));
 }
 
 function cleanupMusicRouteState() {
@@ -706,18 +726,14 @@ function getActiveMusicDisplayIdentityKey() {
     return getPtvDisplayIdentityKey(getPtvServerId(), getPtvCurrentUserId());
 }
 
-function hasFailedMusicImageUrl(imageUrl: string) {
-    return failedMusicImageUrls.has(getActiveMusicDisplayIdentityKey(), imageUrl);
-}
-
-function recordFailedMusicImageUrl(imageUrl: string) {
-    failedMusicImageUrls.set(getActiveMusicDisplayIdentityKey(), imageUrl, imageUrl);
+function recordMusicImageFailure(imageUrl: string) {
+    markPtvMusicImageUrlFailed(imageUrl);
 }
 
 function getItemBackdropUrl(item: PtvMusicItem | null | undefined, size = 1200) {
     const imageUrl = getMusicImageUrl(item, size, 'Backdrop');
 
-    if (!imageUrl || hasFailedMusicImageUrl(imageUrl) || hasPtvImageUrlFailed(imageUrl)) {
+    if (!imageUrl || hasPtvImageUrlFailed(imageUrl)) {
         return PTV_MUSIC_FALLBACK_BACKGROUND_URL || getMusicImagePlaceholder();
     }
 
@@ -729,8 +745,7 @@ function getMusicPageBackdropErrorHandler() {
         const failedUrl = event.currentTarget.currentSrc || event.currentTarget.src;
 
         if (failedUrl && failedUrl !== PTV_MUSIC_FALLBACK_BACKGROUND_URL) {
-            recordFailedMusicImageUrl(failedUrl);
-            markPtvImageUrlFailed(failedUrl);
+            recordMusicImageFailure(failedUrl);
         }
 
         if (event.currentTarget.dataset.ptvFallbackApplied === 'true') {
@@ -748,8 +763,7 @@ function getMusicImageErrorHandler() {
         const failedUrl = event.currentTarget.currentSrc || event.currentTarget.src;
 
         if (failedUrl && failedUrl !== getMusicImagePlaceholder()) {
-            recordFailedMusicImageUrl(failedUrl);
-            markPtvImageUrlFailed(failedUrl);
+            recordMusicImageFailure(failedUrl);
         }
 
         if (event.currentTarget.dataset.ptvFallbackApplied === 'true') {
@@ -769,7 +783,7 @@ function getCachedMusicImageUrl(
 ) {
     const imageUrl = getMusicImageUrl(item, size, preferredImageType);
 
-    if (!imageUrl || hasFailedMusicImageUrl(imageUrl) || hasPtvImageUrlFailed(imageUrl)) return getMusicImagePlaceholder();
+    if (!imageUrl || hasPtvImageUrlFailed(imageUrl)) return getMusicImagePlaceholder();
 
     return imageUrl;
 }
@@ -1134,13 +1148,16 @@ function useMusicQueueSnapshot() {
 
 function useCurrentMusicItem() {
     const [item, setItem] = useState<PtvMusicItem | null>(null);
+    const revisionRef = useRef(-1);
 
     useEffect(() => subscribeToPtvMusicQueue(snapshot => {
         setItem(currentItem => {
             const nextItem = snapshot.currentItem;
+            const nextRevision = Number((snapshot as PtvMusicQueueSnapshot & { queueRevision?: number }).queueRevision ?? -1);
 
-            if ((currentItem?.Id || '') === (nextItem?.Id || '')) return currentItem;
+            if ((currentItem?.Id || '') === (nextItem?.Id || '') && revisionRef.current === nextRevision) return currentItem;
 
+            revisionRef.current = nextRevision;
             return nextItem;
         });
     }), []);
@@ -1326,6 +1343,24 @@ function useMusicAdminControls() {
     return useContext(MUSIC_ADMIN_CONTEXT);
 }
 
+function useMusicAdminActionOwner(item: PtvMusicItem): MusicAdminActionOwner {
+    const connectedRef = useRef(false);
+    const itemRef = useRef(item);
+
+    itemRef.current = item;
+    useEffect(() => {
+        connectedRef.current = true;
+
+        return () => {
+            connectedRef.current = false;
+        };
+    }, []);
+
+    return useMemo(() => ({
+        isCurrent: () => connectedRef.current && itemRef.current === item
+    }), [item]);
+}
+
 function getMusicDownloadUrl(item: PtvMusicItem) {
     if (!item.Id || item.Type !== 'Audio' || item.CanDownload === false) return '';
 
@@ -1386,6 +1421,7 @@ function MusicItemMenu({ item }: Readonly<{
     item: PtvMusicItem;
 }>) {
     const { isAdmin, onAction } = useMusicAdminControls();
+    const adminActionOwner = useMusicAdminActionOwner(item);
     const playbackActions = useMusicPlaybackActions();
     const title = getPtvMusicTitle(item);
     const [isOpen, setOpen] = useState(false);
@@ -1465,7 +1501,7 @@ function MusicItemMenu({ item }: Readonly<{
     };
     const openAdminMenuAction = (action: MusicAdminAction) => {
         closeMenu();
-        onAction(item, action);
+        onAction(item, action, adminActionOwner);
     };
 
     return (
@@ -1589,6 +1625,8 @@ function MusicMetadataLookupDialog({ canShowDebug, onClose, onRefresh, state }: 
     state: MusicMetadataLookupState | null;
 }>) {
     const isOpen = Boolean(state);
+    const adminControls = useContext(MUSIC_ADMIN_CONTEXT);
+    const adminActionOwner = useMusicAdminActionOwner(state?.item || {});
 
     useEffect(() => {
         if (!isOpen) return undefined;
@@ -1625,7 +1663,7 @@ function MusicMetadataLookupDialog({ canShowDebug, onClose, onRefresh, state }: 
                         <PtvIcon name='metadata' />
                         <span>Edit Metadata</span>
                     </button>
-                    <button type='button' onClick={() => void openMusicAdminDialog(state.item, 'identify')}>
+                    <button type='button' onClick={() => adminControls.onAction(state.item, 'identify', adminActionOwner)}>
                         <PtvIcon name='search' />
                         <span>Identify</span>
                     </button>
@@ -1811,7 +1849,7 @@ function MusicCard({
                         imageUrl={getCachedMusicImageUrl(item, shape === 'artist' ? 280 : 360)}
                         placeholderUrl={getMusicImagePlaceholder()}
                         rootMargin={artworkRootMargin}
-                        onError={getMusicImageErrorHandler()}
+                        onSourceFailure={recordMusicImageFailure}
                     />
                     {isTrack ? <MusicQualityTags item={item} /> : null}
                 </a>
@@ -1830,7 +1868,7 @@ function MusicCard({
                         imageUrl={getCachedMusicImageUrl(item, 360)}
                         placeholderUrl={getMusicImagePlaceholder()}
                         rootMargin={artworkRootMargin}
-                        onError={getMusicImageErrorHandler()}
+                        onSourceFailure={recordMusicImageFailure}
                     />
                     {isTrack ? <MusicQualityTags item={item} /> : null}
                     <span><PtvIcon name='play' /></span>
@@ -2445,11 +2483,11 @@ function SmartPlaylistPanel({ generated, onGenerated }: SmartPlaylistPanelProps)
                         </button>
                     </div>
                     <div className='ptv-music-generated-list'>
-                        {generated.items.slice(0, 9).map((item, index) => (
+                        {generated.items.map((item, index) => (
                             <TrackCompactRow
                                 key={getMusicItemDomKey(item, generated.name)}
                                 contextIndex={index}
-                                contextItems={generated.items.slice(0, 9)}
+                                contextItems={generated.items}
                                 item={item}
                             />
                         ))}
@@ -2713,7 +2751,6 @@ function MusicLibraryDebugPanel({ canShowDebug, debug }: Readonly<{
     const albumQuery = debug.queryStatus?.albums;
     const artistQuery = debug.queryStatus?.artists;
     const songQuery = debug.queryStatus?.tracks;
-    const failedImageUrls = failedMusicImageUrls.valuesForIdentity(getActiveMusicDisplayIdentityKey());
     const debugRows = [
         ['userId', debug.userId || 'none'],
         ['serverId', debug.serverId || 'none'],
@@ -2749,8 +2786,7 @@ function MusicLibraryDebugPanel({ canShowDebug, debug }: Readonly<{
         ['pageSize', debug.pageSize],
         ['pageCount', JSON.stringify(debug.pageCount)],
         ['lastMusicQueryUrl', debug.lastMusicQueryUrl || 'none'],
-        ['failedImageUrlCount', failedImageUrls.length],
-        ['failedImageUrls', failedImageUrls.slice(-5).join(' | ') || 'none'],
+        ['failedImageOwnership', 'shared-image-registry'],
         ['droppedArtistCount', debug.droppedArtistCount],
         ['droppedAlbumCount', debug.droppedAlbumCount],
         ['droppedTrackCount', debug.droppedTrackCount],
@@ -3567,6 +3603,14 @@ function AlbumOrPlaylistView({ detail, homeData, kind, onGenerated }: AlbumOrPla
     const labels = getAlbumOrPlaylistLabels(kind);
     const totalDurationTicks = detail.tracks.reduce((total, track) => total + Number(track.RunTimeTicks || 0), 0);
 
+    useEffect(() => {
+        if (kind !== 'album' || !item?.Id || detail.isLoading || detail.isTracksLoading) return;
+
+        recordPtvEvent('render', 'music-album-artist-source', {
+            source: detail.artistSource
+        });
+    }, [ detail.artistSource, detail.isLoading, detail.isTracksLoading, item?.Id, kind ]);
+
     if (detail.isLoading && !item) return <MusicLoading label={`Loading ${kind}`} />;
     if (detail.error) return <MusicError message={detail.error} />;
     if (!item) return <MusicError message={`${labels.entityName} could not be loaded.`} />;
@@ -3723,7 +3767,7 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
     const progress = getProgressPercent(snapshot);
     const [relatedItems, setRelatedItems] = useState<PtvMusicItem[]>([]);
     const [isRelatedLoading, setIsRelatedLoading] = useState(false);
-    const [isPlaylistModalOpen, setPlaylistModalOpen] = useState(false);
+    const [playlistModalItem, setPlaylistModalItem] = useState<PtvMusicItem | null>(null);
     const { isLiked, toggleLiked } = useLikedMusicItem(item, 'player-page-favorite');
     const relatedPool = useMemo(() => getAllHomeTracks(homeData), [homeData]);
     const visibleRelatedItems = relatedItems.filter(relatedItem => relatedItem.Id !== item?.Id);
@@ -3898,7 +3942,7 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
                     <MusicActionButton
                         className='ptv-music-action-add'
                         label='Add to playlist'
-                        onClick={() => setPlaylistModalOpen(true)}
+                        onClick={() => setPlaylistModalItem(item)}
                     >
                         +
                     </MusicActionButton>
@@ -3926,16 +3970,17 @@ function PlayerView({ homeData, musicVideos }: PlayerViewProps) {
                 <LazyMusicPlayerPanel
                     isRelatedLoading={isRelatedLoading}
                     item={item}
+                    onAddToPlaylist={setPlaylistModalItem}
                     relatedItems={visibleRelatedItems}
                     snapshot={snapshot}
                 />
             </React.Suspense>
-            {isPlaylistModalOpen ? (
+            {playlistModalItem ? (
                 <React.Suspense fallback={null}>
                     <LazyPtvMusicPlaylistModal
                         isOpen
-                        item={item}
-                        onClose={() => setPlaylistModalOpen(false)}
+                        item={playlistModalItem}
+                        onClose={() => setPlaylistModalItem(null)}
                     />
                 </React.Suspense>
             ) : null}
@@ -3986,6 +4031,7 @@ function getInitialArtistDetail(): ArtistDetailState {
 
 function getInitialItemDetail(): ItemDetailState {
     return {
+        artistSource: 'unknown',
         error: '',
         isLoading: false,
         isTracksLoading: false,
@@ -3996,6 +4042,22 @@ function getInitialItemDetail(): ItemDetailState {
 
 function getMusicErrorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
+}
+
+function getMusicAdminDialogFailureReason(error: unknown) {
+    const record = error && typeof error === 'object' ? error as Record<string, unknown> : {};
+    const status = Number(record.status || record.statusCode || 0);
+    const fingerprint = `${String(record.name || '')} ${String(record.message || '')}`;
+
+    if (/abort|cancel/i.test(fingerprint)) return 'cancelled';
+    if (/timeout|timed out/i.test(fingerprint)) return 'timeout';
+    if (status === 401 || status === 403) return 'authentication';
+    if (status === 404) return 'not-found';
+    if (status >= 500) return 'server';
+    if (status >= 400) return 'client';
+    if (/network|failed to fetch|offline/i.test(fingerprint)) return 'network';
+
+    return 'unknown';
 }
 
 function isMusicRouteAbortError(error: unknown) {
@@ -4179,6 +4241,8 @@ export default function PiggieTvMusicPage() {
     const musicLibraryIndexActiveRequestKeyRef = useRef('');
     const musicLibraryIndexRequestIdRef = useRef(0);
     const musicMountedRef = useRef(false);
+    const musicIdentifyGenerationRef = useRef(0);
+    const musicRouteKeyRef = useRef(`${location.pathname}${location.search}`);
     const musicRequestIdRef = useRef(0);
     const musicRouteWorkSignalRef = useRef<AbortSignal | null>(null);
     const loadedRouteViewRef = useRef(route.view);
@@ -4213,6 +4277,67 @@ export default function PiggieTvMusicPage() {
     const { canShowDebug, isAdmin } = usePtvAdminDebugVisibility();
     const currentMusicItem = useCurrentMusicItem();
     const musicDataCoordinator = useMemo(() => getPtvMusicDataCoordinator(), []);
+    const musicIdentifyAuthorityOverlay = useMemo(() => new PtvMusicIdentifyAuthorityOverlay(), []);
+    const musicIdentifyOwnerStateRef = useRef<PtvMusicIdentifyOwnerState | null>(null);
+
+    musicRouteKeyRef.current = `${location.pathname}${location.search}`;
+    musicIdentifyOwnerStateRef.current = {
+        albumDetailItem: albumDetail.item,
+        albums,
+        artistDetailAlbums: artistDetail.albums,
+        artistDetailArtist: artistDetail.artist,
+        artists,
+        homeData,
+        metadataLookupItem: metadataLookup?.item || null,
+        searchResults
+    };
+    const reconcileMusicIdentifyItem = useCallback((item: PtvMusicItem | null, requestRevision: number) => (
+        musicIdentifyAuthorityOverlay.reconcileItem(getActiveMusicDisplayIdentityKey(), item, requestRevision)
+    ), [musicIdentifyAuthorityOverlay]);
+    const reconcileMusicIdentifyItems = useCallback((items: readonly PtvMusicItem[], requestRevision: number) => (
+        musicIdentifyAuthorityOverlay.reconcileItems(getActiveMusicDisplayIdentityKey(), items, requestRevision)
+    ), [musicIdentifyAuthorityOverlay]);
+    const reconcileMusicIdentifyHomeData = useCallback((current: PtvMusicHomeData, requestRevision: number) => (
+        musicIdentifyAuthorityOverlay.reconcileHomeData(
+            getActiveMusicDisplayIdentityKey(),
+            current,
+            requestRevision
+        )
+    ), [musicIdentifyAuthorityOverlay]);
+    const reconcileMusicIdentifyArtistDetail = useCallback((
+        current: ArtistDetailState,
+        identityKey: string | null,
+        requestRevision: number
+    ) => {
+        const artist = musicIdentifyAuthorityOverlay.reconcileItem(
+            identityKey,
+            current.artist,
+            requestRevision
+        );
+        const reconciledAlbums = musicIdentifyAuthorityOverlay.reconcileItems(
+            identityKey,
+            current.albums,
+            requestRevision
+        );
+        const topSongs = musicIdentifyAuthorityOverlay.reconcileItems(
+            identityKey,
+            current.topSongs,
+            requestRevision
+        );
+
+        if (
+            artist === current.artist
+            && reconciledAlbums === current.albums
+            && topSongs === current.topSongs
+        ) return current;
+
+        return {
+            ...current,
+            albums: [ ...reconciledAlbums ],
+            artist,
+            topSongs: [ ...topSongs ]
+        };
+    }, [musicIdentifyAuthorityOverlay]);
     const reconcileArtistFavorite = useCallback((change: MusicFavoriteChange) => {
         if (!change.identityKey) return;
 
@@ -4280,53 +4405,220 @@ export default function PiggieTvMusicPage() {
     }, [location.pathname, location.search]);
 
     const runMusicMetadataLookup = useCallback((item: PtvMusicItem) => {
+        const requestRevision = musicIdentifyAuthorityOverlay.captureRequestRevision();
+        const lookupItem = reconcileMusicIdentifyItem(item, requestRevision) || item;
+
         setMetadataLookup({
             error: '',
             isLoading: true,
-            item,
+            item: lookupItem,
             response: null
         });
 
-        void searchPtvMusicMetadata(item)
+        void searchPtvMusicMetadata(lookupItem)
             .then(response => {
-                setMetadataLookup({
-                    error: '',
-                    isLoading: false,
-                    item,
-                    response
+                setMetadataLookup(current => {
+                    if (!current || !isExactPtvMusicIdentifyItem(current.item, lookupItem)) return current;
+
+                    return {
+                        error: '',
+                        isLoading: false,
+                        item: reconcileMusicIdentifyItem(current.item, requestRevision) || current.item,
+                        response
+                    };
                 });
             })
             .catch(error => {
                 const message = getMusicErrorMessage(error) || 'Music metadata lookup failed.';
 
                 recordPtvEvent('api', 'music-metadata-lookup-failed', {
-                    error: message,
-                    itemId: item.Id || null
+                    failureReason: getMusicAdminDialogFailureReason(error),
+                    itemType: lookupItem.Type || 'Unknown'
                 });
-                setMetadataLookup({
-                    error: message,
-                    isLoading: false,
-                    item,
-                    response: null
+                setMetadataLookup(current => {
+                    if (!current || !isExactPtvMusicIdentifyItem(current.item, lookupItem)) return current;
+
+                    return {
+                        error: message,
+                        isLoading: false,
+                        item: reconcileMusicIdentifyItem(current.item, requestRevision) || current.item,
+                        response: null
+                    };
                 });
             });
-    }, []);
+    }, [musicIdentifyAuthorityOverlay, reconcileMusicIdentifyItem]);
 
-    const openAdminAction = useCallback((item: PtvMusicItem, action: MusicAdminAction) => {
+    const adoptConfirmedMusicIdentifyItem = useCallback(async (
+        confirmed: PtvMusicItem,
+        identityKey: string | null,
+        isCurrent: () => boolean
+    ) => {
+        if (!await reconcilePtvMusicIdentifyCaches(identityKey, confirmed, isCurrent)) return false;
+        if (!isCurrent()) return false;
+        if (!musicIdentifyAuthorityOverlay.confirm(identityKey, confirmed)) return false;
+
+        const reconcileArtistDetail = (current: ArtistDetailState) => {
+            const artist = reconcilePtvMusicIdentifyItem(current.artist, confirmed);
+            const reconciledAlbums = reconcilePtvMusicIdentifyPresentationItems(current.albums, confirmed);
+            const topSongs = reconcilePtvMusicIdentifyPresentationItems(current.topSongs, confirmed);
+
+            if (
+                artist === current.artist
+                && reconciledAlbums === current.albums
+                && topSongs === current.topSongs
+            ) return current;
+
+            return {
+                ...current,
+                albums: [ ...reconciledAlbums ],
+                artist,
+                topSongs: [ ...topSongs ]
+            };
+        };
+
+        artistDetailCache.valuesForIdentity(identityKey).forEach(current => {
+            const next = reconcileArtistDetail(current);
+
+            if (next !== current && next.artist?.Id) {
+                artistDetailCache.set(identityKey, next.artist.Id, next);
+            }
+        });
+        setHomeData(current => reconcilePtvMusicIdentifyPresentationHomeData(current, confirmed));
+        setAlbums(current => {
+            const next = reconcilePtvMusicIdentifyPresentationItems(current, confirmed);
+
+            return next === current ? current : [ ...next ];
+        });
+        setArtists(current => {
+            const next = reconcilePtvMusicIdentifyPresentationItems(current, confirmed);
+
+            return next === current ? current : [ ...next ];
+        });
+        setTracks(current => {
+            const next = reconcilePtvMusicIdentifyPresentationItems(current, confirmed);
+
+            return next === current ? current : [ ...next ];
+        });
+        setLikedSongs(reconcilePtvLikedMusicIdentifyMetadata(confirmed));
+        setSearchResults(current => {
+            const next = reconcilePtvMusicIdentifyPresentationItems(current, confirmed);
+
+            return next === current ? current : [ ...next ];
+        });
+        setAlbumDetail(current => {
+            const item = reconcilePtvMusicIdentifyItem(current.item, confirmed);
+            const detailTracks = reconcilePtvMusicIdentifyPresentationItems(current.tracks, confirmed);
+            const isCurrentAlbum = isExactPtvMusicIdentifyItem(current.item, confirmed)
+                && confirmed.Type === 'MusicAlbum';
+            const identifyArtistSource = isCurrentAlbum ?
+                resolvePtvMusicAlbumArtist(confirmed, detailTracks, {
+                    childScope: 'authoritative-album-query',
+                    preservedOwner: current.item
+                }).source :
+                current.artistSource;
+            const relationshipResolution = resolvePtvMusicAlbumArtist(item, detailTracks, {
+                childScope: 'authoritative-album-query'
+            });
+            const nextArtistSource = isCurrentAlbum && identifyArtistSource !== 'unknown' ?
+                identifyArtistSource : relationshipResolution.source;
+
+            return relationshipResolution.item === current.item
+                && detailTracks === current.tracks
+                && nextArtistSource === current.artistSource ?
+                current : {
+                    ...current,
+                    artistSource: nextArtistSource,
+                    item: relationshipResolution.item,
+                    tracks: [ ...detailTracks ]
+                };
+        });
+        setArtistDetail(reconcileArtistDetail);
+        setPlaylistDetail(current => {
+            const playlistTracks = reconcilePtvMusicIdentifyPresentationItems(current.tracks, confirmed);
+
+            return playlistTracks === current.tracks ?
+                current : { ...current, tracks: [ ...playlistTracks ] };
+        });
+        setGenerated(current => {
+            if (!current) return current;
+
+            const items = reconcilePtvMusicIdentifyPresentationItems(current.items, confirmed);
+
+            return items === current.items ? current : { ...current, items: [ ...items ] };
+        });
+        setMetadataLookup(current => {
+            if (!current) return current;
+
+            const item = reconcilePtvMusicIdentifyItem(current.item, confirmed) || current.item;
+
+            return item === current.item ? current : { ...current, item };
+        });
+        reconcilePtvMusicQueueIdentifyMetadata(confirmed);
+        return true;
+    }, [musicIdentifyAuthorityOverlay]);
+
+    const openAdminAction = useCallback((
+        item: PtvMusicItem,
+        action: MusicAdminAction,
+        owner: MusicAdminActionOwner = { isCurrent: () => true }
+    ) => {
         if (action === 'lookup') {
             runMusicMetadataLookup(item);
             return;
         }
 
+        if (action !== 'identify') {
+            void openMusicAdminDialog(item, action)
+                .catch(error => {
+                    recordPtvEvent('render', 'music-admin-dialog-failed', {
+                        action,
+                        failureReason: getMusicAdminDialogFailureReason(error),
+                        itemType: item.Type || 'Unknown'
+                    });
+                });
+            return;
+        }
+
+        const operation: PtvMusicIdentifyOperation = {
+            generation: ++musicIdentifyGenerationRef.current,
+            identityKey: getActiveMusicDisplayIdentityKey(),
+            isOwnerCurrent: owner.isCurrent,
+            item,
+            routeKey: musicRouteKeyRef.current
+        };
+
         void openMusicAdminDialog(item, action)
+            .then(async result => {
+                const authorityResult = result as PtvMusicIdentifyAuthorityResult | null | undefined;
+                const confirmed = authorityResult?.item;
+                const canPublish = () => {
+                    const ownerState = musicIdentifyOwnerStateRef.current;
+
+                    return Boolean(ownerState && canPublishPtvMusicIdentifyResult({
+                        currentGeneration: musicIdentifyGenerationRef.current,
+                        currentIdentityKey: getActiveMusicDisplayIdentityKey(),
+                        currentRouteKey: musicRouteKeyRef.current,
+                        mounted: musicMountedRef.current,
+                        operation,
+                        ownerState,
+                        result: authorityResult
+                    }));
+                };
+
+                if (!confirmed || !canPublish()) return;
+
+                await adoptConfirmedMusicIdentifyItem(confirmed, operation.identityKey, canPublish);
+            })
             .catch(error => {
+                if (!error) return;
+
                 recordPtvEvent('render', 'music-admin-dialog-failed', {
                     action,
-                    error: getMusicErrorMessage(error),
-                    itemId: item.Id || null
+                    failureReason: getMusicAdminDialogFailureReason(error),
+                    itemType: item.Type || 'Unknown'
                 });
             });
-    }, [runMusicMetadataLookup]);
+    }, [adoptConfirmedMusicIdentifyItem, runMusicMetadataLookup]);
 
     const adminControls = useMemo<MusicAdminContextValue>(() => ({
         canShowDebug,
@@ -4532,7 +4824,8 @@ export default function PiggieTvMusicPage() {
         forceRefresh = false,
         ownerRequestId = musicRequestIdRef.current,
         signal = musicRouteWorkSignalRef.current || undefined
-    ) => {
+    ): Promise<null | void> => {
+        const identifyRequestRevision = musicIdentifyAuthorityOverlay.captureRequestRevision();
         const libraryRequestKey = `${ownerRequestId}:${forceRefresh ? 'refresh' : 'normal'}`;
         const isCurrentLibraryRequest = (libraryRequestId: number) => (
             musicMountedRef.current
@@ -4542,7 +4835,7 @@ export default function PiggieTvMusicPage() {
         );
 
         if (signal?.aborted) {
-            return Promise.resolve();
+            return Promise.resolve(null);
         }
 
         if (musicLibraryIndexActiveRequestKeyRef.current === libraryRequestKey) {
@@ -4551,7 +4844,7 @@ export default function PiggieTvMusicPage() {
                 ownerRequestId
             });
 
-            return Promise.resolve();
+            return Promise.resolve(null);
         }
 
         const libraryRequestId = ++musicLibraryIndexRequestIdRef.current;
@@ -4569,22 +4862,34 @@ export default function PiggieTvMusicPage() {
             .then(libraryIndex => {
                 if (!isCurrentLibraryRequest(libraryRequestId)) return;
 
-                setHomeData(previous => mergeMusicLibraryIndex(previous, libraryIndex));
+                setHomeData(previous => reconcileMusicIdentifyHomeData(
+                    mergeMusicLibraryIndex(previous, libraryIndex),
+                    identifyRequestRevision
+                ));
                 setLibraryIndexLoadState('ready');
                 if (!libraryIndex.debug.failedSections.includes('playlists')) {
                     setPlaylists(libraryIndex.playlists.slice(0, PTV_MUSIC_LIBRARY_RETAIN_LIMIT));
                 }
 
                 if (!libraryIndex.debug.failedSections.includes('albums')) {
-                    setAlbums(libraryIndex.albums.slice(0, PTV_MUSIC_LIBRARY_RETAIN_LIMIT));
+                    setAlbums([ ...reconcileMusicIdentifyItems(
+                        libraryIndex.albums.slice(0, PTV_MUSIC_LIBRARY_RETAIN_LIMIT),
+                        identifyRequestRevision
+                    ) ]);
                 }
 
                 if (!libraryIndex.debug.failedSections.includes('artists')) {
-                    setArtists(libraryIndex.artists.slice(0, PTV_MUSIC_LIBRARY_RETAIN_LIMIT));
+                    setArtists([ ...reconcileMusicIdentifyItems(
+                        libraryIndex.artists.slice(0, PTV_MUSIC_LIBRARY_RETAIN_LIMIT),
+                        identifyRequestRevision
+                    ) ]);
                 }
 
                 if (!libraryIndex.debug.failedSections.includes('tracks')) {
-                    setTracks(libraryIndex.tracks.slice(0, PTV_MUSIC_LIBRARY_RETAIN_LIMIT));
+                    setTracks([ ...reconcileMusicIdentifyItems(
+                        libraryIndex.tracks.slice(0, PTV_MUSIC_LIBRARY_RETAIN_LIMIT),
+                        identifyRequestRevision
+                    ) ]);
                 }
                 const libraryUiDiagnostic = {
                     albumCount: libraryIndex.albums.length,
@@ -4623,13 +4928,20 @@ export default function PiggieTvMusicPage() {
                     musicLibraryIndexActiveRequestKeyRef.current = '';
                 }
             });
-    }, [musicDataCoordinator]);
+    }, [
+        musicDataCoordinator,
+        musicIdentifyAuthorityOverlay,
+        reconcileMusicIdentifyHomeData,
+        reconcileMusicIdentifyItems
+    ]);
 
     const loadMusicData = useCallback((forceRefresh = false) => {
+        const identifyRequestRevision = musicIdentifyAuthorityOverlay.captureRequestRevision();
         const routeEnteredAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
         const requestId = ++musicRequestIdRef.current;
         const activeRouteView = routeViewRef.current;
         const shouldLoadLibraryIndex = isPtvMusicCatalogView(activeRouteView);
+        let hasPublishedFirstVisibleContent = false;
 
         setLibraryIndexLoadState('scheduled');
 
@@ -4729,7 +5041,10 @@ export default function PiggieTvMusicPage() {
                     .then(refreshedHomeData => {
                         if (!isCurrentRequest()) return;
 
-                        setHomeData(previous => mergeMusicHomeDataWithLibraryState(previous, refreshedHomeData));
+                        setHomeData(previous => reconcileMusicIdentifyHomeData(
+                            mergeMusicHomeDataWithLibraryState(previous, refreshedHomeData),
+                            identifyRequestRevision
+                        ));
                         recordPtvEvent('render', 'music-background-refresh-completed', {
                             musicBackgroundRefreshCompleted: true,
                             musicBackgroundRefreshMs: Number(((typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()) - refreshStartedAt).toFixed(1)),
@@ -4745,26 +5060,43 @@ export default function PiggieTvMusicPage() {
                     });
             }, isIntentionalInitialSnapshot ? 500 : 350);
         };
+        const publishVisibleHomeData = (nextHomeData: PtvMusicHomeData, delivery: 'progressive' | 'snapshot') => {
+            if (!isCurrentRequest()) return;
+
+            setHomeData(previous => reconcileMusicIdentifyHomeData(
+                mergeMusicHomeDataWithLibraryState(previous, nextHomeData),
+                identifyRequestRevision
+            ));
+            setLoading(false);
+
+            if (hasPublishedFirstVisibleContent) return;
+
+            hasPublishedFirstVisibleContent = true;
+            const visibleAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+            const visibleDurationMs = Number((visibleAt - routeEnteredAt).toFixed(1));
+
+            recordPtvEvent('render', 'music-first-visible-content', {
+                cacheAgeMs: Math.max(0, Date.now() - nextHomeData.generatedAt),
+                delivery,
+                musicCachedRenderMs: visibleDurationMs,
+                musicFirstInteractiveMs: visibleDurationMs,
+                musicFirstVisibleContentMs: visibleDurationMs,
+                musicRouteEnteredAt: routeEnteredAt,
+                sectionCount: nextHomeData.sections.length
+            });
+        };
 
         return musicDataCoordinator.loadHomeSnapshot({
             forceRefresh,
             initialOnly: true,
             isCurrent: isCurrentRequest,
+            onProgress: progressiveHomeData => publishVisibleHomeData(progressiveHomeData, 'progressive'),
             signal: routeSignal
         })
             .then(nextHomeData => {
                 if (!isCurrentRequest()) return;
 
-                setHomeData(previous => mergeMusicHomeDataWithLibraryState(previous, nextHomeData));
-                setLoading(false);
-                recordPtvEvent('render', 'music-first-visible-content', {
-                    cacheAgeMs: Math.max(0, Date.now() - nextHomeData.generatedAt),
-                    musicCachedRenderMs: Number(((typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()) - routeEnteredAt).toFixed(1)),
-                    musicFirstInteractiveMs: Number(((typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()) - routeEnteredAt).toFixed(1)),
-                    musicFirstVisibleContentMs: Number(((typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()) - routeEnteredAt).toFixed(1)),
-                    musicRouteEnteredAt: routeEnteredAt,
-                    sectionCount: nextHomeData.sections.length
-                });
+                publishVisibleHomeData(nextHomeData, 'snapshot');
                 loadMusicVideos();
                 scheduleBackgroundHomeRefresh(nextHomeData);
             })
@@ -4778,7 +5110,14 @@ export default function PiggieTvMusicPage() {
                 });
                 setLoading(false);
             });
-    }, [clearDeferredMusicWork, loadMusicLibraryIndex, musicDataCoordinator, scheduleDeferredMusicWork]);
+    }, [
+        clearDeferredMusicWork,
+        loadMusicLibraryIndex,
+        musicDataCoordinator,
+        musicIdentifyAuthorityOverlay,
+        reconcileMusicIdentifyHomeData,
+        scheduleDeferredMusicWork
+    ]);
 
     useEffect(() => {
         musicMountedRef.current = true;
@@ -4905,6 +5244,7 @@ export default function PiggieTvMusicPage() {
 
         if (route.view !== 'explore' || !route.search) return undefined;
 
+        const identifyRequestRevision = musicIdentifyAuthorityOverlay.captureRequestRevision();
         const routeWork = beginPtvMusicRouteWork(
             PTV_MUSIC_SEARCH_ROUTE_WORK_OWNER,
             `${getActiveMusicDisplayIdentityKey() || 'identity-unavailable'}:${route.search}`
@@ -4916,7 +5256,7 @@ export default function PiggieTvMusicPage() {
 
         void searchPtvMusic(route.search, 60, routeWork.signal).then(results => {
             if (isCurrent()) {
-                setSearchResults(results);
+                setSearchResults([ ...reconcileMusicIdentifyItems(results, identifyRequestRevision) ]);
             }
         }).catch(error => {
             if (isMusicRouteAbortError(error) || !isCurrent()) return;
@@ -4933,7 +5273,7 @@ export default function PiggieTvMusicPage() {
         return () => {
             retirePtvMusicRouteWork(routeWork);
         };
-    }, [route.search, route.view]);
+    }, [musicIdentifyAuthorityOverlay, reconcileMusicIdentifyItems, route.search, route.view]);
 
     useEffect(() => {
         if (route.view !== 'item' || !route.id) return undefined;
@@ -4950,6 +5290,7 @@ export default function PiggieTvMusicPage() {
         void fetchPtvMusicItem(route.id, routeWork.signal)
             .then(item => {
                 if (!isCurrent()) return;
+                if (!item) return;
 
                 recordPtvEvent('route', 'music-item-route-loaded', {
                     itemId: item.Id || route.id,
@@ -4991,7 +5332,18 @@ export default function PiggieTvMusicPage() {
         }
 
         const displayIdentityKey = getActiveMusicDisplayIdentityKey();
-        const cachedDetail = artistDetailCache.get(displayIdentityKey, route.id);
+        const identifyRequestRevision = musicIdentifyAuthorityOverlay.captureRequestRevision();
+        const cachedDetailValue = artistDetailCache.get(displayIdentityKey, route.id);
+        const cachedDetail = cachedDetailValue ?
+            reconcileMusicIdentifyArtistDetail(
+                cachedDetailValue,
+                displayIdentityKey,
+                identifyRequestRevision
+            ) : undefined;
+
+        if (cachedDetail && cachedDetail !== cachedDetailValue) {
+            artistDetailCache.set(displayIdentityKey, route.id, cachedDetail);
+        }
         const routeWork = beginPtvMusicRouteWork(
             PTV_MUSIC_ARTIST_ROUTE_WORK_OWNER,
             `${displayIdentityKey || 'identity-unavailable'}:${route.id}`
@@ -5019,13 +5371,13 @@ export default function PiggieTvMusicPage() {
             onSummary: artist => {
                 if (!isCurrent()) return;
 
-                const summaryDetail: ArtistDetailState = {
+                const summaryDetail = reconcileMusicIdentifyArtistDetail({
                     albums: cachedDetail?.albums || [],
                     artist,
                     error: '',
                     isLoading: false,
                     topSongs: cachedDetail?.topSongs || []
-                };
+                }, displayIdentityKey, identifyRequestRevision);
 
                 artistDetailCache.set(displayIdentityKey, route.id, summaryDetail);
                 setArtistDetail(summaryDetail);
@@ -5040,7 +5392,13 @@ export default function PiggieTvMusicPage() {
                 if (!isCurrent()) return;
 
                 setArtistDetail(current => {
-                    const next = { ...current, albums: artistAlbums };
+                    const next = reconcileMusicIdentifyArtistDetail({
+                        ...current,
+                        albums: [ ...reconcileMusicIdentifyItems(
+                            artistAlbums,
+                            identifyRequestRevision
+                        ) ]
+                    }, displayIdentityKey, identifyRequestRevision);
 
                     artistDetailCache.set(displayIdentityKey, route.id, next);
                     return next;
@@ -5055,7 +5413,13 @@ export default function PiggieTvMusicPage() {
                 if (!isCurrent()) return;
 
                 setArtistDetail(current => {
-                    const next = { ...current, topSongs };
+                    const next = {
+                        ...current,
+                        topSongs: [ ...reconcileMusicIdentifyItems(
+                            topSongs,
+                            identifyRequestRevision
+                        ) ]
+                    };
 
                     artistDetailCache.set(displayIdentityKey, route.id, next);
                     return next;
@@ -5091,7 +5455,13 @@ export default function PiggieTvMusicPage() {
                 });
             }
         };
-    }, [route.id, route.view]);
+    }, [
+        musicIdentifyAuthorityOverlay,
+        reconcileMusicIdentifyArtistDetail,
+        reconcileMusicIdentifyItems,
+        route.id,
+        route.view
+    ]);
 
     useEffect(() => {
         if (route.view !== 'album' || !route.id) {
@@ -5105,6 +5475,7 @@ export default function PiggieTvMusicPage() {
             isTracksLoading: true
         });
 
+        const identifyRequestRevision = musicIdentifyAuthorityOverlay.captureRequestRevision();
         const routeWork = beginPtvMusicRouteWork(
             PTV_MUSIC_ALBUM_ROUTE_WORK_OWNER,
             `${getActiveMusicDisplayIdentityKey() || 'identity-unavailable'}:${route.id}`
@@ -5119,12 +5490,20 @@ export default function PiggieTvMusicPage() {
             loadItem: () => fetchPtvMusicItem(route.id, routeWork.signal),
             loadTracks: () => fetchPtvMusicAlbumTracks(route.id, 100, routeWork.signal),
             onItem: item => {
-                setAlbumDetail(current => ({
-                    ...current,
-                    error: '',
-                    isLoading: false,
-                    item
-                }));
+                setAlbumDetail(current => {
+                    const detailItem = reconcileMusicIdentifyItem(item, identifyRequestRevision);
+                    const relationshipResolution = resolvePtvMusicAlbumArtist(detailItem, current.tracks, {
+                        childScope: 'authoritative-album-query'
+                    });
+
+                    return {
+                        ...current,
+                        artistSource: relationshipResolution.source,
+                        error: '',
+                        isLoading: false,
+                        item: relationshipResolution.item
+                    };
+                });
             },
             onItemError: error => {
                 if (isMusicRouteAbortError(error)) return;
@@ -5135,11 +5514,24 @@ export default function PiggieTvMusicPage() {
                 });
             },
             onTracks: albumTracks => {
-                setAlbumDetail(current => ({
-                    ...current,
-                    isTracksLoading: false,
-                    tracks: albumTracks
-                }));
+                const detailTracks = [ ...reconcileMusicIdentifyItems(
+                    albumTracks,
+                    identifyRequestRevision
+                ) ];
+
+                setAlbumDetail(current => {
+                    const relationshipResolution = resolvePtvMusicAlbumArtist(current.item, detailTracks, {
+                        childScope: 'authoritative-album-query'
+                    });
+
+                    return {
+                        ...current,
+                        artistSource: relationshipResolution.source,
+                        isTracksLoading: false,
+                        item: relationshipResolution.item,
+                        tracks: detailTracks
+                    };
+                });
             },
             onTracksError: error => {
                 if (isMusicRouteAbortError(error)) return;
@@ -5160,7 +5552,13 @@ export default function PiggieTvMusicPage() {
         return () => {
             retirePtvMusicRouteWork(routeWork);
         };
-    }, [route.id, route.view]);
+    }, [
+        musicIdentifyAuthorityOverlay,
+        reconcileMusicIdentifyItem,
+        reconcileMusicIdentifyItems,
+        route.id,
+        route.view
+    ]);
 
     useEffect(() => {
         if (route.view !== 'playlist' || !route.id) {
@@ -5174,6 +5572,7 @@ export default function PiggieTvMusicPage() {
             isTracksLoading: true
         });
 
+        const identifyRequestRevision = musicIdentifyAuthorityOverlay.captureRequestRevision();
         const routeWork = beginPtvMusicRouteWork(
             PTV_MUSIC_PLAYLIST_ROUTE_WORK_OWNER,
             `${getActiveMusicDisplayIdentityKey() || 'identity-unavailable'}:${route.id}`
@@ -5207,7 +5606,10 @@ export default function PiggieTvMusicPage() {
                 setPlaylistDetail(current => ({
                     ...current,
                     isTracksLoading: false,
-                    tracks: playlistTracks
+                    tracks: [ ...reconcileMusicIdentifyItems(
+                        playlistTracks,
+                        identifyRequestRevision
+                    ) ]
                 }));
             },
             onTracksError: error => {
@@ -5237,7 +5639,7 @@ export default function PiggieTvMusicPage() {
                 });
             }
         };
-    }, [route.id, route.view]);
+    }, [musicIdentifyAuthorityOverlay, reconcileMusicIdentifyItems, route.id, route.view]);
 
     const refresh = () => {
         void loadMusicData(true);

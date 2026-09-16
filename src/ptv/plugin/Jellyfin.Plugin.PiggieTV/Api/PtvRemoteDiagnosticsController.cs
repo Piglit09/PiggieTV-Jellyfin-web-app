@@ -33,6 +33,7 @@ public sealed class PtvRemoteDiagnosticsController : BaseJellyfinApiController
     [
         "authorization",
         "cookie",
+        "credential",
         "password",
         "secret",
         "token",
@@ -41,7 +42,7 @@ public sealed class PtvRemoteDiagnosticsController : BaseJellyfinApiController
         "accesskey"
     ];
     private static readonly Regex SensitiveStringContentPattern = new(
-        @"(?:https?://|file://|[a-z]:\\|\\\\|(?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret|token)\s*[:=]|[^\s]+\.(?:3gp|aac|avi|cb7|cbr|cbt|cbz|epub|flac|flv|gif|jpe?g|m2ts|m4a|m4v|mkv|mov|mp3|mp4|ogg|opus|pdf|png|ts|wav|webm|webp|wmv)\b)",
+        @"(?:https?://|file://|[a-z]:\\|\\\\|(?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|credential|password|secret|token)\s*[:=]|sk-(?:proj-)?[a-z0-9_-]{20,}|[^\s]+\.(?:3gp|aac|avi|cb7|cbr|cbt|cbz|epub|flac|flv|gif|jpe?g|m2ts|m4a|m4v|mkv|mov|mp3|mp4|ogg|opus|pdf|png|ts|wav|webm|webp|wmv)\b)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(50));
     private static readonly Regex QueryValuePattern = new(
@@ -253,7 +254,7 @@ public sealed class PtvRemoteDiagnosticsController : BaseJellyfinApiController
             return NotFound(new PtvErrorResponse("PTV_DIAGNOSTICS_REPORT_NOT_FOUND", "No unexpired report is available for this client."));
         }
 
-        var fileName = $"piggie-tv-diagnostics-{report.ClientId}-{report.ReceivedAtUtc:yyyyMMdd-HHmmss}.json";
+        var fileName = $"piggie-tv-diagnostics-{report.ReceivedAtUtc:yyyyMMdd-HHmmss}.json";
         return File(Encoding.UTF8.GetBytes(report.Report.GetRawText()), "application/json", fileName);
     }
 
