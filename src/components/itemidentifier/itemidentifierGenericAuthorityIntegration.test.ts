@@ -3,26 +3,15 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const itemIdentifierSource = readFileSync(
-    resolve(process.cwd(), 'src/components/itemidentifier/itemidentifier.js'),
-    'utf8'
-);
-const itemContextMenuSource = readFileSync(
-    resolve(process.cwd(), 'src/components/itemContextMenu.js'),
-    'utf8'
-);
-const itemDetailsSource = readFileSync(
-    resolve(process.cwd(), 'src/controllers/itemDetails/index.js'),
-    'utf8'
-);
-const metadataEditorSource = readFileSync(
-    resolve(process.cwd(), 'src/components/metadataEditor/metadataEditor.js'),
-    'utf8'
-);
-const shortcutsSource = readFileSync(
-    resolve(process.cwd(), 'src/components/shortcuts.js'),
-    'utf8'
-);
+function readSource(path: string) {
+    return readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n?/g, '\n');
+}
+
+const itemIdentifierSource = readSource('src/components/itemidentifier/itemidentifier.js');
+const itemContextMenuSource = readSource('src/components/itemContextMenu.js');
+const itemDetailsSource = readSource('src/controllers/itemDetails/index.js');
+const metadataEditorSource = readSource('src/components/metadataEditor/metadataEditor.js');
+const shortcutsSource = readSource('src/components/shortcuts.js');
 const submitStart = itemIdentifierSource.indexOf('function submitIdentficationResult(page) {');
 const genericStart = itemIdentifierSource.indexOf('    loading.show();', submitStart);
 const submitEnd = itemIdentifierSource.indexOf('\nfunction showIdentificationForm(page, item) {', genericStart);

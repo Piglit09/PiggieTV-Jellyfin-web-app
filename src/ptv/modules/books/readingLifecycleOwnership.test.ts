@@ -2,22 +2,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const booksPageSource = readFileSync(
-    resolve(process.cwd(), 'src/ptv/modules/books/booksPage.tsx'),
-    'utf8'
-);
-const booksApiSource = readFileSync(
-    resolve(process.cwd(), 'src/ptv/modules/books/booksApi.ts'),
-    'utf8'
-);
-const libraryIndexCacheSource = readFileSync(
-    resolve(process.cwd(), 'src/ptv/utils/libraryIndexCache.ts'),
-    'utf8'
-);
-const itemIdentifierSource = readFileSync(
-    resolve(process.cwd(), 'src/components/itemidentifier/itemidentifier.js'),
-    'utf8'
-);
+function readSource(path: string) {
+    return readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n?/g, '\n');
+}
+
+const booksPageSource = readSource('src/ptv/modules/books/booksPage.tsx');
+const booksApiSource = readSource('src/ptv/modules/books/booksApi.ts');
+const libraryIndexCacheSource = readSource('src/ptv/utils/libraryIndexCache.ts');
+const itemIdentifierSource = readSource('src/components/itemidentifier/itemidentifier.js');
 
 describe('PiggieTV Reading catalog lifecycle', () => {
     it('serves the direct Library route from its progressive index without a broad Home request', () => {
