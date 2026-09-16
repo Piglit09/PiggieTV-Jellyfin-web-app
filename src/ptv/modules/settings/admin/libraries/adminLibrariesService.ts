@@ -118,9 +118,14 @@ function normalizeCreateCollectionType(value: string): CollectionTypeOptions | u
     return normalized as CollectionTypeOptions;
 }
 
-function normalizeCreateFingerprintCollectionType(value: unknown) {
-    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+function normalizeCreateFingerprintInputCollectionType(value: string) {
+    const normalized = value.trim().toLowerCase();
     return !normalized || normalized === 'mixed' ? 'mixed' : normalized;
+}
+
+function normalizeCreateFingerprintServerCollectionType(value: unknown) {
+    return value === undefined || value === null || value === '' || value === 'mixed' ?
+        'mixed' : value;
 }
 
 function haveExactPaths(left: readonly string[], right: readonly string[]) {
@@ -136,11 +141,11 @@ function findExactCreateMatches(
     collectionType: string,
     locations: readonly string[]
 ) {
-    const normalizedType = normalizeCreateFingerprintCollectionType(collectionType);
+    const normalizedType = normalizeCreateFingerprintInputCollectionType(collectionType);
     return libraries.filter(library => (
         typeof library.Name === 'string'
         && library.Name.trim() === name
-        && normalizeCreateFingerprintCollectionType(library.CollectionType) === normalizedType
+        && normalizeCreateFingerprintServerCollectionType(library.CollectionType) === normalizedType
         && haveExactPaths(getAdminLibraryLocations(library), locations)
     ));
 }

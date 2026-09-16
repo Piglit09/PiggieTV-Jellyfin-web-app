@@ -475,6 +475,58 @@ describe('administrator libraries service mutations', () => {
         expect(sdkMocks.addVirtualFolder).not.toHaveBeenCalled();
     });
 
+    it('does not suppress a create for noncanonical returned collection type case or whitespace', async () => {
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [
+                library({
+                    CollectionType: 'Movies' as never,
+                    LibraryOptions: { PathInfos: [] },
+                    Locations: ['/media/new'],
+                    Name: 'New Movies'
+                }),
+                library({
+                    CollectionType: ' movies ' as never,
+                    LibraryOptions: { PathInfos: [] },
+                    Locations: ['/media/new'],
+                    Name: 'New Movies'
+                })
+            ] })
+            .mockResolvedValueOnce({ data: [] });
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'movies',
+            locations: ['/media/new'],
+            name: 'New Movies'
+        }, creationOptions())).resolves.toBeNull();
+
+        expect(sdkMocks.addVirtualFolder).toHaveBeenCalledOnce();
+        expect(sdkMocks.getVirtualFolders).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not reconcile a rejected Mixed create from an invalid non-string returned type', async () => {
+        const invalidType = library({
+            CollectionType: 42 as never,
+            LibraryOptions: { PathInfos: [] },
+            Locations: ['/media/mixed'],
+            Name: 'Mixed'
+        });
+        sdkMocks.getVirtualFolders
+            .mockResolvedValueOnce({ data: [] })
+            .mockResolvedValueOnce({ data: [invalidType] });
+        sdkMocks.addVirtualFolder.mockRejectedValueOnce(new Error('server returned 500'));
+
+        await expect(createAdminLibrary(api, {
+            collectionType: 'mixed',
+            locations: ['/media/mixed'],
+            name: 'Mixed'
+        }, creationOptions())).rejects.toMatchObject({
+            code: 'creation-outcome-uncertain'
+        });
+
+        expect(sdkMocks.addVirtualFolder).toHaveBeenCalledOnce();
+        expect(sdkMocks.getVirtualFolders).toHaveBeenCalledTimes(2);
+    });
+
     it('reconciles one exact match after a rejected POST without retrying the mutation', async () => {
         const exact = library({
             ItemId: 'created-id',
