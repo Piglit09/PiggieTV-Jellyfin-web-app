@@ -9,6 +9,7 @@ import type {
     PtvTasteSignal
 } from '../types/recommendationTypes';
 import {
+    getRecommendationMetadata,
     getRecommendationTitle,
     getResolvedRecommendationArtists,
     normalizeRecommendationTerm
@@ -18,6 +19,7 @@ const ROW_LIMIT = 18;
 const ROW_MIN_ITEMS = 12;
 const MIX_LIMIT = 50;
 const MIXED_ROW_MEDIA_CAP = 6;
+const MADE_FOR_YOU_MEDIA_CAP = ROW_MIN_ITEMS;
 const ROW_ARTIST_CAP = 1;
 const ROW_ALBUM_CAP = 2;
 const ROW_SERIES_CAP = 2;
@@ -120,8 +122,8 @@ function compareRecommended(left: PtvRecommendationScore, right: PtvRecommendati
 }
 
 function compareDiscovery(left: PtvRecommendationScore, right: PtvRecommendationScore) {
-    const leftBlend = (left.affinityScore * 0.7) + (left.discoveryWeight * 0.3);
-    const rightBlend = (right.affinityScore * 0.7) + (right.discoveryWeight * 0.3);
+    const leftBlend = (left.affinityScore * 0.5) + (left.discoveryWeight * 0.5);
+    const rightBlend = (right.affinityScore * 0.5) + (right.discoveryWeight * 0.5);
 
     return rightBlend - leftBlend
         || right.discoveryWeight - left.discoveryWeight
@@ -386,16 +388,141 @@ function isWatchedRecommendation(item: PtvRecommendationScore) {
 
 function isMusicRecommendation(item: PtvRecommendationScore) {
     return item.mediaType === 'music'
+        && hasUserRecommendationSignal(item)
         && item.reasons.some(reason => reason.category === 'artists' || reason.category === 'musicGenres');
 }
 
 function isRediscoverRecommendation(item: PtvRecommendationScore) {
     const playCount = Number(item.item.UserData?.PlayCount || 0);
 
-    return playCount <= 1
+    return hasUserRecommendationSignal(item)
+        && playCount <= 1
         && item.item.UserData?.Played !== true
         && item.affinityScore >= 20
         && item.discoveryWeight < 70;
+}
+
+function hasUserRecommendationSignal(item: PtvRecommendationScore) {
+    return item.reasons.some(reason => (
+        reason.source === 'favorite'
+        || reason.source === 'history'
+        || reason.source === 'recently-viewed'
+        || reason.source === 'resume'
+    ));
+}
+
+function isHiddenGemRecommendation(item: PtvRecommendationScore) {
+    return hasUserRecommendationSignal(item)
+        && Number(item.item.UserData?.PlayCount || 0) === 0
+        && item.item.UserData?.Played !== true
+        && item.affinityScore >= 12
+        && item.discoveryWeight >= 45;
+}
+
+function buildBalancedRecommendationScores(scores: PtvRecommendationScore[]) {
+    const personalized = scores.filter(hasUserRecommendationSignal).sort(compareRecommended);
+    const aggregate = scores
+        .filter(item => !hasUserRecommendationSignal(item) && item.discoveryWeight >= 35)
+        .sort(compareDiscovery);
+
+    if (!personalized.length || !aggregate.length) return [];
+
+    const balanced: PtvRecommendationScore[] = [];
+    const seen = new Set<string>();
+    const add = (item: PtvRecommendationScore | undefined) => {
+        if (!item) return;
+        const key = getScoreIdentity(item);
+
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        balanced.push(item);
+    };
+    const pairCount = Math.max(personalized.length, aggregate.length);
+
+    for (let index = 0; index < pairCount && balanced.length < ROW_LIMIT; index += 1) {
+        add(personalized[index]);
+        add(aggregate[index]);
+    }
+
+    return balanced;
+}
+
+const WATCHED_RELATIONSHIP_CATEGORIES = [
+    'actors',
+    'collections',
+    'directors',
+    'genres',
+    'series',
+    'studios',
+    'tags'
+] as const;
+
+function getWatchedRelationshipTerms(item: PtvRecommendationScore['item']) {
+    const categories = getRecommendationMetadata(item).categories;
+
+    return new Set(
+        WATCHED_RELATIONSHIP_CATEGORIES
+            .flatMap(category => categories[category] || [])
+            .map(normalizeRecommendationTerm)
+            .filter(Boolean)
+    );
+}
+
+function hasStrongWatchedRelationship(
+    candidate: PtvRecommendationScore,
+    subjectTerms: Set<string>
+) {
+    if (!subjectTerms.size) return false;
+
+    return [ ...getWatchedRelationshipTerms(candidate.item) ]
+        .some(term => subjectTerms.has(term));
+}
+
+function buildBecauseYouWatchedRows(
+    scores: PtvRecommendationScore[],
+    historyItems: PtvRecommendationScore['item'][]
+) {
+    const rows: Array<{ duplicateItemsRemoved: number; row: PtvRecommendationRow }> = [];
+    const blockedKeys = new Set<string>();
+    const seenSubjects = new Set<string>();
+
+    for (const subject of historyItems) {
+        if (rows.length >= 4) break;
+
+        const subjectKey = normalizeRecommendationTerm(String(subject.Id || getRecommendationTitle(subject)));
+        const title = getRecommendationTitle(subject);
+
+        if (!subjectKey || !title || seenSubjects.has(subjectKey)) continue;
+        seenSubjects.add(subjectKey);
+
+        const subjectTerms = getWatchedRelationshipTerms(subject);
+        const candidates = scores.filter(candidate => (
+            getScoreIdentity(candidate) !== String(subject.Id || '')
+            && hasStrongWatchedRelationship(candidate, subjectTerms)
+        ));
+        const selection = selectFilledDiverseScores(candidates, candidates, candidates, {
+            blockedKeys,
+            maxPerMediaType: MIXED_ROW_MEDIA_CAP,
+            maxPerSeries: ROW_SERIES_CAP,
+            sort: compareRecommended
+        });
+        const row = makeRow(
+            `because-you-watched-${labelToId(subjectKey)}`,
+            `Because You Watched ${title}`,
+            'Related through explicit collection, series, genre, studio, tag, cast, or director metadata.',
+            selection.items,
+            'mixed',
+            selection.diagnostics
+        );
+
+        if (!row) continue;
+        row.items.forEach(item => {
+            blockedKeys.add(getScoreIdentity(item));
+        });
+        rows.push({ duplicateItemsRemoved: selection.duplicateItemsRemoved, row });
+    }
+
+    return rows;
 }
 
 function makeRow(
@@ -481,7 +608,8 @@ function getMediaRow(
 
 export function buildPtvRecommendationRowsWithQuality(
     profile: PtvTasteProfile,
-    scores: PtvRecommendationScore[]
+    scores: PtvRecommendationScore[],
+    options: { historyItems?: PtvRecommendationScore['item'][] } = {}
 ): PtvRecommendationRowsResult {
     const rows: PtvRecommendationRow[] = [];
     let duplicateItemsRemoved = 0;
@@ -494,36 +622,46 @@ export function buildPtvRecommendationRowsWithQuality(
         rows.push(row);
     }
 
-    const recommended = selectFilledDiverseScores(scores, scores.filter(item => item.affinityScore >= 15), scores.filter(item => item.discoveryWeight >= 35), {
+    const personalizedScores = scores.filter(hasUserRecommendationSignal);
+    const recommended = selectFilledDiverseScores(personalizedScores, personalizedScores, personalizedScores, {
         maxPerArtist: ROW_ARTIST_CAP,
-        maxPerMediaType: MIXED_ROW_MEDIA_CAP,
+        maxPerMediaType: MADE_FOR_YOU_MEDIA_CAP,
         maxPerSeries: ROW_SERIES_CAP,
         sort: compareRecommended
     });
 
     pushSelection(makeRow(
         'recommended-for-you',
-        'Recommended For You',
-        'Highest affinity items from your cross-media taste profile.',
+        'Made For You',
+        'User-only picks supported by your favorites, history, recent activity, or resumable media.',
         recommended.items,
         'mixed',
         recommended.diagnostics
     ), recommended.duplicateItemsRemoved);
 
-    const watched = selectFilledDiverseScores(scores.filter(isWatchedRecommendation), scores.filter(item => item.affinityScore >= 18), scores.filter(item => item.discoveryWeight >= 35), {
-        maxPerMediaType: MIXED_ROW_MEDIA_CAP,
-        maxPerSeries: ROW_SERIES_CAP,
-        sort: compareWatched
-    });
+    const watchedSubjectRows = buildBecauseYouWatchedRows(scores, options.historyItems || []);
 
-    pushSelection(makeRow(
-        'because-you-watched',
-        'Because You Watched...',
-        'Movies, shows, and anime matched directly to watch history.',
-        watched.items,
-        'mixed',
-        watched.diagnostics
-    ), watched.duplicateItemsRemoved);
+    if (watchedSubjectRows.length) {
+        watchedSubjectRows.forEach(result => {
+            pushSelection(result.row, result.duplicateItemsRemoved);
+        });
+    } else {
+        const watchedScores = scores.filter(isWatchedRecommendation);
+        const watched = selectFilledDiverseScores(watchedScores, watchedScores, watchedScores, {
+            maxPerMediaType: MIXED_ROW_MEDIA_CAP,
+            maxPerSeries: ROW_SERIES_CAP,
+            sort: compareWatched
+        });
+
+        pushSelection(makeRow(
+            'because-you-watched',
+            'Because You Watched...',
+            'Movies, shows, and anime matched directly to watch history.',
+            watched.items,
+            'mixed',
+            watched.diagnostics
+        ), watched.duplicateItemsRemoved);
+    }
 
     const listened = selectFilledDiverseScores(scores.filter(isMusicRecommendation), scores.filter(item => item.mediaType === 'music'), scores.filter(item => item.mediaType === 'music' && item.discoveryWeight >= 35), {
         maxPerArtist: ROW_ARTIST_CAP,
@@ -539,7 +677,8 @@ export function buildPtvRecommendationRowsWithQuality(
         listened.diagnostics
     ), listened.duplicateItemsRemoved);
 
-    const discovery = selectFilledDiverseScores(scores.filter(item => item.discoveryWeight >= 35), scores.filter(item => item.affinityScore >= 12), scores, {
+    const balancedRecommendationScores = buildBalancedRecommendationScores(scores);
+    const discovery = selectFilledDiverseScores(balancedRecommendationScores, balancedRecommendationScores, balancedRecommendationScores, {
         maxPerArtist: ROW_ARTIST_CAP,
         maxPerMediaType: MIXED_ROW_MEDIA_CAP,
         maxPerSeries: ROW_SERIES_CAP,
@@ -548,14 +687,15 @@ export function buildPtvRecommendationRowsWithQuality(
 
     pushSelection(makeRow(
         'ptv-discovery',
-        'PTV Discovery Mix',
-        'Seventy percent affinity with thirty percent fresh, unwatched, and underplayed content.',
+        'PTV Recommendation',
+        'A balanced blend of user-specific affinity and aggregate discovery candidates.',
         discovery.items,
         'mixed',
         discovery.diagnostics
     ), discovery.duplicateItemsRemoved);
 
-    const rediscover = selectFilledDiverseScores(scores.filter(isRediscoverRecommendation), scores.filter(item => item.affinityScore >= 18), scores.filter(item => item.discoveryWeight >= 35), {
+    const rediscoverScores = scores.filter(isRediscoverRecommendation);
+    const rediscover = selectFilledDiverseScores(rediscoverScores, rediscoverScores, rediscoverScores, {
         maxPerArtist: ROW_ARTIST_CAP,
         maxPerMediaType: MIXED_ROW_MEDIA_CAP,
         maxPerSeries: ROW_SERIES_CAP,
@@ -570,6 +710,23 @@ export function buildPtvRecommendationRowsWithQuality(
         'mixed',
         rediscover.diagnostics
     ), rediscover.duplicateItemsRemoved);
+
+    const hiddenGemScores = scores.filter(isHiddenGemRecommendation);
+    const hiddenGems = selectFilledDiverseScores(hiddenGemScores, hiddenGemScores, hiddenGemScores, {
+        maxPerArtist: ROW_ARTIST_CAP,
+        maxPerMediaType: MIXED_ROW_MEDIA_CAP,
+        maxPerSeries: ROW_SERIES_CAP,
+        sort: compareDiscovery
+    });
+
+    pushSelection(makeRow(
+        'hidden-gems',
+        'Hidden Gems',
+        'Unplayed, underexposed items with clear support from your taste signals.',
+        hiddenGems.items,
+        'mixed',
+        hiddenGems.diagnostics
+    ), hiddenGems.duplicateItemsRemoved);
 
     const mediaRows: Array<[
         string,
@@ -587,7 +744,7 @@ export function buildPtvRecommendationRowsWithQuality(
     ];
 
     mediaRows.forEach(([id, title, explanation, mediaType]) => {
-        const result = getMediaRow(id, title, explanation, scores, mediaType);
+        const result = getMediaRow(id, title, explanation, personalizedScores, mediaType);
 
         pushSelection(result.row, result.duplicateItemsRemoved);
     });
@@ -630,9 +787,10 @@ export function buildPtvRecommendationRowsWithQuality(
 
 export function buildPtvRecommendationRows(
     profile: PtvTasteProfile,
-    scores: PtvRecommendationScore[]
+    scores: PtvRecommendationScore[],
+    options: { historyItems?: PtvRecommendationScore['item'][] } = {}
 ): PtvRecommendationRow[] {
-    return buildPtvRecommendationRowsWithQuality(profile, scores).rows;
+    return buildPtvRecommendationRowsWithQuality(profile, scores, options).rows;
 }
 
 export function buildPtvRecommendationMixes(scores: PtvRecommendationScore[]): PtvRecommendationMix[] {

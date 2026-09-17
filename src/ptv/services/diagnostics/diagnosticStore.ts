@@ -18,11 +18,13 @@ import {
     type PtvFrameDiagnostic,
     type PtvImageDiagnostic,
     type PtvInputDiagnostic,
+    type PtvPlaybackSessionDiagnostic,
     type PtvPlatformDiagnostic,
     type PtvPluginDiagnostic,
     type PtvRecommendationDiagnostic,
     type PtvRequestDiagnostic,
     type PtvRequestErrorCategory,
+    type PtvRouteCriticalState,
     type PtvRouteDiagnostic,
     type PtvServerDiagnostic,
     type PtvShelfDiagnostic
@@ -37,11 +39,32 @@ export const PTV_DIAGNOSTIC_RETENTION_LIMITS = Object.freeze({
     frames: 120,
     images: 200,
     inputs: 300,
+    playbackSessions: 8,
     requests: 200,
     routes: 50,
     shelves: 100,
     warnings: 100
 });
+
+export const PTV_SEVERE_FRAME_JANK_WARNING = 'SEVERE_FRAME_JANK';
+export const PTV_SLOW_API_REQUESTS_WARNING = 'SLOW_API_REQUESTS';
+export const PTV_HIGH_API_CONCURRENCY_WARNING = 'HIGH_API_CONCURRENCY';
+export const PTV_EXTREME_IMAGE_CHURN_WARNING = 'EXTREME_IMAGE_CHURN';
+export const PTV_DIAGNOSTIC_HEALTH_THRESHOLDS = Object.freeze({
+    highApiConcurrency: 7,
+    imageChurnMinimumEvents: 600,
+    imageChurnMinimumRecentEvents: 180,
+    imageChurnMinimumRetentionTrims: 400,
+    imageChurnWindowMs: 60_000,
+    slowApiP95MinimumSamples: 3,
+    slowApiP95Ms: 8_000,
+    slowApiRequestMs: 10_000
+});
+const PTV_SEVERE_FRAME_JANK_REQUIRED_SAMPLES = 5;
+const PTV_SEVERE_FRAME_JANK_MAX_SPAN_MS = 8_000;
+const PTV_SEVERE_FRAME_JANK_MAX_FPS = 15;
+const PTV_SEVERE_FRAME_JANK_MIN_JANK_PERCENTAGE = 80;
+const PTV_SEVERE_FRAME_JANK_MIN_FRAME_COUNT = 3;
 
 const INITIALIZATION_ORDER = [
     'environment',
@@ -97,8 +120,13 @@ function createId(prefix: string, sequence: number) {
     return `${prefix}-${sequence.toString(36)}`;
 }
 
-function emptyHealth(status: PtvDiagnosticHealth['status'], reason: string, lastUpdated?: string) {
-    return createPtvDiagnosticHealth(status, reason, { lastUpdated });
+function emptyHealth(
+    status: PtvDiagnosticHealth['status'],
+    reason: string,
+    lastUpdated?: string,
+    warnings: readonly string[] = []
+) {
+    return createPtvDiagnosticHealth(status, reason, { lastUpdated, warnings });
 }
 
 function createDefaultContext(now: string): DiagnosticContext {
@@ -260,6 +288,9 @@ export function normalizePtvDiagnosticRouteFamily(value = '') {
     if (segments[0] === 'dashboard' && segments[1] === 'piggietv') {
         return `dashboard/piggietv/${segments[2] || 'overview'}`;
     }
+    if (segments[0] === 'settings' && segments[1] === 'admin' && segments[2] === 'piggietv') {
+        return `settings/admin/piggietv/${segments[3] || 'overview'}`;
+    }
 
     const known = [
         'home', 'movies', 'shows', 'tv', 'music', 'reading', 'books', 'comics',
@@ -309,10 +340,136 @@ export function classifyPtvDiagnosticError(error: unknown): PtvRequestErrorCateg
     return 'unknown';
 }
 
+export function hasSustainedPtvSevereFrameJank(
+    frames: readonly PtvFrameDiagnostic[],
+    routes: readonly PtvRouteDiagnostic[]
+) {
+    const route = routes.at(-1);
+
+    if (!route?.settledAt || route.status !== 'settled') return false;
+
+    const settledAt = Date.parse(route.settledAt);
+    if (!Number.isFinite(settledAt)) return false;
+
+    const samples = frames.filter(frame => (
+        frame.visibilityState === 'visible'
+        && frame.routeFamily === route.routeFamily
+        && Date.parse(frame.sampledAt) >= settledAt
+    )).slice(-PTV_SEVERE_FRAME_JANK_REQUIRED_SAMPLES);
+
+    if (samples.length < PTV_SEVERE_FRAME_JANK_REQUIRED_SAMPLES) return false;
+
+    const firstSampleAt = Date.parse(samples[0].sampledAt);
+    const lastSampleAt = Date.parse(samples.at(-1)?.sampledAt || '');
+
+    if (!Number.isFinite(firstSampleAt)
+        || !Number.isFinite(lastSampleAt)
+        || lastSampleAt - firstSampleAt > PTV_SEVERE_FRAME_JANK_MAX_SPAN_MS) return false;
+
+    return samples.every(frame => (
+        frame.frameCount >= PTV_SEVERE_FRAME_JANK_MIN_FRAME_COUNT
+        && frame.approximateFps <= PTV_SEVERE_FRAME_JANK_MAX_FPS
+        && frame.jankyFramePercentage >= PTV_SEVERE_FRAME_JANK_MIN_JANK_PERCENTAGE
+    ));
+}
+
+function getSuccessfulRequestDurations(requests: readonly PtvRequestDiagnostic[]) {
+    return requests.filter(request => (
+        request.success
+        && !request.cancellation
+        && !request.coordinatorHit
+    )).map(request => request.durationMs);
+}
+
+export function hasPtvSlowSuccessfulApiRequests(requests: readonly PtvRequestDiagnostic[]) {
+    const durations = getSuccessfulRequestDurations(requests);
+
+    return durations.some(duration => duration >= PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.slowApiRequestMs)
+        || (
+            durations.length >= PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.slowApiP95MinimumSamples
+            && getPtvDiagnosticPercentile(durations, 0.95) >= PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.slowApiP95Ms
+        );
+}
+
+export function hasPtvHighApiConcurrency(
+    requests: readonly PtvRequestDiagnostic[],
+    activeConcurrency: number
+) {
+    return activeConcurrency >= PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.highApiConcurrency
+        || requests.some(request => (
+            request.activeConcurrencyAtStart >= PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.highApiConcurrency
+            && !request.cancellation
+            && !request.coordinatorHit
+        ));
+}
+
+export function hasPtvExtremeImageLifecycleChurn(
+    images: readonly PtvImageDiagnostic[],
+    imageEventCount: number,
+    imageRetentionTrimmed: number,
+    generatedAt: string
+) {
+    if (
+        imageEventCount < PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.imageChurnMinimumEvents
+        || imageRetentionTrimmed < PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.imageChurnMinimumRetentionTrims
+    ) return false;
+
+    const generatedAtMs = Date.parse(generatedAt);
+
+    if (!Number.isFinite(generatedAtMs)) return false;
+
+    const recentWindowStartedAt = generatedAtMs - PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.imageChurnWindowMs;
+    const recentEventCount = images.filter(image => {
+        const occurredAt = Date.parse(image.occurredAt);
+
+        return Number.isFinite(occurredAt)
+            && occurredAt >= recentWindowStartedAt
+            && occurredAt <= generatedAtMs;
+    }).length;
+
+    return recentEventCount >= PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.imageChurnMinimumRecentEvents;
+}
+
+type PtvDerivedWarningInput = Readonly<{
+    activeConcurrency: number;
+    frames: readonly PtvFrameDiagnostic[];
+    generatedAt: string;
+    imageEventCount: number;
+    imageRetentionTrimmed: number;
+    images: readonly PtvImageDiagnostic[];
+    requests: readonly PtvRequestDiagnostic[];
+    routes: readonly PtvRouteDiagnostic[];
+}>;
+
+function getDerivedWarnings(input: PtvDerivedWarningInput) {
+    const derivedWarnings: string[] = [];
+
+    if (hasSustainedPtvSevereFrameJank(input.frames, input.routes)) {
+        derivedWarnings.push(PTV_SEVERE_FRAME_JANK_WARNING);
+    }
+    if (hasPtvSlowSuccessfulApiRequests(input.requests)) {
+        derivedWarnings.push(PTV_SLOW_API_REQUESTS_WARNING);
+    }
+    if (hasPtvHighApiConcurrency(input.requests, input.activeConcurrency)) {
+        derivedWarnings.push(PTV_HIGH_API_CONCURRENCY_WARNING);
+    }
+    if (hasPtvExtremeImageLifecycleChurn(
+        input.images,
+        input.imageEventCount,
+        input.imageRetentionTrimmed,
+        input.generatedAt
+    )) {
+        derivedWarnings.push(PTV_EXTREME_IMAGE_CHURN_WARNING);
+    }
+
+    return derivedWarnings;
+}
+
 function getOverallHealth(
     context: DiagnosticContext,
     requests: PtvRequestDiagnostic[],
     frames: PtvFrameDiagnostic[],
+    derivedWarnings: readonly string[],
     generatedAt: string
 ) {
     const statuses = [
@@ -323,11 +480,29 @@ function getOverallHealth(
         context.recommendations.health.status,
         context.focus.health.status
     ];
-    const failures = requests.filter(request => !request.success).length;
+    const failures = requests.filter(request => !request.success && !request.cancellation).length;
     const latestFrame = frames.at(-1);
 
     if (statuses.includes('failing')) {
-        return emptyHealth('failing', 'One or more observed subsystems are failing.', generatedAt);
+        return emptyHealth('failing', 'One or more observed subsystems are failing.', generatedAt, derivedWarnings);
+    }
+    if (derivedWarnings.includes(PTV_SEVERE_FRAME_JANK_WARNING)) {
+        return emptyHealth(
+            'degraded',
+            'Sustained severe frame jank was observed after the current route settled.',
+            generatedAt,
+            derivedWarnings
+        );
+    }
+    if (derivedWarnings.includes(PTV_SLOW_API_REQUESTS_WARNING)
+        || derivedWarnings.includes(PTV_HIGH_API_CONCURRENCY_WARNING)
+        || derivedWarnings.includes(PTV_EXTREME_IMAGE_CHURN_WARNING)) {
+        return emptyHealth(
+            'degraded',
+            'API latency, request concurrency, or image lifecycle churn exceeded diagnostic health thresholds.',
+            generatedAt,
+            derivedWarnings
+        );
     }
     if (
         statuses.includes('degraded')
@@ -335,13 +510,13 @@ function getOverallHealth(
         || failures > 0
         || (latestFrame?.jankyFramePercentage || 0) > 20
     ) {
-        return emptyHealth('degraded', 'The client is usable, with one or more degraded signals.', generatedAt);
+        return emptyHealth('degraded', 'The client is usable, with one or more degraded signals.', generatedAt, derivedWarnings);
     }
     if (statuses.some(status => status === 'healthy')) {
-        return emptyHealth('healthy', 'Observed client subsystems are operating normally.', generatedAt);
+        return emptyHealth('healthy', 'Observed client subsystems are operating normally.', generatedAt, derivedWarnings);
     }
 
-    return emptyHealth('unknown', 'Not enough observations are available yet.', generatedAt);
+    return emptyHealth('unknown', 'Not enough observations are available yet.', generatedAt, derivedWarnings);
 }
 
 export function createPtvDiagnosticStore() {
@@ -367,6 +542,7 @@ export function createPtvDiagnosticStore() {
     const frames: PtvFrameDiagnostic[] = [];
     const inputs: PtvInputDiagnostic[] = [];
     const images: PtvImageDiagnostic[] = [];
+    const playbackSessions: PtvPlaybackSessionDiagnostic[] = [];
     const shelves: PtvShelfDiagnostic[] = [];
     const warnings: string[] = [];
     const dropped: Record<string, number> = {};
@@ -387,6 +563,18 @@ export function createPtvDiagnosticStore() {
 
     function getSnapshot(generatedAt = timestamp()): PtvDiagnosticSnapshot {
         const droppedTotal = Object.values(dropped).reduce((sum, value) => sum + value, 0);
+        const derivedWarnings = getDerivedWarnings({
+            activeConcurrency: activeRequests.size,
+            frames,
+            generatedAt,
+            imageEventCount: eventCounts.images || 0,
+            imageRetentionTrimmed: dropped.images || 0,
+            images,
+            requests,
+            routes
+        });
+        const snapshotWarnings = [...new Set([...warnings, ...derivedWarnings])]
+            .slice(-PTV_DIAGNOSTIC_RETENTION_LIMITS.warnings);
         const estimatedStoreBytes = requests.length * 260
             + routes.length * 310
             + focusChanges.length * 190
@@ -396,8 +584,9 @@ export function createPtvDiagnosticStore() {
             + frames.length * 230
             + inputs.length * 360
             + images.length * 150
+            + playbackSessions.length * 1_300
             + shelves.length * 150
-            + warnings.join('').length * 2;
+            + snapshotWarnings.join('').length * 2;
 
         return {
             build: context.build,
@@ -418,11 +607,12 @@ export function createPtvDiagnosticStore() {
             focusVisibility: [...focusVisibility],
             frames: [...frames],
             generatedAt,
-            health: getOverallHealth(context, requests, frames, generatedAt),
+            health: getOverallHealth(context, requests, frames, derivedWarnings, generatedAt),
             images: [...images],
             inputs: [...inputs],
             latestFocus: context.focus,
             platform: context.platform,
+            playbackSessions: [...playbackSessions],
             plugin: context.plugin,
             privacyClassification: 'local-only',
             recommendations: context.recommendations,
@@ -449,7 +639,7 @@ export function createPtvDiagnosticStore() {
                 startedAt: sessionStartedAt
             },
             shelves: [...shelves],
-            warnings: [...warnings]
+            warnings: snapshotWarnings
         };
     }
 
@@ -534,7 +724,7 @@ export function createPtvDiagnosticStore() {
                 timeout: false
             }, PTV_DIAGNOSTIC_RETENTION_LIMITS.requests);
         },
-        startRoute(route: string) {
+        startRoute(route: string, routeGeneration: number | null = null) {
             const now = timestamp();
             const previous = routes.at(-1);
 
@@ -550,6 +740,9 @@ export function createPtvDiagnosticStore() {
             record('routes', routes, {
                 activeRequestsAtSettle: null,
                 cleanupCompletedAt: null,
+                criticalCompletedAt: null,
+                criticalStartedAt: null,
+                criticalState: 'undeclared',
                 firstContentAt: null,
                 firstDirectionalMovementAt: null,
                 firstFocusableAt: null,
@@ -569,6 +762,7 @@ export function createPtvDiagnosticStore() {
                 recognizedAt: now,
                 requestedAt: now,
                 routeFamily: normalizePtvDiagnosticRouteFamily(route),
+                routeGeneration,
                 routeSessionId,
                 settledAt: null,
                 shelvesPendingAtSettle: null,
@@ -576,6 +770,53 @@ export function createPtvDiagnosticStore() {
             }, PTV_DIAGNOSTIC_RETENTION_LIMITS.routes);
 
             return routeSessionId;
+        },
+        associateRouteGeneration(routeSessionId: string, routeGeneration: number) {
+            const index = routes.findIndex(route => route.routeSessionId === routeSessionId);
+
+            if (index < 0 || routes[index].status !== 'active') return;
+            if (routes[index].routeGeneration === routeGeneration) return;
+
+            routes[index] = {
+                ...routes[index],
+                routeGeneration
+            };
+            count('route-generation');
+            publish('routes');
+        },
+        markRouteCriticalState(
+            routeSessionId: string,
+            criticalState: Exclude<PtvRouteCriticalState, 'undeclared'>,
+            routeGeneration: number | null = null
+        ) {
+            const index = routes.findIndex(route => route.routeSessionId === routeSessionId);
+
+            if (index < 0) return false;
+
+            const route = routes[index];
+
+            if (route.status !== 'active') return false;
+            if (
+                routeGeneration !== null
+                && route.routeGeneration !== null
+                && route.routeGeneration !== routeGeneration
+            ) return false;
+            if (route.criticalState !== 'undeclared' && route.criticalState !== 'pending') return false;
+            if (criticalState === 'pending' && route.criticalState === 'pending') return true;
+
+            const occurredAt = timestamp();
+
+            routes[index] = {
+                ...route,
+                criticalCompletedAt: criticalState === 'pending' ? null : occurredAt,
+                criticalStartedAt: route.criticalStartedAt || occurredAt,
+                criticalState,
+                routeGeneration: route.routeGeneration ?? routeGeneration
+            };
+            count('route-critical-state');
+            publish('routes');
+
+            return true;
         },
         markRoutePhase(
             routeSessionId: string,
@@ -598,6 +839,7 @@ export function createPtvDiagnosticStore() {
                 shelves.filter(shelf => shelf.status === 'request-started').length
                 - shelves.filter(shelf => (
                     shelf.status === 'settled'
+                    || shelf.status === 'cancelled'
                     || shelf.status === 'disposed'
                     || shelf.status === 'failed'
                     || shelf.status === 'empty'
@@ -713,6 +955,44 @@ export function createPtvDiagnosticStore() {
                 eventId: createId('image', ++eventSequence)
             }, PTV_DIAGNOSTIC_RETENTION_LIMITS.images);
         },
+        upsertPlaybackSession(session: PtvPlaybackSessionDiagnostic) {
+            if (!collectorEnabled) return;
+
+            const existingIndex = playbackSessions.findIndex(candidate => (
+                candidate.diagnosticSessionId === session.diagnosticSessionId
+            ));
+            const existing = existingIndex >= 0 ? playbackSessions[existingIndex] : null;
+
+            if (existing && (
+                session.sourceGeneration < existing.sourceGeneration
+                || (session.sourceGeneration === existing.sourceGeneration
+                    && Date.parse(session.updatedAt) < Date.parse(existing.updatedAt))
+            )) return;
+
+            const retained: PtvPlaybackSessionDiagnostic = {
+                ...session,
+                buffer: { ...session.buffer },
+                hls: { ...session.hls },
+                player: { ...session.player },
+                readyStateTransitions: session.readyStateTransitions.map(transition => ({ ...transition })),
+                stalls: {
+                    ...session.stalls,
+                    episodeDurationsMs: [...session.stalls.episodeDurationsMs],
+                    recoveryResults: [...session.stalls.recoveryResults]
+                }
+            };
+
+            if (existingIndex >= 0) playbackSessions.splice(existingIndex, 1);
+            boundedPush(
+                playbackSessions,
+                retained,
+                PTV_DIAGNOSTIC_RETENTION_LIMITS.playbackSessions,
+                'playbackSessions',
+                dropped
+            );
+            count('playbackSessions');
+            publish('playbackSessions');
+        },
         recordShelf(shelf: Omit<PtvShelfDiagnostic, 'eventId'>) {
             record('shelves', shelves, {
                 ...shelf,
@@ -747,8 +1027,9 @@ export function createPtvDiagnosticStore() {
 
             return {
                 active: activeRequests.size,
+                cancellations: requests.filter(request => request.cancellation).length,
                 coalesced: requests.filter(request => request.coordinatorHit).length,
-                failures: requests.filter(request => !request.success).length,
+                failures: requests.filter(request => !request.success && !request.cancellation).length,
                 p50Ms: getPtvDiagnosticPercentile(durations, 0.5),
                 p90Ms: getPtvDiagnosticPercentile(durations, 0.9),
                 p95Ms: getPtvDiagnosticPercentile(durations, 0.95),
@@ -803,6 +1084,7 @@ export function createPtvDiagnosticStore() {
             frames.length = 0;
             inputs.length = 0;
             images.length = 0;
+            playbackSessions.length = 0;
             shelves.length = 0;
             warnings.length = 0;
             Object.keys(dropped).forEach(key => {

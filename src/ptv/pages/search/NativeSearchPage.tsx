@@ -46,6 +46,7 @@ import {
     normalizePtvSearchFilter,
     PTV_SEARCH_FILTERS,
     serializePtvSearchParams,
+    shouldRestartPtvCommittedSearch,
     type PtvSearchFilterId,
     type PtvSearchGroupId,
     type PtvSearchGroupStatus,
@@ -54,9 +55,13 @@ import {
 import { PtvSearchActionLifecycle } from './nativeSearchActionLifecycle';
 import {
     getPtvSearchHintFailureKind,
-    searchPtvHints,
     type PtvGroupedSearchHints
 } from './searchHintService';
+import {
+    PTV_SEARCH_MAX_CONCURRENCY,
+    searchPtvWithRecovery,
+    type PtvSearchGroupProgress
+} from './resilientSearchService';
 import { useNativeSearchCurrentUser } from './useNativeSearchCurrentUser';
 import { usePtvAuthenticatedIdentity } from '../../api/usePtvAuthenticatedIdentity';
 
@@ -99,6 +104,8 @@ const PTV_SEARCH_GROUPS: readonly PtvSearchGroupConfig[] = [
     { id: 'shows', title: 'Shows', kicker: 'Series results', includeItemTypes: 'Series', priority: 1 },
     { id: 'collections', title: 'Collections', kicker: 'Collections', includeItemTypes: 'BoxSet', priority: 1 },
     { id: 'episodes', title: 'Episodes', kicker: 'Episode results', includeItemTypes: 'Episode', priority: 2 },
+    { id: 'genres', title: 'Genres', kicker: 'Browse by genre', includeItemTypes: 'Genre,MusicGenre', priority: 2 },
+    { id: 'studios', title: 'Studios', kicker: 'Studios and networks', includeItemTypes: 'Studio', priority: 2 },
     { id: 'people', title: 'People', kicker: 'Cast and creators', includeItemTypes: 'Person', priority: 2 },
     { id: 'reading', title: 'Reading', kicker: 'Books, comics, manga', includeItemTypes: 'Book', priority: 2 },
     { id: 'music', title: 'Songs', kicker: 'Music results', includeItemTypes: 'Audio', priority: 3 },
@@ -203,6 +210,17 @@ function getSearchCache(key: string) {
     return cached;
 }
 
+function getCachedSearchGroups(groups: Record<PtvSearchGroupId, PtvSearchGroupState>) {
+    return PTV_SEARCH_GROUPS.reduce<Record<PtvSearchGroupId, PtvSearchGroupState>>((cachedGroups, group) => {
+        cachedGroups[group.id] = {
+            ...groups[group.id],
+            durationMs: 0,
+            endpointPath: 'Search cache'
+        };
+        return cachedGroups;
+    }, {} as Record<PtvSearchGroupId, PtvSearchGroupState>);
+}
+
 function getLoadingGroups() {
     return PTV_SEARCH_GROUPS.reduce<Record<PtvSearchGroupId, PtvSearchGroupState>>((groups, group) => {
         groups[group.id] = {
@@ -215,15 +233,27 @@ function getLoadingGroups() {
 
 function getSettledHintGroups(
     groupedHints: PtvGroupedSearchHints,
-    durationMs: number
+    durationMs: number,
+    failedGroupIds: readonly PtvSearchGroupId[] = []
 ) {
+    const failedGroups = new Set(failedGroupIds);
+
     return PTV_SEARCH_GROUPS.reduce<Record<PtvSearchGroupId, PtvSearchGroupState>>((groups, group) => {
         const items = groupedHints[group.id];
+        const failed = failedGroups.has(group.id) && !items.length;
+        let status: PtvSearchGroupStatus = 'empty';
+
+        if (items.length) {
+            status = 'success';
+        } else if (failed) {
+            status = 'error';
+        }
 
         groups[group.id] = {
-            ...getEmptyGroupState(items.length ? 'success' : 'empty'),
+            ...getEmptyGroupState(status),
             durationMs,
-            endpointPath: 'Search/Hints',
+            endpointPath: failedGroupIds.length ? 'Search/Hints + Users/{user}/Items' : 'Search/Hints',
+            error: failed ? 'This result group could not be loaded.' : '',
             items
         };
         return groups;
@@ -266,11 +296,28 @@ function getSearchItemYear(item: PtvItem) {
 }
 
 function getSearchItemMeta(item: PtvItem) {
+    const normalizedType = getText(item.Type).toLowerCase();
+    const typeLabel = normalizedType === 'musicgenre' ? 'Music genre' : getText(item.Type);
+
     return [
         getSearchItemYear(item),
-        getText(item.Type),
+        typeLabel,
         getText(item.OfficialRating)
     ].filter(Boolean).join(' | ');
+}
+
+function isSearchDirectoryItem(item: PtvItem) {
+    return ['genre', 'musicgenre', 'studio'].includes(getText(item.Type).toLowerCase());
+}
+
+function getSearchCardAriaLabel(item: PtvItem, title: string) {
+    const type = getText(item.Type).toLowerCase();
+
+    if (type === 'genre') return `Browse ${title} genre`;
+    if (type === 'musicgenre') return `Browse ${title} music genre`;
+    if (type === 'studio') return `Browse titles from ${title} studio`;
+
+    return `Open ${title}`;
 }
 
 function getSearchItemImageCandidates(item: PtvItem, serverId: string) {
@@ -317,6 +364,7 @@ function getSearchBackdrop(groups: Record<PtvSearchGroupId, PtvSearchGroupState>
 function getSearchRoute(item: PtvItem) {
     return resolvePtvItemRoute(item, {
         fallbackHref: `#/details?id=${encodeURIComponent(getText(item.Id))}`,
+        serverId: getPtvServerId(),
         source: 'ptv-search'
     });
 }
@@ -337,6 +385,7 @@ function NativeSearchCard({
     const route = useMemo(() => getSearchRoute(item), [item]);
     const tags = useMemo(() => getPtvQualityTags(item, { maxTags: 3 }), [item]);
     const title = getSearchItemTitle(item);
+    const directoryItem = isSearchDirectoryItem(item);
     const itemId = getText(item.Id);
     const serverId = getPtvServerId();
     const userId = getText(user?.Id);
@@ -449,7 +498,7 @@ function NativeSearchCard({
             data-ptv-search-source-group={sourceGroup}
         >
             <a
-                aria-label={`Open ${title}`}
+                aria-label={getSearchCardAriaLabel(item, title)}
                 className='ptv-search-card-link'
                 href={route.href}
                 onClick={onCardClick}
@@ -458,7 +507,7 @@ function NativeSearchCard({
                     {imageUrl ? (
                         <img alt='' loading='lazy' onError={advanceImageCandidate} src={imageUrl} />
                     ) : (
-                        <span>{title.slice(0, 1)}</span>
+                        <span aria-hidden='true'>{title.slice(0, 1)}</span>
                     )}
                     {tags.length ? (
                         <span className='ptv-search-quality-stack'>
@@ -473,7 +522,7 @@ function NativeSearchCard({
                 <span className='ptv-search-card-title'>{title}</span>
                 <span className='ptv-search-card-meta'>{getSearchItemMeta(item)}</span>
             </a>
-            {user ? (
+            {user && !directoryItem ? (
                 <button
                     aria-label={`More actions for ${title}`}
                     aria-haspopup='menu'
@@ -827,6 +876,8 @@ export default function NativeSearchPage() {
     }));
     const recentSearches = recentHistory.scope === searchHistoryScope ? recentHistory.items : [];
     const requestIdRef = useRef(0);
+    const activeSearchAbortRef = useRef<AbortController | null>(null);
+    const invalidatedSearchDraftRef = useRef(false);
     const retryGateRef = useRef(createPtvRetryGate());
     const backdropUrl = useMemo(() => getSearchBackdrop(groups), [groups]);
     const visibleSearchGroups = useMemo(() => PTV_SEARCH_GROUPS.filter(
@@ -845,6 +896,7 @@ export default function NativeSearchPage() {
     );
 
     useEffect(() => {
+        invalidatedSearchDraftRef.current = false;
         setInputQuery(routeQuery);
         setDebouncedQuery(routeQuery.trim());
     }, [routeQuery]);
@@ -901,7 +953,7 @@ export default function NativeSearchPage() {
 
         if (cached) {
             retryGateRef.current.release();
-            setGroups(cached.groups);
+            setGroups(getCachedSearchGroups(cached.groups));
             setCacheHit(true);
             recordPtvEvent('route', 'ptv-search-cache-hit', {
                 queryLength: query.length
@@ -929,13 +981,15 @@ export default function NativeSearchPage() {
         const hintLimit = PTV_SEARCH_RESULT_LIMIT * requestGroups.length;
 
         requestIdRef.current = requestId;
+        activeSearchAbortRef.current?.abort();
+        activeSearchAbortRef.current = abortController;
         setGroups(getLoadingGroups());
         setCacheHit(false);
         recordPtvEvent('route', 'ptv-search-started', {
-            requestPlan: 'search-hints',
+            requestPlan: 'search-hints-with-bounded-recovery',
             searchDebounceMs: PTV_SEARCH_DEBOUNCE_MS,
-            searchMaxConcurrency: 1,
-            searchQueuedGroupCount: 1,
+            searchMaxConcurrency: PTV_SEARCH_MAX_CONCURRENCY,
+            searchQueuedGroupCount: requestGroups.length,
             queryLength: query.length
         });
         recordPtvEvent('api', 'ptv-search-hints-request-started', {
@@ -950,9 +1004,24 @@ export default function NativeSearchPage() {
             abortController.abort();
         }, PTV_SEARCH_HINT_TIMEOUT_MS);
 
-        void searchPtvHints({
+        void searchPtvWithRecovery({
             includeItemTypes,
             limit: hintLimit,
+            onGroupResult: (progress: PtvSearchGroupProgress) => {
+                if (cancelled || requestIdRef.current !== requestId) return;
+
+                const durationMs = Number((performance.now() - startedAt).toFixed(1));
+
+                setGroups(currentGroups => ({
+                    ...currentGroups,
+                    [progress.groupId]: {
+                        ...getEmptyGroupState(progress.items.length ? 'success' : 'empty'),
+                        durationMs,
+                        endpointPath: progress.source === 'hints' ? 'Search/Hints' : 'Users/{user}/Items',
+                        items: progress.items
+                    }
+                }));
+            },
             perGroupLimit: PTV_SEARCH_RESULT_LIMIT,
             query,
             serverId,
@@ -964,13 +1033,15 @@ export default function NativeSearchPage() {
 
                 settled = true;
                 const durationMs = Number((performance.now() - startedAt).toFixed(1));
-                const nextGroups = getSettledHintGroups(result.groups, durationMs);
+                const nextGroups = getSettledHintGroups(result.groups, durationMs, result.failedGroupIds);
                 const firstResultGroup = PTV_SEARCH_GROUPS.find(group => nextGroups[group.id].items.length);
+                const cacheable = isSearchCacheable(nextGroups)
+                    && (result.primaryStatus === 'success' || Boolean(firstResultGroup));
 
                 setGroups(nextGroups);
                 retryGateRef.current.release();
 
-                if (cacheKey && isSearchCacheable(nextGroups)) {
+                if (cacheKey && cacheable) {
                     rememberSearchCache(cacheKey, {
                         groups: nextGroups,
                         query,
@@ -988,12 +1059,14 @@ export default function NativeSearchPage() {
                 recordPtvEvent('api', 'ptv-search-hints-request-complete', {
                     durationMs,
                     hintCount: result.hintCount,
-                    requestStartCount: 1,
+                    primaryStatus: result.primaryStatus,
+                    recoveredGroupIds: result.recoveredGroupIds,
+                    requestStartCount: result.requestCount,
                     totalRecordCount: result.totalRecordCount
                 });
                 recordPtvEvent('route', 'ptv-search-complete', {
-                    cached: isSearchCacheable(nextGroups),
-                    requestStartCount: 1,
+                    cached: cacheable,
+                    requestStartCount: result.requestCount,
                     searchCompleteMs: durationMs,
                     timeoutCount: 0
                 });
@@ -1026,12 +1099,20 @@ export default function NativeSearchPage() {
                     timeoutCount: failureKind === 'timeout' ? 1 : 0
                 });
             })
-            .finally(() => window.clearTimeout(timeoutId));
+            .finally(() => {
+                window.clearTimeout(timeoutId);
+                if (activeSearchAbortRef.current === abortController) {
+                    activeSearchAbortRef.current = null;
+                }
+            });
 
         return () => {
             cancelled = true;
             window.clearTimeout(timeoutId);
             abortController.abort();
+            if (activeSearchAbortRef.current === abortController) {
+                activeSearchAbortRef.current = null;
+            }
 
             if (!settled) {
                 recordPtvEvent('route', 'ptv-search-cancelled', {
@@ -1070,17 +1151,43 @@ export default function NativeSearchPage() {
         });
     }, [searchHistoryScope, serverId, userId]);
     const clearSearchQuery = useCallback(() => {
+        requestIdRef.current += 1;
+        activeSearchAbortRef.current?.abort();
+        activeSearchAbortRef.current = null;
+        invalidatedSearchDraftRef.current = false;
         setInputQuery('');
         setDebouncedQuery('');
+        setGroups(getInitialGroups('idle'));
+        setCacheHit(false);
         setSearchParams(buildPtvSearchParams('', activeFilter), { replace: true });
     }, [activeFilter, setSearchParams]);
     const retrySearch = useCallback(() => {
+        if (inputQuery.trim() !== debouncedQuery.trim()) return;
         if (!retryGateRef.current.claim()) return;
         setRetryGeneration(generation => generation + 1);
-    }, []);
+    }, [debouncedQuery, inputQuery]);
     const updateInputQuery = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-        setInputQuery(event.currentTarget.value);
-    }, []);
+        const nextQuery = event.currentTarget.value;
+
+        if (nextQuery.trim() !== debouncedQuery.trim()) {
+            invalidatedSearchDraftRef.current = true;
+            requestIdRef.current += 1;
+            activeSearchAbortRef.current?.abort();
+            activeSearchAbortRef.current = null;
+            retryGateRef.current.release();
+            setGroups(getInitialGroups(nextQuery.trim().length >= 2 ? 'queued' : 'idle'));
+            setCacheHit(false);
+        } else if (shouldRestartPtvCommittedSearch(
+            invalidatedSearchDraftRef.current,
+            nextQuery,
+            debouncedQuery
+        )) {
+            invalidatedSearchDraftRef.current = false;
+            setRetryGeneration(generation => generation + 1);
+        }
+
+        setInputQuery(nextQuery);
+    }, [debouncedQuery]);
 
     return (
         <Page
@@ -1096,6 +1203,7 @@ export default function NativeSearchPage() {
                 backdropSource={backdropUrl ? 'search-results' : 'search-fallback'}
                 backdropUrl={backdropUrl}
                 className='ptv-search-shell'
+                searchQuery={inputQuery}
                 section='search'
                 title='Search'
             >
@@ -1116,7 +1224,7 @@ export default function NativeSearchPage() {
                                 inputMode='search'
                                 maxLength={160}
                                 onChange={updateInputQuery}
-                                placeholder='Search movies, shows, people, music, reading'
+                                placeholder='Search titles, people, music, genres, studios'
                                 type='search'
                                 value={inputQuery}
                             />

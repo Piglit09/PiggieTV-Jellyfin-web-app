@@ -6,6 +6,10 @@ const searchPageSource = fs.readFileSync(
     path.join(__dirname, 'NativeSearchPage.tsx'),
     'utf8'
 );
+const shellSource = fs.readFileSync(
+    path.join(__dirname, '../../shell/PTVShell.tsx'),
+    'utf8'
+);
 
 describe('native Search navigation adoption wiring', () => {
     it('delegates card activation to the shared Search details boundary', () => {
@@ -31,12 +35,19 @@ describe('native Search navigation adoption wiring', () => {
         expect(menuTrigger).toBeGreaterThan(detailsLinkClose);
     });
 
-    it('uses one coordinated hint request with abort and stale-generation protection', () => {
-        expect(searchPageSource.match(/searchPtvHints\(\{/g)).toHaveLength(1);
-        expect(searchPageSource).not.toContain('searchPtvItems');
+    it('uses resilient coordinated search with abort and stale-generation protection', () => {
+        expect(searchPageSource.match(/searchPtvWithRecovery\(\{/g)).toHaveLength(1);
         expect(searchPageSource).toContain('requestIdRef.current !== requestId');
+        expect(searchPageSource).toContain('activeSearchAbortRef.current?.abort()');
         expect(searchPageSource).toContain('abortController.abort()');
         expect(searchPageSource).toContain('getPtvSearchHintFailureKind(error, timedOut)');
+    });
+
+    it('keeps the page and shell search inputs synchronized during replace navigation', () => {
+        expect(searchPageSource).toContain('searchQuery={inputQuery}');
+        expect(shellSource).toContain('searchQuery: syncedSearchQuery');
+        expect(shellSource).toContain('setSearchQuery(syncedSearchQuery)');
+        expect(shellSource).toContain("getPtvShellHashPath(window.location.hash) === '#/search'");
     });
 
     it('uses tagged Primary-to-Thumb artwork fallback and retires broken images', () => {
@@ -44,5 +55,14 @@ describe('native Search navigation adoption wiring', () => {
         expect(searchPageSource).toContain('includeUntagged: false');
         expect(searchPageSource).toContain('markPtvImageCandidateFailed(imageCandidate)');
         expect(searchPageSource).toContain('onError={advanceImageCandidate}');
+    });
+
+    it('treats Genre, MusicGenre, and Studio as browse directories instead of media details', () => {
+        expect(searchPageSource).toContain("includeItemTypes: 'Genre,MusicGenre'");
+        expect(searchPageSource).toContain("includeItemTypes: 'Studio'");
+        expect(searchPageSource).toContain('serverId: getPtvServerId()');
+        expect(searchPageSource).toContain('user && !directoryItem');
+        expect(searchPageSource).toContain('Browse ${title} music genre');
+        expect(searchPageSource).toContain('Browse titles from ${title} studio');
     });
 });

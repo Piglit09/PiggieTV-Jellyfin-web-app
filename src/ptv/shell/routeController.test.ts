@@ -1,4 +1,6 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+
+import * as routeControllerModule from './routeController';
 
 const routeMocks = vi.hoisted(() => ({
     current: {
@@ -47,6 +49,22 @@ import {
     recordPtvRouteGenerationLifecycle,
     startPtvRouteController
 } from './routeController';
+
+type PtvRouteLifetimeContract = Readonly<{
+    active: boolean;
+    generation: number;
+    identity: string;
+    isCurrent: () => boolean;
+    retired: boolean;
+    routeFamily: string;
+    routeKey: string;
+    signal: AbortSignal;
+}>;
+
+const routeLifetimeApi = routeControllerModule as typeof routeControllerModule & {
+    acquirePtvRouteLifetime: (routeFamily: string) => PtvRouteLifetimeContract;
+    retirePtvRouteLifetime: (lifetime: PtvRouteLifetimeContract) => boolean;
+};
 
 function getTestRouteFeatures(routeId: string) {
     if (routeId === 'reading') return ['books', 'reading'];
@@ -161,6 +179,41 @@ describe('routeController lifecycle telemetry', () => {
         });
     });
 
+    it('creates only one Manga generation while Request presentation teardown lags', async () => {
+        const { getPtvRouteOwnership } = await vi.importActual<typeof import('./routes')>('./routes');
+        const synchronizeCurrentLocation = (lifecycle: 'page-mount' | 'page-render') => {
+            routeMocks.current = getPtvRouteOwnership(window.location);
+            recordPtvRouteGenerationLifecycle(lifecycle, { page: routeMocks.current.id });
+
+            return getPtvRouteControllerState();
+        };
+
+        document.documentElement.classList.add('ptv-request-active');
+
+        try {
+            window.history.replaceState(null, '', '/#/requests');
+            const requestRoute = synchronizeCurrentLocation('page-render');
+
+            window.history.replaceState(null, '', '/#/reading/manga');
+            const mangaDuringRequestTeardown = synchronizeCurrentLocation('page-mount');
+
+            document.documentElement.classList.remove('ptv-request-active');
+            const mangaAfterRequestTeardown = synchronizeCurrentLocation('page-render');
+
+            expect(requestRoute.owner).toBe('request');
+            expect(mangaDuringRequestTeardown).toMatchObject({
+                normalizedPath: '/reading/manga',
+                owner: 'reading',
+                pageType: 'reading'
+            });
+            expect(mangaDuringRequestTeardown.routeGeneration).toBe(requestRoute.routeGeneration + 1);
+            expect(mangaAfterRequestTeardown.routeGeneration).toBe(mangaDuringRequestTeardown.routeGeneration);
+            expect(mangaAfterRequestTeardown.routeKey).toBe(mangaDuringRequestTeardown.routeKey);
+        } finally {
+            document.documentElement.classList.remove('ptv-request-active');
+        }
+    });
+
     it('synchronizes Browse, Reading, Dashboard, authentication, and history transitions before lifecycle events', () => {
         const transitions = [
             {
@@ -256,5 +309,118 @@ describe('routeController lifecycle telemetry', () => {
 
         expect(isPtvRouteGenerationCurrent(token)).toBe(false);
         expect(capturePtvRouteGeneration()).not.toEqual(token);
+    });
+});
+
+describe('routeController-owned route lifetime', () => {
+    const acquiredLifetimes: PtvRouteLifetimeContract[] = [];
+
+    const synchronizeRoute = (routeId: 'home' | 'movies') => {
+        const hash = `#/${routeId}`;
+
+        routeMocks.current = {
+            ...routeMocks.current,
+            features: [ routeId ],
+            full: `/${hash}`,
+            hash,
+            id: routeId,
+            normalizedPath: `/${routeId}`,
+            owner: routeId,
+            pageType: routeId
+        };
+        window.history.replaceState(null, '', `/${hash}`);
+        recordPtvRouteGenerationLifecycle('page-render', { page: routeId });
+
+        return getPtvRouteControllerState();
+    };
+
+    const acquireLifetime = (routeFamily: string) => {
+        const lifetime = routeLifetimeApi.acquirePtvRouteLifetime(routeFamily);
+
+        acquiredLifetimes.push(lifetime);
+
+        return lifetime;
+    };
+
+    afterEach(() => {
+        acquiredLifetimes.splice(0).forEach(lifetime => {
+            routeLifetimeApi.retirePtvRouteLifetime(lifetime);
+        });
+    });
+
+    it('returns one immutable family, generation, route identity, and signal contract', () => {
+        const route = synchronizeRoute('home');
+        const lifetime = acquireLifetime('home');
+
+        expect(Object.keys(lifetime).sort((left, right) => left.localeCompare(right))).toEqual([
+            'active',
+            'generation',
+            'identity',
+            'isCurrent',
+            'retired',
+            'routeFamily',
+            'routeKey',
+            'signal'
+        ]);
+        expect(Object.isFrozen(lifetime)).toBe(true);
+        expect(Object.getOwnPropertyDescriptor(lifetime, 'active')?.get).toEqual(expect.any(Function));
+        expect(Object.getOwnPropertyDescriptor(lifetime, 'retired')?.get).toEqual(expect.any(Function));
+        expect(lifetime).toMatchObject({
+            active: true,
+            retired: false,
+            routeFamily: 'home',
+            routeKey: route.routeKey
+        });
+        expect(lifetime.generation).toBeGreaterThan(0);
+        expect(lifetime.identity).not.toBe('');
+        expect(lifetime.signal).toBeInstanceOf(AbortSignal);
+        expect(lifetime.signal.aborted).toBe(false);
+        expect(lifetime.isCurrent()).toBe(true);
+    });
+
+    it('retires the previous same-family generation when the same route remounts', () => {
+        const navigationGeneration = synchronizeRoute('home').routeGeneration;
+        const first = acquireLifetime('home');
+        const second = acquireLifetime('home');
+
+        expect(second.routeKey).toBe(first.routeKey);
+        expect(second.generation).toBeGreaterThan(first.generation);
+        expect(second.identity).not.toBe(first.identity);
+        expect(first.signal.aborted).toBe(true);
+        expect(first.active).toBe(false);
+        expect(first.retired).toBe(true);
+        expect(first.isCurrent()).toBe(false);
+        expect(second.signal.aborted).toBe(false);
+        expect(second.active).toBe(true);
+        expect(second.retired).toBe(false);
+        expect(second.isCurrent()).toBe(true);
+        expect(getPtvRouteControllerState().routeGeneration).toBe(navigationGeneration);
+    });
+
+    it('retires every active family lifetime when the canonical route changes', () => {
+        synchronizeRoute('home');
+        const home = acquireLifetime('home');
+        const observer = acquireLifetime('home-observer');
+
+        synchronizeRoute('movies');
+
+        for (const lifetime of [ home, observer ]) {
+            expect(lifetime.signal.aborted).toBe(true);
+            expect(lifetime.active).toBe(false);
+            expect(lifetime.retired).toBe(true);
+            expect(lifetime.isCurrent()).toBe(false);
+        }
+    });
+
+    it('retires a lifetime exactly once', () => {
+        synchronizeRoute('home');
+        const lifetime = acquireLifetime('home');
+
+        expect(routeLifetimeApi.retirePtvRouteLifetime(lifetime)).toBe(true);
+        expect(routeLifetimeApi.retirePtvRouteLifetime(lifetime)).toBe(false);
+        expect(lifetime.signal.aborted).toBe(true);
+        expect(lifetime.active).toBe(false);
+        expect(lifetime.retired).toBe(true);
+        expect(lifetime.isCurrent()).toBe(false);
     });
 });

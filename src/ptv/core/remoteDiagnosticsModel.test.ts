@@ -195,9 +195,9 @@ describe('remote diagnostics privacy and payload contract', () => {
             message: 'GET https://media.example.test/Items/abcdef0123456789?api_key=secret failed',
             note: 'token=top-secret Authorization: Basic-credential api key=private'
         })).toEqual({
-            authorization: '[redacted]',
-            message: '[redacted]',
-            note: '[redacted]'
+            authorization: '[REDACTED]',
+            message: '[REDACTED]',
+            note: '[REDACTED]'
         });
         expect(sanitizePtvDiagnosticRoute('#/details?id=abcdef0123456789&token=secret')).toBe('/details');
         expect(sanitizePtvDiagnosticRoute('#/music/artist/artist-one')).toBe('/music/artist/:id');
@@ -205,6 +205,23 @@ describe('remote diagnostics privacy and payload contract', () => {
             path: null,
             scope: 'cross-origin'
         });
+    });
+
+    it('redacts credential containers and socket queries without hiding safe token metrics', () => {
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_TOKEN', 'remote-diagnostics' ].join('_');
+        // eslint-disable-next-line compat/compat -- Native header sanitization is the behavior under test.
+        const nativeHeaders = new Headers({ 'X-Api-Key': accessCanary });
+        const sanitized = sanitizePtvRemoteDiagnosticDetail({
+            headers: nativeHeaders,
+            socket: `wss://server.invalid/socket?api_key=${accessCanary}`,
+            tokenCount: 13,
+            tokenUsage: 21
+        });
+        const serialized = JSON.stringify(sanitized);
+
+        expect(serialized).not.toContain(accessCanary);
+        expect(serialized).toContain('[REDACTED]');
+        expect(sanitized).toMatchObject({ tokenCount: 13, tokenUsage: 21 });
     });
 
     it('removes relative media paths, local paths, and query values from error text', () => {

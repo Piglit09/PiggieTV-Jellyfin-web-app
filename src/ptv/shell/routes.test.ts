@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { getPtvRouteOwnership } from './routes';
 
@@ -8,6 +8,10 @@ function getRoute(hash: string) {
         pathname: '/'
     } as Location);
 }
+
+afterEach(() => {
+    document.documentElement.classList.remove('ptv-request-active');
+});
 
 describe('PTV shell reading routes', () => {
     it('routes the primary Reading tab to Reading Home ownership', () => {
@@ -35,6 +39,48 @@ describe('PTV shell reading routes', () => {
         expect(route.owner).toBe('books');
         expect(route.pageType).toBe('books');
         expect(route.normalizedPath).toBe('/books');
+    });
+
+    it('does not let deferred Request teardown steal one canonical Manga navigation', () => {
+        document.documentElement.classList.add('ptv-request-active');
+        const whileRequestTeardownIsPending = getRoute('#/reading/manga');
+
+        document.documentElement.classList.remove('ptv-request-active');
+        const afterRequestTeardown = getRoute('#/reading/manga');
+        const ownership = [ whileRequestTeardownIsPending, afterRequestTeardown ].map(route => ({
+            id: route.id,
+            normalizedPath: route.normalizedPath,
+            owner: route.owner,
+            pageType: route.pageType
+        }));
+
+        expect(ownership).toEqual([
+            {
+                id: 'reading',
+                normalizedPath: '/reading/manga',
+                owner: 'reading',
+                pageType: 'reading'
+            },
+            {
+                id: 'reading',
+                normalizedPath: '/reading/manga',
+                owner: 'reading',
+                pageType: 'reading'
+            }
+        ]);
+    });
+});
+
+describe('PTV shell Request route ownership', () => {
+    it('uses the canonical Request URL before its presentation class mounts', () => {
+        expect(document.documentElement.classList.contains('ptv-request-active')).toBe(false);
+
+        expect(getRoute('#/requests')).toMatchObject({
+            id: 'request',
+            normalizedPath: '/requests',
+            owner: 'request',
+            pageType: 'request'
+        });
     });
 });
 

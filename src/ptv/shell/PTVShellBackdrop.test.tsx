@@ -158,4 +158,24 @@ describe('PTVShellBackdrop lifecycle', () => {
 
         expect(container.querySelector('.ptv-shell-backdrop-image-previous')).toBeNull();
     });
+
+    it('discards configured current/previous images on presentation retirement without waiting for replacement load', () => {
+        flushSync(() => root?.render(<PTVShellBackdrop key='proof-current' source='home' url='/configured-old.jpg' />));
+        flushSync(() => root?.render(<PTVShellBackdrop key='proof-current' source='home' url='/configured-next.jpg' />));
+        flushSync(() => images[0]?.onload?.(new Event('load')));
+        expect(container.querySelectorAll('img')).toHaveLength(2);
+
+        flushSync(() => root?.render(<PTVShellBackdrop key='proof-retired' source='home' url='/generic.jpg' />));
+        expect(Array.from(container.querySelectorAll('img')).map(image => image.getAttribute('src'))).toEqual(['/generic.jpg']);
+        expect(animationFrames.size).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('keeps the same generic backdrop instance and creates no request when its key is unchanged', () => {
+        flushSync(() => root?.render(<PTVShellBackdrop key='generic' source='home' url='/generic.jpg' />));
+        const initialNode = container.querySelector('img');
+        flushSync(() => root?.render(<PTVShellBackdrop key='generic' source='home' url='/generic.jpg' />));
+        expect(container.querySelector('img')).toBe(initialNode);
+        expect(images).toHaveLength(0);
+    });
 });

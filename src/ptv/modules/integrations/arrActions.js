@@ -2,16 +2,17 @@ import { ServerConnections } from '../../../lib/jellyfin-apiclient';
 import { registerModule } from '../../core/lifecycle';
 import { resetRuntimeScope } from '../../core/scope';
 import { getCoordinatedLegacyItemDetail } from '../../services/coordinatedLegacyItemDetail';
+import { getActiveDetailsPage } from '../details/activeDetailsPage';
 import { openPtvRequestPortal } from '../request/requestLoader';
 import { getPtvIntegrationActions } from './arrLinks';
 import { getPtvIntegrationSettings } from './integrationsConfig';
 
 import './integrations.scss';
 
-const DETAIL_PAGE_SELECTOR = '#itemDetailPage, .itemDetailPage';
 const ACTION_CLASS = 'ptv-integration-action';
 const ACTION_GROUP_CLASS = 'ptv-integration-actions';
 const CACHE_TTL_MS = 2 * 60 * 1000;
+const REQUEST_EXCLUDED_DETAIL_TYPES = new Set(['movie', 'series']);
 
 let currentParams = {};
 let requestToken = 0;
@@ -53,24 +54,26 @@ function getApiClient(serverId) {
     return ServerConnections.currentApiClient?.() || null;
 }
 
-function getCacheKey(serverId, itemId) {
-    return `${serverId || 'default'}:${itemId}`;
+function getCacheKey(serverId, userId, itemId) {
+    return `${serverId || 'default'}:${userId}:${itemId}`;
 }
 
 async function loadItem(serverId, itemId) {
-    const cacheKey = getCacheKey(serverId, itemId);
+    const apiClient = getApiClient(serverId);
+    const userId = apiClient?.getCurrentUserId?.();
+
+    if (!apiClient || !userId || !itemId) return null;
+
+    const cacheKey = getCacheKey(serverId, userId, itemId);
     const cached = itemCache.get(cacheKey);
 
     if (cached && Date.now() - cached.createdAt < CACHE_TTL_MS) {
         return cached.item;
     }
 
-    const apiClient = getApiClient(serverId);
-    const userId = apiClient?.getCurrentUserId?.();
-
-    if (!apiClient || !userId || !itemId) return null;
-
     const item = await getCoordinatedLegacyItemDetail(apiClient, itemId).catch(() => null);
+
+    if (getApiClient(serverId)?.getCurrentUserId?.() !== userId) return null;
 
     if (item) {
         itemCache.set(cacheKey, {
@@ -152,8 +155,12 @@ function createManagerLink(action) {
     return link;
 }
 
-function shouldShowRequest(settings) {
-    return settings.seerr.enabled && settings.seerr.enableRequestsPage;
+export function shouldShowRequest(settings, item) {
+    const itemType = String(item?.Type || '').trim().toLowerCase();
+
+    return settings.seerr.enabled
+        && settings.seerr.enableRequestsPage
+        && !REQUEST_EXCLUDED_DETAIL_TYPES.has(itemType);
 }
 
 function renderActions(page, item, settings) {
@@ -162,7 +169,7 @@ function renderActions(page, item, settings) {
     if (!target || !item) return;
 
     const actions = getPtvIntegrationActions(item, settings);
-    const showRequest = shouldShowRequest(settings);
+    const showRequest = shouldShowRequest(settings, item);
     const actionKey = [
         item.Id || item.Name || '',
         showRequest ? 'request' : '',
@@ -190,7 +197,7 @@ function renderActions(page, item, settings) {
 }
 
 async function enhanceDetailIntegrations() {
-    const page = document.querySelector(DETAIL_PAGE_SELECTOR);
+    const page = getActiveDetailsPage();
 
     if (!page) return;
 
@@ -232,6 +239,7 @@ function refresh() {
 function destroy() {
     requestToken += 1;
     currentParams = {};
+    itemCache.clear();
     document.querySelectorAll(`.${ACTION_GROUP_CLASS}`).forEach((group) => {
         group.remove();
     });

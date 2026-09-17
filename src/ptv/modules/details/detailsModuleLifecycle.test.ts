@@ -25,13 +25,19 @@ const detailsMocks = vi.hoisted(() => ({
     clearImageRepairAttempts: vi.fn(),
     coordinatedDetail: vi.fn(),
     detailsRenderedHandler: null as ((event: CustomEvent) => void) | null,
+    episodePresentation: vi.fn(),
     getApiClient: vi.fn(),
     getImageCandidates: vi.fn(() => []),
     prepareLayout: vi.fn(),
+    rememberRouteOrigin: vi.fn(),
     registeredModule: null as DetailsModule | null,
     releaseLayout: vi.fn(),
+    restoreRouteOrigin: vi.fn(),
     resetBackdrop: vi.fn(),
+    resetEpisodePresentation: vi.fn(),
+    resetHeroArtwork: vi.fn(),
     setBackdropCandidates: vi.fn(),
+    setHeroArtworkCandidates: vi.fn(),
     setShellSection: vi.fn()
 }));
 
@@ -89,8 +95,17 @@ vi.mock('../../core/clientProfile', () => ({
     }))
 }));
 
+vi.mock('../../core/tvFocus', () => ({
+    rememberPtvRouteOrigin: detailsMocks.rememberRouteOrigin,
+    restorePtvRouteOrigin: detailsMocks.restoreRouteOrigin
+}));
+
 vi.mock('../../services/coordinatedLegacyItemDetail', () => ({
     getCoordinatedLegacyItemDetail: detailsMocks.coordinatedDetail
+}));
+
+vi.mock('../../services/requestCoordinator', () => ({
+    recordPtvRequestLedgerStaleRejected: vi.fn()
 }));
 
 vi.mock('./detailsShell', () => ({
@@ -100,10 +115,14 @@ vi.mock('./detailsShell', () => ({
 }));
 
 vi.mock('./detailsLayout', () => ({
+    applyPtvEpisodeDetailsPresentation: detailsMocks.episodePresentation,
     preparePtvDetailsLayout: detailsMocks.prepareLayout,
     releasePtvDetailsLayout: detailsMocks.releaseLayout,
     resetPtvDetailsBackdrop: detailsMocks.resetBackdrop,
-    setPtvDetailsBackdropCandidates: detailsMocks.setBackdropCandidates
+    resetPtvDetailsHeroArtwork: detailsMocks.resetHeroArtwork,
+    resetPtvEpisodeDetailsPresentation: detailsMocks.resetEpisodePresentation,
+    setPtvDetailsBackdropCandidates: detailsMocks.setBackdropCandidates,
+    setPtvDetailsHeroArtworkCandidates: detailsMocks.setHeroArtworkCandidates
 }));
 
 vi.mock('./detailImageRepairState', () => ({
@@ -133,8 +152,16 @@ function createScope() {
         callback: () => void;
         cancelled: boolean;
     }> = [];
+    const listeners: Array<{
+        callback: (event: Event) => void;
+        eventName: string;
+    }> = [];
     const scope = {
         add: vi.fn((disposer?: () => void) => disposer),
+        listen: vi.fn((_target: EventTarget, eventName: string, callback: (event: Event) => void) => {
+            listeners.push({ callback, eventName });
+            return vi.fn();
+        }),
         timeout: vi.fn((callback: () => void) => {
             const entry = {
                 callback,
@@ -151,6 +178,12 @@ function createScope() {
     };
 
     return {
+        dispatch(eventName: string, event: Event) {
+            listeners.filter(listener => listener.eventName === eventName)
+                .forEach(listener => {
+                    listener.callback(event);
+                });
+        },
         runInspection() {
             const entry = scheduled.find(candidate => !candidate.cancelled);
 
@@ -276,6 +309,25 @@ describe('details enhancement module lifecycle', () => {
         expect(page.querySelector('.ptv-reader-detail-actions')).toBeNull();
     });
 
+    it('captures a Details child origin before navigation and restores only through the existing focus owner', () => {
+        const page = renderDetailsPage();
+        const scope = createScope();
+        const module = getRegisteredModule();
+        const origin = document.createElement('a');
+        const label = document.createElement('span');
+
+        origin.className = 'itemAction';
+        origin.href = '#/details?id=child';
+        origin.append(label);
+        page.append(origin);
+
+        module.init({ scope: scope.scope });
+        scope.dispatch('click', { target: label } as unknown as Event);
+
+        expect(detailsMocks.rememberRouteOrigin).toHaveBeenCalledWith(origin);
+        expect(detailsMocks.restoreRouteOrigin).toHaveBeenCalledWith(page);
+    });
+
     it('lets the authoritative rendered item supersede the slow inspection consumer', async () => {
         const page = renderDetailsPage();
         const inspection = createDeferred<DetailItem>();
@@ -336,5 +388,73 @@ describe('details enhancement module lifecycle', () => {
 
         expect(inspectionSignal.aborted).toBe(false);
         expect(detailsMocks.setShellSection).not.toHaveBeenCalled();
+    });
+
+    it('enhances the visible restored page when a hidden cached detail remains connected', async () => {
+        window.location.hash = '#/details?id=item-current&serverId=server-a';
+        document.body.innerHTML = `
+            <main id="itemDetailPage" class="itemDetailPage hide" data-page="stale">
+                <div class="mainDetailButtons"></div>
+            </main>
+            <main id="itemDetailPage" class="itemDetailPage" data-page="current">
+                <div class="mainDetailButtons"></div>
+            </main>
+        `;
+
+        const stalePage = document.querySelector<HTMLElement>('[data-page="stale"]')!;
+        const currentPage = document.querySelector<HTMLElement>('[data-page="current"]')!;
+        const scope = createScope();
+
+        detailsMocks.coordinatedDetail.mockResolvedValueOnce({
+            Id: 'item-current',
+            Name: 'current',
+            Type: 'Movie'
+        });
+
+        getRegisteredModule().init({ scope: scope.scope });
+
+        expect(detailsMocks.prepareLayout).toHaveBeenCalledWith(currentPage);
+        expect(detailsMocks.prepareLayout).not.toHaveBeenCalledWith(stalePage);
+
+        scope.runInspection();
+        await settlePromises();
+
+        expect(currentPage.dataset.ptvDetailsHydratedItemId).toBe('item-current');
+        expect(stalePage.dataset.ptvDetailsHydratedItemId).toBeUndefined();
+    });
+
+    it('waits through an all-hidden restore transition and applies the exact rendered page', () => {
+        window.location.hash = '#/details?id=item-incoming&serverId=server-a';
+        document.body.innerHTML = `
+            <main id="itemDetailPage" class="itemDetailPage hide" data-page="incoming">
+                <div class="mainDetailButtons"></div>
+            </main>
+            <main id="itemDetailPage" class="itemDetailPage hide" data-page="stale">
+                <div class="mainDetailButtons"></div>
+            </main>
+        `;
+
+        const incomingPage = document.querySelector<HTMLElement>('[data-page="incoming"]')!;
+        const stalePage = document.querySelector<HTMLElement>('[data-page="stale"]')!;
+
+        getRegisteredModule().init({ scope: createScope().scope });
+
+        expect(detailsMocks.prepareLayout).not.toHaveBeenCalled();
+
+        incomingPage.classList.remove('hide');
+        detailsMocks.detailsRenderedHandler?.(new CustomEvent('detailsrendered', {
+            detail: {
+                item: {
+                    Id: 'item-incoming',
+                    ServerId: 'server-a',
+                    Type: 'Movie'
+                },
+                page: incomingPage
+            }
+        }));
+
+        expect(detailsMocks.prepareLayout).toHaveBeenCalledWith(incomingPage);
+        expect(detailsMocks.prepareLayout).not.toHaveBeenCalledWith(stalePage);
+        expect(incomingPage.dataset.ptvDetailsHydratedItemId).toBe('item-incoming');
     });
 });

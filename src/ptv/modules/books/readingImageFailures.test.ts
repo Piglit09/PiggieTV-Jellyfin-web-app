@@ -38,4 +38,20 @@ describe('PtvReadingImageFailureRegistry', () => {
         expect(comics.failedCoverItemIds.has('shared-1')).toBe(true);
         expect(comics.failedUrls.has(url)).toBe(true);
     });
+
+    it('advances a route-local retry epoch even when refreshed artwork keeps the same tag', () => {
+        const registry = createPtvReadingImageFailureRegistry();
+
+        expect(registry.getRetryEpoch('books', 'stable-item')).toBe(0);
+        expect(registry.getRetryEpoch('manga', 'stable-item')).toBe(0);
+
+        registry.clearForItem('books', 'stable-item');
+
+        expect(registry.getRetryEpoch('books', 'stable-item')).toBe(1);
+        expect(registry.getRetryEpoch('manga', 'stable-item')).toBe(0);
+
+        registry.clearForItem('books', 'STABLE-ITEM');
+
+        expect(registry.getRetryEpoch('books', 'stable-item')).toBe(2);
+    });
 });

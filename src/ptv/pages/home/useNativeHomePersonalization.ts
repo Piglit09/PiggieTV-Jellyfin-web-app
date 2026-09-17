@@ -5,6 +5,7 @@ import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import type { NativeHomeRow } from './hooks';
 import { createNativeHomePersonalizedRows } from './personalizedHomeRows';
 import type { PtvRecommendationFeedbackState } from '../../modules/recommendations/types/recommendationTypes';
+import { getPtvDisplayIdentityKey } from '../../services/displayIdentity';
 
 export type NativeHomePersonalizationStatus =
     | 'disabled'
@@ -24,6 +25,7 @@ type UseNativeHomePersonalizationOptions = Readonly<{
     enabled: boolean;
     feedback?: PtvRecommendationFeedbackState;
     isPrimaryHomeLoading: boolean;
+    serverId: string;
     userId: string;
 }>;
 
@@ -38,9 +40,15 @@ export function useNativeHomePersonalization({
     enabled,
     feedback,
     isPrimaryHomeLoading,
+    serverId,
     userId
 }: UseNativeHomePersonalizationOptions) {
     const generationRef = useRef(0);
+    const scopeKey = useMemo(
+        () => getPtvDisplayIdentityKey(serverId, userId),
+        [serverId, userId]
+    );
+    const activeScopeRef = useRef(scopeKey);
     const feedbackRef = useRef(feedback);
     const [retryRevision, setRetryRevision] = useState(0);
     const [state, setState] = useState<NativeHomePersonalizationState>(INITIAL_STATE);
@@ -49,11 +57,13 @@ export function useNativeHomePersonalization({
     feedbackRef.current = feedback;
 
     useEffect(() => {
+        const scopeChanged = activeScopeRef.current !== scopeKey;
+        activeScopeRef.current = scopeKey;
         const generation = generationRef.current + 1;
 
         generationRef.current = generation;
 
-        if (!enabled || !userId) {
+        if (!enabled || !serverId || !userId) {
             setState({
                 error: '',
                 rows: [],
@@ -83,7 +93,7 @@ export function useNativeHomePersonalization({
 
         setState(previous => ({
             error: '',
-            rows: previous.rows,
+            rows: scopeChanged ? [] : previous.rows,
             status: 'loading'
         }));
 
@@ -93,11 +103,18 @@ export function useNativeHomePersonalization({
                     getPtvRecommendationHomeData({
                         feedback: feedbackRef.current,
                         forceRefresh: retryRevision > 0,
-                        signal: controller.signal
+                        serverId,
+                        signal: controller.signal,
+                        userId
                     })
                 ))
                 .then(data => {
-                    if (retired || controller.signal.aborted || generationRef.current !== generation) return;
+                    if (
+                        retired
+                        || controller.signal.aborted
+                        || generationRef.current !== generation
+                        || activeScopeRef.current !== scopeKey
+                    ) return;
 
                     const rows = createNativeHomePersonalizedRows(data);
 
@@ -112,6 +129,7 @@ export function useNativeHomePersonalization({
                         retired
                         || controller.signal.aborted
                         || generationRef.current !== generation
+                        || activeScopeRef.current !== scopeKey
                         || (error instanceof Error && error.name === 'AbortError')
                     ) return;
 
@@ -128,7 +146,7 @@ export function useNativeHomePersonalization({
             controller.abort();
             window.clearTimeout(timer);
         };
-    }, [enabled, feedbackKey, isPrimaryHomeLoading, retryRevision, userId]);
+    }, [enabled, feedbackKey, isPrimaryHomeLoading, retryRevision, scopeKey, serverId, userId]);
 
     const retry = useCallback(() => {
         setRetryRevision(previous => previous + 1);

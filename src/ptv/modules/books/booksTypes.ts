@@ -137,6 +137,7 @@ export type PtvReadingSection = {
 export type PtvReadingLibraryDebug = {
     dropReasons: string[];
     droppedItemCount: number;
+    failedReadCount?: number;
     fetchedItemCount: number;
     jellyfinItemTotal: number;
     jellyfinRouteItemTotal: number;

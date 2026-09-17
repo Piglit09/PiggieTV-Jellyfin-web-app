@@ -41,10 +41,6 @@ function getInitialMode(): SignupMode {
     return mode === 'reset' ? 'reset-request' : 'create';
 }
 
-function getVerificationBaseUrl() {
-    return `${window.location.origin}${window.location.pathname}#/signup`;
-}
-
 function goToLogin() {
     window.location.replace(`${window.location.pathname}#/login`);
 }
@@ -93,7 +89,6 @@ const SignupPage = () => {
             confirmPassword,
             email: email.trim(),
             password,
-            verificationBaseUrl: getVerificationBaseUrl(),
             username: username.trim()
         })
             .then(result => {

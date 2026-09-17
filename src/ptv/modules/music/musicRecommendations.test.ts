@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const recommendationEventMocks = vi.hoisted(() => ({
+    recordPtvEvent: vi.fn()
+}));
+const recommendationPluginMocks = vi.hoisted(() => ({
+    getCurrentPtvPluginApiClient: vi.fn()
+}));
+
+vi.mock('../../core/observability', () => recommendationEventMocks);
+vi.mock('../../core/pluginApi', () => recommendationPluginMocks);
+
 import {
     buildPtvDistinctMusicRecommendationRow,
     buildPtvMusicRecommendations,
@@ -42,6 +52,10 @@ function musicItem(
 }
 
 describe('buildPtvMusicRecommendationShelves()', () => {
+    beforeEach(() => {
+        recommendationEventMocks.recordPtvEvent.mockClear();
+    });
+
     it('repairs stale cached discovery rows without repeating affinity items', () => {
         const madeForYou = [
             musicItem('made-1', 'Alpha', 'Affinity One'),
@@ -121,9 +135,16 @@ describe('buildPtvMusicRecommendationShelves()', () => {
         expect(shelves.recommended.map(item => item.Id)).toEqual(['discover-1']);
     });
 
-    it('keeps non-track music records out of related playback queues', async () => {
-        const seed = musicItem('seed-1', 'Seed Artist', 'Seed Track');
-        const playable = musicItem('track-1', 'Related Artist', 'Related Track');
+    it('keeps non-track and zero-affinity music records out of related playback queues', async () => {
+        const seed = musicItem('seed-1', 'Seed Artist', 'Seed Track', [ 'Synth' ]);
+        const playable = musicItem('track-1', 'Related Artist', 'Related Track', [ 'Synth' ]);
+        const unrelated = {
+            ...musicItem('unrelated-1', 'Unrelated Artist', 'Unrelated Track', [ 'Country' ]),
+            UserData: {
+                IsFavorite: true,
+                PlayCount: 50
+            }
+        };
         const related = await buildPtvMusicRelatedTracks(seed, {
             pool: [
                 {
@@ -135,16 +156,52 @@ describe('buildPtvMusicRecommendationShelves()', () => {
                     ...musicItem('artist-1', 'Seed Artist', 'Artist Record'),
                     Type: 'MusicArtist'
                 },
-                playable
+                playable,
+                unrelated
             ]
         });
 
         expect(related.map(item => item.Id)).toEqual(['track-1']);
     });
+
+    it('holds the Made For You, Discovery, and Related familiarity policies when supply is balanced', async () => {
+        const seed = musicItem('seed-policy', 'Seed Artist', 'Seed Track', [ 'Synth' ]);
+        const familiar = Array.from({ length: 7 }, (_, index) => ({
+            ...musicItem(`familiar-${index}`, `Familiar ${index}`, `Familiar ${index}`, [ 'Synth' ]),
+            UserData: { IsFavorite: true, PlayCount: 3 }
+        }));
+        const discovery = Array.from({ length: 8 }, (_, index) => (
+            musicItem(`discovery-${index}`, `Discovery ${index}`, `Discovery ${index}`, [ 'Synth' ])
+        ));
+        const madeForYouDiscovery = Array.from({ length: 3 }, (_, index) => (
+            musicItem(`made-discovery-${index}`, `Made Discovery ${index}`, `Made Discovery ${index}`, [ 'Synth' ])
+        ));
+        const shelves = buildPtvMusicRecommendationShelves(
+            [ seed ],
+            [ ...familiar, ...madeForYouDiscovery ],
+            [ ...familiar.slice(0, 2).map(item => ({ ...item, Id: `new-${item.Id}` })), ...discovery ],
+            [],
+            10
+        );
+        const related = await buildPtvMusicRelatedTracks(seed, {
+            limit: 10,
+            pool: [ ...familiar.slice(0, 6), ...discovery.slice(0, 4) ]
+        });
+
+        expect(shelves.madeForYou.filter(item => item.UserData?.PlayCount).length).toBe(7);
+        expect(shelves.madeForYou.filter(item => !item.UserData?.PlayCount).length).toBe(3);
+        expect(shelves.recommended.filter(item => item.UserData?.PlayCount).length).toBe(2);
+        expect(shelves.recommended.filter(item => !item.UserData?.PlayCount).length).toBe(8);
+        expect(related.filter(item => item.UserData?.PlayCount).length).toBe(6);
+        expect(related.filter(item => !item.UserData?.PlayCount).length).toBe(4);
+    });
 });
 
 describe('buildPtvMusicRecommendations()', () => {
     beforeEach(() => {
+        recommendationEventMocks.recordPtvEvent.mockClear();
+        recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReset();
+        recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReturnValue(null);
         musicApiMocks.fetchPtvMusicTracksForGenerator.mockReset();
         musicApiMocks.getPtvMusicHome.mockReset();
     });
@@ -160,7 +217,7 @@ describe('buildPtvMusicRecommendations()', () => {
     it('keeps a playable song seed first while enforcing feedback and concentration limits', async () => {
         const seed = musicItem('seed-song', 'Seed Artist', 'Seed Song', ['Synth']);
         const familiar = {
-            ...musicItem('familiar', 'Familiar Artist', 'Familiar Song', ['Rock']),
+            ...musicItem('familiar', 'Familiar Artist', 'Familiar Song', ['Synth']),
             UserData: {
                 IsFavorite: true,
                 PlayCount: 4
@@ -178,17 +235,20 @@ describe('buildPtvMusicRecommendations()', () => {
         const pool = [
             seed,
             musicItem('seed-related-1', 'Seed Artist', 'Seed Related One', ['Synth']),
-            musicItem('seed-related-2', 'Seed Artist', 'Seed Related Two', ['Synth']),
-            musicItem('album-related-1', 'Album Artist', 'Album Related One'),
+            {
+                ...musicItem('seed-related-2', 'Seed Artist', 'Seed Related Two', ['Synth']),
+                AlbumId: 'seed-related-album-2'
+            },
+            musicItem('album-related-1', 'Album Artist', 'Album Related One', ['Synth']),
             musicItem('album-related-2', 'Album Artist', 'Album Related Two'),
             musicItem('album-related-3', 'Album Artist', 'Album Related Three'),
             familiar,
             disliked,
             hidden,
-            musicItem('discovery-1', 'Discovery One', 'Discovery One'),
-            musicItem('discovery-2', 'Discovery Two', 'Discovery Two'),
-            musicItem('discovery-3', 'Discovery Three', 'Discovery Three'),
-            musicItem('discovery-3', 'Discovery Three', 'Discovery Three')
+            musicItem('discovery-1', 'Discovery One', 'Discovery One', ['Synth']),
+            musicItem('discovery-2', 'Discovery Two', 'Discovery Two', ['Synth']),
+            musicItem('discovery-3', 'Discovery Three', 'Discovery Three', ['Synth']),
+            musicItem('discovery-3', 'Discovery Three', 'Discovery Three', ['Synth'])
         ];
 
         useMusicHome(pool);
@@ -234,7 +294,7 @@ describe('buildPtvMusicRecommendations()', () => {
         expect(itemIds).toContain('familiar');
         expect(itemIds).not.toContain('disliked');
         expect(itemIds).not.toContain('hidden');
-        expect(Math.max(...Object.values(artistCounts))).toBeLessThanOrEqual(2);
+        expect(Math.max(...Object.values(artistCounts))).toBeLessThanOrEqual(3);
         expect(Math.max(...Object.values(albumCounts))).toBeLessThanOrEqual(2);
         expect(musicApiMocks.fetchPtvMusicTracksForGenerator).not.toHaveBeenCalled();
     });
@@ -354,6 +414,288 @@ describe('buildPtvMusicRecommendations()', () => {
         expect(differentSession.items.map(item => item.Id)).not.toEqual(first.items.map(item => item.Id));
         expect(first.items[0]?.Id).toMatch(/^new-/);
         expect(first.items.map(item => item.Id)).toContain('liked-track');
+        expect(first.items.findIndex(item => item.Id === 'liked-track')).toBeLessThan(first.items.length - 1);
+    });
+
+    it('keeps Radio at 25/75 while excluding high-score tracks outside strict seed affinity', async () => {
+        const seed = {
+            ...musicItem('radio-seed', 'Radio Seed', 'Radio Seed', [ 'Synth' ]),
+            UserData: { IsFavorite: true, PlayCount: 4 }
+        };
+        const familiar = {
+            ...musicItem('radio-familiar', 'Known Guest', 'Known Guest', [ 'Synth' ]),
+            UserData: { IsFavorite: true, PlayCount: 4 }
+        };
+        const discovery = Array.from({ length: 8 }, (_, index) => (
+            musicItem(`radio-discovery-${index}`, `New Artist ${index}`, `New Track ${index}`, [ 'Synth' ])
+        ));
+        const unrelated = {
+            ...musicItem('unrelated-favorite', 'Country Favorite', 'Unrelated Favorite', [ 'Country' ]),
+            UserData: { IsFavorite: true, PlayCount: 100 }
+        };
+
+        useMusicHome([ seed, familiar, ...discovery, unrelated ]);
+        const result = await buildPtvMusicRecommendations({
+            limit: 10,
+            seed: { item: seed, kind: 'song', label: seed.Name },
+            sessionSeed: 'strict-radio-policy'
+        });
+        const familiarCount = result.items.filter(item => item.UserData?.PlayCount).length;
+
+        expect(result.items).toHaveLength(10);
+        expect(result.items[0]?.Id).toBe('radio-seed');
+        expect(familiarCount).toBe(2);
+        expect(result.items.length - familiarCount).toBe(8);
+        expect(result.items.map(item => item.Id)).not.toContain('unrelated-favorite');
+        expect(recommendationEventMocks.recordPtvEvent).toHaveBeenCalledWith(
+            'recommendation',
+            'music-recommendation-generation-completed',
+            expect.objectContaining({
+                algorithmId: 'ptv-diversified-sequence-v2',
+                algorithmPolicyId: 'music-premium-v2',
+                discoveryCount: 8,
+                familiarCount: 2,
+                itemCount: 10,
+                surface: 'radio'
+            })
+        );
+    });
+
+    it('uses the plugin V2 rank when advertised and preserves a local fallback boundary', async () => {
+        const items = [
+            musicItem('plugin-a', 'Artist A', 'Track A', [ 'Ambient' ]),
+            musicItem('plugin-b', 'Artist B', 'Track B', [ 'Ambient' ])
+        ];
+        const getStatus = vi.fn().mockResolvedValue({
+            featureFlags: { recommendationPolicyV2: true }
+        });
+        const rankRecommendations = vi.fn().mockImplementation((request: {
+            requestId: string;
+            surface: string;
+        }) => Promise.resolve({
+            algorithmId: 'ptv-diversified-sequence-v2',
+            cohort: 'music-premium',
+            constraints: {
+                discoveryTarget: 0.8,
+                familiarTarget: 0.2,
+                maxConsecutiveAlbum: 1,
+                maxConsecutiveArtist: 1,
+                maxItemsPerAlbum: 1,
+                maxItemsPerArtist: 2
+            },
+            contractVersion: '2.0',
+            generatedAt: '2026-08-08T00:00:00Z',
+            generationLatencyMs: 1,
+            items: [
+                { classification: 'discovery', id: 'plugin-b', mediaType: 'Audio', rank: 1, reasons: [], score: 2, source: 'jellyfin-music-library', title: 'Track B', transitionScore: 0 },
+                { classification: 'discovery', id: 'plugin-a', mediaType: 'Audio', rank: 2, reasons: [], score: 1, source: 'jellyfin-music-library', title: 'Track A', transitionScore: 0 }
+            ],
+            policyVersion: 'music-premium-v2',
+            requestId: request.requestId,
+            surface: request.surface
+        }));
+
+        recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReturnValue({
+            getCurrentUserId: () => 'user-1',
+            getStatus,
+            rankRecommendations
+        });
+        useMusicHome(items);
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 2,
+            prompt: 'Ambient focus radio',
+            seed: { kind: 'random' },
+            sessionSeed: 'plugin-v2'
+        });
+
+        expect(result.items.map(item => item.Id)).toEqual([ 'plugin-b', 'plugin-a' ]);
+        expect(getStatus).toHaveBeenCalledWith({ signal: undefined });
+        expect(rankRecommendations).toHaveBeenCalledWith(
+            expect.objectContaining({
+                contractVersion: '2.0',
+                policyVersion: 'music-premium-v2',
+                seed: expect.objectContaining({ genres: expect.arrayContaining([ 'ambient' ]) }),
+                surface: 'radio'
+            }),
+            { signal: undefined }
+        );
+    });
+
+    it('falls back to the local V2 rank when the plugin returns malformed ranked items', async () => {
+        const items = [
+            musicItem('local-a', 'Artist A', 'Track A', [ 'Ambient' ]),
+            musicItem('local-b', 'Artist B', 'Track B', [ 'Ambient' ])
+        ];
+        const rankRecommendations = vi.fn().mockResolvedValue({
+            algorithmId: 'ptv-diversified-sequence-v2',
+            cohort: 'music-premium',
+            constraints: {
+                discoveryTarget: 0.75,
+                familiarTarget: 0.25,
+                maxConsecutiveAlbum: 2,
+                maxConsecutiveArtist: 2,
+                maxItemsPerAlbum: 2,
+                maxItemsPerArtist: 3
+            },
+            contractVersion: '2.0',
+            generatedAt: '2026-08-08T00:00:00Z',
+            generationLatencyMs: 1,
+            items: [{}],
+            policyVersion: 'music-premium-v2',
+            requestId: 'malformed-request',
+            surface: 'radio'
+        });
+
+        recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReturnValue({
+            getCurrentUserId: () => 'user-1',
+            getStatus: vi.fn().mockResolvedValue({
+                featureFlags: { recommendationPolicyV2: true }
+            }),
+            rankRecommendations
+        });
+        useMusicHome(items);
+
+        await expect(buildPtvMusicRecommendations({
+            limit: 2,
+            prompt: 'Ambient focus radio',
+            seed: { kind: 'random' },
+            sessionSeed: 'malformed-plugin-v2'
+        })).resolves.toEqual(expect.objectContaining({
+            items: expect.arrayContaining(items)
+        }));
+        expect(recommendationEventMocks.recordPtvEvent).toHaveBeenCalledWith(
+            'recommendation',
+            'music-recommendation-policy-fallback',
+            expect.objectContaining({
+                fallbackReason: 'plugin-rank-failed',
+                source: 'local-v2',
+                surface: 'radio'
+            })
+        );
+    });
+
+    it('uses free-text prompt terms to rank matching genres and tags ahead of unrelated tracks', async () => {
+        useMusicHome([
+            musicItem('horror-synth-1', 'Night One', 'Neon Graves', [ 'Horror', 'Synthwave' ]),
+            musicItem('horror-synth-2', 'Night Two', 'Midnight Circuit', [ 'Synthwave' ]),
+            musicItem('horror-synth-3', 'Night Three', 'Dark Signal', [ 'Horror' ]),
+            musicItem('country-1', 'Daylight', 'Open Road', [ 'Country' ]),
+            musicItem('pop-1', 'Sunshine', 'Bright Lights', [ 'Pop' ])
+        ]);
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 3,
+            prompt: 'Make me a 50-song Horror Synthwave mix',
+            seed: { kind: 'random' },
+            sessionSeed: 'prompt-intent'
+        });
+
+        expect(result.items.map(item => item.Id)).toEqual(expect.arrayContaining([
+            'horror-synth-1',
+            'horror-synth-2',
+            'horror-synth-3'
+        ]));
+        expect(result.items.every(item => item.Id?.startsWith('horror-synth-'))).toBe(true);
+    });
+
+    it('does not pad an explicit prompt with unrelated homepage tracks', async () => {
+        useMusicHome([
+            musicItem('darkwave-1', 'Night Signal', 'Black Glass', [ 'Darkwave' ]),
+            musicItem('darkwave-2', 'Cold Neon', 'After Midnight', [ 'Darkwave' ]),
+            ...Array.from({ length: 12 }, (_, index) => (
+                musicItem(`country-${index}`, `Country ${index}`, `Open Road ${index}`, [ 'Country' ])
+            ))
+        ]);
+        musicApiMocks.fetchPtvMusicTracksForGenerator.mockResolvedValue([]);
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 8,
+            prompt: 'Build a darkwave playlist',
+            seed: { kind: 'random' },
+            sessionSeed: 'prompt-relevance-floor'
+        });
+
+        expect(result.items.map(item => item.Id)).toEqual(expect.arrayContaining([ 'darkwave-1', 'darkwave-2' ]));
+        expect(result.items).toHaveLength(2);
+        expect(result.items.every(item => item.Genres?.includes('Darkwave'))).toBe(true);
+    });
+
+    it.each([
+        [ 'Relax', 'Ambient' ],
+        [ 'Focus', 'Classical' ],
+        [ 'Party', 'Dance' ],
+        [ 'Workout', 'Metal' ],
+        [ 'Commute', 'Rock' ],
+        [ 'Sleep', 'Drone' ],
+        [ 'Romance', 'Soul' ]
+    ])('maps the %s mood chip to useful %s vocabulary', async (mood, matchingGenre) => {
+        useMusicHome([
+            musicItem(`match-${mood}-1`, `${mood} Artist`, `${mood} One`, [ matchingGenre ]),
+            musicItem(`match-${mood}-2`, `${mood} Guest`, `${mood} Two`, [ matchingGenre ]),
+            musicItem(`miss-${mood}`, 'Wrong Artist', 'Wrong Track', [ 'Spoken Word' ])
+        ]);
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 1,
+            prompt: `Make 50-song ${mood} mix`,
+            seed: {
+                kind: 'genre',
+                label: mood,
+                value: mood.toLowerCase()
+            },
+            sessionSeed: `mood-${mood}`
+        });
+
+        expect(result.items[0]?.Genres).toContain(matchingGenre);
+    });
+
+    it('keeps FLAC-only and OPUS-only quality requests distinct', async () => {
+        useMusicHome([
+            { ...musicItem('flac-1', 'Lossless One', 'FLAC One'), Container: 'flac' },
+            { ...musicItem('flac-2', 'Lossless Two', 'FLAC Two'), Container: 'flac' },
+            { ...musicItem('opus-1', 'Efficient One', 'OPUS One'), Container: 'opus' },
+            { ...musicItem('mp3-1', 'Legacy One', 'MP3 One'), Container: 'mp3' }
+        ]);
+        musicApiMocks.fetchPtvMusicTracksForGenerator.mockResolvedValue([]);
+
+        const flac = await buildPtvMusicRecommendations({
+            limit: 4,
+            prompt: 'Make FLAC-only playlist',
+            seed: { kind: 'quality', label: 'FLAC', value: 'flac' }
+        });
+        const opus = await buildPtvMusicRecommendations({
+            limit: 4,
+            prompt: 'Make OPUS-only playlist',
+            seed: { kind: 'quality', label: 'OPUS', value: 'opus' }
+        });
+
+        expect(flac.items.map(item => item.Id)).toEqual(expect.arrayContaining([ 'flac-1', 'flac-2' ]));
+        expect(flac.items.every(item => item.Container === 'flac')).toBe(true);
+        expect(opus.items.map(item => item.Id)).toEqual([ 'opus-1' ]);
+    });
+
+    it('spreads controlled discovery through a seeded mix instead of appending it at the end', async () => {
+        const familiar = Array.from({ length: 6 }, (_, index) => ({
+            ...musicItem(`familiar-${index}`, `Familiar ${index}`, `Familiar Track ${index}`, [ 'Synth' ]),
+            UserData: {
+                IsFavorite: true,
+                PlayCount: 4
+            }
+        }));
+        const discovery = Array.from({ length: 4 }, (_, index) => (
+            musicItem(`discovery-${index}`, `Discovery ${index}`, `Discovery Track ${index}`, [ 'Synth' ])
+        ));
+
+        useMusicHome([ ...familiar, ...discovery ]);
+        const result = await buildPtvMusicRecommendations({
+            limit: 8,
+            seed: { kind: 'genre', label: 'Synth', value: 'Synth' },
+            sessionSeed: 'distributed-discovery'
+        });
+
+        expect(result.items.slice(0, 4).some(item => !item.UserData?.PlayCount)).toBe(true);
+        expect(result.items.slice(4).some(item => item.UserData?.PlayCount)).toBe(true);
     });
 
     it('keeps Artist Mix album concentration bounded when the library supports alternatives', async () => {
@@ -396,7 +738,7 @@ describe('buildPtvMusicRecommendations()', () => {
                 return counts;
             }, {});
 
-        expect(result.items).toHaveLength(8);
+        expect(result.items).toHaveLength(2);
         expect(Math.max(...Object.values(firstWindowAlbumCounts))).toBeLessThanOrEqual(2);
     });
 
@@ -408,7 +750,7 @@ describe('buildPtvMusicRecommendations()', () => {
             IndexNumber: index + 1
         }));
         const alternatives = Array.from({ length: 4 }, (_, index) => (
-            musicItem(`alternative-${index}`, `Alternative ${index}`, `Alternative Track ${index}`)
+            musicItem(`alternative-${index}`, `Alternative ${index}`, `Alternative Track ${index}`, [ 'Synth' ])
         ));
 
         useMusicHome([...albumTracks, ...alternatives]);
@@ -416,6 +758,7 @@ describe('buildPtvMusicRecommendations()', () => {
             limit: 8,
             seed: {
                 item: {
+                    Genres: [ 'Synth' ],
                     Id: 'seed-album',
                     Name: 'Seed Album',
                     Type: 'MusicAlbum'
@@ -434,11 +777,11 @@ describe('buildPtvMusicRecommendations()', () => {
         });
 
         expect(result.items[0]?.AlbumId).toBe('seed-album');
-        expect(result.items.filter(item => item.AlbumId === 'seed-album').length).toBeGreaterThan(2);
+        expect(result.items.filter(item => item.AlbumId === 'seed-album').length).toBeLessThanOrEqual(2);
         expect(longestAlbumArtistRun).toBeLessThanOrEqual(2);
     });
 
-    it('relaxes concentration only after strict candidates are exhausted in a small library', async () => {
+    it('keeps hard concentration caps when a small library cannot fill the requested limit', async () => {
         const smallLibrary = Array.from({ length: 5 }, (_, index) => ({
             ...musicItem(`small-${index}`, 'Only Artist', `Small Track ${index}`),
             AlbumId: 'only-album'
@@ -451,8 +794,8 @@ describe('buildPtvMusicRecommendations()', () => {
             sessionSeed: 'small-library-fallback'
         });
 
-        expect(result.items).toHaveLength(5);
-        expect(new Set(result.items.map(item => item.Id)).size).toBe(5);
+        expect(result.items).toHaveLength(1);
+        expect(new Set(result.items.map(item => item.Id)).size).toBe(1);
     });
 
     it('forwards cancellation to fallback work and rejects a retired generation', async () => {

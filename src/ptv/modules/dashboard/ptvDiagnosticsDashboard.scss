@@ -3,9 +3,10 @@
 }
 
 .ptv-diagnostics-dashboard {
-    width: min(100% - 2rem, 92rem);
-    margin: 0 auto;
-    padding: 9rem 0 5rem;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
 }
 
 .ptv-diagnostics-header {
@@ -208,8 +209,7 @@
 
 @media (max-width: 44rem) {
     .ptv-diagnostics-dashboard {
-        width: min(100% - 1rem, 92rem);
-        padding-top: 8rem;
+        width: 100%;
     }
 
     .ptv-diagnostics-header {

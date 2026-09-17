@@ -698,7 +698,16 @@ function executeCommand(item, id, options) {
                 break;
             case 'identify':
                 import('./itemidentifier/itemidentifier').then((itemIdentifier) => {
-                    itemIdentifier.show(itemId, serverId).then(getResolveFunction(resolve, id, true), getResolveFunction(resolve, id));
+                    itemIdentifier.showWithAuthority(itemId, serverId).then(result => {
+                        resolve({
+                            command: id,
+                            deleted: false,
+                            identifyReadbackCode: result?.readbackCode || null,
+                            itemId,
+                            updated: true,
+                            updatedItem: result?.readbackCode === 'READBACK_CONFIRMED' ? result.item : null
+                        });
+                    }, getResolveFunction(resolve, id));
                 });
                 break;
             case 'moremediainfo':

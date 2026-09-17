@@ -153,6 +153,29 @@ describe('native Search details navigation adoption', () => {
     });
 
     it.each([
+        [{ Id: 'genre-1', Type: 'Genre' }, '#/list?genreId=genre-1&serverId=server-1'],
+        [{ Id: 'music-genre-1', Type: 'MusicGenre' }, '#/list?musicGenreId=music-genre-1&serverId=server-1'],
+        [{ Id: 'studio-1', Type: 'Studio' }, '#/list?studioId=studio-1&serverId=server-1']
+    ])('leaves directory list routes under native anchor navigation', (item, expectedHref) => {
+        const route = resolvePtvItemRoute(item, { serverId: 'server-1' });
+        const event = createActivationEvent();
+
+        const result = activateNativeSearchCard({
+            event,
+            item,
+            route,
+            sourceGroup: 'directory'
+        });
+
+        expect(result).toBeNull();
+        expect(route).toMatchObject({ href: expectedHref, routeSource: 'jellyfin-list' });
+        expect(event.preventDefault).not.toHaveBeenCalled();
+        expect(appRouter.show).not.toHaveBeenCalled();
+        expect(countEvent('ptv-item-route-click')).toBe(1);
+        expect(countEvent('ptv-core-details-navigation')).toBe(0);
+    });
+
+    it.each([
         { ctrlKey: true },
         { metaKey: true },
         { shiftKey: true },

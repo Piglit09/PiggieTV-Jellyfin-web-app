@@ -8,7 +8,7 @@ import Divider from '@mui/material/Divider';
 import Grid from '@mui/material/Grid2';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import Page from 'components/Page';
 
@@ -16,6 +16,13 @@ import {
     getCurrentPtvPluginApiClient,
     normalizePtvApiError
 } from '../../core/pluginApi';
+import {
+    capturePtvRouteCriticalLifecycleOwner,
+    recordPtvRouteCriticalPending,
+    recordPtvRouteCriticalTerminal,
+    type PtvRouteCriticalLifecycleOwner,
+    type PtvRouteCriticalTerminalOutcome
+} from '../../shell/routeCriticalLifecycle';
 
 import '../dashboard/dashboard.scss';
 import './calendar.scss';
@@ -34,7 +41,6 @@ type PtvArrCalendarItem = {
     date?: string | null;
     episodeNumber?: number | null;
     episodeTitle?: string | null;
-    externalUrl?: string | null;
     hasFile?: boolean | null;
     id: string;
     monitored?: boolean | null;
@@ -80,15 +86,33 @@ function getServiceLabel(service: string) {
 function formatCalendarDate(value?: string | null) {
     if (!value) return 'Date TBA';
 
-    const date = new Date(value);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ?
+        new Date(`${value}T12:00:00`) :
+        new Date(value);
 
     if (Number.isNaN(date.getTime())) return value;
 
     return new Intl.DateTimeFormat(undefined, {
         day: 'numeric',
         month: 'short',
-        weekday: 'short'
+        weekday: 'short',
+        year: 'numeric'
     }).format(date);
+}
+
+function getCalendarDateKey(value?: string | null) {
+    if (!value) return 'tba';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
 }
 
 function getSortKey(item: PtvArrCalendarItem) {
@@ -105,13 +129,13 @@ function getEpisodeLabel(item: PtvArrCalendarItem) {
     return item.episodeTitle ? `${prefix} - ${item.episodeTitle}` : prefix;
 }
 
-function groupCalendarItems(items: PtvArrCalendarItem[]): CalendarGroup[] {
+export function groupCalendarItems(items: PtvArrCalendarItem[]): CalendarGroup[] {
     const groups = new Map<string, CalendarGroup>();
 
     [...items]
         .sort((left, right) => getSortKey(left).localeCompare(getSortKey(right)))
         .forEach(item => {
-            const key = item.date ? item.date.slice(0, 10) : 'tba';
+            const key = getCalendarDateKey(item.date);
             const existing = groups.get(key);
 
             if (existing) {
@@ -126,7 +150,58 @@ function groupCalendarItems(items: PtvArrCalendarItem[]): CalendarGroup[] {
             });
         });
 
-    return Array.from(groups.values());
+    return Array.from(groups.values()).sort((left, right) => {
+        if (left.key === 'tba') return 1;
+        if (right.key === 'tba') return -1;
+
+        return left.key.localeCompare(right.key);
+    });
+}
+
+function isConfiguredCalendarService(service: PtvArrCalendarServiceStatus) {
+    return Boolean(service.enabled && service.configured && service.supported);
+}
+
+export function isHealthyCalendarService(service: PtvArrCalendarServiceStatus) {
+    if (!isConfiguredCalendarService(service) || service.error) return false;
+
+    return service.statusCode == null || (service.statusCode >= 200 && service.statusCode < 300);
+}
+
+export function getPtvCalendarRouteCriticalOutcome(
+    response: PtvArrCalendarResponse
+): PtvRouteCriticalTerminalOutcome {
+    const items = response.items || EMPTY_CALENDAR_ITEMS;
+    const configuredServices = (response.services || EMPTY_CALENDAR_SERVICES)
+        .filter(isConfiguredCalendarService);
+    const healthyServiceCount = configuredServices.filter(isHealthyCalendarService).length;
+    const failedServiceCount = configuredServices.length - healthyServiceCount;
+
+    if (healthyServiceCount > 0 && failedServiceCount > 0) return 'partial';
+    if (items.length > 0) return response.ok === false || failedServiceCount > 0 ? 'partial' : 'success';
+    if (failedServiceCount > 0 && healthyServiceCount === 0) return 'failed';
+    if (response.ok === false && configuredServices.length > 0) return 'failed';
+
+    return 'empty';
+}
+
+function getCalendarServiceState(service: PtvArrCalendarServiceStatus) {
+    if (isHealthyCalendarService(service)) return 'healthy';
+    if (isConfiguredCalendarService(service)) return 'degraded';
+
+    return 'inactive';
+}
+
+function getCalendarServiceErrorMessage(service: PtvArrCalendarServiceStatus) {
+    if (!service.error) return '';
+    if (service.statusCode === 401 || service.statusCode === 403) return 'Authentication failed. Check the saved API key.';
+    if (service.statusCode === 404) return 'The calendar endpoint is unavailable for this service.';
+    if (service.statusCode && service.statusCode >= 500) return 'The service returned a server error.';
+    if (service.error.toLowerCase().includes('timed out') || service.error.toLowerCase().includes('timeout')) {
+        return 'The service timed out.';
+    }
+
+    return 'The service calendar could not be loaded.';
 }
 
 function getCalendarErrorMessage(error: unknown) {
@@ -139,48 +214,88 @@ const PiggieTvCalendarPage = () => {
     const [calendar, setCalendar] = useState<PtvArrCalendarResponse | null>(null);
     const [errorMessage, setErrorMessage] = useState('');
     const [loading, setLoading] = useState(false);
+    const requestRef = useRef<{
+        controller: AbortController | null;
+        generation: number;
+        owner: PtvRouteCriticalLifecycleOwner;
+        promise: Promise<void>;
+    } | null>(null);
+    const requestGenerationRef = useRef(0);
 
     const loadCalendar = useCallback(() => {
+        if (requestRef.current) return requestRef.current.promise;
+
+        const owner = capturePtvRouteCriticalLifecycleOwner('calendar');
+
+        recordPtvRouteCriticalPending(owner);
+
         const pluginApi = getCurrentPtvPluginApiClient();
 
         if (!pluginApi?.getArrCalendar) {
             setErrorMessage('PiggieTV plugin API is unavailable.');
+            recordPtvRouteCriticalTerminal(owner, 'failed');
             return Promise.resolve();
         }
 
+        const generation = ++requestGenerationRef.current;
+        // eslint-disable-next-line compat/compat -- Jellyfin provides the legacy-browser AbortController polyfill.
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
         setLoading(true);
         setErrorMessage('');
 
-        return pluginApi.getArrCalendar<PtvArrCalendarResponse>({
+        const promise = pluginApi.getArrCalendar<PtvArrCalendarResponse>({
             params: {
                 daysAfter: CALENDAR_DAYS_AFTER,
                 daysBefore: CALENDAR_DAYS_BEFORE
-            }
+            },
+            signal: controller?.signal
         })
             .then(response => {
+                if (generation !== requestGenerationRef.current) return;
                 setCalendar(response);
+                recordPtvRouteCriticalTerminal(owner, getPtvCalendarRouteCriticalOutcome(response));
 
                 if (response?.ok === false) {
                     setErrorMessage(response.message || 'Release calendar returned a degraded response.');
                 }
             })
             .catch(err => {
+                if (generation !== requestGenerationRef.current || controller?.signal.aborted) {
+                    recordPtvRouteCriticalTerminal(owner, 'cancelled');
+                    return;
+                }
                 setErrorMessage(getCalendarErrorMessage(err));
+                recordPtvRouteCriticalTerminal(owner, 'failed');
             })
             .finally(() => {
+                if (generation !== requestGenerationRef.current) return;
+                requestRef.current = null;
                 setLoading(false);
             });
+
+        requestRef.current = { controller, generation, owner, promise };
+        return promise;
     }, []);
 
     useEffect(() => {
         void loadCalendar();
+
+        return () => {
+            requestGenerationRef.current += 1;
+            if (requestRef.current) {
+                recordPtvRouteCriticalTerminal(requestRef.current.owner, 'cancelled');
+            }
+            requestRef.current?.controller?.abort();
+            requestRef.current = null;
+        };
     }, [loadCalendar]);
 
     const items = calendar?.items || EMPTY_CALENDAR_ITEMS;
     const services = calendar?.services || EMPTY_CALENDAR_SERVICES;
     const groups = useMemo(() => groupCalendarItems(items), [items]);
-    const activeServiceCount = services.filter(service => service.enabled && service.configured && service.supported).length;
-    const serviceErrors = services.filter(service => service.error);
+    const configuredServiceCount = services.filter(isConfiguredCalendarService).length;
+    const activeServiceCount = services.filter(isHealthyCalendarService).length;
+    const serviceErrors = services.filter(service => isConfiguredCalendarService(service) && service.error);
 
     return (
         <Page
@@ -207,9 +322,15 @@ const PiggieTvCalendarPage = () => {
                     </Stack>
 
                     {errorMessage ? <Alert severity='warning'>{errorMessage}</Alert> : null}
-                    {!loading && services.length > 0 && activeServiceCount === 0 ? (
+                    {!loading && services.length > 0 && configuredServiceCount === 0 ? (
                         <Alert severity='info'>
                             Configure and save a Sonarr, Radarr, or Lidarr API key in the PiggieTV dashboard to enable the release calendar.
+                        </Alert>
+                    ) : null}
+
+                    {!loading && configuredServiceCount > 0 && activeServiceCount === 0 ? (
+                        <Alert severity='warning'>
+                            Configured calendar providers are currently unavailable. Review each provider status and retry.
                         </Alert>
                     ) : null}
 
@@ -222,16 +343,16 @@ const PiggieTvCalendarPage = () => {
                                             <Stack direction='row' justifyContent='space-between' alignItems='center' gap={1}>
                                                 <Typography variant='h2'>{getServiceLabel(service.service)}</Typography>
                                                 <Chip
-                                                    className={`ptv-status-badge ${service.enabled && service.configured && service.supported ? 'ptv-status-badge-info' : 'ptv-status-badge-path'}`}
-                                                    label={service.enabled && service.configured && service.supported ? 'enabled' : 'inactive'}
+                                                    className={`ptv-status-badge ${isHealthyCalendarService(service) ? 'ptv-status-badge-info' : 'ptv-status-badge-path'}`}
+                                                    label={getCalendarServiceState(service)}
                                                     size='small'
                                                 />
                                             </Stack>
                                             <Typography className='ptv-calendar-service-meta'>
                                                 {service.supported === false ? 'No calendar adapter' : `${service.itemCount || 0} items`}
                                             </Typography>
-                                            {service.error ? (
-                                                <Typography className='ptv-calendar-service-error'>{service.error}</Typography>
+                                            {isConfiguredCalendarService(service) && service.error ? (
+                                                <Typography className='ptv-calendar-service-error'>{getCalendarServiceErrorMessage(service)}</Typography>
                                             ) : null}
                                         </Stack>
                                     </CardContent>

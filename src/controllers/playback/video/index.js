@@ -14,6 +14,7 @@ import datetime from '../../../scripts/datetime';
 import itemHelper from '../../../components/itemHelper';
 import mediaInfo from '../../../components/mediainfo/mediainfo';
 import focusManager from '../../../components/focusManager';
+import { shouldFocusVideoOsdOnReveal } from './videoOsdFocusPolicy';
 import Events from '../../../utils/events.ts';
 import globalize from '../../../lib/globalize';
 import { appHost } from '../../../components/apphost';
@@ -407,11 +408,13 @@ export default function (view) {
             elem.classList.remove('hide');
             elem.classList.remove('videoOsdBottom-hidden');
 
-            if (!layoutManager.mobile) {
+            if (!layoutManager.mobile && shouldFocusVideoOsdOnReveal(layoutManager.tv, Boolean(focusElement))) {
                 _focus(focusElement);
             }
             toggleSubtitleSync();
-        } else if (currentVisibleMenu === 'osd' && !layoutManager.mobile) {
+        } else if (currentVisibleMenu === 'osd'
+            && !layoutManager.mobile
+            && shouldFocusVideoOsdOnReveal(layoutManager.tv, Boolean(focusElement))) {
             _focus(focusElement);
         }
     }

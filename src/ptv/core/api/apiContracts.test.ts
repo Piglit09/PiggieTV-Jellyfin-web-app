@@ -57,6 +57,11 @@ describe('PTV Core API contracts', () => {
         vi.advanceTimersByTime(1);
         expect(timed.signal.aborted).toBe(true);
         timed.dispose();
+
+        const manual = createPtvCoreRequestCancellation();
+        manual.abort();
+        expect(manual.signal.aborted).toBe(true);
+        manual.dispose();
         vi.useRealTimers();
     });
 

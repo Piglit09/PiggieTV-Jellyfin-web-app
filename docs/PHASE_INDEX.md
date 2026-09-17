@@ -47,3 +47,12 @@ with operational context in [Handoff](../HANDOFF.md) and ownership rules in
 ## Product phase F3
 
 - [Phase F3: Premium Collections and Cross-Library Discovery](collections/phase-f3-premium-collections.md) - route-lazy Collections landing and Details, explicit cross-library relationships, scoped personalization, integration boundaries, and rollback notes.
+
+## Active closure: F3A2
+
+- Decision: HOLD.
+- Report: [Phase F3A2 authenticated latency and recovery](collections/phase-f3a2-authenticated-latency-recovery.md).
+- Product source delta: none.
+- Proven: one runtime/client/socket owner, bounded visible retry recovery, development and production browser-TV focus.
+- Open: stable three-cycle transport, live Collection Search result capability, production deep-scroll restoration, and real second-user isolation.
+- Exactly one next phase: Phase F3A3 - Collection Search Capability and Backend Latency Closure.

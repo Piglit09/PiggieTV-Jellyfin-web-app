@@ -8,6 +8,10 @@ namespace Jellyfin.Plugin.PiggieTV.Models;
 /// </summary>
 public sealed class PtvFeaturedContentDocument
 {
+    // Private response-publication proof. Never serialized, persisted, or accepted from client JSON.
+    [JsonIgnore]
+    internal Services.PtvConfiguredRowAssociationService.Projection? ConfiguredRowProjection { get; set; }
+
     /// <summary>
     /// Gets or sets the server cache document version.
     /// </summary>

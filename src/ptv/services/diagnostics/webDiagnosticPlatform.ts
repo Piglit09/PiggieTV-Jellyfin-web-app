@@ -12,9 +12,14 @@ import {
     type PtvFocusVisibilityDiagnostic,
     type PtvImageRole,
     type PtvInputDiagnostic,
+    type PtvPlaybackMediaMode,
+    type PtvPlaybackRouteClassification,
+    type PtvPlaybackSessionDiagnostic,
+    type PtvPlaybackSessionState,
     type PtvRemoteInputSource,
     type PtvRemoteInputStage,
-    type PtvSafeRemoteAction
+    type PtvSafeRemoteAction,
+    type PtvShelfDiagnostic
 } from '../../core/diagnostics/diagnosticContracts';
 import type { PtvCoreInitializationEvent } from '../../core/initialization/coreInitialization';
 import {
@@ -34,6 +39,11 @@ import {
     getFeaturedContentCacheStatus
 } from '../../modules/cache/featuredContentCache';
 import {
+    PTV_ROUTE_CRITICAL_LIFECYCLE_EVENT,
+    type PtvRouteCriticalLifecycleDetail
+} from '../../shell/routeCriticalLifecycle';
+import { getPtvCanonicalRouteIdentity } from '../../shell/routeIdentity';
+import {
     getPtvDiagnosticPreferences,
     subscribePtvDiagnosticPreferences
 } from './diagnosticPreferences';
@@ -52,7 +62,9 @@ type RouteControllerDetail = {
     hash?: string;
     normalizedPath?: string;
     path?: string;
+    routeGeneration?: number;
     routeId?: string;
+    routeKey?: string;
 };
 
 const FOCUSABLE_SELECTOR = [
@@ -69,6 +81,128 @@ const FOCUSABLE_SELECTOR = [
 ].join(',');
 
 let platform: DisposableCollector | null = null;
+let routeCriticalLifecycleHandler: ((detail: PtvRouteCriticalLifecycleDetail) => void) | null = null;
+
+export const PTV_PLAYBACK_SESSION_SNAPSHOT_EVENT = 'ptv-playback-session-snapshot';
+const PTV_PLAYBACK_MAX_COUNT = 10_000_000;
+const PTV_PLAYBACK_MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1_000;
+const PTV_PLAYBACK_MAX_SECONDS = 7 * 24 * 60 * 60;
+const PTV_PLAYBACK_ROUTE_FAMILIES = [
+    'audio',
+    'books',
+    'collections',
+    'comics',
+    'details',
+    'full-screen-player',
+    'home',
+    'item',
+    'live-tv',
+    'manga',
+    'mini-player',
+    'movies',
+    'music',
+    'now-playing',
+    'other',
+    'playback',
+    'player',
+    'reading',
+    'search',
+    'shows',
+    'tv',
+    'unknown',
+    'video'
+] as const;
+const PTV_PLAYBACK_RECOVERY_RESULTS = [
+    'cancelled',
+    'failed',
+    'ignored',
+    'load-restarted',
+    'media-error-recovered',
+    'not-attempted',
+    'not-needed',
+    'recovered',
+    'retrying',
+    'skipped',
+    'source-replaced',
+    'stale',
+    'success',
+    'succeeded',
+    'suppressed',
+    'timed-out',
+    'timeout',
+    'unknown'
+] as const;
+
+const PTV_ROUTE_CRITICAL_STATES = [
+    'cancelled',
+    'empty',
+    'failed',
+    'partial',
+    'pending',
+    'success'
+] as const;
+
+export function getPtvDiagnosticNavigationIdentity(detail: RouteControllerDetail = {}) {
+    const detailFull = detail.full || '';
+    const fullHashIndex = detailFull.indexOf('#');
+    const detailHash = detail.hash
+        || (fullHashIndex >= 0 ? detailFull.slice(fullHashIndex) : '');
+    const fallbackPath = detail.normalizedPath
+        || detail.path
+        || (fullHashIndex >= 0 ? detailFull.slice(0, fullHashIndex) : detailFull)
+        || window.location.pathname;
+
+    return getPtvCanonicalRouteIdentity(detailHash || window.location.hash, fallbackPath);
+}
+
+export function normalizePtvRouteCriticalLifecycleDetail(
+    value: unknown
+): PtvRouteCriticalLifecycleDetail | null {
+    if (!isRecord(value)) return null;
+
+    const lifecycleId = typeof value.lifecycleId === 'string' ? value.lifecycleId.trim() : '';
+    const navigationKey = typeof value.navigationKey === 'string'
+        ? getPtvCanonicalRouteIdentity(value.navigationKey)
+        : '';
+    const routeFamily = typeof value.routeFamily === 'string' ? value.routeFamily.trim() : '';
+    const routeGeneration = Number(value.routeGeneration);
+    const routeKey = typeof value.routeKey === 'string' ? value.routeKey.trim() : '';
+    const state = typeof value.state === 'string' ? value.state.trim().toLowerCase() : '';
+
+    if (
+        !lifecycleId
+        || !navigationKey
+        || !routeFamily
+        || !Number.isSafeInteger(routeGeneration)
+        || routeGeneration < 0
+        || !routeKey
+        || !PTV_ROUTE_CRITICAL_STATES.includes(state as typeof PTV_ROUTE_CRITICAL_STATES[number])
+    ) return null;
+
+    return {
+        lifecycleId,
+        navigationKey,
+        routeFamily,
+        routeGeneration,
+        routeKey,
+        state: state as PtvRouteCriticalLifecycleDetail['state']
+    };
+}
+const PTV_RECOMMENDATION_GENERATION_LIMIT = 12;
+
+type PtvRecommendationGenerationState = {
+    explicitIdentity: boolean;
+    failureObserved: boolean;
+    key: string;
+    sequence: number;
+    startedAt: number;
+    terminal: boolean;
+};
+
+let recommendationGenerationSequence = 0;
+let currentRecommendationGeneration: PtvRecommendationGenerationState | null = null;
+let recommendationFailureSticky = false;
+const recommendationGenerations = new Map<string, PtvRecommendationGenerationState>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -94,6 +228,10 @@ function booleanField(detail: unknown, name: string) {
     return isRecord(detail) && detail[name] === true;
 }
 
+function hasField(detail: unknown, names: string[]) {
+    return isRecord(detail) && names.some(name => Object.prototype.hasOwnProperty.call(detail, name));
+}
+
 function safeEnum(value: unknown, allowed: readonly string[], fallback: string) {
     const normalized = typeof value === 'string' ? value.toLowerCase().trim() : '';
 
@@ -114,6 +252,314 @@ function safeHash(value: string) {
     }
 
     return `element-${hash.toString(36)}`;
+}
+
+function getPtvRecommendationGenerationKey(detail: unknown, allowNestedDetail = true): string | null {
+    if (!isRecord(detail)) return null;
+
+    for (const name of [
+        'generation',
+        'generationId',
+        'generationKey',
+        'generationSequence',
+        'generationToken',
+        'requestGeneration',
+        'requestId',
+        'generationStartedAt'
+    ]) {
+        const value = detail[name];
+
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return `generation-${safeHash(String(value))}`;
+        }
+        if (typeof value === 'string' && value.trim()) {
+            return `generation-${safeHash(value.trim().slice(0, 256))}`;
+        }
+    }
+
+    if (allowNestedDetail && isRecord(detail.detail)) {
+        return getPtvRecommendationGenerationKey(detail.detail, false);
+    }
+
+    return null;
+}
+
+function isPtvCoreRecommendationFailureName(name: string) {
+    return /^recommendation-(?:candidate-fetch|engine|generation|music-library-prerequisite|profile|provider|recently-added|source)(?:-|:|$)/.test(name);
+}
+
+function isPtvCoreRecommendationStartName(name: string) {
+    return name === 'recommendation-generation-start'
+        || name === 'recommendation-generation-started'
+        || name === 'recommendation-candidate-fetch-start'
+        || name === 'recommendation-candidate-fetch-started';
+}
+
+function isPtvCoreRecommendationCompletionName(name: string) {
+    return name === 'recommendation-diagnostic-report'
+        || name === 'recommendation-generation-completed'
+        || name === 'recommendation-provider-loaded'
+        || name === 'recommendation-rows-generated';
+}
+
+function trimPtvRecommendationGenerations() {
+    while (recommendationGenerations.size > PTV_RECOMMENDATION_GENERATION_LIMIT) {
+        const oldestKey = recommendationGenerations.keys().next().value;
+
+        if (typeof oldestKey !== 'string') return;
+        if (oldestKey === currentRecommendationGeneration?.key) {
+            const current = recommendationGenerations.get(oldestKey);
+
+            recommendationGenerations.delete(oldestKey);
+            if (current) recommendationGenerations.set(oldestKey, current);
+            continue;
+        }
+        recommendationGenerations.delete(oldestKey);
+    }
+}
+
+function beginPtvRecommendationGeneration(event: PtvObservabilityEvent) {
+    const explicitKey = getPtvRecommendationGenerationKey(event.detail);
+    const existing = explicitKey ? recommendationGenerations.get(explicitKey) : null;
+
+    if (existing) {
+        if (currentRecommendationGeneration && existing.sequence < currentRecommendationGeneration.sequence) {
+            return null;
+        }
+
+        existing.terminal = false;
+        currentRecommendationGeneration = existing;
+        return existing;
+    }
+
+    if (currentRecommendationGeneration && event.at < currentRecommendationGeneration.startedAt) return null;
+
+    recommendationGenerationSequence += 1;
+    const generation: PtvRecommendationGenerationState = {
+        explicitIdentity: Boolean(explicitKey),
+        failureObserved: false,
+        key: explicitKey || `observed-generation-${recommendationGenerationSequence}`,
+        sequence: recommendationGenerationSequence,
+        startedAt: event.at,
+        terminal: false
+    };
+
+    currentRecommendationGeneration = generation;
+    recommendationGenerations.set(generation.key, generation);
+    trimPtvRecommendationGenerations();
+
+    return generation;
+}
+
+function getPtvRecommendationEventGeneration(event: PtvObservabilityEvent) {
+    const explicitKey = getPtvRecommendationGenerationKey(event.detail);
+
+    if (explicitKey) {
+        const generation = recommendationGenerations.get(explicitKey);
+
+        return {
+            current: Boolean(generation && generation === currentRecommendationGeneration),
+            generation: generation || null,
+            proven: Boolean(generation)
+        };
+    }
+
+    const generation = currentRecommendationGeneration;
+
+    return {
+        current: Boolean(generation),
+        generation,
+        proven: Boolean(generation && !generation.explicitIdentity && generation.sequence === 1)
+    };
+}
+
+function resetPtvRecommendationGenerationState() {
+    currentRecommendationGeneration = null;
+    recommendationFailureSticky = false;
+    recommendationGenerationSequence = 0;
+    recommendationGenerations.clear();
+}
+
+function boundedPlaybackNumber(value: unknown, maximum: number, integer = false) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) return 0;
+
+    const bounded = Math.min(maximum, Math.max(0, number));
+    return integer ? Math.floor(bounded) : Number(bounded.toFixed(3));
+}
+
+function playbackRecord(value: unknown) {
+    return isRecord(value) ? value : {};
+}
+
+function safePlaybackSessionId(value: unknown) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+    if (!normalized) return '';
+    if (/^(?:ptv-)?playback(?:-session)?-[a-z0-9][a-z0-9-]{0,63}$/.test(normalized)) return normalized;
+
+    return `playback-session-${safeHash(normalized).replace(/^element-/, '')}`;
+}
+
+function safePlaybackUpdatedAt(value: unknown, fallback: string) {
+    const parsed = typeof value === 'string' ? Date.parse(value) : Number.NaN;
+
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
+}
+
+function safePlaybackState(value: unknown): PtvPlaybackSessionState {
+    const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+    const allowed: readonly PtvPlaybackSessionState[] = [
+        'IDLE',
+        'LOADING',
+        'BUFFERING',
+        'PLAYING',
+        'DEGRADED',
+        'STALLED',
+        'RECOVERING',
+        'ENDED',
+        'FAILED'
+    ];
+
+    return allowed.includes(normalized as PtvPlaybackSessionState)
+        ? normalized as PtvPlaybackSessionState
+        : 'IDLE';
+}
+
+function safePlaybackMediaMode(value: unknown): PtvPlaybackMediaMode {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const modes: Readonly<Record<string, PtvPlaybackMediaMode>> = {
+        'direct play': 'Direct Play',
+        'direct stream': 'Direct Stream',
+        'hls transcode': 'HLS Transcode',
+        unknown: 'Unknown'
+    };
+
+    return modes[normalized] || 'Unknown';
+}
+
+function safePlaybackRouteClassification(value: unknown): PtvPlaybackRouteClassification {
+    const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+    const allowed: readonly PtvPlaybackRouteClassification[] = [
+        'LAN_DIRECT',
+        'LOCAL_VIA_PUBLIC_HOSTNAME',
+        'PUBLIC_PROXY',
+        'CLOUDFLARE_TUNNEL',
+        'VPN_PATH',
+        'UNKNOWN'
+    ];
+
+    return allowed.includes(normalized as PtvPlaybackRouteClassification)
+        ? normalized as PtvPlaybackRouteClassification
+        : 'UNKNOWN';
+}
+
+function safePlaybackRouteFamily(value: unknown) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+    return PTV_PLAYBACK_ROUTE_FAMILIES.includes(normalized as typeof PTV_PLAYBACK_ROUTE_FAMILIES[number])
+        ? normalized
+        : 'unknown';
+}
+
+function safePlaybackRecoveryResults(value: unknown) {
+    if (!Array.isArray(value)) return [];
+
+    return value.slice(-20).map(result => {
+        const normalized = typeof result === 'string' ? result.trim().toLowerCase().replace(/_/g, '-') : '';
+
+        return PTV_PLAYBACK_RECOVERY_RESULTS.includes(normalized as typeof PTV_PLAYBACK_RECOVERY_RESULTS[number])
+            ? normalized
+            : 'unknown';
+    });
+}
+
+export function normalizePtvPlaybackSessionSnapshot(
+    value: unknown,
+    fallbackUpdatedAt = new Date().toISOString()
+): PtvPlaybackSessionDiagnostic | null {
+    const outer = playbackRecord(value);
+    const detail = isRecord(outer.detail) ? outer.detail : outer;
+    const diagnosticSessionId = safePlaybackSessionId(detail.diagnosticSessionId);
+
+    if (!diagnosticSessionId) return null;
+
+    const buffer = playbackRecord(detail.buffer);
+    const stalls = playbackRecord(detail.stalls);
+    const hls = playbackRecord(detail.hls);
+    const player = playbackRecord(detail.player);
+    const transitions = Array.isArray(detail.readyStateTransitions) ? detail.readyStateTransitions : [];
+
+    return {
+        buffer: {
+            averageAheadSeconds: boundedPlaybackNumber(buffer.averageAheadSeconds, PTV_PLAYBACK_MAX_SECONDS),
+            belowTwoSecondsCount: boundedPlaybackNumber(buffer.belowTwoSecondsCount, PTV_PLAYBACK_MAX_COUNT, true),
+            currentAheadSeconds: boundedPlaybackNumber(buffer.currentAheadSeconds, PTV_PLAYBACK_MAX_SECONDS),
+            maximumAheadSeconds: boundedPlaybackNumber(buffer.maximumAheadSeconds, PTV_PLAYBACK_MAX_SECONDS),
+            minimumAheadSeconds: boundedPlaybackNumber(buffer.minimumAheadSeconds, PTV_PLAYBACK_MAX_SECONDS),
+            sampleCount: boundedPlaybackNumber(buffer.sampleCount, PTV_PLAYBACK_MAX_COUNT, true),
+            zeroBufferCount: boundedPlaybackNumber(buffer.zeroBufferCount, PTV_PLAYBACK_MAX_COUNT, true)
+        },
+        diagnosticSessionId,
+        hls: {
+            droppedFragmentTrackingCount: boundedPlaybackNumber(hls.droppedFragmentTrackingCount, PTV_PLAYBACK_MAX_COUNT, true),
+            duplicateFragmentRequestCount: boundedPlaybackNumber(hls.duplicateFragmentRequestCount, PTV_PLAYBACK_MAX_COUNT, true),
+            fragmentAverageLatencyMs: boundedPlaybackNumber(hls.fragmentAverageLatencyMs, PTV_PLAYBACK_MAX_DURATION_MS),
+            fragmentFailureCount: boundedPlaybackNumber(hls.fragmentFailureCount, PTV_PLAYBACK_MAX_COUNT, true),
+            fragmentLongestLatencyMs: boundedPlaybackNumber(hls.fragmentLongestLatencyMs, PTV_PLAYBACK_MAX_DURATION_MS),
+            fragmentP95LatencyMs: boundedPlaybackNumber(hls.fragmentP95LatencyMs, PTV_PLAYBACK_MAX_DURATION_MS),
+            fragmentRequestCount: boundedPlaybackNumber(hls.fragmentRequestCount, PTV_PLAYBACK_MAX_COUNT, true),
+            fragmentRetryCount: boundedPlaybackNumber(hls.fragmentRetryCount, PTV_PLAYBACK_MAX_COUNT, true),
+            fragmentSuccessCount: boundedPlaybackNumber(hls.fragmentSuccessCount, PTV_PLAYBACK_MAX_COUNT, true),
+            fragmentTimeoutCount: boundedPlaybackNumber(hls.fragmentTimeoutCount, PTV_PLAYBACK_MAX_COUNT, true),
+            manifestAverageLatencyMs: boundedPlaybackNumber(hls.manifestAverageLatencyMs, PTV_PLAYBACK_MAX_DURATION_MS),
+            manifestP95LatencyMs: boundedPlaybackNumber(hls.manifestP95LatencyMs, PTV_PLAYBACK_MAX_DURATION_MS),
+            manifestRequestCount: boundedPlaybackNumber(hls.manifestRequestCount, PTV_PLAYBACK_MAX_COUNT, true),
+            manifestSuccessCount: boundedPlaybackNumber(hls.manifestSuccessCount, PTV_PLAYBACK_MAX_COUNT, true)
+        },
+        mediaMode: safePlaybackMediaMode(detail.mediaMode),
+        player: {
+            activeLoadRestarts: boundedPlaybackNumber(player.activeLoadRestarts, PTV_PLAYBACK_MAX_COUNT, true),
+            mediaSourceAssignments: boundedPlaybackNumber(player.mediaSourceAssignments, PTV_PLAYBACK_MAX_COUNT, true),
+            mountCount: boundedPlaybackNumber(player.mountCount, PTV_PLAYBACK_MAX_COUNT, true),
+            pauseCalls: boundedPlaybackNumber(player.pauseCalls, PTV_PLAYBACK_MAX_COUNT, true),
+            playCalls: boundedPlaybackNumber(player.playCalls, PTV_PLAYBACK_MAX_COUNT, true),
+            programmaticSeeks: boundedPlaybackNumber(player.programmaticSeeks, PTV_PLAYBACK_MAX_COUNT, true),
+            qualitySwitches: boundedPlaybackNumber(player.qualitySwitches, PTV_PLAYBACK_MAX_COUNT, true),
+            recoveryActions: boundedPlaybackNumber(player.recoveryActions, PTV_PLAYBACK_MAX_COUNT, true),
+            sourceReplacements: boundedPlaybackNumber(player.sourceReplacements, PTV_PLAYBACK_MAX_COUNT, true),
+            staleEventsIgnored: boundedPlaybackNumber(player.staleEventsIgnored, PTV_PLAYBACK_MAX_COUNT, true),
+            unmountCount: boundedPlaybackNumber(player.unmountCount, PTV_PLAYBACK_MAX_COUNT, true)
+        },
+        readyStateTransitions: transitions.slice(-16).flatMap(transition => {
+            if (!isRecord(transition)) return [];
+
+            return [{
+                atMs: boundedPlaybackNumber(transition.atMs, PTV_PLAYBACK_MAX_DURATION_MS),
+                from: boundedPlaybackNumber(transition.from, 4, true),
+                to: boundedPlaybackNumber(transition.to, 4, true)
+            }];
+        }),
+        routeClassification: safePlaybackRouteClassification(detail.routeClassification),
+        routeFamily: safePlaybackRouteFamily(detail.routeFamily),
+        sourceGeneration: boundedPlaybackNumber(detail.sourceGeneration, PTV_PLAYBACK_MAX_COUNT, true),
+        stalls: {
+            cumulativeDurationMs: boundedPlaybackNumber(stalls.cumulativeDurationMs, PTV_PLAYBACK_MAX_DURATION_MS),
+            episodeDurationsMs: Array.isArray(stalls.episodeDurationsMs)
+                ? stalls.episodeDurationsMs.slice(-20).map(duration => (
+                    boundedPlaybackNumber(duration, PTV_PLAYBACK_MAX_DURATION_MS)
+                ))
+                : [],
+            longestDurationMs: boundedPlaybackNumber(stalls.longestDurationMs, PTV_PLAYBACK_MAX_DURATION_MS),
+            recoveryResults: safePlaybackRecoveryResults(stalls.recoveryResults),
+            stalledCount: boundedPlaybackNumber(stalls.stalledCount, PTV_PLAYBACK_MAX_COUNT, true),
+            waitingCount: boundedPlaybackNumber(stalls.waitingCount, PTV_PLAYBACK_MAX_COUNT, true)
+        },
+        state: safePlaybackState(detail.state),
+        terminal: detail.terminal === true,
+        updatedAt: safePlaybackUpdatedAt(detail.updatedAt, fallbackUpdatedAt)
+    };
 }
 
 export function classifyPtvDiagnosticFocusElement(
@@ -182,6 +628,11 @@ export function createPtvImageRemountGuard(limit = 32) {
     };
 }
 
+export function isPtvDiagnosticsRouteFamily(routeFamily: string) {
+    return routeFamily === 'dashboard/piggietv/diagnostics'
+        || routeFamily === 'settings/admin/piggietv/diagnostics';
+}
+
 export function createPtvImageLifecycleTracker(now: () => number = () => performance.now()) {
     const states = new WeakMap<HTMLImageElement, PtvImageLifecycleState>();
 
@@ -226,14 +677,6 @@ export function isPtvDiagnosticRouteContentReady(root: ParentNode = document) {
         .some(image => !image.complete && isPtvDiagnosticFocusVisible(image));
 
     return !visiblePendingShelf && !visiblePendingImage;
-}
-
-function getPtvDiagnosticLayoutFingerprint() {
-    const visibleShelves = Array.from(document.querySelectorAll<HTMLElement>(
-        '[data-ptv-row-mounted="true"], .ptv-recommendations-section, .verticalSection'
-    )).filter(isPtvDiagnosticFocusVisible).length;
-
-    return `${document.documentElement.scrollHeight}:${document.body.scrollHeight}:${visibleShelves}`;
 }
 
 function currentRouteFamily() {
@@ -394,7 +837,7 @@ function getPendingRenderCounts(snapshot: ReturnType<ReturnType<typeof getPtvDia
     const pendingShelves = Math.max(
         0,
         snapshot.shelves.filter(shelf => shelf.status === 'request-started').length
-        - snapshot.shelves.filter(shelf => ['disposed', 'empty', 'failed', 'settled'].includes(shelf.status)).length
+        - snapshot.shelves.filter(shelf => ['cancelled', 'disposed', 'empty', 'failed', 'settled'].includes(shelf.status)).length
     );
 
     return { pendingImages, pendingShelves };
@@ -649,6 +1092,20 @@ export function bridgePtvFocusDiagnosticEvent(event: Event) {
 export function bridgePtvDiagnosticObservabilityEvent(event: PtvObservabilityEvent) {
     const store = getPtvDiagnosticStore();
 
+    if (event.type === 'playback' && event.name === PTV_PLAYBACK_SESSION_SNAPSHOT_EVENT) {
+        const snapshot = normalizePtvPlaybackSessionSnapshot(event.detail, new Date(event.at).toISOString());
+
+        if (snapshot) store.upsertPlaybackSession(snapshot);
+        return;
+    }
+
+    if (event.type === 'route' && event.name === PTV_ROUTE_CRITICAL_LIFECYCLE_EVENT) {
+        const detail = normalizePtvRouteCriticalLifecycleDetail(event.detail);
+
+        if (detail) routeCriticalLifecycleHandler?.(detail);
+        return;
+    }
+
     if (event.type === 'cache') {
         updateCacheSummary();
         return;
@@ -657,55 +1114,131 @@ export function bridgePtvDiagnosticObservabilityEvent(event: PtvObservabilityEve
     if (event.type === 'recommendation') {
         const snapshot = store.getSnapshot();
         const previous = snapshot.recommendations;
-        const failed = /fail|error/.test(event.name);
-        const globalStarted = /generation-start|candidate-fetch-start/.test(event.name);
-        const completed = /provider-loaded|critical-completed|generation-completed|diagnostic-report|rows-generated|dashboard-data-loaded/.test(event.name);
+        const explicitGenerationKey = getPtvRecommendationGenerationKey(event.detail);
+        const failureNamed = /fail|error/.test(event.name);
+        const failed = failureNamed && isPtvCoreRecommendationFailureName(event.name);
+        const globalStarted = Boolean(explicitGenerationKey)
+            && isPtvCoreRecommendationStartName(event.name);
+        const completed = isPtvCoreRecommendationCompletionName(event.name);
+        const startedGeneration = globalStarted ? beginPtvRecommendationGeneration(event) : null;
+        const eventGeneration = globalStarted
+            ? {
+                current: Boolean(startedGeneration),
+                generation: startedGeneration,
+                proven: Boolean(startedGeneration)
+            }
+            : getPtvRecommendationEventGeneration(event);
+
+        if (!globalStarted && explicitGenerationKey && (!eventGeneration.generation || !eventGeneration.current)) {
+            return;
+        }
+
         const sourceTimings = arrayField(event.detail, 'sourceTimings');
         const sourceFailures = arrayField(event.detail, 'sourceFailures');
         const explicitFailedSourceCount = numberField(event.detail, ['failedSourceCount'], sourceFailures.length);
+        const eventSourceCount = Math.max(
+            numberField(event.detail, ['sourceCount']),
+            sourceFailures.length,
+            sourceTimings.length
+        );
         const sourceCount = Math.max(
             previous.sourceCount,
-            numberField(event.detail, ['sourceCount']),
-            sourceTimings.length
+            eventSourceCount
         );
         const successfulSourceCount = sourceTimings.filter(timing => (
             !isRecord(timing) || timing.status !== 'failed'
         )).length;
-        const allSourcesFailed = completed && sourceCount > 0 && explicitFailedSourceCount >= sourceCount;
-        const partialFallback = completed && explicitFailedSourceCount > 0 && (
-            successfulSourceCount > 0 || explicitFailedSourceCount < sourceCount
+        const completionAffectsCurrent = completed && (
+            eventGeneration.current || (!currentRecommendationGeneration && !explicitGenerationKey)
+        );
+        const allSourcesFailed = completionAffectsCurrent
+            && eventSourceCount > 0
+            && explicitFailedSourceCount >= eventSourceCount;
+        const partialFallback = completionAffectsCurrent && explicitFailedSourceCount > 0 && (
+            successfulSourceCount > 0 || explicitFailedSourceCount < eventSourceCount
         );
         const localSourceFailure = failed && /source|prerequisite/.test(event.name);
+        const failureAffectsCurrent = failed && (
+            eventGeneration.current || !explicitGenerationKey
+        );
+        const sourceSummaryPresent = hasField(event.detail, [
+            'failedSourceCount',
+            'sourceCount',
+            'sourceFailures',
+            'sourceTimings'
+        ]);
+        const explicitSuccess = booleanField(event.detail, 'recovered')
+            || booleanField(event.detail, 'success')
+            || (isRecord(event.detail) && /complete|healthy|recover|success/.test(String(event.detail.status || '').toLowerCase()));
+        const successfulSourceSummary = sourceSummaryPresent
+            && explicitFailedSourceCount === 0
+            && (
+                successfulSourceCount > 0
+                || (hasField(event.detail, ['failedSourceCount']) && explicitFailedSourceCount === 0)
+                || eventSourceCount === 0
+            );
+        const provenSuccessfulCompletion = completionAffectsCurrent
+            && eventGeneration.proven
+            && !allSourcesFailed
+            && (explicitSuccess || successfulSourceSummary);
+
+        if (failureAffectsCurrent || allSourcesFailed) {
+            recommendationFailureSticky = true;
+            if (eventGeneration.current && eventGeneration.generation) {
+                eventGeneration.generation.failureObserved = true;
+            }
+        } else if (provenSuccessfulCompletion) {
+            recommendationFailureSticky = false;
+            if (eventGeneration.generation) eventGeneration.generation.failureObserved = false;
+        }
+
+        if (eventGeneration.generation && eventGeneration.current) {
+            if (completionAffectsCurrent || (failureAffectsCurrent && !localSourceFailure)) {
+                eventGeneration.generation.terminal = true;
+            }
+        }
+
         const nextHealth = allSourcesFailed
             ? createPtvDiagnosticHealth('degraded', 'All observed recommendation sources failed safely.')
-            : completed
+            : failureAffectsCurrent
                 ? createPtvDiagnosticHealth(
-                    'healthy',
-                    partialFallback
-                        ? 'Recommendation generation completed with a bounded source fallback.'
-                        : sourceCount === 0
-                            ? 'Recommendation generation completed with no eligible sources.'
-                            : 'Recommendation generation completed successfully.'
+                    'degraded',
+                    localSourceFailure
+                        ? 'A recommendation source failed; generation recovery has not been proven.'
+                        : 'Recommendation generation failed safely.'
                 )
-                : failed && !localSourceFailure
-                    ? createPtvDiagnosticHealth('degraded', 'Recommendation generation failed safely.')
-                    : previous.health;
+                : completed && recommendationFailureSticky
+                    ? previous.health
+                    : completed && completionAffectsCurrent
+                        ? createPtvDiagnosticHealth(
+                            'healthy',
+                            partialFallback
+                                ? 'Recommendation generation completed with a bounded source fallback.'
+                                : sourceCount === 0
+                                    ? 'Recommendation generation completed with no eligible sources.'
+                                    : 'Recommendation generation completed successfully.'
+                        )
+                        : previous.health;
 
         store.updateContext({
             recommendations: {
                 ...previous,
-                active: completed ? false : globalStarted ? true : previous.active,
+                active: completionAffectsCurrent || (failureAffectsCurrent && !localSourceFailure)
+                    ? false
+                    : globalStarted && startedGeneration ? true : previous.active,
                 configuredRows: Math.max(previous.configuredRows, numberField(event.detail, ['configuredRows', 'configuredRowCount'])),
                 duplicateSuppressionCount: previous.duplicateSuppressionCount
                     + numberField(event.detail, ['duplicateItemsRemoved', 'duplicateSuppressionCount']),
                 generatedRows: Math.max(previous.generatedRows, numberField(event.detail, ['generatedRows', 'rowCount', 'recommendationRowsGenerated'])),
                 health: nextHealth,
                 itemCount: Math.max(previous.itemCount, numberField(event.detail, ['itemCount', 'totalItems'])),
-                lastErrorCategory: allSourcesFailed ? 'generation'
-                    : partialFallback || localSourceFailure ? 'source-partial'
+                lastErrorCategory: allSourcesFailed || (failureAffectsCurrent && !localSourceFailure) ? 'generation'
+                    : partialFallback || (failureAffectsCurrent && localSourceFailure) ? 'source-partial'
                         : previous.lastErrorCategory,
-                lastGenerationAt: completed ? new Date(event.at).toISOString() : previous.lastGenerationAt,
-                runDurationMs: completed ? event.durationMs ?? numberField(event.detail, ['durationMs'], previous.runDurationMs || 0) : previous.runDurationMs,
+                lastGenerationAt: completionAffectsCurrent ? new Date(event.at).toISOString() : previous.lastGenerationAt,
+                runDurationMs: completionAffectsCurrent
+                    ? event.durationMs ?? numberField(event.detail, ['durationMs'], previous.runDurationMs || 0)
+                    : previous.runDurationMs,
                 sourceCount
             }
         });
@@ -713,14 +1246,7 @@ export function bridgePtvDiagnosticObservabilityEvent(event: PtvObservabilityEve
     }
 
     if (event.type === 'row-fetch' || (event.type === 'render' && /row|shelf/i.test(event.name))) {
-        const failed = /fail|error|abort/.test(event.name);
-        const status = failed ? 'failed'
-            : /empty/.test(event.name) ? 'empty'
-                : /dispose|unmount/.test(event.name) ? 'disposed'
-                    : /settled|complete|mounted|visible/.test(event.name) ? 'settled'
-                        : /render/.test(event.name) ? 'render-started'
-                            : /return|success/.test(event.name) ? 'data-returned'
-                                : 'request-started';
+        const status = classifyPtvDiagnosticShelfStatus(event);
 
         store.recordShelf({
             durationMs: event.durationMs ?? null,
@@ -734,6 +1260,44 @@ export function bridgePtvDiagnosticObservabilityEvent(event: PtvObservabilityEve
             status
         });
     }
+}
+
+function hasPtvDiagnosticCancellationDetail(detail: unknown): boolean {
+    if (!isRecord(detail)) return false;
+    if (detail.cancellation === true || detail.cancelled === true || detail.canceled === true) return true;
+
+    return [
+        detail.code,
+        detail.error,
+        detail.errorCategory,
+        detail.kind,
+        detail.message,
+        detail.name,
+        detail.outcome,
+        detail.reason,
+        detail.status
+    ].some(value => {
+        if (typeof value === 'string') return /abort|cancel/i.test(value);
+        if (!isRecord(value)) return false;
+
+        return [ value.code, value.kind, value.message, value.name, value.status ]
+            .some(nested => typeof nested === 'string' && /abort|cancel/i.test(nested));
+    });
+}
+
+export function classifyPtvDiagnosticShelfStatus(
+    event: Pick<PtvObservabilityEvent, 'detail' | 'name'>
+): PtvShelfDiagnostic['status'] {
+    if (/timeout|timed-out/i.test(event.name)) return 'failed';
+    if (/abort|cancel/i.test(event.name) || hasPtvDiagnosticCancellationDetail(event.detail)) return 'cancelled';
+    if (/fail|error/.test(event.name)) return 'failed';
+    if (/empty/.test(event.name)) return 'empty';
+    if (/dispose|unmount/.test(event.name)) return 'disposed';
+    if (/settled|complete|mounted|visible/.test(event.name)) return 'settled';
+    if (/render/.test(event.name)) return 'render-started';
+    if (/return|success/.test(event.name)) return 'data-returned';
+
+    return 'request-started';
 }
 
 function updateCacheSummary() {
@@ -910,7 +1474,7 @@ function initializeContext() {
             buildTimestamp: build.frontendBuildDate,
             commitSha: build.frontendCommitSha,
             environment: build.environment,
-            packageVersion: build.jellyfinWebVersion
+            packageVersion: build.ptvWebVersion
         },
         core: {
             ...store.getSnapshot().core,
@@ -953,6 +1517,10 @@ function createCollector(): DisposableCollector {
     let scrollFocusFingerprint = 'none';
     let scrollInputId = '';
     let scrollScope: PtvFocusScopeCategory = 'unknown';
+    let currentCriticalLifecycleId = '';
+    let currentNavigationKey = '';
+    let currentRouteControllerKey = '';
+    let currentRouteGeneration: number | null = null;
     let currentRouteSessionId = '';
     let routeLayoutFingerprint = '';
     let routeReadySince = 0;
@@ -1025,8 +1593,9 @@ function createCollector(): DisposableCollector {
 
         if (!route || route.settledAt) return;
 
-        const ready = Boolean(route.firstContentAt) && isPtvDiagnosticRouteContentReady();
-        const fingerprint = getPtvDiagnosticLayoutFingerprint();
+        const ready = route.criticalState !== 'undeclared'
+            && route.criticalState !== 'pending';
+        const fingerprint = `critical:${route.criticalState}`;
         const now = performance.now();
 
         if (!ready) {
@@ -1042,29 +1611,105 @@ function createCollector(): DisposableCollector {
 
         routeSettleTimer = window.setTimeout(evaluateRouteSettlement, 100);
     };
-    const startRoute = (detail?: RouteControllerDetail) => {
+    const startRoute = (detail: RouteControllerDetail = {}) => {
+        const navigationKey = getPtvDiagnosticNavigationIdentity(detail);
+        const routeGeneration = Number.isSafeInteger(detail.routeGeneration)
+            && Number(detail.routeGeneration) >= 0
+            ? Number(detail.routeGeneration)
+            : null;
+        const routeControllerKey = typeof detail.routeKey === 'string' ? detail.routeKey : '';
+        const hasDifferentKnownGeneration = currentRouteGeneration !== null
+            && routeGeneration !== null
+            && routeGeneration !== currentRouteGeneration;
+
+        if (currentRouteSessionId
+            && navigationKey === currentNavigationKey
+            && !hasDifferentKnownGeneration) {
+            if (routeGeneration !== null) {
+                currentRouteGeneration = routeGeneration;
+                currentRouteControllerKey = routeControllerKey || currentRouteControllerKey;
+                store.associateRouteGeneration(currentRouteSessionId, routeGeneration);
+            }
+
+            return currentRouteSessionId;
+        }
+
         window.clearTimeout(routeSettleTimer);
         const route = detail?.normalizedPath || detail?.hash || detail?.path || detail?.full || window.location.hash;
 
-        currentRouteSessionId = store.startRoute(route);
+        currentCriticalLifecycleId = '';
+        currentNavigationKey = navigationKey;
+        currentRouteControllerKey = routeControllerKey;
+        currentRouteGeneration = routeGeneration;
+        currentRouteSessionId = store.startRoute(route, routeGeneration);
+        const routeSessionId = currentRouteSessionId;
         routeLayoutFingerprint = '';
         routeReadySince = 0;
         window.requestAnimationFrame(() => {
-            if (disposed || !currentRouteSessionId) return;
-            store.markRoutePhase(currentRouteSessionId, 'initialized');
+            if (disposed || currentRouteSessionId !== routeSessionId) return;
+            store.markRoutePhase(routeSessionId, 'initialized');
 
             if (document.querySelector('main, [role="main"], .mainAnimatedPage:not(.hide), [data-ptv-route-content]')) {
-                store.markRoutePhase(currentRouteSessionId, 'first-content');
+                store.markRoutePhase(routeSessionId, 'first-content');
             }
             if (document.querySelector(FOCUSABLE_SELECTOR)) {
-                store.markRoutePhase(currentRouteSessionId, 'first-focusable');
+                store.markRoutePhase(routeSessionId, 'first-focusable');
             }
         });
         routeSettleTimer = window.setTimeout(evaluateRouteSettlement, 100);
+
+        return routeSessionId;
     };
     const handleRoute = (event: Event) => {
         startRoute((event as CustomEvent<RouteControllerDetail>).detail);
     };
+    const handleRouteCriticalLifecycle = (detail: PtvRouteCriticalLifecycleDetail) => {
+        if (!currentRouteSessionId || detail.navigationKey !== currentNavigationKey) return;
+        if (
+            currentRouteGeneration !== null
+            && detail.routeGeneration !== currentRouteGeneration
+        ) return;
+        if (currentRouteControllerKey && detail.routeKey !== currentRouteControllerKey) return;
+        if (normalizePtvDiagnosticRouteFamily(detail.routeFamily) !== currentRouteFamily()) return;
+
+        if (currentRouteGeneration === null) {
+            currentRouteGeneration = detail.routeGeneration;
+            currentRouteControllerKey = detail.routeKey;
+            store.associateRouteGeneration(currentRouteSessionId, detail.routeGeneration);
+        }
+
+        if (detail.state === 'pending') {
+            if (store.markRouteCriticalState(
+                currentRouteSessionId,
+                detail.state,
+                detail.routeGeneration
+            )) {
+                currentCriticalLifecycleId = detail.lifecycleId;
+                routeReadySince = 0;
+            }
+            return;
+        }
+
+        if (currentCriticalLifecycleId && detail.lifecycleId !== currentCriticalLifecycleId) return;
+        if (!store.markRouteCriticalState(
+            currentRouteSessionId,
+            detail.state,
+            detail.routeGeneration
+        )) return;
+
+        currentCriticalLifecycleId = detail.lifecycleId;
+        routeReadySince = 0;
+
+        if (
+            detail.state !== 'cancelled'
+            && detail.state !== 'failed'
+            && !store.getSnapshot().routes.find(route => route.routeSessionId === currentRouteSessionId)?.firstContentAt
+        ) {
+            store.markRoutePhase(currentRouteSessionId, 'first-content');
+        }
+    };
+
+    routeCriticalLifecycleHandler = handleRouteCriticalLifecycle;
 
     const recordImageRequest = (image: HTMLImageElement) => {
         if (!image.getAttribute('src') && !image.getAttribute('data-src')) return;
@@ -1073,7 +1718,7 @@ function createCollector(): DisposableCollector {
         const routeFamily = currentRouteFamily();
         if (
             role === 'logo'
-            && routeFamily === 'dashboard/piggietv/diagnostics'
+            && isPtvDiagnosticsRouteFamily(routeFamily)
             && !diagnosticSelfImageGenerations.shouldRecord(currentRouteSessionId || routeFamily, image)
         ) return;
 
@@ -1248,6 +1893,7 @@ function createCollector(): DisposableCollector {
         'focusVisibility',
         'imageLifecycle',
         'pluginStatus',
+        'playbackSessionSnapshots',
         'requestCoordinator',
         'remoteInputPipeline',
         'routeLifecycle',
@@ -1279,6 +1925,9 @@ function createCollector(): DisposableCollector {
             document.removeEventListener('load', recordImageCompletion, true);
             document.removeEventListener('error', recordImageCompletion, true);
             document.removeEventListener('scroll', handleDiagnosticScroll, true);
+            if (routeCriticalLifecycleHandler === handleRouteCriticalLifecycle) {
+                routeCriticalLifecycleHandler = null;
+            }
             disposers.splice(0).forEach(dispose => dispose());
         },
         refreshExternalStatus
@@ -1349,6 +1998,7 @@ export function refreshPtvWebDiagnosticExternalStatus() {
 export function disposePtvWebDiagnosticPlatformForTests() {
     platform?.dispose();
     platform = null;
+    resetPtvRecommendationGenerationState();
 }
 
 /* eslint-enable @stylistic/operator-linebreak, array-callback-return, compat/compat, curly, no-nested-ternary, sonarjs/cognitive-complexity, sonarjs/no-alphabetical-sort, sonarjs/no-nested-conditional */

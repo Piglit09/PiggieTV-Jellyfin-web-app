@@ -6,6 +6,13 @@ import { useCustomSubtitles } from 'apps/stable/features/playback/utils/subtitle
 import subtitleAppearanceHelper from 'components/subtitlesettings/subtitleappearancehelper';
 import { AppFeature } from 'constants/appFeature';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
+import {
+    classifyPlaybackRoute,
+    createHlsPlaybackSession,
+    getPlaybackMediaMode,
+    getPlaybackRouteFamily
+} from 'ptv/modules/playback/hlsPlaybackSession';
 import { currentSettings as userSettings } from 'scripts/settings/userSettings';
 import { MediaError } from 'types/mediaError';
 
@@ -44,6 +51,11 @@ import { PluginType } from '../../types/plugin.ts';
 import Events from '../../utils/events.ts';
 import { includesAny } from '../../utils/container.ts';
 import { isHls } from '../../utils/mediaSource.ts';
+import {
+    DEFAULT_HLS_BUFFER_LENGTH_SECONDS,
+    bindHlsBufferPolicy,
+    createVodTranscodeFragmentLoadPolicy
+} from './hlsPlaybackPolicy';
 
 /**
  * Returns resolved URL.
@@ -58,7 +70,7 @@ function resolveUrl(url) {
             resolve(xhr.responseURL || url);
         };
         xhr.onerror = function (e) {
-            console.error(e);
+            ptvSafeConsole.error('Unable to resolve video URL', e);
             resolve(url);
         };
         xhr.send(null);
@@ -72,7 +84,7 @@ function tryRemoveElement(elem) {
         try {
             parentNode.removeChild(elem);
         } catch (err) {
-            console.error(`error removing dialog element: ${err}`);
+            ptvSafeConsole.error('error removing dialog element', err);
         }
     }
 }
@@ -114,13 +126,14 @@ function enableNativeTrackSupport(mediaSource, track) {
     return true;
 }
 
-function requireHlsPlayer(callback) {
-    import('hls.js/dist/hls.js').then(({ default: hls }) => {
+function requireHlsPlayer() {
+    return import('hls.js/dist/hls.js').then(({ default: hls }) => {
         hls.DefaultConfig.lowLatencyMode = false;
         hls.DefaultConfig.backBufferLength = Infinity;
         hls.DefaultConfig.liveBackBufferLength = 90;
         window.Hls = hls;
-        callback();
+
+        return hls;
     });
 }
 
@@ -306,6 +319,26 @@ export class HtmlVideoPlayer {
      */
     _hlsPlayer;
     /**
+     * @private (used by the shared media helper)
+     * @type {import('ptv/modules/playback/hlsPlaybackSession').HlsPlaybackSession | null | undefined}
+     */
+    _ptvPlaybackSession;
+    /**
+     * @private (used by source ownership guards)
+     * @type {number | undefined}
+     */
+    _ptvPlaybackSourceGeneration;
+    /**
+     * @private (used by the playback watchdog to recognize native HLS)
+     * @type {boolean | undefined}
+     */
+    _ptvIsHlsSource;
+    /**
+     * @private (settles a retired HLS startup promise)
+     * @type {(() => void) | null | undefined}
+     */
+    _ptvCancelHlsBinding;
+    /**
      * @private (used in other files)
      * @type {any | null | undefined}
      */
@@ -371,7 +404,7 @@ export class HtmlVideoPlayer {
 
             loading.show();
 
-            console.debug(`prefetching hls playlist: ${hlsPlaylistUrl}`);
+            ptvSafeConsole.debug('prefetching hls playlist', hlsPlaylistUrl);
 
             return ServerConnections.getApiClient(item.ServerId).ajax({
 
@@ -379,12 +412,12 @@ export class HtmlVideoPlayer {
                 url: hlsPlaylistUrl
 
             }).then(function () {
-                console.debug(`completed prefetching hls playlist: ${hlsPlaylistUrl}`);
+                ptvSafeConsole.debug('completed prefetching hls playlist', hlsPlaylistUrl);
 
                 loading.hide();
                 streamInfo.url = hlsPlaylistUrl;
             }, function () {
-                console.error(`error prefetching hls playlist: ${hlsPlaylistUrl}`);
+                ptvSafeConsole.error('error prefetching hls playlist', hlsPlaylistUrl);
 
                 loading.hide();
             });
@@ -437,42 +470,84 @@ export class HtmlVideoPlayer {
     /**
      * @private
      */
-    setSrcWithHlsJs(elem, options, url) {
+    async setSrcWithHlsJs(elem, options, url) {
+        const sourceGeneration = this._ptvPlaybackSourceGeneration;
+        const session = this._ptvPlaybackSession;
+        const isCurrentSource = () => this._ptvPlaybackSourceGeneration === sourceGeneration
+            && this._ptvPlaybackSession === session
+            && this.#mediaElement === elem;
+        const Hls = await requireHlsPlayer();
+
+        if (!isCurrentSource()) return;
+
+        const includeCorsCredentials = await getIncludeCorsCredentials();
+
+        if (!isCurrentSource()) return;
+
+        const fragLoadPolicy = createVodTranscodeFragmentLoadPolicy(Hls.DefaultConfig.fragLoadPolicy, options);
+        const hlsConfig = {
+            startPosition: options.playerStartPositionTicks / 10000000,
+            manifestLoadingTimeOut: 20000,
+            maxBufferLength: DEFAULT_HLS_BUFFER_LENGTH_SECONDS,
+            maxMaxBufferLength: DEFAULT_HLS_BUFFER_LENGTH_SECONDS,
+            videoPreference: { preferHDR: true },
+            xhrSetup(xhr) {
+                xhr.withCredentials = includeCorsCredentials;
+            }
+        };
+
+        if (fragLoadPolicy) hlsConfig.fragLoadPolicy = fragLoadPolicy;
+
+        const hls = new Hls(hlsConfig);
+
+        if (!isCurrentSource()) {
+            hls.destroy();
+            return;
+        }
+
+        const isAffectedBrowser = browser.chrome || browser.edgeChromium || browser.firefox;
+
+        bindHlsBufferPolicy(hls, Hls.Events, isAffectedBrowser);
+        this._hlsPlayer = hls;
+        session?.bindHls(hls, Hls.Events);
+
         return new Promise((resolve, reject) => {
-            requireHlsPlayer(async () => {
-                let maxBufferLength = 30;
+            this._ptvCancelHlsBinding = bindEventsToHlsPlayer(
+                this,
+                hls,
+                elem,
+                this.onError,
+                resolve,
+                reject,
+                { isCurrentSource }
+            );
 
-                // Some browsers cannot handle huge fragments in high bitrate.
-                // This issue usually happens when using HWA encoders with a high bitrate setting.
-                // Limit the BufferLength to 6s, it works fine when playing 4k 120Mbps over HLS on chrome.
-                // https://github.com/video-dev/hls.js/issues/876
-                if ((browser.chrome || browser.edgeChromium || browser.firefox) && playbackManager.getMaxStreamingBitrate(this) >= 25000000) {
-                    maxBufferLength = 6;
-                }
-
-                const includeCorsCredentials = await getIncludeCorsCredentials();
-
-                const hls = new Hls({
-                    startPosition: options.playerStartPositionTicks / 10000000,
-                    manifestLoadingTimeOut: 20000,
-                    maxBufferLength: maxBufferLength,
-                    maxMaxBufferLength: maxBufferLength,
-                    videoPreference: { preferHDR: true },
-                    xhrSetup(xhr) {
-                        xhr.withCredentials = includeCorsCredentials;
-                    }
-                });
+            try {
                 hls.loadSource(url);
                 hls.attachMedia(elem);
-
-                bindEventsToHlsPlayer(this, hls, elem, this.onError, resolve, reject);
-
-                this._hlsPlayer = hls;
-
-                // This is needed in setCurrentTrackElement
                 this.#currentSrc = url;
-            });
+            } catch (error) {
+                if (this._hlsPlayer === hls) this._hlsPlayer = null;
+                hls.destroy();
+                reject(error);
+            }
         });
+    }
+
+    /**
+     * Invalidates all asynchronous work owned by the previous media source.
+     * @private
+     */
+    disposePtvPlaybackSession(reason) {
+        this._ptvPlaybackSourceGeneration = (this._ptvPlaybackSourceGeneration || 0) + 1;
+        const session = this._ptvPlaybackSession;
+
+        this._ptvPlaybackSession = null;
+        this._ptvIsHlsSource = false;
+        if (!session) return;
+
+        if (reason !== 'source-replaced') session.end(reason);
+        session.dispose(reason);
     }
 
     /**
@@ -482,7 +557,7 @@ export class HtmlVideoPlayer {
         elem.removeEventListener('error', this.onError);
 
         let val = options.url;
-        console.debug(`playing url: ${val}`);
+        ptvSafeConsole.debug('assigning media source', classifyPlaybackRoute(val));
 
         // Convert to seconds
         const seconds = (options.playerStartPositionTicks || 0) / 10000000;
@@ -490,6 +565,7 @@ export class HtmlVideoPlayer {
             val += `#t=${seconds}`;
         }
 
+        this.disposePtvPlaybackSession('source-replaced');
         destroyHlsPlayer(this);
         destroyFlvPlayer(this);
         destroyCastPlayer(this);
@@ -515,6 +591,23 @@ export class HtmlVideoPlayer {
 
         this._currentPlayOptions = options;
 
+        const isHlsSource = isHls(options.mediaSource);
+        const usesHlsJs = enableHlsJsPlayerForCodecs(options.mediaSource, 'Video') && isHlsSource;
+        const sourceGeneration = this._ptvPlaybackSourceGeneration;
+        const playbackSession = createHlsPlaybackSession({
+            isCurrent: () => this._ptvPlaybackSourceGeneration === sourceGeneration
+                && this._ptvPlaybackSession === playbackSession
+                && this.#mediaElement === elem,
+            media: elem,
+            mediaMode: getPlaybackMediaMode(options.playMethod, isHlsSource),
+            routeClassification: classifyPlaybackRoute(val),
+            routeFamily: getPlaybackRouteFamily(),
+            sourceGeneration
+        });
+
+        this._ptvPlaybackSession = playbackSession;
+        this._ptvIsHlsSource = isHlsSource;
+
         if (secondaryTrackValid) {
             this.#secondarySubtitleTrackIndexToSetOnPlaying = options.mediaSource.DefaultSecondarySubtitleStreamIndex == null ? -1 : options.mediaSource.DefaultSecondarySubtitleStreamIndex;
             if (this.#secondarySubtitleTrackIndexToSetOnPlaying != null && this.#secondarySubtitleTrackIndexToSetOnPlaying >= 0) {
@@ -532,7 +625,7 @@ export class HtmlVideoPlayer {
             elem.crossOrigin = crossOrigin;
         }
 
-        if (enableHlsJsPlayerForCodecs(options.mediaSource, 'Video') && isHls(options.mediaSource)) {
+        if (usesHlsJs) {
             return this.setSrcWithHlsJs(elem, options, val);
         } else if (options.playMethod !== 'Transcode' && options.mediaSource.Container?.toUpperCase() === 'FLV') {
             return this.setSrcWithFlvJs(elem, options, val);
@@ -540,13 +633,16 @@ export class HtmlVideoPlayer {
             elem.autoplay = true;
 
             const includeCorsCredentials = await getIncludeCorsCredentials();
+            if (this._ptvPlaybackSourceGeneration !== sourceGeneration || this._ptvPlaybackSession !== playbackSession) return;
             if (includeCorsCredentials) {
                 // Safari will not send cookies without this
                 elem.crossOrigin = 'use-credentials';
             }
 
             return applySrc(elem, val, options).then(() => {
+                if (this._ptvPlaybackSourceGeneration !== sourceGeneration || this._ptvPlaybackSession !== playbackSession) return;
                 this.#currentSrc = val;
+                playbackSession.recordPlayerAction('play');
 
                 return playWithPromise(elem, this.onError);
             });
@@ -832,9 +928,11 @@ export class HtmlVideoPlayer {
 
         if (elem) {
             if (src) {
+                this._ptvPlaybackSession?.recordPlayerAction('pause');
                 elem.pause();
             }
 
+            this.disposePtvPlaybackSession('stop');
             onEndedInternal(this, elem, this.onError);
         }
 
@@ -849,6 +947,8 @@ export class HtmlVideoPlayer {
 
     destroy() {
         this.setSubtitleOffset.cancel();
+
+        this.disposePtvPlaybackSession('destroy');
 
         destroyHlsPlayer(this);
         destroyFlvPlayer(this);
@@ -902,6 +1002,7 @@ export class HtmlVideoPlayer {
          */
         const elem = e.target;
         this.destroyCustomTrack(elem);
+        this.disposePtvPlaybackSession('ended');
         onEndedInternal(this, elem, this.onError);
     };
 
@@ -1079,7 +1180,7 @@ export class HtmlVideoPlayer {
         const elem = e.target;
         const errorCode = elem.error ? (elem.error.code || 0) : 0;
         const errorMessage = elem.error ? (elem.error.message || '') : '';
-        console.error(`media element error: ${errorCode} ${errorMessage}`);
+        ptvSafeConsole.error('media element error', errorCode, errorMessage);
 
         let type;
 
@@ -1470,7 +1571,7 @@ export class HtmlVideoPlayer {
                     trackElement.removeCue(trackElement.cues[0]);
                 }
             } catch (e) {
-                console.error('error removing cue from textTrack', e);
+                ptvSafeConsole.error('error removing cue from textTrack', e);
             }
 
             trackElement.mode = 'disabled';
@@ -1798,6 +1899,7 @@ export class HtmlVideoPlayer {
         const mediaElement = this.#mediaElement;
         if (mediaElement) {
             if (val != null) {
+                this._ptvPlaybackSession?.recordPlayerAction('seek');
                 mediaElement.currentTime = val / 1000;
                 return;
             }
@@ -1833,7 +1935,7 @@ export class HtmlVideoPlayer {
     }
 
     static onPictureInPictureError(err) {
-        console.error(`Picture in picture error: ${err}`);
+        ptvSafeConsole.error('Picture in picture error', err);
     }
 
     setPictureInPictureEnabled(isEnabled) {
@@ -1889,11 +1991,11 @@ export class HtmlVideoPlayer {
             if (video) {
                 if (isEnabled) {
                     video.requestAirPlay().catch(function(err) {
-                        console.error('Error requesting AirPlay', err);
+                        ptvSafeConsole.error('Error requesting AirPlay', err);
                     });
                 } else {
                     document.exitAirPLay().catch(function(err) {
-                        console.error('Error exiting AirPlay', err);
+                        ptvSafeConsole.error('Error exiting AirPlay', err);
                     });
                 }
             }
@@ -1953,6 +2055,7 @@ export class HtmlVideoPlayer {
     pause() {
         const mediaElement = this.#mediaElement;
         if (mediaElement) {
+            this._ptvPlaybackSession?.recordPlayerAction('pause');
             mediaElement.pause();
         }
     }
@@ -1965,6 +2068,7 @@ export class HtmlVideoPlayer {
     unpause() {
         const mediaElement = this.#mediaElement;
         if (mediaElement) {
+            this._ptvPlaybackSession?.recordPlayerAction('play');
             mediaElement.play();
         }
     }

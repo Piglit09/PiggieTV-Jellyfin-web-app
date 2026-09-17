@@ -58,13 +58,14 @@ function compactMusicUserData(userData: PtvMusicItem['UserData']) {
         LastPlayedDate: userData.LastPlayedDate || undefined,
         PlayCount: userData.PlayCount || undefined,
         PlaybackPositionTicks: userData.PlaybackPositionTicks || undefined,
-        Played: userData.Played || undefined
+        Played: userData.Played || undefined,
+        PlayedPercentage: userData.PlayedPercentage || undefined
     };
 
     return Object.values(compacted).some(value => value !== undefined) ? compacted : undefined;
 }
 
-function compactPtvMusicItemForSnapshot(item: PtvMusicItem): PtvMusicItem {
+export function compactPtvMusicItemForStorage(item: PtvMusicItem): PtvMusicItem {
     const mediaSummary = getCompactMusicMediaSummary(item);
     const compacted: PtvMusicItem = {
         Album: compactMusicText(item.Album, 120) || undefined,
@@ -110,15 +111,60 @@ function compactPtvMusicItemForSnapshot(item: PtvMusicItem): PtvMusicItem {
     return compacted;
 }
 
+export function projectPtvMusicLibraryIndexItemForStorage(item: PtvMusicItem): PtvMusicItem {
+    const projected: PtvMusicItem = {
+        Album: compactMusicText(item.Album, 120) || undefined,
+        AlbumArtist: compactMusicText(item.AlbumArtist, 120) || undefined,
+        AlbumArtists: compactMusicArtistRefs(item.AlbumArtists),
+        AlbumId: item.AlbumId,
+        AlbumPrimaryImageItemId: item.AlbumPrimaryImageItemId,
+        AlbumPrimaryImageTag: item.AlbumPrimaryImageTag,
+        Artist: compactMusicText(item.Artist, 120) || undefined,
+        ArtistItems: compactMusicArtistRefs(item.ArtistItems),
+        Artists: Array.isArray(item.Artists) ? item.Artists.slice(0, 8).filter(Boolean) : undefined,
+        BackdropImageTags: Array.isArray(item.BackdropImageTags) ? item.BackdropImageTags.slice(0, 1) : undefined,
+        CanDownload: typeof item.CanDownload === 'boolean' ? item.CanDownload : undefined,
+        Container: compactMusicText(item.Container, 32) || undefined,
+        DateCreated: typeof item.DateCreated === 'string' ? item.DateCreated : undefined,
+        Genres: Array.isArray(item.Genres) ? item.Genres.slice(0, 8).filter(Boolean) : undefined,
+        Id: item.Id,
+        ImageTags: item.ImageTags,
+        IndexNumber: item.IndexNumber,
+        MediaType: item.MediaType,
+        Name: compactMusicText(item.Name, 180) || item.Name,
+        ParentBackdropImageTags: Array.isArray(item.ParentBackdropImageTags) ? item.ParentBackdropImageTags.slice(0, 1) : undefined,
+        ParentId: typeof item.ParentId === 'string' ? item.ParentId : undefined,
+        ParentIndexNumber: item.ParentIndexNumber,
+        ParentPrimaryImageItemId: item.ParentPrimaryImageItemId,
+        ParentPrimaryImageTag: item.ParentPrimaryImageTag,
+        PremiereDate: item.PremiereDate,
+        PrimaryImageAspectRatio: item.PrimaryImageAspectRatio,
+        ProductionYear: item.ProductionYear,
+        RunTimeTicks: item.RunTimeTicks,
+        ServerId: item.ServerId,
+        SortName: compactMusicText(item.SortName, 180) || undefined,
+        Type: item.Type,
+        UserData: compactMusicUserData(item.UserData)
+    };
+
+    Object.keys(projected).forEach(key => {
+        if ((projected as Record<string, unknown>)[key] === undefined) {
+            delete (projected as Record<string, unknown>)[key];
+        }
+    });
+
+    return projected;
+}
+
 function compactPtvMusicSectionForSnapshot(section: PtvMusicSection): PtvMusicSection {
     return {
         emptyMessage: section.emptyMessage,
         id: section.id,
-        items: section.items.map(compactPtvMusicItemForSnapshot),
+        items: section.items.map(compactPtvMusicItemForStorage),
         kind: section.kind,
         seed: section.seed ? {
             id: section.seed.id,
-            item: section.seed.item ? compactPtvMusicItemForSnapshot(section.seed.item) : undefined,
+            item: section.seed.item ? compactPtvMusicItemForStorage(section.seed.item) : undefined,
             kind: section.seed.kind,
             label: section.seed.label,
             value: section.seed.value

@@ -169,7 +169,7 @@ test.describe('Phase F1 flagship discovery slice', () => {
 
         await expect(searchInput).toHaveValue('Atlas');
         await expect(searchInput).toBeFocused();
-        await expect(filters.getByRole('button')).toHaveCount(8);
+        await expect(filters.getByRole('button')).toHaveCount(10);
         await expect(filters.getByRole('button', { name: 'All', exact: true })).toHaveAttribute('aria-pressed', 'true');
         await expect(page.getByRole('region', { name: 'All search results' })).toHaveAttribute('aria-busy', 'false');
         await expect(page.getByRole('heading', { name: 'Movies', exact: true })).toBeVisible();
@@ -251,8 +251,8 @@ test.describe('Phase F1 flagship discovery slice', () => {
             Array.from(container.children).map(element => element.id || element.className)
         ));
 
-        expect(sectionOrder.indexOf('ptv-details-discovery verticalSection detailVerticalSection ptv-details-glass'))
-            .toBeLessThan(sectionOrder.indexOf('similarCollapsible'));
+        expect(sectionOrder.indexOf('similarCollapsible'))
+            .toBeLessThan(sectionOrder.indexOf('ptv-details-discovery verticalSection detailVerticalSection ptv-details-glass'));
         expect(apiRequests).toEqual([]);
 
         const firstDiscoveryLink = links.getByRole('link').first();
@@ -266,7 +266,10 @@ test.describe('Phase F1 flagship discovery slice', () => {
 
         const creatorLink = links.locator('.ptv-details-discovery-link--creator');
         const creatorHref = await creatorLink.getAttribute('href');
-        const creatorQuery = new URLSearchParams(creatorHref?.split('?')[1] || '').get('query') || '';
+        const creatorQueryMatch = /(?:^|&)query=([^&]*)/.exec(creatorHref?.split('?')[1] || '');
+        const creatorQuery = creatorQueryMatch ?
+            decodeURIComponent(creatorQueryMatch[1].replace(/\+/g, ' ')) :
+            '';
 
         await creatorLink.focus();
         await creatorLink.press('Enter');

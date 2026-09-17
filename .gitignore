@@ -28,3 +28,46 @@
 /.codex-remote-attachments/
 /test-results.zip
 /tmp/.npm-cache/
+
+# Local environment and credential files. Keep shareable templates trackable.
+.env
+.env.local
+.env.*
+*.env
+*.env.local
+*.env.*
+.envrc
+.envrc.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
+!*.env.example
+!*.env.sample
+!*.env.template
+!.envrc.example
+!.envrc.sample
+!.envrc.template
+
+# Repository-local operational state and private QA output. These paths are
+# staging safeguards, not backups; operational data belongs outside the repo.
+/.codex-runtime/
+/artifacts/
+
+# Repository-local tool caches not covered above.
+/.ruff_cache/
+
+# Audited Jellyfin runtime exports. These may contain credentials, private
+# account data, server state, or generated metadata and must never be staged.
+**/configuration/Jellyfin.Plugin.PiggieTV.xml
+**/configuration/PiggieTV/accounts/ptv-accounts.json
+**/configuration/PiggieTV/accounts/account-backup-status.json
+**/configuration/PiggieTV/featured-content-cache.json
+**/configuration/PiggieTV/metadata-quality/metadata-quality.json
+**/configuration/PiggieTV/metadata-quality/settings.json
+**/configuration/PiggieTV/diagnostics/ptv-diagnostics.log
+
+# Legacy snapshot; canonical source is src/ptv/modules/account/.
+/src/ptv/modules/account.zip

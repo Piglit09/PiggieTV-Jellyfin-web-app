@@ -5,6 +5,7 @@ import { appHost } from 'components/apphost';
 import layoutManager from 'components/layoutManager';
 import { appRouter } from 'components/router/appRouter';
 import { AppFeature } from 'constants/appFeature';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import shell from 'scripts/shell';
 
 import './emby-button.scss';
@@ -39,7 +40,7 @@ const LinkButton: React.FC<LinkButtonProps> = ({
                 e.preventDefault();
                 appRouter.show(url)
                     .catch(err => {
-                        console.error('[LinkButton] failed to show url', url, err);
+                        ptvSafeConsole.error('[LinkButton] failed to show url', url, err);
                     });
             }
         } else {

@@ -16,9 +16,10 @@ import {
     titleCaseTerm
 } from '../scoring/metadata';
 import { logPtvRecommendationFailure } from '../debug/recommendationRuntimeDebug';
+import { getPtvDisplayIdentityKey } from '../../../services/displayIdentity';
 
-const PROFILE_VERSION = 1;
-const PROFILE_STORAGE_PREFIX = 'ptv.recommendations.profile.v1';
+const PROFILE_VERSION = 2;
+const PROFILE_STORAGE_PREFIX = 'ptv.recommendations.profile.v2';
 const SOURCE_WEIGHTS: Record<PtvRecommendationSourceType, number> = {
     candidate: 1,
     favorite: 34,
@@ -43,7 +44,7 @@ const CATEGORY_TO_PROFILE_KEY: Record<PtvTasteCategory, keyof PtvTasteProfile> =
     tags: 'crossMediaTerms'
 };
 
-function createEmptyProfile(serverId = getPtvServerId() || 'server', userId = getPtvCurrentUserId() || 'user', now = Date.now()): PtvTasteProfile {
+function createEmptyProfile(serverId = getPtvServerId() || '', userId = getPtvCurrentUserId() || '', now = Date.now()): PtvTasteProfile {
     return {
         crossMediaTerms: {},
         favoriteActors: {},
@@ -67,7 +68,8 @@ function createEmptyProfile(serverId = getPtvServerId() || 'server', userId = ge
 }
 
 function getStorageKey(profile: Pick<PtvTasteProfile, 'serverId' | 'userId'>) {
-    return `${PROFILE_STORAGE_PREFIX}:${profile.serverId}:${profile.userId}`;
+    const identityKey = getPtvDisplayIdentityKey(profile.serverId, profile.userId);
+    return identityKey ? `${PROFILE_STORAGE_PREFIX}:${identityKey}` : null;
 }
 
 function getCompletionRatioWeight(completionRatio: number) {
@@ -208,22 +210,37 @@ export function buildPtvTasteProfile(
 
 export function savePtvTasteProfile(profile: PtvTasteProfile) {
     try {
-        window.localStorage?.setItem(getStorageKey(profile), JSON.stringify(profile));
+        const storageKey = getStorageKey(profile);
+        if (!storageKey) return false;
+
+        window.localStorage?.setItem(storageKey, JSON.stringify(profile));
+        return true;
     } catch (error) {
         logPtvRecommendationFailure('Taste profile save', error, {
             serverId: profile.serverId,
             userId: profile.userId
         });
         // Local storage is a convenience cache; recommendation generation still works without it.
+        return false;
     }
 }
 
-export function loadPtvTasteProfile(serverId = getPtvServerId() || 'server', userId = getPtvCurrentUserId() || 'user') {
+export function loadPtvTasteProfile(serverId = getPtvServerId() || '', userId = getPtvCurrentUserId() || '') {
     try {
-        const raw = window.localStorage?.getItem(getStorageKey({ serverId, userId }));
+        const storageKey = getStorageKey({ serverId, userId });
+        const expectedIdentity = getPtvDisplayIdentityKey(serverId, userId);
+
+        if (!storageKey || !expectedIdentity) return null;
+
+        const raw = window.localStorage?.getItem(storageKey);
         const parsed = raw ? JSON.parse(raw) as PtvTasteProfile : null;
 
-        return parsed?.profileVersion === PROFILE_VERSION ? parsed : null;
+        if (
+            parsed?.profileVersion === PROFILE_VERSION
+            && getPtvDisplayIdentityKey(parsed.serverId, parsed.userId) === expectedIdentity
+        ) return parsed;
+
+        return null;
     } catch (error) {
         logPtvRecommendationFailure('Taste profile localStorage read', error, {
             serverId,

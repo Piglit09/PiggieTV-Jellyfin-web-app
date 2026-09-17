@@ -149,6 +149,7 @@ export function createPtvCoreRequestCancellation(options: Readonly<{
         undefined;
 
     return {
+        abort,
         dispose() {
             if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId);
             options.signal?.removeEventListener('abort', abort);

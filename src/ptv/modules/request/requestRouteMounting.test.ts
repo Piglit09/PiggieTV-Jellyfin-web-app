@@ -72,4 +72,18 @@ describe('PTV Request direct-route mounting', () => {
         expect(document.documentElement.classList.contains('ptv-request-active'))
             .toBe(false);
     });
+
+    it('registers URL-owned routing independently of Request presentation state', async () => {
+        routeMocks.registerModule.mockClear();
+        await import('./index');
+
+        const registration = routeMocks.registerModule.mock.calls.at(-1)?.[0];
+        const matches = registration?.route?.pattern;
+
+        expect(matches).toEqual(expect.any(Function));
+        expect(matches({ hash: '#/requests' })).toBe(true);
+
+        document.documentElement.classList.add('ptv-request-active');
+        expect(matches({ hash: '#/reading/manga' })).toBe(false);
+    });
 });

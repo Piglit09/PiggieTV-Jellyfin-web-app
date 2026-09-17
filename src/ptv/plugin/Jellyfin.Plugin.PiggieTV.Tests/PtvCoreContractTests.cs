@@ -19,6 +19,8 @@ public sealed class PtvCoreContractTests
         Assert.True(status.DiagnosticsCapable);
         Assert.True(status.ServerCapabilities["pluginApi"]);
         Assert.True(status.ServerCapabilities["recommendations"]);
+        Assert.True(status.ServerCapabilities["mediaReports"]);
+        Assert.Contains("mediaReports", status.SupportedFeatureFlags);
         Assert.Contains("remoteDiagnostics", status.SupportedFeatureFlags);
         Assert.Empty(status.ClientCompatibilityWarnings);
     }
@@ -37,5 +39,6 @@ public sealed class PtvCoreContractTests
             json.GetProperty("cacheVersion").GetInt32());
         Assert.True(json.GetProperty("diagnosticsCapable").GetBoolean());
         Assert.True(json.GetProperty("serverCapabilities").GetProperty("pluginApi").GetBoolean());
+        Assert.True(json.GetProperty("serverCapabilities").GetProperty("mediaReports").GetBoolean());
     }
 }

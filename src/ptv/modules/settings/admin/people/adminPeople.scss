@@ -1,0 +1,677 @@
+/* PiggieTV Administration — native Devices and Activity */
+/* stylelint-disable no-descending-specificity */
+
+.ptv-admin-people {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-admin-people-header {
+    display: flex;
+    gap: 24px;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+
+.ptv-admin-people-header h1 {
+    margin: 0;
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent, inherit);
+    font-size: clamp(2.15rem, 3.3vw, 3.45rem);
+    font-weight: 900;
+    letter-spacing: -0.042em;
+    line-height: 0.98;
+}
+
+.ptv-admin-people-header p {
+    max-width: 64ch;
+    margin: 9px 0 0;
+    color: var(--ptv-color-text-muted);
+    line-height: 1.5;
+}
+
+.ptv-admin-people :is(button, .ptv-admin-people-button) {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--ptv-touch-target-min, 44px);
+    box-sizing: border-box;
+    padding: 9px 15px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-soft);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 820;
+    text-decoration: none;
+    cursor: pointer;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-people :is(button, .ptv-admin-people-button):hover:not(:disabled),
+.ptv-admin-people :is(button, .ptv-admin-people-button):focus-visible,
+.ptv-admin-device-dialog :is(button, .ptv-admin-people-button):focus-visible {
+    border-color: var(--ptv-state-hover-border);
+    color: var(--ptv-state-hover-text);
+    background: var(--ptv-state-hover);
+    box-shadow: var(--ptv-state-hover-shadow);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+.ptv-admin-people button:disabled {
+    color: var(--ptv-color-text-disabled);
+    cursor: not-allowed;
+    opacity: 0.68;
+}
+
+.ptv-admin-device-dialog .MuiBackdrop-root {
+    background: rgba(var(--ptv-palette-black-rgb), 0.76);
+    backdrop-filter: blur(7px);
+}
+
+.ptv-admin-device-dialog .MuiPaper-root {
+    width: min(620px, calc(100vw - 28px));
+    border: 1px solid var(--ptv-elevation-3-border);
+    border-radius: var(--ptv-radius-panel, 20px);
+    color: var(--ptv-color-text-primary);
+    background: var(--ptv-elevation-3-surface, #130c1e);
+    box-shadow: var(--ptv-elevation-3-shadow);
+}
+
+.ptv-admin-device-dialog .MuiDialogTitle-root {
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent, inherit);
+    font-weight: 900;
+}
+
+.ptv-admin-device-dialog .MuiDialogContentText-root {
+    color: var(--ptv-color-text-muted);
+    line-height: 1.55;
+}
+
+.ptv-admin-device-dialog .MuiDialogActions-root {
+    padding: 12px 24px 20px;
+}
+
+.ptv-admin-people .is-danger {
+    border-color: var(--ptv-state-danger-border);
+    color: var(--ptv-state-danger-text);
+    background: var(--ptv-state-danger-bg);
+}
+
+.ptv-admin-people-toolbar,
+.ptv-admin-people-notice,
+.ptv-admin-device-list,
+.ptv-admin-activity-list,
+.ptv-admin-people-empty,
+.ptv-admin-people-error {
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 20px);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    backdrop-filter: blur(var(--ptv-elevation-2-blur, 12px)) saturate(1.08);
+}
+
+.ptv-admin-people-toolbar {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) auto auto;
+    gap: 12px 18px;
+    align-items: center;
+    padding: 14px;
+}
+
+.ptv-admin-people-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.ptv-admin-people-search .ptv-icon {
+    position: absolute;
+    left: 14px;
+    color: var(--ptv-color-text-muted);
+    pointer-events: none;
+}
+
+.ptv-admin-people-search input {
+    width: 100%;
+    min-height: var(--ptv-touch-target-min, 44px);
+    box-sizing: border-box;
+    padding: 10px 13px 10px 43px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-primary);
+    background: var(--ptv-component-input-bg, rgba(var(--ptv-palette-black-rgb), 0.28));
+    font: inherit;
+}
+
+.ptv-admin-people-search input:focus {
+    border-color: var(--ptv-state-focus-border);
+    box-shadow: var(--ptv-state-focus-shadow);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 1px;
+}
+
+.ptv-admin-people-filters {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.ptv-admin-people .ptv-admin-people-filter {
+    min-height: 38px;
+    padding: 6px 12px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.75rem;
+}
+
+.ptv-admin-people .ptv-admin-people-filter[aria-pressed='true'] {
+    border-color: var(--ptv-state-selected-border);
+    color: var(--ptv-state-selected-text);
+    background: var(--ptv-state-selected);
+}
+
+.ptv-admin-people-result-count,
+.ptv-admin-people-search-scope {
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+}
+
+.ptv-admin-people-search-scope {
+    grid-column: 1 / -1;
+    margin: -4px 2px 0;
+}
+
+.ptv-admin-people-notice {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 11px;
+    align-items: center;
+    padding: 12px 15px;
+    color: var(--ptv-color-text-muted);
+}
+
+.ptv-admin-people-notice strong {
+    color: var(--ptv-color-text-soft);
+    font-size: 0.82rem;
+}
+
+.ptv-admin-people-notice p {
+    margin: 3px 0 0;
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-device-list,
+.ptv-admin-activity-list {
+    min-width: 0;
+    overflow: hidden;
+}
+
+.ptv-admin-device-row {
+    display: grid;
+    grid-template-columns: minmax(210px, 1.25fr) minmax(170px, 0.9fr) minmax(135px, 0.68fr) minmax(118px, auto) auto;
+    gap: 15px;
+    align-items: center;
+    min-height: 84px;
+    box-sizing: border-box;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-device-row:last-child {
+    border-bottom: 0;
+}
+
+.ptv-admin-device-more {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    justify-content: center;
+    min-height: 64px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--ptv-border-divider);
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+}
+
+.ptv-admin-device-row:hover {
+    background: var(--ptv-state-hover);
+}
+
+.ptv-admin-device-main {
+    display: grid;
+    grid-template-columns: 49px minmax(0, 1fr);
+    gap: 13px;
+    align-items: center;
+    min-width: 0;
+}
+
+.ptv-admin-device-icon {
+    display: grid;
+    width: 49px;
+    height: 49px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: 16px;
+    color: var(--ptv-color-text-accent);
+    background: var(--ptv-state-selected);
+    place-items: center;
+}
+
+.ptv-admin-device-identity,
+.ptv-admin-device-users,
+.ptv-admin-device-activity {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-device-identity strong,
+.ptv-admin-device-users strong,
+.ptv-admin-device-activity strong {
+    overflow: hidden;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.83rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-device-identity small,
+.ptv-admin-device-users small,
+.ptv-admin-device-activity small {
+    margin-top: 4px;
+    overflow: hidden;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.68rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-people-badge {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    width: fit-content;
+    min-height: 25px;
+    padding: 2px 8px;
+    border: 1px solid var(--ptv-border-divider);
+    border-radius: 999px;
+    color: var(--ptv-color-text-muted);
+    background: var(--ptv-component-chip-bg);
+    font-size: 0.64rem;
+    font-weight: 850;
+    white-space: nowrap;
+}
+
+.ptv-admin-people-badge::before {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    content: '';
+}
+
+.ptv-admin-people-badge[data-tone='healthy'] { color: var(--ptv-state-success-text, #8ee8b5); }
+.ptv-admin-people-badge[data-tone='info'] { color: var(--ptv-color-focus-soft); }
+.ptv-admin-people-badge[data-tone='warning'] { color: var(--ptv-state-warning-text, #f2c878); }
+.ptv-admin-people-badge[data-tone='danger'] { color: var(--ptv-state-danger-text); }
+
+.ptv-admin-device-sessions {
+    display: grid;
+    grid-column: 1 / -1;
+    gap: 1px;
+    margin: 0;
+    padding: 0 0 0 62px;
+    list-style: none;
+}
+
+.ptv-admin-device-session {
+    display: grid;
+    grid-template-columns: 94px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    min-height: 43px;
+    padding: 7px 10px;
+    border-top: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-device-session > span:nth-child(2) {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-device-session strong {
+    overflow: hidden;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.73rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-device-session small {
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.64rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-admin-device-session-state {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    color: var(--ptv-color-focus-soft);
+}
+
+.ptv-admin-activity-list {
+    position: relative;
+    padding: 4px 0;
+}
+
+.ptv-admin-activity-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 88px 14px minmax(0, 1fr);
+    gap: 13px;
+    min-height: 76px;
+    padding: 14px 18px;
+}
+
+.ptv-admin-activity-row:not(:last-child)::after {
+    position: absolute;
+    right: 18px;
+    bottom: 0;
+    left: 133px;
+    height: 1px;
+    background: var(--ptv-border-divider);
+    content: '';
+}
+
+.ptv-admin-activity-row time {
+    padding-top: 4px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.68rem;
+    font-weight: 760;
+    text-align: right;
+}
+
+.ptv-admin-activity-marker {
+    position: relative;
+    width: 9px;
+    height: 9px;
+    margin-top: 6px;
+    border: 2px solid rgba(var(--ptv-palette-black-rgb), 0.62);
+    border-radius: 50%;
+    background: var(--ptv-color-text-muted);
+    box-shadow: 0 0 0 1px var(--ptv-border-strong);
+}
+
+.ptv-admin-activity-marker::after {
+    position: absolute;
+    top: 11px;
+    left: 3px;
+    width: 1px;
+    height: 64px;
+    background: var(--ptv-border-divider);
+    content: '';
+}
+
+.ptv-admin-activity-row:last-child .ptv-admin-activity-marker::after {
+    display: none;
+}
+
+.ptv-admin-activity-marker[data-severity='info'] { background: var(--ptv-color-focus-soft); }
+.ptv-admin-activity-marker[data-severity='warning'] { background: var(--ptv-state-warning-text, #f2c878); }
+.ptv-admin-activity-marker[data-severity='error'] { background: var(--ptv-state-danger-text); }
+
+.ptv-admin-activity-copy {
+    min-width: 0;
+}
+
+.ptv-admin-activity-title-line,
+.ptv-admin-activity-meta {
+    display: flex;
+    gap: 7px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.ptv-admin-activity-title-line > strong {
+    margin-right: 3px;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.84rem;
+}
+
+.ptv-admin-activity-copy p {
+    max-width: 88ch;
+    margin: 6px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.73rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.ptv-admin-activity-meta {
+    margin-top: 7px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.66rem;
+}
+
+.ptv-admin-activity-meta > :not(:last-child)::after {
+    margin-left: 7px;
+    content: '·';
+}
+
+.ptv-admin-activity-meta a {
+    color: var(--ptv-color-text-accent);
+    font-weight: 760;
+    text-decoration: none;
+}
+
+.ptv-admin-activity-meta a:focus-visible {
+    border-radius: 5px;
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 3px;
+}
+
+.ptv-admin-activity-pagination {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.ptv-admin-activity-pagination span {
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+}
+
+.ptv-admin-people-empty,
+.ptv-admin-people-error {
+    display: grid;
+    gap: 8px;
+    min-height: 210px;
+    padding: 30px;
+    text-align: center;
+    place-content: center;
+}
+
+.ptv-admin-people-empty h2,
+.ptv-admin-people-error h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.ptv-admin-people-empty p,
+.ptv-admin-people-error p {
+    margin: 0;
+    color: var(--ptv-color-text-muted);
+}
+
+.ptv-admin-people-skeleton-row {
+    height: 84px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+    background: linear-gradient(90deg, rgba(var(--ptv-palette-white-rgb), 0.025), rgba(var(--ptv-palette-white-rgb), 0.075), rgba(var(--ptv-palette-white-rgb), 0.025));
+    background-size: 220% 100%;
+    animation: ptv-admin-people-shimmer 1.6s ease-in-out infinite;
+}
+
+.ptv-admin-people-skeleton-row:last-child {
+    border-bottom: 0;
+}
+
+@keyframes ptv-admin-people-shimmer {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+}
+
+@media (max-width: 1320px) {
+    .ptv-admin-device-row {
+        grid-template-columns: minmax(210px, 1.2fr) minmax(145px, 0.8fr) minmax(118px, 0.62fr) auto;
+    }
+
+    .ptv-admin-device-state {
+        grid-column: 2;
+    }
+
+    .ptv-admin-device-row > button {
+        grid-column: 4;
+        grid-row: 1 / 3;
+    }
+}
+
+@media (max-width: 760px) {
+    .ptv-admin-people {
+        gap: 14px;
+    }
+
+    .ptv-admin-people-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ptv-admin-people-header h1 {
+        font-size: clamp(2rem, 12vw, 2.65rem);
+    }
+
+    .ptv-admin-people-header > button {
+        width: 100%;
+    }
+
+    .ptv-admin-people-toolbar {
+        grid-template-columns: 1fr;
+        padding: 12px;
+    }
+
+    .ptv-admin-people-filters {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+    }
+
+    .ptv-admin-people-result-count,
+    .ptv-admin-people-search-scope {
+        grid-column: 1;
+    }
+
+    .ptv-admin-device-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px 14px;
+        padding: 14px;
+    }
+
+    .ptv-admin-device-main {
+        grid-column: 1 / -1;
+    }
+
+    .ptv-admin-device-users,
+    .ptv-admin-device-activity {
+        grid-column: 1;
+    }
+
+    .ptv-admin-device-state {
+        grid-column: 2;
+        grid-row: 2;
+        align-self: start;
+    }
+
+    .ptv-admin-device-row > button {
+        grid-column: 1 / -1;
+        grid-row: auto;
+        width: 100%;
+    }
+
+    .ptv-admin-device-sessions {
+        grid-column: 1 / -1;
+        padding-left: 0;
+    }
+
+    .ptv-admin-device-more {
+        align-items: stretch;
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .ptv-admin-device-session {
+        grid-template-columns: 1fr auto;
+    }
+
+    .ptv-admin-device-session-state {
+        grid-column: 1 / -1;
+    }
+
+    .ptv-admin-activity-row {
+        grid-template-columns: 13px minmax(0, 1fr);
+        gap: 11px;
+        padding: 15px 14px;
+    }
+
+    .ptv-admin-activity-row time {
+        grid-column: 2;
+        grid-row: 1;
+        padding: 0;
+        text-align: left;
+    }
+
+    .ptv-admin-activity-marker {
+        grid-column: 1;
+        grid-row: 1 / 3;
+    }
+
+    .ptv-admin-activity-copy {
+        grid-column: 2;
+        grid-row: 2;
+    }
+
+    .ptv-admin-activity-row:not(:last-child)::after {
+        right: 14px;
+        left: 38px;
+    }
+
+    .ptv-admin-activity-marker::after {
+        height: 100px;
+    }
+
+    .ptv-admin-activity-pagination {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .ptv-admin-activity-pagination span {
+        grid-column: 1 / -1;
+        grid-row: 1;
+        text-align: center;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-admin-people-skeleton-row { animation: none; }
+}

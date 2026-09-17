@@ -7,11 +7,14 @@ const frontendConfig = read('src/ptv/core/config.ts');
 const apiRoutes = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvApiRoutes.cs');
 const cacheValidator = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentValidator.cs');
 const statusController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs');
+const relationshipController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvRelationshipController.cs');
+const recommendationController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvRecommendationController.cs');
+const readingMetadataController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvReadingMetadataController.cs');
 const statusResponse = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvStatusResponse.cs');
 const project = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
 const pluginManifest = JSON.parse(read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/meta.json'));
 const packageJson = JSON.parse(read('package.json'));
-const expectedPluginVersion = ['10', '11', '8', '2'].join('.');
+const expectedPluginVersion = '0.5.18.0';
 
 function requiredMatch(source, pattern, label) {
     const match = source.match(pattern);
@@ -35,7 +38,13 @@ const requiredRoutes = [
     ['featured', "featuredContent: 'Ptv/v1/featured'"],
     ['featured refresh', "featuredContentRefresh: 'Ptv/v1/featured/refresh'"],
     ['Google Books metadata', "googleBooksMetadataSearch: 'Ptv/v1/reading/metadata/googlebooks/search'"],
-    ['reading series overrides', "readingSeriesOverrides: 'Ptv/v1/reading/series-overrides'"]
+    ['Reading metadata providers', "readingMetadataProviders: 'Ptv/v1/reading/metadata/providers'"],
+    ['Reading metadata search', "readingMetadataSearch: 'Ptv/v1/reading/metadata/search'"],
+    ['reading series overrides', "readingSeriesOverrides: 'Ptv/v1/reading/series-overrides'"],
+    ['authoritative relationships', "relationships: 'Ptv/v1/relationships'"],
+    ['recommendation policy v2', "recommendationPolicyRank: 'Ptv/v2/recommendations/rank'"],
+    ['Calendar data', "arrCalendar: 'Ptv/v1/calendar'"],
+    ['Calendar availability', "arrCalendarAvailability: 'Ptv/v1/integrations/calendar-availability'"]
 ];
 
 const failures = [];
@@ -51,8 +60,8 @@ if (contract.pluginVersion !== expectedPluginVersion) {
 if (contract.pluginManifestVersion !== contract.pluginVersion) {
     failures.push(`Plugin manifest mismatch: project ${contract.pluginVersion}, manifest ${contract.pluginManifestVersion}`);
 }
-if (contract.pluginTarget !== '10.11.8') {
-    failures.push(`Unexpected Jellyfin package target: expected 10.11.8, received ${contract.pluginTarget}`);
+if (contract.pluginTarget !== '10.11.11') {
+    failures.push(`Unexpected Jellyfin package target: expected 10.11.11, received ${contract.pluginTarget}`);
 }
 
 for (const [label, sourceText] of requiredRoutes) {
@@ -60,20 +69,36 @@ for (const [label, sourceText] of requiredRoutes) {
 }
 
 const backendContracts = [
-    ['reading override GET route', /\[HttpGet\("reading\/series-overrides\/\{routeKind\}"\)\]/],
-    ['reading override PUT route', /\[HttpPut\("reading\/series-overrides\/\{routeKind\}"\)\]/],
-    ['reading override status feature', /"readingSeriesOverrides"/],
-    ['PTV Core contract version', /\[JsonPropertyName\("contractVersion"\)\][\s\S]*?=\s*"1\.0"/],
-    ['PTV Core cache version', /\[JsonPropertyName\("cacheVersion"\)\]/],
-    ['recommendation schema version', /\[JsonPropertyName\("recommendationSchemaVersion"\)\]/],
-    ['diagnostics capability', /\[JsonPropertyName\("diagnosticsCapable"\)\]/],
-    ['server capabilities', /\[JsonPropertyName\("serverCapabilities"\)\]/],
-    ['supported feature flags', /\[JsonPropertyName\("supportedFeatureFlags"\)\]/],
-    ['client compatibility warnings', /\[JsonPropertyName\("clientCompatibilityWarnings"\)\]/]
+    ['Reading metadata controller', readingMetadataController, /\[Route\("Ptv\/v1\/reading\/metadata"\)\]/],
+    ['Reading metadata providers route', readingMetadataController, /\[HttpGet\("providers"\)\]/],
+    ['Reading metadata search route', readingMetadataController, /\[HttpPost\("search"\)\]/],
+    ['Reading metadata administrator authorization', readingMetadataController, /Policies\.RequiresElevation/],
+    ['reading override GET route', statusController, /\[HttpGet\("reading\/series-overrides\/\{routeKind\}"\)\]/],
+    ['reading override PUT route', statusController, /\[HttpPut\("reading\/series-overrides\/\{routeKind\}"\)\]/],
+    ['Calendar route', statusController, /\[HttpGet\("calendar"\)\]/],
+    ['Calendar compatibility route', statusController, /\[HttpGet\("integrations\/arr\/calendar"\)\]/],
+    ['secret-free Calendar availability route', statusController, /\[HttpGet\("integrations\/calendar-availability"\)\]/],
+    ['administrator-only detailed integration status', statusController, /GetIntegrationsStatus\(\)[\s\S]*?CanWriteFeaturedContentSafeAsync\("integrations\/status"\)/],
+    ['relationship GET route', relationshipController, /\[HttpGet\("\{sourceItemId\}"\)\]/],
+    ['relationship POST route', relationshipController, /\[HttpPost\]/],
+    ['relationship PUT route', relationshipController, /\[HttpPut\("\{mappingId\}"\)\]/],
+    ['relationship DELETE route', relationshipController, /\[HttpDelete\("\{mappingId\}"\)\]/],
+    ['recommendation policy v2 controller', recommendationController, /\[Route\("Ptv\/v2\/recommendations"\)\]/],
+    ['recommendation policy v2 rank route', recommendationController, /\[HttpPost\("rank"\)\]/],
+    ['recommendation v1 compatibility route', recommendationController, /\[HttpGet\("~\/Ptv\/v1\/recommendations"\)\]/],
+    ['recommendation policy status feature', statusController, /"recommendationPolicyV2"/],
+    ['reading override status feature', statusResponse, /"readingSeriesOverrides"/],
+    ['relationship status feature', statusResponse, /"detailsRelationships"/],
+    ['PTV Core contract version', statusResponse, /\[JsonPropertyName\("contractVersion"\)\][\s\S]*?=\s*"1\.0"/],
+    ['PTV Core cache version', statusResponse, /\[JsonPropertyName\("cacheVersion"\)\]/],
+    ['recommendation schema version', statusResponse, /\[JsonPropertyName\("recommendationSchemaVersion"\)\]/],
+    ['diagnostics capability', statusResponse, /\[JsonPropertyName\("diagnosticsCapable"\)\]/],
+    ['server capabilities', statusResponse, /\[JsonPropertyName\("serverCapabilities"\)\]/],
+    ['supported feature flags', statusResponse, /\[JsonPropertyName\("supportedFeatureFlags"\)\]/],
+    ['client compatibility warnings', statusResponse, /\[JsonPropertyName\("clientCompatibilityWarnings"\)\]/]
 ];
 
-for (const [label, pattern] of backendContracts) {
-    const source = label.includes('route') && !label.includes('status') ? statusController : statusResponse;
+for (const [label, source, pattern] of backendContracts) {
     if (!pattern.test(source)) failures.push(`Missing plugin ${label}.`);
 }
 

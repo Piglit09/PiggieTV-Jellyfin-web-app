@@ -68,4 +68,33 @@ describe('notificationService', () => {
 
         expect(service.getPtvNotificationSnapshot().totalCount).toBe(0);
     });
+
+    it('sanitizes credential-bearing diagnostics before memory and local storage retention', async () => {
+        const service = await loadNotificationService();
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_TOKEN', 'notification' ].join('_');
+
+        service.addPtvNotification({
+            message: `Request failed?api_key=${accessCanary}`,
+            route: `#/quickconnect?code=${accessCanary}`,
+            source: 'request',
+            technicalDetails: {
+                config: {
+                    // eslint-disable-next-line compat/compat -- Native header sanitization is the behavior under test.
+                    headers: new Headers({ 'X-Api-Key': accessCanary })
+                },
+                tokenCount: 6
+            },
+            title: 'Authenticated request failed',
+            type: 'error'
+        });
+
+        const notification = service.getPtvNotificationSnapshot().notifications[0];
+        const snapshot = JSON.stringify(service.getPtvNotificationSnapshot());
+        const stored = window.localStorage.getItem('ptv:notifications:v1') || '';
+
+        expect(snapshot).not.toContain(accessCanary);
+        expect(stored).not.toContain(accessCanary);
+        expect(snapshot).toContain('[REDACTED]');
+        expect(notification.technicalDetails).toContain('"tokenCount": 6');
+    });
 });

@@ -3,21 +3,25 @@ export type PtvSearchGroupId =
     | 'artists'
     | 'collections'
     | 'episodes'
+    | 'genres'
     | 'movies'
     | 'music'
     | 'people'
     | 'reading'
-    | 'shows';
+    | 'shows'
+    | 'studios';
 
 export type PtvSearchFilterId =
     | 'all'
     | 'collections'
     | 'episodes'
+    | 'genres'
     | 'movies'
     | 'music'
     | 'people'
     | 'reading'
-    | 'shows';
+    | 'shows'
+    | 'studios';
 
 export type PtvSearchGroupStatus =
     | 'cancelled'
@@ -47,6 +51,8 @@ const ALL_SEARCH_GROUPS: readonly PtvSearchGroupId[] = [
     'shows',
     'collections',
     'episodes',
+    'genres',
+    'studios',
     'people',
     'reading',
     'music',
@@ -59,6 +65,8 @@ export const PTV_SEARCH_FILTERS: readonly PtvSearchFilterConfig[] = [
     { id: 'movies', label: 'Movies', groups: ['movies'] },
     { id: 'shows', label: 'Shows', groups: ['shows'] },
     { id: 'episodes', label: 'Episodes', groups: ['episodes'] },
+    { id: 'genres', label: 'Genres', groups: ['genres'] },
+    { id: 'studios', label: 'Studios', groups: ['studios'] },
     { id: 'music', label: 'Music', groups: ['music', 'albums', 'artists'] },
     { id: 'people', label: 'People', groups: ['people'] },
     { id: 'collections', label: 'Collections', groups: ['collections'] },
@@ -97,6 +105,14 @@ export function serializePtvSearchParams(query: string, filter: PtvSearchFilterI
     return Object.entries(buildPtvSearchParams(query, filter))
         .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
         .join('&');
+}
+
+export function shouldRestartPtvCommittedSearch(
+    draftWasInvalidated: boolean,
+    draftQuery: string,
+    committedQuery: string
+) {
+    return draftWasInvalidated && draftQuery.trim() === committedQuery.trim();
 }
 
 export function getPtvSearchPresentation(

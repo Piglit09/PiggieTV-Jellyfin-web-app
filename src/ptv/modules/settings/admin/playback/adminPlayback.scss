@@ -1,0 +1,287 @@
+/* Native PiggieTV server Playback administration. */
+
+.ptv-admin-playback {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-admin-playback-tabs {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    box-sizing: border-box;
+    padding: 4px;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: 15px;
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    scrollbar-width: thin;
+}
+
+.ptv-admin-playback-tabs a {
+    display: inline-flex;
+    min-width: max-content;
+    min-height: var(--ptv-touch-target-min, 44px);
+    align-items: center;
+    justify-content: center;
+    padding: 0 20px;
+    border: 1px solid transparent;
+    border-radius: 11px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.8rem;
+    font-weight: 820;
+    text-decoration: none;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-playback-tabs a[aria-selected='true'] {
+    border-color: var(--ptv-state-selected-border);
+    color: var(--ptv-color-text-strong);
+    background: var(--ptv-state-selected);
+    box-shadow: var(--ptv-state-selected-shadow);
+}
+
+.ptv-admin-playback-tabs a:hover,
+.ptv-admin-playback-tabs a:focus-visible {
+    color: var(--ptv-state-hover-text);
+    background: var(--ptv-state-hover);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: -2px;
+}
+
+.ptv-admin-playback-section,
+.ptv-admin-playback-section > .ptv-admin-configuration {
+    min-width: 0;
+}
+
+.ptv-admin-playback-section > .ptv-admin-configuration {
+    gap: 14px;
+}
+
+.ptv-admin-playback-section-heading {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 26px;
+}
+
+.ptv-admin-playback-section-heading h2 {
+    margin: 0;
+    color: var(--ptv-color-text-soft);
+    font-size: 1.05rem;
+}
+
+.ptv-admin-playback-section-heading p {
+    margin: 3px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+}
+
+.ptv-admin-playback-section-heading .ptv-admin-configuration-refreshing {
+    flex: none;
+}
+
+.ptv-admin-playback .ptv-admin-configuration-notice.is-compact {
+    margin: 0;
+}
+
+.ptv-admin-playback-transcoding-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    min-width: 0;
+    overflow: hidden;
+    margin: 0;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-md, 12px);
+    background: var(--ptv-border-divider);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+}
+
+.ptv-admin-playback-transcoding-summary > div {
+    min-width: 0;
+    padding: 11px 13px;
+    background: var(--ptv-component-panel-bg-subtle);
+}
+
+.ptv-admin-playback-transcoding-summary dt {
+    margin-bottom: 4px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.64rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ptv-admin-playback-transcoding-summary dd {
+    overflow-wrap: anywhere;
+    margin: 0;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
+.ptv-admin-playback-details {
+    grid-column: 1 / -1;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 20px);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+}
+
+.ptv-admin-playback-details > summary {
+    display: flex;
+    min-height: 58px;
+    box-sizing: border-box;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 17px;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.85rem;
+    font-weight: 850;
+    cursor: pointer;
+    list-style: none;
+}
+
+.ptv-admin-playback-details > summary::-webkit-details-marker {
+    display: none;
+}
+
+.ptv-admin-playback-details > summary::after {
+    color: var(--ptv-color-text-muted);
+    content: '+';
+    font-size: 1.25rem;
+}
+
+.ptv-admin-playback-details[open] > summary {
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-playback-details[open] > summary::after {
+    content: '–';
+}
+
+.ptv-admin-playback-details > summary:focus-visible {
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: -4px;
+}
+
+.ptv-admin-playback-details-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding: 14px;
+}
+
+.ptv-admin-playback-codecs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 18px;
+}
+
+.ptv-admin-playback-codecs .ptv-admin-configuration-toggle {
+    min-height: 64px;
+}
+
+.ptv-admin-playback-readonly-badge {
+    display: inline-flex;
+    min-height: 42px;
+    align-items: center;
+    padding: 0 10px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.65rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.ptv-admin-playback-actions-note {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.ptv-admin-playback-dialog .MuiPaper-root {
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 20px);
+    color: var(--ptv-color-text-primary);
+    background: var(--ptv-component-panel-bg, #100c1c);
+    box-shadow: var(--ptv-elevation-3-shadow);
+}
+
+.ptv-admin-playback-dialog-actions button {
+    min-height: var(--ptv-touch-target-min, 44px);
+    padding: 9px 15px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-soft);
+    background: var(--ptv-component-panel-bg-subtle);
+    font: inherit;
+    font-weight: 800;
+}
+
+.ptv-admin-playback-dialog-actions button.is-danger {
+    border-color: var(--ptv-state-danger-border);
+    color: var(--ptv-state-danger-text);
+    background: var(--ptv-state-danger-bg);
+}
+
+.ptv-admin-playback-dialog-actions button:focus-visible {
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+    .ptv-admin-playback-details-grid,
+    .ptv-admin-playback-codecs {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .ptv-admin-playback-tabs {
+        width: 100%;
+    }
+
+    .ptv-admin-playback-tabs a {
+        flex: 1 0 auto;
+        padding-right: 17px;
+        padding-left: 17px;
+    }
+
+    .ptv-admin-playback-section-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .ptv-admin-playback-transcoding-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-admin-playback-details-grid {
+        padding: 10px;
+    }
+}
+
+@media (max-width: 420px) {
+    .ptv-admin-playback-tabs a {
+        padding-right: 14px;
+        padding-left: 14px;
+    }
+
+    .ptv-admin-playback-readonly-badge {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-admin-playback-tabs a {
+        transition: none;
+    }
+}

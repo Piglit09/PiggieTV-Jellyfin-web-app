@@ -43,8 +43,12 @@ type PtvInputPipelineContext = {
 };
 
 type PtvFocusMemory = Readonly<{
+    horizontalScrollOwnerKey?: string;
     key: string;
     routeKey: string;
+    scrollLeft?: number;
+    scrollTop?: number;
+    verticalScrollOwnerKey?: string;
 }>;
 
 type PtvFocusLayer = Readonly<{
@@ -770,6 +774,117 @@ function getFocusKey(element: HTMLElement, boundary: HTMLElement) {
     return `path:${getStructuralFocusKey(element, boundary)}`;
 }
 
+type PtvScrollAxis = 'horizontal' | 'vertical';
+type PtvScrollOwner = HTMLElement | Window;
+
+function getPtvScrollOwner(element: HTMLElement, boundary: HTMLElement, axis: PtvScrollAxis): PtvScrollOwner {
+    let current = element.parentElement;
+
+    while (current) {
+        const style = window.getComputedStyle(current);
+        const overflow = axis === 'horizontal' ? style.overflowX : style.overflowY;
+        const scrollSize = axis === 'horizontal' ? current.scrollWidth : current.scrollHeight;
+        const clientSize = axis === 'horizontal' ? current.clientWidth : current.clientHeight;
+
+        if (/^(?:auto|overlay|scroll)$/.test(overflow) && scrollSize > clientSize + 1) return current;
+        if (current === boundary) break;
+        current = current.parentElement;
+    }
+
+    return window;
+}
+
+function getPtvScrollOwnerKey(owner: PtvScrollOwner, boundary: HTMLElement) {
+    if (owner === window) return 'window';
+
+    const element = owner as HTMLElement;
+
+    if (element.id) return `id:${element.id}`;
+    if (element.dataset.ptvFocusScope) return `scope:${element.dataset.ptvFocusScope}`;
+
+    const shelf = element.closest<HTMLElement>('[data-ptv-shelf-id]');
+
+    if (shelf?.dataset.ptvShelfId) {
+        return `shelf:${shelf.dataset.ptvShelfId}:${getStructuralFocusKey(element, shelf)}`;
+    }
+
+    return `path:${getStructuralFocusKey(element, boundary)}`;
+}
+
+function getPtvScrollOwnerPosition(owner: PtvScrollOwner, axis: PtvScrollAxis) {
+    if (owner === window) {
+        return axis === 'horizontal' ? window.pageXOffset || 0 : window.pageYOffset || 0;
+    }
+
+    return axis === 'horizontal' ? (owner as HTMLElement).scrollLeft : (owner as HTMLElement).scrollTop;
+}
+
+function capturePtvFocusMemory(element: HTMLElement, boundary: HTMLElement, routeKey: string): PtvFocusMemory {
+    const horizontalOwner = getPtvScrollOwner(element, boundary, 'horizontal');
+    const verticalOwner = getPtvScrollOwner(element, boundary, 'vertical');
+
+    return {
+        horizontalScrollOwnerKey: getPtvScrollOwnerKey(horizontalOwner, boundary),
+        key: getFocusKey(element, boundary),
+        routeKey,
+        scrollLeft: getPtvScrollOwnerPosition(horizontalOwner, 'horizontal'),
+        scrollTop: getPtvScrollOwnerPosition(verticalOwner, 'vertical'),
+        verticalScrollOwnerKey: getPtvScrollOwnerKey(verticalOwner, boundary)
+    };
+}
+
+function restorePtvFocusMemoryScroll(
+    element: HTMLElement,
+    boundary: HTMLElement,
+    memory: PtvFocusMemory
+) {
+    if (
+        memory.scrollLeft === undefined
+        || memory.scrollTop === undefined
+        || !memory.horizontalScrollOwnerKey
+        || !memory.verticalScrollOwnerKey
+    ) {
+        return false;
+    }
+
+    const horizontalOwner = getPtvScrollOwner(element, boundary, 'horizontal');
+    const verticalOwner = getPtvScrollOwner(element, boundary, 'vertical');
+
+    if (
+        getPtvScrollOwnerKey(horizontalOwner, boundary) !== memory.horizontalScrollOwnerKey
+        || getPtvScrollOwnerKey(verticalOwner, boundary) !== memory.verticalScrollOwnerKey
+    ) {
+        return false;
+    }
+
+    if (horizontalOwner === window && verticalOwner === window) {
+        try {
+            window.scrollTo({
+                behavior: 'auto',
+                left: memory.scrollLeft,
+                top: memory.scrollTop
+            });
+        } catch {
+            window.scrollTo(memory.scrollLeft, memory.scrollTop);
+        }
+        return true;
+    }
+
+    if (horizontalOwner === window) {
+        window.scrollTo(memory.scrollLeft, window.pageYOffset || 0);
+    } else {
+        (horizontalOwner as HTMLElement).scrollLeft = memory.scrollLeft;
+    }
+
+    if (verticalOwner === window) {
+        window.scrollTo(window.pageXOffset || 0, memory.scrollTop);
+    } else {
+        (verticalOwner as HTMLElement).scrollTop = memory.scrollTop;
+    }
+
+    return true;
+}
+
 function dispatchFocusDiagnostic(name: string, detail: Record<string, unknown>) {
     if (typeof window === 'undefined') return;
 
@@ -891,6 +1006,7 @@ class PtvTvFocusManager {
     private duplicateKeySuppressedCount = 0;
     private focusHistory: PtvTvNavigationHistoryEntry[] = [];
     private focusMemory = new Map<string, PtvFocusMemory>();
+    private pendingRouteOrigins = new Set<string>();
     private geometryFramePending = false;
     private routeDefaultFailureCount = 0;
     private lastFocusedElement: HTMLElement | null = null;
@@ -933,6 +1049,7 @@ class PtvTvFocusManager {
     }>();
     private previousFocusCategory: PtvFocusElementCategory = 'unknown';
     private previousScopeCategory: PtvFocusScopeCategory = 'unknown';
+    private suppressFocusScroll = false;
 
     private recordInputStage(
         context: PtvInputPipelineContext,
@@ -1574,12 +1691,20 @@ class PtvTvFocusManager {
     };
 
     private readonly handleRouteChange = (event: Event) => {
-        this.rememberCurrentFocus();
-
         const detail = event instanceof CustomEvent ? event.detail as PtvRouteControllerState | undefined : undefined;
         const routeState = detail || getPtvRouteControllerState();
+        const nextRouteKey = routeState?.routeKey || getLocationRouteKey();
 
-        this.lastRouteKey = routeState?.routeKey || getLocationRouteKey();
+        if (nextRouteKey === this.lastRouteKey) {
+            this.graphRebuildReason = 'duplicate-route-change';
+            this.cacheDirty = true;
+            if (this.routeRestorePending) this.scheduleRestore('route-change');
+            return;
+        }
+
+        this.rememberCurrentFocus();
+
+        this.lastRouteKey = nextRouteKey;
         this.pageType = routeState?.pageType || document.documentElement.dataset.ptvRoutePageType || '';
         this.routeOwner = routeState?.owner || document.documentElement.dataset.ptvRouteOwner || this.routeOwner;
         this.layerStack = [];
@@ -1924,6 +2049,47 @@ class PtvTvFocusManager {
             key: targetId,
             routeKey
         });
+        return true;
+    }
+
+    rememberRouteOrigin(element: HTMLElement, routeKey = getPtvRouteControllerState().routeKey) {
+        if (!element.isConnected || !routeKey) return false;
+
+        const boundary = element.closest<HTMLElement>(PAGE_SCOPE_SELECTOR) || document.body;
+        const memory = capturePtvFocusMemory(element, boundary, routeKey);
+
+        this.focusMemory.set(routeKey, memory);
+        this.pendingRouteOrigins.add(routeKey);
+
+        return true;
+    }
+
+    restoreRouteOrigin(scope: HTMLElement, routeKey = getPtvRouteControllerState().routeKey) {
+        if (!scope.isConnected || !routeKey || !this.pendingRouteOrigins.has(routeKey)) return false;
+
+        const memory = this.focusMemory.get(routeKey);
+
+        if (!memory) return false;
+
+        const candidates = Array.from(scope.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+
+        if (scope.matches(FOCUSABLE_SELECTOR)) candidates.unshift(scope);
+
+        const target = candidates.find(candidate => (
+            isPtvFocusableCandidate(candidate, scope)
+            && getFocusKey(candidate, scope) === memory.key
+        ));
+
+        if (!target || !restorePtvFocusMemoryScroll(target, scope, memory)) return false;
+
+        const focusRestored = this.focusWithoutScroll(target, 'route-origin');
+
+        if (!focusRestored) return false;
+
+        this.focusMemory.set(routeKey, memory);
+        this.pendingRouteOrigins.delete(routeKey);
+        if (routeKey === this.lastRouteKey) this.routeRestorePending = false;
+
         return true;
     }
 
@@ -2307,10 +2473,7 @@ class PtvTvFocusManager {
 
         if (!active || !cache.scope.contains(active)) return null;
 
-        return {
-            key: cache.keys.get(active) || getFocusKey(active, cache.scope),
-            routeKey: this.lastRouteKey
-        };
+        return capturePtvFocusMemory(active, cache.scope, this.lastRouteKey);
     }
 
     private closeActiveLayer(reason: string) {
@@ -2436,6 +2599,7 @@ class PtvTvFocusManager {
             && isPtvFocusableCandidate(target, pageScope)
         ) {
             this.routeRestorePending = false;
+            this.pendingRouteOrigins.delete(this.lastRouteKey);
         }
     }
 
@@ -2621,11 +2785,15 @@ class PtvTvFocusManager {
         element.classList.add('ptv-tv-focus-visible');
         this.lastFocusedElement = element;
 
-        const cache = this.getCache();
-        const key = cache.keys.get(element) || getFocusKey(element, cache.scope);
-        const entry: PtvFocusMemory = { key, routeKey: this.lastRouteKey };
+        if (!this.suppressFocusScroll) scrollFocusedElementIntoView(element);
 
-        if (!this.getActiveLayer()) this.focusMemory.set(this.lastRouteKey, entry);
+        const cache = this.getCache();
+        const entry = capturePtvFocusMemory(element, cache.scope, this.lastRouteKey);
+        const key = entry.key;
+
+        if (!this.getActiveLayer() && !this.routeRestorePending) {
+            this.focusMemory.set(this.lastRouteKey, entry);
+        }
         const playbackSurface = element.closest<HTMLElement>('[data-ptv-playback-surface]');
         const surface = playbackSurface?.dataset.ptvPlaybackSurface;
 
@@ -2646,7 +2814,6 @@ class PtvTvFocusManager {
             this.focusHistory = [...this.focusHistory, historyEntry].slice(-FOCUS_HISTORY_LIMIT);
         }
 
-        scrollFocusedElementIntoView(element);
         this.publishSnapshot();
     }
 
@@ -2656,7 +2823,6 @@ class PtvTvFocusManager {
             this.requestMovementConfirmation(element, this.activeInput);
         }
         focusElement(element);
-        scrollFocusedElementIntoView(element);
 
         if (document.activeElement === element) {
             this.confirmMovement(element);
@@ -2666,6 +2832,19 @@ class PtvTvFocusManager {
         }
         this.handleScroll();
         return false;
+    }
+
+    private focusWithoutScroll(element: HTMLElement, reason: string) {
+        this.suppressFocusScroll = true;
+
+        try {
+            if (this.enabled) return this.moveFocus(element, reason);
+
+            focusElement(element);
+            return document.activeElement === element;
+        } finally {
+            this.suppressFocusScroll = false;
+        }
     }
 
     private publishSnapshot() {
@@ -2729,8 +2908,20 @@ class PtvTvFocusManager {
         if (!this.enabled || document.hidden) return false;
 
         const cache = this.getCache();
-        let target = this.findMemoryTarget(cache, requestedMemory || this.focusMemory.get(this.lastRouteKey) || null);
+        const routeMemory = requestedMemory || this.focusMemory.get(this.lastRouteKey) || null;
+        let target = this.findMemoryTarget(cache, routeMemory);
         let source = requestedMemory ? 'requested-memory' : 'route-memory';
+
+        if (!target && routeMemory && this.routeRestorePending) {
+            this.pendingRestoreReason = reason;
+            this.recordDiagnostic('ptv-tv-focus-restore-pending', {
+                focusRestoreSource: source,
+                focusRestoreSuccess: false,
+                reason,
+                scope: classifyPtvTvFocusScope(cache.scope)
+            });
+            return false;
+        }
 
         if (!target && reason === 'menu-open-last') {
             target = cache.candidates[cache.candidates.length - 1] || null;
@@ -2781,7 +2972,18 @@ class PtvTvFocusManager {
         }
 
         this.pendingRestoreReason = '';
-        const focusRestored = this.moveFocus(target, `restore:${reason}`);
+        const scrollRestored = Boolean(
+            this.routeRestorePending
+            && routeMemory
+            && restorePtvFocusMemoryScroll(target, cache.scope, routeMemory)
+        );
+        const focusRestored = scrollRestored ?
+            this.focusWithoutScroll(target, `restore:${reason}`) :
+            this.moveFocus(target, `restore:${reason}`);
+
+        if (focusRestored && scrollRestored && routeMemory) {
+            this.focusMemory.set(this.lastRouteKey, routeMemory);
+        }
         this.completeRouteRestore(target, focusRestored);
         this.recordDiagnostic('ptv-tv-focus-restored', {
             focusedCategory: classifyPtvTvFocusElement(target),
@@ -2936,10 +3138,7 @@ class PtvTvFocusManager {
 
         const boundary = scope.contains(element) ? scope : this.cache?.scope || document.body;
 
-        return {
-            key: this.cache?.keys.get(element) || getFocusKey(element, boundary),
-            routeKey: this.lastRouteKey
-        };
+        return capturePtvFocusMemory(element, boundary, this.lastRouteKey);
     }
 }
 
@@ -2961,6 +3160,14 @@ export function getPtvTvNavigationSnapshot() {
 
 export function notifyPtvTvFocusContentReady(reason?: string) {
     tvFocusManager.notifyContentReady(reason);
+}
+
+export function rememberPtvRouteOrigin(element: HTMLElement, routeKey?: string) {
+    return tvFocusManager.rememberRouteOrigin(element, routeKey);
+}
+
+export function restorePtvRouteOrigin(scope: HTMLElement, routeKey?: string) {
+    return tvFocusManager.restoreRouteOrigin(scope, routeKey);
 }
 
 export function notifyPtvTvPlaybackFocus(active: boolean) {

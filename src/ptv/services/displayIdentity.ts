@@ -1,13 +1,51 @@
+export function normalizePtvDisplayIdentityPart(value: unknown): string {
+    return String(value || '').trim().toLocaleLowerCase();
+}
+
 export function getPtvDisplayIdentityKey(
     serverId: unknown,
     userId: unknown
 ): string | null {
-    const normalizedServerId = String(serverId || '').trim();
-    const normalizedUserId = String(userId || '').trim();
+    const normalizedServerId = normalizePtvDisplayIdentityPart(serverId);
+    const normalizedUserId = normalizePtvDisplayIdentityPart(userId);
 
     if (!normalizedServerId || !normalizedUserId) return null;
 
     return `${encodeURIComponent(normalizedServerId)}:${encodeURIComponent(normalizedUserId)}`;
+}
+
+export type PtvAuthenticatedIdentityClient = {
+    getCurrentUserId?: () => unknown;
+    serverId?: () => unknown;
+    serverInfo?: () => { Id?: unknown } | null | undefined;
+};
+
+/**
+ * Resolves the single canonical authenticated display identity shared by
+ * user-scoped caches and request coordination. Conflicting server identity
+ * observations fail closed instead of selecting one source heuristically.
+ */
+export function getPtvAuthenticatedDisplayIdentityKey(
+    apiClient: PtvAuthenticatedIdentityClient | null | undefined
+): string | null {
+    if (!apiClient) return null;
+
+    try {
+        const serverIds = [
+            apiClient.serverId?.(),
+            apiClient.serverInfo?.()?.Id
+        ]
+            .map(normalizePtvDisplayIdentityPart)
+            .filter(Boolean);
+        const uniqueServerIds = new Set(serverIds);
+        const userId = normalizePtvDisplayIdentityPart(apiClient.getCurrentUserId?.());
+
+        if (uniqueServerIds.size !== 1 || !userId) return null;
+
+        return getPtvDisplayIdentityKey(serverIds[0], userId);
+    } catch {
+        return null;
+    }
 }
 
 export class PtvIdentityScopedCache<TValue> {
@@ -49,6 +87,15 @@ export class PtvIdentityScopedCache<TValue> {
         }
 
         return true;
+    }
+
+    delete(serverId: unknown, userId: unknown): boolean {
+        const key = getPtvDisplayIdentityKey(serverId, userId);
+        return key ? this.entries.delete(key) : false;
+    }
+
+    clear(): void {
+        this.entries.clear();
     }
 
     get size() {

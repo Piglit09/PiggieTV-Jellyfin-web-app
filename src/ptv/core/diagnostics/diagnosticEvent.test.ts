@@ -45,7 +45,7 @@ describe('PTV Core diagnostics', () => {
             durationMs: 12,
             errorCode: 'API_HTTP_500'
         });
-        expect(event.metadata[sensitiveHeaderName]).toBe('[redacted]');
+        expect(event.metadata[sensitiveHeaderName]).toBe('[REDACTED]');
         expect(JSON.stringify(event.metadata)).not.toContain('person@example.test');
         expect(JSON.stringify(event.metadata)).not.toContain('token=secret');
     });

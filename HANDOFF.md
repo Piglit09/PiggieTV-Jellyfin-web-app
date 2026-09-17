@@ -4,6 +4,26 @@ Updated 2026-08-01 for Phase H1 repository hygiene.
 
 ## Current Handoff
 
+### 2026-08-31 Native LG webOS 0.1.19 Shows-library recovery
+
+The physical LG 70UN7070PUA now runs native client `0.1.19`, commit `4ff9d29` (`Scope webOS Shows library queries`), with installed production chunk `main-legacy-ZXj1APVw.js`. The Shows screen no longer issues one unscoped recursive Series query. It resolves the account's typed TV-library roots once, queries at most three roots concurrently with `ParentId`, requests only the scalar sort field, disables exact count expansion on each page, and merges/deduplicates the results while retaining the existing 12-second per-request deadline.
+
+Physical diagnosis proved the old global request was canceled twice at exactly 12 seconds and returned HTTP 504 after 102.1 seconds without the client deadline. Removing fields alone did not repair it. All three parent-scoped LAN probes returned 24 items in roughly 3.2 to 4.8 seconds. The TV had still been configured for `https://piggietv.com`; even scoped requests timed out there. Its credential-bound session was re-established through the normal sign-in flow against `http://10.16.0.50:8096` rather than weakening credential binding or transferring a token between origins.
+
+Installed-package acceptance now shows 1,065 Shows titles and 72 rendered cards. A fresh A-Z load issued three parent-scoped HTTP 200 requests to `10.16.0.50:8096` in 2.4, 7.8, and 9.9 seconds. The card count remained 72 for 20 seconds and restored at 72 after Home -> Shows, with no load error or runtime exception. Focus remained visible, although the return check left focus on the Home navigation control while Shows was current; full remote focus restoration remains part of the broader physical matrix.
+
+Focused `showsLibrary.test.tsx` passes 11/11. TypeScript and the production package build pass with only the established large-chunk warning. The specific native Shows-library loading failure is closed for this LAN configuration. Do not close the separate Jellyfin latency or full release gates: the slowest successful parent request was still 9.9 seconds, the public reverse-proxy path remains unsuitable for this TV, Movies and other catalog routes were not migrated by this change, and the complete playback/Back/focus matrix remains open. No Jellyfin Web product source changed, so the PTV Web version was not bumped.
+
+### 2026-08-31 Native LG webOS 0.1.18 recovery
+
+The separate native webOS client in `C:\Users\Piggie\Documents\GitHub\PiggieTV-WebOS` is committed as `08d8848` (`Harden webOS session and runtime recovery`), packaged, and installed on the physical LG 70UN7070PUA as version `0.1.18`. The installed application loaded the exact committed production chunk `main-legacy-B92NAWM6.js`.
+
+The native sign-in failure had two independent causes presented as one state. A failed startup restore could leave `state.startupError` set even after the built-in server test received HTTP 200. `AuthScreen` now clears only that stale startup connectivity error after successful server validation; credential and controller errors remain independently owned. The production package was rebuilt and installed after that correction.
+
+Physical post-install evidence shows authenticated Home restored with populated Featured, Continue Watching, and Next Up rows, visible focus, working route navigation, and no runtime exception. One initially timed-out lower row recovered through its normal Retry action. The native application is not the Jellyfin Web document at `/web`; it is a separate packaged React/Vite client with its own release and deployment boundary.
+
+Do not call the overall release production-ready. The same physical run still measured nondeterministic backend latency, including approximately 7.5 seconds for `Users/Me`, 9.3 seconds for Resume, and 4.3 seconds for Next Up. Lower Home rows initially entered timeout recovery states, and the complete physical route/playback matrix remains open. This task changed no shipped Jellyfin Web product source, so the PTV Web version was not bumped.
+
 Web reliability and performance work through Phase F2D-B1 is **APPROVED**.
 Phase H1 preserves that implementation, records every dirty path, removes only
 proven generated noise, and establishes local commit boundaries. No product
@@ -1295,3 +1315,7 @@ discovery, and complete physical webOS. See `ITEMS_PIPELINE_REPORT.md`.
 ## F3 implementation handoff
 
 Phase F3 Premium Collections is implemented locally after the approved H1 boundary. Product source is route-lazy and plugin-independent. Final phase approval remains gated on the requested automated, authenticated development, frozen-production, bundle, privacy, and clean-worktree evidence. No production deployment or native application expansion is part of this phase.
+
+## F3A2 handoff
+
+F3A2 is HOLD. Authenticated development and frozen-production sessions preserved one bootstrap, runtime application, ApiClient, and Jellyfin socket, and the controlled visible retry recovered without a retry loop. Three-cycle acceptance did not pass because the approved test server repeatedly timed out or failed collection sources and returned no Collection Search result for a usable Jellyfin collection. Production deep-scroll restoration and real second-user isolation also remain unproven. Continue only with Phase F3A3 - Collection Search Capability and Backend Latency Closure. Do not start F4.

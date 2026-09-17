@@ -1,0 +1,413 @@
+/* PiggieTV Administration — native Library Display */
+/* stylelint-disable no-descending-specificity */
+
+.ptv-admin-library-display {
+    display: grid;
+    gap: 18px;
+    min-width: 0;
+    color: var(--ptv-color-text-primary);
+}
+
+.ptv-admin-library-display-header {
+    display: flex;
+    gap: 24px;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+
+.ptv-admin-library-display-header h1 {
+    margin: 0;
+    color: var(--ptv-color-text-strong);
+    font-family: var(--ptv-font-accent, inherit);
+    font-size: clamp(2.15rem, 3.3vw, 3.45rem);
+    font-weight: 900;
+    letter-spacing: -0.042em;
+    line-height: 0.98;
+}
+
+.ptv-admin-library-display-header p {
+    max-width: 64ch;
+    margin: 9px 0 0;
+    color: var(--ptv-color-text-muted);
+    line-height: 1.5;
+}
+
+.ptv-admin-library-display-refreshing {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    min-height: 36px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+
+.ptv-admin-library-display-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+}
+
+.ptv-admin-library-display-section,
+.ptv-admin-library-display-error,
+.ptv-admin-library-display-notice,
+.ptv-admin-library-display-actions {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 20px);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    backdrop-filter: blur(var(--ptv-elevation-2-blur, 12px)) saturate(1.08);
+}
+
+.ptv-admin-library-display-section > header {
+    padding: 15px 17px 12px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-library-display-section > header h2 {
+    margin: 0;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.94rem;
+}
+
+.ptv-admin-library-display-section > header p {
+    margin: 5px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.73rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-library-display-section-body {
+    display: grid;
+    min-width: 0;
+    padding: 4px 17px;
+}
+
+.ptv-admin-library-display-toggle {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: center;
+    min-height: 70px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-library-display-toggle:last-child {
+    border-bottom: 0;
+}
+
+.ptv-admin-library-display-toggle > span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.ptv-admin-library-display-toggle strong {
+    color: var(--ptv-color-text-soft);
+    font-size: 0.8rem;
+}
+
+.ptv-admin-library-display-toggle small {
+    margin-top: 4px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-library-display-toggle input {
+    position: relative;
+    width: 45px;
+    height: 25px;
+    margin: 0;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: 999px;
+    background: var(--ptv-component-field-bg);
+    appearance: none;
+    cursor: pointer;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-library-display-toggle input::after {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: var(--ptv-color-text-muted);
+    content: '';
+    transition: transform var(--ptv-motion-fast) var(--ptv-motion-ease-standard), background var(--ptv-motion-fast) var(--ptv-motion-ease-standard);
+}
+
+.ptv-admin-library-display-toggle input:checked {
+    border-color: var(--ptv-state-selected-border);
+    background: var(--ptv-state-selected);
+    box-shadow: var(--ptv-state-selected-shadow);
+}
+
+.ptv-admin-library-display-toggle input:checked::after {
+    background: var(--ptv-color-text-strong);
+    transform: translateX(20px);
+}
+
+.ptv-admin-library-display-toggle input:focus-visible {
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 3px;
+}
+
+.ptv-admin-library-display-toggle input:disabled {
+    cursor: not-allowed;
+    opacity: var(--ptv-state-disabled-opacity, 0.58);
+}
+
+.ptv-admin-library-display :is(button, .ptv-button) {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--ptv-touch-target-min, 44px);
+    box-sizing: border-box;
+    padding: 9px 15px;
+    border: 1px solid var(--ptv-border-strong);
+    border-radius: var(--ptv-radius-md, 12px);
+    color: var(--ptv-color-text-soft);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 820;
+    text-decoration: none;
+    cursor: pointer;
+    transition: var(--ptv-transition-hover);
+}
+
+.ptv-admin-library-display :is(button, .ptv-button):hover:not(:disabled),
+.ptv-admin-library-display :is(button, .ptv-button):focus-visible {
+    border-color: var(--ptv-state-hover-border);
+    color: var(--ptv-state-hover-text);
+    background: var(--ptv-state-hover);
+    box-shadow: var(--ptv-state-hover-shadow);
+    outline: var(--ptv-a11y-focus-outline);
+    outline-offset: 2px;
+}
+
+.ptv-admin-library-display :is(button, .ptv-button):disabled {
+    color: var(--ptv-color-text-disabled);
+    cursor: not-allowed;
+    opacity: 0.68;
+}
+
+.ptv-admin-library-display .is-primary {
+    border-color: var(--ptv-state-focus-border);
+    color: var(--ptv-color-text-strong);
+    background: var(--ptv-state-selected);
+}
+
+.ptv-admin-library-display-error {
+    display: grid;
+    gap: 8px;
+    min-height: 250px;
+    padding: 30px;
+    text-align: center;
+    place-content: center;
+}
+
+.ptv-admin-library-display-error h2,
+.ptv-admin-library-display-error p {
+    margin: 0;
+}
+
+.ptv-admin-library-display-error h2 {
+    color: var(--ptv-color-text-soft);
+    font-size: 1.1rem;
+}
+
+.ptv-admin-library-display-error p {
+    max-width: 54ch;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.ptv-admin-library-display-error button {
+    justify-self: center;
+    margin-top: 7px;
+}
+
+.ptv-admin-library-display-notice {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 13px 15px;
+    color: var(--ptv-color-text-muted);
+}
+
+.ptv-admin-library-display-notice.is-warning {
+    border-color: var(--ptv-state-warning-border, rgba(242, 200, 120, 0.34));
+    color: var(--ptv-state-warning-text, #f2c878);
+    background: var(--ptv-state-warning-bg, rgba(92, 63, 18, 0.25));
+}
+
+.ptv-admin-library-display-notice strong {
+    color: var(--ptv-color-text-soft);
+    font-size: 0.82rem;
+}
+
+.ptv-admin-library-display-notice p {
+    margin: 3px 0 0;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.ptv-admin-library-display-actions {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 13px 15px;
+}
+
+.ptv-admin-library-display-actions > div {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.ptv-admin-library-display-feedback {
+    min-height: 1.2em;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.75rem;
+    font-weight: 760;
+    line-height: 1.4;
+}
+
+.ptv-admin-library-display-feedback.is-saved {
+    color: var(--ptv-state-success-text, #8ee8b5);
+}
+
+.ptv-admin-library-display-feedback.is-error {
+    color: var(--ptv-state-danger-text);
+}
+
+.ptv-admin-library-display-note {
+    margin: -5px 2px 0;
+    color: var(--ptv-color-text-disabled);
+    font-size: 0.72rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-library-display-section.is-skeleton {
+    pointer-events: none;
+}
+
+.ptv-admin-library-display-skeleton-line,
+.ptv-admin-library-display-skeleton-switch {
+    display: block;
+    height: 10px;
+    border-radius: 8px;
+    background: linear-gradient(90deg, rgba(var(--ptv-palette-white-rgb), 0.045), rgba(var(--ptv-palette-white-rgb), 0.1), rgba(var(--ptv-palette-white-rgb), 0.045));
+    background-size: 220% 100%;
+    animation: ptv-admin-library-display-shimmer 1.6s ease-in-out infinite;
+}
+
+.ptv-admin-library-display-skeleton-line.is-heading {
+    width: min(180px, 58%);
+    height: 13px;
+}
+
+.ptv-admin-library-display-skeleton-line.is-description {
+    width: min(320px, 82%);
+    margin-top: 10px;
+}
+
+.ptv-admin-library-display-skeleton-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px;
+    align-items: center;
+    min-height: 70px;
+    border-bottom: 1px solid var(--ptv-border-divider);
+}
+
+.ptv-admin-library-display-skeleton-row:last-child {
+    border-bottom: 0;
+}
+
+.ptv-admin-library-display-skeleton-row > .ptv-admin-library-display-skeleton-line {
+    width: 68%;
+}
+
+.ptv-admin-library-display-skeleton-switch {
+    width: 45px;
+    height: 25px;
+    border-radius: 999px;
+}
+
+@keyframes ptv-admin-library-display-shimmer {
+    0% { background-position: 160% 0; }
+    100% { background-position: -60% 0; }
+}
+
+@media (max-width: 900px) {
+    .ptv-admin-library-display-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .ptv-admin-library-display-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .ptv-admin-library-display-header h1 {
+        font-size: clamp(2rem, 9vw, 2.65rem);
+    }
+
+    .ptv-admin-library-display-notice {
+        grid-template-columns: 22px minmax(0, 1fr);
+    }
+
+    .ptv-admin-library-display-notice > button {
+        grid-column: 1 / -1;
+    }
+
+    .ptv-admin-library-display-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ptv-admin-library-display-actions > div {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 420px) {
+    .ptv-admin-library-display-section-body {
+        padding-right: 14px;
+        padding-left: 14px;
+    }
+
+    .ptv-admin-library-display-toggle {
+        gap: 12px;
+    }
+
+    .ptv-admin-library-display-actions > div {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ptv-admin-library-display-skeleton-line,
+    .ptv-admin-library-display-skeleton-switch {
+        animation: none;
+    }
+}

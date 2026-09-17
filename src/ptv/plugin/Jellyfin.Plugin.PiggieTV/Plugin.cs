@@ -1,7 +1,9 @@
 using Jellyfin.Plugin.PiggieTV.Configuration;
+using Jellyfin.Plugin.PiggieTV.Services;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Serialization;
+using MediaBrowser.Model.Plugins;
 using System.Diagnostics;
 
 namespace Jellyfin.Plugin.PiggieTV;
@@ -14,7 +16,7 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
     /// <summary>
     /// Gets the build timestamp stamped into this diagnostic plugin build.
     /// </summary>
-    public const string BuildTimestampUtc = "2026-05-25T17:43:32Z";
+    public const string BuildTimestampUtc = "2026-08-09T11:33:43Z";
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
@@ -44,4 +46,11 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
     /// Gets the current plugin instance.
     /// </summary>
     public static Plugin? Instance { get; private set; }
+
+    /// <inheritdoc />
+    public override void UpdateConfiguration(BasePluginConfiguration configuration)
+    {
+        using var mutation = PtvConfiguredRowAssociationService.BeginConfigurationMutation();
+        base.UpdateConfiguration(configuration);
+    }
 }

@@ -79,6 +79,7 @@ type PtvRecommendationSourcePool = {
 };
 
 type PtvRecommendationProviderContext = {
+    diagnosticGenerationId?: string;
     musicLibraryDetectionReason?: string | null;
     musicLibraryId?: string | null;
     musicLibraryName?: string | null;
@@ -310,6 +311,7 @@ async function requestRecommendationJson<T>(
 
     logPtvRecommendationStage('Source request started', {
         endpoint,
+        generationId: context.diagnosticGenerationId,
         libraryId: context.musicLibraryId || null,
         query: diagnosticQuery,
         source,
@@ -340,6 +342,7 @@ async function requestRecommendationJson<T>(
 
         logPtvRecommendationStage('Source request completed', {
             ...timing,
+            generationId: context.diagnosticGenerationId,
             source
         });
 
@@ -357,6 +360,7 @@ async function requestRecommendationJson<T>(
         logPtvRecommendationFailure('Source request failed', error, {
             endpoint,
             failureReason: 'api failure',
+            generationId: context.diagnosticGenerationId,
             libraryId: context.musicLibraryId || null,
             query: diagnosticQuery,
             responseBodySummary,
@@ -570,12 +574,14 @@ function fetchRecommendationSource(
     stage: string,
     task: () => Promise<PtvRecommendationItem[]>,
     options: {
+        diagnosticGenerationId?: string;
         signal?: AbortSignal;
     } = {}
 ): Promise<PtvRecommendationSourceResult> {
     const startedAt = Date.now();
 
     logPtvRecommendationStage('Source fetch started', {
+        generationId: options.diagnosticGenerationId,
         source: stage,
         startedAt
     });
@@ -602,7 +608,10 @@ function fetchRecommendationSource(
                 status: items.length ? 'success' : 'empty'
             };
 
-            logPtvRecommendationStage('Source fetch completed', timing);
+            logPtvRecommendationStage('Source fetch completed', {
+                ...timing,
+                generationId: options.diagnosticGenerationId
+            });
 
             return {
                 items,
@@ -641,6 +650,7 @@ function fetchRecommendationSource(
                 durationMs,
                 endpoint: failure.endpoint,
                 failureReason: failure.failureReason,
+                generationId: options.diagnosticGenerationId,
                 libraryId: failure.libraryId,
                 responseBodySummary: failure.responseBodySummary,
                 source: stage,
@@ -769,6 +779,7 @@ async function getItemsWithFallbacks(
 
             subqueries.push(getSourceSubqueryTiming(source, variant, items, usable));
             logPtvRecommendationStage('Source query variant completed', {
+                generationId: context.diagnosticGenerationId,
                 itemCount: items.length,
                 label: variant.label,
                 parameterUnderTest: variant.parameterUnderTest,
@@ -807,6 +818,7 @@ async function getItemsWithFallbacks(
             logPtvRecommendationFailure('Source query variant', error, {
                 endpoint: failedSubquery.endpoint,
                 failureReason: failedSubquery.failureReason,
+                generationId: context.diagnosticGenerationId,
                 label: variant.label,
                 parameterUnderTest: variant.parameterUnderTest,
                 query: failedSubquery.query,
@@ -896,6 +908,7 @@ async function getRecentlyAddedItems(context: PtvRecommendationProviderContext, 
 
         logPtvRecommendationFailure('Recently added primary endpoint', error, {
             ...primaryContext,
+            generationId: context.diagnosticGenerationId,
             source: 'recently-added'
         });
 
@@ -1030,11 +1043,17 @@ function getReadingHomeItems(context: PtvRecommendationProviderContext, limit = 
     });
 }
 
-export async function getPtvRecommendationDataBundle(options: { includeHomeScans?: boolean; signal?: AbortSignal } = {}): Promise<PtvRecommendationDataBundle> {
+export async function getPtvRecommendationDataBundle(options: {
+    diagnosticGenerationId?: string;
+    includeHomeScans?: boolean;
+    serverId?: string | null;
+    signal?: AbortSignal;
+    userId?: string | null;
+} = {}): Promise<PtvRecommendationDataBundle> {
     throwIfRecommendationAborted(options.signal);
 
-    const serverId = getPtvServerId() || 'server';
-    const userId = getPtvCurrentUserId();
+    const serverId = String(options.serverId || getPtvServerId() || 'server').trim();
+    const userId = String(options.userId || getPtvCurrentUserId() || '').trim();
     const includeHomeScans = options.includeHomeScans === true;
     const sources = [
         'favorites',
@@ -1056,6 +1075,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
     const musicLibrary = await rejectOnRecommendationAbort(
         getPtvMusicLibrary().catch(error => {
             logPtvRecommendationFailure('Music library prerequisite', error, {
+                generationId: options.diagnosticGenerationId,
                 serverId,
                 userId: userId || null
             });
@@ -1065,6 +1085,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
         options.signal
     );
     const providerContext: PtvRecommendationProviderContext = {
+        diagnosticGenerationId: options.diagnosticGenerationId,
         musicLibraryDetectionReason: musicLibrary?.detectionReason || null,
         musicLibraryId: musicLibrary?.id || null,
         musicLibraryName: musicLibrary?.name || null,
@@ -1075,6 +1096,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
 
     logPtvRecommendationStage('Provider created', {
         currentUserLoaded: Boolean(userId),
+        generationId: options.diagnosticGenerationId,
         musicLibraryDetectionReason: providerContext.musicLibraryDetectionReason,
         musicLibraryDiscovered: Boolean(providerContext.musicLibraryId),
         musicLibraryId: providerContext.musicLibraryId,
@@ -1084,6 +1106,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
     });
     logPtvRecommendationStage('Provider prerequisites resolved', {
         currentUserLoaded: Boolean(userId),
+        generationId: options.diagnosticGenerationId,
         musicLibraryDetectionReason: providerContext.musicLibraryDetectionReason,
         musicLibraryDiscovered: Boolean(providerContext.musicLibraryId),
         musicLibraryId: providerContext.musicLibraryId,
@@ -1093,6 +1116,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
     });
     logPtvRecommendationStage('Candidate fetch started', {
         currentUserLoaded: Boolean(userId),
+        generationId: options.diagnosticGenerationId,
         musicLibraryId: providerContext.musicLibraryId,
         serverId,
         sources,
@@ -1146,6 +1170,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
             .filter((timing): timing is PtvRecommendationSourceTiming => Boolean(timing));
     } catch (error) {
         logPtvRecommendationFailure('Provider creation', error, {
+            generationId: options.diagnosticGenerationId,
             serverId,
             userId: userId || null
         });
@@ -1155,6 +1180,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
     logPtvRecommendationStage('Candidate fetch completed', {
         broadCandidateCount: broadCandidates.length,
         favoriteCount: favorites.length,
+        generationId: options.diagnosticGenerationId,
         historyCount: history.length,
         musicHomeCount: musicHome.length,
         readingHomeCount: readingHome.length,
@@ -1186,6 +1212,7 @@ export async function getPtvRecommendationDataBundle(options: { includeHomeScans
         broadCandidateCount: broadCandidates.length,
         candidateCount: candidates.length,
         favoriteCount: favorites.length,
+        generationId: options.diagnosticGenerationId,
         historyCount: history.length,
         musicLibraryId: providerContext.musicLibraryId,
         musicHomeCount: musicHome.length,

@@ -6,6 +6,7 @@ import {
 import { getObserverDiagnostics } from './observer';
 import { recordPtvEvent } from './observability';
 import { getRuntimeDiagnostics, resetRuntimeScope } from './scope';
+import { ptvSafeConsole } from './safeConsole';
 import {
     cleanupDisconnectedPtvHomeHeroes,
     unmountPtvHomeHero
@@ -23,7 +24,7 @@ function isDebugEnabled() {
 function debugLog(message, detail) {
     if (!isDebugEnabled()) return;
 
-    console.debug(`[PiggieTV LifecycleSafety] ${message}`, detail);
+    ptvSafeConsole.debug(`[PiggieTV LifecycleSafety] ${message}`, detail);
 }
 
 function getHomeContainers() {

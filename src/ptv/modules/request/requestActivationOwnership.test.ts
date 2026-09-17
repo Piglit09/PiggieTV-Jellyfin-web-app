@@ -8,7 +8,6 @@ const activationSources = [
     'src/controllers/home.js',
     'src/ptv/modules/sidebar/SidebarItem.tsx',
     'src/ptv/modules/sidebar/Sidebar.tsx',
-    'src/ptv/modules/header/AppHeader.tsx',
     'src/ptv/modules/header/index.js',
     'src/ptv/modules/integrations/arrActions.js'
 ].map(file => normalizeNewlines(readFileSync(resolve(process.cwd(), file), 'utf8')));

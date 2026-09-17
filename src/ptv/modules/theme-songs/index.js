@@ -7,10 +7,14 @@ import { toApi } from '../../../utils/jellyfin-apiclient/compat';
 import { registerModule } from '../../core/lifecycle';
 import { watchElement } from '../../core/observer';
 import { createPtvAbortController } from '../../core/abortController';
+import { ptvSafeConsole } from '../../core/safeConsole';
+import {
+    DETAIL_PAGE_SELECTOR,
+    getActiveDetailsPage
+} from '../details/activeDetailsPage';
 
 import './theme-songs.scss';
 
-const DETAIL_PAGE_SELECTOR = '#itemDetailPage, .itemDetailPage';
 const PRIMARY_TARGET_SELECTOR = '.mainDetailButtons';
 const FALLBACK_TARGET_SELECTOR = '.detailRibbon';
 const TARGET_DISCOVERY_SELECTOR = `${PRIMARY_TARGET_SELECTOR}, ${FALLBACK_TARGET_SELECTOR}`;
@@ -219,7 +223,7 @@ function isCurrentEnhancement(generation, page, identity) {
         return false;
     }
 
-    if (document.querySelector(DETAIL_PAGE_SELECTOR) !== page) {
+    if (getActiveDetailsPage() !== page) {
         return false;
     }
 
@@ -241,7 +245,7 @@ function enhanceThemeSongs(generation = lifecycleGeneration) {
         return Promise.resolve();
     }
 
-    const page = document.querySelector(DETAIL_PAGE_SELECTOR);
+    const page = getActiveDetailsPage();
 
     if (!page) return Promise.resolve();
 
@@ -257,7 +261,7 @@ function enhanceThemeSongs(generation = lifecycleGeneration) {
     try {
         identity = createThemeIdentity(serverId, id);
     } catch (err) {
-        console.warn('[PiggieTV] Theme song lookup failed', err);
+        ptvSafeConsole.warn('[PiggieTV] Theme song lookup failed', err);
         removeChip(page);
 
         return Promise.resolve();
@@ -281,7 +285,7 @@ function enhanceThemeSongs(generation = lifecycleGeneration) {
         } catch (err) {
             if (!isCurrentEnhancement(generation, page, identity)) return;
 
-            console.warn('[PiggieTV] Theme song lookup failed', err);
+            ptvSafeConsole.warn('[PiggieTV] Theme song lookup failed', err);
             removeChip(page);
         }
     })();
@@ -396,21 +400,23 @@ function disconnectObservedPage() {
     observedPage = null;
 }
 
-function observeDetailsPage(page) {
-    if (!active || page === observedPage) return;
+function observeDetailsPage() {
+    const activePage = getActiveDetailsPage();
+
+    if (!active || !activePage || activePage === observedPage) return;
 
     disconnectObservedPage();
-    observedPage = page;
+    observedPage = activePage;
 
     if (currentScope?.mutationObserver) {
-        stopObservingPage = currentScope.mutationObserver(onPageMutations, page, {
+        stopObservingPage = currentScope.mutationObserver(onPageMutations, activePage, {
             childList: true,
             subtree: true
         });
     } else {
         const observer = new MutationObserver(onPageMutations);
 
-        observer.observe(page, {
+        observer.observe(activePage, {
             childList: true,
             subtree: true
         });
@@ -428,7 +434,7 @@ function onDetailsPageMissing() {
 function onViewShow(event) {
     if (!active) return;
 
-    removeChip(document.querySelector(DETAIL_PAGE_SELECTOR));
+    document.querySelectorAll(DETAIL_PAGE_SELECTOR).forEach(removeChip);
     retireActiveRequest();
     currentParams = event.detail?.params || {};
     beginGeneration();
@@ -456,10 +462,10 @@ function init({ scope } = {}) {
             onMissing: onDetailsPageMissing
         });
 
-    const page = document.querySelector(DETAIL_PAGE_SELECTOR);
+    const page = getActiveDetailsPage();
 
     if (page) {
-        observeDetailsPage(page);
+        observeDetailsPage();
     } else {
         scheduleEnhancement();
     }
@@ -473,8 +479,6 @@ function refresh() {
 }
 
 function destroy() {
-    const page = observedPage;
-
     active = false;
     retireActiveRequest();
     beginGeneration();
@@ -483,7 +487,7 @@ function destroy() {
     stopWatchingDetails?.();
     stopWatchingDetails = null;
     disconnectObservedPage();
-    removeChip(page);
+    document.querySelectorAll(DETAIL_PAGE_SELECTOR).forEach(removeChip);
     currentParams = {};
     currentScope = null;
 }

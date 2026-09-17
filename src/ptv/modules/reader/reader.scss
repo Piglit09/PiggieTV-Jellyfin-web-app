@@ -68,25 +68,42 @@
 .ptv-reader-comic {
     position: relative;
     z-index: 1;
-    display: flex;
+    display: block;
     width: 100%;
     height: 100%;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
     overflow: auto;
+    scrollbar-gutter: stable;
 }
 
 .ptv-reader-pdf.is-continuous,
 .ptv-reader-comic--continuous {
-    align-items: center;
-    justify-content: flex-start;
+    display: flex;
     flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
     padding-bottom: 4rem;
 }
 
+.ptv-reader-page-stage {
+    box-sizing: border-box;
+    display: flex;
+    width: max-content;
+    min-width: 100%;
+    height: max-content;
+    min-height: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 0.5rem;
+}
+
+.ptv-reader-comic--continuous .ptv-reader-page-stage,
+.ptv-reader-pdf.is-continuous .ptv-reader-page-stage {
+    flex: 0 0 auto;
+}
+
 .ptv-reader-pdf-page {
-    max-width: 100%;
+    flex: 0 0 auto;
     border-radius: 6px;
     background: #fff;
     box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
@@ -94,26 +111,16 @@
 
 .ptv-reader-comic-page {
     display: block;
+    flex: 0 0 auto;
     max-width: 100%;
     max-height: 100%;
     border-radius: 6px;
-    object-fit: contain;
     box-shadow: 0 24px 72px rgba(0, 0, 0, 0.46);
 }
 
-.ptv-reader-comic-page.is-fit-width {
-    width: min(100%, 1280px);
-    height: auto;
-}
-
-.ptv-reader-comic-page.is-fit-height {
-    width: auto;
-    height: 100%;
-}
-
-.ptv-reader-comic-page.is-fit-page {
-    width: auto;
-    height: auto;
+.ptv-reader-comic-page[style] {
+    max-width: none;
+    max-height: none;
 }
 
 .ptv-reader-toolbar {
@@ -122,12 +129,15 @@
     inset: 0 0 auto;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 180ms ease;
+    visibility: hidden;
+    transition: opacity 180ms ease, visibility 0s linear 180ms;
 }
 
 .ptv-reader-toolbar.is-visible {
     pointer-events: auto;
     opacity: 1;
+    visibility: visible;
+    transition-delay: 0s;
 }
 
 .ptv-reader-toolbar__top,
@@ -147,10 +157,20 @@
 .ptv-reader-toolbar__bottom {
     position: fixed;
     inset: auto 0 1.1rem;
-    justify-content: center;
     width: fit-content;
     max-width: calc(100% - 2rem);
     margin-inline: auto;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+
+.ptv-reader-toolbar__zoom {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding-inline: 0.55rem;
+    border-inline: 1px solid rgba(246, 242, 255, 0.16);
 }
 
 .ptv-reader-toolbar__title {
@@ -191,6 +211,16 @@
     background: linear-gradient(135deg, rgba(39, 200, 255, 0.22), rgba(253, 56, 192, 0.2));
 }
 
+.ptv-reader button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.ptv-reader button[aria-pressed="true"] {
+    border-color: rgba(39, 200, 255, 0.92);
+    background: linear-gradient(135deg, rgba(39, 200, 255, 0.28), rgba(253, 56, 192, 0.2));
+}
+
 .ptv-reader-toolbar-button {
     display: inline-flex;
     align-items: center;
@@ -225,6 +255,23 @@
     color: #f8fbff;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     font-weight: 800;
+}
+
+.ptv-reader-toolbar-button--zoom-out .ptv-reader-toolbar-button__label,
+.ptv-reader-toolbar-button--zoom-in .ptv-reader-toolbar-button__label,
+.ptv-reader-toolbar-button--reset-zoom .ptv-reader-toolbar-button__label,
+.ptv-reader-toolbar-button--fit-page .ptv-reader-toolbar-button__label,
+.ptv-reader-toolbar-button--fit-width .ptv-reader-toolbar-button__label {
+    display: none;
+}
+
+.ptv-reader-toolbar-button--reset-zoom .ptv-reader-toolbar-button__glyph {
+    min-width: 3.45rem;
+}
+
+.ptv-reader-toolbar-button--fit-page .ptv-reader-toolbar-button__glyph,
+.ptv-reader-toolbar-button--fit-width .ptv-reader-toolbar-button__glyph {
+    min-width: 3.25rem;
 }
 
 .ptv-reader-toolbar-button--close .ptv-reader-toolbar-button__glyph {
@@ -373,8 +420,7 @@
     }
 
     .ptv-reader-toolbar__bottom {
-        overflow-x: auto;
-        justify-content: flex-start;
+        max-width: calc(100% - 0.9rem);
     }
 
     .ptv-reader-toolbar-button {

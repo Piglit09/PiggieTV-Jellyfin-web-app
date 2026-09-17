@@ -1,3 +1,3 @@
-import PiggieTvRowsPage from 'ptv/modules/dashboard/PiggieTvRowsPage';
+import { LegacyPiggietvRowsRedirect } from './LegacyPiggietvAdminRedirect';
 
-export const Component = PiggieTvRowsPage;
+export const Component = LegacyPiggietvRowsRedirect;

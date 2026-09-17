@@ -61,6 +61,14 @@ public static class PtvApiRoutes
     public const string V1SettingsReset = $"{V1}/settings/reset";
 
     /// <summary>
+    /// Versioned authoritative relationship route.
+    /// </summary>
+    public const string V1Relationships = $"{V1}/relationships";
+
+    /// <summary>Versioned authoritative recommendation ranking route.</summary>
+    public const string V2RecommendationRank = "v2/recommendations/rank";
+
+    /// <summary>
     /// Versioned item image diagnostics route.
     /// </summary>
     public const string V1ImageDiagnostics = $"{V1}/diagnostics/images";
@@ -73,6 +81,9 @@ public static class PtvApiRoutes
     /// <summary>Versioned rolling diagnostics storage route.</summary>
     public const string V1DiagnosticsStorage = $"{V1}/diagnostics/storage";
 
+    /// <summary>Versioned authenticated media issue reporting route.</summary>
+    public const string V1MediaReports = $"{V1}/reports/media";
+
     /// <summary>
     /// Versioned music metadata lookup route.
     /// </summary>
@@ -82,6 +93,12 @@ public static class PtvApiRoutes
     /// Versioned Google Books metadata lookup route.
     /// </summary>
     public const string V1GoogleBooksMetadataSearch = $"{V1}/reading/metadata/googlebooks/search";
+
+    /// <summary>Versioned provider-neutral Reading metadata provider inventory.</summary>
+    public const string V1ReadingMetadataProviders = $"{V1}/reading/metadata/providers";
+
+    /// <summary>Versioned provider-neutral Reading metadata identification route.</summary>
+    public const string V1ReadingMetadataSearch = $"{V1}/reading/metadata/search";
 
     /// <summary>
     /// Legacy unversioned status route.

@@ -31,8 +31,21 @@ export type PtvLibraryIndexCacheReadOptions = {
 };
 
 export type PtvLibraryIndexCacheWriteOptions = {
+    shouldWrite?: () => boolean;
     scope?: PtvCoreScope;
     staleWhileRevalidateMs?: number;
+};
+
+export type PtvLibraryIndexCacheUpdateResult =
+    | 'deleted-invalid'
+    | 'failed'
+    | 'missing'
+    | 'retired'
+    | 'unchanged'
+    | 'updated';
+
+export type PtvLibraryIndexCacheUpdateOptions = PtvLibraryIndexCacheReadOptions & {
+    shouldWrite?: () => boolean;
 };
 
 function getIndexedDb(): IDBFactory | null {
@@ -261,7 +274,7 @@ export async function writePtvLibraryIndexCache<TData>(
     try {
         const store = await getStore('readwrite');
 
-        if (!store) return;
+        if (!store || options.shouldWrite?.() === false) return;
 
         const createdAtMs = Date.now();
         const expiresAtMs = createdAtMs + ttlMs;
@@ -289,6 +302,74 @@ export async function writePtvLibraryIndexCache<TData>(
             error: error instanceof Error ? error.message : String(error),
             key
         });
+    }
+}
+
+export async function updatePtvLibraryIndexCache<TData>(
+    key: string,
+    schemaVersion: number,
+    update: (current: TData) => TData,
+    options: PtvLibraryIndexCacheUpdateOptions = {}
+): Promise<PtvLibraryIndexCacheUpdateResult> {
+    try {
+        if (options.shouldWrite?.() === false) return 'retired';
+
+        const store = await getStore('readwrite');
+
+        if (!store) return 'missing';
+
+        const value = await requestResult(store.get(key)) as unknown;
+
+        if (!value) return 'missing';
+        if (options.shouldWrite?.() === false) return 'retired';
+
+        const inspection = inspectPtvLibraryIndexCacheRecord<TData>(
+            value,
+            key,
+            schemaVersion,
+            { ...options, allowStale: true }
+        );
+
+        if (
+            (inspection.outcome !== 'hit' && inspection.outcome !== 'stale')
+            || !inspection.envelope
+        ) {
+            if (options.shouldWrite?.() === false) return 'retired';
+            await requestResult(store.delete(key));
+            recordPtvEvent('cache', 'library-index-cache-update-invalid-deleted', {
+                outcome: inspection.outcome
+            });
+            return 'deleted-invalid';
+        }
+
+        const nextPayload = update(inspection.envelope.payload);
+
+        if (nextPayload === inspection.envelope.payload) return 'unchanged';
+
+        const nextEnvelope = createPtvCacheEnvelope({
+            createdAt: inspection.envelope.createdAt,
+            expiresAt: inspection.envelope.expiresAt,
+            key: inspection.envelope.key,
+            payload: nextPayload,
+            payloadBytes: getSerializedPayloadBytes(nextPayload),
+            schemaVersion: inspection.envelope.schemaVersion,
+            scope: inspection.envelope.scope,
+            staleWhileRevalidateUntil: inspection.envelope.staleWhileRevalidateUntil
+        });
+
+        if (options.shouldWrite?.() === false) return 'retired';
+        await requestResult(store.put(nextEnvelope));
+        recordPtvEvent('cache', 'library-index-cache-updated', {
+            result: 'updated'
+        });
+        return 'updated';
+    } catch (error) {
+        if (options.shouldWrite?.() === false) return 'retired';
+        await deletePtvLibraryIndexCache(key);
+        recordPtvEvent('cache', 'library-index-cache-update-failed', {
+            reason: error instanceof Error ? 'indexed-db-error' : 'unknown-error'
+        });
+        return 'failed';
     }
 }
 

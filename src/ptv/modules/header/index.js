@@ -36,6 +36,8 @@ const HEADER_ICON_CLASS_MAP = [
 ];
 const OWNED_TABS_SELECTOR = '[data-ptv-owned-tabs="true"]';
 const STOCK_TABS_HIDDEN_CLASS = 'ptv-stock-home-tabs-hidden';
+const HEADER_HERO_TOP_CLASS = 'ptv-header-over-home-hero';
+const HEADER_GLASS_SCROLL_THRESHOLD = 18;
 const TOP_TABS = [
     {
         icon: 'home',
@@ -80,6 +82,29 @@ function isHomeRoute() {
         || hash === PTV_ROUTES.homeHtml
         || hash.startsWith(`${PTV_ROUTES.home}?`)
         || hash.startsWith(`${PTV_ROUTES.homeHtml}?`);
+}
+
+function getHeaderScrollTop(eventTarget) {
+    const activePage = document.querySelector('.mainAnimatedPage:not(.hide):not(.hidden), .ptv-native-home, .ptv-shell-content');
+    const candidates = [
+        eventTarget instanceof Element ? eventTarget : null,
+        activePage,
+        document.documentElement,
+        document.body
+    ];
+
+    return Math.max(
+        window.scrollY || 0,
+        ...candidates.map(candidate => Number(candidate?.scrollTop || 0))
+    );
+}
+
+function syncHeaderSurface(event) {
+    const overHomeHero = isHomeRoute()
+        && getHeaderScrollTop(event?.target) <= HEADER_GLASS_SCROLL_THRESHOLD;
+
+    document.documentElement.classList.toggle(HEADER_HERO_TOP_CLASS, overHomeHero);
+    document.body?.classList.toggle(HEADER_HERO_TOP_CLASS, overHomeHero);
 }
 
 function isRequestRoute() {
@@ -644,6 +669,7 @@ function enhanceHeaderIcons() {
 }
 
 headerScope.watchDom(() => {
+    syncHeaderSurface();
     enhanceHeaderIcons();
     cleanupSidebarBranding();
     scheduleHeaderRepair();
@@ -659,10 +685,16 @@ headerScope.watchDom(() => {
     ['pagebeforeshow', document]
 ].forEach(([eventName, target]) => {
     headerScope.listen(target, eventName, () => {
+        syncHeaderSurface();
         cleanupSidebarBranding();
         enhanceHeaderIcons();
         scheduleHeaderRepair();
     });
+});
+
+headerScope.listen(document, 'scroll', syncHeaderSurface, {
+    capture: true,
+    passive: true
 });
 
 patchHeaderHistoryEvents();
@@ -682,5 +714,6 @@ registerModule({
 });
 
 startPtvIconEngine();
+syncHeaderSurface();
 enhanceHeaderIcons();
 scheduleHeaderRepair();

@@ -3,11 +3,23 @@ import { flushSync } from 'react-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../shell/PTVShell', () => ({
-    default: ({ headerOnly, section }: { headerOnly?: boolean; section?: string }) => (
+    default: ({
+        headerOnly,
+        navigationVariant,
+        section,
+        showBackButton
+    }: {
+        headerOnly?: boolean;
+        navigationVariant?: string;
+        section?: string;
+        showBackButton?: boolean;
+    }) => (
         <header
             className='ptv-shell-header'
             data-header-only={String(Boolean(headerOnly))}
+            data-navigation-variant={navigationVariant}
             data-section={section}
+            data-show-back={String(Boolean(showBackButton))}
         />
     )
 }));
@@ -45,7 +57,9 @@ describe('PTV details shell ownership', () => {
 
         expect(host).not.toBeNull();
         expect(header?.dataset.headerOnly).toBe('true');
+        expect(header?.dataset.navigationVariant).toBe('details');
         expect(header?.dataset.section).toBe('movies');
+        expect(header?.dataset.showBack).toBe('true');
 
         flushSync(() => setPtvDetailsShellSection('shows'));
         expect(host?.querySelector<HTMLElement>('.ptv-shell-header')?.dataset.section).toBe('shows');

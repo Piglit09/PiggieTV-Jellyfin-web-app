@@ -3,6 +3,13 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const shellSource = readFileSync(resolve(process.cwd(), 'src/ptv/styles/shell.scss'), 'utf8');
+const homeSource = readFileSync(resolve(process.cwd(), 'src/ptv/pages/home/nativeHome.scss'), 'utf8');
+const browseSource = readFileSync(resolve(process.cwd(), 'src/ptv/pages/browse/nativeBrowse.scss'), 'utf8');
+const searchSource = readFileSync(resolve(process.cwd(), 'src/ptv/pages/search/nativeSearch.scss'), 'utf8');
+const musicSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/music/music.scss'), 'utf8');
+const booksSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/books/books.scss'), 'utf8');
+const collectionsSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/collections/collections.scss'), 'utf8');
+const detailsSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/details/details-shell.scss'), 'utf8');
 
 describe('PTV shell geometry ownership', () => {
     it('does not convert Jellyfin route containers into normal-flow shell content', () => {
@@ -13,5 +20,22 @@ describe('PTV shell geometry ownership', () => {
 
     it('keeps relative positioning scoped to the PTV-owned shell page', () => {
         expect(shellSource).toMatch(/\.ptv-shell-page\s*\{[^}]*position:\s*relative/);
+    });
+
+    it('shares one near-edge content-width contract across product routes', () => {
+        expect(shellSource).toContain('--ptv-content-edge:');
+        [homeSource, browseSource, searchSource, musicSource, booksSource, collectionsSource, detailsSource]
+            .forEach(source => {
+                expect(source).toContain('--ptv-content-edge');
+            });
+        expect(musicSource).not.toContain('width: min(100%, 1760px)');
+        expect(booksSource).not.toContain('width: min(100%, 1800px)');
+        expect(collectionsSource).not.toContain('width: calc(100% - clamp(2rem, 7vw, 8rem))');
+    });
+
+    it('places Home utilities below the shared shell header clearance', () => {
+        expect(shellSource).toMatch(/--ptv-utility-safe-top:\s*calc\(var\(--ptv-shell-header-top/);
+        expect(shellSource).toContain('--ptv-shell-header-clearance-height: 126px');
+        expect(homeSource).toMatch(/\.ptv-native-home-controls\s*\{[^}]*top:\s*var\(--ptv-utility-safe-top/);
     });
 });

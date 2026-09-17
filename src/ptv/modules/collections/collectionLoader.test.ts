@@ -69,6 +69,18 @@ describe('Collection loader lifecycle', () => {
         expect(api.getItems).toHaveBeenCalledTimes(1);
     });
 
+    it('re-verifies an authoritative BoxSet when its direct detail shape cannot normalize', async () => {
+        api.getItem.mockResolvedValueOnce({ Id: 'set', Name: 'Saga', Type: 'Folder' });
+        api.getItems
+            .mockResolvedValueOnce({ Items: [{ Id: 'a', Name: 'A', Type: 'Movie' }] })
+            .mockResolvedValueOnce({ Items: [{ Id: 'set', Name: 'Saga', Type: 'BoxSet' }] });
+
+        await expect(loadPtvCollectionDetails('jellyfin:set', createPtvAbortController().signal))
+            .resolves.toMatchObject({ memberCount: 1, sourceType: 'jellyfin' });
+        expect(api.getItem).toHaveBeenCalledTimes(1);
+        expect(api.getItems).toHaveBeenCalledTimes(2);
+    });
+
     it('builds truthful visible sections after partial deferred failure', () => {
         const critical: PtvPortableCollection[] = [{
             artworkCandidates: [], backdropCandidates: [], capabilities: {

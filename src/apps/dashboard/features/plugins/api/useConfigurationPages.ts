@@ -5,8 +5,9 @@ import { queryOptions, useQuery } from '@tanstack/react-query';
 import type { AxiosRequestConfig } from 'axios';
 
 import { useApi } from 'hooks/useApi';
+import { usePtvAuthenticatedIdentity } from 'ptv/api/usePtvAuthenticatedIdentity';
 
-import { QueryKey } from './queryKey';
+import { getConfigurationPagesQueryKey } from './queryKey';
 
 const fetchConfigurationPages = async (
     api: Api,
@@ -20,16 +21,18 @@ const fetchConfigurationPages = async (
 
 const getConfigurationPagesQuery = (
     api?: Api,
+    serverId = '',
     params?: DashboardApiGetConfigurationPagesRequest
 ) => queryOptions({
-    queryKey: [ QueryKey.ConfigurationPages, params?.enableInMainMenu ],
+    queryKey: getConfigurationPagesQueryKey(serverId, params?.enableInMainMenu),
     queryFn: ({ signal }) => fetchConfigurationPages(api!, params, { signal }),
-    enabled: !!api
+    enabled: Boolean(api && serverId)
 });
 
 export const useConfigurationPages = (
     params?: DashboardApiGetConfigurationPagesRequest
 ) => {
     const { api } = useApi();
-    return useQuery(getConfigurationPagesQuery(api, params));
+    const { serverId } = usePtvAuthenticatedIdentity();
+    return useQuery(getConfigurationPagesQuery(api, serverId, params));
 };

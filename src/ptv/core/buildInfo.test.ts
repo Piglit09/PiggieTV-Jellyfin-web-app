@@ -6,8 +6,8 @@ import {
     getPtvBuildInfo
 } from './buildInfo';
 
-const OLD_PLUGIN_VERSION = ['10', '11', '8', '1'].join('.');
-const CURRENT_PLUGIN_VERSION = ['10', '11', '8', '2'].join('.');
+const OLD_PLUGIN_VERSION = ['0', '4', '0', '0'].join('.');
+const CURRENT_PLUGIN_VERSION = ['0', '5', '0', '0'].join('.');
 
 const READING_OVERRIDES_FEATURE = {
     featureFlags: { readingSeriesOverrides: true },
@@ -23,6 +23,7 @@ describe('PiggieTV build information', () => {
         expect(info.cacheSchemaVersion).toBe(7);
         expect(info.frontendBuildDate).not.toBe('unknown');
         expect(info.frontendBuildId).not.toBe('unknown');
+        expect(info.ptvWebVersion).not.toBe('unknown');
     });
 
     it('reports development and production overrides', () => {
@@ -31,7 +32,8 @@ describe('PiggieTV build information', () => {
             frontendBuildDate: '2026-07-14T12:00:00.000Z',
             frontendBuildId: 'dev-build',
             frontendCommitSha: 'abc123',
-            jellyfinWebVersion: '10.11.11'
+            jellyfinWebVersion: '10.11.11',
+            ptvWebVersion: '0.5.0'
         });
         const production = getPtvBuildInfo(undefined, {
             environment: 'production',
@@ -40,6 +42,8 @@ describe('PiggieTV build information', () => {
 
         expect(development.environment).toBe('development');
         expect(development.frontendBuildDate).toBe('2026-07-14T12:00:00.000Z');
+        expect(development.jellyfinWebVersion).toBe('10.11.11');
+        expect(development.ptvWebVersion).toBe('0.5.0');
         expect(production.environment).toBe('production');
     });
 
@@ -60,23 +64,21 @@ describe('PiggieTV build information', () => {
             pluginVersion: OLD_PLUGIN_VERSION,
             features: ['status', 'featuredContent']
         }, {
-            jellyfinWebVersion: '10.11.11',
             pluginConnected: true
         });
 
         expect(result.compatibility).toBe('capability-upgrade-required');
-        expect(result.compatibilityMessage).toContain(CURRENT_PLUGIN_VERSION);
+        expect(result.compatibilityMessage).toContain('Reading persistence support');
         expect(result.compatibilityMessage).toContain('server-persisted Reading corrections');
     });
 
-    it('accepts plugin 10.11.8.2 when Reading persistence is advertised', () => {
+    it('accepts independently versioned plugin 0.5.0.0 when API, cache, and capabilities match', () => {
         const result = classifyPtvBuildCompatibility({
             apiVersion: 1,
             cacheVersion: 7,
             pluginVersion: CURRENT_PLUGIN_VERSION,
             ...READING_OVERRIDES_FEATURE
         }, {
-            jellyfinWebVersion: '10.11.11',
             pluginConnected: true
         });
 
@@ -94,11 +96,13 @@ describe('PiggieTV build information', () => {
             frontendBuildId: '10.11.11',
             frontendCommitSha: 'abc123',
             jellyfinWebVersion: '10.11.11',
+            ptvWebVersion: '0.5.0',
             pluginConnected: true
         });
         const compact = formatPtvBuildInfoCompact(info);
 
         expect(compact).toContain('commit=abc123');
+        expect(compact).toContain('ptvWeb=0.5.0');
         expect(compact).toContain('readingOverrides=available');
         expect(compact).toContain('compatibility=compatible');
         expect(compact).not.toContain('http');

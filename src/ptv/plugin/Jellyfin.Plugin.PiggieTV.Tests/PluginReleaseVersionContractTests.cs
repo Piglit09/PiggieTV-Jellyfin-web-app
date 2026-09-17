@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.PiggieTV.Tests;
 
 public sealed class PluginReleaseVersionContractTests
 {
-    private const string ExpectedPluginVersion = "10.11.8.2";
+    private const string ExpectedPluginVersion = "0.5.18.0";
 
     [Fact]
     public void AssemblyAndStatusReportCurrentPluginVersion()
@@ -27,6 +27,6 @@ public sealed class PluginReleaseVersionContractTests
         using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
 
         Assert.Equal(ExpectedPluginVersion, manifest.RootElement.GetProperty("version").GetString());
-        Assert.Equal("10.11.8.0", manifest.RootElement.GetProperty("targetAbi").GetString());
+        Assert.Equal("10.11.11.0", manifest.RootElement.GetProperty("targetAbi").GetString());
     }
 }

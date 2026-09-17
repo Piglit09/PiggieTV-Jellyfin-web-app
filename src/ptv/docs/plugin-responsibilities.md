@@ -14,6 +14,9 @@ The PiggieTV Jellyfin plugin should stay focused. It is not a second frontend.
 - manual admin refresh endpoint
 - optional server-side TMDb metadata enrichment for featured row matching
 - admin-only plugin settings storage for dashboard controls
+- authoritative cross-library relationship mappings in plugin configuration
+- authenticated, per-user visibility-filtered relationship reads
+- administrator-only relationship creation, update, and deletion
 
 ## Owns Next
 
@@ -38,6 +41,8 @@ Featured-content cache reads are authenticated-user endpoints. TV clients and no
 Featured-content cache writes, clears, and manual refreshes are admin/elevated-only. This prevents broken clients or browser extensions from poisoning or thrashing the shared homepage cache for every user.
 
 Admin-only endpoints are used for plugin settings that mutate server policy, refresh behavior, performance limits, or server-side credentials.
+
+Authoritative relationship mappings are shared server configuration. Both endpoint identities must resolve through Jellyfin, the media families must differ, and categories are allowlisted. Reads are authenticated and omit unavailable or user-invisible endpoints. Mutations are administrator-only. Relationship logs contain categories and counts only, never item or mapping identities.
 
 ## Secret Rule
 

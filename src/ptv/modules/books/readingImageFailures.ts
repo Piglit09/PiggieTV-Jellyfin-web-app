@@ -28,6 +28,7 @@ export function normalizePtvReadingImageRoute(route: string | null | undefined) 
 
 export function createPtvReadingImageFailureRegistry() {
     const states = new Map<string, PtvReadingImageFailureState>();
+    const retryEpochs = new Map<string, Map<string, number>>();
 
     function get(route: string | null | undefined) {
         const routeKey = normalizePtvReadingImageRoute(route);
@@ -46,7 +47,15 @@ export function createPtvReadingImageFailureRegistry() {
 
         if (!normalizedItemId) return;
 
-        const state = get(route);
+        const routeKey = normalizePtvReadingImageRoute(route);
+        const state = get(routeKey);
+        let routeRetryEpochs = retryEpochs.get(routeKey);
+
+        if (!routeRetryEpochs) {
+            routeRetryEpochs = new Map<string, number>();
+            retryEpochs.set(routeKey, routeRetryEpochs);
+        }
+        routeRetryEpochs.set(normalizedItemId, (routeRetryEpochs.get(normalizedItemId) || 0) + 1);
 
         for (const id of Array.from(state.failedCoverItemIds)) {
             if (id.toLowerCase() === normalizedItemId) state.failedCoverItemIds.delete(id);
@@ -64,5 +73,12 @@ export function createPtvReadingImageFailureRegistry() {
         }
     }
 
-    return { clearForItem, get };
+    function getRetryEpoch(route: string | null | undefined, itemId: string | null | undefined) {
+        const routeKey = normalizePtvReadingImageRoute(route);
+        const normalizedItemId = String(itemId || '').trim().toLowerCase();
+
+        return retryEpochs.get(routeKey)?.get(normalizedItemId) || 0;
+    }
+
+    return { clearForItem, get, getRetryEpoch };
 }

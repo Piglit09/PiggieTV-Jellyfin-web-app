@@ -5,6 +5,7 @@ import {
     getPtvAuthenticationRouteKind,
     isPtvLoginRoute
 } from './authenticationRoutes';
+import { isPtvRequestFeatureRoute } from '../modules/extendedFeatureRoutes';
 
 const ROUTE_MATCHERS = [
     {
@@ -137,7 +138,7 @@ const ROUTE_MATCHERS = [
         navigationItemId: 'request',
         owner: 'request',
         pageType: 'request',
-        pattern: () => document.documentElement.classList.contains('ptv-request-active')
+        pattern: ({ hash }) => isPtvRequestFeatureRoute(hash)
     },
     {
         className: 'ptv-route-calendar',

@@ -1,5 +1,6 @@
 import { importModule } from '@uupaa/dynamic-import-polyfill';
 import './viewManager/viewContainer.scss';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import Dashboard from '../utils/dashboard';
 
 const getMainAnimatedPages = () => {
@@ -185,7 +186,7 @@ export function setOnBeforeChange(fn) {
 }
 
 export function tryRestoreView(options) {
-    console.debug('[viewContainer] tryRestoreView', options);
+    ptvSafeConsole.debug('[viewContainer] tryRestoreView', options);
     const url = options.url;
     const index = currentUrls.indexOf(url);
 

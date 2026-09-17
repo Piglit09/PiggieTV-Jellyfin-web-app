@@ -454,7 +454,7 @@ registerModule({
         navigationItemId: 'request',
         owner: 'request',
         pageType: 'request',
-        pattern: () => document.documentElement.classList.contains('ptv-request-active'),
+        pattern: ({ hash }) => isPtvRequestFeatureRoute(hash),
         surface: 1
     },
     surface: 1,

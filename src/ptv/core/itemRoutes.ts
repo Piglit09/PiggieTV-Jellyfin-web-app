@@ -4,7 +4,7 @@ import {
     shouldCollectDiagnostics
 } from './observability';
 
-export type PtvItemRouteSource = 'jellyfin-fallback' | 'ptv-collections' | 'ptv-music' | 'ptv-reading' | 'ptv-video';
+export type PtvItemRouteSource = 'jellyfin-fallback' | 'jellyfin-list' | 'ptv-collections' | 'ptv-music' | 'ptv-reading' | 'ptv-video';
 
 export type PtvItemRouteResult = {
     fallbackReason: string;
@@ -18,6 +18,7 @@ export type PtvItemRouteContext = {
     fallbackHref?: string;
     mediaType?: string;
     privacySafeDiagnostics?: boolean;
+    serverId?: string;
     source?: string;
 };
 
@@ -25,6 +26,11 @@ type PtvRouteItem = Record<string, unknown> | null | undefined;
 
 const READING_CONTAINERS = new Set(['cb7', 'cbr', 'cbt', 'cbz', 'epub', 'pdf']);
 const COMIC_CONTAINERS = new Set(['cb7', 'cbr', 'cbt', 'cbz']);
+const JELLYFIN_LIST_PARAM_BY_TYPE = new Map([
+    ['genre', 'genreId'],
+    ['musicgenre', 'musicGenreId'],
+    ['studio', 'studioId']
+]);
 
 function getRecordString(item: PtvRouteItem, ...keys: string[]) {
     if (!item) return '';
@@ -50,12 +56,9 @@ function getNormalizedItemText(item: PtvRouteItem, context: PtvItemRouteContext)
     return [
         context.mediaType,
         getRecordString(item, 'PtvReadingLibraryKindHint', 'ptvReadingLibraryKindHint'),
-        getRecordString(item, 'PtvReadingLibraryName', 'ptvReadingLibraryName'),
         getRecordString(item, 'CollectionType', 'collectionType'),
         getRecordString(item, 'Type', 'type'),
-        getRecordString(item, 'MediaType', 'mediaType'),
-        getRecordString(item, 'Name', 'name', 'Title', 'title'),
-        getRecordString(item, 'Path', 'path')
+        getRecordString(item, 'MediaType', 'mediaType')
     ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -80,6 +83,22 @@ function getJellyfinDetailsHref(item: PtvRouteItem, fallbackHref = PTV_ROUTES.ho
     const serverParam = serverId ? `&serverId=${encodeURIComponent(serverId)}` : '';
 
     return `#/details?id=${encodeURIComponent(itemId)}${serverParam}`;
+}
+
+function getJellyfinListHref(
+    item: PtvRouteItem,
+    itemId: string,
+    context: PtvItemRouteContext
+) {
+    const type = getRecordString(item, 'Type', 'type').toLowerCase();
+    const listParam = JELLYFIN_LIST_PARAM_BY_TYPE.get(type) || '';
+
+    if (!listParam) return '';
+
+    const serverId = getItemServerId(item) || context.serverId || '';
+    const serverParam = serverId ? `&serverId=${encodeURIComponent(serverId)}` : '';
+
+    return `#/list?${listParam}=${encodeURIComponent(itemId)}${serverParam}`;
 }
 
 function isAudioItem(item: PtvRouteItem, context: PtvItemRouteContext) {
@@ -162,6 +181,10 @@ export function resolvePtvItemRoute(
     if (!itemId) {
         return makeRouteResult(fallbackHref, 'jellyfin-fallback', 'missing-item-id');
     }
+
+    const listHref = getJellyfinListHref(item, itemId, context);
+
+    if (listHref) return makeRouteResult(listHref, 'jellyfin-list');
 
     if (getRecordString(item, 'Type', 'type').toLocaleLowerCase('en-US') === 'boxset') {
         return makeRouteResult(

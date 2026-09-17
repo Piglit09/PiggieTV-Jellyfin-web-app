@@ -2,6 +2,24 @@
 
 ## Current Architecture Status
 
+### Native multi-library Shows query boundary (2026-08-31)
+
+The native Shows catalog must not use an unscoped recursive `Users/{user}/Items` Series request on this deployment. `ShowsLibraryScreen` resolves `Users/{user}/Views`, selects all typed `tvshows` roots (falling back to typed mixed roots only when no TV root exists), caches that scope per authenticated media-cache identity, and fans out parent-scoped pages with a maximum concurrency of three. Results are merged by stable item ID and ordered by the requested scalar DateCreated or SortName key. Each parent retains an independent 24-item cursor and completion check, while the screen advances its shared page offset by 24.
+
+Native catalog list requests must remain lean. The Shows grid requests only `DateCreated` or `SortName`, sets `EnableTotalRecordCount=false`, and obtains user data through its dedicated query flag. It must not restore `Overview`, `Genres`, `ChildCount`, or `RecursiveItemCount` to this list boundary; those expansions caused no useful grid behavior and correlated with the slow global catalog path. Do not increase the 12-second request timeout to disguise server or proxy latency.
+
+Server origin is part of the native credential binding, not mutable display metadata. Changing a persisted session URL without rewriting its protected AES-GCM binding correctly invalidates and clears the session. Production origin changes must therefore use normal sign-in against the new origin; tokens must not be copied between origins. The accepted LG session now targets `http://10.16.0.50:8096`, where three parent pages completed in 2.4 to 9.9 seconds. `https://piggietv.com` remains a separate unaccepted native path because the same workload timed out and its unbounded diagnostic probe returned 504 after 102.1 seconds.
+
+This boundary is native-client architecture only. It does not change Jellyfin Web routing, service-worker behavior, plugin APIs, or the separate authenticated Items-latency release gate.
+
+### Native webOS deployment and startup-error ownership (2026-08-31)
+
+The LG application is a separately packaged React/Vite client from `C:\Users\Piggie\Documents\GitHub\PiggieTV-WebOS`; it is not a wrapper around the currently deployed Jellyfin Web `/web` document. Native package builds, versions, chunks, installation, and cache adoption must therefore be diagnosed independently from the Jellyfin Web frontend and service worker.
+
+Native startup connectivity state and authentication state have distinct owners. Startup restore may publish `state.startupError` when initial server recovery fails. After `validateServer` succeeds, `AuthScreen` clears that startup-only error and marks startup complete. Session-controller and credential errors remain untouched and continue to own authentication failure presentation. A successful reachability check must not clear credentials, manufacture a session, or hide a real authentication error.
+
+The installed `0.1.18` package loaded `main-legacy-B92NAWM6.js` and restored authenticated Home on the physical LG. Slow Jellyfin responses remain an external runtime condition surfaced through bounded row timeout/retry states; do not mask them by increasing interaction timeouts or conflating them with native startup-error ownership. Native and Web release acceptance remain separate, and neither this physical recovery nor a successful server test closes the existing authenticated Items-latency blocker.
+
 As of 2026-08-01, Web reliability and performance work through Phase F2D-B1
 is approved. Phase H1 is repository-only hygiene and does not alter playback,
 routing, request/cache ownership, connection ownership, or native application
@@ -1000,3 +1018,7 @@ or recommendation boundaries remain legacy.
 ## F3 Collections ownership boundary
 
 Premium Collections extends the native browse route, shared item/request APIs, `currentSettings`, item router, image pipeline, diagnostics, and global focus graph. The lazy F3 module owns only Collection normalization, explicit relationship resolution, bounded source composition, Collection preferences, and presentation. It does not own routing, requests, caching, playback, metadata, settings transport, feedback storage, or focus. See [docs/collections/phase-f3-premium-collections.md](docs/collections/phase-f3-premium-collections.md).
+
+## F3A2 validation boundary
+
+Phase F3A2 adds credential-blind authenticated Collections evidence tooling only. It attaches to the existing browser, router, request coordinator, ApiClient, runtime, settings, and focus owners; it does not create a product runtime or transport owner. Exact request identities are hashed in memory, failed-request handoff is separated from concurrent duplication, and persisted evidence rejects URLs, private addresses, credentials, identifiers, titles, and local paths. See `docs/collections/phase-f3a2-authenticated-latency-recovery.md`.

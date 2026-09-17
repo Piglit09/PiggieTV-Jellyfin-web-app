@@ -65,6 +65,11 @@ public class PiggieTVPluginConfiguration : BasePluginConfiguration
     public ReadingSeriesOverrideSettings ReadingSeriesOverrides { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets administrator-defined authoritative cross-library relationships.
+    /// </summary>
+    public PtvRelationshipMappingSettings RelationshipMappings { get; set; } = new();
+
+    /// <summary>
     /// Gets or sets Jellyseerr request integration settings.
     /// </summary>
     public SeerrSettings SeerrSettings { get; set; } = new();

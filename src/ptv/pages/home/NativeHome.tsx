@@ -12,6 +12,7 @@ import Page from 'components/Page';
 
 import {
     getPtvImageFailureDiagnostics,
+    getPtvCurrentUserId,
     getPtvItemImageCandidates,
     getPtvItemImageUrl,
     hasPtvImageCandidateFailed,
@@ -28,6 +29,7 @@ import {
     type PtvUser
 } from '../../api';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
+import { getPtvDisplayIdentityKey } from '../../services/displayIdentity';
 import { PTV_ASSETS, PTV_BRANDING, PTV_ROUTES } from '../../core/config';
 import {
     recordPtvItemRouteClick,
@@ -88,6 +90,7 @@ import {
     prioritizeNativeHomePersonalizedHeroItems
 } from './personalizedHomeRows';
 import { useNativeHomePersonalization } from './useNativeHomePersonalization';
+import { useConfiguredHomePreview } from './useConfiguredHomePreview';
 
 const HomeCustomizationDialog = lazy(() => import('./HomeCustomizationDialog'));
 
@@ -144,6 +147,7 @@ type NativeHomeRowLayoutAction = 'down' | 'pin' | 'reset' | 'unpin' | 'up';
 type NativeHomeRowLayoutActionHandler = (rowId: string, action: NativeHomeRowLayoutAction) => void;
 type NativeHomeHeroProps = Readonly<{
     activeItem: PtvItem | null;
+    backdropPresentationKey: string;
     canAutoRotate: boolean;
     heroItem: PtvItem | null;
     heroItems: PtvItem[];
@@ -1745,6 +1749,7 @@ function getNativeHomeHeroRotationItems(heroItems: PtvItem[], fallbackHeroItem: 
 
 function NativeHomeHero({
     activeItem,
+    backdropPresentationKey,
     canAutoRotate,
     heroItem: fallbackHeroItem,
     heroItems,
@@ -1920,6 +1925,7 @@ function NativeHomeHero({
         >
             {backdropUrl ? (
                 <NativeHomeHeroBackdrop
+                    key={backdropPresentationKey}
                     item={heroItem}
                     objectPosition={getNativeHomeHeroBackdropPosition(heroItem)}
                     src={backdropUrl}
@@ -3102,12 +3108,9 @@ function NativeHome() {
     const retryPreferenceDocumentRef = useRef<NativeHomePreferenceDocument | null>(null);
     const retryPreferenceReasonRef = useRef<'feedback' | 'layout'>('layout');
     const smartHeroRequestTokenRef = useRef(0);
-    const [activeBackdropItem, setActiveBackdropItem] = useState<PtvItem | null>(null);
-    const [focusedHeroItem, setFocusedHeroItem] = useState<PtvItem | null>(null);
-    const [pendingHeroItem, setPendingHeroItem] = useState<PtvItem | null>(null);
     const [isMediaNavOpen, setIsMediaNavOpen] = useState(false);
     const [smartHeroFocusSource, setSmartHeroFocusSource] = useState<NativeHomeIntelligenceFocusSource>('hero');
-    const [smartHeroSourceRow, setSmartHeroSourceRow] = useState('');
+    const [unsafeSmartHeroSourceRow, setSmartHeroSourceRow] = useState('');
     const [staleHeroRequestsIgnored, setStaleHeroRequestsIgnored] = useState(0);
     const [heroUpdateCount, setHeroUpdateCount] = useState(0);
     const [cancelledHeroTransitions, setCancelledHeroTransitions] = useState(0);
@@ -3122,22 +3125,44 @@ function NativeHome() {
     const [feedbackNotice, setFeedbackNotice] = useState('');
     const { canShowDebug } = usePtvAdminDebugVisibility();
     const {
+        configuredHeroAuthorities,
         debug,
-        error,
-        heroItem,
-        heroItems,
-        isLoading,
-        rows: rawRows,
-        user
+        error: unsafeError,
+        heroItem: unsafeHeroItem,
+        heroItems: unsafeHeroItems,
+        identityKey: stateIdentityKey,
+        isLoading: unsafeIsLoading,
+        rows: unsafeRawRows,
+        user: unsafeUser
     } = useNativeHomeData();
+    const activeServerId = String(getPtvServerId() || '');
+    const activeUserId = String(getPtvCurrentUserId(activeServerId) || '');
+    const activeIdentityKey = getPtvDisplayIdentityKey(activeServerId, activeUserId);
+    const ownsActiveIdentity = Boolean(
+        activeIdentityKey
+        && activeIdentityKey === stateIdentityKey
+        && unsafeUser?.Id === activeUserId
+    );
+    const error = ownsActiveIdentity ? unsafeError : null;
+    const heroItem = ownsActiveIdentity ? unsafeHeroItem : null;
+    const heroItems = useMemo(
+        () => ownsActiveIdentity ? unsafeHeroItems : [],
+        [ownsActiveIdentity, unsafeHeroItems]
+    );
+    const isLoading = ownsActiveIdentity ? unsafeIsLoading : true;
+    const rawRows = useMemo(
+        () => ownsActiveIdentity ? unsafeRawRows : [],
+        [ownsActiveIdentity, unsafeRawRows]
+    );
+    const user = ownsActiveIdentity ? unsafeUser : null;
     const preferenceScope = useMemo(() => {
         const userId = String(user?.Id || '');
         const currentScope = getCurrentNativeHomePreferenceScope();
 
-        if (!userId || !currentScope || currentScope.userId !== userId) return null;
+        if (!activeServerId || !userId || !currentScope || currentScope.serverId !== activeServerId || currentScope.userId !== userId) return null;
 
         return currentScope;
-    }, [user?.Id]);
+    }, [activeServerId, user?.Id]);
 
     useEffect(() => {
         preferenceSaveGenerationRef.current += 1;
@@ -3169,6 +3194,7 @@ function NativeHome() {
         enabled: personalizationSettings.experimentalRecommendations,
         feedback: preferenceDocument?.feedback,
         isPrimaryHomeLoading: isLoading,
+        serverId: activeServerId,
         userId: String(user?.Id || '')
     });
     const unfilteredMergedRows = useMemo(
@@ -3204,6 +3230,24 @@ function NativeHome() {
         [heroItem, heroItems, personalizedHome.rows, preferenceDocument]
     );
     const resolvedHeroItem = resolvedHeroItems[0] || null;
+    const {
+        activeBackdropItem,
+        backdropPresentationKey,
+        capturePreview,
+        focusedHeroItem,
+        hasRetiredConfiguredFocus,
+        isPreviewCurrent,
+        pendingHeroItem,
+        setActiveBackdropItem,
+        setActiveBackdropPreview,
+        setFocusedHeroPreview,
+        setPendingHeroPreview
+    } = useConfiguredHomePreview(
+        activeIdentityKey,
+        configuredHeroAuthorities,
+        configuredHeroAuthorities?.[getItemId(resolvedHeroItem)]
+    );
+    const smartHeroSourceRow = hasRetiredConfiguredFocus && !focusedHeroItem && !pendingHeroItem ? '' : unsafeSmartHeroSourceRow;
     const customizationRows = useMemo(() => {
         const seen = new Set<string>();
 
@@ -3432,12 +3476,12 @@ function NativeHome() {
             focusedHeroTimerRef.current = null;
         }
 
-        setPendingHeroItem(null);
+        setPendingHeroPreview(null);
         setCancelledHeroTransitions(previous => previous + 1);
         recordPtvEvent('render', 'native-home-smart-hero-paused-for-nav', {
             committedHeroItemId: getItemId(focusedHeroItem) || getItemId(resolvedHeroItem) || null
         });
-    }, [focusedHeroItem, resolvedHeroItem]);
+    }, [focusedHeroItem, resolvedHeroItem, setPendingHeroPreview]);
 
     const handleFocusedBackdropItemChange = useCallback((
         item: PtvItem | null,
@@ -3452,7 +3496,7 @@ function NativeHome() {
         }
 
         if (!item) {
-            setPendingHeroItem(null);
+            setPendingHeroPreview(null);
             setSmartHeroFocusSource(source);
             setSmartHeroSourceRow('');
             setCancelledHeroTransitions(previous => previous + 1);
@@ -3464,7 +3508,7 @@ function NativeHome() {
         }
 
         if (isMediaNavOpen) {
-            setPendingHeroItem(null);
+            setPendingHeroPreview(null);
             setStaleHeroRequestsIgnored(previous => previous + 1);
             recordPtvEvent('render', 'native-home-smart-hero-request-ignored-nav-open', {
                 itemId: getItemId(item),
@@ -3477,7 +3521,7 @@ function NativeHome() {
         const now = performance.now();
 
         if ((source === 'focus' || source === 'mouse') && now - lastScrollAtRef.current < NATIVE_HOME_SCROLL_SUPPRESSION_MS) {
-            setPendingHeroItem(null);
+            setPendingHeroPreview(null);
             setStaleHeroRequestsIgnored(previous => previous + 1);
             recordPtvEvent('render', 'native-home-smart-hero-request-ignored-scroll', {
                 itemId: getItemId(item),
@@ -3487,11 +3531,14 @@ function NativeHome() {
             return;
         }
 
+        const selectedPreview = capturePreview(item, row);
+        if (!isPreviewCurrent(selectedPreview)) return;
+
         setSmartHeroFocusSource(source);
         setSmartHeroSourceRow(row?.title || row?.id || '');
 
         if (source === 'row') {
-            setPendingHeroItem(null);
+            setPendingHeroPreview(null);
             recordPtvEvent('render', 'native-home-smart-hero-row-backdrop-only', {
                 currentHeroItemId: getItemId(focusedHeroItem) || getItemId(resolvedHeroItem) || null,
                 rowId: row?.id || null,
@@ -3508,10 +3555,10 @@ function NativeHome() {
         const quietDelay = Math.max(0, NATIVE_HOME_SMART_HERO_MIN_COMMIT_GAP_MS - (queuedAt - lastHeroCommitAtRef.current));
         const delay = baseDelay + quietDelay;
 
-        setPendingHeroItem(item);
+        setPendingHeroPreview(selectedPreview);
 
         focusedHeroTimerRef.current = window.setTimeout(() => {
-            if (smartHeroRequestTokenRef.current !== requestToken) {
+            if (smartHeroRequestTokenRef.current !== requestToken || !isPreviewCurrent(selectedPreview)) {
                 focusedHeroTimerRef.current = null;
                 setStaleHeroRequestsIgnored(previous => previous + 1);
                 setCancelledHeroTransitions(previous => previous + 1);
@@ -3525,10 +3572,10 @@ function NativeHome() {
 
             const transitionMs = Number((performance.now() - queuedAt).toFixed(1));
 
-            setActiveBackdropItem(item);
-            setFocusedHeroItem(item);
+            setActiveBackdropPreview(selectedPreview);
+            setFocusedHeroPreview(selectedPreview);
             lastHeroCommitAtRef.current = performance.now();
-            setPendingHeroItem(null);
+            setPendingHeroPreview(null);
             focusedHeroTimerRef.current = null;
             preloadNativeHomeHeroAssets(item, performanceProfile);
             setHeroUpdateCount(previous => previous + 1);
@@ -3550,7 +3597,7 @@ function NativeHome() {
                 transitionMs
             });
         }, delay);
-    }, [focusedHeroItem, isMediaNavOpen, performanceProfile, resolvedHeroItem]);
+    }, [capturePreview, focusedHeroItem, isMediaNavOpen, isPreviewCurrent, performanceProfile, resolvedHeroItem, setActiveBackdropPreview, setFocusedHeroPreview, setPendingHeroPreview]);
 
     useEffect(() => () => {
         smartHeroRequestTokenRef.current += 1;
@@ -3583,8 +3630,8 @@ function NativeHome() {
         if (!focusedHeroItem || isMediaNavOpen) return undefined;
 
         heroInactivityTimerRef.current = window.setTimeout(() => {
-            setFocusedHeroItem(null);
-            setPendingHeroItem(null);
+            setFocusedHeroPreview(null);
+            setPendingHeroPreview(null);
             setSmartHeroFocusSource('hero');
             setSmartHeroSourceRow('');
             recordPtvEvent('render', 'native-home-smart-hero-resumed-carousel', {
@@ -3598,7 +3645,7 @@ function NativeHome() {
                 heroInactivityTimerRef.current = null;
             }
         };
-    }, [focusedHeroItem, isMediaNavOpen]);
+    }, [focusedHeroItem, isMediaNavOpen, setFocusedHeroPreview, setPendingHeroPreview]);
 
     useEffect(() => {
         if (isLoading || error) return;
@@ -3653,6 +3700,7 @@ function NativeHome() {
                 style={pageAccentStyle}
             >
                 <PTVShell
+                    backdropPresentationKey={backdropPresentationKey}
                     backdropSource={activeBackdropItem ? 'home-focused-item' : 'home-hero'}
                     backdropUrl={shellBackdropUrl}
                     className='ptv-native-home-shell'
@@ -3663,7 +3711,11 @@ function NativeHome() {
                         <NativeHomeFallback message={error} />
                     ) : (
                         <>
-                            <div className='ptv-native-home-controls' aria-label='Home controls'>
+                            <div
+                                aria-label='Home controls'
+                                className='ptv-native-home-controls'
+                                data-ptv-utility-row='home'
+                            >
                                 <button
                                     ref={customizeTriggerRef}
                                     aria-haspopup='dialog'
@@ -3708,6 +3760,7 @@ function NativeHome() {
                             {personalizationSettings.heroEnabled ? (
                                 <NativeHomeHero
                                     activeItem={focusedHeroItem}
+                                    backdropPresentationKey={backdropPresentationKey}
                                     canAutoRotate={canAutoRotateHero}
                                     heroItem={resolvedHeroItem}
                                     heroItems={resolvedHeroItems}

@@ -52,7 +52,6 @@ import './elements/emby-button/emby-button';
 // Import auto-running components
 // NOTE: This is an anti-pattern
 import './components/playback/displayMirrorManager';
-import './components/playback/playerSelectionMenu';
 import './components/themeMediaPlayer';
 import './scripts/autoThemes';
 import './scripts/mouseManager';
@@ -105,21 +104,25 @@ build: ${__JF_BUILD_VERSION__}`);
 
     // ===== PTV SERVER BOOTSTRAP =====
 
-    const serverUrl = await serverAddress();
+    const initializeConfiguredServer = serverAddress().then(serverUrl => {
+        if (serverUrl) {
+            if (__WEBPACK_SERVE__) {
+                console.info('[PTV] Using the configured development Jellyfin server.');
+            }
 
-    if (serverUrl) {
-        if (__WEBPACK_SERVE__) {
-            console.info('[PTV] Using the configured development Jellyfin server.');
+            ServerConnections.initApiClient(serverUrl);
         }
-
-        ServerConnections.initApiClient(serverUrl);
-    }
+    });
 
     // Initialize automatic (default) cast target
     initializeAutoCast();
 
-    // Load the translation dictionary
-    await loadCoreDictionary();
+    // Server discovery and the core dictionary are independent. Starting both now
+    // avoids a network waterfall while retaining the same pre-render guarantees.
+    await Promise.all([
+        initializeConfiguredServer,
+        loadCoreDictionary()
+    ]);
     // Use the culture module as the single owner for account and live settings
     // changes. Font loading subscribes to the same normalized culture signal.
     Events.on(cultureEvents, CULTURE_CHANGED_EVENT, updateFontsForCulture);
@@ -133,9 +136,6 @@ build: ${__JF_BUILD_VERSION__}`);
     if (browser.iOS) {
         import('./styles/ios.scss');
     }
-
-    // Load frontend plugins
-    await loadPlugins();
 
     // Establish the websocket connection
     Events.on(appHost, 'resume', () => {
@@ -153,8 +153,11 @@ build: ${__JF_BUILD_VERSION__}`);
     // Render the app
     await renderApp();
 
-    // Load platform specific features
+    // The useful shell must not wait for optional frontend plugins. Start those
+    // modules after React has mounted so a slow plugin can never strand the
+    // static splash screen.
     loadPlatformFeatures();
+    void loadPlugins();
 
     // Enable navigation controls
     keyboardNavigation.enable();
@@ -214,22 +217,22 @@ async function loadPlugins() {
     console.groupCollapsed('loading installed plugins');
     console.dir(pluginManager);
 
-    let list = await getPlugins();
-    if (!appHost.supports(AppFeature.RemoteControl)) {
-        // Disable remote player plugins if not supported
-        list = list.filter(plugin => !plugin.startsWith('sessionPlayer')
-            && !plugin.startsWith('chromecastPlayer'));
-    } else if (!browser.chrome && !browser.edgeChromium && !browser.opera) {
-        // Disable chromecast player in unsupported browsers
-        list = list.filter(plugin => !plugin.startsWith('chromecastPlayer'));
-    }
-
-    // add any native plugins
-    if (window.NativeShell) {
-        list = list.concat(window.NativeShell.getPlugins());
-    }
-
     try {
+        let list = await getPlugins();
+        if (!appHost.supports(AppFeature.RemoteControl)) {
+            // Disable remote player plugins if not supported
+            list = list.filter(plugin => !plugin.startsWith('sessionPlayer')
+                && !plugin.startsWith('chromecastPlayer'));
+        } else if (!browser.chrome && !browser.edgeChromium && !browser.opera) {
+            // Disable chromecast player in unsupported browsers
+            list = list.filter(plugin => !plugin.startsWith('chromecastPlayer'));
+        }
+
+        // add any native plugins
+        if (window.NativeShell) {
+            list = list.concat(window.NativeShell.getPlugins());
+        }
+
         await Promise.all(list.map(plugin => pluginManager.loadPlugin(plugin)));
         console.debug('finished loading plugins');
     } catch (e) {

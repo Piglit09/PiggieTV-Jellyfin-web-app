@@ -1,3 +1,3 @@
-import PtvDiagnosticsDashboardPage from 'ptv/modules/dashboard/PtvDiagnosticsDashboardPage';
+import { LegacyPiggietvDiagnosticsRedirect } from './LegacyPiggietvAdminRedirect';
 
-export const Component = PtvDiagnosticsDashboardPage;
+export const Component = LegacyPiggietvDiagnosticsRedirect;

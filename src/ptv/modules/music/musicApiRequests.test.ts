@@ -10,6 +10,11 @@ vi.mock('../../core/pluginApi', () => ({
     getCurrentPtvPluginApiClient: vi.fn()
 }));
 
+vi.mock('../../api/images', () => ({
+    hasPtvImageCandidateFailed: vi.fn(() => false),
+    markPtvImageCandidateFailed: vi.fn()
+}));
+
 vi.mock('../../api', async () => {
     const { serializePtvItemFieldProfile } = await import('../../api/itemFieldProfiles');
 
@@ -35,13 +40,27 @@ vi.mock('../../api', async () => {
 
 import {
     getPtvCurrentUserId,
+    getPtvFavoriteItems,
     getPtvItems,
-    requestPtvJson
+    getPtvRecentlyAdded,
+    getPtvResumeItems,
+    getPtvServerId,
+    getPtvUserViews,
+    requestPtvJson,
+    type PtvItemsResult,
+    type PtvLibrary
 } from '../../api';
+import { recordPtvEvent } from '../../core/observability';
 import { serializePtvItemFieldProfile } from '../../api/itemFieldProfiles';
 import {
+    fetchPtvMusicAlbumTracks,
     fetchPtvMusicLyrics,
     fetchPtvMusicPlaylists,
+    fetchPtvMusicTracks,
+    fetchPtvMusicVideos,
+    getPtvMusicHome,
+    invalidatePtvMusicHomeCache,
+    PTV_MUSIC_API_REQUEST_CONCURRENCY,
     PTV_MUSIC_PLAYLIST_PROBE_CONCURRENCY
 } from './musicApi';
 import type { PtvMusicItem } from './musicTypes';
@@ -60,11 +79,41 @@ function createAbortError() {
     });
 }
 
+function createPtvMusicRequestTracker() {
+    let activeRequestCount = 0;
+    let peakRequestCount = 0;
+    const releaseRequests: Array<() => void> = [];
+
+    return {
+        getPeakRequestCount: () => peakRequestCount,
+        release: (count = releaseRequests.length) => {
+            releaseRequests.splice(0, count).forEach(release => {
+                release();
+            });
+        },
+        request: () => new Promise<PtvItemsResult<PtvMusicItem>>(resolve => {
+            activeRequestCount += 1;
+            peakRequestCount = Math.max(peakRequestCount, activeRequestCount);
+            releaseRequests.push(() => {
+                activeRequestCount -= 1;
+                resolve({ Items: [], TotalRecordCount: 0 });
+            });
+        })
+    };
+}
+
 describe('PiggieTV Music list requests', () => {
     beforeEach(() => {
         vi.mocked(getPtvCurrentUserId).mockReturnValue('user-1');
+        vi.mocked(getPtvServerId).mockReturnValue('server-1');
+        vi.mocked(getPtvFavoriteItems).mockReset();
         vi.mocked(getPtvItems).mockReset();
+        vi.mocked(getPtvRecentlyAdded).mockReset();
+        vi.mocked(getPtvResumeItems).mockReset();
+        vi.mocked(getPtvUserViews).mockReset();
         vi.mocked(requestPtvJson).mockReset();
+        vi.mocked(recordPtvEvent).mockReset();
+        invalidatePtvMusicHomeCache();
     });
 
     it('uses the lean card profile and bounds playlist content probes', async () => {
@@ -209,5 +258,264 @@ describe('PiggieTV Music list requests', () => {
         await expect(fetchPtvMusicLyrics(item)).resolves.toEqual({ Lyrics: null });
         await expect(fetchPtvMusicLyrics(item)).rejects.toBe(timeout);
         expect(requestPtvJson).toHaveBeenCalledTimes(2);
+    });
+
+    it('deduplicates identical in-flight track shelves', async () => {
+        let resolveItems!: (value: { Items: PtvMusicItem[]; TotalRecordCount: number }) => void;
+
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        vi.mocked(getPtvItems).mockImplementation(() => new Promise(resolve => {
+            resolveItems = resolve;
+        }));
+
+        const first = fetchPtvMusicTracks({ SortBy: 'SortName' }, 12);
+        const second = fetchPtvMusicTracks({ SortBy: 'SortName' }, 12);
+
+        await vi.waitFor(() => {
+            expect(getPtvItems).toHaveBeenCalledTimes(1);
+        });
+        resolveItems({
+            Items: [{ Id: 'deduped-track', Name: 'Deduped Track', Type: 'Audio' }],
+            TotalRecordCount: 1
+        });
+
+        await expect(Promise.all([ first, second ])).resolves.toEqual([
+            [ expect.objectContaining({ Id: 'deduped-track' }) ],
+            [ expect.objectContaining({ Id: 'deduped-track' }) ]
+        ]);
+    });
+
+    it('loads one album through Jellyfin album relationship identity without treating the album as a parent folder', async () => {
+        vi.mocked(getPtvUserViews).mockResolvedValue({
+            Items: [{
+                CollectionType: 'music',
+                Id: 'music-library-1',
+                Name: 'Music',
+                Type: 'CollectionFolder'
+            }],
+            TotalRecordCount: 1
+        });
+        vi.mocked(getPtvItems).mockResolvedValue({
+            Items: [{
+                AlbumId: 'album-1',
+                Id: 'track-1',
+                Name: 'Track 1',
+                Type: 'Audio'
+            }],
+            TotalRecordCount: 1
+        });
+
+        await expect(fetchPtvMusicAlbumTracks('album-1', 100)).resolves.toEqual([
+            expect.objectContaining({ Id: 'track-1' })
+        ]);
+
+        const query = vi.mocked(getPtvItems).mock.calls[0]?.[0];
+
+        expect(query).toEqual(expect.objectContaining({
+            AlbumIds: 'album-1',
+            IncludeItemTypes: 'Audio',
+            ParentId: 'music-library-1',
+            Recursive: true
+        }));
+        expect(query?.ParentId).not.toBe('album-1');
+        expect(getPtvItems).toHaveBeenCalledTimes(1);
+    });
+
+    it('negative-caches library discovery and records one truthful discovery start', async () => {
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        vi.mocked(getPtvItems).mockResolvedValue({
+            Items: [{ Id: 'track-1', Name: 'Track', Type: 'Audio' }],
+            TotalRecordCount: 1
+        });
+
+        await fetchPtvMusicTracks({ SearchTerm: 'first' }, 12);
+        await fetchPtvMusicTracks({ SearchTerm: 'second' }, 12);
+
+        const discoveryStarts = vi.mocked(recordPtvEvent).mock.calls.filter(([, name]) => (
+            name === 'music-library-discovery-started'
+        ));
+
+        expect(getPtvUserViews).toHaveBeenCalledTimes(1);
+        expect(discoveryStarts).toHaveLength(1);
+        expect(recordPtvEvent).toHaveBeenCalledWith('cache', 'music-library-scope-cache-hit', expect.objectContaining({
+            libraryId: null,
+            selectedParentId: null
+        }));
+    });
+
+    it('caps concurrent Music list transports at the shared request budget', async () => {
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        vi.mocked(getPtvItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        await fetchPtvMusicTracks({ SearchTerm: 'warm-discovery' }, 1);
+
+        const requestTracker = createPtvMusicRequestTracker();
+
+        vi.mocked(getPtvItems).mockReset();
+        vi.mocked(getPtvItems).mockImplementation(requestTracker.request);
+
+        const requests = Array.from({ length: 6 }, (_, index) => (
+            fetchPtvMusicTracks({ SearchTerm: `budget-${index}` }, 1)
+        ));
+
+        await vi.waitFor(() => {
+            expect(getPtvItems).toHaveBeenCalledTimes(PTV_MUSIC_API_REQUEST_CONCURRENCY);
+        });
+        expect(requestTracker.getPeakRequestCount()).toBe(PTV_MUSIC_API_REQUEST_CONCURRENCY);
+
+        requestTracker.release(PTV_MUSIC_API_REQUEST_CONCURRENCY);
+        await vi.waitFor(() => {
+            expect(getPtvItems).toHaveBeenCalledTimes(requests.length);
+        });
+        requestTracker.release();
+
+        await expect(Promise.all(requests)).resolves.toHaveLength(requests.length);
+        expect(requestTracker.getPeakRequestCount()).toBe(PTV_MUSIC_API_REQUEST_CONCURRENCY);
+    });
+
+    it('cancels queued Music list work before it starts a transport', async () => {
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        vi.mocked(getPtvItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        await fetchPtvMusicTracks({ SearchTerm: 'warm-cancellation' }, 1);
+
+        const requestTracker = createPtvMusicRequestTracker();
+        // eslint-disable-next-line compat/compat -- Jellyfin loads the AbortController polyfill for legacy web runtimes.
+        const controller = new AbortController();
+
+        vi.mocked(getPtvItems).mockReset();
+        vi.mocked(getPtvItems).mockImplementation(requestTracker.request);
+        const activeRequests = Array.from({ length: PTV_MUSIC_API_REQUEST_CONCURRENCY }, (_, index) => (
+            fetchPtvMusicTracks({ SearchTerm: `active-${index}` }, 1)
+        ));
+        const queuedRequest = fetchPtvMusicTracks({ SearchTerm: 'queued-abort' }, 1, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(getPtvItems).toHaveBeenCalledTimes(PTV_MUSIC_API_REQUEST_CONCURRENCY);
+        });
+        controller.abort();
+        await expect(queuedRequest).rejects.toMatchObject({ name: 'AbortError' });
+
+        requestTracker.release();
+        await expect(Promise.all(activeRequests)).resolves.toHaveLength(PTV_MUSIC_API_REQUEST_CONCURRENCY);
+        expect(getPtvItems).toHaveBeenCalledTimes(PTV_MUSIC_API_REQUEST_CONCURRENCY);
+    });
+
+    it('reuses complete initial shelves and reduces a normal Home schedule from 17 to 13 transports', async () => {
+        vi.mocked(getPtvUserViews).mockResolvedValue({
+            Items: [{
+                CollectionType: 'music',
+                Id: 'music-library-1',
+                Name: 'Music',
+                Type: 'CollectionFolder'
+            }],
+            TotalRecordCount: 1
+        });
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            const resolvedQuery = query || {};
+            const itemType = String(resolvedQuery.IncludeItemTypes || 'Audio');
+            let type = 'Audio';
+
+            if (itemType === 'MusicAlbum') type = 'MusicAlbum';
+            if (itemType === 'MusicArtist') type = 'MusicArtist';
+            const id = `${type}-${String(resolvedQuery.SortBy || 'sample')}`;
+
+            return {
+                Items: [{ Id: id, Name: id, Type: type }],
+                TotalRecordCount: 1
+            };
+        });
+        vi.mocked(getPtvRecentlyAdded).mockResolvedValue([{
+            Id: 'recently-added',
+            Name: 'Recently Added',
+            Type: 'Audio'
+        }]);
+        vi.mocked(getPtvResumeItems).mockResolvedValue({
+            Items: [{ Id: 'resume-track', Name: 'Resume Track', Type: 'Audio' }],
+            TotalRecordCount: 1
+        });
+        vi.mocked(getPtvFavoriteItems).mockResolvedValue({
+            Items: [{ Id: 'favorite-track', Name: 'Favorite Track', Type: 'Audio' }],
+            TotalRecordCount: 1
+        });
+
+        await expect(getPtvMusicHome({ forceRefresh: true, initialOnly: true })).resolves.toEqual(expect.objectContaining({
+            completeness: 'initial-usable',
+            isPartial: true
+        }));
+        expect(
+            vi.mocked(getPtvUserViews).mock.calls.length
+            + vi.mocked(getPtvItems).mock.calls.length
+            + vi.mocked(getPtvRecentlyAdded).mock.calls.length
+            + vi.mocked(getPtvResumeItems).mock.calls.length
+            + vi.mocked(getPtvFavoriteItems).mock.calls.length
+        ).toBe(8);
+
+        await expect(getPtvMusicHome({ forceRefresh: true, initialOnly: false })).resolves.toEqual(expect.objectContaining({
+            completeness: 'complete',
+            isPartial: false
+        }));
+        expect(
+            vi.mocked(getPtvUserViews).mock.calls.length
+            + vi.mocked(getPtvItems).mock.calls.length
+            + vi.mocked(getPtvRecentlyAdded).mock.calls.length
+            + vi.mocked(getPtvResumeItems).mock.calls.length
+            + vi.mocked(getPtvFavoriteItems).mock.calls.length
+        ).toBe(12);
+        expect(getPtvResumeItems).toHaveBeenCalledTimes(1);
+        expect(getPtvFavoriteItems).toHaveBeenCalledTimes(1);
+        expect(recordPtvEvent).toHaveBeenCalledWith('cache', 'music-home-initial-seed-reused', {
+            avoidedRequestCount: 4,
+            libraryId: 'music-library-1',
+            requestCountAfterReuse: 4,
+            requestCountWithoutReuse: 8
+        });
+
+        await fetchPtvMusicVideos(12);
+        expect(
+            vi.mocked(getPtvUserViews).mock.calls.length
+            + vi.mocked(getPtvItems).mock.calls.length
+            + vi.mocked(getPtvRecentlyAdded).mock.calls.length
+            + vi.mocked(getPtvResumeItems).mock.calls.length
+            + vi.mocked(getPtvFavoriteItems).mock.calls.length
+        ).toBe(13);
+    });
+
+    it('publishes the first usable shelf before library discovery completes', async () => {
+        let resolveViews!: (value: PtvItemsResult<PtvLibrary>) => void;
+        let homeSettled = false;
+        const onProgress = vi.fn();
+
+        vi.mocked(getPtvUserViews).mockImplementation(() => new Promise(resolve => {
+            resolveViews = resolve;
+        }));
+        vi.mocked(getPtvItems).mockResolvedValue({
+            Items: [{ Id: 'recent-track', Name: 'Recent Track', Type: 'Audio' }],
+            TotalRecordCount: 1
+        });
+        vi.mocked(getPtvRecentlyAdded).mockResolvedValue([]);
+        vi.mocked(getPtvResumeItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        vi.mocked(getPtvFavoriteItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+
+        const homeRequest = getPtvMusicHome({
+            forceRefresh: true,
+            initialOnly: true,
+            onProgress
+        }).finally(() => {
+            homeSettled = true;
+        });
+
+        await vi.waitFor(() => {
+            expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({
+                completeness: 'initial-usable',
+                isPartial: true,
+                sections: [ expect.objectContaining({ id: 'recently-played' }) ]
+            }));
+        });
+        expect(homeSettled).toBe(false);
+
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        resolveViews({ Items: [], TotalRecordCount: 0 });
+        await expect(homeRequest).resolves.toEqual(expect.objectContaining({
+            completeness: 'initial-usable'
+        }));
     });
 });

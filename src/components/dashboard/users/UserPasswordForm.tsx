@@ -1,5 +1,6 @@
 import React, { FunctionComponent, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { UserDto } from '@jellyfin/sdk/lib/generated-client';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
 import Dashboard from '../../../utils/dashboard';
 import globalize from '../../../lib/globalize';
 import confirm from '../../confirm/confirm';
@@ -72,7 +73,7 @@ const UserPasswordForm: FunctionComponent<IProps> = ({ userId }: IProps) => {
         }
 
         loadUser().catch(err => {
-            console.error('[UserPasswordForm] failed to load user', err);
+            ptvSafeConsole.error('[UserPasswordForm] failed to load user', err);
         });
 
         const onSubmit = (e: Event) => {
@@ -109,7 +110,7 @@ const UserPasswordForm: FunctionComponent<IProps> = ({ userId }: IProps) => {
                 toast(globalize.translate('PasswordSaved'));
 
                 loadUser().catch(err => {
-                    console.error('[UserPasswordForm] failed to load user', err);
+                    ptvSafeConsole.error('[UserPasswordForm] failed to load user', err);
                 });
             }, function () {
                 loading.hide();
@@ -136,10 +137,10 @@ const UserPasswordForm: FunctionComponent<IProps> = ({ userId }: IProps) => {
                         title: globalize.translate('ResetPassword')
                     });
                     loadUser().catch(err => {
-                        console.error('[UserPasswordForm] failed to load user', err);
+                        ptvSafeConsole.error('[UserPasswordForm] failed to load user', err);
                     });
                 }).catch(err => {
-                    console.error('[UserPasswordForm] failed to reset user password', err);
+                    ptvSafeConsole.error('[UserPasswordForm] failed to reset user password', err);
                 });
             }).catch(() => {
                 // confirm dialog was closed

@@ -1,7 +1,9 @@
 # PTV Core machine-readable contracts
 
-`v1` is the canonical cross-platform wire contract for PTV Core. The schemas
-use JSON Schema 2020-12 and are validated by `npm run contracts:validate`.
+`v1` remains the canonical baseline cross-platform wire contract for PTV Core.
+`v2` currently contains the opt-in premium recommendation policy request,
+response, and privacy-safe quality-event contracts. The schemas use JSON Schema
+2020-12 and are validated by `npm run contracts:validate`.
 
 ## Versioning
 
@@ -10,8 +12,9 @@ use JSON Schema 2020-12 and are validated by `npm run contracts:validate`.
   within `v1`.
 - Removing/renaming a field, changing a required field, narrowing accepted
   values, or changing a field's meaning requires `v2`.
-- Payloads declare `contractVersion: "1.0"`. Persisted data also declares its
-  feature `schemaVersion`; recommendation data declares `cacheVersion`.
+- Baseline payloads declare `contractVersion: "1.0"`. Premium recommendation
+  policy payloads declare `contractVersion: "2.0"`; persisted v1 data continues
+  to declare its feature `schemaVersion` or recommendation `cacheVersion`.
 - Readers accept unknown fields for forward compatibility and reject unknown
   required enum values.
 
@@ -43,6 +46,11 @@ aliases, cache v7 data, and platform storage keys are not removed by v1.
   versioned shared artifact is safe.
 - C# uses additive DTO properties with explicit JSON names. Existing endpoints
   and response properties remain valid when v1 metadata is absent.
+
+The v2 recommendation policy is additive: clients may rank locally with the
+same documented constraints when an older plugin does not advertise
+`recommendationPolicyV2`, while the existing v1 recommendation response remains
+readable throughout the rollout.
 
 Schemas define wire compatibility; they do not mandate UI frameworks, storage
 engines, API libraries, playback engines, or code generation.

@@ -11,6 +11,26 @@ export type ReaderFitMode = 'width' | 'height' | 'page';
 
 export type ReaderSpreadMode = 'single' | 'double';
 
+export type ReaderZoomMode = 'fit-page' | 'fit-width' | 'manual';
+
+export interface ReaderZoomState {
+    mode: ReaderZoomMode;
+    manualScale: number;
+}
+
+export interface ReaderZoomCapabilities {
+    kind: 'page' | 'text' | 'none';
+    canZoomIn: boolean;
+    canZoomOut: boolean;
+    canResetZoom: boolean;
+    canFitPage: boolean;
+    canFitWidth: boolean;
+    canAdjustTextScale: boolean;
+    minScale: number;
+    maxScale: number;
+    step: number;
+}
+
 export interface ReaderMetadata {
     id: string;
     stableId: string;

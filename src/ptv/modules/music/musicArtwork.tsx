@@ -1,4 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+
+import {
+    loadPtvMusicArtworkSource,
+    markPtvMusicArtworkSourceFailed
+} from './musicArtworkSourceCoordinator';
 
 type PtvMusicArtworkSource = Readonly<{
     key: string;
@@ -11,6 +16,7 @@ export type PtvMusicArtworkProps = Readonly<{
     eager?: boolean;
     imageUrl: string;
     onError?: React.ReactEventHandler<HTMLImageElement>;
+    onSourceFailure?: (url: string) => void;
     placeholderUrl: string;
     rootMargin?: string;
 }>;
@@ -27,31 +33,39 @@ export default function PtvMusicArtwork({
     eager = false,
     imageUrl,
     onError,
+    onSourceFailure,
     placeholderUrl,
     rootMargin = '240px'
 }: PtvMusicArtworkProps) {
     const imageRef = useRef<HTMLImageElement>(null);
     const [loadedSource, setLoadedSource] = useState<PtvMusicArtworkSource>(() => ({
         key: imageUrl,
-        url: eager ? imageUrl : placeholderUrl
+        url: imageUrl === placeholderUrl ? placeholderUrl : ''
     }));
-    let source = placeholderUrl;
+    let source = '';
 
     if (loadedSource.key === imageUrl) {
         source = loadedSource.url;
-    } else if (eager) {
-        source = imageUrl;
     }
 
     useEffect(() => {
         let disposed = false;
         const loadArtwork = () => {
-            if (!disposed) {
+            if (disposed) return;
+
+            if (!imageUrl || imageUrl === placeholderUrl) {
+                setLoadedSource({ key: imageUrl, url: placeholderUrl });
+                return;
+            }
+
+            void loadPtvMusicArtworkSource(imageUrl, onSourceFailure).then(loaded => {
+                if (disposed) return;
+
                 setLoadedSource({
                     key: imageUrl,
-                    url: imageUrl || placeholderUrl
+                    url: loaded ? imageUrl : ''
                 });
-            }
+            });
         };
 
         if (eager || !imageUrl || imageUrl === placeholderUrl) {
@@ -63,7 +77,7 @@ export default function PtvMusicArtwork({
 
         setLoadedSource({
             key: imageUrl,
-            url: placeholderUrl
+            url: ''
         });
 
         if (typeof IntersectionObserver === 'undefined' || !imageRef.current) {
@@ -88,7 +102,19 @@ export default function PtvMusicArtwork({
             disposed = true;
             observer.disconnect();
         };
-    }, [eager, imageUrl, placeholderUrl, rootMargin]);
+    }, [eager, imageUrl, onSourceFailure, placeholderUrl, rootMargin]);
+
+    const handleError = useCallback<React.ReactEventHandler<HTMLImageElement>>(event => {
+        markPtvMusicArtworkSourceFailed(imageUrl, onSourceFailure);
+        setLoadedSource({ key: imageUrl, url: '' });
+        onError?.(event);
+    }, [imageUrl, onError, onSourceFailure]);
+    const deferredStyle = source ? undefined : {
+        backgroundImage: `url("${placeholderUrl.split('"').join('%22')}")`,
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: 'cover'
+    };
 
     return (
         <img
@@ -96,9 +122,11 @@ export default function PtvMusicArtwork({
             alt={alt}
             className={className}
             decoding='async'
+            data-ptv-artwork-deferred={source ? undefined : 'true'}
             loading={eager ? 'eager' : 'lazy'}
-            src={source}
-            onError={onError}
+            src={source || undefined}
+            style={deferredStyle}
+            onError={handleError}
         />
     );
 }

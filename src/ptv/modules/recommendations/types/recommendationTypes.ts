@@ -312,9 +312,11 @@ export type PtvRecommendationRunOptions = {
     feedback?: PtvRecommendationFeedbackState;
     includeHomeScans?: boolean;
     now?: number;
+    serverId?: string | null;
     signal?: AbortSignal;
     sourceFailures?: PtvRecommendationSourceFailure[];
     sourceTimings?: PtvRecommendationSourceTiming[];
+    userId?: string | null;
 };
 
 export type PtvRecommendationHomeData = {

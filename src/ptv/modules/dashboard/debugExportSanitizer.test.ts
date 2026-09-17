@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention, compat/compat -- Tests intentionally exercise native credential carriers and wire keys. */
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,8 +11,9 @@ describe('debugExportSanitizer', () => {
         const sensitiveUserId = '11112222333344445555666677778888';
         const sensitiveItemId = 'aaaabbbbccccddddeeeeffff00001111';
         const privateHost = ['10', '23', '45', '67'].join('.');
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_TOKEN', 'debug-export' ].join('_');
         const snapshot = {
-            authorization: 'fixture',
+            authorization: `Bearer ${accessCanary}`,
             cachePath: 'C:\\Users\\ExampleUser\\AppData\\Local\\jellyfin\\ptv-cache.json',
             imageUrl: `http://${privateHost}:8096/Items/${sensitiveItemId}/Images/Primary?fillWidth=320&quality=90`,
             serverHost: 'jellyfin.internal',
@@ -44,7 +46,7 @@ describe('debugExportSanitizer', () => {
         expect(serialized).not.toContain(privateHost);
         expect(serialized).not.toContain(sensitiveUserId);
         expect(serialized).not.toContain(sensitiveItemId);
-        expect(serialized).not.toContain('highly-sensitive-token');
+        expect(serialized).not.toContain(accessCanary);
         expect(serialized).not.toContain('tmdb-secret');
         expect(serialized).not.toContain('smtp.private.example');
         expect(serialized).not.toContain('smtpPasswordConfigured');
@@ -101,6 +103,26 @@ describe('debugExportSanitizer', () => {
         expect(serialized).toContain('"serverHost": "[private-host]"');
     });
 
+    it('redacts playback source/session identifiers and media titles', () => {
+        const values = {
+            currentItemId: 'item-current-private',
+            currentItemName: 'Private Movie Title',
+            itemId: 'item-private',
+            mediaSourceId: 'source-private',
+            nextItemId: 'item-next-private',
+            nextItemName: 'Private Next Title',
+            playbackSessionId: 'playback-private',
+            playSessionId: 'play-private'
+        };
+        const serialized = serializeSanitizedPtvDebugExport(values);
+
+        Object.values(values).forEach(value => {
+            expect(serialized).not.toContain(value);
+        });
+        expect(serialized).toContain('[redacted-id]');
+        expect(serialized).toContain('[redacted-media-title]');
+    });
+
     it('omits credential-shape and SMTP password-status fields from shareable exports', () => {
         const sanitized = sanitizePtvDebugExport({
             pluginState: {
@@ -117,6 +139,25 @@ describe('debugExportSanitizer', () => {
         expect(serialized).not.toContain('credentialLength');
         expect(serialized).not.toContain('smtpPasswordConfigured');
         expect(sanitized.sanitization.omittedFields).toBe(3);
+    });
+
+    it('sanitizes native error, header, and URL parameter containers while preserving safe metrics', () => {
+        const accessCanary = [ 'PTV_TEST', 'ACCESS_TOKEN', 'native-export' ].join('_');
+        const error = Object.assign(new Error(`request?token=${accessCanary}`), {
+            config: { headers: new Headers({ 'X-Api-Key': accessCanary }) }
+        });
+        const serialized = serializeSanitizedPtvDebugExport({
+            error,
+            params: new URLSearchParams({ api_key: accessCanary, page: '2' }),
+            tokenCount: 7,
+            tokenUsage: 11
+        });
+
+        expect(serialized).not.toContain(accessCanary);
+        expect(serialized).toContain('[REDACTED]');
+        expect(serialized).toContain('"tokenCount": 7');
+        expect(serialized).toContain('"tokenUsage": 11');
+        expect(serialized).toContain('"page": "2"');
     });
 
     it('does not mutate input and bounds nested arrays, strings, objects, and depth', () => {
@@ -151,3 +192,5 @@ describe('debugExportSanitizer', () => {
         expect(report.truncatedStrings).toBeGreaterThan(0);
     });
 });
+
+/* eslint-enable @typescript-eslint/naming-convention, compat/compat */

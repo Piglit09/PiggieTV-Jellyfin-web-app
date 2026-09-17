@@ -1,0 +1,22 @@
+{
+  "contractVersion": "2.0",
+  "policyVersion": "music-premium-v2",
+  "surface": "radio",
+  "serverId": "fixture-server",
+  "userId": "fixture-user",
+  "limit": 6,
+  "seed": {
+    "id": "seed",
+    "artistIds": ["artist-a"],
+    "albumId": "album-a",
+    "genres": ["alternative"]
+  },
+  "candidates": [
+    { "id": "a1", "title": "A One", "mediaType": "music", "source": "similar", "classification": "affinity", "baseScore": 90, "artistIds": ["artist-a"], "albumId": "album-b", "genres": ["alternative"], "familiar": true },
+    { "id": "a2", "title": "A Two", "mediaType": "music", "source": "instant-mix", "classification": "affinity", "baseScore": 88, "artistIds": ["artist-a"], "albumId": "album-c", "genres": ["alternative"], "familiar": true },
+    { "id": "a3", "title": "A Three", "mediaType": "music", "source": "instant-mix", "classification": "affinity", "baseScore": 86, "artistIds": ["artist-a"], "albumId": "album-d", "genres": ["alternative"], "familiar": true },
+    { "id": "b1", "title": "B One", "mediaType": "music", "source": "similar", "classification": "discovery", "baseScore": 84, "artistIds": ["artist-b"], "albumId": "album-e", "genres": ["alternative"], "familiar": false },
+    { "id": "c1", "title": "C One", "mediaType": "music", "source": "suggestions", "classification": "discovery", "baseScore": 82, "artistIds": ["artist-c"], "albumId": "album-f", "genres": ["alternative"], "familiar": false },
+    { "id": "d1", "title": "D One", "mediaType": "music", "source": "suggestions", "classification": "discovery", "baseScore": 80, "artistIds": ["artist-d"], "albumId": "album-g", "genres": ["alternative"], "familiar": false }
+  ]
+}

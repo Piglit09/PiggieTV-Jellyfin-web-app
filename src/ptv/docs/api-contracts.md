@@ -211,6 +211,39 @@ Only Jellyfin admins/elevated users may call this endpoint.
 
 Restores default PiggieTV plugin settings. This resets the plugin configuration to defaults and returns the public settings DTO.
 
+### Authoritative Relationship Endpoints
+
+`GET /Ptv/v1/relationships/{sourceItemId}` is available to authenticated Jellyfin users. It returns only enabled mappings for which both the requested source and destination are visible to the current user. Missing, malformed, same-family, disabled, or unavailable mappings are omitted. A source that is unavailable to the current user returns `404`.
+
+```json
+{
+  "schemaVersion": 1,
+  "relationships": [
+    {
+      "mappingId": "opaque-mapping-id",
+      "targetItemId": "opaque-jellyfin-item-id",
+      "category": "soundtrack",
+      "direction": "source-to-target",
+      "displayOrder": 0,
+      "enabled": true,
+      "schemaVersion": 1
+    }
+  ]
+}
+```
+
+The payload intentionally contains no titles, provider IDs, paths, or raw metadata. Bidirectional mappings are returned relative to the requested source.
+
+Relationship mutations require Jellyfin administrator/elevated permission:
+
+```text
+POST   /Ptv/v1/relationships
+PUT    /Ptv/v1/relationships/{mappingId}
+DELETE /Ptv/v1/relationships/{mappingId}
+```
+
+Create requests provide `sourceItemId`, `targetItemId`, `category`, and optional `direction`, `displayOrder`, and `enabled`. Source and target must resolve through Jellyfin, must differ, and must belong to different supported media families. Categories are limited to `soundtrack`, `adaptation`, `based-on`, `spin-off`, `companion-reading`, `companion-video`, `related-game`, `related-comic`, and `related-book`. Directions are limited to `source-to-target` and `bidirectional`. Equivalent mappings are rejected with `409`. Updates may change category, direction, display order, or enabled state; endpoint identities remain immutable. Delete removes the mapping immediately from plugin configuration.
+
 ### Native Signup Endpoints
 
 PiggieTV owns native signup, email verification, password reset, and invite management through server-side plugin routes. Frontend JavaScript never receives Jellyfin admin tokens or SMTP credentials.

@@ -1,4 +1,5 @@
 import { getPtvServerId, type PtvItem, type PtvLibrary, type PtvUser } from '../../../api';
+import { getPtvDisplayIdentityKey } from '../../../services/displayIdentity';
 import type { NativeHomeRow } from '../hooks';
 import { inferNativeHomeMood, type NativeHomeMood, type NativeHomeMoodResult } from './moodInferenceService';
 import { getNativeHomeSeasonalContext, type NativeHomeSeasonalContext } from './seasonalContentService';
@@ -29,14 +30,15 @@ export type NativeHomeProfile = {
     userId: string;
 };
 
-const HOME_PROFILE_VERSION = 1;
-const HOME_PROFILE_STORAGE_PREFIX = 'ptv.home.profile.v1';
+const HOME_PROFILE_VERSION = 2;
+const HOME_PROFILE_STORAGE_PREFIX = 'ptv.home.profile.v2';
 const MAX_PROFILE_TERMS = 10;
 
 type NativeHomeMaybeItem = PtvItem | PtvLibrary | null | undefined;
 
 function getStorageKey(serverId: string, userId: string) {
-    return `${HOME_PROFILE_STORAGE_PREFIX}:${serverId || 'server'}:${userId || 'user'}`;
+    const identityKey = getPtvDisplayIdentityKey(serverId, userId);
+    return identityKey ? `${HOME_PROFILE_STORAGE_PREFIX}:${identityKey}` : null;
 }
 
 function readString(item: NativeHomeMaybeItem, ...keys: string[]) {
@@ -100,12 +102,22 @@ function getTimeOfDay(date: Date): NativeHomeProfile['context']['timeOfDay'] {
     return 'night';
 }
 
-export function loadNativeHomeProfile(serverId = getPtvServerId() || 'server', userId = 'user') {
+export function loadNativeHomeProfile(serverId = getPtvServerId() || '', userId = '') {
     try {
-        const raw = window.localStorage?.getItem(getStorageKey(serverId, userId));
+        const storageKey = getStorageKey(serverId, userId);
+        const expectedIdentity = getPtvDisplayIdentityKey(serverId, userId);
+
+        if (!storageKey || !expectedIdentity) return null;
+
+        const raw = window.localStorage?.getItem(storageKey);
         const parsed = raw ? JSON.parse(raw) as NativeHomeProfile : null;
 
-        return parsed?.profileVersion === HOME_PROFILE_VERSION ? parsed : null;
+        if (
+            parsed?.profileVersion === HOME_PROFILE_VERSION
+            && getPtvDisplayIdentityKey(parsed.serverId, parsed.userId) === expectedIdentity
+        ) return parsed;
+
+        return null;
     } catch {
         return null;
     }
@@ -113,9 +125,14 @@ export function loadNativeHomeProfile(serverId = getPtvServerId() || 'server', u
 
 export function saveNativeHomeProfile(profile: NativeHomeProfile) {
     try {
-        window.localStorage?.setItem(getStorageKey(profile.serverId, profile.userId), JSON.stringify(profile));
+        const storageKey = getStorageKey(profile.serverId, profile.userId);
+        if (!storageKey) return false;
+
+        window.localStorage?.setItem(storageKey, JSON.stringify(profile));
+        return true;
     } catch {
         // Home personalization is an opportunistic cache; rendering must not depend on it.
+        return false;
     }
 }
 
@@ -128,8 +145,8 @@ export function buildNativeHomeProfile(
     } = {}
 ) {
     const now = options.now || new Date();
-    const serverId = getPtvServerId() || 'server';
-    const userId = options.user?.Id || 'user';
+    const serverId = getPtvServerId() || '';
+    const userId = options.user?.Id || '';
     const genreCounts: Record<string, number> = {};
     const studioCounts: Record<string, number> = {};
     const artistCounts: Record<string, number> = {};
@@ -201,7 +218,7 @@ export function buildNativeHomeProfile(
         userId
     };
 
-    if (options.save !== false) {
+    if (options.save !== false && serverId && userId) {
         saveNativeHomeProfile(profile);
     }
 

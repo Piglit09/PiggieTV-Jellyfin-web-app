@@ -218,15 +218,20 @@ describe('PtvMusicItemMenuOverlay lifecycle', () => {
 
     it('focuses the first enabled menu item and wraps keyboard navigation across enabled items', () => {
         flushSync(() => root.render(<OverlayFixture />));
-        flushAnimationFrames();
 
         const menu = document.querySelector<HTMLElement>('[data-ptv-music-item-menu-overlay]')!;
+        const trigger = container.querySelector<HTMLButtonElement>('#music-menu-trigger')!;
         const disabledItem = menu.querySelector<HTMLButtonElement>('[disabled]')!;
         const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])'));
 
         expect(document.activeElement).toBe(items[0]);
         expect(disabledItem.tabIndex).toBe(-1);
         expect(items.map(item => item.tabIndex)).toEqual([0, -1]);
+
+        trigger.focus();
+        flushAnimationFrames();
+
+        expect(document.activeElement).toBe(items[0]);
 
         items[0].dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' }));
         expect(document.activeElement).toBe(items[1]);

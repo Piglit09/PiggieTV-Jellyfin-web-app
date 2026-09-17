@@ -3,7 +3,10 @@ import {
     type PtvCoreSeriesSeasons
 } from '../core/api/seriesSeasonsBoundary';
 import { type PtvCoreApiResponse } from '../core/api/apiContracts';
-import { type PtvCoreResult } from '../core/errors/coreError';
+import {
+    type PtvCoreError,
+    type PtvCoreResult
+} from '../core/errors/coreError';
 import { recordPtvEvent } from '../core/observability';
 import { requestPtvJson } from './client';
 import { type PtvApiQuery } from './types';
@@ -73,6 +76,20 @@ async function executePtvSeriesSeasonsRequest<TResponse, TSeason>(
     };
 }
 
+function throwPtvSeriesSeasonsFailure(
+    legacyError: unknown,
+    coreError: PtvCoreError
+): never {
+    if (legacyError !== undefined) throw legacyError;
+
+    const error = new Error(coreError.message) as Error & {
+        coreError: PtvCoreError;
+    };
+    error.name = 'PtvApiError';
+    error.coreError = coreError;
+    throw error;
+}
+
 export async function getPtvSeriesSeasons<TResponse, TSeason = unknown>(
     apiClient: PtvSeriesSeasonsApiClient,
     seriesId: string,
@@ -87,14 +104,34 @@ export async function getPtvSeriesSeasons<TResponse, TSeason = unknown>(
     );
 
     if (execution.result.success) return execution.result.value.value.raw;
-    if (execution.legacyError !== undefined) throw execution.legacyError;
 
-    const error = new Error(execution.result.error.message) as Error & {
-        coreError: typeof execution.result.error;
-    };
-    error.name = 'PtvApiError';
-    error.coreError = execution.result.error;
-    throw error;
+    return throwPtvSeriesSeasonsFailure(
+        execution.legacyError,
+        execution.result.error
+    );
+}
+
+export async function getPtvSeriesSeasonItems<TSeason = unknown>(
+    apiClient: PtvSeriesSeasonsApiClient,
+    seriesId: string,
+    options?: Record<string, unknown>,
+    requestOptions: PtvSeriesSeasonsRequestOptions = {}
+): Promise<TSeason[]> {
+    const execution = await executePtvSeriesSeasonsRequest<unknown, TSeason>(
+        apiClient,
+        seriesId,
+        options,
+        requestOptions
+    );
+
+    if (execution.result.success) {
+        return execution.result.value.value.items.map(metadata => metadata.item);
+    }
+
+    return throwPtvSeriesSeasonsFailure(
+        execution.legacyError,
+        execution.result.error
+    );
 }
 
 export async function getPtvSeriesSeasonsCoreResult<TResponse, TSeason = unknown>(

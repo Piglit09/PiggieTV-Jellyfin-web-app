@@ -290,6 +290,7 @@ export type PtvMusicQueueSnapshot = {
     currentItem: PtvMusicItem | null;
     isMuted: boolean;
     isAudio: boolean;
+    isLoading?: boolean;
     isPlaying: boolean;
     isShuffled: boolean;
     playbackError?: string | null;

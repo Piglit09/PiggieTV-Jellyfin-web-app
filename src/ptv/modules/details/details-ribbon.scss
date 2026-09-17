@@ -153,3 +153,175 @@
         justify-content: flex-start;
     }
 }
+
+.ptv-detail-page.ptv-details--episode .detailRibbon {
+    display: block !important;
+    align-self: end;
+    padding: 0 !important;
+}
+
+.ptv-detail-page.ptv-details--episode .detailRibbon .infoWrapper {
+    max-width: 760px !important;
+}
+
+.ptv-detail-page.ptv-details--episode .detailLogo.ptv-detail-native-logo {
+    width: min(54%, 390px) !important;
+    height: clamp(70px, 7vw, 118px) !important;
+    margin-bottom: 10px !important;
+
+    filter: drop-shadow(0 14px 32px rgba(0, 0, 0, 0.58));
+}
+
+.ptv-detail-page.ptv-details--episode .nameContainer,
+.ptv-detail-page.ptv-details--episode .detailNameContainer {
+    display: grid;
+    gap: 7px;
+}
+
+.ptv-detail-page.ptv-details--episode .nameContainer > .parentName,
+.ptv-detail-page.ptv-details--episode .detailNameContainer > .parentName {
+    margin: 0 0 2px !important;
+
+    color: rgba(247, 240, 255, 0.86) !important;
+    font-family: var(--ptv-font-accent) !important;
+    font-size: clamp(20px, 1.7vw, 28px) !important;
+    font-weight: 850 !important;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+}
+
+.ptv-detail-page.ptv-details--episode .detailLogo.ptv-detail-native-logo:not(.hide) ~ :is(.nameContainer, .detailNameContainer) > .parentName {
+    display: none !important;
+}
+
+.ptv-detail-page.ptv-details--episode .ptv-episode-native-name {
+    display: none !important;
+}
+
+.ptv-detail-page .ptv-episode-identity {
+    display: grid;
+    gap: 7px;
+}
+
+.ptv-detail-page .ptv-episode-context {
+    color: #ff83d1;
+    font-size: clamp(12px, 0.86vw, 15px);
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    text-shadow: 0 0 20px rgba(255, 98, 200, 0.24);
+}
+
+.ptv-detail-page .ptv-episode-title {
+    margin: 0;
+
+    color: rgba(255, 253, 255, 0.97);
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(38px, 3.35vw, 62px);
+    font-weight: 950;
+    letter-spacing: -0.035em;
+    line-height: 0.98;
+    overflow-wrap: anywhere;
+    text-shadow: 0 12px 32px rgba(0, 0, 0, 0.44);
+    text-transform: uppercase;
+}
+
+.ptv-detail-page.ptv-details--episode .mainDetailButtons.ptv-details-glass-actions {
+    justify-content: flex-start;
+    gap: 12px;
+    width: 100%;
+    margin-top: 22px;
+    padding: 0;
+
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+.ptv-detail-page.ptv-details--episode .detailButton {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    gap: 11px;
+    justify-content: center;
+    min-width: 154px !important;
+    width: auto !important;
+    height: 54px !important;
+    padding: 0 24px !important;
+
+    border: 1px solid rgba(220, 173, 255, 0.36) !important;
+    border-radius: 14px !important;
+    background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.1), transparent 48%),
+        rgba(77, 35, 115, 0.38) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 14px 34px rgba(0, 0, 0, 0.3) !important;
+    font-family: inherit !important;
+    font-size: 17px !important;
+    font-weight: 850 !important;
+    backdrop-filter: blur(18px) saturate(1.3);
+}
+
+.ptv-detail-page.ptv-details--episode .detailButton:not(.btnPlay, .btnReplay) {
+    display: none !important;
+}
+
+.ptv-detail-page.ptv-details--episode .detailButton.btnPlay {
+    border-color: rgba(255, 199, 246, 0.46) !important;
+    background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.2), transparent 44%),
+        linear-gradient(135deg, rgba(156, 83, 255, 0.96), rgba(232, 70, 177, 0.94)) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        0 14px 34px rgba(92, 33, 160, 0.34),
+        0 0 24px rgba(214, 69, 206, 0.2) !important;
+}
+
+.ptv-detail-page.ptv-details--episode .detailButton.btnReplay {
+    background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.1), transparent 48%),
+        rgba(92, 43, 133, 0.42) !important;
+}
+
+.ptv-detail-page.ptv-details--episode .detailButton-content {
+    flex-direction: row;
+}
+
+.ptv-detail-page.ptv-details--episode .ptv-detail-action-label {
+    line-height: 1;
+}
+
+.ptv-detail-page.ptv-details--episode .detailButton:is(:hover, :focus-visible, .ptv-tv-focus-visible) {
+    border-color: var(--ptv-details-focus-core) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.2),
+        0 0 0 2px rgba(207, 125, 255, 0.62),
+        0 0 28px var(--ptv-details-focus-glow) !important;
+    transform: translateY(-1px);
+}
+
+@media (max-width: 900px) {
+    .ptv-detail-page.ptv-details--episode .detailRibbon {
+        padding: 0 !important;
+    }
+
+    .ptv-detail-page.ptv-details--episode .detailLogo.ptv-detail-native-logo {
+        width: min(72vw, 340px) !important;
+        margin-left: 0 !important;
+
+        background-position: left center !important;
+    }
+
+    .ptv-detail-page .ptv-episode-title {
+        font-size: clamp(34px, 10vw, 48px);
+    }
+
+    .ptv-detail-page.ptv-details--episode .detailButton {
+        min-width: 138px !important;
+        height: 50px !important;
+        padding: 0 20px !important;
+        font-size: 15px !important;
+    }
+}

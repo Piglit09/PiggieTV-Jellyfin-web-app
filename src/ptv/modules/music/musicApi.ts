@@ -4,13 +4,13 @@ import {
     getPtvFavoriteItems,
     getPtvItem,
     getPtvItemImageCandidates,
-    getPtvItemImageUrl,
     getPtvApiUrl,
     getPtvItems,
     getPtvRecentlyAdded,
     getPtvResumeItems,
     getPtvServerId,
     getPtvUserViews,
+    markPtvImageUrlFailed,
     requestPtvJson,
     serializePtvItemFieldProfile,
     sendPtvJson,
@@ -18,6 +18,7 @@ import {
     type PtvItemsResult,
     type PtvItemQuery
 } from '../../api';
+import type { PtvItemImageCandidate } from '../../api/images';
 import { recordPtvEvent, timePtvAsync } from '../../core/observability';
 import { getCurrentPtvPluginApiClient } from '../../core/pluginApi';
 import { logPtvRecommendationStage } from '../recommendations/debug/recommendationRuntimeDebug';
@@ -31,6 +32,7 @@ import {
     deletePtvLibraryIndexCacheByPrefix,
     PTV_LIBRARY_INDEX_CACHE_TTL_MS,
     readPtvLibraryIndexCache,
+    updatePtvLibraryIndexCache,
     writePtvLibraryIndexCache
 } from '../../utils/libraryIndexCache';
 import { runPtvScheduledRequests } from '../../utils/ptvMediaRequestScheduler';
@@ -67,20 +69,34 @@ import {
     mergePtvLikedMusicItems
 } from './musicLikes';
 import {
+    isSupportedPtvMusicIdentifyType,
+    reconcilePtvMusicIdentifyPresentationItem,
+    reconcilePtvMusicIdentifyPresentationHomeData
+} from './musicIdentifyAdoption';
+import {
+    markPtvMusicImageCandidateFailedByUrl,
+    selectPtvMusicImageCandidate
+} from './musicImageCandidateSelection';
+import {
     compactPtvMusicHomeSnapshotForStorage,
     getMusicJsonPayloadBytes,
     MUSIC_HOME_PERSISTENT_CACHE_SCHEMA_VERSION,
     MUSIC_HOME_SNAPSHOT_MAX_BYTES,
-    MUSIC_HOME_SNAPSHOT_TARGET_BYTES
+    MUSIC_HOME_SNAPSHOT_TARGET_BYTES,
+    projectPtvMusicLibraryIndexItemForStorage
 } from './musicHomeSnapshot';
 
 const MUSIC_LIST_FIELDS = serializePtvItemFieldProfile('MUSIC_CARD_FIELDS');
 export const PTV_MUSIC_PLAYLIST_PROBE_CONCURRENCY = 4;
+export const PTV_MUSIC_API_REQUEST_CONCURRENCY = 4;
 
 const MUSIC_HOME_CACHE_TTL_MS = 5 * 60 * 1000;
+const MUSIC_HOME_INITIAL_SEED_REUSE_WINDOW_MS = 30 * 1000;
 const DEFAULT_TRACK_LIMIT = 28;
 const DEFAULT_ALBUM_SAMPLE_LIMIT = 32;
 const DEFAULT_ARTIST_SAMPLE_LIMIT = 32;
+const MUSIC_HOME_INITIAL_REQUEST_CONCURRENCY = PTV_MUSIC_API_REQUEST_CONCURRENCY;
+const MUSIC_HOME_FULL_REQUEST_CONCURRENCY = PTV_MUSIC_API_REQUEST_CONCURRENCY;
 const MUSIC_LIBRARY_PAGE_SIZE = 48;
 const MUSIC_LIBRARY_FETCH_CAP = PTV_MUSIC_LIBRARY_RETAIN_LIMIT;
 const MUSIC_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 2;
@@ -109,7 +125,7 @@ const MUSIC_PLACEHOLDER_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent([
     '<path d="M384 160v254a62 62 0 1 1-34-55V224l-142 32v190a62 62 0 1 1-34-55V222l210-48z" fill="#fff" opacity=".92"/>',
     '</svg>'
 ].join(''))}`;
-const musicImageUrlCache = new PtvMusicIdentityResourceCache<string>(512);
+const musicImageCandidateCache = new PtvMusicIdentityResourceCache<PtvItemImageCandidate>(512);
 
 type MusicHomeCacheEntry = {
     data: PtvMusicHomeData;
@@ -125,9 +141,31 @@ type MusicDataCoordinatorRequest<T> = {
     startedAt: number;
 };
 
+type PtvMusicApiRequestQueueEntry = {
+    abortHandler?: () => void;
+    reject: (reason?: unknown) => void;
+    resolve: (value: unknown) => void;
+    signal?: AbortSignal;
+    started: boolean;
+    task: () => Promise<unknown>;
+};
+
+type PtvMusicHomeInitialSeed = {
+    albums: PtvMusicItem[];
+    artists: PtvMusicItem[];
+    continueListening: PtvMusicItem[];
+    favorites: PtvMusicItem[];
+};
+
 type PtvMusicRouteRequestOptions = {
     isCurrent?: () => boolean;
     signal?: AbortSignal;
+};
+
+type PtvMusicHomeRequestOptions = PtvMusicRouteRequestOptions & {
+    initialOnly?: boolean;
+    forceRefresh?: boolean;
+    onProgress?: (data: PtvMusicHomeData) => void;
 };
 
 type PtvMusicLibraryScope = {
@@ -172,6 +210,8 @@ const musicDataCoordinatorRequests = new Map<string, MusicDataCoordinatorRequest
 const musicHomeRequestGenerations = new Map<string, number>();
 const musicLibraryIndexRequestGenerations = new Map<string, number>();
 const musicLibraryIndexWriteChains = new Map<string, Promise<void>>();
+const musicApiRequestQueue: PtvMusicApiRequestQueueEntry[] = [];
+let activeMusicApiRequestCount = 0;
 let musicDataRequestStartedCount = 0;
 let musicDataRequestJoinedCount = 0;
 let musicDataRequestCancelledCount = 0;
@@ -210,6 +250,19 @@ function getMusicDataScopeKey(libraryId = 'pending') {
     ].join(':');
 }
 
+function getStableMusicRequestValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(getStableMusicRequestValue);
+    if (!value || typeof value !== 'object') return value;
+
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, getStableMusicRequestValue(entry)]));
+}
+
+function getMusicListRequestKey(kind: string, query: PtvItemQuery, limit: number) {
+    return `music-list:${getMusicDataScopeKey()}:${kind}:${limit}:${JSON.stringify(getStableMusicRequestValue(query))}`;
+}
+
 function getMusicHomeStorageKey(cacheKey: string, initialOnly = false) {
     return `ptv:music-home-snapshot:${cacheKey}:${initialOnly ? 'initial' : 'full'}:v${MUSIC_HOME_PERSISTENT_CACHE_SCHEMA_VERSION}`;
 }
@@ -233,6 +286,63 @@ function isPtvMusicAbortError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error || '');
 
     return errorRecord.name === 'AbortError' || /abort|cancel|superseded/i.test(message);
+}
+
+function drainPtvMusicApiRequestQueue() {
+    while (
+        activeMusicApiRequestCount < PTV_MUSIC_API_REQUEST_CONCURRENCY
+        && musicApiRequestQueue.length > 0
+    ) {
+        const entry = musicApiRequestQueue.shift();
+
+        if (!entry) return;
+        if (entry.signal?.aborted) {
+            if (entry.abortHandler) entry.signal.removeEventListener('abort', entry.abortHandler);
+            entry.reject(createPtvMusicAbortError());
+            continue;
+        }
+
+        entry.started = true;
+        if (entry.abortHandler) entry.signal?.removeEventListener('abort', entry.abortHandler);
+        activeMusicApiRequestCount += 1;
+        Promise.resolve()
+            .then(entry.task)
+            .then(entry.resolve, entry.reject)
+            .finally(() => {
+                activeMusicApiRequestCount = Math.max(0, activeMusicApiRequestCount - 1);
+                drainPtvMusicApiRequestQueue();
+            });
+    }
+}
+
+function runPtvMusicApiRequest<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) return Promise.reject(createPtvMusicAbortError());
+
+    return new Promise<T>((resolve, reject) => {
+        const entry: PtvMusicApiRequestQueueEntry = {
+            reject,
+            resolve: value => resolve(value as T),
+            signal,
+            started: false,
+            task
+        };
+        const abortHandler = () => {
+            if (entry.started) return;
+
+            const queueIndex = musicApiRequestQueue.indexOf(entry);
+
+            if (queueIndex >= 0) {
+                musicApiRequestQueue.splice(queueIndex, 1);
+            }
+            signal?.removeEventListener('abort', abortHandler);
+            reject(createPtvMusicAbortError());
+        };
+
+        entry.abortHandler = abortHandler;
+        signal?.addEventListener('abort', abortHandler, { once: true });
+        musicApiRequestQueue.push(entry);
+        drainPtvMusicApiRequestQueue();
+    });
 }
 
 function throwIfPtvMusicRouteWorkRetired(options: PtvMusicRouteRequestOptions = {}) {
@@ -589,13 +699,13 @@ function uniquePtvMusicPlaylists(items: PtvMusicItem[]) {
 }
 
 function getItems<TItem = PtvMusicItem>(query: PtvItemQuery, signal?: AbortSignal) {
-    return getPtvItems<TItem>({
+    return runPtvMusicApiRequest(() => getPtvItems<TItem>({
         EnableImageTypes: 'Primary,Backdrop,Thumb',
         EnableTotalRecordCount: true,
         Fields: MUSIC_LIST_FIELDS,
         Recursive: true,
         ...query
-    }, { signal });
+    }, { signal }), signal);
 }
 
 async function getScopedMusicQuery(query: PtvItemQuery, signal?: AbortSignal): Promise<PtvItemQuery> {
@@ -676,18 +786,6 @@ function getMusicErrorParentId(error: unknown) {
     return typeof contextError.ptvMusicParentId === 'string' ? contextError.ptvMusicParentId : null;
 }
 
-function getMusicStringValue(item: PtvMusicItem | null | undefined, ...keys: string[]) {
-    if (!item) return '';
-
-    for (const key of keys) {
-        const value = item[key];
-
-        if (typeof value === 'string' && value) return value;
-    }
-
-    return '';
-}
-
 function cleanMusicDisplayValue(value: unknown) {
     return String(value || '').trim();
 }
@@ -714,30 +812,6 @@ function firstKnownMusicDisplayValue(values: unknown[]) {
 
 function getFirstStringArrayValue(value: unknown) {
     return Array.isArray(value) ? value.find(isKnownMusicDisplayValue) : '';
-}
-
-function getMusicParentImageUrl(item: PtvMusicItem, size: number) {
-    const parentImageItemId = getMusicStringValue(
-        item,
-        'ParentPrimaryImageItemId',
-        'AlbumPrimaryImageItemId',
-        'AlbumId'
-    );
-    const parentImageTag = getMusicStringValue(
-        item,
-        'ParentPrimaryImageTag',
-        'AlbumPrimaryImageTag'
-    );
-
-    if (!parentImageItemId || !parentImageTag) return '';
-
-    return getPtvItemImageUrl(parentImageItemId, {
-        fillHeight: size,
-        fillWidth: size,
-        imageType: 'Primary',
-        quality: 84,
-        tag: parentImageTag
-    });
 }
 
 function getMusicImageTag(item: PtvMusicItem, preferredImageType: PtvMusicImageType) {
@@ -800,9 +874,11 @@ export function getMusicImageUrl(
         canonicalSize
     ].join(':');
     const displayIdentityKey = getMusicDisplayIdentityKey();
-    const cachedUrl = musicImageUrlCache.get(displayIdentityKey, cacheKey);
+    const cachedCandidate = musicImageCandidateCache.get(displayIdentityKey, cacheKey);
+    const availableCachedCandidate = cachedCandidate ?
+        selectPtvMusicImageCandidate([ cachedCandidate ]) : null;
 
-    if (cachedUrl) return cachedUrl;
+    if (availableCachedCandidate) return availableCachedCandidate.url;
 
     let order: Array<'Primary' | 'Thumb' | 'Backdrop' | 'SeriesPrimary' | 'ParentPrimary'> = ['Primary', 'ParentPrimary', 'Thumb', 'Backdrop', 'SeriesPrimary'];
 
@@ -820,20 +896,18 @@ export function getMusicImageUrl(
         },
         order
     });
-    const taggedCandidate = candidates.find(candidate => candidate.tag);
+    const selectedCandidate = selectPtvMusicImageCandidate(candidates);
 
-    if (taggedCandidate?.url) {
-        musicImageUrlCache.set(displayIdentityKey, cacheKey, taggedCandidate.url);
-        return taggedCandidate.url;
+    if (!selectedCandidate) return MUSIC_PLACEHOLDER_IMAGE;
+
+    musicImageCandidateCache.set(displayIdentityKey, cacheKey, selectedCandidate);
+    return selectedCandidate.url;
+}
+
+export function markPtvMusicImageUrlFailed(url: string) {
+    if (!markPtvMusicImageCandidateFailedByUrl(url)) {
+        markPtvImageUrlFailed(url);
     }
-
-    const parentImageUrl = getMusicParentImageUrl(item, canonicalSize);
-    const fallbackCandidate = candidates.find(candidate => candidate.url);
-    const resolvedUrl = parentImageUrl || fallbackCandidate?.url || MUSIC_PLACEHOLDER_IMAGE;
-
-    musicImageUrlCache.set(displayIdentityKey, cacheKey, resolvedUrl);
-
-    return resolvedUrl;
 }
 
 function isMusicLibrary(library: PtvLibrary) {
@@ -897,14 +971,11 @@ export async function getPtvMusicLibrary(signal?: AbortSignal): Promise<PtvMusic
         userId: getPtvCurrentUserId() || null
     };
 
-    recordPtvMusicApiDiagnostic('music-library-discovery-started', discoveryContext);
-
     if (musicLibraryCache.has(cacheKey)) {
         const cachedScope = musicLibraryCache.get(cacheKey) || null;
 
-        recordPtvMusicApiDiagnostic('music-library-discovery-complete', {
+        recordPtvEvent('cache', 'music-library-scope-cache-hit', {
             ...discoveryContext,
-            cached: true,
             libraryId: cachedScope?.id || null,
             libraryName: cachedScope?.name || null,
             selectedParentId: cachedScope?.selectedParentId || null
@@ -914,7 +985,8 @@ export async function getPtvMusicLibrary(signal?: AbortSignal): Promise<PtvMusic
     }
 
     return runMusicCoordinatorRequest(`music-library-discovery:${cacheKey}`, 'music-library-discovery', async () => {
-        const result = await getPtvUserViews({ signal });
+        recordPtvMusicApiDiagnostic('music-library-discovery-started', discoveryContext);
+        const result = await runPtvMusicApiRequest(() => getPtvUserViews({ signal }), signal);
 
         throwIfPtvMusicRouteWorkRetired({ signal });
         const libraries = result.Items || [];
@@ -940,9 +1012,7 @@ export async function getPtvMusicLibrary(signal?: AbortSignal): Promise<PtvMusic
             selectedParentId: scope?.selectedParentId || null
         };
 
-        if (scope) {
-            musicLibraryCache.set(cacheKey, scope);
-        }
+        musicLibraryCache.set(cacheKey, scope);
 
         recordPtvEvent('api', 'music-library-resolved', {
             detectedMusicLibraryCount: musicLibraries.length,
@@ -1163,7 +1233,16 @@ export function getPtvMusicTitle(item?: PtvMusicItem | null): string {
 }
 
 export function getPtvMusicArtist(item?: PtvMusicItem | null): string {
-    const artist = firstKnownMusicDisplayValue([
+    const isAlbum = item?.Type === 'MusicAlbum';
+    const artist = firstKnownMusicDisplayValue(isAlbum ? [
+        ...(item?.AlbumArtists || []).map(entry => entry.Name),
+        item?.AlbumArtist,
+        ...(item?.ArtistItems || []).map(entry => entry.Name),
+        getFirstStringArrayValue(item?.Artists),
+        item?.Artist,
+        getFirstStringArrayValue(item?.MusicBrainzArtistNames),
+        item?.MusicBrainzArtistName
+    ] : [
         item?.AlbumArtist,
         getFirstStringArrayValue(item?.Artists),
         item?.Artist,
@@ -1242,29 +1321,53 @@ export function fetchPtvMusicTracks(
     limit = DEFAULT_TRACK_LIMIT,
     signal?: AbortSignal
 ): Promise<PtvMusicItem[]> {
-    return getScopedItemsWithUnscopedFallback<PtvMusicItem>({
+    const requestQuery: PtvItemQuery = {
         IncludeItemTypes: 'Audio',
         Limit: limit,
         ...query
-    }, 'tracks', signal).then(result => uniquePtvMusicItems(result.Items || []));
+    };
+
+    return runMusicCoordinatorRequest(
+        getMusicListRequestKey('tracks', requestQuery, limit),
+        'music-track-list',
+        () => getScopedItemsWithUnscopedFallback<PtvMusicItem>(requestQuery, 'tracks', signal)
+            .then(result => uniquePtvMusicItems(result.Items || [])),
+        { signal }
+    );
 }
 
 export function fetchPtvMusicAlbums(limit = DEFAULT_ALBUM_SAMPLE_LIMIT, signal?: AbortSignal): Promise<PtvMusicItem[]> {
-    return getScopedItemsWithUnscopedFallback<PtvMusicItem>({
+    const query: PtvItemQuery = {
         IncludeItemTypes: 'MusicAlbum',
         Limit: limit,
         SortBy: 'DatePlayed,SortName',
         SortOrder: 'Descending'
-    }, 'albums', signal).then(result => uniquePtvMusicItems(result.Items || []).sort(byName));
+    };
+
+    return runMusicCoordinatorRequest(
+        getMusicListRequestKey('albums', query, limit),
+        'music-album-list',
+        () => getScopedItemsWithUnscopedFallback<PtvMusicItem>(query, 'albums', signal)
+            .then(result => uniquePtvMusicItems(result.Items || []).sort(byName)),
+        { signal }
+    );
 }
 
 export function fetchPtvMusicArtists(limit = DEFAULT_ARTIST_SAMPLE_LIMIT, signal?: AbortSignal): Promise<PtvMusicItem[]> {
-    return fetchPtvMusicArtistsResult({
+    const query: PtvItemQuery = {
         IncludeItemTypes: 'MusicArtist',
         Limit: limit,
         SortBy: 'SortName',
         SortOrder: 'Ascending'
-    }, signal).then(result => uniquePtvMusicItems(result.Items || []).sort(byName));
+    };
+
+    return runMusicCoordinatorRequest(
+        getMusicListRequestKey('artists', query, limit),
+        'music-artist-list',
+        () => fetchPtvMusicArtistsResult(query, signal)
+            .then(result => uniquePtvMusicItems(result.Items || []).sort(byName)),
+        { signal }
+    );
 }
 
 async function fetchPtvMusicArtistsEndpoint(
@@ -1286,16 +1389,16 @@ async function fetchPtvMusicArtistsEndpoint(
 
     if (!userId) return { Items: [], TotalRecordCount: 0 };
 
-    return requestPtvJson<PtvItemsResult<PtvMusicItem>>('Artists', {
+    return runPtvMusicApiRequest(() => requestPtvJson<PtvItemsResult<PtvMusicItem>>('Artists', {
         params,
         signal
-    }).catch(error => {
+    }), signal).catch(error => {
         if (isPtvMusicAbortError(error)) throw error;
 
-        return requestPtvJson<PtvItemsResult<PtvMusicItem>>('Artists/AlbumArtists', {
+        return runPtvMusicApiRequest(() => requestPtvJson<PtvItemsResult<PtvMusicItem>>('Artists/AlbumArtists', {
             params,
             signal
-        });
+        }), signal);
     });
 }
 
@@ -1342,7 +1445,10 @@ async function fetchPtvRecentlyAddedMusic(
     });
 
     try {
-        const scopedItems = uniquePtvMusicItems(await getPtvRecentlyAdded<PtvMusicItem>(scopedQuery, { signal }));
+        const scopedItems = uniquePtvMusicItems(await runPtvMusicApiRequest(
+            () => getPtvRecentlyAdded<PtvMusicItem>(scopedQuery, { signal }),
+            signal
+        ));
 
         recordPtvEvent('api', 'music-query-complete', {
             parentId: scopedParentId,
@@ -1385,7 +1491,10 @@ async function fetchPtvRecentlyAddedMusic(
     });
 
     try {
-        const unscopedItems = uniquePtvMusicItems(await getPtvRecentlyAdded<PtvMusicItem>(unscopedQuery, { signal }));
+        const unscopedItems = uniquePtvMusicItems(await runPtvMusicApiRequest(
+            () => getPtvRecentlyAdded<PtvMusicItem>(unscopedQuery, { signal }),
+            signal
+        ));
 
         recordPtvEvent('api', 'music-query-unscoped-fallback-complete', {
             parentId: scopedParentId,
@@ -2145,7 +2254,7 @@ export function fetchPtvMusicAlbumTracks(
     if (!albumId) return Promise.resolve([]);
 
     return fetchPtvMusicTracks({
-        ParentId: albumId,
+        AlbumIds: albumId,
         SortBy: 'ParentIndexNumber,IndexNumber,SortName',
         SortOrder: 'Ascending'
     }, limit, signal);
@@ -2168,14 +2277,14 @@ export function fetchPtvMusicPlaylistTracks(
         }, limit, signal);
     }
 
-    return requestPtvJson<PtvItemsResult<PtvMusicItem>>(`Playlists/${playlistId}/Items`, {
+    return runPtvMusicApiRequest(() => requestPtvJson<PtvItemsResult<PtvMusicItem>>(`Playlists/${playlistId}/Items`, {
         params: {
             Fields: MUSIC_LIST_FIELDS,
             Limit: limit,
             UserId: userId
         },
         signal
-    }).then(result => uniquePtvMusicItems(result.Items || []))
+    }), signal).then(result => uniquePtvMusicItems(result.Items || []))
         .catch(error => {
             if (signal?.aborted || isPtvMusicAbortError(error)) throw error;
 
@@ -2209,6 +2318,157 @@ function getSection(id: string, title: string, items: PtvMusicItem[], options: P
         seed: options.seed,
         subtitle: options.subtitle,
         title
+    };
+}
+
+function getPtvMusicHomeInitialSeed(
+    cacheKey: string,
+    musicLibrary: PtvMusicLibraryScope | null
+): PtvMusicHomeInitialSeed | null {
+    const entry = musicHomeSummaryCache.get(cacheKey);
+    const requiredTimingIds = [
+        'album-sample',
+        'artist-sample',
+        'continue-listening',
+        'favorites'
+    ];
+
+    if (
+        !entry
+        || entry.expiresAt <= Date.now()
+        || Date.now() - entry.data.generatedAt > MUSIC_HOME_INITIAL_SEED_REUSE_WINDOW_MS
+        || entry.data.completeness !== 'initial-usable'
+        || !entry.data.isPartial
+        || (entry.data.library?.id || null) !== (musicLibrary?.id || null)
+        || requiredTimingIds.some(id => !entry.data.sectionTimings?.some(timing => timing.id === id && timing.status === 'ok'))
+    ) {
+        return null;
+    }
+
+    const getItemsBySectionId = (id: string) => entry.data.sections.find(section => section.id === id)?.items || [];
+
+    return {
+        albums: getItemsBySectionId('top-albums'),
+        artists: getItemsBySectionId('top-artists'),
+        continueListening: getItemsBySectionId('continue-listening'),
+        favorites: getItemsBySectionId('liked-songs')
+    };
+}
+
+function recordPtvMusicHomeInitialSeedTimings(
+    seed: PtvMusicHomeInitialSeed,
+    sectionTimings: PtvMusicSectionTiming[]
+) {
+    [
+        [ 'albums', seed.albums.length ],
+        [ 'artists', seed.artists.length ],
+        [ 'continue-listening', seed.continueListening.length ],
+        [ 'favorites', seed.favorites.length ]
+    ].forEach(([ id, itemCount ]) => {
+        sectionTimings.push({
+            durationMs: 0,
+            id: String(id),
+            itemCount: Number(itemCount),
+            status: 'ok'
+        });
+    });
+}
+
+function fetchUnscopedMusicTracks(
+    query: PtvItemQuery,
+    limit: number,
+    signal?: AbortSignal
+) {
+    return getItems<PtvMusicItem>({
+        IncludeItemTypes: 'Audio',
+        Limit: limit,
+        ...query
+    }, signal).then(result => uniquePtvMusicItems(result.Items || []));
+}
+
+function fetchUnscopedRecentlyAddedMusic(limit: number, signal?: AbortSignal) {
+    return runPtvMusicApiRequest(() => getPtvRecentlyAdded<PtvMusicItem>({
+        Fields: MUSIC_LIST_FIELDS,
+        IncludeItemTypes: 'Audio',
+        Limit: limit
+    }, { signal }), signal).then(uniquePtvMusicItems);
+}
+
+function fetchPtvMusicResumeShelf(
+    libraryScope: Partial<PtvItemQuery>,
+    signal?: AbortSignal
+) {
+    return runPtvMusicApiRequest(() => getPtvResumeItems<PtvMusicItem>({
+        Fields: MUSIC_LIST_FIELDS,
+        IncludeItemTypes: 'Audio',
+        Limit: 24,
+        Recursive: true,
+        ...libraryScope
+    }, { signal }), signal).then(result => uniquePtvMusicItems(result.Items || []));
+}
+
+function fetchPtvMusicFavoritesShelf(
+    libraryScope: Partial<PtvItemQuery>,
+    signal?: AbortSignal
+) {
+    return runPtvMusicApiRequest(() => getPtvFavoriteItems<PtvMusicItem>({
+        Fields: MUSIC_LIST_FIELDS,
+        IncludeItemTypes: 'Audio',
+        Limit: 48,
+        Recursive: true,
+        SortBy: 'SortName',
+        ...libraryScope
+    }, { signal }), signal).then(result => uniquePtvMusicItems(result.Items || []));
+}
+
+function createInitialMusicProgressPublisher(
+    options: PtvMusicHomeRequestOptions,
+    sectionTimings: PtvMusicSectionTiming[],
+    getLibrary: () => PtvMusicLibraryScope | null
+) {
+    const completedSections = new Map<string, PtvMusicSection>();
+    const sectionOrder = [
+        'recently-played',
+        'recently-added-music'
+    ];
+
+    return (section: PtvMusicSection) => {
+        if (!section.items.length || !options.onProgress || options.signal?.aborted || options.isCurrent?.() === false) return;
+
+        completedSections.set(section.id, section);
+        const sections = sectionOrder
+            .map(id => completedSections.get(id))
+            .filter((entry): entry is PtvMusicSection => Boolean(entry));
+        const data: PtvMusicHomeData = {
+            completeness: 'initial-usable',
+            generatedAt: Date.now(),
+            isPartial: true,
+            library: getLibrary(),
+            nextEligibleRefreshAt: Date.now() + MUSIC_HOME_CACHE_TTL_MS,
+            refreshReason: 'progressive-first-shelf',
+            sectionTimings: sectionTimings.slice(),
+            sections,
+            stats: {
+                albumCount: 0,
+                artistCount: 0,
+                trackCount: uniquePtvMusicItems(sections.flatMap(entry => entry.items)).length
+            }
+        };
+
+        recordPtvEvent('render', 'music-home-progressive-shelf-ready', {
+            itemCount: section.items.length,
+            sectionCount: sections.length,
+            sectionId: section.id
+        });
+
+        try {
+            options.onProgress(data);
+        } catch {
+            recordPtvEvent('render', 'music-home-progress-callback-failed', {
+                reason: 'callback-threw',
+                sectionId: section.id
+            });
+        }
     };
 }
 
@@ -2275,13 +2535,194 @@ export function invalidatePtvMusicHomeCache() {
     void deletePtvLibraryIndexCacheByPrefix(`music:${cacheKey}:`);
 }
 
+function reconcilePtvMusicIdentifyHomeCacheEntry(
+    entry: MusicHomeCacheEntry | undefined,
+    confirmed: PtvMusicItem
+) {
+    if (!entry) return entry;
+
+    const data = reconcilePtvMusicIdentifyPresentationHomeData(entry.data, confirmed);
+
+    return data === entry.data ? entry : { ...entry, data };
+}
+
+function reconcilePersistentPtvMusicIdentifyHomeCache(
+    cacheKey: string,
+    initialOnly: boolean,
+    confirmed: PtvMusicItem
+) {
+    const storageKey = getMusicHomeStorageKey(cacheKey, initialOnly);
+    const entry = readPtvLocalStorageJson<MusicHomeCacheEntry | null>(storageKey, null);
+
+    if (
+        !entry
+        || entry.schemaVersion !== MUSIC_HOME_PERSISTENT_CACHE_SCHEMA_VERSION
+        || !entry.data
+    ) return 'missing' as const;
+
+    const data = reconcilePtvMusicIdentifyPresentationHomeData(entry.data, confirmed);
+
+    if (data === entry.data) return 'unchanged' as const;
+
+    const compacted = compactPtvMusicHomeSnapshotForStorage(data);
+
+    const updated = writePtvLocalStorageJson(
+        storageKey,
+        { ...entry, data: compacted.data },
+        {
+            maxBytes: MUSIC_HOME_SNAPSHOT_MAX_BYTES,
+            namespace: 'ptv:music-home-snapshot'
+        }
+    );
+
+    if (!updated) removePtvLocalStorageKey(storageKey);
+
+    return updated ? 'updated' as const : 'deleted-after-failure' as const;
+}
+
+function reconcilePtvMusicIdentifyLibraryIndex(
+    current: PtvMusicLibraryIndex,
+    confirmed: PtvMusicItem
+) {
+    const reconcileItems = (items: readonly PtvMusicItem[]) => {
+        let changed = false;
+        const next = items.map(item => {
+            const reconciled = reconcilePtvMusicIdentifyPresentationItem(item, confirmed);
+
+            if (reconciled === item) return item;
+
+            changed = true;
+            return projectPtvMusicLibraryIndexItemForStorage(reconciled);
+        });
+
+        return changed ? next : items;
+    };
+    const albums = reconcileItems(current.albums);
+    const artists = reconcileItems(current.artists);
+    const playlists = reconcileItems(current.playlists);
+    const tracks = reconcileItems(current.tracks);
+
+    if (
+        albums === current.albums
+        && artists === current.artists
+        && playlists === current.playlists
+        && tracks === current.tracks
+    ) return current;
+
+    return {
+        ...current,
+        albums: [ ...albums ],
+        artists: [ ...artists ],
+        playlists: [ ...playlists ],
+        tracks: [ ...tracks ]
+    };
+}
+
+function queuePtvMusicIdentifyLibraryIndexCacheUpdate(
+    key: string,
+    confirmed: PtvMusicItem,
+    isOperationCurrent: () => boolean
+) {
+    const generation = beginPtvMusicRequestGeneration(musicLibraryIndexRequestGenerations, key);
+    const isCurrent = () => isOperationCurrent() && isPtvMusicRequestGenerationCurrent(
+        musicLibraryIndexRequestGenerations,
+        key,
+        generation
+    );
+    const previousWrite = musicLibraryIndexWriteChains.get(key) || Promise.resolve();
+    const update = previousWrite
+        .catch(() => undefined)
+        .then(async () => {
+            if (!isCurrent()) return;
+
+            await updatePtvLibraryIndexCache<PtvMusicLibraryIndex>(
+                key,
+                MUSIC_LIBRARY_INDEX_CACHE_SCHEMA_VERSION,
+                current => reconcilePtvMusicIdentifyLibraryIndex(current, confirmed),
+                { shouldWrite: isCurrent }
+            );
+        });
+    const trackedUpdate = update.finally(() => {
+        if (musicLibraryIndexWriteChains.get(key) === trackedUpdate) {
+            musicLibraryIndexWriteChains.delete(key);
+        }
+    });
+
+    musicLibraryIndexWriteChains.set(key, trackedUpdate);
+
+    return trackedUpdate;
+}
+
+/**
+ * Adopts a confirmed Identify DTO into reusable Music snapshots and atomically
+ * reconciles only the active library-index records. No network request or Music
+ * model reload is started here.
+ */
+export async function reconcilePtvMusicIdentifyCaches(
+    identityKey: string | null,
+    confirmed: PtvMusicItem,
+    isCurrent: () => boolean
+) {
+    const cacheKey = getCacheKey();
+    const libraryIds = new Set<string>();
+    const activeLibrary = musicLibraryCache.get(cacheKey);
+    const normalizedIdentityKey = String(identityKey || '').trim().toLocaleLowerCase();
+    const activeIdentityKey = String(getMusicDisplayIdentityKey() || '').trim().toLocaleLowerCase();
+
+    if (
+        !isCurrent()
+        || !normalizedIdentityKey
+        || normalizedIdentityKey !== activeIdentityKey
+        || !confirmed.Id
+        || !isSupportedPtvMusicIdentifyType(confirmed)
+    ) return false;
+
+    beginPtvMusicRequestGeneration(musicHomeRequestGenerations, `${cacheKey}:initial`);
+    beginPtvMusicRequestGeneration(musicHomeRequestGenerations, `${cacheKey}:full`);
+
+    [ musicHomeSummaryCache, musicHomeCache ].forEach(cache => {
+        const current = cache.get(cacheKey);
+        const next = reconcilePtvMusicIdentifyHomeCacheEntry(current, confirmed);
+
+        if (next && next !== current) cache.set(cacheKey, next);
+        const libraryId = next?.data.library?.id;
+        if (libraryId) libraryIds.add(libraryId);
+    });
+
+    [ true, false ].forEach(initialOnly => {
+        const storageKey = getMusicHomeStorageKey(cacheKey, initialOnly);
+        const entry = readPtvLocalStorageJson<MusicHomeCacheEntry | null>(storageKey, null);
+        const libraryId = entry?.data?.library?.id;
+
+        if (libraryId) libraryIds.add(libraryId);
+        reconcilePersistentPtvMusicIdentifyHomeCache(cacheKey, initialOnly, confirmed);
+    });
+
+    if (activeLibrary?.id) libraryIds.add(activeLibrary.id);
+    if (lastMusicLibraryDiscovery.selectedMusicLibraryId) {
+        libraryIds.add(lastMusicLibraryDiscovery.selectedMusicLibraryId);
+    }
+    libraryIds.add('unscoped');
+
+    const libraryIndexKeys = Array.from(libraryIds, getMusicLibraryIndexCacheKey);
+
+    await Promise.all(libraryIndexKeys.map(key => (
+        queuePtvMusicIdentifyLibraryIndexCacheUpdate(key, confirmed, isCurrent)
+    )));
+
+    if (!isCurrent()) return false;
+
+    recordPtvEvent('cache', 'music-identify-cache-reconciled', {
+        homeCacheKinds: 2,
+        itemType: confirmed.Type || 'Unknown',
+        libraryIndexCacheCount: libraryIndexKeys.length
+    });
+
+    return true;
+}
+
 // eslint-disable-next-line sonarjs/cognitive-complexity -- Cache precedence and retirement checks stay explicit to prevent stale route data from winning.
-export async function getPtvMusicHome(options: {
-    initialOnly?: boolean;
-    forceRefresh?: boolean;
-    isCurrent?: () => boolean;
-    signal?: AbortSignal;
-} = {}): Promise<PtvMusicHomeData> {
+export async function getPtvMusicHome(options: PtvMusicHomeRequestOptions = {}): Promise<PtvMusicHomeData> {
     throwIfPtvMusicRouteWorkRetired(options);
     const cacheKey = getCacheKey();
     const activeCache = options.initialOnly ? musicHomeSummaryCache : musicHomeCache;
@@ -2370,7 +2811,8 @@ export async function getPtvMusicHome(options: {
             options
         );
         const sectionTimings: PtvMusicSectionTiming[] = [];
-        const musicLibrary = await getPtvMusicLibrary(options.signal).catch(error => {
+        let musicLibrary: PtvMusicLibraryScope | null = null;
+        const musicLibraryPromise = getPtvMusicLibrary(options.signal).catch(error => {
             if (isPtvMusicAbortError(error)) throw error;
 
             recordMusicApiSectionFailure('library', error);
@@ -2378,58 +2820,62 @@ export async function getPtvMusicHome(options: {
             return null;
         });
 
-        throwIfPtvMusicRouteWorkRetired({
-            isCurrent,
-            signal: options.signal
-        });
-        const libraryScope = musicLibrary?.id ? { ParentId: musicLibrary.id } : {};
-
         if (options.initialOnly) {
+            const publishProgress = createInitialMusicProgressPublisher(
+                options,
+                sectionTimings,
+                () => musicLibrary
+            );
+            const recentlyPlayedPromise = timeMusicSection('recently-played', fetchUnscopedMusicTracks({
+                SortBy: 'DatePlayed',
+                SortOrder: 'Descending'
+            }, 24, options.signal), sectionTimings).then(items => {
+                publishProgress(getSection('recently-played', 'Recently Played', items, {
+                    seed: { kind: 'recent', label: 'Recently Played' }
+                }));
+                return items;
+            });
+            const recentlyAddedPromise = timeMusicSection(
+                'recently-added',
+                fetchUnscopedRecentlyAddedMusic(24, options.signal),
+                sectionTimings
+            ).then(items => {
+                publishProgress(getSection('recently-added-music', 'Recently Added Music', items, {
+                    seed: { kind: 'recent', label: 'Recently Added Music' }
+                }));
+                return items;
+            });
+
+            musicLibrary = await musicLibraryPromise;
+            throwIfPtvMusicRouteWorkRetired({
+                isCurrent,
+                signal: options.signal
+            });
+            const libraryScope = musicLibrary?.id ? { ParentId: musicLibrary.id } : {};
             const [
-                recentlyPlayed,
                 continueListening,
                 favorites,
-                recentlyAdded,
                 albumSample,
                 artistSample,
                 trackSample
             ] = await runPtvScheduledRequests(
                 [
-                    () => timeMusicSection('recently-played', fetchPtvMusicTracks({
-                        SortBy: 'DatePlayed',
-                        SortOrder: 'Descending'
-                    }, 24, options.signal), sectionTimings),
-                    () => timeMusicSection('continue-listening', getPtvResumeItems<PtvMusicItem>({
-                        Fields: MUSIC_LIST_FIELDS,
-                        IncludeItemTypes: 'Audio',
-                        Limit: 18,
-                        Recursive: true,
-                        ...libraryScope
-                    }, { signal: options.signal }).then(result => uniquePtvMusicItems(result.Items || [])), sectionTimings),
-                    () => timeMusicSection('favorites', getPtvFavoriteItems<PtvMusicItem>({
-                        Fields: MUSIC_LIST_FIELDS,
-                        IncludeItemTypes: 'Audio',
-                        Limit: 24,
-                        Recursive: true,
-                        SortBy: 'SortName',
-                        ...libraryScope
-                    }, { signal: options.signal }).then(result => uniquePtvMusicItems(result.Items || [])), sectionTimings),
-                    () => timeMusicSection('recently-added', fetchPtvRecentlyAddedMusic(
-                        libraryScope,
-                        24,
-                        'recently-added',
-                        options.signal
-                    ), sectionTimings),
-                    () => timeMusicSection('album-sample', fetchPtvMusicAlbums(20, options.signal), sectionTimings),
-                    () => timeMusicSection('artist-sample', fetchPtvMusicArtists(20, options.signal), sectionTimings),
+                    () => timeMusicSection('continue-listening', fetchPtvMusicResumeShelf(libraryScope, options.signal), sectionTimings),
+                    () => timeMusicSection('favorites', fetchPtvMusicFavoritesShelf(libraryScope, options.signal), sectionTimings),
+                    () => timeMusicSection('album-sample', fetchPtvMusicAlbums(DEFAULT_ALBUM_SAMPLE_LIMIT, options.signal), sectionTimings),
+                    () => timeMusicSection('artist-sample', fetchPtvMusicArtists(DEFAULT_ARTIST_SAMPLE_LIMIT, options.signal), sectionTimings),
                     () => timeMusicSection('track-sample', fetchPtvMusicTracks({
                         SortBy: 'SortName',
                         SortOrder: 'Ascending'
                     }, 20, options.signal), sectionTimings)
                 ],
                 task => task(),
-                { concurrency: 2, signal: options.signal }
+                { concurrency: MUSIC_HOME_INITIAL_REQUEST_CONCURRENCY, signal: options.signal }
             );
+            const [recentlyPlayed, recentlyAdded] = await Promise.all([
+                recentlyPlayedPromise,
+                recentlyAddedPromise
+            ]);
             throwIfPtvMusicRouteWorkRetired({
                 isCurrent,
                 signal: options.signal
@@ -2534,56 +2980,97 @@ export async function getPtvMusicHome(options: {
             return data;
         }
 
-        const [
-            recentlyPlayed,
-            continueListening,
-            favorites,
-            recentlyAdded,
-            highestPlayed,
-            newMusic,
-            albums,
-            artists
-        ] = await runPtvScheduledRequests(
+        musicLibrary = await musicLibraryPromise;
+        throwIfPtvMusicRouteWorkRetired({
+            isCurrent,
+            signal: options.signal
+        });
+        const libraryScope = musicLibrary?.id ? { ParentId: musicLibrary.id } : {};
+        const initialSeed = getPtvMusicHomeInitialSeed(cacheKey, musicLibrary);
+        let recentlyPlayed: PtvMusicItem[];
+        let continueListening: PtvMusicItem[];
+        let favorites: PtvMusicItem[];
+        let recentlyAdded: PtvMusicItem[];
+        let highestPlayed: PtvMusicItem[];
+        let newMusic: PtvMusicItem[];
+        let albums: PtvMusicItem[];
+        let artists: PtvMusicItem[];
+
+        if (initialSeed) {
+            continueListening = initialSeed.continueListening;
+            favorites = initialSeed.favorites;
+            albums = initialSeed.albums;
+            artists = initialSeed.artists;
+            recordPtvMusicHomeInitialSeedTimings(initialSeed, sectionTimings);
+            recordPtvEvent('cache', 'music-home-initial-seed-reused', {
+                avoidedRequestCount: 4,
+                libraryId: musicLibrary?.id || null,
+                requestCountAfterReuse: 4,
+                requestCountWithoutReuse: 8
+            });
+            [ recentlyPlayed, recentlyAdded, highestPlayed, newMusic ] = await runPtvScheduledRequests(
+                [
+                    () => timeMusicSection('recently-played', fetchPtvMusicTracks({
+                        SortBy: 'DatePlayed',
+                        SortOrder: 'Descending'
+                    }, DEFAULT_TRACK_LIMIT, options.signal), sectionTimings),
+                    () => timeMusicSection('recently-added', fetchPtvRecentlyAddedMusic(
+                        libraryScope,
+                        36,
+                        'recently-added',
+                        options.signal
+                    ), sectionTimings),
+                    () => timeMusicSection('highest-played', fetchPtvMusicTracks({
+                        SortBy: 'PlayCount,SortName',
+                        SortOrder: 'Descending'
+                    }, 48, options.signal), sectionTimings),
+                    () => timeMusicSection('new-music', fetchPtvMusicTracks({
+                        SortBy: 'DateCreated',
+                        SortOrder: 'Descending'
+                    }, 48, options.signal), sectionTimings)
+                ],
+                task => task(),
+                { concurrency: MUSIC_HOME_FULL_REQUEST_CONCURRENCY, signal: options.signal }
+            );
+        } else {
             [
-                () => timeMusicSection('recently-played', fetchPtvMusicTracks({
-                    SortBy: 'DatePlayed',
-                    SortOrder: 'Descending'
-                }, DEFAULT_TRACK_LIMIT, options.signal), sectionTimings),
-                () => timeMusicSection('continue-listening', getPtvResumeItems<PtvMusicItem>({
-                    Fields: MUSIC_LIST_FIELDS,
-                    IncludeItemTypes: 'Audio',
-                    Limit: 24,
-                    Recursive: true,
-                    ...libraryScope
-                }, { signal: options.signal }).then(result => uniquePtvMusicItems(result.Items || [])), sectionTimings),
-                () => timeMusicSection('favorites', getPtvFavoriteItems<PtvMusicItem>({
-                    Fields: MUSIC_LIST_FIELDS,
-                    IncludeItemTypes: 'Audio',
-                    Limit: 48,
-                    Recursive: true,
-                    SortBy: 'SortName',
-                    ...libraryScope
-                }, { signal: options.signal }).then(result => uniquePtvMusicItems(result.Items || [])), sectionTimings),
-                () => timeMusicSection('recently-added', fetchPtvRecentlyAddedMusic(
-                    libraryScope,
-                    36,
-                    'recently-added',
-                    options.signal
-                ), sectionTimings),
-                () => timeMusicSection('highest-played', fetchPtvMusicTracks({
-                    SortBy: 'PlayCount,SortName',
-                    SortOrder: 'Descending'
-                }, 48, options.signal), sectionTimings),
-                () => timeMusicSection('new-music', fetchPtvMusicTracks({
-                    SortBy: 'DateCreated',
-                    SortOrder: 'Descending'
-                }, 48, options.signal), sectionTimings),
-                () => timeMusicSection('albums', fetchPtvMusicAlbums(DEFAULT_ALBUM_SAMPLE_LIMIT, options.signal), sectionTimings),
-                () => timeMusicSection('artists', fetchPtvMusicArtists(DEFAULT_ARTIST_SAMPLE_LIMIT, options.signal), sectionTimings)
-            ],
-            task => task(),
-            { concurrency: 3, signal: options.signal }
-        );
+                recentlyPlayed,
+                continueListening,
+                favorites,
+                recentlyAdded,
+                highestPlayed,
+                newMusic,
+                albums,
+                artists
+            ] = await runPtvScheduledRequests(
+                [
+                    () => timeMusicSection('recently-played', fetchPtvMusicTracks({
+                        SortBy: 'DatePlayed',
+                        SortOrder: 'Descending'
+                    }, DEFAULT_TRACK_LIMIT, options.signal), sectionTimings),
+                    () => timeMusicSection('continue-listening', fetchPtvMusicResumeShelf(libraryScope, options.signal), sectionTimings),
+                    () => timeMusicSection('favorites', fetchPtvMusicFavoritesShelf(libraryScope, options.signal), sectionTimings),
+                    () => timeMusicSection('recently-added', fetchPtvRecentlyAddedMusic(
+                        libraryScope,
+                        36,
+                        'recently-added',
+                        options.signal
+                    ), sectionTimings),
+                    () => timeMusicSection('highest-played', fetchPtvMusicTracks({
+                        SortBy: 'PlayCount,SortName',
+                        SortOrder: 'Descending'
+                    }, 48, options.signal), sectionTimings),
+                    () => timeMusicSection('new-music', fetchPtvMusicTracks({
+                        SortBy: 'DateCreated',
+                        SortOrder: 'Descending'
+                    }, 48, options.signal), sectionTimings),
+                    () => timeMusicSection('albums', fetchPtvMusicAlbums(DEFAULT_ALBUM_SAMPLE_LIMIT, options.signal), sectionTimings),
+                    () => timeMusicSection('artists', fetchPtvMusicArtists(DEFAULT_ARTIST_SAMPLE_LIMIT, options.signal), sectionTimings)
+                ],
+                task => task(),
+                { concurrency: MUSIC_HOME_FULL_REQUEST_CONCURRENCY, signal: options.signal }
+            );
+        }
         throwIfPtvMusicRouteWorkRetired({
             isCurrent,
             signal: options.signal

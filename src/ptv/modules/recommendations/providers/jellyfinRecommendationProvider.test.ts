@@ -17,6 +17,10 @@ const apiMocks = vi.hoisted(() => ({
     }),
     requestPtvJson: vi.fn()
 }));
+const providerEventMocks = vi.hoisted(() => ({
+    logFailure: vi.fn(),
+    logStage: vi.fn()
+}));
 
 vi.mock('../../../api', () => ({
     cleanPtvQuery: vi.fn((query: Record<string, unknown> | undefined) => query),
@@ -40,8 +44,8 @@ vi.mock('../../music/musicApi', () => ({
 }));
 
 vi.mock('../debug/recommendationRuntimeDebug', () => ({
-    logPtvRecommendationFailure: vi.fn(),
-    logPtvRecommendationStage: vi.fn()
+    logPtvRecommendationFailure: providerEventMocks.logFailure,
+    logPtvRecommendationStage: providerEventMocks.logStage
 }));
 
 type RequestOptions = {
@@ -75,6 +79,8 @@ describe('Jellyfin recommendation provider request lifecycle', () => {
         apiUrlServerIds.length = 0;
         apiMocks.getPtvApiUrl.mockClear();
         apiMocks.requestPtvJson.mockReset();
+        providerEventMocks.logFailure.mockReset();
+        providerEventMocks.logStage.mockReset();
     });
 
     it('propagates one captured server/user identity and signal to every coordinated request', async () => {
@@ -102,6 +108,49 @@ describe('Jellyfin recommendation provider request lifecycle', () => {
         });
         apiUrlServerIds.forEach(serverId => {
             expect(serverId).toBe('server-a');
+        });
+    });
+
+    it('carries the engine diagnostic generation through provider and source lifecycle events', async () => {
+        const diagnosticGenerationId = 'recommendation-generation-test';
+
+        apiMocks.requestPtvJson.mockImplementation(async endpoint => emptyPayload(endpoint));
+
+        const { getPtvRecommendationDataBundle } = await loadProvider();
+
+        await getPtvRecommendationDataBundle({ diagnosticGenerationId });
+
+        const lifecycleStages = new Set([
+            'Candidate fetch completed',
+            'Candidate fetch started',
+            'Provider created',
+            'Provider loaded',
+            'Provider prerequisites resolved',
+            'Source fetch completed',
+            'Source fetch started',
+            'Source request completed',
+            'Source request started'
+        ]);
+        const lifecycleCalls = providerEventMocks.logStage.mock.calls.filter(([ stage ]) => lifecycleStages.has(stage));
+
+        expect(lifecycleCalls.length).toBeGreaterThan(0);
+        lifecycleCalls.forEach(([, detail ]) => {
+            expect(detail).toMatchObject({ generationId: diagnosticGenerationId });
+        });
+    });
+
+    it('keeps provider failures scoped to the same diagnostic generation', async () => {
+        const diagnosticGenerationId = 'recommendation-generation-failure-test';
+
+        apiMocks.requestPtvJson.mockRejectedValue(new Error('bounded source failure'));
+
+        const { getPtvRecommendationDataBundle } = await loadProvider();
+
+        await getPtvRecommendationDataBundle({ diagnosticGenerationId });
+
+        expect(providerEventMocks.logFailure.mock.calls.length).toBeGreaterThan(0);
+        providerEventMocks.logFailure.mock.calls.forEach(([, , detail ]) => {
+            expect(detail).toMatchObject({ generationId: diagnosticGenerationId });
         });
     });
 

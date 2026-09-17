@@ -2,13 +2,14 @@
 
 ## Access
 
-The protected administrator route is:
+The canonical protected administrator route is:
 
-`#/dashboard/piggietv/diagnostics`
+`#/settings/admin/piggietv/diagnostics`
 
-It uses the existing Jellyfin dashboard route type and shell. Links appear in
-the server dashboard drawer and in the administrator section of user settings.
-No new authentication or authorization mechanism was added.
+It uses the native Settings administration route and `PtvAdminLayout`. The
+former `#/dashboard/piggietv/diagnostics` route replacement-redirects here for
+bookmark compatibility. `SettingsPage` verifies the current Jellyfin user's
+administrator policy before the diagnostics module mounts.
 
 ## Sections
 
@@ -40,6 +41,17 @@ session ID while retaining current platform/build context.
 
 Copy and Download construct and sanitize the export on demand. Neither action
 uploads data.
+
+## Credential safety invariant
+
+Authentication secrets must never be written to the browser console,
+diagnostic records, clipboard snapshots, or exports. PiggieTV routes structured
+logging and diagnostic values through the central redaction boundary, including
+headers, authenticated URL parameters, transport errors, native `Headers`, and
+`URLSearchParams`. The audited Jellyfin API client bundle is also transformed by
+a fail-closed build loader so upstream credential, request-URL, and WebSocket
+debug messages cannot bypass that boundary. Redaction applies in development
+and production; it does not alter the credential used by the actual request.
 
 ## Developer overlay
 

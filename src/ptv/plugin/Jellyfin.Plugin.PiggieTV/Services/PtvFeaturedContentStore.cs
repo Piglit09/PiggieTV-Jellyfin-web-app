@@ -20,6 +20,7 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
     private readonly string _directory;
     private readonly string _filePath;
     private readonly ILogger<PtvFeaturedContentStore> _logger;
+    private readonly PtvConfiguredRowAssociationService? _associations;
     private long _lastPayloadBytes;
     private string? _lastWriteError;
 
@@ -28,20 +29,21 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
     /// </summary>
     /// <param name="applicationPaths">Jellyfin application paths.</param>
     /// <param name="logger">Logger.</param>
+    /// <param name="associations">Optional process-local generation provenance owner.</param>
     public PtvFeaturedContentStore(
         IApplicationPaths applicationPaths,
-        ILogger<PtvFeaturedContentStore> logger)
+        ILogger<PtvFeaturedContentStore> logger,
+        PtvConfiguredRowAssociationService? associations = null)
     {
         _logger = logger;
+        _associations = associations;
 
         _directory = Path.Combine(applicationPaths.PluginConfigurationsPath, "PiggieTV");
         Directory.CreateDirectory(_directory);
         _filePath = Path.Combine(_directory, "featured-content-cache.json");
 
         _logger.LogInformation(
-            "PiggieTV featured-content cache store constructed. Directory={CacheDirectory}. File={CacheFilePath}. DirectoryExists={DirectoryExists}.",
-            _directory,
-            _filePath,
+            "PiggieTV featured-content cache store constructed. Category=store; DirectoryExists={DirectoryExists}.",
             Directory.Exists(_directory));
     }
 
@@ -61,8 +63,18 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
     }
 
     /// <inheritdoc />
-    public async Task<PtvFeaturedContentDocument> WriteAsync(
+    public Task<PtvFeaturedContentDocument> WriteAsync(
         PtvFeaturedContentDocument document,
+        CancellationToken cancellationToken) => WriteCoreAsync(document, null, cancellationToken);
+
+    internal Task<PtvFeaturedContentDocument> WriteGeneratedAsync(
+        PtvFeaturedContentDocument document,
+        PtvConfiguredRowAssociationService.Generation generation,
+        CancellationToken cancellationToken) => WriteCoreAsync(document, generation, cancellationToken);
+
+    private async Task<PtvFeaturedContentDocument> WriteCoreAsync(
+        PtvFeaturedContentDocument document,
+        PtvConfiguredRowAssociationService.Generation? generation,
         CancellationToken cancellationToken)
     {
         PtvFeaturedContentDocument normalizedDocument;
@@ -75,6 +87,7 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
 
         try
         {
+            _associations?.RetireStoreBinding();
             normalizedDocument = ValidateDocument(document);
             payloadBytes = JsonSerializer.SerializeToUtf8Bytes(normalizedDocument, JsonOptions);
 
@@ -85,9 +98,7 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
             var normalizedStats = GetDocumentDebugStats(normalizedDocument);
 
             _logger.LogInformation(
-                "PiggieTV featured-content cache write starting. Directory: {CacheDirectory}. File: {CacheFilePath}. DirectoryExists: {DirectoryExists}. FileExists: {FileExists}. Writable: {Writable}. PayloadBytes: {PayloadBytes}. MaxPayloadBytes: {MaxPayloadBytes}. HeroCount: {HeroCount}. SectionCount: {SectionCount}. ItemCount: {ItemCount}. IncomingHeroCount: {IncomingHeroCount}. IncomingSectionCount: {IncomingSectionCount}. IncomingItemCount: {IncomingItemCount}.",
-                _directory,
-                _filePath,
+                "PiggieTV featured-content cache write starting. Category=store; DirectoryExists={DirectoryExists}; FileExists={FileExists}; Writable={Writable}; PayloadBytes={PayloadBytes}; MaxPayloadBytes={MaxPayloadBytes}; HeroCount={HeroCount}; SectionCount={SectionCount}; ItemCount={ItemCount}; IncomingHeroCount={IncomingHeroCount}; IncomingSectionCount={IncomingSectionCount}; IncomingItemCount={IncomingItemCount}.",
                 directoryExists,
                 fileExists,
                 isWritable,
@@ -102,7 +113,7 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
 
             if (!isWritable)
             {
-                throw new IOException($"PiggieTV cache directory is not writable: {writeProbeError}");
+                throw new IOException("PiggieTV cache directory is not writable.");
             }
 
             await using (var stream = new FileStream(
@@ -117,26 +128,24 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
+            // A retired generation may retain the existing cache-write behavior, but never provenance.
+            var currentGeneration = generation is not null && _associations?.IsCurrent(generation) == true;
             ReplaceTemporaryFile(temporaryPath, _filePath);
+            if (currentGeneration) _associations!.RegisterGeneratedWrite(generation!, normalizedDocument);
             _lastPayloadBytes = payloadBytes.Length;
             _lastWriteError = null;
             _logger.LogInformation(
-                "PiggieTV featured-content cache write finished. File: {CacheFilePath}. PayloadBytes: {PayloadBytes}.",
-                _filePath,
+                "PiggieTV featured-content cache write finished. Category=success; PayloadBytes={PayloadBytes}.",
                 payloadBytes.Length);
 
             return normalizedDocument;
         }
         catch (PtvFeaturedContentValidationException ex)
         {
-            _lastWriteError = $"Featured cache validation failed: {ex.Code}: {ex.Message}";
+            _lastWriteError = "PTV_FEATURED_CACHE_VALIDATION_FAILED";
             _logger.LogWarning(
-                ex,
-                "PiggieTV featured-content cache validation failed. Code: {Code}. Message: {Message}. Directory: {CacheDirectory}. File: {CacheFilePath}. PayloadBytes: {PayloadBytes}. MaxPayloadBytes: {MaxPayloadBytes}. HeroCount: {HeroCount}. SectionCount: {SectionCount}. ItemCount: {ItemCount}.",
+                "PiggieTV featured-content cache validation failed. Category=validation; Code={Code}; PayloadBytes={PayloadBytes}; MaxPayloadBytes={MaxPayloadBytes}; HeroCount={HeroCount}; SectionCount={SectionCount}; ItemCount={ItemCount}.",
                 ex.Code,
-                ex.Message,
-                _directory,
-                _filePath,
                 payloadBytes.Length,
                 PtvFeaturedContentValidator.GetMaxDocumentBytes(),
                 incomingStats.HeroCount,
@@ -144,15 +153,11 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
                 incomingStats.ItemCount);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _lastWriteError = FormatStoreException("Unable to store featured cache", ex);
+            _lastWriteError = "PTV_FEATURED_CACHE_WRITE_FAILED";
             _logger.LogError(
-                ex,
-                "PiggieTV featured-content cache write failed. Directory: {CacheDirectory}. File: {CacheFilePath}. TempFile: {TemporaryPath}. PayloadBytes: {PayloadBytes}. MaxPayloadBytes: {MaxPayloadBytes}. HeroCount: {HeroCount}. SectionCount: {SectionCount}. ItemCount: {ItemCount}. DirectoryExists: {DirectoryExists}. FileExists: {FileExists}.",
-                _directory,
-                _filePath,
-                temporaryPath,
+                "PiggieTV featured-content cache write failed. Category=store; PayloadBytes={PayloadBytes}; MaxPayloadBytes={MaxPayloadBytes}; HeroCount={HeroCount}; SectionCount={SectionCount}; ItemCount={ItemCount}; DirectoryExists={DirectoryExists}; FileExists={FileExists}.",
                 payloadBytes.Length,
                 PtvFeaturedContentValidator.GetMaxDocumentBytes(),
                 incomingStats.HeroCount,
@@ -176,6 +181,7 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
 
         try
         {
+            _associations?.RetireStoreBinding();
             if (File.Exists(_filePath))
             {
                 File.Delete(_filePath);
@@ -240,14 +246,10 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
             File.Delete(probePath);
             return true;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            error = FormatStoreException("Cache directory write probe failed", ex);
-            _logger.LogWarning(
-                ex,
-                "PiggieTV featured-content cache directory is not writable. Directory: {CacheDirectory}. File: {CacheFilePath}.",
-                _directory,
-                _filePath);
+            error = "PTV_FEATURED_CACHE_PROBE_FAILED";
+            _logger.LogWarning("PiggieTV featured-content cache directory is not writable. Category=write-probe.");
             return false;
         }
     }
@@ -275,10 +277,10 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
 
             return PtvFeaturedContentValidator.NormalizeStoredDocument(document);
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            _logger.LogWarning(ex, "PiggieTV featured-content cache file is invalid. Returning an empty document.");
-            QuarantineCorruptCacheFile(ex);
+            _logger.LogWarning("PiggieTV featured-content cache file is invalid. Category=invalid-json; EmptyDocument=true.");
+            QuarantineCorruptCacheFile();
 
             return PtvFeaturedContentValidator.CreateEmptyDocument();
         }
@@ -344,15 +346,15 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
                 _lastPayloadBytes = new FileInfo(_filePath).Length;
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.LogWarning(ex, "PiggieTV could not read featured-content cache file size.");
+            _logger.LogWarning("PiggieTV featured-content cache size read failed. Category=file-size.");
         }
 
         return _lastPayloadBytes;
     }
 
-    private void QuarantineCorruptCacheFile(Exception sourceException)
+    private void QuarantineCorruptCacheFile()
     {
         try
         {
@@ -364,17 +366,11 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
             var corruptPath = $"{_filePath}.corrupt.{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
 
             File.Move(_filePath, corruptPath, true);
-            _logger.LogWarning(
-                sourceException,
-                "PiggieTV moved corrupt featured-content cache file to {CorruptCacheFilePath}.",
-                corruptPath);
+            _logger.LogWarning("PiggieTV corrupt featured-content cache quarantined. Category=invalid-json.");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _logger.LogWarning(
-                ex,
-                "PiggieTV could not move corrupt featured-content cache file. File: {CacheFilePath}.",
-                _filePath);
+            _logger.LogWarning("PiggieTV corrupt featured-content cache quarantine failed. Category=invalid-json.");
         }
     }
 
@@ -413,11 +409,6 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
         {
             // Best-effort cleanup. The original write exception is more useful than a temp-file cleanup failure.
         }
-    }
-
-    private static string FormatStoreException(string context, Exception exception)
-    {
-        return $"{context}: {exception.GetType().FullName}: {exception.Message}{Environment.NewLine}{exception.StackTrace}";
     }
 
     private static DocumentDebugStats GetDocumentDebugStats(PtvFeaturedContentDocument? document)

@@ -2,11 +2,11 @@ import mountPtvHomeHero, {
     cleanupDisconnectedPtvHomeHeroes,
     unmountPtvHomeHero
 } from 'ptv/pages/home/mountHero';
+import { trimPtvImageManagerMemory } from 'ptv/core/imageManager';
 import {
-    cancelPtvImageScope,
-    trimPtvImageManagerMemory
-} from 'ptv/core/imageManager';
-import { enhancePtvCards } from 'ptv/modules/cards/CardEnhancer';
+    cleanupPtvCardEnhancements,
+    enhancePtvCards
+} from 'ptv/modules/cards/CardEnhancer';
 import {
     FEATURED_CACHE_UPDATED_EVENT,
     getFeaturedContent
@@ -14,14 +14,20 @@ import {
 import { getPtvPerformanceProfile } from 'ptv/core/clientProfile';
 import { getPtvFeatureSettings } from 'ptv/core/featureSettings';
 import { recordPtvEvent, timePtvAsync } from 'ptv/core/observability';
-import { getUserViewsQuery } from 'hooks/useUserViews';
+import { ptvSafeConsole } from 'ptv/core/safeConsole';
+import { getPtvUserViews } from 'ptv/api/libraries';
+import { retirePtvRouteLifetime } from 'ptv/shell/routeController';
+import {
+    capturePtvRouteCriticalLifecycleOwner,
+    recordPtvRouteCriticalPending,
+    recordPtvRouteCriticalTerminal
+} from 'ptv/shell/routeCriticalLifecycle';
 import globalize from 'lib/globalize';
 import { DEFAULT_SECTIONS } from 'types/homeSectionType';
 import Dashboard from 'utils/dashboard';
-import { toApi } from 'utils/jellyfin-apiclient/compat';
-import { queryClient } from 'utils/query/queryClient';
 
 import {
+    createOwnedHomeApiClient,
     createFeaturedContentFetcher,
     getRowsFromFeaturedPayload,
     loadGenreMap,
@@ -29,9 +35,11 @@ import {
     PTV_HOME_ROWS,
     cleanupPtvRowBackdrops,
     renderLibraryRow,
-    renderMediaRow
+    renderMediaRow,
+    resumePtvRowVisuals
 } from './ptvRows';
 import { runBoundedHomeWork } from './homeWorkPlan';
+import { canRestoreLegacyHomeRow, isLegacyConfiguredRow } from './legacyConfiguredPresentation';
 
 import 'elements/emby-button/paper-icon-button-light';
 import 'elements/emby-itemscontainer/emby-itemscontainer';
@@ -77,7 +85,8 @@ function limitRowsForPerformance(rows, performanceProfile) {
 }
 
 function getHomeRowsForPayload(featuredPayload, performanceProfile) {
-    const payloadRows = getRowsFromFeaturedPayload(featuredPayload, PTV_HOME_ROWS);
+    const payloadRows = getRowsFromFeaturedPayload(featuredPayload, PTV_HOME_ROWS)
+        .filter(row => !isLegacyConfiguredRow(row));
 
     if (featuredPayload?.rowConfigApplied === true || featuredPayload?.sections?.length) {
         return payloadRows;
@@ -90,6 +99,133 @@ function getSharedFeaturedContent(fetchFeaturedContent) {
     return getFeaturedContent(fetchFeaturedContent);
 }
 
+function isHomeRouteLifetimeCurrent(elem, lifetime = elem?.ptvRouteLifetime) {
+    if (!elem || !lifetime || elem.ptvRouteLifetime !== lifetime || lifetime.signal?.aborted) return false;
+
+    try {
+        return lifetime.active === true && lifetime.isCurrent() === true;
+    } catch {
+        return false;
+    }
+}
+
+function createHomeHeroOptions(elem, baseOptions, lifetime) {
+    const apiClient = baseOptions?.apiClient;
+
+    return {
+        apiClient: createOwnedHomeApiClient(apiClient, {
+            scope: 'route',
+            serverId: apiClient?.serverId?.(),
+            signal: lifetime.signal
+        }),
+        ...(baseOptions?.featuredContentPromise ? {
+            featuredContentPromise: baseOptions.featuredContentPromise
+        } : {}),
+        isCurrent: () => isHomeRouteLifetimeCurrent(elem, lifetime),
+        user: baseOptions?.user
+    };
+}
+
+function cleanupHomeRouteLifetimeBinding(elem) {
+    if (typeof elem?.ptvRouteLifetimeCleanup === 'function') {
+        elem.ptvRouteLifetimeCleanup();
+    }
+
+    if (elem) {
+        elem.ptvRouteLifetimeCleanup = null;
+    }
+}
+
+function clearHomeRouteTimers(elem) {
+    if (!elem?.ptvRouteTimerCleanups) return;
+
+    for (const cleanup of Array.from(elem.ptvRouteTimerCleanups)) {
+        cleanup();
+    }
+
+    elem.ptvRouteTimerCleanups.clear();
+}
+
+function scheduleHomeRouteTimer(elem, lifetime, callback, delayMs, onCancel = null) {
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) {
+        onCancel?.();
+        return null;
+    }
+
+    if (!elem.ptvRouteTimerCleanups) {
+        elem.ptvRouteTimerCleanups = new Set();
+    }
+
+    let active = true;
+    let timer = 0;
+    const cleanup = () => {
+        if (!active) return;
+
+        active = false;
+        window.clearTimeout(timer);
+        elem.ptvRouteTimerCleanups?.delete(cleanup);
+        onCancel?.();
+    };
+
+    timer = window.setTimeout(() => {
+        if (!active) return;
+
+        active = false;
+        elem.ptvRouteTimerCleanups?.delete(cleanup);
+
+        if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+            callback();
+        } else {
+            onCancel?.();
+        }
+    }, delayMs);
+    elem.ptvRouteTimerCleanups.add(cleanup);
+
+    return cleanup;
+}
+
+function bindHomeRouteLifetime(elem, lifetime) {
+    if (!lifetime || lifetime.signal?.aborted || lifetime.isCurrent?.() !== true) return false;
+
+    const previousLifetime = elem.ptvRouteLifetime;
+
+    cleanupHomeRouteLifetimeBinding(elem);
+
+    if (previousLifetime && previousLifetime !== lifetime) {
+        retirePtvRouteLifetime(previousLifetime);
+    }
+
+    elem.ptvRouteLifetime = lifetime;
+    const handleAbort = () => {
+        if (elem.ptvRouteLifetime !== lifetime) return;
+
+        cleanupHomeRouteLifetimeBinding(elem);
+        elem.ptvRouteLifetime = null;
+        cleanupHomeRouteResources(elem);
+    };
+
+    lifetime.signal.addEventListener('abort', handleAbort, { once: true });
+    elem.ptvRouteLifetimeCleanup = () => {
+        lifetime.signal.removeEventListener('abort', handleAbort);
+    };
+
+    return isHomeRouteLifetimeCurrent(elem, lifetime);
+}
+
+function retireBoundHomeRouteLifetime(elem) {
+    const lifetime = elem?.ptvRouteLifetime;
+
+    cleanupHomeRouteLifetimeBinding(elem);
+
+    if (elem) {
+        elem.ptvRouteLifetime = null;
+    }
+
+    if (lifetime) {
+        retirePtvRouteLifetime(lifetime);
+    }
+}
+
 function cleanupFeaturedCacheListener(elem) {
     if (typeof elem.ptvFeaturedCacheCleanup === 'function') {
         elem.ptvFeaturedCacheCleanup();
@@ -97,10 +233,26 @@ function cleanupFeaturedCacheListener(elem) {
     }
 }
 
-function delay(ms) {
-    if (!ms) return Promise.resolve();
+function delay(ms, elem, lifetime) {
+    if (!ms) return Promise.resolve(isHomeRouteLifetimeCurrent(elem, lifetime));
 
-    return new Promise(resolve => window.setTimeout(resolve, ms));
+    return new Promise(resolve => {
+        scheduleHomeRouteTimer(elem, lifetime, () => resolve(true), ms, () => resolve(false));
+    });
+}
+
+function deferHomeRouteWork(elem, lifetime) {
+    return new Promise(resolve => {
+        scheduleHomeRouteTimer(elem, lifetime, () => resolve(true), 0, () => resolve(false));
+    });
+}
+
+function enhanceCurrentHomeCards(elem, lifetime) {
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
+    enhancePtvCards(elem, {
+        isCurrent: () => isHomeRouteLifetimeCurrent(elem, lifetime)
+    });
 }
 
 function createLookupMaps() {
@@ -152,6 +304,7 @@ function getVirtualRowState(elem, row, index) {
             distantSince: 0,
             height: 0,
             html: '',
+            genericPresentationVerified: false,
             hydrated: false,
             mountedAt: 0,
             remountCount: 0,
@@ -200,6 +353,7 @@ function rememberRowState(elem, sectionElem, row, index) {
     state.className = sectionElem.className;
     state.height = height || state.height || 0;
     state.html = sectionElem.dataset.ptvRowResumed === 'true' ? sectionElem.innerHTML : state.html;
+    state.genericPresentationVerified = !isLegacyConfiguredRow(row);
     state.hydrated = state.hydrated || sectionElem.dataset.ptvRowResumed === 'true';
     state.rowDataKey = getVirtualRowDataKey(row);
     state.scrollLeft = Math.round(scroller?.scrollLeft || Number(sectionElem.dataset.ptvScrollLeft || 0) || 0);
@@ -258,8 +412,9 @@ function markSectionResumed(section) {
     }
 }
 
-function scheduleDeferredResume(elem, sections, options) {
+function scheduleDeferredResume(elem, sections, options, lifetime = elem.ptvRouteLifetime) {
     if (!sections.length) return;
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
 
     if (!elem.ptvDeferredResumeTimers) {
         elem.ptvDeferredResumeTimers = new Set();
@@ -268,7 +423,11 @@ function scheduleDeferredResume(elem, sections, options) {
     const timer = window.setTimeout(() => {
         elem.ptvDeferredResumeTimers?.delete(timer);
 
-        const connectedSections = sections.filter(section => section.isConnected);
+        if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
+        const connectedSections = sections.filter(section => (
+            section.isConnected && isHomeRouteLifetimeCurrent(elem, lifetime)
+        ));
         if (!connectedSections.length) return;
 
         void timePtvAsync(
@@ -277,18 +436,22 @@ function scheduleDeferredResume(elem, sections, options) {
             () => runBoundedHomeWork(
                 connectedSections,
                 VIRTUAL_ROW_WORK_CONCURRENCY,
-                section => resumeSection(section, options),
-                () => elem.isConnected
+                section => resumeSection(section, options, elem, lifetime),
+                () => isHomeRouteLifetimeCurrent(elem, lifetime)
             ),
             {
                 sections: connectedSections.length
             }
         )
             .then(() => {
-                enhancePtvCards(elem);
+                if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                    enhanceCurrentHomeCards(elem, lifetime);
+                }
             })
             .catch(err => {
-                console.warn('[PTV Home] Failed resuming deferred sections', err);
+                if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                    ptvSafeConsole.warn('[PTV Home] Failed resuming deferred sections', err);
+                }
             });
     }, 450);
 
@@ -578,7 +741,9 @@ function getRowMountOptions(context) {
     return {
         enableOverflow: enableScrollX(),
         featuredContentSource: context.featuredContentSource,
-        performanceProfile: context.performanceProfile
+        isRouteCurrent: context.isRouteCurrent,
+        performanceProfile: context.performanceProfile,
+        routeOwnerRef: context.routeOwnerRef
     };
 }
 
@@ -596,7 +761,7 @@ function restoreCachedVirtualRow(elem, sectionElem, row, index, reason) {
     const state = getVirtualRowState(elem, row, index);
     const rowDataKey = getVirtualRowDataKey(row);
 
-    if (!state.html || state.rowDataKey !== rowDataKey || !state.hydrated) {
+    if (!canRestoreLegacyHomeRow(row, state) || !state.html || state.rowDataKey !== rowDataKey || !state.hydrated) {
         return null;
     }
 
@@ -630,6 +795,8 @@ function restoreCachedVirtualRow(elem, sectionElem, row, index, reason) {
 }
 
 function mountVirtualRow(elem, sectionElem, row, index, context, reason = 'mount') {
+    if (!isHomeRouteLifetimeCurrent(elem, context.routeOwnerRef.lifetime)) return null;
+
     if (!sectionElem || sectionElem.dataset.ptvRowMounted === 'true') {
         return getRowItemContainer(sectionElem);
     }
@@ -687,6 +854,13 @@ function unmountVirtualRow(elem, sectionElem, row, index, reason = 'distant') {
         itemsContainer.fetchData = null;
         itemsContainer.parentContainer = null;
         itemsContainer.getItemsHtml = null;
+        itemsContainer.afterRefresh = null;
+        itemsContainer.ptvDataOwner = null;
+        itemsContainer.isDataOwnerCurrent = null;
+        itemsContainer.ptvLastRowItems = null;
+        itemsContainer.ptvRefreshGeneration = (Number(itemsContainer.ptvRefreshGeneration) || 0) + 1;
+        itemsContainer.ptvRefreshInFlightGeneration = 0;
+        itemsContainer.ptvRowOptions = null;
     });
 
     sectionElem.innerHTML = '';
@@ -705,19 +879,27 @@ function unmountVirtualRow(elem, sectionElem, row, index, reason = 'distant') {
 }
 
 function mountAndResumeVirtualRow(elem, entry, context, origin) {
+    const lifetime = context.routeOwnerRef.lifetime;
+
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return Promise.resolve(null);
     if (!entry.slot || entry.slot.dataset.ptvRowMounted === 'true' || entry.slot.dataset.ptvRowMounting === 'true') {
         return Promise.resolve(null);
     }
 
     entry.slot.dataset.ptvRowMounting = 'true';
+    entry.slot.ptvRowMountLifetimeIdentity = lifetime.identity;
 
     return timePtvAsync(
         'render',
         'home-row-mount-viewport',
         () => Promise.resolve().then(() => {
+            if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return null;
+
             const section = mountVirtualRow(elem, entry.slot, entry.row, entry.index, context, origin);
             if (entry.slot.dataset.ptvRowResumed === 'true') {
-                noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+                if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                    noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+                }
 
                 return null;
             }
@@ -729,8 +911,10 @@ function mountAndResumeVirtualRow(elem, entry, context, origin) {
             return resumeSection(section, {
                 deferContinue: false,
                 refresh: true
-            }).then(result => {
-                noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+            }, elem, lifetime).then(result => {
+                if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                    noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+                }
 
                 return result;
             });
@@ -743,16 +927,22 @@ function mountAndResumeVirtualRow(elem, entry, context, origin) {
         }
     )
         .catch(err => {
-            console.warn('[PTV Home] Failed mounting viewport row', err);
+            if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                ptvSafeConsole.warn('[PTV Home] Failed mounting viewport row', err);
+            }
         })
         .finally(() => {
-            delete entry.slot.dataset.ptvRowMounting;
+            if (entry.slot.ptvRowMountLifetimeIdentity === lifetime.identity) {
+                delete entry.slot.dataset.ptvRowMounting;
+                entry.slot.ptvRowMountLifetimeIdentity = null;
+            }
         });
 }
 
-function resumeMountedVirtualRow(elem, entry, origin) {
+function resumeMountedVirtualRow(elem, entry, origin, lifetime = elem.ptvRouteLifetime) {
     const section = entry.slot?.querySelector('.itemsContainer');
 
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return Promise.resolve(null);
     if (!entry.slot
         || entry.slot.dataset.ptvRowResumed === 'true'
         || entry.slot.dataset.ptvRowMounting === 'true'
@@ -763,6 +953,7 @@ function resumeMountedVirtualRow(elem, entry, origin) {
     }
 
     entry.slot.dataset.ptvRowMounting = 'true';
+    entry.slot.ptvRowMountLifetimeIdentity = lifetime.identity;
 
     return timePtvAsync(
         'render',
@@ -770,8 +961,10 @@ function resumeMountedVirtualRow(elem, entry, origin) {
         () => resumeSection(section, {
             deferContinue: false,
             refresh: true
-        }).then(result => {
-            noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+        }, elem, lifetime).then(result => {
+            if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                noteHydratedRow(elem, entry.slot, entry.row, entry.index);
+            }
 
             return result;
         }),
@@ -783,10 +976,15 @@ function resumeMountedVirtualRow(elem, entry, origin) {
         }
     )
         .catch(err => {
-            console.warn('[PTV Home] Failed resuming mounted viewport row', err);
+            if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                ptvSafeConsole.warn('[PTV Home] Failed resuming mounted viewport row', err);
+            }
         })
         .finally(() => {
-            delete entry.slot.dataset.ptvRowMounting;
+            if (entry.slot.ptvRowMountLifetimeIdentity === lifetime.identity) {
+                delete entry.slot.dataset.ptvRowMounting;
+                entry.slot.ptvRowMountLifetimeIdentity = null;
+            }
         });
 }
 
@@ -827,6 +1025,10 @@ function takeUniqueRowEntries(entries, limit) {
 }
 
 function mountInitialRows(elem, rows, context, scrollRoot = null) {
+    const lifetime = context.routeOwnerRef.lifetime;
+
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return Promise.resolve([]);
+
     const pendingRows = getPendingVirtualRows(elem, rows);
     const targetCount = getInitialHydrationTarget(elem, rows, context.performanceProfile, scrollRoot);
     const visibleRows = pendingRows
@@ -846,14 +1048,20 @@ function mountInitialRows(elem, rows, context, scrollRoot = null) {
         initialRows,
         VIRTUAL_ROW_WORK_CONCURRENCY,
         entry => mountAndResumeVirtualRow(elem, entry, context, 'initial'),
-        () => elem.isConnected
+        () => isHomeRouteLifetimeCurrent(elem, lifetime)
     ).finally(() => {
-        recordVirtualizationMetrics(elem, rows, 'initial', scrollRoot);
+        if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+            recordVirtualizationMetrics(elem, rows, 'initial', scrollRoot);
+        }
     });
 }
 
 function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
+    const lifetime = context.routeOwnerRef.lifetime;
+
     cleanupRowMountObserver(elem);
+
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
 
     const slots = getPendingVirtualRows(elem, rows);
 
@@ -916,6 +1124,8 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
     };
 
     const cleanupDistantRows = (origin = 'scan') => {
+        if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
         let unmountedRows = 0;
         const unmountedRowIds = [];
 
@@ -944,13 +1154,17 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
     };
 
     const scheduleIdleCleanup = (origin = 'idle') => {
+        if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
         if (cleanupTimer) {
             window.clearTimeout(cleanupTimer);
         }
 
         cleanupTimer = window.setTimeout(() => {
             cleanupTimer = 0;
-            cleanupDistantRows(origin);
+            if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                cleanupDistantRows(origin);
+            }
         }, VIRTUAL_ROW_IDLE_CLEANUP_MS);
     };
 
@@ -997,7 +1211,7 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
     };
 
     const pumpRows = (origin = 'scan') => {
-        if (!elem.isConnected) return Promise.resolve();
+        if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return Promise.resolve();
 
         if (pumpRunning) {
             pendingPumpOrigin = origin;
@@ -1030,12 +1244,14 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
             rowWork,
             VIRTUAL_ROW_WORK_CONCURRENCY,
             work => work.type === 'resume' ?
-                resumeMountedVirtualRow(elem, work.entry, origin) :
+                resumeMountedVirtualRow(elem, work.entry, origin, lifetime) :
                 mountAndResumeVirtualRow(elem, work.entry, context, origin),
-            () => elem.isConnected
+            () => isHomeRouteLifetimeCurrent(elem, lifetime)
         )
             .then(() => {
-                enhancePtvCards(elem);
+                if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
+                enhanceCurrentHomeCards(elem, lifetime);
                 scheduleIdleCleanup(`${origin}-idle`);
                 recordVirtualizationMetrics(elem, rows, origin, scrollRoot);
 
@@ -1048,10 +1264,19 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
                     && (pendingRows || unresumedRows)
                     && resumedRows < minimumHydratedRows
                 ) {
-                    window.setTimeout(() => schedulePump(`${origin}-continue`), 180);
+                    const timer = window.setTimeout(() => {
+                        fallbackTimers.delete(timer);
+
+                        if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                            schedulePump(`${origin}-continue`);
+                        }
+                    }, 180);
+                    fallbackTimers.add(timer);
                 }
             })
             .finally(() => {
+                if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
                 pumpRunning = false;
 
                 if (pendingPumpOrigin) {
@@ -1063,11 +1288,14 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
     };
 
     const schedulePump = (origin = 'event') => {
+        if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
         if (pumpFrame) return;
 
         pumpFrame = window.requestAnimationFrame(() => {
             pumpFrame = 0;
-            void pumpRows(origin);
+            if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                void pumpRows(origin);
+            }
         });
     };
 
@@ -1084,6 +1312,8 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
 
     if (typeof IntersectionObserver === 'function') {
         observer = new IntersectionObserver((entries) => {
+            if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
             const visibleEntries = entries.filter(entry => entry.isIntersecting && entriesBySlot.has(entry.target));
 
             if (!visibleEntries.length) return;
@@ -1161,22 +1391,29 @@ function observeVirtualRowSlots(elem, rows, context, scrollRoot = null) {
     ].forEach(([ origin, delayMs ]) => {
         const timer = window.setTimeout(() => {
             fallbackTimers.delete(timer);
-            schedulePump(origin);
+            if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                schedulePump(origin);
+            }
         }, delayMs);
 
         fallbackTimers.add(timer);
     });
 }
 
-export function loadSections(elem, apiClient, user) {
+export function loadSections(elem, apiClient, user, userSettings, lifetime) {
+    void userSettings;
+    cleanupHomeRouteResources(elem, { preserveRowVisuals: false });
+
+    if (!bindHomeRouteLifetime(elem, lifetime)) return Promise.resolve();
+
+    const isCurrent = () => isHomeRouteLifetimeCurrent(elem, lifetime);
+    const routeCriticalOwner = capturePtvRouteCriticalLifecycleOwner('home');
+    let routeCriticalOutcome = 'failed';
+
     elem.dataset.ptvRouteCriticalPending = 'true';
+    elem.dataset.ptvRouteCriticalGeneration = String(lifetime.generation);
+    recordPtvRouteCriticalPending(routeCriticalOwner);
     window.__PTV_HOME_INITIALIZED__ = true;
-    unmountPtvHomeHero(elem);
-    cleanupPtvRowBackdrops(elem);
-    cleanupFeaturedCacheListener(elem);
-    clearDeferredResumeTimers(elem);
-    cleanupViewportResumeObserver(elem);
-    cleanupRowMountObserver(elem);
     elem.ptvVirtualRows = null;
     elem.ptvVirtualRowContext = null;
     elem.ptvVirtualRowStateCache = new Map();
@@ -1184,13 +1421,24 @@ export function loadSections(elem, apiClient, user) {
     elem.ptvRowObserverTriggerCount = 0;
     elem.ptvRowManualViewportPassCount = 0;
     elem.ptvLastUnmountReason = '';
+    elem.ptvHomeHeroOptions = null;
+    elem.ptvHomeHeroBaseOptions = null;
     trimPtvImageManagerMemory();
 
     const userId = user.Id || apiClient.getCurrentUserId();
-    const loadPromise = timePtvAsync('render', 'home-sections-load', () => queryClient
-        .fetchQuery(getUserViewsQuery(toApi(apiClient), userId))
-        .then(result => result.Items || [])
+    const loadPromise = timePtvAsync('render', 'home-sections-load', () => getPtvUserViews({
+        scope: 'route',
+        serverId: apiClient.serverId?.(),
+        signal: lifetime.signal,
+        userId
+    })
+        .then(result => isCurrent() ? result.Items || [] : null)
         .then(function (userViews) {
+            if (!userViews || !isCurrent()) {
+                routeCriticalOutcome = 'cancelled';
+                return undefined;
+            }
+
             let html = '';
             const performanceProfile = getPtvPerformanceProfile();
             const featureSettings = getPtvFeatureSettings();
@@ -1206,16 +1454,15 @@ export function loadSections(elem, apiClient, user) {
                 const lookupMaps = createLookupMaps();
                 const lookupMapsPromise = hydrateLookupMaps(lookupMaps, apiClient, userId)
                     .catch(() => lookupMaps);
-                const fetchFeaturedContent = () => lookupMapsPromise.then(() => createFeaturedContentFetcher(
-                    apiClient,
-                    userId,
-                    seedRows,
-                    lookupMaps,
-                    userViews,
-                    {
-                        performanceProfile
-                    }
-                )());
+                const fetchFeaturedContent = () => lookupMapsPromise
+                    .then(() => createFeaturedContentFetcher(
+                        apiClient,
+                        userId,
+                        seedRows,
+                        lookupMaps,
+                        userViews,
+                        { performanceProfile }
+                    )());
                 let featuredContentPromise = seedRows.length ?
                     getSharedFeaturedContent(fetchFeaturedContent) :
                     Promise.resolve({
@@ -1227,6 +1474,13 @@ export function loadSections(elem, apiClient, user) {
                 return featuredContentPromise
                     .catch(() => null)
                     .then(featuredPayload => {
+                        if (!isCurrent()) {
+                            routeCriticalOutcome = 'cancelled';
+                            return undefined;
+                        }
+
+                        const featuredCriticalOutcome = featuredPayload ? 'success' : 'partial';
+
                         const rows = featureSettings.homeRowsEnabled ?
                             getHomeRowsForPayload(featuredPayload, performanceProfile) :
                             [];
@@ -1239,6 +1493,8 @@ export function loadSections(elem, apiClient, user) {
                             html += '<div class="verticalSection section' + i + '"></div>';
                         }
 
+                        if (!isCurrent()) return undefined;
+
                         elem.innerHTML = html;
                         elem.classList.add('homeSectionsContainer');
                         elem.classList.toggle('ptv-home-low-power', performanceProfile.isLowPower);
@@ -1246,32 +1502,54 @@ export function loadSections(elem, apiClient, user) {
                         elem.dataset.ptvRenderProfile = performanceProfile.renderProfile.id;
                         elem.dataset.ptvRenderTier = performanceProfile.renderProfile.tier;
 
-                        if (!rows.length) {
-                            mountPtvHomeHero(elem, {
-                                apiClient,
-                                user
-                            });
+                        const heroBaseOptions = rows.length ? {
+                            apiClient,
+                            featuredContentPromise,
+                            user
+                        } : {
+                            apiClient,
+                            user
+                        };
+                        const heroOptions = createHomeHeroOptions(elem, heroBaseOptions, lifetime);
 
-                            return Promise.resolve();
+                        elem.ptvHomeHeroBaseOptions = heroBaseOptions;
+                        elem.ptvHomeHeroOptions = heroOptions;
+
+                        if (!rows.length) {
+                            if (isCurrent()) {
+                                mountPtvHomeHero(elem, heroOptions);
+                                routeCriticalOutcome = featuredCriticalOutcome;
+                            }
+
+                            return undefined;
                         }
 
                         const featuredContentSource = {
                             get: () => featuredContentPromise
                         };
                         const handleFeaturedCacheUpdated = () => {
+                            if (!isCurrent()) return;
+
                             featuredContentPromise = getFeaturedContent(fetchFeaturedContent);
+                            elem.ptvHomeHeroBaseOptions.featuredContentPromise = featuredContentPromise;
 
                             void resume(elem, {
                                 deferContinue: true,
                                 refresh: true
-                            })
+                            }, lifetime)
                                 .then(() => {
-                                    enhancePtvCards(elem);
+                                    if (isCurrent()) {
+                                        enhanceCurrentHomeCards(elem, lifetime);
+                                    }
                                 })
                                 .catch(err => {
-                                    console.warn('[PTV Home] Failed refreshing featured cache content', err);
+                                    if (isCurrent()) {
+                                        ptvSafeConsole.warn('[PTV Home] Failed refreshing featured cache content', err);
+                                    }
                                 });
                         };
+
+                        if (!isCurrent()) return undefined;
 
                         cleanupFeaturedCacheListener(elem);
                         window.addEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
@@ -1279,79 +1557,120 @@ export function loadSections(elem, apiClient, user) {
                             window.removeEventListener(FEATURED_CACHE_UPDATED_EVENT, handleFeaturedCacheUpdated);
                         };
 
-                        mountPtvHomeHero(elem, {
-                            apiClient,
-                            user,
-                            featuredContentPromise
-                        });
+                        mountPtvHomeHero(elem, heroOptions);
 
                         for (let i = 0; i < rows.length; i++) {
+                            if (!isCurrent()) return undefined;
+
                             setRowSlotMetadata(getRowSlot(elem, i), rows[i], i);
                         }
 
+                        const routeOwnerRef = {
+                            lifetime
+                        };
                         const rowMountContext = {
                             apiClient,
                             featuredContentSource,
+                            isRouteCurrent: () => isHomeRouteLifetimeCurrent(elem, routeOwnerRef.lifetime),
                             lookupMaps,
                             performanceProfile,
+                            routeOwnerRef,
                             userId,
                             userViews
                         };
                         const rowScrollRoot = getRowScrollRoot(elem);
                         elem.ptvVirtualRows = rows;
                         elem.ptvVirtualRowContext = rowMountContext;
-                        // Timeout for polyfilled CustomElements (webOS 1.2)
-                        return new Promise(resolve => window.setTimeout(resolve, 0))
-                            .then(() => mountInitialRows(elem, rows, rowMountContext, rowScrollRoot))
+
+                        // Delay for polyfilled CustomElements (webOS 1.2). The
+                        // route owner cancels this continuation on retirement.
+                        return deferHomeRouteWork(elem, lifetime)
+                            .then(continued => continued ?
+                                mountInitialRows(elem, rows, rowMountContext, rowScrollRoot) :
+                                undefined)
                             .then(() => {
-                                enhancePtvCards(elem);
+                                if (!isCurrent()) return;
+
+                                enhanceCurrentHomeCards(elem, lifetime);
                                 observeVirtualRowSlots(elem, rows, rowMountContext, rowScrollRoot);
                                 recordPtvEvent('render', 'home-route-critical-shelves-settled', {
                                     deferredRows: Math.max(0, rows.length - getResumedVirtualRowCount(elem, rows)),
                                     routeCriticalRows: getResumedVirtualRowCount(elem, rows)
                                 });
+                                routeCriticalOutcome = featuredCriticalOutcome;
                             });
                     });
-            } else {
-                let noLibDescription;
-                if (user.Policy?.IsAdministrator) {
-                    noLibDescription = globalize.translate('NoCreatedLibraries', '<br><a id="button-createLibrary" class="button-link">', '</a>');
-                } else {
-                    noLibDescription = globalize.translate('AskAdminToCreateLibrary');
-                }
-
-                html += '<div class="centerMessage padded-left padded-right">';
-                html += '<h2>' + globalize.translate('MessageNothingHere') + '</h2>';
-                html += '<p>' + noLibDescription + '</p>';
-                html += '</div>';
-                elem.innerHTML = html;
-
-                const createNowLink = elem.querySelector('#button-createLibrary');
-                if (createNowLink) {
-                    createNowLink.addEventListener('click', function () {
-                        Dashboard.navigate('dashboard/libraries');
-                    });
-                }
             }
+
+            let noLibDescription;
+            if (user.Policy?.IsAdministrator) {
+                noLibDescription = globalize.translate('NoCreatedLibraries', '<br><a id="button-createLibrary" class="button-link">', '</a>');
+            } else {
+                noLibDescription = globalize.translate('AskAdminToCreateLibrary');
+            }
+
+            html += '<div class="centerMessage padded-left padded-right">';
+            html += '<h2>' + globalize.translate('MessageNothingHere') + '</h2>';
+            html += '<p>' + noLibDescription + '</p>';
+            html += '</div>';
+
+            if (!isCurrent()) return undefined;
+
+            routeCriticalOutcome = 'empty';
+            elem.innerHTML = html;
+
+            const createNowLink = elem.querySelector('#button-createLibrary');
+            if (createNowLink && isCurrent()) {
+                createNowLink.addEventListener('click', function () {
+                    if (isCurrent()) {
+                        Dashboard.navigate('dashboard/libraries');
+                    }
+                });
+            }
+
+            return undefined;
         }));
 
     return loadPromise.finally(() => {
-        delete elem.dataset.ptvRouteCriticalPending;
+        if (elem.dataset.ptvRouteCriticalGeneration === String(lifetime.generation)) {
+            delete elem.dataset.ptvRouteCriticalPending;
+            delete elem.dataset.ptvRouteCriticalGeneration;
+        }
+
+        recordPtvRouteCriticalTerminal(
+            routeCriticalOwner,
+            !isCurrent() || lifetime.signal.aborted ? 'cancelled' : routeCriticalOutcome
+        );
     });
 }
 
-export function destroySections(elem) {
+function pauseHomeItemContainers(elem) {
+    const elems = elem.querySelectorAll('.itemsContainer');
+
+    for (const e of elems) {
+        e.pause?.();
+    }
+}
+
+function cleanupHomeRouteResources(elem, options = {}) {
+    const preserveRowVisuals = options.preserveRowVisuals !== false;
+
     delete elem.dataset.ptvRouteCriticalPending;
+    delete elem.dataset.ptvRouteCriticalGeneration;
+    clearHomeRouteTimers(elem);
     clearDeferredResumeTimers(elem);
     cleanupViewportResumeObserver(elem);
     cleanupRowMountObserver(elem);
     cleanupFeaturedCacheListener(elem);
     unmountPtvHomeHero(elem);
-    cleanupPtvRowBackdrops(elem);
-    cancelPtvImageScope('hero-backdrop');
-    cancelPtvImageScope('row-backdrop');
-    cancelPtvImageScope('viewport');
-    cancelPtvImageScope('viewport-fallback');
+    cleanupPtvCardEnhancements(elem);
+    cleanupPtvRowBackdrops(elem, { preserveStyles: preserveRowVisuals });
+    pauseHomeItemContainers(elem);
+}
+
+export function destroySections(elem) {
+    retireBoundHomeRouteLifetime(elem);
+    cleanupHomeRouteResources(elem, { preserveRowVisuals: false });
     cleanupDisconnectedPtvHomeHeroes();
     trimPtvImageManagerMemory();
 
@@ -1360,8 +1679,17 @@ export function destroySections(elem) {
         e.fetchData = null;
         e.parentContainer = null;
         e.getItemsHtml = null;
+        e.afterRefresh = null;
+        e.ptvDataOwner = null;
+        e.isDataOwnerCurrent = null;
+        e.ptvLastRowItems = null;
+        e.ptvRefreshGeneration = (Number(e.ptvRefreshGeneration) || 0) + 1;
+        e.ptvRefreshInFlightGeneration = 0;
+        e.ptvRowOptions = null;
     }
 
+    elem.ptvHomeHeroOptions = null;
+    elem.ptvHomeHeroBaseOptions = null;
     elem.ptvVirtualRows = null;
     elem.ptvVirtualRowContext = null;
     elem.ptvVirtualRowStateCache = null;
@@ -1369,13 +1697,8 @@ export function destroySections(elem) {
 }
 
 export function pause(elem) {
-    clearDeferredResumeTimers(elem);
-    cleanupViewportResumeObserver(elem);
-
-    const elems = elem.querySelectorAll('.itemsContainer');
-    for (const e of elems) {
-        e.pause();
-    }
+    retireBoundHomeRouteLifetime(elem);
+    cleanupHomeRouteResources(elem);
 }
 
 function getInitialRowCount(performanceProfile) {
@@ -1416,28 +1739,39 @@ function getDeferredResumeSections(sections, options, performanceProfile) {
     return sections.filter(section => !immediateSections.has(section));
 }
 
-function resumeSection(section, options) {
-    if (section.ptvResumePromise) return section.ptvResumePromise;
+function resumeSection(section, options, elem, lifetime) {
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return Promise.resolve(null);
+
+    if (section.ptvResumePromise && section.ptvResumeLifetimeIdentity === lifetime.identity) {
+        return section.ptvResumePromise;
+    }
 
     const resumePromise = section.resume(options)
         .then(result => {
-            markSectionResumed(section);
+            if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                markSectionResumed(section);
+            }
+
             return result;
         })
         .finally(() => {
-            if (section.ptvResumePromise === resumePromise) {
+            if (section.ptvResumePromise === resumePromise
+                && section.ptvResumeLifetimeIdentity === lifetime.identity) {
                 section.ptvResumePromise = null;
+                section.ptvResumeLifetimeIdentity = null;
             }
         });
 
     section.ptvResumePromise = resumePromise;
+    section.ptvResumeLifetimeIdentity = lifetime.identity;
 
     return resumePromise;
 }
 
-function observeDeferredResumeSections(elem, sections, options, performanceProfile) {
+function observeDeferredResumeSections(elem, sections, options, performanceProfile, lifetime) {
     cleanupViewportResumeObserver(elem);
 
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
     if (!sections.length) return;
 
     if (typeof IntersectionObserver !== 'function') {
@@ -1446,7 +1780,7 @@ function observeDeferredResumeSections(elem, sections, options, performanceProfi
             batchDelayMs: options?.batchDelayMs ?? performanceProfile.sectionResumeBatchDelayMs,
             batchSize: options?.batchSize ?? Math.max(1, performanceProfile.sectionResumeBatchSize || 2),
             deferContinue: false
-        });
+        }, lifetime);
         return;
     }
 
@@ -1454,6 +1788,8 @@ function observeDeferredResumeSections(elem, sections, options, performanceProfi
     const scrollRoot = getRowScrollRoot(elem);
     const targetsBySection = new WeakMap();
     const observer = new IntersectionObserver((entries) => {
+        if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
         entries
             .filter(entry => entry.isIntersecting)
             .forEach(entry => {
@@ -1470,7 +1806,7 @@ function observeDeferredResumeSections(elem, sections, options, performanceProfi
                 void timePtvAsync(
                     'render',
                     'home-section-resume-viewport',
-                    () => resumeSection(section, options),
+                    () => resumeSection(section, options, elem, lifetime),
                     {
                         row: section.dataset.ptvRowId || '',
                         rowIndex: getRowIndex(section),
@@ -1478,10 +1814,14 @@ function observeDeferredResumeSections(elem, sections, options, performanceProfi
                     }
                 )
                     .then(() => {
-                        enhancePtvCards(elem);
+                        if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                            enhanceCurrentHomeCards(elem, lifetime);
+                        }
                     })
                     .catch(err => {
-                        console.warn('[PTV Home] Failed resuming viewport section', err);
+                        if (isHomeRouteLifetimeCurrent(elem, lifetime)) {
+                            ptvSafeConsole.warn('[PTV Home] Failed resuming viewport section', err);
+                        }
                     });
             });
     }, {
@@ -1490,6 +1830,8 @@ function observeDeferredResumeSections(elem, sections, options, performanceProfi
     });
 
     sections.forEach(section => {
+        if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return;
+
         const target = section.parentContainer || section.closest?.('.verticalSection') || section;
 
         targetsBySection.set(target, section);
@@ -1498,24 +1840,59 @@ function observeDeferredResumeSections(elem, sections, options, performanceProfi
     elem.ptvViewportResumeObserver = observer;
 }
 
-export function resume(elem, options) {
+export function resume(elem, options = {}, lifetime = elem.ptvRouteLifetime) {
+    const adoptingLifetime = elem.ptvRouteLifetime !== lifetime;
+
+    if (adoptingLifetime && !bindHomeRouteLifetime(elem, lifetime)) return Promise.resolve([]);
+    if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return Promise.resolve([]);
+
     clearDeferredResumeTimers(elem);
+
+    if (elem.ptvVirtualRowContext?.routeOwnerRef) {
+        elem.ptvVirtualRowContext.routeOwnerRef.lifetime = lifetime;
+    }
 
     const sections = Array.from(elem.querySelectorAll('.itemsContainer'))
         .filter(section => typeof section.resume === 'function');
+
+    sections.forEach(section => {
+        section.ptvDataOwner = lifetime.identity;
+        section.isDataOwnerCurrent = () => isHomeRouteLifetimeCurrent(elem, lifetime);
+    });
+
+    if (adoptingLifetime && elem.ptvHomeHeroBaseOptions && isHomeRouteLifetimeCurrent(elem, lifetime)) {
+        const heroOptions = createHomeHeroOptions(elem, elem.ptvHomeHeroBaseOptions, lifetime);
+
+        elem.ptvHomeHeroOptions = heroOptions;
+        mountPtvHomeHero(elem, heroOptions);
+    }
+
+    if (adoptingLifetime) {
+        resumePtvRowVisuals(elem);
+
+        if (elem.ptvVirtualRows?.length && elem.ptvVirtualRowContext) {
+            observeVirtualRowSlots(
+                elem,
+                elem.ptvVirtualRows,
+                elem.ptvVirtualRowContext,
+                getRowScrollRoot(elem)
+            );
+        }
+    }
+
     const performanceProfile = getPtvPerformanceProfile();
     const immediateSections = getImmediateResumeSections(sections, options, performanceProfile);
     const deferredSections = getDeferredResumeSections(sections, options, performanceProfile);
     const batchSize = options?.batchSize || performanceProfile.sectionResumeBatchSize;
     const batchDelay = options?.batchDelayMs ?? performanceProfile.sectionResumeBatchDelayMs;
 
-    observeDeferredResumeSections(elem, deferredSections, options, performanceProfile);
+    observeDeferredResumeSections(elem, deferredSections, options, performanceProfile, lifetime);
 
     if (!batchSize || batchSize <= 0) {
         return timePtvAsync(
             'render',
             'home-sections-resume',
-            () => Promise.all(immediateSections.map(section => resumeSection(section, options))),
+            () => Promise.all(immediateSections.map(section => resumeSection(section, options, elem, lifetime))),
             {
                 deferredSections: deferredSections.length,
                 sections: immediateSections.length
@@ -1531,12 +1908,16 @@ export function resume(elem, options) {
     }
 
     return timePtvAsync('render', 'home-sections-resume-batched', () => batches.reduce((chain, batch, index) => chain
-        .then(() => Promise.all(batch.map(section => resumeSection(section, options))))
+        .then(() => isHomeRouteLifetimeCurrent(elem, lifetime) ?
+            Promise.all(batch.map(section => resumeSection(section, options, elem, lifetime))) :
+            [])
         .then(batchResults => {
+            if (!isHomeRouteLifetimeCurrent(elem, lifetime)) return null;
+
             results.push(...batchResults);
 
             if (index < batches.length - 1) {
-                return delay(batchDelay);
+                return delay(batchDelay, elem, lifetime);
             }
 
             return null;

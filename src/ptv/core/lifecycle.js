@@ -1,5 +1,6 @@
 import { on, emit } from './events';
 import { disposeRuntimeScope, getRuntimeDiagnostics, getRuntimeScopeNames, resetRuntimeScope } from './scope';
+import { ptvSafeConsole } from './safeConsole';
 
 const modules = new Map();
 let activeRoute = null;
@@ -212,19 +213,19 @@ function isDebugEnabled() {
 function warnDebug(message, detail) {
     if (!isDebugEnabled()) return;
 
-    console.warn(`[PiggieTV Lifecycle] ${message}`, detail);
+    ptvSafeConsole.warn(`[PiggieTV Lifecycle] ${message}`, detail);
 }
 
 export function registerModule(module) {
     if (!module?.name && !module?.id) {
-        console.warn('[PiggieTV] Module missing name:', module);
+        ptvSafeConsole.warn('[PiggieTV] Module missing name:', module);
         return null;
     }
 
     const normalizedModule = normalizeModule(module);
 
     if (modules.has(normalizedModule.name)) {
-        console.warn(`[PiggieTV] Module already registered: ${normalizedModule.name}`);
+        ptvSafeConsole.warn(`[PiggieTV] Module already registered: ${normalizedModule.name}`);
         return modules.get(normalizedModule.name);
     }
 
@@ -267,7 +268,7 @@ export function refreshModules(reason = 'manual') {
         try {
             module.refresh({ reason, route: activeRoute, scope: module.scope });
         } catch (err) {
-            console.error(`[PiggieTV] Module refresh failed: ${module.name}`, err);
+            ptvSafeConsole.error(`[PiggieTV] Module refresh failed: ${module.name}`, err);
         }
     }
 }
@@ -287,7 +288,7 @@ function activateModule(module, route) {
             module.init?.({ route, scope: module.scope });
         }
     } catch (err) {
-        console.error(`[PiggieTV] Module init failed: ${module.name}`, err);
+        ptvSafeConsole.error(`[PiggieTV] Module init failed: ${module.name}`, err);
     }
 }
 
@@ -295,7 +296,7 @@ function refreshModule(module, route) {
     try {
         module.refresh?.({ reason: 'routechange', route, scope: module.scope });
     } catch (err) {
-        console.error(`[PiggieTV] Module refresh failed: ${module.name}`, err);
+        ptvSafeConsole.error(`[PiggieTV] Module refresh failed: ${module.name}`, err);
     }
 }
 
@@ -303,7 +304,7 @@ function deactivateModule(module, route) {
     try {
         module.destroy?.({ route, scope: module.scope });
     } catch (err) {
-        console.error(`[PiggieTV] Module destroy failed: ${module.name}`, err);
+        ptvSafeConsole.error(`[PiggieTV] Module destroy failed: ${module.name}`, err);
     }
 
     module.scope?.dispose();

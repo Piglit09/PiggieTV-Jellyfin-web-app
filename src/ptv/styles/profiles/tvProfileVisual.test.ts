@@ -132,7 +132,7 @@ describe('PiggieTV TV compatibility profile', () => {
         expect(webOsStyles).toContain('transition: none !important');
     });
 
-    it('anchors the persistent playback dock host to the viewport', () => {
+    it('anchors the persistent playback dock host and mounted dock to the viewport', () => {
         expect(shellStyles).toContain("[data-ptv-runtime-root-host='true']");
         expect(shellStyles).toMatch(
             /\[data-ptv-runtime-root-host='true'\]\s*\{[^}]*inset:\s*0;[^}]*position:\s*fixed;/
@@ -150,7 +150,16 @@ describe('PiggieTV TV compatibility profile', () => {
             /\.ptv-runtime-root,\s*\.ptv-runtime-media-dock-slot\s*\{[^}]*inset:\s*0;[^}]*position:\s*absolute;/
         );
         expect(shellStyles).toMatch(
-            /\.ptv-runtime-media-dock-slot \.ptv-media-dock\s*\{[^}]*position:\s*absolute;/
+            /\.ptv-runtime-media-dock-slot \.ptv-media-dock\s*\{[^}]*position:\s*fixed;/
+        );
+        expect(shellStyles).toMatch(
+            /html\.ptv-render-tv \.ptv-media-dock\s*\{[^}]*bottom:\s*var\(--ptv-tv-safe-y\);[^}]*max-width:\s*calc\(100vw - var\(--ptv-tv-safe-x\) - var\(--ptv-tv-safe-x\)\);[^}]*right:\s*var\(--ptv-tv-safe-x\);/
+        );
+        expect(shellStyles).toContain('right: calc(0.7rem + env(safe-area-inset-right))');
+        expect(shellStyles).toContain('bottom: calc(0.7rem + env(safe-area-inset-bottom))');
+        expect(shellStyles).toContain('left: calc(0.7rem + env(safe-area-inset-left))');
+        expect(shellStyles).toContain(
+            'max-width: min(42rem, calc(100vw - 1.2rem - env(safe-area-inset-left) - env(safe-area-inset-right)))'
         );
         expect(webOsStyles).toMatch(
             /html\.ptv-platform-webos \.ptv-media-dock\s*\{[^}]*bottom:\s*36px;[^}]*right:\s*66px;[^}]*width:\s*560px;/

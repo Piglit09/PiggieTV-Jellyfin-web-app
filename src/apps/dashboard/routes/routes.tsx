@@ -8,6 +8,7 @@ import { toViewManagerPageRoute } from 'components/router/LegacyRoute';
 import { LEGACY_ADMIN_ROUTES } from './_legacyRoutes';
 import ServerContentPage from 'components/ServerContentPage';
 import ErrorBoundary from 'components/router/ErrorBoundary';
+import LegacyMetadataManagerRedirect from './LegacyMetadataManagerRedirect';
 
 export const DASHBOARD_APP_PATHS = {
     Dashboard: 'dashboard',
@@ -27,26 +28,18 @@ export const DASHBOARD_APP_ROUTES: RouteObject[] = [
                         children: [
                             {
                                 index: true,
-                                lazy: () => import('./index')
+                                element: <Navigate replace to='/settings/admin' />
                             },
                             ...ASYNC_ADMIN_ROUTES.map(toAsyncPageRoute),
-                            ...LEGACY_ADMIN_ROUTES.map(toViewManagerPageRoute),
-                            {
-                                path: 'plugins/catalog',
-                                element: <Navigate replace to='/dashboard/plugins' />
-                            }
+                            ...LEGACY_ADMIN_ROUTES.map(toViewManagerPageRoute)
                         ],
                         errorElement: <ErrorBoundary pageClasses={[ 'type-interior' ]} />
                     },
 
-                    /* NOTE: The metadata editor might deserve a dedicated app in the future */
-                    toViewManagerPageRoute({
+                    {
                         path: DASHBOARD_APP_PATHS.MetadataManager,
-                        pageProps: {
-                            controller: 'edititemmetadata',
-                            view: 'edititemmetadata.html'
-                        }
-                    }),
+                        element: <LegacyMetadataManagerRedirect />
+                    },
 
                     {
                         path: DASHBOARD_APP_PATHS.PluginConfig,

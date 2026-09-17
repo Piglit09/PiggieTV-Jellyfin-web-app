@@ -7,8 +7,8 @@ export function mountPtvSettingsShell() {
 
     settingsEnhancementMounted = true;
     recordPtvEvent('render', 'settings-enhancement-mounted', {
-        nativeShellMounted: false,
-        owner: 'jellyfin'
+        nativeShellMounted: true,
+        owner: 'piggietv'
     });
 
     return unmountPtvSettingsShell;
@@ -19,7 +19,7 @@ export function unmountPtvSettingsShell() {
 
     settingsEnhancementMounted = false;
     recordPtvEvent('render', 'settings-enhancement-unmounted', {
-        nativeShellMounted: false,
-        owner: 'jellyfin'
+        nativeShellMounted: true,
+        owner: 'piggietv'
     });
 }

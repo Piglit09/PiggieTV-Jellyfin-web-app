@@ -1,7 +1,9 @@
 import { emit, on } from '../core/events';
 import { getRoute, scheduleRouteCheck } from '../core/router';
+import { createPtvAbortController } from '../core/abortController';
 import { recordPtvEvent } from '../core/observability';
 import { registerPtvRuntimeListener } from '../core/runtime';
+import { ptvSafeConsole } from '../core/safeConsole';
 import { getPtvCanonicalRouteIdentity } from './routeIdentity';
 import { getPtvRouteOwnership } from './routes';
 
@@ -33,6 +35,17 @@ export type PtvRouteControllerState = {
 export type PtvRouteGenerationToken = Readonly<{
     routeGeneration: number;
     routeKey: string;
+}>;
+
+export type PtvRouteLifetime = Readonly<{
+    readonly active: boolean;
+    readonly generation: number;
+    readonly identity: string;
+    readonly isCurrent: () => boolean;
+    readonly retired: boolean;
+    readonly routeFamily: string;
+    readonly routeKey: string;
+    readonly signal: AbortSignal;
 }>;
 
 type PtvRouteLike = {
@@ -77,7 +90,14 @@ const ENHANCED_ROUTE_FEATURES = new Set([
 let routeControllerStarted = false;
 let currentState: PtvRouteControllerState | null = null;
 let routeGeneration = 0;
+let routeLifetimeGeneration = 0;
 const nativeRouteRegistry = new Map<string, PtvNativeRouteRegistration>();
+const activeRouteLifetimes = new Map<string, PtvRouteLifetime>();
+const routeLifetimeOwners = new WeakMap<PtvRouteLifetime, {
+    abortController: AbortController;
+    routeGeneration: number;
+    retired: boolean;
+}>();
 const routeGenerationCounters = new Map<number, {
     duplicateRouteEventSuppressed: number;
     pageMountCountByGeneration: number;
@@ -85,6 +105,38 @@ const routeGenerationCounters = new Map<number, {
     renderCountByGeneration: number;
     shellMountCountByGeneration: number;
 }>();
+
+function retirePtvRouteLifetimeInternal(
+    lifetime: PtvRouteLifetime,
+    reason: 'explicit' | 'replaced' | 'route-change'
+) {
+    const owner = routeLifetimeOwners.get(lifetime);
+
+    if (!owner || owner.retired) return false;
+
+    owner.retired = true;
+
+    if (activeRouteLifetimes.get(lifetime.routeFamily) === lifetime) {
+        activeRouteLifetimes.delete(lifetime.routeFamily);
+    }
+
+    if (!owner.abortController.signal.aborted) {
+        owner.abortController.abort();
+    }
+
+    recordPtvEvent('route', 'route-lifetime-retired', {
+        reason,
+        routeFamily: lifetime.routeFamily
+    });
+
+    return true;
+}
+
+function retireAllPtvRouteLifetimes() {
+    for (const lifetime of Array.from(activeRouteLifetimes.values())) {
+        retirePtvRouteLifetimeInternal(lifetime, 'route-change');
+    }
+}
 
 function seedPtvNativeRoute(path: string, mode: PtvRouteTakeoverMode = 'native') {
     const normalizedPath = normalizeRegisteredPath(path);
@@ -187,7 +239,7 @@ function getForcedRouteDescriptor(route: PtvRouteLike): PtvRouteLike | null {
     return null;
 }
 
-console.info('[PTV Recommendations] Route registered', {
+ptvSafeConsole.info('[PTV Recommendations] Route registered', {
     ...getCurrentRouteDiagnostics(),
     routeId: 'recommendations',
     source: 'ptv-route-controller'
@@ -358,10 +410,15 @@ export function recordPtvRouteGenerationLifecycle(
     lifecycle: 'page-mount' | 'page-render' | 'page-unmount' | 'shell-mount',
     detail: Record<string, unknown> = {}
 ) {
-    const counter = lifecycle === 'shell-mount' ? 'shellMountCountByGeneration' :
-        lifecycle === 'page-render' ? 'renderCountByGeneration' :
-            lifecycle === 'page-unmount' ? 'pageUnmountCountByGeneration' :
-                'pageMountCountByGeneration';
+    let counter: keyof ReturnType<typeof getRouteGenerationCounters> = 'pageMountCountByGeneration';
+
+    if (lifecycle === 'shell-mount') {
+        counter = 'shellMountCountByGeneration';
+    } else if (lifecycle === 'page-render') {
+        counter = 'renderCountByGeneration';
+    } else if (lifecycle === 'page-unmount') {
+        counter = 'pageUnmountCountByGeneration';
+    }
 
     return incrementRouteGenerationCounter(counter, {
         lifecycle,
@@ -394,14 +451,14 @@ function publishRowBuilderRouteMatch(nextState: PtvRouteControllerState) {
             reason: 'Row Builder URL was claimed by a different PTV route matcher.'
         };
 
-        console.error('[PTV Row Builder] Route matched failed', failureDetail);
+        ptvSafeConsole.error('[PTV Row Builder] Route matched failed', failureDetail);
         recordPtvEvent('route', 'row-builder-route-matched-failed', failureDetail);
         return;
     }
 
     if (nextState.routeId !== 'row-builder') return;
 
-    console.info('[PTV Row Builder] Route matched', detail);
+    ptvSafeConsole.info('[PTV Row Builder] Route matched', detail);
     recordPtvEvent('route', 'row-builder-route-matched', detail);
 }
 
@@ -430,14 +487,14 @@ function publishRecommendationRouteMatch(nextState: PtvRouteControllerState) {
             reason: 'Recommendations URL was claimed by a different PTV route matcher.'
         };
 
-        console.error('[PTV Recommendations] Route matched failed', failureDetail);
+        ptvSafeConsole.error('[PTV Recommendations] Route matched failed', failureDetail);
         recordPtvEvent('recommendation', 'recommendation-route-matched-failed', failureDetail);
         return;
     }
 
     if (nextState.routeId !== 'recommendations') return;
 
-    console.info('[PTV Recommendations] Route matched', detail);
+    ptvSafeConsole.info('[PTV Recommendations] Route matched', detail);
     recordPtvEvent('recommendation', 'recommendation-route-matched', detail);
 }
 
@@ -465,6 +522,7 @@ function publishRouteControllerState(route: PtvRouteLike) {
         return currentState;
     }
 
+    retireAllPtvRouteLifetimes();
     routeGeneration += 1;
     currentState = {
         ...nextState,
@@ -548,6 +606,66 @@ export function isPtvRouteGenerationCurrent(token: PtvRouteGenerationToken) {
 
     return state.routeGeneration === token.routeGeneration
         && state.routeKey === token.routeKey;
+}
+
+export function acquirePtvRouteLifetime(routeFamily: string): PtvRouteLifetime {
+    const normalizedRouteFamily = String(routeFamily || '').trim();
+
+    if (!normalizedRouteFamily) {
+        throw new TypeError('A route family is required to acquire a PTV route lifetime.');
+    }
+
+    const existingLifetime = activeRouteLifetimes.get(normalizedRouteFamily);
+
+    if (existingLifetime) {
+        retirePtvRouteLifetimeInternal(existingLifetime, 'replaced');
+    }
+
+    const routeState = getPtvRouteControllerState();
+    const abortController = createPtvAbortController();
+    const generation = ++routeLifetimeGeneration;
+    const identity = `ptv-route-lifetime-${generation}`;
+    const owner = {
+        abortController,
+        retired: false,
+        routeGeneration: routeState.routeGeneration
+    };
+    const isCurrent = () => {
+        if (owner.retired || abortController.signal.aborted) return false;
+        if (activeRouteLifetimes.get(normalizedRouteFamily)?.identity !== identity) return false;
+
+        const currentRoute = getPtvRouteControllerState();
+
+        return currentRoute.routeGeneration === owner.routeGeneration
+            && currentRoute.routeKey === routeState.routeKey;
+    };
+
+    const lifetime: PtvRouteLifetime = Object.freeze({
+        get active() {
+            return isCurrent();
+        },
+        generation,
+        identity,
+        isCurrent,
+        get retired() {
+            return owner.retired;
+        },
+        routeFamily: normalizedRouteFamily,
+        routeKey: routeState.routeKey,
+        signal: abortController.signal
+    });
+    routeLifetimeOwners.set(lifetime, owner);
+    activeRouteLifetimes.set(normalizedRouteFamily, lifetime);
+
+    recordPtvEvent('route', 'route-lifetime-acquired', {
+        routeFamily: normalizedRouteFamily
+    });
+
+    return lifetime;
+}
+
+export function retirePtvRouteLifetime(lifetime: PtvRouteLifetime) {
+    return retirePtvRouteLifetimeInternal(lifetime, 'explicit');
 }
 
 export function navigatePtvRoute(href: string, options: {

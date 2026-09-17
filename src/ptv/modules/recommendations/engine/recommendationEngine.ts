@@ -14,6 +14,10 @@ import {
     logPtvRecommendationStage
 } from '../debug/recommendationRuntimeDebug';
 import { getPtvRecommendationDataBundle } from '../providers/jellyfinRecommendationProvider';
+import {
+    createPtvRecommendationIdentity,
+    getPtvRecommendationCacheScopePrefix
+} from '../recommendationIdentity';
 import { buildPtvRecommendationDebugReport } from '../debug/recommendationDebug';
 import { buildPtvRecommendationMixes, buildPtvRecommendationRowsWithQuality } from '../rows/recommendationRows';
 import { getPtvRecommendationScoreModel, scorePtvRecommendationCandidates } from '../scoring/scoringModel';
@@ -35,6 +39,7 @@ import type {
 
 const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
 const HOME_CACHE_TTL_MS = 5 * 60 * 1000;
+let recommendationDiagnosticGenerationSequence = 0;
 
 type DashboardCacheEntry = {
     data: PtvRecommendationDashboardData;
@@ -67,15 +72,18 @@ function assertCanRunRecommendationGeneration() {
     }
 }
 
-function getCurrentCacheKey(includeHomeScans = false) {
-    const serverId = String(getPtvServerId() || '').trim();
-    const userId = String(getPtvCurrentUserId() || '').trim();
-
-    if (!serverId || !userId) {
-        throw new Error('Recommendation caching requires an authenticated server user.');
-    }
-
-    return `${serverId}:${userId}:${includeHomeScans ? 'home-scans' : 'primary-sources'}`;
+function getCurrentRecommendationIdentity(options: {
+    feedback?: PtvRecommendationRunOptions['feedback'];
+    includeHomeScans?: boolean;
+    serverId?: string | null;
+    userId?: string | null;
+} = {}) {
+    return createPtvRecommendationIdentity({
+        feedback: options.feedback,
+        includeHomeScans: options.includeHomeScans,
+        serverId: options.serverId ?? getPtvServerId(),
+        userId: options.userId ?? getPtvCurrentUserId()
+    });
 }
 
 export function invalidatePtvRecommendationCache(scope: {
@@ -87,7 +95,7 @@ export function invalidatePtvRecommendationCache(scope: {
 
     if (!serverId || !userId) return 0;
 
-    const cachePrefix = `${serverId}:${userId}:`;
+    const cachePrefix = getPtvRecommendationCacheScopePrefix({ serverId, userId });
     let invalidatedEntries = 0;
 
     [dashboardCache, homeCache].forEach(cache => {
@@ -152,7 +160,11 @@ function getTopRecommendationSources(profile: PtvTasteProfile) {
         }));
 }
 
-function getProfile(bundle: PtvRecommendationDataBundle, options: PtvRecommendationRunOptions = {}) {
+function getProfile(
+    bundle: PtvRecommendationDataBundle,
+    options: PtvRecommendationRunOptions = {},
+    diagnosticGenerationId = ''
+) {
     if (!bundle.profileSignals.length) {
         const cachedProfile = loadPtvTasteProfile(bundle.serverId, bundle.userId);
         const profile = cachedProfile || buildPtvTasteProfile([], {
@@ -162,6 +174,7 @@ function getProfile(bundle: PtvRecommendationDataBundle, options: PtvRecommendat
         });
 
         logPtvRecommendationStage('Profile loaded', {
+            generationId: diagnosticGenerationId,
             profileSource: cachedProfile ? 'localStorage' : 'empty-new-user',
             serverId: profile.serverId,
             sourceCount: Object.values(profile.sourceCounts).reduce((total, count) => total + (count || 0), 0),
@@ -180,6 +193,7 @@ function getProfile(bundle: PtvRecommendationDataBundle, options: PtvRecommendat
 
         savePtvTasteProfile(profile);
         logPtvRecommendationStage('Profile loaded', {
+            generationId: diagnosticGenerationId,
             profileSource: 'generated',
             serverId: profile.serverId,
             sourceCount: Object.values(profile.sourceCounts).reduce((total, count) => total + (count || 0), 0),
@@ -189,6 +203,7 @@ function getProfile(bundle: PtvRecommendationDataBundle, options: PtvRecommendat
         return profile;
     } catch (error) {
         logPtvRecommendationFailure('Profile load', error, {
+            generationId: diagnosticGenerationId,
             profileSignals: bundle.profileSignals.length,
             serverId: bundle.serverId,
             userId: bundle.userId
@@ -201,7 +216,14 @@ export async function buildPtvRecommendationEngineResult(
     bundle?: PtvRecommendationDataBundle,
     options: PtvRecommendationRunOptions = {}
 ): Promise<PtvRecommendationEngineResult> {
+    const diagnosticGenerationId = `recommendation-generation-${++recommendationDiagnosticGenerationSequence}`;
+
+    logPtvRecommendationStage('Generation started', {
+        generationId: diagnosticGenerationId,
+        providedBundle: Boolean(bundle)
+    });
     logPtvRecommendationStage('Engine created', {
+        generationId: diagnosticGenerationId,
         providedBundle: Boolean(bundle)
     });
 
@@ -210,12 +232,15 @@ export async function buildPtvRecommendationEngineResult(
             throwIfRecommendationAborted(options.signal);
             assertCanRunRecommendationGeneration();
             const dataBundle = bundle || await getPtvRecommendationDataBundle({
+                diagnosticGenerationId,
                 includeHomeScans: options.includeHomeScans,
-                signal: options.signal
+                serverId: options.serverId,
+                signal: options.signal,
+                userId: options.userId
             });
             throwIfRecommendationAborted(options.signal);
             const now = options.now || Date.now();
-            const profile = getProfile(dataBundle, { now });
+            const profile = getProfile(dataBundle, { now }, diagnosticGenerationId);
             throwIfRecommendationAborted(options.signal);
             const filteredCandidateItems = filterPtvRecommendationCandidates(
                 uniqueCandidates(dataBundle.candidates.map(input => input.item)),
@@ -227,7 +252,11 @@ export async function buildPtvRecommendationEngineResult(
                 { now }
             );
             throwIfRecommendationAborted(options.signal);
-            const rowResult = buildPtvRecommendationRowsWithQuality(profile, candidates);
+            const rowResult = buildPtvRecommendationRowsWithQuality(profile, candidates, {
+                historyItems: dataBundle.profileSignals
+                    .filter(signal => signal.source === 'history')
+                    .map(signal => signal.item)
+            });
             const rows = filterAndDedupePtvRecommendationRows(rowResult.rows, options.feedback);
             const rowItemCountBeforeFeedback = rowResult.rows.reduce((total, row) => total + row.items.length, 0);
             const rowItemCountAfterFeedback = rows.reduce((total, row) => total + row.items.length, 0);
@@ -247,6 +276,7 @@ export async function buildPtvRecommendationEngineResult(
 
             logPtvRecommendationStage('Recommendations generated', {
                 candidateCount: candidates.length,
+                generationId: diagnosticGenerationId,
                 mixCount: mixes.length,
                 profileSignalCount: dataBundle.profileSignals.length
             });
@@ -266,6 +296,7 @@ export async function buildPtvRecommendationEngineResult(
                 candidateCountByProvider: providerCandidateCounts,
                 favoriteItemCount: providerItemCounts.favorites || 0,
                 finalRecommendationCount: candidates.length,
+                generationId: diagnosticGenerationId,
                 generatedRowCount: rows.length,
                 historyItemCount: providerItemCounts.history || 0,
                 profileSignalCount: dataBundle.profileSignals.length,
@@ -277,6 +308,7 @@ export async function buildPtvRecommendationEngineResult(
             });
             logPtvRecommendationStage('Rows generated', {
                 duplicateItemsRemoved: debug.quality.duplicateItemsRemoved,
+                generationId: diagnosticGenerationId,
                 rowDiagnostics: rows.map(row => ({
                     id: row.id,
                     itemCount: row.items.length,
@@ -296,18 +328,27 @@ export async function buildPtvRecommendationEngineResult(
             };
         } catch (error) {
             logPtvRecommendationFailure('Engine creation', error, {
+                generationId: diagnosticGenerationId,
                 providedBundle: Boolean(bundle)
             });
             throw error;
         }
     }, {
+        generationId: diagnosticGenerationId,
         providedBundle: Boolean(bundle)
     });
 }
 
-export async function getPtvRecommendationDashboardData(options: { forceRefresh?: boolean; includeHomeScans?: boolean; signal?: AbortSignal } = {}): Promise<PtvRecommendationDashboardData> {
+export async function getPtvRecommendationDashboardData(options: {
+    forceRefresh?: boolean;
+    includeHomeScans?: boolean;
+    serverId?: string | null;
+    signal?: AbortSignal;
+    userId?: string | null;
+} = {}): Promise<PtvRecommendationDashboardData> {
     const now = Date.now();
-    const cacheKey = getCurrentCacheKey(options.includeHomeScans === true);
+    const identity = getCurrentRecommendationIdentity(options);
+    const cacheKey = identity.cacheKey;
     const cached = dashboardCache.get(cacheKey);
 
     throwIfRecommendationAborted(options.signal);
@@ -320,7 +361,9 @@ export async function getPtvRecommendationDashboardData(options: { forceRefresh?
     const result = await buildPtvRecommendationEngineResult(undefined, {
         includeHomeScans: options.includeHomeScans,
         now,
-        signal: options.signal
+        serverId: identity.serverId,
+        signal: options.signal,
+        userId: identity.userId
     });
     throwIfRecommendationAborted(options.signal);
     const scoreModel = getPtvRecommendationScoreModel();
@@ -355,10 +398,13 @@ export async function getPtvRecommendationHomeData(options: {
     feedback?: PtvRecommendationRunOptions['feedback'];
     forceRefresh?: boolean;
     includeHomeScans?: boolean;
+    serverId?: string | null;
     signal?: AbortSignal;
+    userId?: string | null;
 } = {}): Promise<PtvRecommendationHomeData> {
     const now = Date.now();
-    const cacheKey = getCurrentCacheKey(options.includeHomeScans === true);
+    const identity = getCurrentRecommendationIdentity(options);
+    const cacheKey = identity.cacheKey;
     const cached = homeCache.get(cacheKey);
 
     throwIfRecommendationAborted(options.signal);
@@ -372,7 +418,9 @@ export async function getPtvRecommendationHomeData(options: {
         feedback: options.feedback,
         includeHomeScans: options.includeHomeScans,
         now,
-        signal: options.signal
+        serverId: identity.serverId,
+        signal: options.signal,
+        userId: identity.userId
     });
     throwIfRecommendationAborted(options.signal);
     const data: PtvRecommendationHomeData = {

@@ -29,7 +29,6 @@
 
 .ptv-detail-page .detailPagePrimaryContent > .detailSection {
     padding: 22px 24px !important;
-
     border-radius: var(--ptv-radius-lg, 22px);
 }
 
@@ -109,78 +108,6 @@
     min-width: 0;
 }
 
-.ptv-detail-page .ptv-details-discovery {
-    overflow: hidden;
-}
-
-.ptv-detail-page .ptv-details-discovery-description {
-    max-width: 720px;
-    margin: -6px 0 16px;
-
-    color: rgba(230, 226, 245, 0.72);
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.ptv-detail-page .ptv-details-discovery-links {
-    display: grid;
-    grid-auto-columns: minmax(190px, 240px);
-    grid-auto-flow: column;
-    gap: 10px;
-    overflow-x: auto;
-    padding: 2px 2px 8px;
-
-    scroll-snap-type: x proximity;
-}
-
-.ptv-detail-page .ptv-details-discovery-link {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-    padding: 12px 14px;
-
-    color: rgba(255, 255, 255, 0.94);
-    border: 1px solid rgba(185, 155, 255, 0.24);
-    border-radius: 14px;
-    outline: none;
-    background: linear-gradient(145deg, rgba(103, 69, 156, 0.26), rgba(28, 24, 43, 0.5));
-    scroll-snap-align: start;
-    text-decoration: none;
-
-    transition:
-        border-color 140ms ease,
-        box-shadow 140ms ease,
-        transform 140ms ease;
-}
-
-.ptv-detail-page .ptv-details-discovery-link strong,
-.ptv-detail-page .ptv-details-discovery-link span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.ptv-detail-page .ptv-details-discovery-link strong {
-    font-size: 14px;
-    font-weight: 850;
-}
-
-.ptv-detail-page .ptv-details-discovery-link span {
-    color: rgba(214, 201, 241, 0.72);
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-}
-
-.ptv-detail-page .ptv-details-discovery-link:hover,
-.ptv-detail-page .ptv-details-discovery-link:focus-visible {
-    color: #fff;
-    border-color: rgba(202, 176, 255, 0.68);
-    box-shadow: 0 10px 28px rgba(25, 10, 52, 0.3);
-    transform: translateY(-2px);
-}
-
 @media (max-width: 900px) {
     .ptv-detail-page .detailPageSecondaryContainer {
         padding: 0 0 120px !important;
@@ -192,14 +119,679 @@
     }
 }
 
-@media (max-width: 600px) {
-    .ptv-detail-page .ptv-details-discovery-links {
-        grid-auto-columns: minmax(180px, 76vw);
+.ptv-detail-page .ptv-cinematic-details {
+    --ptv-cinematic-accent: #7dd6ff;
+    --ptv-cinematic-accent-soft: rgba(125, 214, 255, 0.18);
+    --ptv-cinematic-card-width: clamp(220px, 18vw, 310px);
+    --ptv-cinematic-margin: clamp(18px, 2.5vw, 42px);
+
+    display: grid;
+    gap: 24px;
+    width: 100%;
+    margin: 34px 0 26px;
+
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1080px;
+}
+
+.ptv-detail-page .ptv-cinematic-details--series {
+    --ptv-cinematic-accent: #ffba6b;
+    --ptv-cinematic-accent-soft: rgba(255, 186, 107, 0.18);
+}
+
+.ptv-detail-page .ptv-cinematic-details--music {
+    --ptv-cinematic-accent: #ff8fba;
+    --ptv-cinematic-accent-soft: rgba(255, 143, 186, 0.18);
+    --ptv-cinematic-card-width: clamp(190px, 16vw, 270px);
+}
+
+.ptv-detail-page .ptv-cinematic-details--reading {
+    --ptv-cinematic-accent: #91e6bd;
+    --ptv-cinematic-accent-soft: rgba(145, 230, 189, 0.17);
+    --ptv-cinematic-card-width: clamp(180px, 15vw, 240px);
+}
+
+.ptv-detail-page .ptv-cinematic-details__intro {
+    position: relative;
+
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(230px, 0.55fr);
+    gap: clamp(24px, 3vw, 54px);
+    align-items: stretch;
+    overflow: hidden;
+    padding: clamp(24px, 3.2vw, 46px);
+
+    border-radius: clamp(22px, 2.4vw, 34px);
+}
+
+.ptv-detail-page .ptv-cinematic-details__intro::after {
+    content: '';
+
+    position: absolute;
+    right: -8%;
+    bottom: -78%;
+    z-index: 0;
+
+    width: min(40vw, 520px);
+    aspect-ratio: 1;
+
+    border: 1px solid var(--ptv-cinematic-accent-soft);
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--ptv-cinematic-accent-soft), transparent 68%);
+    pointer-events: none;
+}
+
+.ptv-detail-page .ptv-cinematic-details__intro-copy,
+.ptv-detail-page .ptv-cinematic-details__gateway-panel {
+    position: relative;
+    z-index: 1;
+}
+
+.ptv-detail-page .ptv-cinematic-details__intro-copy {
+    display: grid;
+    gap: 10px;
+    align-content: center;
+    max-width: 860px;
+}
+
+.ptv-detail-page .ptv-cinematic-details__kicker {
+    color: var(--ptv-cinematic-accent);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.ptv-detail-page .ptv-cinematic-details__title {
+    margin: 0;
+
+    color: #fff;
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(30px, 4vw, 58px);
+    font-weight: 950;
+    letter-spacing: -0.035em;
+    line-height: 1;
+}
+
+.ptv-detail-page .ptv-cinematic-details__summary,
+.ptv-detail-page .ptv-cinematic-details__status {
+    max-width: 760px;
+    margin: 7px 0 0;
+
+    color: rgba(238, 235, 247, 0.78);
+    font-size: clamp(14px, 1.2vw, 17px);
+    line-height: 1.55;
+}
+
+.ptv-detail-page .ptv-cinematic-details__metadata,
+.ptv-detail-page .ptv-cinematic-details__stats,
+.ptv-detail-page .ptv-cinematic-details__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0;
+    margin: 8px 0 0;
+
+    list-style: none;
+}
+
+.ptv-detail-page .ptv-cinematic-details__metadata-item,
+.ptv-detail-page .ptv-cinematic-details__stat,
+.ptv-detail-page .ptv-cinematic-shelf__order {
+    padding: 7px 11px;
+
+    color: rgba(255, 255, 255, 0.88);
+    border: 1px solid var(--ptv-cinematic-accent-soft);
+    border-radius: 999px;
+    background: rgba(6, 4, 13, 0.42);
+    font-size: 11px;
+    font-weight: 850;
+    letter-spacing: 0.035em;
+}
+
+.ptv-detail-page .ptv-cinematic-details__gateway-panel {
+    display: grid;
+    gap: 13px;
+    align-content: center;
+    min-width: 0;
+    padding: 18px;
+
+    border: 1px solid var(--ptv-cinematic-accent-soft);
+    border-radius: 22px;
+    background: linear-gradient(145deg, rgba(9, 7, 17, 0.68), var(--ptv-cinematic-accent-soft));
+}
+
+.ptv-detail-page .ptv-cinematic-details__monogram {
+    display: grid;
+    width: 72px;
+    aspect-ratio: 1;
+    place-items: center;
+
+    color: var(--ptv-cinematic-accent);
+    border: 1px solid var(--ptv-cinematic-accent-soft);
+    border-radius: 20px;
+    background: rgba(5, 4, 10, 0.52);
+    font-family: var(--ptv-font-accent);
+    font-size: 36px;
+    font-weight: 950;
+}
+
+.ptv-detail-page .ptv-cinematic-details__action {
+    min-height: 42px;
+    padding: 9px 14px;
+
+    color: #fff;
+    border: 1px solid var(--ptv-cinematic-accent-soft);
+    border-radius: 999px;
+    outline: none;
+    background: rgba(8, 6, 15, 0.68);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.ptv-detail-page .ptv-cinematic-details__action:hover,
+.ptv-detail-page .ptv-cinematic-details__action:focus-visible {
+    border-color: var(--ptv-cinematic-accent);
+    box-shadow: 0 0 0 3px var(--ptv-cinematic-accent-soft);
+}
+
+.ptv-detail-page .ptv-cinematic-details__shelves {
+    display: grid;
+    gap: 22px;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf {
+    min-width: 0;
+    overflow: hidden;
+    padding: clamp(19px, 2.2vw, 30px) 0 clamp(16px, 2vw, 26px);
+
+    border-top: 1px solid var(--ptv-cinematic-accent-soft);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    background:
+        linear-gradient(90deg, var(--ptv-cinematic-accent-soft), transparent 22%),
+        linear-gradient(180deg, rgba(16, 10, 26, 0.48), rgba(7, 5, 13, 0.28));
+    scroll-margin-top: 110px;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf__heading {
+    display: flex;
+    gap: 20px;
+    align-items: start;
+    justify-content: space-between;
+    padding: 0 var(--ptv-cinematic-margin) 18px;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf__heading-copy {
+    display: grid;
+    gap: 5px;
+    max-width: 840px;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf__title {
+    margin: 0;
+
+    color: rgba(255, 255, 255, 0.98);
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(21px, 2.1vw, 32px);
+    font-weight: 920;
+    letter-spacing: -0.02em;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf__description,
+.ptv-detail-page .ptv-cinematic-shelf__explanation {
+    margin: 0;
+
+    color: rgba(226, 221, 240, 0.68);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf__explanation {
+    color: var(--ptv-cinematic-accent);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf__rail,
+.ptv-detail-page .ptv-cinematic-skeleton-rail {
+    display: grid;
+    grid-auto-columns: var(--ptv-cinematic-card-width);
+    grid-auto-flow: column;
+    gap: clamp(12px, 1.25vw, 20px);
+    overflow-x: auto;
+    padding: 3px var(--ptv-cinematic-margin) 14px;
+
+    overscroll-behavior-inline: contain;
+    scroll-padding-inline: var(--ptv-cinematic-margin);
+    scroll-snap-type: x proximity;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf--entities .ptv-cinematic-shelf__rail {
+    --ptv-cinematic-card-width: clamp(180px, 14vw, 232px);
+}
+
+.ptv-detail-page .ptv-cinematic-shelf__item {
+    position: relative;
+
+    min-width: 0;
+    scroll-snap-align: start;
+}
+
+.ptv-detail-page .ptv-cinematic-card {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    height: 100%;
+    padding: 7px;
+
+    color: #fff;
+    border: 1px solid transparent;
+    border-radius: 18px;
+    outline: none;
+    background: rgba(10, 7, 18, 0.42);
+    text-decoration: none;
+
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 180ms ease;
+}
+
+.ptv-detail-page .ptv-cinematic-card:hover,
+.ptv-detail-page .ptv-cinematic-card:focus-visible {
+    color: #fff;
+    border-color: var(--ptv-cinematic-accent);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.34), 0 0 0 3px var(--ptv-cinematic-accent-soft);
+    transform: translateY(-4px);
+}
+
+.ptv-detail-page .ptv-cinematic-card__artwork-frame,
+.ptv-detail-page .ptv-cinematic-skeleton-card {
+    position: relative;
+
+    display: grid;
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    place-items: center;
+
+    border-radius: 13px;
+    background:
+        linear-gradient(135deg, var(--ptv-cinematic-accent-soft), rgba(29, 18, 45, 0.86)),
+        repeating-linear-gradient(120deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 5px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.ptv-detail-page .ptv-cinematic-skeleton-card {
+    min-height: 150px;
+    animation: ptv-cinematic-skeleton 1.45s ease-in-out infinite alternate;
+}
+
+.ptv-detail-page .ptv-cinematic-card--entity .ptv-cinematic-card__artwork-frame {
+    aspect-ratio: 4 / 5;
+}
+
+.ptv-detail-page .ptv-cinematic-details--music .ptv-cinematic-card--media .ptv-cinematic-card__artwork-frame {
+    aspect-ratio: 1;
+}
+
+.ptv-detail-page .ptv-cinematic-details--reading .ptv-cinematic-card--media .ptv-cinematic-card__artwork-frame {
+    aspect-ratio: 2 / 3;
+}
+
+.ptv-detail-page .ptv-cinematic-card__artwork {
+    position: absolute;
+    inset: 0;
+
+    display: grid;
+    place-items: center;
+
+    background-position: center;
+    background-size: cover;
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(30px, 5vw, 58px);
+    font-weight: 950;
+}
+
+.ptv-detail-page .ptv-cinematic-card__artwork-frame > .blurhash-canvas {
+    position: absolute;
+    inset: 0;
+
+    width: 100%;
+    height: 100%;
+}
+
+.ptv-detail-page .ptv-cinematic-card__sequence {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    border-radius: 50%;
+    background: rgba(5, 4, 10, 0.8);
+    font-size: 12px;
+    font-weight: 950;
+}
+
+.ptv-detail-page .ptv-cinematic-card__copy {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    padding: 0 4px 5px;
+}
+
+.ptv-detail-page .ptv-cinematic-card__title {
+    display: -webkit-box;
+    overflow: hidden;
+
+    font-size: 15px;
+    font-weight: 900;
+    line-height: 1.25;
+
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.ptv-detail-page .ptv-cinematic-card__subtitle {
+    overflow: hidden;
+
+    color: rgba(230, 225, 240, 0.72);
+    font-size: 12px;
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ptv-detail-page .ptv-cinematic-card__reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.ptv-detail-page .ptv-cinematic-card__reason {
+    padding: 4px 7px;
+
+    color: var(--ptv-cinematic-accent);
+    border: 1px solid var(--ptv-cinematic-accent-soft);
+    border-radius: 999px;
+    background: rgba(4, 3, 9, 0.38);
+    font-size: 10px;
+    font-weight: 820;
+    line-height: 1.2;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf--timeline .ptv-cinematic-shelf__item::after {
+    content: '';
+
+    position: absolute;
+    top: 23px;
+    left: calc(100% - 4px);
+
+    width: calc(clamp(12px, 1.25vw, 20px) + 8px);
+    height: 2px;
+
+    background: linear-gradient(90deg, var(--ptv-cinematic-accent), transparent);
+    pointer-events: none;
+}
+
+.ptv-detail-page .ptv-cinematic-shelf--timeline .ptv-cinematic-shelf__item:last-child::after {
+    display: none;
+}
+
+.ptv-detail-page .ptv-cinematic-details--loading {
+    min-height: 310px;
+}
+
+.ptv-detail-page .ptv-cinematic-details--loading .ptv-cinematic-details__intro {
+    grid-template-columns: 1fr;
+}
+
+@keyframes ptv-cinematic-skeleton {
+    from { opacity: 0.46; }
+    to { opacity: 0.9; }
+}
+
+@media (min-width: 2000px) {
+    .ptv-detail-page .ptv-cinematic-details {
+        --ptv-cinematic-card-width: clamp(230px, 14vw, 340px);
     }
 }
 
+@media (max-width: 900px) {
+    .ptv-detail-page .ptv-cinematic-details {
+        --ptv-cinematic-card-width: min(68vw, 286px);
+        --ptv-cinematic-margin: 18px;
+
+        gap: 18px;
+        margin-top: 26px;
+    }
+
+    .ptv-detail-page .ptv-cinematic-details--music,
+    .ptv-detail-page .ptv-cinematic-details--reading {
+        --ptv-cinematic-card-width: min(56vw, 232px);
+    }
+
+    .ptv-detail-page .ptv-cinematic-details__intro {
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
+
+    .ptv-detail-page .ptv-cinematic-details__gateway-panel {
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+    }
+
+    .ptv-detail-page .ptv-cinematic-details__actions {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 600px) {
+    .ptv-detail-page .ptv-cinematic-details {
+        margin-right: -16px;
+        margin-left: -16px;
+    }
+
+    .ptv-detail-page .ptv-cinematic-details__intro {
+        margin: 0 16px;
+        padding: 22px 19px;
+        border-radius: 20px;
+    }
+
+    .ptv-detail-page .ptv-cinematic-details__title {
+        font-size: clamp(28px, 10vw, 42px);
+    }
+
+    .ptv-detail-page .ptv-cinematic-details__gateway-panel {
+        grid-template-columns: 1fr;
+    }
+
+    .ptv-detail-page .ptv-cinematic-details__monogram {
+        width: 58px;
+        border-radius: 16px;
+        font-size: 29px;
+    }
+
+    .ptv-detail-page .ptv-cinematic-shelf__heading {
+        display: grid;
+        gap: 12px;
+    }
+
+    .ptv-detail-page .ptv-cinematic-shelf__order {
+        justify-self: start;
+    }
+
+    .ptv-detail-page .ptv-cinematic-shelf--timeline .ptv-cinematic-shelf__rail {
+        display: grid;
+        grid-auto-flow: row;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+        overflow: visible;
+    }
+
+    .ptv-detail-page .ptv-cinematic-shelf--timeline .ptv-cinematic-shelf__item::after {
+        top: calc(100% - 2px);
+        left: 32px;
+
+        width: 2px;
+        height: 18px;
+
+        background: linear-gradient(180deg, var(--ptv-cinematic-accent), transparent);
+    }
+
+    .ptv-detail-page .ptv-cinematic-shelf--timeline .ptv-cinematic-card {
+        grid-template-columns: minmax(112px, 38vw) minmax(0, 1fr);
+        align-items: center;
+    }
+}
+
+html.ptv-client-low-power .ptv-detail-page .ptv-cinematic-details {
+    content-visibility: visible;
+}
+
+html.ptv-client-low-power .ptv-detail-page .ptv-cinematic-card,
+html.ptv-client-low-power .ptv-detail-page .ptv-cinematic-skeleton-card {
+    transition: none;
+    animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-    .ptv-detail-page .ptv-details-discovery-link {
+    .ptv-detail-page .ptv-cinematic-card,
+    .ptv-detail-page .ptv-cinematic-skeleton-card {
         transition: none;
+        animation: none;
+    }
+
+    .ptv-detail-page .ptv-cinematic-card:hover,
+    .ptv-detail-page .ptv-cinematic-card:focus-visible {
+        transform: none;
+    }
+}
+
+.ptv-detail-page.ptv-details--episode .detailPageSecondaryContainer {
+    margin-top: 0 !important;
+    padding-bottom: 96px !important;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible {
+    overflow: visible;
+    width: calc(100% + clamp(28px, 3vw, 58px));
+    margin: 0 !important;
+    padding: 0 0 22px !important;
+
+    border: 0 !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible::before {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible > .sectionTitle {
+    margin: 0 0 14px !important;
+
+    color: rgba(255, 252, 255, 0.95) !important;
+    font-size: clamp(20px, 1.55vw, 27px) !important;
+    font-weight: 900 !important;
+    letter-spacing: -0.02em !important;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible > .sectionTitle::after {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible [is='emby-scroller'] {
+    overflow: visible;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .similarContent {
+    display: flex;
+    gap: clamp(12px, 1.35vw, 22px);
+    overflow-x: auto;
+    padding: 3px clamp(28px, 3vw, 58px) 18px 3px !important;
+
+    scroll-padding-inline: 3px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .similarContent::-webkit-scrollbar {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .card {
+    flex: 0 0 clamp(238px, 18vw, 344px);
+    min-width: 0;
+    margin: 0 !important;
+
+    scroll-snap-align: start;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardBox {
+    border: 1px solid rgba(211, 158, 255, 0.16);
+    border-radius: 15px;
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 180ms ease;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardScalable {
+    position: relative;
+
+    aspect-ratio: 16 / 9;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardPadder {
+    display: none;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardImageContainer {
+    position: absolute;
+    inset: 0;
+
+    background-position: center;
+    background-size: cover;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .cardText {
+    padding: 10px 3px 0;
+
+    color: rgba(248, 243, 252, 0.9);
+    font-size: 14px;
+    font-weight: 760;
+}
+
+.ptv-detail-page.ptv-details--episode #similarCollapsible .card:is(:hover, :focus-within, .show-focus) .cardBox {
+    border-color: var(--ptv-details-focus-core);
+    box-shadow:
+        0 0 0 2px rgba(207, 125, 255, 0.58),
+        0 0 28px var(--ptv-details-focus-glow),
+        0 18px 42px rgba(0, 0, 0, 0.4);
+    transform: translateY(-2px);
+}
+
+.ptv-detail-page.ptv-details--episode .detailPageSecondaryContainer .detailVerticalSection:not(#similarCollapsible),
+.ptv-detail-page.ptv-details--episode .detailPageSecondaryContainer .verticalSection:not(#similarCollapsible) {
+    margin-top: 26px !important;
+}
+
+@media (max-width: 900px) {
+    .ptv-detail-page.ptv-details--episode #similarCollapsible {
+        width: calc(100% + 18px);
+    }
+
+    .ptv-detail-page.ptv-details--episode #similarCollapsible .similarContent {
+        padding-right: 18px !important;
+    }
+
+    .ptv-detail-page.ptv-details--episode #similarCollapsible .card {
+        flex-basis: min(72vw, 300px);
     }
 }

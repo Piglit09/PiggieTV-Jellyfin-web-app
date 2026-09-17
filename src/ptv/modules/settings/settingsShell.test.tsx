@@ -14,15 +14,15 @@ describe('PTV settings shell ownership', () => {
         flushSync(() => unmountPtvSettingsShell());
     });
 
-    it('keeps enhanced Settings Jellyfin-owned without mounting a native PTV shell', () => {
+    it('records the first-party PiggieTV settings ownership boundary', () => {
         flushSync(() => mountPtvSettingsShell());
         flushSync(() => mountPtvSettingsShell());
 
         expect(document.querySelector('#ptv-settings-shell-root')).toBeNull();
         expect(document.querySelector('.ptv-shell-header')).toBeNull();
         expect(observabilityMocks.recordPtvEvent).toHaveBeenCalledWith('render', 'settings-enhancement-mounted', {
-            nativeShellMounted: false,
-            owner: 'jellyfin'
+            nativeShellMounted: true,
+            owner: 'piggietv'
         });
     });
 });

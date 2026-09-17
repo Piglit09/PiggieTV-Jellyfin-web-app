@@ -1,0 +1,263 @@
+/* Native PiggieTV administration workspaces. */
+/* stylelint-disable no-descending-specificity */
+
+.ptv-admin-piggietv-page {
+    --ptv-piggietv-status-ok: #34d399;
+    --ptv-piggietv-status-warning-rgb: 251, 146, 60;
+
+    width: 100%;
+    min-width: 0;
+}
+
+.ptv-admin-piggietv-content {
+    width: 100%;
+    min-width: 0;
+}
+
+.ptv-admin-piggietv-header {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.ptv-admin-piggietv-page .MuiTypography-h1 {
+    margin: 0;
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-accent);
+    font-size: clamp(2rem, 3vw, 3rem);
+    font-weight: 900;
+    line-height: var(--ptv-line-title);
+}
+
+.ptv-admin-piggietv-page .MuiTypography-h2 {
+    color: var(--ptv-color-text-primary);
+    font-family: var(--ptv-font-accent);
+    font-size: var(--ptv-text-section);
+    font-weight: 850;
+    line-height: var(--ptv-line-section);
+}
+
+.ptv-admin-piggietv-page .ptv-dashboard-card {
+    height: 100%;
+    min-width: 0;
+    border: 1px solid var(--ptv-border-subtle);
+    border-radius: var(--ptv-radius-lg, 20px);
+    background:
+        radial-gradient(ellipse at 12% 0%, rgba(125, 211, 252, 0.06), transparent 34%),
+        radial-gradient(ellipse at 90% 100%, rgba(236, 72, 153, 0.06), transparent 42%),
+        var(--ptv-elevation-2-surface) !important;
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+    backdrop-filter: blur(10px) saturate(1.08);
+}
+
+.ptv-admin-piggietv-page .MuiCardContent-root {
+    padding: clamp(var(--ptv-space-3), 1.5vw, var(--ptv-space-4)) !important;
+}
+
+.ptv-admin-piggietv-page .MuiAlert-root {
+    border-radius: var(--ptv-radius-md);
+}
+
+.ptv-admin-piggietv-page .MuiButton-root {
+    min-height: 42px;
+    border-radius: 999px;
+    text-transform: none;
+}
+
+.ptv-admin-piggietv-page .ptv-settings-field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+    gap: var(--ptv-space-3);
+    align-items: start;
+}
+
+.ptv-admin-piggietv-page .ptv-featured-cache-interval-field {
+    width: min(180px, 100%);
+}
+
+.ptv-admin-piggietv-page .ptv-live-status-chip,
+.ptv-admin-piggietv-page .ptv-cache-state-chip,
+.ptv-admin-piggietv-page .ptv-render-profile-badge,
+.ptv-admin-piggietv-page .ptv-status-badge {
+    height: 26px !important;
+    border: 1px solid rgba(var(--ptv-color-focus-rgb), 0.2) !important;
+    background: rgba(var(--ptv-color-focus-rgb), 0.1) !important;
+    color: var(--ptv-color-text-primary) !important;
+    font-size: 0.72rem !important;
+    font-weight: 850 !important;
+}
+
+.ptv-admin-piggietv-page .ptv-badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    min-width: 0;
+}
+
+.ptv-admin-piggietv-page .ptv-status-badge-path {
+    max-width: min(100%, 360px);
+}
+
+.ptv-admin-piggietv-page .ptv-status-badge-path .MuiChip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ptv-admin-piggietv-page .ptv-live-status-dot {
+    width: 8px !important;
+    height: 8px !important;
+    margin-left: 7px !important;
+    border-radius: 999px;
+    background: var(--ptv-state-danger-text);
+    box-shadow: 0 0 0 3px rgba(var(--ptv-color-accent-rgb), 0.12);
+}
+
+.ptv-admin-piggietv-page [data-ptv-plugin-state='connected'] .ptv-live-status-dot {
+    background: var(--ptv-piggietv-status-ok);
+    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.14);
+}
+
+.ptv-admin-piggietv-page [data-ptv-plugin-state='connected'] .ptv-live-status-chip,
+.ptv-admin-piggietv-page .ptv-control-card-cache[data-ptv-cache-state='fresh'] .ptv-cache-state-chip {
+    border-color: rgba(52, 211, 153, 0.34) !important;
+    background: rgba(52, 211, 153, 0.12) !important;
+}
+
+.ptv-admin-piggietv-page [data-ptv-plugin-state='using-fallback'] .ptv-live-status-chip,
+.ptv-admin-piggietv-page [data-ptv-plugin-state='timeout'] .ptv-live-status-chip,
+.ptv-admin-piggietv-page .ptv-control-card-cache[data-ptv-cache-state='stale'] .ptv-cache-state-chip {
+    border-color: rgba(var(--ptv-piggietv-status-warning-rgb), 0.38) !important;
+    background: rgba(var(--ptv-piggietv-status-warning-rgb), 0.13) !important;
+}
+
+.ptv-admin-piggietv-page [data-ptv-plugin-state='endpoint-unreachable'] .ptv-live-status-chip,
+.ptv-admin-piggietv-page [data-ptv-plugin-state='plugin-missing'] .ptv-live-status-chip,
+.ptv-admin-piggietv-page [data-ptv-plugin-state='unauthorized'] .ptv-live-status-chip,
+.ptv-admin-piggietv-page [data-ptv-plugin-state='version-mismatch'] .ptv-live-status-chip,
+.ptv-admin-piggietv-page .ptv-control-card-cache[data-ptv-cache-state='missing'] .ptv-cache-state-chip {
+    border-color: var(--ptv-state-danger-border) !important;
+    background: var(--ptv-state-danger) !important;
+}
+
+.ptv-admin-piggietv-page .ptv-debug-report-preview {
+    max-height: 16rem;
+    padding: var(--ptv-space-3);
+    margin: 0;
+    overflow: auto;
+    border: 1px solid var(--ptv-border-subtle);
+    border-radius: var(--ptv-radius-md);
+    background: rgba(5, 3, 12, 0.54);
+    color: var(--ptv-color-text-secondary);
+    font-family: var(--ptv-font-mono, monospace);
+    font-size: 0.75rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+
+.ptv-admin-piggietv-advanced-details {
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--ptv-border-subtle);
+    border-radius: var(--ptv-radius-md);
+    background: rgba(8, 5, 18, 0.3);
+}
+
+.ptv-admin-piggietv-advanced-details summary {
+    cursor: pointer;
+    color: var(--ptv-color-text-primary);
+    font-weight: 800;
+}
+
+.ptv-admin-piggietv-advanced-details[open] summary {
+    margin-bottom: 0.75rem;
+}
+
+.ptv-admin-piggietv-page .ptv-row-rule-line {
+    max-width: 100%;
+    padding-bottom: var(--ptv-space-2);
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+.ptv-admin-piggietv-page .ptv-row-builder-action-label {
+    display: block;
+    margin-bottom: var(--ptv-space-2);
+    color: var(--ptv-color-text-secondary);
+    font-weight: 850;
+    letter-spacing: 0.08em;
+}
+
+.ptv-admin-piggietv-page .ptv-row-rule-editor {
+    display: grid;
+    grid-template-columns:
+        86px minmax(168px, 1.25fr) minmax(118px, 0.75fr) minmax(160px, 1fr)
+        minmax(190px, 1.1fr) minmax(128px, 0.82fr) 78px 86px 118px
+        minmax(168px, 1fr) minmax(220px, 1.2fr) minmax(172px, auto);
+    gap: var(--ptv-space-2);
+    align-items: center;
+    min-width: 1560px;
+}
+
+.ptv-admin-piggietv-page .ptv-row-rule-cell {
+    min-width: 0;
+}
+
+.ptv-admin-piggietv-page .ptv-row-rule-inline-helper {
+    margin: var(--ptv-space-2) 0 0;
+    color: var(--ptv-color-text-secondary);
+    line-height: 1.45;
+}
+
+.ptv-admin-piggietv-page .ptv-row-rule-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--ptv-space-2);
+    min-width: max-content;
+}
+
+.ptv-admin-piggietv-page .ptv-row-rule-subrows {
+    width: 82px;
+}
+
+.ptv-admin-piggietv-page :focus-visible {
+    outline: 2px solid var(--ptv-color-focus);
+    outline-offset: 3px;
+}
+
+@media (max-width: 1760px) {
+    .ptv-admin-piggietv-page .ptv-row-rule-line {
+        overflow-x: visible;
+    }
+
+    .ptv-admin-piggietv-page .ptv-row-rule-editor {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        min-width: 0;
+        padding: var(--ptv-space-3);
+        border: 1px solid var(--ptv-border-subtle);
+        border-radius: var(--ptv-radius-md);
+        background: rgba(8, 5, 18, 0.32);
+    }
+
+    .ptv-admin-piggietv-page .ptv-row-rule-actions {
+        flex-wrap: wrap;
+        min-width: 0;
+    }
+
+    .ptv-admin-piggietv-page .ptv-row-rule-subrows,
+    .ptv-admin-piggietv-page .ptv-featured-cache-interval-field {
+        width: 100%;
+    }
+}
+
+@media (max-width: 1200px) {
+    .ptv-admin-piggietv-page .ptv-row-rule-editor {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .ptv-admin-piggietv-page .ptv-row-rule-editor {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* stylelint-enable no-descending-specificity */

@@ -10,6 +10,7 @@ import {
 } from '../../services/runtimeStability';
 
 import type { PtvMusicItem } from './musicTypes';
+import { reconcilePtvMusicIdentifyPresentationItem } from './musicIdentifyAdoption';
 import { updatePtvMusicQueueItemUserData } from './musicQueue';
 
 type PtvLikedMusicEntry = {
@@ -27,6 +28,12 @@ type PtvLikedMusicListener = (items: PtvMusicItem[]) => void;
 const LIKED_MUSIC_STORAGE_PREFIX = 'ptv.music.liked.v2';
 const MAX_STORED_LIKED_SONGS = 200;
 const listeners = new Set<PtvLikedMusicListener>();
+const pendingLikedMusicRollbacks = new Map<number, {
+    itemId: string;
+    previousEntry: PtvLikedMusicEntry | null;
+    storageKey: string;
+}>();
+let likedMusicMutationGeneration = 0;
 
 function getLikedMusicStorageKey() {
     return [
@@ -81,13 +88,13 @@ function compactLikedMusicItem(item: PtvMusicItem): PtvMusicItem {
     };
 }
 
-function getStoredLikedMusicEntries() {
-    const payload = readPtvLocalStorageJson<Partial<PtvLikedMusicPayload>>(getLikedMusicStorageKey(), {});
+function getStoredLikedMusicEntries(storageKey = getLikedMusicStorageKey()) {
+    const payload = readPtvLocalStorageJson<Partial<PtvLikedMusicPayload>>(storageKey, {});
 
     return Array.isArray(payload.items) ? payload.items.filter(isPtvLikedMusicEntry) : [];
 }
 
-function writeStoredLikedMusicEntries(entries: PtvLikedMusicEntry[]) {
+function writeStoredLikedMusicEntries(entries: PtvLikedMusicEntry[], storageKey = getLikedMusicStorageKey()) {
     const payload: PtvLikedMusicPayload = {
         items: entries
             .filter(entry => Boolean(entry.item.Id))
@@ -100,7 +107,7 @@ function writeStoredLikedMusicEntries(entries: PtvLikedMusicEntry[]) {
         version: 2
     };
 
-    const stored = writePtvLocalStorageJson(getLikedMusicStorageKey(), payload, {
+    const stored = writePtvLocalStorageJson(storageKey, payload, {
         maxBytes: 96_000,
         namespace: 'music-liked'
     });
@@ -191,6 +198,40 @@ export function mergePtvLikedMusicItems(items: PtvMusicItem[]) {
     return emitLikedMusicUpdated();
 }
 
+export function reconcilePtvLikedMusicIdentifyMetadata(confirmed: PtvMusicItem) {
+    const activeStorageKey = getLikedMusicStorageKey();
+    let changed = false;
+    const entries = getStoredLikedMusicEntries().map(entry => {
+        const item = reconcilePtvMusicIdentifyPresentationItem(entry.item, confirmed);
+
+        if (item === entry.item) return entry;
+
+        changed = true;
+        return { ...entry, item };
+    });
+
+    pendingLikedMusicRollbacks.forEach(rollback => {
+        if (!rollback.previousEntry || rollback.storageKey !== activeStorageKey) return;
+
+        const item = reconcilePtvMusicIdentifyPresentationItem(
+            rollback.previousEntry.item,
+            confirmed
+        );
+
+        if (item !== rollback.previousEntry.item) {
+            rollback.previousEntry = {
+                ...rollback.previousEntry,
+                item: withFavoriteUserData(item, true)
+            };
+        }
+    });
+
+    if (!changed) return getPtvLikedMusicItems();
+
+    writeStoredLikedMusicEntries(entries);
+    return emitLikedMusicUpdated();
+}
+
 export function subscribeToPtvLikedMusic(listener: PtvLikedMusicListener) {
     listeners.add(listener);
     listener(getPtvLikedMusicItems());
@@ -205,7 +246,14 @@ export async function setPtvMusicItemLiked(item: PtvMusicItem, liked: boolean) {
         throw new Error('Cannot like a music item without an Id.');
     }
 
-    const previousEntries = getStoredLikedMusicEntries();
+    const storageKey = getLikedMusicStorageKey();
+    const previousEntries = getStoredLikedMusicEntries(storageKey);
+    const mutationGeneration = ++likedMusicMutationGeneration;
+    const rollback = {
+        itemId: item.Id,
+        previousEntry: previousEntries.find(entry => entry.item.Id === item.Id) || null,
+        storageKey
+    };
     const nextEntries = liked ?
         uniqueLikedEntries([
             {
@@ -216,7 +264,8 @@ export async function setPtvMusicItemLiked(item: PtvMusicItem, liked: boolean) {
         ]) :
         previousEntries.filter(entry => entry.item.Id !== item.Id);
 
-    writeStoredLikedMusicEntries(nextEntries);
+    pendingLikedMusicRollbacks.set(mutationGeneration, rollback);
+    writeStoredLikedMusicEntries(nextEntries, storageKey);
     emitLikedMusicUpdated();
     updatePtvMusicQueueItemUserData(item.Id, {
         ...(item.UserData || {}),
@@ -233,11 +282,23 @@ export async function setPtvMusicItemLiked(item: PtvMusicItem, liked: boolean) {
             liked
         });
 
-        return getPtvLikedMusicItems();
+        pendingLikedMusicRollbacks.delete(mutationGeneration);
+
+        return storageKey === getLikedMusicStorageKey() ? getPtvLikedMusicItems() : [];
     } catch (error) {
-        writeStoredLikedMusicEntries(previousEntries);
-        emitLikedMusicUpdated();
-        updatePtvMusicQueueItemUserData(item.Id, item.UserData);
+        const currentEntries = getStoredLikedMusicEntries(storageKey)
+            .filter(entry => entry.item.Id !== item.Id);
+        const rollbackEntry = pendingLikedMusicRollbacks.get(mutationGeneration)?.previousEntry;
+
+        pendingLikedMusicRollbacks.delete(mutationGeneration);
+        writeStoredLikedMusicEntries(uniqueLikedEntries([
+            ...(rollbackEntry ? [ rollbackEntry ] : []),
+            ...currentEntries
+        ]), storageKey);
+        if (storageKey === getLikedMusicStorageKey()) {
+            emitLikedMusicUpdated();
+            updatePtvMusicQueueItemUserData(item.Id, item.UserData);
+        }
         recordPtvEvent('render', 'music-liked-song-failed', {
             error: error instanceof Error ? error.message : String(error),
             itemId: item.Id,

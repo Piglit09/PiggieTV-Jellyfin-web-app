@@ -312,6 +312,16 @@ npm run build:report
 
 The browser suite uses a controlled local harness and does not require Jellyfin credentials. Production builds inject a sanitized frontend commit, build date, build ID, build mode, and Jellyfin Web version. The PiggieTV dashboard combines these values with connected plugin/API/cache versions.
 
+PiggieTV Web releases use the independent version in `ptv-version.json`; the first separated release is `0.5.0`. `package.json` remains the upstream Jellyfin Web compatibility version. Validate or advance the PTV release with:
+
+```sh
+npm run version:ptv:check
+npm run version:ptv:next
+npm run version:ptv:bump
+```
+
+Automatic bumps advance one patch step, carry `x.y.99` to `x.(y+1).0`, and stop at `x.99.99` so a major version can never change implicitly.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for required CI checks, commit guidance, privacy rules, and device validation. See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) before packaging or deployment.
 
 ## Plugin Build

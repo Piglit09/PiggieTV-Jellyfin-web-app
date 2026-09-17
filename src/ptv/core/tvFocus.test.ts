@@ -16,7 +16,9 @@ import {
     notifyPtvTvPlaybackFocus,
     notifyPtvTvPlaybackSurfaceDisposed,
     notifyPtvTvPlaybackSurfaceReady,
+    rememberPtvRouteOrigin,
     registerPtvTvPlaybackBackHandler,
+    restorePtvRouteOrigin,
     syncPtvTvFocusEngine
 } from './tvFocus';
 import {
@@ -516,6 +518,231 @@ describe('PiggieTV TV focus engine', () => {
         }));
 
         expect(document.activeElement).toBe(routeBButton);
+    });
+
+    it('restores a non-TV Details origin with one canonical scroll commit and no scrollIntoView pass', () => {
+        const parentPage = document.createElement('section');
+        const origin = document.createElement('a');
+        const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+
+        parentPage.className = 'mainAnimatedPage';
+        origin.href = '#/details?id=child';
+        origin.dataset.ptvFocusKey = 'details:child:origin';
+        origin.scrollIntoView = vi.fn();
+        setRect(origin, 0, 500);
+        parentPage.append(origin);
+        document.body.append(parentPage);
+        Object.defineProperty(window, 'pageXOffset', { configurable: true, value: 0 });
+        Object.defineProperty(window, 'pageYOffset', { configurable: true, value: 412 });
+
+        expect(rememberPtvRouteOrigin(origin, 'parent-route')).toBe(true);
+
+        parentPage.remove();
+        const restoredPage = document.createElement('section');
+        const restoredOrigin = document.createElement('a');
+
+        restoredPage.className = 'mainAnimatedPage';
+        restoredOrigin.href = '#/details?id=child';
+        restoredOrigin.dataset.ptvFocusKey = 'details:child:origin';
+        restoredOrigin.scrollIntoView = vi.fn();
+        setRect(restoredOrigin, 0, 500);
+        restoredPage.append(restoredOrigin);
+        document.body.append(restoredPage);
+        Object.defineProperty(window, 'pageYOffset', { configurable: true, value: 0 });
+
+        expect(restorePtvRouteOrigin(restoredPage, 'parent-route')).toBe(true);
+        expect(document.activeElement).toBe(restoredOrigin);
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+        expect(scrollTo).toHaveBeenCalledWith({
+            behavior: 'auto',
+            left: 0,
+            top: 412
+        });
+        expect(restoredOrigin.scrollIntoView).not.toHaveBeenCalled();
+        expect(restorePtvRouteOrigin(restoredPage, 'parent-route')).toBe(false);
+    });
+
+    it('waits for a delayed origin card and rejects a stale route generation', () => {
+        const sourcePage = document.createElement('section');
+        const origin = document.createElement('a');
+
+        sourcePage.className = 'mainAnimatedPage';
+        origin.href = '#/details?id=episode';
+        origin.dataset.ptvFocusKey = 'details:episode:origin';
+        setRect(origin, 0, 400);
+        sourcePage.append(origin);
+        document.body.append(sourcePage);
+        Object.defineProperty(window, 'pageXOffset', { configurable: true, value: 0 });
+        Object.defineProperty(window, 'pageYOffset', { configurable: true, value: 280 });
+        vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+
+        expect(rememberPtvRouteOrigin(origin, 'season-route')).toBe(true);
+        sourcePage.remove();
+
+        const restoredPage = document.createElement('section');
+
+        restoredPage.className = 'mainAnimatedPage';
+        document.body.append(restoredPage);
+        expect(restorePtvRouteOrigin(restoredPage, 'episode-route')).toBe(false);
+        expect(restorePtvRouteOrigin(restoredPage, 'season-route')).toBe(false);
+
+        const restoredOrigin = document.createElement('a');
+
+        restoredOrigin.href = '#/details?id=episode';
+        restoredOrigin.dataset.ptvFocusKey = 'details:episode:origin';
+        setRect(restoredOrigin, 0, 400);
+        restoredPage.append(restoredOrigin);
+
+        expect(restorePtvRouteOrigin(restoredPage, 'season-route')).toBe(true);
+        expect(document.activeElement).toBe(restoredOrigin);
+    });
+
+    it('restores nested Series and Season origins independently in Back order', () => {
+        const seriesPage = document.createElement('section');
+        const seasonCard = document.createElement('a');
+
+        seriesPage.className = 'mainAnimatedPage';
+        seasonCard.dataset.ptvFocusKey = 'series:season-origin';
+        seasonCard.href = '#/details?id=season';
+        setRect(seasonCard, 0, 300);
+        seriesPage.append(seasonCard);
+        document.body.append(seriesPage);
+        Object.defineProperty(window, 'pageXOffset', { configurable: true, value: 0 });
+        Object.defineProperty(window, 'pageYOffset', { configurable: true, value: 180 });
+        vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+        expect(rememberPtvRouteOrigin(seasonCard, 'series-parent-route')).toBe(true);
+
+        seriesPage.remove();
+        const seasonPage = document.createElement('section');
+        const episodeCard = document.createElement('a');
+
+        seasonPage.className = 'mainAnimatedPage';
+        episodeCard.dataset.ptvFocusKey = 'season:episode-origin';
+        episodeCard.href = '#/details?id=episode';
+        setRect(episodeCard, 0, 500);
+        seasonPage.append(episodeCard);
+        document.body.append(seasonPage);
+        Object.defineProperty(window, 'pageYOffset', { configurable: true, value: 360 });
+        expect(rememberPtvRouteOrigin(episodeCard, 'season-parent-route')).toBe(true);
+
+        seasonPage.remove();
+        const restoredSeasonPage = document.createElement('section');
+        const restoredEpisodeCard = episodeCard.cloneNode() as HTMLAnchorElement;
+
+        restoredSeasonPage.className = 'mainAnimatedPage';
+        setRect(restoredEpisodeCard, 0, 500);
+        restoredSeasonPage.append(restoredEpisodeCard);
+        document.body.append(restoredSeasonPage);
+        expect(restorePtvRouteOrigin(restoredSeasonPage, 'season-parent-route')).toBe(true);
+        expect(document.activeElement).toBe(restoredEpisodeCard);
+
+        restoredSeasonPage.remove();
+        const restoredSeriesPage = document.createElement('section');
+        const restoredSeasonCard = seasonCard.cloneNode() as HTMLAnchorElement;
+
+        restoredSeriesPage.className = 'mainAnimatedPage';
+        setRect(restoredSeasonCard, 0, 300);
+        restoredSeriesPage.append(restoredSeasonCard);
+        document.body.append(restoredSeriesPage);
+        expect(restorePtvRouteOrigin(restoredSeriesPage, 'series-parent-route')).toBe(true);
+        expect(document.activeElement).toBe(restoredSeasonCard);
+    });
+
+    it('preserves a nested vertical scroll owner and waits for usable artwork geometry', () => {
+        vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+        vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue('Chrome');
+        const createPage = (top: number, measured: boolean) => {
+            const page = document.createElement('section');
+            const scroller = document.createElement('div');
+            const origin = document.createElement('a');
+
+            page.className = 'mainAnimatedPage';
+            scroller.id = 'season-episode-scroll-owner';
+            scroller.style.overflowY = 'auto';
+            Object.defineProperties(scroller, {
+                clientHeight: { configurable: true, value: 400 },
+                scrollHeight: { configurable: true, value: 1200 }
+            });
+            scroller.scrollTop = top;
+            origin.dataset.ptvFocusKey = 'season:delayed-artwork-origin';
+            origin.href = '#/details?id=episode';
+            setRect(origin, 0, 500, measured ? 100 : 0, measured ? 60 : 0);
+            scroller.append(origin);
+            page.append(scroller);
+
+            return { origin, page, scroller };
+        };
+        const source = createPage(640, true);
+
+        document.body.append(source.page);
+        expect(rememberPtvRouteOrigin(source.origin, 'nested-scroll-route')).toBe(true);
+        source.page.remove();
+
+        const restored = createPage(0, false);
+
+        document.body.append(restored.page);
+        expect(restorePtvRouteOrigin(restored.page, 'nested-scroll-route')).toBe(false);
+        expect(restored.scroller.scrollTop).toBe(0);
+
+        setRect(restored.origin, 0, 500);
+        expect(restorePtvRouteOrigin(restored.page, 'nested-scroll-route')).toBe(true);
+        expect(restored.scroller.scrollTop).toBe(640);
+        expect(document.activeElement).toBe(restored.origin);
+    });
+
+    it('does not let duplicate parent-route notifications recapture stale child focus', () => {
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+            callback(performance.now());
+            return 1;
+        });
+        vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+        Object.defineProperty(window, 'pageXOffset', { configurable: true, value: 0 });
+        Object.defineProperty(window, 'pageYOffset', { configurable: true, value: 240 });
+        const parentPage = document.createElement('section');
+        const origin = document.createElement('a');
+
+        parentPage.className = 'mainAnimatedPage';
+        origin.dataset.ptvFocusKey = 'season:episode-origin';
+        origin.href = '#/details?id=episode';
+        setRect(origin, 0, 400);
+        parentPage.append(origin);
+        document.body.append(parentPage);
+        syncPtvTvFocusEngine({ isTv: true });
+        origin.focus();
+        expect(rememberPtvRouteOrigin(origin, 'season-route')).toBe(true);
+
+        window.dispatchEvent(new CustomEvent('ptv:routecontrollerchange', {
+            detail: { pageType: 'details', routeKey: 'episode-route' }
+        }));
+        parentPage.remove();
+        const childPage = document.createElement('section');
+        const childAction = document.createElement('button');
+
+        childPage.className = 'mainAnimatedPage';
+        childAction.dataset.ptvFocusKey = 'episode:play';
+        setRect(childAction, 0, 100);
+        childPage.append(childAction);
+        document.body.append(childPage);
+        childAction.focus();
+
+        window.dispatchEvent(new CustomEvent('ptv:routecontrollerchange', {
+            detail: { pageType: 'details', routeKey: 'season-route' }
+        }));
+        window.dispatchEvent(new CustomEvent('ptv:routecontrollerchange', {
+            detail: { pageType: 'details', routeKey: 'season-route' }
+        }));
+
+        childPage.remove();
+        const restoredPage = document.createElement('section');
+        const restoredOrigin = origin.cloneNode() as HTMLAnchorElement;
+
+        restoredPage.className = 'mainAnimatedPage';
+        setRect(restoredOrigin, 0, 400);
+        restoredPage.append(restoredOrigin);
+        document.body.append(restoredPage);
+        notifyPtvTvFocusContentReady('season-episodes-ready');
+
+        expect(document.activeElement).toBe(restoredOrigin);
     });
 
     it('uses the real prefixed route event and applies the Home initial-focus rule', () => {

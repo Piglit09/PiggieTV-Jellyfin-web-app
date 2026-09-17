@@ -489,8 +489,8 @@ function refreshLibraryInfoInDrawer(user) {
         html += '<h3 class="sidebarHeader">';
         html += globalize.translate('HeaderAdmin');
         html += '</h3>';
-        html += `<a is="emby-linkbutton" class="navMenuOption lnkMediaFolder lnkManageServer" data-itemid="dashboard" href="#/dashboard">${getPtvDrawerIconHtml('dashboard', globalize.translate('TabDashboard'))}<span class="navMenuOptionText">${globalize.translate('TabDashboard')}</span></a>`;
-        html += `<a is="emby-linkbutton" class="navMenuOption lnkMediaFolder editorViewMenu" data-itemid="editor" href="#/metadata">${getPtvDrawerIconHtml('mode_edit', globalize.translate('MetadataManager'))}<span class="navMenuOptionText">${globalize.translate('MetadataManager')}</span></a>`;
+        html += `<a is="emby-linkbutton" class="navMenuOption lnkMediaFolder lnkManageServer" data-itemid="dashboard" href="#/settings/admin">${getPtvDrawerIconHtml('dashboard', globalize.translate('TabDashboard'))}<span class="navMenuOptionText">${globalize.translate('TabDashboard')}</span></a>`;
+        html += `<a is="emby-linkbutton" class="navMenuOption lnkMediaFolder editorViewMenu" data-itemid="editor" href="#/settings/admin/media/metadata-manager">${getPtvDrawerIconHtml('mode_edit', globalize.translate('MetadataManager'))}<span class="navMenuOptionText">${globalize.translate('MetadataManager')}</span></a>`;
         html += '</div>';
     }
 

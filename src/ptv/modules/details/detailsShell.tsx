@@ -35,7 +35,13 @@ export function getPtvDetailsShellSection(item: DetailShellItem | null | undefin
 
 function renderPtvDetailsShell() {
     detailsShellRoot?.render(
-        <PTVShell headerOnly section={detailsShellSection} title='Details'>
+        <PTVShell
+            headerOnly
+            navigationVariant='details'
+            section={detailsShellSection}
+            showBackButton
+            title='Details'
+        >
             {null}
         </PTVShell>
     );

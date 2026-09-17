@@ -24,6 +24,7 @@ import { appRouter } from '../router/appRouter';
 import template from './metadataEditor.template.html';
 import { BaseItemKind } from '@jellyfin/sdk/lib/generated-client/models/base-item-kind';
 import { SeriesStatus } from '@jellyfin/sdk/lib/generated-client/models/series-status';
+import { isIdentifyOwnerCurrent } from '../itemidentifier/itemIdentifierExpectedEffects';
 
 let currentContext;
 let metadataEditorInfo;
@@ -253,9 +254,33 @@ function afterDeleted(context, item) {
     }
 }
 
+function isMetadataEditorIdentifyOwnerCurrent(context, ownerItem) {
+    const ownerConnected = typeof context?.isConnected !== 'boolean' || context.isConnected;
+
+    return isIdentifyOwnerCurrent(currentItem, ownerItem, ownerConnected) && Boolean(metadataEditorInfo);
+}
+
+function reconcileAuthoritativeIdentifyItem(context, updatedItem, ownerItem) {
+    if (!updatedItem?.Id
+        || updatedItem.Id !== ownerItem?.Id
+        || !isMetadataEditorIdentifyOwnerCurrent(context, ownerItem)) {
+        return;
+    }
+
+    currentItem = {
+        ...currentItem,
+        ...updatedItem
+    };
+    loadExternalIds(context, currentItem, metadataEditorInfo.ExternalIdInfos);
+    setFieldVisibilities(context, currentItem);
+    fillItemInfo(context, currentItem, metadataEditorInfo.ParentalRatingOptions);
+}
+
 function showMoreMenu(context, button, user) {
     import('../itemContextMenu').then(({ default: itemContextMenu }) => {
         const item = currentItem;
+
+        if (!isMetadataEditorIdentifyOwnerCurrent(context, item)) return;
 
         itemContextMenu.show({
             item: item,
@@ -268,8 +293,12 @@ function showMoreMenu(context, button, user) {
             queue: false,
             user: user
         }).then(function (result) {
+            if (!isMetadataEditorIdentifyOwnerCurrent(context, item)) return;
+
             if (result.deleted) {
                 afterDeleted(context, item);
+            } else if (result.command === 'identify') {
+                reconcileAuthoritativeIdentifyItem(context, result.updatedItem, item);
             } else if (result.updated) {
                 reload(context, item.Id, item.ServerId);
             }
@@ -1142,4 +1171,3 @@ export default {
         });
     }
 };
-

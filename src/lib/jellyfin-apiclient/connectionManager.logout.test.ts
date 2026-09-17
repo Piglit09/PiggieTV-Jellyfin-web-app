@@ -116,4 +116,39 @@ describe('Jellyfin ConnectionManager logout state and events', () => {
             UserId: null
         });
     });
+
+    it('bounds a non-settling remote logout before clearing local session state', async () => {
+        vi.useFakeTimers();
+
+        try {
+            const server = {
+                AccessToken: 'access-token',
+                ExchangeToken: 'exchange-token',
+                Id: 'server-three',
+                UserId: 'user-three',
+                UserLinkType: 'LinkedUser'
+            };
+            const { manager } = createManager(
+                server,
+                () => new Promise<void>(() => undefined)
+            );
+
+            const logout = manager.logout();
+
+            await vi.advanceTimersByTimeAsync(10000);
+            await expect(logout).resolves.toBeUndefined();
+            expect(connectionMocks.trigger).toHaveBeenCalledWith(
+                manager,
+                'localusersignedout',
+                [{ serverId: 'server-three' }]
+            );
+            expect(server).toMatchObject({
+                AccessToken: null,
+                ExchangeToken: null,
+                UserId: null
+            });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

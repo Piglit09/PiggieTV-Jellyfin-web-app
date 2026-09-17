@@ -123,7 +123,7 @@ public sealed class ReadingSeriesOverrideContractTests
     }
 
     [Fact]
-    public async Task StatusSettingsAndFeaturedPathsAcceptPopulatedReadingOverrides()
+    public async Task StatusAndSettingsAcceptPopulatedReadingOverridesWhileFeaturedFailsClosedWithoutUser()
     {
         var configuration = new PluginConfiguration();
         configuration.ReadingSeriesOverrides.SetRoute("comics", new Dictionary<string, ReadingSeriesOverrideDefinition>
@@ -149,7 +149,7 @@ public sealed class ReadingSeriesOverrideContractTests
 
         Assert.IsType<OkObjectResult>(await controller.GetStatus(full: true, CancellationToken.None));
         Assert.IsType<OkObjectResult>((await controller.GetSettings()).Result);
-        Assert.IsType<OkObjectResult>((await controller.GetFeaturedContent(CancellationToken.None)).Result);
+        Assert.IsType<UnauthorizedObjectResult>((await controller.GetFeaturedContent(CancellationToken.None)).Result);
     }
 
     private static bool IsGenericDictionary(Type type)
