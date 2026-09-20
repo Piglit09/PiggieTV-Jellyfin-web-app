@@ -63,6 +63,8 @@ import {
 import { getPtvDiagnosticStore } from '../src/ptv/services/diagnostics/diagnosticStore';
 import '../src/ptv/modules/details/details.scss';
 import '../src/ptv/modules/music/music.scss';
+import '../src/ptv/modules/settings/settings.scss';
+import '../src/ptv/modules/settings/admin/libraries/adminLibraries.scss';
 import '../src/ptv/pages/home/homeCustomizationDialog.scss';
 import '../src/ptv/pages/home/nativeHome.scss';
 import '../src/ptv/pages/search/nativeSearch.scss';
@@ -83,6 +85,18 @@ style.textContent = `
     * { box-sizing: border-box; }
     html { min-height: 100%; background: #090812; color: #fff; font-family: sans-serif; }
     body { min-height: 140vh; margin: 0; }
+    body.ptv-e2e-settings-layout { height: 100vh; min-height: 100vh; overflow: hidden; }
+    body.ptv-e2e-settings-layout #app { position: relative; height: 100vh; overflow: hidden; }
+    :where(body.ptv-e2e-settings-layout) #ptvSettingsPage {
+        position: absolute;
+        top: 0;
+        right: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        overflow-y: auto;
+    }
     button, a { min-height: 2.75rem; }
     .authenticated-header { display: grid; }
     .primary-navigation-header { position: relative; z-index: 50; padding: 1rem; background: #211635; }
@@ -1424,6 +1438,61 @@ function renderPrimaryNavigationHeader() {
     };
 }
 
+function renderAdminLibrariesLayoutFixture() {
+    document.body.classList.add('ptv-e2e-settings-layout');
+    const page = addElement(root, 'main', {
+        className: 'page mainAnimatedPage noSecondaryNavPage ptv-settings-page',
+        id: 'ptvSettingsPage'
+    });
+    const section = addElement(page, 'div');
+
+    section.dataset.ptvSettingsSection = 'admin-libraries';
+    const application = addElement(section, 'main', { className: 'ptv-settings-application' });
+    const adminShell = addElement(application, 'div', { className: 'ptv-admin-shell ptv-admin-shell-settings' });
+    const mainColumn = addElement(adminShell, 'div', { className: 'ptv-admin-main-column' });
+    const libraries = addElement(mainColumn, 'section', { className: 'ptv-admin-libraries' });
+
+    libraries.dataset.testid = 'ptv-admin-libraries-list';
+    const header = addElement(libraries, 'header', { className: 'ptv-admin-libraries-header' });
+    const headerCopy = addElement(header, 'div');
+
+    addElement(headerCopy, 'h1', { text: 'Libraries' });
+    addElement(headerCopy, 'p', { text: 'Manage media sources, scans and library behavior.' });
+    const actions = addElement(header, 'div', { className: 'ptv-admin-libraries-header-actions' });
+    const scan = addElement(actions, 'button', { text: 'Scan All Libraries' });
+    const add = addElement(actions, 'button', { className: 'is-primary', text: 'Add Library' });
+
+    scan.type = 'button';
+    add.type = 'button';
+    const toolbar = addElement(libraries, 'div', { className: 'ptv-admin-libraries-toolbar' });
+    const search = addElement(toolbar, 'input');
+
+    search.setAttribute('aria-label', 'Search libraries');
+    search.placeholder = 'Search libraries';
+    const filters = addElement(toolbar, 'div', { className: 'ptv-admin-library-filter-group' });
+
+    filters.setAttribute('aria-label', 'Filter libraries');
+    filters.setAttribute('role', 'group');
+    for (const label of ['All', 'Movies', 'Music', 'Shows']) {
+        const filter = addElement(filters, 'button', { className: 'ptv-admin-library-filter', text: label });
+
+        filter.type = 'button';
+        filter.setAttribute('aria-pressed', String(label === 'All'));
+    }
+    const list = addElement(libraries, 'div', { className: 'ptv-admin-libraries-list' });
+
+    for (const name of ['Movies', 'TV Shows', 'Music', 'Anime', 'Cartoons', 'Documentaries', 'Concerts', 'Family']) {
+        const row = addElement(list, 'article', { className: 'ptv-admin-library-row' });
+
+        row.dataset.testid = 'ptv-admin-library-row';
+        addElement(row, 'strong', { text: name });
+        addElement(row, 'span', { text: 'Available' });
+        addElement(row, 'span', { text: '/media/fixture' });
+        const manage = addElement(row, 'button', { text: 'Manage' });
+        manage.type = 'button';
+    }
+}
+
 function renderHeader() {
     if (new URLSearchParams(window.location.search).get('dropdown') === '1') {
         renderPrimaryNavigationHeader();
@@ -2753,7 +2822,7 @@ function renderRoute() {
     document.querySelectorAll<HTMLElement>('[data-ptv-music-fixture-external]').forEach(element => {
         element.remove();
     });
-    document.body.classList.remove('ptv-e2e-details');
+    document.body.classList.remove('ptv-e2e-details', 'ptv-e2e-settings-layout');
     document.documentElement.classList.remove('ptv-route-detail-page');
     document.body.classList.remove('ptv-route-music-mounted');
     delete document.documentElement.dataset.ptvPlaybackSurface;
@@ -2790,6 +2859,8 @@ function renderRoute() {
         renderSearch(search);
     } else if (path === '/details' || path.startsWith('/item/')) {
         renderDetails();
+    } else if (path === '/e2e/settings-admin-libraries-layout') {
+        renderAdminLibrariesLayoutFixture();
     } else if (path === '/home') {
         renderNativeHome();
     } else {
