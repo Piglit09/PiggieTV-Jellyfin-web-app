@@ -105,7 +105,7 @@ git commit -m "fix: embed full Web source commit"
 **Files:**
 
 - Create: `docs/diagnostics/2026-09-20-stabilization-backlog-reconciliation.md`
-- Create: `docs/architecture/ptv-web-reference-client.md`
+- Create: `docs/architecture/PTV_WEB_REFERENCE_CLIENT.md`
 
 **Interfaces:**
 
