@@ -94,7 +94,6 @@ style.textContent = `
         left: 0;
         width: 100%;
         height: 100%;
-        min-height: 0;
         overflow-y: auto;
     }
     button, a { min-height: 2.75rem; }

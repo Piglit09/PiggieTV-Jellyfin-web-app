@@ -122,6 +122,9 @@ test.describe('PiggieTV shell surface hierarchy', () => {
         expect(initialHeader).not.toBeNull();
         expect(initialSettingsPage).not.toBeNull();
         expect(initialSettingsPage!.y).toBeGreaterThanOrEqual(initialHeader!.y + initialHeader!.height);
+        expect(initialSettingsPage!.y + initialSettingsPage!.height).toBeLessThanOrEqual(
+            page.viewportSize()!.height + 1
+        );
 
         const scrollState = await settingsPage.evaluate((element: HTMLElement) => {
             element.scrollTop = element.scrollHeight;
@@ -144,6 +147,9 @@ test.describe('PiggieTV shell surface hierarchy', () => {
         expect(scrolledSettingsPage).not.toBeNull();
         expect(lastRow).not.toBeNull();
         expect(scrolledSettingsPage!.y).toBeGreaterThanOrEqual(scrolledHeader!.y + scrolledHeader!.height);
+        expect(scrolledSettingsPage!.y + scrolledSettingsPage!.height).toBeLessThanOrEqual(
+            page.viewportSize()!.height + 1
+        );
         expect(lastRow!.y).toBeGreaterThanOrEqual(scrolledSettingsPage!.y);
         expect(lastRow!.y + lastRow!.height).toBeLessThanOrEqual(
             scrolledSettingsPage!.y + scrolledSettingsPage!.height + 1

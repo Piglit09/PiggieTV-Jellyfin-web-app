@@ -61,6 +61,7 @@ describe('PTV shell geometry ownership', () => {
 
         expect(settingsPageBlock).toMatch(/margin-top:\s*126px/);
         expect(settingsPageBlock).toMatch(/height:\s*calc\(100% - 126px\)/);
+        expect(settingsPageBlock).toMatch(/min-height:\s*0/);
         expect(settingsPageBlock).toMatch(/overflow-y:\s*auto/);
         expect(mobileBlock).not.toMatch(/\.ptv-admin-library-row\s*\{[^}]*margin-top:\s*126px/);
     });
