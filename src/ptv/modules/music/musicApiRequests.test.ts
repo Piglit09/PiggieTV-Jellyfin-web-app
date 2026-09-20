@@ -129,12 +129,16 @@ function populatedHomeMocks() {
     });
     vi.mocked(getPtvItems).mockImplementation(async query => {
         const type = String(query?.IncludeItemTypes || 'Audio');
+        let itemType = 'Audio';
+
+        if (type === 'MusicAlbum') itemType = 'MusicAlbum';
+        if (type === 'MusicArtist') itemType = 'MusicArtist';
 
         return {
             Items: [{
                 Id: `${type}-1`,
                 Name: `${type} 1`,
-                Type: type === 'MusicAlbum' ? 'MusicAlbum' : type === 'MusicArtist' ? 'MusicArtist' : 'Audio'
+                Type: itemType
             }],
             TotalRecordCount: 1
         };
@@ -156,6 +160,7 @@ describe('PiggieTV Music list requests', () => {
         vi.mocked(requestPtvJson).mockReset();
         vi.mocked(recordPtvEvent).mockReset();
         invalidatePtvMusicHomeCache();
+        localStorage.removeItem('ptv.music.liked.v2:server-1:user-1');
     });
 
     it('uses the lean card profile and bounds playlist content probes', async () => {
@@ -574,7 +579,7 @@ describe('PiggieTV Music list requests', () => {
         vi.mocked(getPtvFavoriteItems).mockRejectedValue(new Error('Jellyfin unavailable'));
 
         await expect(getPtvMusicHome()).rejects.toThrow('Music full load failed before any library items were confirmed');
-        expect(getPtvItems).toHaveBeenCalled();
+        expect(getPtvUserViews).toHaveBeenCalled();
         expect(localStorage.getItem(fullMusicHomeStorageKey)).toBe(serialized);
     });
 
