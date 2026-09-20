@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 
-Status: Approved direction; awaiting written-spec confirmation
+Status: Approved by the user on 2026-09-20
 
 Target: VM115 Jellyfin 12 production baseline, PTV Web 0.5.59, PiggieTV Plugin 0.5.18.0
 
