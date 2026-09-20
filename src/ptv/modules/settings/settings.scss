@@ -1040,6 +1040,19 @@ html.ptv-user-high-visibility-focus :focus-visible {
     }
 }
 
+@media (max-width: 720px) {
+    #ptvSettingsPage.ptv-settings-page {
+        height: calc(100% - 126px);
+        margin-top: 126px;
+        overflow-y: auto;
+    }
+
+    .ptv-settings-hub,
+    .ptv-settings-application {
+        padding-top: 0;
+    }
+}
+
 @media (max-width: 420px) {
     .ptv-settings-hub,
     .ptv-settings-application {
