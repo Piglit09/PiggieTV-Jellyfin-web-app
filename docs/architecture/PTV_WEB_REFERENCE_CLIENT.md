@@ -20,6 +20,21 @@ Jellyfin owns virtual-folder creation, identifiers, configured paths, and scans.
 
 The reference widths are 390x844 phone, 1024x1366 tablet, 2560x1271 desktop, and 1920x1080 TV. Responsive changes must preserve focus, keyboard/touch/remote access, action visibility, independent page scrolling where owned, and no horizontal overflow.
 
+## Known And Deferred Behavior
+
+The supported baseline does not claim resolution of the following open or deferred work:
+
+- **Library scope bleed — open defect.** Library-specific recommendation rows may include content from other libraries. Future work must investigate library-ID scoping versus media-type-only scoping.
+- **Image churn and performance — open investigation.** Diagnostics have shown thousands of image lifecycle events and long-tail Items requests of approximately 4–10 seconds. The cause requires a separate bounded investigation.
+- **Recommendation generation — open defect.** A degraded generation state remains under investigation. No causal relationship to library scope bleed is assumed without evidence.
+- **Player flyout lifecycle — open defect.** Audio and Subtitles flyouts may outlive auto-hidden playback controls.
+- **Player volume persistence — open defect.** Episode autoplay may reset the user’s volume instead of preserving it.
+- **Player presentation — deferred UX work.** The intended top header/back button, series or movie identity treatment, and the episode label `SxxExx · Episode Title` remain deferred.
+- **Media topology and Anime discovery — deferred infrastructure audit.** VM115, DAS, Servarr, Jellyfin, and PTV path relationships require a read-only audit before any filesystem or library mutation.
+- **PTV Reading migration — deferred project.** Calibre/Caliweb Books, Comics, and Manga must be inventoried and migrated before CT108 can be retired.
+- **Premium UI 2.0 — deferred project.** A PTV-purple translucent/reactive glass system and native-client-appropriate implementations are post-stability work.
+- **PTV Games — deferred project.** Initial integration should use romM or another specialized backend rather than immediately replacing the game backend.
+
 ## Non-Guarantees
 
 HTTP success does not universally prove mutation, cache, image, indexing, playback, or UI convergence. PTV must not infer missing projection fields as deletion, use Web filtering as an authorization boundary, or add broad retries/timeouts to hide an unresolved owner.
