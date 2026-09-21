@@ -34,6 +34,19 @@ test('accepts the complete Jellyfin 12 PascalCase empty-bootstrap evidence', () 
     });
 });
 
+test('accepts Jellyfin 12 PascalCase evidence with null DTO members omitted', () => {
+    const evidence = fixture('metadata-quality-jellyfin12-pascal-omitted-nullables.json');
+
+    assert.deepEqual(verifyMetadataQualityBootstrap(evidence), {
+        activeGenerationCount: 1,
+        failedGenerationCount: 2,
+        generationState: 'ACTIVE',
+        resultCount: 0,
+        scanState: 'idle',
+        totalScanned: 0
+    });
+});
+
 test('accepts the complete Jellyfin 12 explicit camelCase profile', () => {
     const evidence = fixture('metadata-quality-jellyfin12-camel.json');
 

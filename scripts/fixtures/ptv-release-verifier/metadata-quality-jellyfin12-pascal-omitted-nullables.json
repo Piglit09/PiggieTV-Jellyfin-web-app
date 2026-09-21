@@ -1,0 +1,37 @@
+{
+  "status": {
+    "State": "idle"
+  },
+  "summary": {
+    "Counts": {
+      "Dismissed": 0,
+      "Healthy": 0,
+      "Incomplete": 0,
+      "LikelyIncorrect": 0,
+      "NeedsReview": 0,
+      "Resolved": 0,
+      "TotalScanned": 0,
+      "Unavailable": 0
+    },
+    "Scan": {
+      "State": "idle"
+    }
+  },
+  "results": {
+    "Items": [],
+    "TotalRecordCount": 0
+  },
+  "store": {
+    "activeGenerationCount": 1,
+    "activePointerMatches": true,
+    "buildingGenerationCount": 0,
+    "dirtyActiveCount": 0,
+    "failedGenerationCount": 2,
+    "generationState": "ACTIVE",
+    "pendingSourceHashCount": 0,
+    "resultCount": 0,
+    "rollbackJsonIsRegularFile": true,
+    "rollbackJsonPresent": true,
+    "validatingGenerationCount": 0
+  }
+}

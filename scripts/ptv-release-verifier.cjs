@@ -20,6 +20,17 @@ function readDtoField(record, pascalKey, camelKey, label) {
     throw new Error(`${label} is missing ${pascalKey}/${camelKey}.`);
 }
 
+function readNullableDtoField(record, pascalKey, camelKey, label) {
+    const hasPascal = Object.hasOwn(record, pascalKey);
+    const hasCamel = Object.hasOwn(record, camelKey);
+    if (hasPascal && hasCamel) {
+        throw new Error(`${label} must not contain both ${pascalKey} and ${camelKey}.`);
+    }
+    if (hasPascal) return record[pascalKey];
+    if (hasCamel) return record[camelKey];
+    return null;
+}
+
 function requireNonNegativeInteger(value, label) {
     if (!Number.isInteger(value) || value < 0) {
         throw new Error(`${label} must be a non-negative integer.`);
@@ -45,10 +56,10 @@ function verifyMetadataQualityBootstrap(evidence) {
     if (statusState !== 'idle') {
         throw new Error('Metadata Quality status must be idle.');
     }
-    if (readDtoField(status, 'ActiveRun', 'activeRun', 'Metadata Quality status') !== null) {
+    if (readNullableDtoField(status, 'ActiveRun', 'activeRun', 'Metadata Quality status') !== null) {
         throw new Error('Metadata Quality status must not have an active run.');
     }
-    if (readDtoField(status, 'StoreErrorCode', 'storeErrorCode', 'Metadata Quality status') !== null) {
+    if (readNullableDtoField(status, 'StoreErrorCode', 'storeErrorCode', 'Metadata Quality status') !== null) {
         throw new Error('Metadata Quality status contains a store error.');
     }
 
@@ -88,10 +99,10 @@ function verifyMetadataQualityBootstrap(evidence) {
     if (scanState !== 'idle') {
         throw new Error('Metadata Quality summary scan must be idle.');
     }
-    if (readDtoField(scan, 'RunId', 'runId', 'Metadata Quality summary Scan') !== null) {
+    if (readNullableDtoField(scan, 'RunId', 'runId', 'Metadata Quality summary Scan') !== null) {
         throw new Error('Metadata Quality summary scan must not have a run id.');
     }
-    if (readDtoField(scan, 'ErrorMessage', 'errorMessage', 'Metadata Quality summary Scan') !== null) {
+    if (readNullableDtoField(scan, 'ErrorMessage', 'errorMessage', 'Metadata Quality summary Scan') !== null) {
         throw new Error('Metadata Quality summary scan contains an error.');
     }
 
