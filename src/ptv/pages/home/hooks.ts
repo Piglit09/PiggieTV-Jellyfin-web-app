@@ -3617,7 +3617,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
         currentDisplayIdentity.serverId,
         currentDisplayIdentity.userId
     );
-    useSyncExternalStore(subscribeConfiguredRowFreshness, getConfiguredRowFreshnessSnapshot);
+    const presentationSnapshot = useSyncExternalStore(subscribeConfiguredRowFreshness, getConfiguredRowFreshnessSnapshot);
     const [state, setStoredState] = useState<NativeHomeState>({
         debug: {
             home: getEmptyNativeHomeAdaptiveDebug(),
@@ -4736,8 +4736,11 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
         };
     }, [currentDisplayIdentityKey, setState]);
 
+    const currentPresentation = useMemo(() => retainCurrentNativeHomePresentation(state, currentDisplayIdentityKey),
+        [state, currentDisplayIdentityKey, presentationSnapshot]);
+
     return {
-        ...retainCurrentNativeHomePresentation(state, currentDisplayIdentityKey),
+        ...currentPresentation,
         identityKey: stateIdentityKey
     };
 }

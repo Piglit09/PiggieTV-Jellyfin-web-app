@@ -301,6 +301,27 @@ describe('useNativeHomeData configured-row final proof integration', () => {
         expect(latestState?.rows.some(row => row.rowType === 'configured-rule')).toBe(false);
     });
 
+    it('keeps presentation references stable on a parent render but retires them on a new freshness snapshot', async () => {
+        const staged = stageInputs();
+        await act(async () => root.render(<Harness />));
+        staged.rowSettings.resolve(settings());
+        staged.featuredPayload.resolve(featured());
+        await flush();
+        staged.finalStatus.resolve(status());
+        await flush();
+        const settledRows = latestState!.rows;
+        const settledAuthorities = latestState!.configuredHeroAuthorities;
+        expect(settledRows.some(row => row.rowType === 'configured-rule')).toBe(true);
+
+        act(() => root.render(<Harness />));
+        expect(latestState!.rows).toBe(settledRows);
+        expect(latestState!.configuredHeroAuthorities).toBe(settledAuthorities);
+
+        act(() => retireConfiguredRowFreshness('observed-mutation'));
+        expect(latestState!.rows).not.toBe(settledRows);
+        expect(latestState!.rows.some(row => row.rowType === 'configured-rule')).toBe(false);
+    });
+
     it('loads configured Continue Watching when a featured cache is usable', async () => {
         const staged = stageInputs();
         mocks.getResumeItems.mockResolvedValue({ Items: [ resumeItem ], TotalRecordCount: 1 });
