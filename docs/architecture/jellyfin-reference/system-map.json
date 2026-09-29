@@ -977,10 +977,25 @@
     }
   },
   "owners": {
+    "browseLibraryPresentation": {
+      "authoritativeOwner": "Jellyfin authenticated ordinary ParentId item/Resume reads, with user-aware Ancestors proof for nested parents",
+      "derivedOwners": ["NativeBrowsePage resolved route scope", "browseData scoped reader and focused/directory caches", "browseRecommendations projection of global ranks onto fresh scoped DTOs", "usePtvBrowseBackdrop exact scope/availability owner and shell image retirement"],
+      "identity": ["server", "user", "resolved library roots", "route generation and filters/page"],
+      "rule": "Missing scope fails closed. Media type and global recommendation/cache snapshots are not membership. No unsupported AncestorIds HTTP filter or explicit Ids membership shortcut. Fallback uses only the same fresh library pool; global Home/hub/Collections owners remain global.",
+      "projectedRoots": "DTO Type=UserView provenance permits only Series-to-Season membership proof via ordinary recursive paged root reads when physical ancestors cannot represent a grouped view. Other nested/BoxSet queries do not gain that fallback. Random root pools interleave before limiting.",
+      "chapterRefs": ["05-library-item-relationships.md", "21-ownership-conflicts.md", "23-before-you-modify-checklists.md"],
+      "localEvidence": {
+        "baseCommit": "4eda45c8c6bd56a8f6ab9e31fa81ddc13d5e0073",
+        "version": "Web 0.5.60 unchanged; Plugin unchanged",
+        "files": ["src/ptv/pages/browse/browseData.ts", "src/ptv/pages/browse/NativeBrowsePage.tsx", "src/ptv/pages/browse/browseRecommendations.ts"],
+        "status": "VERIFIED_FROM_SOURCE_AND_FOCUSED_TESTS_NOT_DEPLOYED"
+      }
+    },
     "configuredHomePresentation": {
       "authoritativeOwner": "PTV Plugin configuration issuer and trusted generated store binding, observed through an explicit final protected status read",
       "recoveryOwner": "PtvFeaturedContentRefreshService existing semaphore and hosted scheduler; missing current generation/document binding triggers normal regeneration independently of content TTL, with a bounded missing-trust retry and replaceable schedule wakeup",
       "recoveryEvidenceRef": "$.ptvOverrides.configuredHomePresentation.evidence[3]",
+      "localWebRenderContract": "Web 0.5.60 Pass 01 memoizes derived presentation on state/identity/exact freshness snapshot and makes identical item-reference/proof preview updates idempotent. Snapshot retirement and old-callback proof binding remain authoritative; local source/tests only, not deployed.",
       "derivedOwners": [
         "configuredRowFreshness single active server/user proof and local revision",
         "Native Home current/last-good rows and derived Hero presentation",

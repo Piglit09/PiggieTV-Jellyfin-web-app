@@ -4,6 +4,22 @@
 
 This register identifies where stock Jellyfin and PTV share, duplicate, or compete for state. It does **not** prescribe consolidation and it does not label every duplicate as a defect. The authoritative contracts remain the stock 10.11.11 behavior documented in chapters 01-19 and 24-25; PTV differences are source-inspected from the dirty Web 0.5.57/Plugin 0.5.16.0 tree identified in chapter 20.
 
+## Local Web 0.5.60 stabilization Pass 01 (not deployed)
+
+This additive record applies to `fix/web-library-isolation`, based on `4eda45c8c6bd56a8f6ab9e31fa81ddc13d5e0073`. It does not supersede historical release/physical-acceptance records or change Plugin behavior.
+
+| Producer / owner | Classification and corrected contract |
+|---|---|
+| Movies/Shows/Anime/Cartoons Featured, Continue, Latest/Recently Added, genre/studio/network/tag shelves and focused pages | `LIBRARY_SCOPED`: `browseData.getPtvBrowseScopedItems` uses ordinary authenticated per-root `ParentId` reads. Multi-root reads merge bounded results; nested parents require a matching user-aware Ancestors read. Unsupported HTTP `AncestorIds` and explicit-IDs membership shortcuts are not proof. |
+| Library Recommended | Formerly `BUGGY_GLOBAL`: global engine ranking was selected by heuristic Movie/Series category, losing the resolved library. Now a fresh scoped item pool is read first; ranking may order only its IDs, using the scoped DTOs. Empty/error membership never broadens. Anime's heuristic `anime` label is not membership. |
+| Library fallback/cache | `LIBRARY_SCOPED`: fallback reuses only that fresh pool. Focused cache schema `library-scope-v2` retains server/user/root/route/filter/page identity; incompatible prior entries are not consumed. Directory cache remains root/identity-scoped. Library child owners retire on scope-resolution-key changes. |
+| Home/hub Made For You, Hidden Gems, configured/generated Home rows, global ranking cache, Premium Collections | `GLOBAL_BY_DESIGN`: no library page may treat their global ranking/snapshots as membership. Global Home and collection semantics remain unchanged. |
+| Native Home presentation and active preview | `SAFE_REDUNDANCY`: derived rows/hero authorities are memoized on state, identity and the exact freshness snapshot; repeating the same item reference/proof is a no-op. Changed DTOs remain adoptable. Old callbacks retain their captured proof and cannot borrow a new one. |
+
+`VERIFIED_FROM_SOURCE` / focused `VERIFIED_BY_TEST`: `NativeBrowsePage.tsx`, `browseData.ts`, `browseRecommendations.ts`, `hooks.ts`, `useConfiguredHomePreview.ts`, their focused tests and `useNativeHomeFreshness.integration.test.tsx`. The reproduced Home Maximum-update-depth loop came from cloned authority maps changing a hero-effect callback, which allocated another preview on every render; it is separate from library membership. Populated Cartoons live acceptance is not established: the existing local test backend has no Cartoons library. No production acceptance is claimed.
+
+Bounded review corrections preserve grouped stock UserViews: where physical ancestry cannot represent a projected root, only Series-to-Season navigation may prove the Series ID by ordinary recursive, paged reads of the resolved UserView. Other nested/BoxSet queries remain closed; this is not an explicit-ID shortcut or a general ancestry bypass. Multi-root Random pools interleave before deduplication/limiting. `usePtvBrowseBackdrop` binds URL and callbacks to an exact scope/availability owner; retirement resets the retained shell image layer and same-scope recovery cannot revive an old URL/callback.
+
 ## Ownership vocabulary
 
 The ledger uses the requested ownership roles: `AUTHORITATIVE_OWNER`, `DERIVED_OWNER`, `CACHE_OWNER`, `VIEW_OWNER`, `OBSERVER`, `COMPATIBILITY_LAYER`, and `DUPLICATED_OWNER`. `DUPLICATED_OWNER` describes two implementations retaining ownership of equivalent state or behavior; it is an ownership condition, not a Phase 6 conflict verdict. The separate PTV modification label for duplicated code is `DUPLICATE_IMPLEMENTATION`.

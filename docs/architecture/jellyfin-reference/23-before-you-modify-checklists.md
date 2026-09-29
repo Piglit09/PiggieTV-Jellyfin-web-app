@@ -10,6 +10,20 @@ These are review gates for changes to stock-compatible Jellyfin `10.11.11` and c
 
 Use [22-change-impact-matrix](22-change-impact-matrix.md) to find adjacent subsystem gates. Do not mark an item complete from a similarly named file or a successful HTTP status alone.
 
+## Local Web 0.5.60 Pass 01 regression contract
+
+- [x] Same-type Shows/Anime/Cartoons fixtures use disjoint IDs; no type/genre/provider/title heuristic grants library membership.
+- [x] Read one ordinary Jellyfin `ParentId` per resolved root; merge/deduplicate bounded pages without unsupported `AncestorIds` or `Ids` shortcuts.
+- [x] Reject missing resolution, foreign/missing/error nested ancestry, retired server/user identity and aborted owners before publication.
+- [x] Rank only fresh scoped DTOs; empty/small/error fallback cannot fill with a foreign library. Warm global rank data remains non-authoritative.
+- [x] Keep focused/directory cache identity rooted in server/user/library/route/filter/page; version incompatible focused entries rather than disabling caching.
+- [x] Repeated Home preview callbacks converge while changed DTOs and exact freshness-snapshot retirement still work.
+- [x] Projected/grouped UserViews require ordinary per-root paged Series membership before Season reads when physical ancestry cannot represent the view; foreign/exhausted/cancelled/retired and non-Season/BoxSet cases stay closed.
+- [x] Multi-root Random pools do not starve later roots; library backdrop retirement rejects late callbacks and same-scope unavailable-to-ready resurrection.
+- [ ] Complete manual local Home/library route, details/back and hard-refresh acceptance; record a missing Cartoons library as unavailable rather than populated acceptance.
+
+These entries describe the local `fix/web-library-isolation` source and focused regressions, not production qualification. They leave Plugin, global Home rows, Premium Collections, versioning and the remaining stabilization backlog unchanged.
+
 ## Universal preflight
 
 - [ ] State the intended behavior and the one authoritative owner that should change.
