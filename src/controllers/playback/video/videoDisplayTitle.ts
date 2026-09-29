@@ -10,15 +10,11 @@ function padIndex(value?: number | null): string {
     return String(Math.max(0, Number(value || 0))).padStart(2, '0');
 }
 
-export function getEpisodePlaybackTitle(
-    item: VideoDisplayItem,
-    parentName?: string | null
-): string | null {
+export function getEpisodePlaybackTitle(item: VideoDisplayItem): string | null {
     if (item.Type !== 'Episode') return null;
 
-    const seriesName = item.SeriesName?.trim() || parentName?.trim() || 'Episode';
     const episodeName = item.Name?.trim() || 'Untitled';
     const index = `S${padIndex(item.ParentIndexNumber)}E${padIndex(item.IndexNumber)}`;
 
-    return `${seriesName}  \u00b7  ${index} - ${episodeName}`;
+    return `${index} \u2014 ${episodeName}`;
 }

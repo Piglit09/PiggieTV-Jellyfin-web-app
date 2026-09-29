@@ -289,7 +289,7 @@ html:not(.ptv-player-osd-visible) :is(#videoOsdPage.ptv-player-page, .videoOsdPa
     backdrop-filter: blur(22px) saturate(1.12);
 }
 
-.ptv-player-osd-visible .ptv-player-topbar {
+.ptv-player-chrome-visible .ptv-player-topbar {
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);

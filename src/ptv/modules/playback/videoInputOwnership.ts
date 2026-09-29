@@ -10,11 +10,15 @@ export type PtvVideoControlsVisibilityLease = Readonly<{
 
 let videoControlsVisibilityHandler: VideoControlsVisibilityHandler | null = null;
 let videoControlsVisibilityOwner = '';
+let videoControlsInteractionActive: (() => boolean) | null = null;
+let videoControlsRetirementHandler: (() => void) | null = null;
 let hiddenVideoDirectionalGesture: HiddenVideoDirectionalGesture | null = null;
 
 export function registerPtvVideoControlsVisibilityHandler(
     owner: string,
-    handler: VideoControlsVisibilityHandler
+    handler: VideoControlsVisibilityHandler,
+    isInteractionActive?: () => boolean,
+    onRetire?: () => void
 ): PtvVideoControlsVisibilityLease {
     const isActive = () => (
         videoControlsVisibilityHandler === handler
@@ -25,6 +29,10 @@ export function registerPtvVideoControlsVisibilityHandler(
 
         videoControlsVisibilityHandler = null;
         videoControlsVisibilityOwner = '';
+        videoControlsInteractionActive = null;
+        const retire = videoControlsRetirementHandler;
+        videoControlsRetirementHandler = null;
+        retire?.();
         return true;
     };
 
@@ -33,10 +41,18 @@ export function registerPtvVideoControlsVisibilityHandler(
         return { isActive, release };
     }
 
+    const retirePrevious = videoControlsRetirementHandler;
     videoControlsVisibilityHandler = handler;
     videoControlsVisibilityOwner = owner;
+    videoControlsInteractionActive = isInteractionActive || null;
+    videoControlsRetirementHandler = onRetire || null;
+    retirePrevious?.();
 
     return { isActive, release };
+}
+
+export function isPtvVideoControlsInteractionActive() {
+    return videoControlsInteractionActive?.() ?? false;
 }
 
 export function requestPtvVideoControlsVisibility(visible: boolean) {
@@ -176,6 +192,7 @@ export function reconcilePtvVideoControlSurface(
     root: Document | Element = document
 ) {
     root.querySelectorAll('.ptv-player-topbar').forEach(element => {
+        if (videoPage && element.matches('.ptv-player-chrome-root > .ptv-player-topbar[data-ptv-enhanced="true"]')) return;
         element.remove();
     });
     root.querySelectorAll('[data-ptv-playback-surface="video-controls"]').forEach(element => {
@@ -192,6 +209,7 @@ export function isPtvVideoPlayerControlFocused(element: Element | null = documen
     if (!(element instanceof HTMLElement)) return false;
 
     const controlSurface = element.closest([
+        '.ptv-player-chrome-root > .ptv-player-topbar[data-ptv-enhanced="true"]',
         '.ptv-player-pause-stage',
         '#videoOsdPage .videoOsdBottom',
         '.videoOsdPage .videoOsdBottom',

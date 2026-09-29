@@ -251,6 +251,10 @@ Server PlaybackInfo/device profile determines the delivery path; `PlaySessionId`
 - [ ] Test direct play, remux/direct stream and transcode; start, pause, seek backward/forward, stream change, end, error and stop.
 - [ ] Test source A→B rapidly, HLS fragment stall/error recovery, background/foreground and remote-control socket/no-socket.
 - [ ] Verify one active player/HLS instance/listener set and stable queue/Now Playing after unrelated Identify/Details changes.
+- [ ] Keep continuous-session HTML video gain/mute on the retained media element through autoplay/manual Next; do not write an item-specific default over it. Keep full-teardown and non-video initialization semantics separate.
+- [ ] Retire owned transient menus through the existing controls visibility lease. Abort root/child sheets and fence lazy imports, user lookup, selections and finalization after hide, error, takeover or teardown; do not add another hide timer.
+- [ ] Defer the existing timers during active pointer/touch/held-key interaction, release on cancel/keyup/blur, and do not let lingering pointer focus keep Web controls visible indefinitely.
+- [ ] Verify top Movie/Series logo-or-title plus existing Back ownership, episode-only bottom identity, hidden Back focus, failed/stale logo fallback and cleanup before DOM reconciliation.
 
 PTV currently embeds an HLS session/source generation inside the stock HTML player; therefore edits on either side share one lifecycle boundary. `VERIFIED_FROM_SOURCE` — PTV-WEB@worktree, `src/plugins/htmlVideoPlayer/plugin.js`, imports/state/set source/disposal, lines 12-15, 323-340, 473-645 and 925-964; `src/ptv/modules/playback/hlsPlaybackSession.ts`, `createHlsPlaybackSession`, lines 277-824.
 
@@ -317,6 +321,9 @@ Stock webpack emits fixed entry/service-worker names and content-hashed lazy chu
 - [ ] Build from one source snapshot and create a complete asset manifest/hash set before deployment.
 - [ ] Keep service worker standalone and verify registration/controller origin; do not assume it caches the app.
 - [ ] Bound update/chunk recovery to one generation-aware reload and preserve a usable current app after update-check failure.
+- [ ] Compare the worker's verified embedded webpack generation with the running bundle, not merely waiting/installed state. Equal/older/unknown identities do not notify; a genuine later identity does.
+- [ ] Bind dismissal/reload attempts to the candidate and use one observation epoch across startup/controller registration reads, worker events and identity replies. A late result or error must not replace/erase newer availability.
+- [ ] Recheck playback/reading/mutation/unsaved activity immediately before every reload, including activation completion/fallback. Keep the stable worker URL and standalone notification/claim behavior; do not infer an application fetch cache.
 - [ ] Test production build, typecheck/lint/style checks, version check, build-info contract and emitted lazy chunks/routes.
 - [ ] Compare two clean builds where reproducibility is required; record intentional nondeterministic metadata.
 - [ ] Before deploy, verify exact previous rollback generation; atomically switch the full asset set; do not mix files.

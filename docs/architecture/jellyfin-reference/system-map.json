@@ -952,7 +952,7 @@
     "buildServiceWorkerAssets": {
       "authoritativeOwners": [
         "Webpack build output for asset generation",
-        "active browser service worker for controlled cache generation"
+        "Browser registration/controller for worker lifecycle only, not application asset caching"
       ],
       "dependsOn": [
         "chunk identity",
@@ -1187,20 +1187,42 @@
     "builtAssetGeneration": {
       "authoritativeOwner": "deployed Web build output",
       "derivedOwners": [
-        "service-worker cache",
+        "standalone worker embedded generation and lifecycle",
         "browser HTTP cache",
-        "open document/chunk graph"
+        "open document/chunk graph",
+        "UpdateService verified candidate observer"
       ],
       "cleanup": [
-        "service-worker generation activation/retirement",
-        "browser reload/update flow"
+        "candidate-specific dismissal/reload retirement",
+        "one observation epoch fences registration reads, worker events and identity replies",
+        "activity-gated browser reload/update flow"
+      ],
+      "updateRule": "Same-origin worker MessagePort identity derives only from existing webpack provenance. Equal/older/unknown generations do not notify; verified later generations do. This worker has no fetch/cache/purge owner.",
+      "localCandidateEvidence": [
+        "src/ptv/services/updateGeneration.ts",
+        "src/ptv/services/updateService.ts",
+        "src/ptv/services/updateService.test.ts",
+        "src/serviceworker.js"
       ],
       "chapterRefs": [
-        "18-build-service-worker-assets.md"
+        "18-build-service-worker-assets.md",
+        "21-ownership-conflicts.md",
+        "23-before-you-modify-checklists.md"
       ],
       "evidenceRefs": [
         "$.systems.buildServiceWorkerAssets.evidence[0]"
       ]
+    },
+    "videoControlsTransientState": {
+      "authoritativeOwner": "native video controller current visibility lease and existing controls hide timers",
+      "derivedOwners": ["abortable root/child action sheets", "PTV Movie/Series header", "episode-only bottom identity"],
+      "identity": ["active view and visibility lease", "active manager player", "server/item", "controls visibility"],
+      "cleanup": ["hide", "view/player/lease replacement", "playback start/stop/error", "view teardown"],
+      "rule": "One operation starts before lazy work and guards post-await reads, selection mutations and identity-safe finalization. Held input defers existing timers and releases on cancel/keyup/blur; no separate menu timeout. Active HTML video gain/mute belongs to the retained element across Next/autoplay, not PTV item-start enforcement. Header artwork uses existing image ownership and retires before DOM reconciliation.",
+      "localCandidateStatus": "Web 0.5.62 RC1 source preparation; local Pass 02 browser acceptance passed, production/deployment not claimed",
+      "files": ["src/controllers/playback/video/index.js", "src/controllers/playback/video/videoTransientMenuLifecycle.ts", "src/components/playback/playersettingsmenu.js", "src/ptv/modules/playback/videoInputOwnership.ts", "src/ptv/modules/playback/index.js", "src/ptv/modules/playback/playerHeader.ts", "src/controllers/playback/video/videoDisplayTitle.ts"],
+      "tests": ["videoTransientMenuLifecycle.test.ts", "playersettingsmenu.test.ts", "continuousVideoPreferences.test.ts", "playerHeader.test.ts", "playerHeader.integration.test.ts", "playerHeader.imageLoad.test.ts", "videoDisplayTitle.test.ts", "videoInputOwnership.test.ts", "playerChromeTimer.test.ts"],
+      "chapterRefs": ["14-playback-session-transcoding.md", "21-ownership-conflicts.md", "23-before-you-modify-checklists.md"]
     }
   },
   "dependencies": {

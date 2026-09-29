@@ -4,7 +4,12 @@ import globalize from 'lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import qualityoptions from '../qualityOptions';
 
-function showQualityMenu(player, btn) {
+function isOperationCurrent(operation) {
+    return !operation || operation.isCurrent();
+}
+
+function showQualityMenu(player, btn, operation) {
+    if (!isOperationCurrent(operation)) return Promise.resolve();
     const videoStream = playbackManager.currentMediaSource(player).MediaStreams.filter(function (stream) {
         return stream.Type === 'Video';
     })[0];
@@ -42,8 +47,10 @@ function showQualityMenu(player, btn) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: btn
+        positionTo: btn,
+        signal: operation?.signal
     }).then(function (id) {
+        if (!isOperationCurrent(operation)) return;
         const bitrate = parseInt(id, 10);
         if (bitrate !== selectedBitrate) {
             playbackManager.setMaxStreamingBitrate({
@@ -54,7 +61,8 @@ function showQualityMenu(player, btn) {
     });
 }
 
-function showRepeatModeMenu(player, btn) {
+function showRepeatModeMenu(player, btn, operation) {
+    if (!isOperationCurrent(operation)) return Promise.resolve();
     const menuItems = [];
     const currentValue = playbackManager.getRepeatMode(player);
 
@@ -78,8 +86,10 @@ function showRepeatModeMenu(player, btn) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: btn
+        positionTo: btn,
+        signal: operation?.signal
     }).then(function (mode) {
+        if (!isOperationCurrent(operation)) return;
         if (mode) {
             playbackManager.setRepeatMode(mode, player);
         }
@@ -130,7 +140,8 @@ function getQualitySecondaryText(player) {
     return text;
 }
 
-function showAspectRatioMenu(player, btn) {
+function showAspectRatioMenu(player, btn, operation) {
+    if (!isOperationCurrent(operation)) return Promise.resolve();
     // each has a name and id
     const currentId = playbackManager.getAspectRatio(player);
     const menuItems = playbackManager.getSupportedAspectRatios(player)
@@ -142,8 +153,10 @@ function showAspectRatioMenu(player, btn) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: btn
+        positionTo: btn,
+        signal: operation?.signal
     }).then(function (id) {
+        if (!isOperationCurrent(operation)) return;
         if (id) {
             playbackManager.setAspectRatio(id, player);
             return Promise.resolve();
@@ -153,7 +166,8 @@ function showAspectRatioMenu(player, btn) {
     });
 }
 
-function showPlaybackRateMenu(player, btn) {
+function showPlaybackRateMenu(player, btn, operation) {
+    if (!isOperationCurrent(operation)) return Promise.resolve();
     // each has a name and id
     const currentId = playbackManager.getPlaybackRate(player);
     const menuItems = playbackManager.getSupportedPlaybackRates(player).map(i => ({
@@ -164,8 +178,10 @@ function showPlaybackRateMenu(player, btn) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: btn
+        positionTo: btn,
+        signal: operation?.signal
     }).then(function (id) {
+        if (!isOperationCurrent(operation)) return;
         if (id) {
             playbackManager.setPlaybackRate(id, player);
             return Promise.resolve();
@@ -176,6 +192,7 @@ function showPlaybackRateMenu(player, btn) {
 }
 
 function showWithUser(options, player, user) {
+    if (!isOperationCurrent(options.operation)) return Promise.resolve();
     const supportedCommands = playbackManager.getSupportedCommands(player);
 
     const menuItems = [];
@@ -242,13 +259,15 @@ function showWithUser(options, player, user) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: options.positionTo
+        positionTo: options.positionTo,
+        signal: options.operation?.signal
     }).then(function (id) {
         return handleSelectedOption(id, options, player);
     });
 }
 
 export function show(options) {
+    if (!isOperationCurrent(options.operation)) return Promise.resolve();
     const player = options.player;
     const currentItem = playbackManager.currentItem(player);
 
@@ -263,23 +282,24 @@ export function show(options) {
 }
 
 function handleSelectedOption(id, options, player) {
+    if (!isOperationCurrent(options.operation)) return Promise.resolve();
     switch (id) {
         case 'quality':
-            return showQualityMenu(player, options.positionTo);
+            return showQualityMenu(player, options.positionTo, options.operation);
         case 'aspectratio':
-            return showAspectRatioMenu(player, options.positionTo);
+            return showAspectRatioMenu(player, options.positionTo, options.operation);
         case 'playbackrate':
-            return showPlaybackRateMenu(player, options.positionTo);
+            return showPlaybackRateMenu(player, options.positionTo, options.operation);
         case 'repeatmode':
-            return showRepeatModeMenu(player, options.positionTo);
+            return showRepeatModeMenu(player, options.positionTo, options.operation);
         case 'stats':
             if (options.onOption) {
-                options.onOption('stats');
+                return Promise.resolve(options.onOption('stats'));
             }
             return Promise.resolve();
         case 'suboffset':
             if (options.onOption) {
-                options.onOption('suboffset');
+                return Promise.resolve(options.onOption('suboffset'));
             }
             return Promise.resolve();
         default:

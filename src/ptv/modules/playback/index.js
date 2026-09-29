@@ -18,6 +18,7 @@ import {
 import { setPtvVideoPlaybackPresentation } from '../../services/playbackPresentationService';
 import {
     hidePtvVideoControls,
+    isPtvVideoControlsInteractionActive,
     isPtvVideoPlayerControlFocused,
     reconcilePtvVideoControlSurface
 } from './videoInputOwnership';
@@ -26,6 +27,13 @@ import {
     shouldDeferPlayerChromeHide
 } from './playerChromeTimer';
 import { getPlaybackStallRecoveryStrategy } from './playbackStallRecovery';
+import {
+    ensurePlayerHeader,
+    getPlayerHeaderIdentity,
+    removePlayerHeader,
+    setPlayerHeaderVisible,
+    updatePlayerHeader
+} from './playerHeader';
 
 import './playbackChrome';
 import './playback.scss';
@@ -420,7 +428,9 @@ function getStartupVolumeKey(player, item) {
 }
 
 function setPlaybackStartupVolume(player, item) {
-    if (!player) return;
+    // The HTML video element initializes fresh playback and retains the user's
+    // gain and mute choices when the same element advances to another item.
+    if (!player || player.id === 'htmlvideoplayer') return;
 
     const startupVolumeKey = getStartupVolumeKey(player, item);
 
@@ -518,14 +528,6 @@ function addLogoCandidates(candidates, item) {
             maxWidth: 760
         });
     }
-}
-
-function getFirstLogoUrl(item) {
-    const candidates = [];
-
-    addLogoCandidates(candidates, item);
-
-    return getUniqueUrls(candidates)[0] || '';
 }
 
 function addDiscCandidates(candidates, item, includePrimaryFallback = false) {
@@ -669,29 +671,6 @@ function getDisplayTitle(item) {
     return item.Name || item.SeriesName || '';
 }
 
-function getPlayerHeaderTitle(item) {
-    if (!item) return '';
-
-    if (item.SeriesName) {
-        const episodeParts = [
-            item.ParentIndexNumber ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : '',
-            item.IndexNumber ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''
-        ].filter(Boolean).join(':');
-
-        return [
-            item.SeriesName,
-            episodeParts,
-            item.Name
-        ].filter(Boolean).join(' - ');
-    }
-
-    if (item.Type === 'Movie' && item.ProductionYear) {
-        return `${item.Name} (${item.ProductionYear})`;
-    }
-
-    return item.Name || getDisplayTitle(item);
-}
-
 function getMetaItems(item) {
     return [
         item?.ProductionYear,
@@ -736,19 +715,6 @@ function setSafeLogo(element, url) {
 
     element.style.backgroundImage = `url("${url.replace(/"/g, '%22')}")`;
     element.classList.add('ptv-player-logo-visible');
-}
-
-function setHeaderLogo(element, url) {
-    if (!element) return;
-
-    if (!url) {
-        element.style.removeProperty('background-image');
-        element.classList.remove('ptv-player-top-logo-visible');
-        return;
-    }
-
-    element.style.backgroundImage = `url("${url.replace(/"/g, '%22')}")`;
-    element.classList.add('ptv-player-top-logo-visible');
 }
 
 function goBackFromPlayback() {
@@ -869,29 +835,20 @@ function hideReconnectingStateSoon(reason = 'settled') {
 }
 
 function getOrCreatePlayerHeader() {
-    document.querySelectorAll(`.${PLAYER_HEADER_CLASS}`).forEach(header => {
-        header.remove();
-    });
-    return null;
+    const header = ensurePlayerHeader(getPlayerChromeRoot(), goBackFromPlayback);
+    setPlayerHeaderVisible(header, document.documentElement.classList.contains(PLAYER_CHROME_VISIBLE_CLASS));
+    return header;
 }
 
 function renderPlayerHeader(item) {
     const header = getOrCreatePlayerHeader();
-    if (!header) return;
-    const title = header.querySelector('.ptv-player-top-title');
-    const logo = header.querySelector('.ptv-player-top-logo');
-    const share = header.querySelector('.ptv-player-top-share');
-    const cast = header.querySelector('.ptv-player-top-cast');
-    const logoUrl = getFirstLogoUrl(item);
-
-    if (title) {
-        title.textContent = getPlayerHeaderTitle(item);
-    }
-
-    setHeaderLogo(logo, logoUrl);
-    header.classList.toggle('ptv-player-topbar-has-logo', Boolean(logoUrl));
-    share?.classList.remove('hide');
-    cast?.classList.toggle('hide', !getPlaybackPages().some(page => page.querySelector('.btnAirPlay:not(.hide), .headerCastButton:not(.hide), .castButton:not(.hide)')));
+    const identity = getPlayerHeaderIdentity(item);
+    const logoUrl = identity.logo ? getImageUrl(item, 'Logo', {
+        itemId: identity.logo.itemId,
+        tag: identity.logo.tag,
+        maxWidth: 760
+    }) : '';
+    updatePlayerHeader(header, identity.title, logoUrl);
 }
 
 function clearPlayerChromeTimer() {
@@ -906,6 +863,8 @@ function setPlayerChromeVisible(visible) {
 
     document.documentElement.classList.toggle(PLAYER_CHROME_VISIBLE_CLASS, shouldShow);
     document.body.classList.toggle(PLAYER_CHROME_VISIBLE_CLASS, shouldShow);
+    const header = document.querySelector(`.${PLAYER_HEADER_CLASS}`);
+    if (header) setPlayerHeaderVisible(header, shouldShow);
     syncNativePlayerControlsVisibility(shouldShow);
     setPtvVideoPlaybackPresentation({
         available: isPlaybackUiActive(),
@@ -932,6 +891,7 @@ function showPlayerChrome(autoHide = true) {
         playerChromeTimer = null;
         if (shouldDeferPlayerChromeHide({
             controlFocused: hasFocusedPlayerControl(),
+            interactionActive: isPtvVideoControlsInteractionActive(),
             isTv: getPtvClientProfile().isTv
         })) {
             showPlayerChrome(true);
@@ -1508,6 +1468,8 @@ function enhancePlaybackDom() {
 }
 
 function cleanupPlaybackDom() {
+    const chromeRoot = document.querySelector(`.${PLAYER_CHROME_ROOT_CLASS}`);
+    if (chromeRoot) removePlayerHeader(chromeRoot);
     reconcilePtvVideoControlSurface(null);
     clearPlayerChromeTimer();
     clearPlaybackStallTimer();
@@ -1520,7 +1482,7 @@ function cleanupPlaybackDom() {
     cancelPtvImageScope('pause-screen-logo');
     cancelPtvImageScope('pause-screen-disc');
     pauseAssetToken += 1;
-    document.querySelector(`.${PLAYER_CHROME_ROOT_CLASS}`)?.remove();
+    chromeRoot?.remove();
     document.documentElement.classList.remove('ptv-player-paused');
     document.documentElement.classList.remove(PLAYER_PAGE_CLASS);
     document.body.classList.remove('ptv-player-paused');
