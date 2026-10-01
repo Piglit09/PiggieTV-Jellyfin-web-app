@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import actionSheet from '../../../components/actionSheet/actionSheet';
 import { createVideoFetchingDataState } from '../../../controllers/playback/video/fetchingDataState';
 import { createVideoTransientMenuLifecycle, isVideoTransientMenuCancellation } from '../../../controllers/playback/video/videoTransientMenuLifecycle';
+import { runPtvIconEngine } from '../icons/ptvIconEngine';
 import * as videoInputOwnership from './videoInputOwnership';
 import Events from '../../../utils/events';
 
@@ -64,8 +65,14 @@ function createController() {
     const item = { Id: 'movie-a', ServerId: 'server-a' };
     let player: object = firstPlayer;
     let currentItem = item;
-    const audioSelection = vi.fn();
-    const subtitleSelection = vi.fn();
+    let audioIndex = 0;
+    let subtitleIndex = 2;
+    const audioSelection = vi.fn((index: number) => {
+        audioIndex = index;
+    });
+    const subtitleSelection = vi.fn((index: number) => {
+        subtitleIndex = index;
+    });
     const secondarySelection = vi.fn();
     const settingsShow = vi.fn<(options: { onOption: (option: string) => Promise<unknown> | undefined }) => Promise<unknown>>(() => Promise.resolve());
     const actionImport = deferred<{ default: typeof actionSheet }>();
@@ -78,11 +85,11 @@ function createController() {
         currentItem: () => currentItem,
         getPlayerState: () => ({ MediaSource: { SupportsTranscoding: true } }),
         audioTracks: () => [{ Index: 0, DisplayTitle: 'English' }, { Index: 1, DisplayTitle: 'French' }],
-        getAudioStreamIndex: () => 0,
+        getAudioStreamIndex: () => audioIndex,
         setAudioStreamIndex: audioSelection,
-        subtitleTracks: () => [{ Index: 2, DisplayTitle: 'English' }],
+        subtitleTracks: () => [{ Index: 2, DisplayTitle: 'English' }, { Index: 4, DisplayTitle: 'Spanish' }],
         secondarySubtitleTracks: () => [{ Index: 3, DisplayTitle: 'French' }],
-        getSubtitleStreamIndex: () => 2,
+        getSubtitleStreamIndex: () => subtitleIndex,
         getSecondarySubtitleStreamIndex: () => -1,
         playerHasSecondarySubtitleSupport: () => true,
         trackHasSecondarySubtitleSupport: () => true,
@@ -164,6 +171,8 @@ function createController() {
     return {
         view, firstPlayer, observation, actionImport, settingsImport, settingsShow, statsImport, statsCreated, subtitleSyncCreated,
         audioSelection, subtitleSelection, secondarySelection,
+        setCurrentAudioIndex: (index: number) => { audioIndex = index; },
+        setCurrentSubtitleIndex: (index: number) => { subtitleIndex = index; },
         changeItem: () => { currentItem = { Id: 'movie-b', ServerId: 'server-a' }; },
         playbackError: () => Events.trigger(manager, 'playbackerror', ['NoCompatibleStream']),
         replace: () => {
@@ -171,6 +180,17 @@ function createController() {
             observation.replace(player);
         }
     };
+}
+
+function selectedMenuIds() {
+    const sheet = document.querySelector('.actionSheet.opened');
+    expect(sheet).not.toBeNull();
+    runPtvIconEngine(sheet!);
+    const icons = Array.from(sheet!.querySelectorAll('.actionSheetMenuItem .ptv-icon'));
+    expect(icons.every(icon => icon.getAttribute('class') === 'ptv-icon')).toBe(true);
+    return icons
+        .filter(icon => (icon as HTMLElement).style.visibility !== 'hidden')
+        .map(icon => icon.closest('[data-id]')!.getAttribute('data-id'));
 }
 
 describe('native video transient menu callers', () => {
@@ -327,6 +347,57 @@ describe('native video transient menu callers', () => {
         await task;
         const setter = menu === 'audio' ? controller.audioSelection : controller.subtitleSelection;
         expect(setter).toHaveBeenCalledExactlyOnceWith(menu === 'audio' ? 1 : -1, controller.firstPlayer);
+    });
+
+    it('tracks exactly one subtitle choice through Off, A, B, Off and menu reopen', async () => {
+        controller.setCurrentSubtitleIndex(-1);
+        controller.actionImport.resolve({ default: actionSheet });
+
+        const offTask = controller.observation.subtitles();
+        await flush();
+        expect(selectedMenuIds()).toEqual(['-1']);
+        (document.querySelector('.actionSheet [data-id="2"]') as HTMLElement).click();
+        await offTask;
+        expect(controller.subtitleSelection).toHaveBeenLastCalledWith(2, controller.firstPlayer);
+
+        const aTask = controller.observation.subtitles();
+        await flush();
+        expect(selectedMenuIds()).toEqual(['2']);
+        (document.querySelector('.actionSheet [data-id="4"]') as HTMLElement).click();
+        await aTask;
+        expect(controller.subtitleSelection).toHaveBeenLastCalledWith(4, controller.firstPlayer);
+
+        const bTask = controller.observation.subtitles();
+        await flush();
+        expect(selectedMenuIds()).toEqual(['4']);
+        (document.querySelector('.actionSheet [data-id="-1"]') as HTMLElement).click();
+        await bTask;
+        expect(controller.subtitleSelection).toHaveBeenLastCalledWith(-1, controller.firstPlayer);
+
+        void controller.observation.subtitles();
+        await flush();
+        expect(selectedMenuIds()).toEqual(['-1']);
+    });
+
+    it('tracks the actual audio index through A, B and reopen without selecting unavailable tracks', async () => {
+        controller.actionImport.resolve({ default: actionSheet });
+        const firstTask = controller.observation.audio();
+        await flush();
+        expect(selectedMenuIds()).toEqual(['0']);
+        (document.querySelector('.actionSheet [data-id="1"]') as HTMLElement).click();
+        await firstTask;
+        expect(controller.audioSelection).toHaveBeenLastCalledWith(1, controller.firstPlayer);
+
+        const reopenTask = controller.observation.audio();
+        await flush();
+        expect(selectedMenuIds()).toEqual(['1']);
+
+        (document.querySelector('.actionSheet [data-id="1"]') as HTMLElement).click();
+        await reopenTask;
+        controller.setCurrentAudioIndex(99);
+        void controller.observation.audio();
+        await flush();
+        expect(selectedMenuIds()).toEqual([]);
     });
 
     it('does not toggle a replacement subtitle overlay when selecting a track replaces the player', async () => {

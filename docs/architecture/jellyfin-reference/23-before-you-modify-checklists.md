@@ -20,7 +20,7 @@ Use [22-change-impact-matrix](22-change-impact-matrix.md) to find adjacent subsy
 - [x] Repeated Home preview callbacks converge while changed DTOs and exact freshness-snapshot retirement still work.
 - [x] Projected/grouped UserViews require ordinary per-root paged Series membership before Season reads when physical ancestry cannot represent the view; foreign/exhausted/cancelled/retired and non-Season/BoxSet cases stay closed.
 - [x] Multi-root Random pools do not starve later roots; library backdrop retirement rejects late callbacks and same-scope unavailable-to-ready resurrection.
-- [ ] Complete manual local Home/library route, details/back and hard-refresh acceptance; record a missing Cartoons library as unavailable rather than populated acceptance.
+- [x] Complete manual local Home/library route, Details/Back and hard-refresh acceptance. The 2026-10-01 isolated Jellyfin 12 fixture had all four libraries populated; bounded user-aware row sampling found zero cross-library IDs, and Home loop/browser checks passed. Evidence: [Pass 02 final Pass 01 regression acceptance](../../diagnostics/pass02-browser-acceptance.md#2026-10-01-final-pass-01-regression-acceptance).
 
 These entries describe the local `fix/web-library-isolation` source and focused regressions, not production qualification. They leave Plugin, global Home rows, Premium Collections, versioning and the remaining stabilization backlog unchanged.
 
@@ -246,6 +246,8 @@ Server PlaybackInfo/device profile determines the delivery path; `PlaySessionId`
 - [ ] Give each player source a generation; destroy old HLS/player listeners/session before the replacement can report or recover.
 - [ ] Keep queue/Now Playing state independent from displayed metadata DTO replacement.
 - [ ] Preserve audio/subtitle selections, start ticks and seek semantics through source recreation.
+- [ ] Read each action-sheet selection from the current player stream index, and verify the browser's computed checkmark visibility after icon normalization; hidden alignment icons are not selected tracks.
+- [ ] Fence subtitle session readback, fetched cues and renderer imports to the current media element, play options, source generation and primary/secondary selection. Off or a newer track must reject late work; a repeated same-track request must keep its pending fetch, and a replacement source must fetch that track anew.
 - [ ] Report final stop after success, error and user cancellation where possible; observe Server session and FFmpeg job convergence.
 - [ ] Do not classify a successful report/segment HTTP status as proof that the renderer displayed uninterrupted frames.
 - [ ] Test direct play, remux/direct stream and transcode; start, pause, seek backward/forward, stream change, end, error and stop.
