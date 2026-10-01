@@ -42,6 +42,102 @@ type PtvCinematicRenderOptions = Readonly<{
 
 const CINEMATIC_HEADING_ID = 'ptv-cinematic-details-heading';
 const CINEMATIC_ENRICHMENT_TIMEOUT_MS = 8000;
+const progressiveShelfTimers = new WeakMap<HTMLElement, () => void>();
+
+function cancelProgressiveShelves(section: HTMLElement) {
+    progressiveShelfTimers.get(section)?.();
+    progressiveShelfTimers.delete(section);
+}
+
+function getShelfSignature(shelf: PtvCinematicShelf, family: PtvCinematicMediaFamily) {
+    // Include the complete source DTO so a changed route, artwork tag, or card label cannot reuse stale DOM.
+    return JSON.stringify([family, shelf]);
+}
+
+function getGatewaySignature(model: PtvCinematicDetailsModel) {
+    return JSON.stringify([model.kicker, model.gateway || getGatewayFallback(model)]);
+}
+
+function applySectionMetadata(
+    section: HTMLElement,
+    model: PtvCinematicDetailsModel,
+    sourceState: 'failed' | 'pending' | 'settled',
+    sourceRetired: boolean
+) {
+    section.className = `ptv-cinematic-details ptv-cinematic-details--${model.family}`;
+    section.removeAttribute('aria-busy');
+    section.removeAttribute('aria-live');
+    section.removeAttribute('data-ptv-cinematic-details-item-id');
+    section.setAttribute('aria-labelledby', CINEMATIC_HEADING_ID);
+    section.dataset.ptvCandidateCount = String(model.candidateCount);
+    section.dataset.ptvDedupedCandidateCount = String(model.dedupedCandidateCount);
+    section.dataset.ptvMediaFamily = model.family;
+    section.dataset.ptvRequestedShelfCount = String(model.shelves.length);
+    section.dataset.ptvSourceSettled = sourceState === 'settled' ? 'true' : 'false';
+    if (sourceRetired) section.dataset.ptvSourceSettled = 'retired';
+    else if (sourceState === 'failed') section.dataset.ptvSourceSettled = 'failed';
+}
+
+function restoreCinematicFocus(section: HTMLElement, activeElement: Element | null, focusKey: string) {
+    if (!focusKey || !section.isConnected) return;
+    if (section.ownerDocument.activeElement === activeElement && section.contains(activeElement)) return;
+
+    const focusTarget = Array.from(section.querySelectorAll<HTMLElement>('[data-ptv-focus-key]'))
+        .find(element => element.dataset.ptvFocusKey === focusKey);
+
+    if (focusTarget) focusPtvTvElement(focusTarget, 'details-cinematic-enrichment');
+}
+
+function getShelvesToKeepInPlace(currentShelves: HTMLElement[], nextShelves: HTMLElement[]) {
+    const targetIndexes = new Map(nextShelves.map((shelf, index) => [shelf, index]));
+    const lengths = currentShelves.map(() => 1);
+    const predecessors = currentShelves.map(() => -1);
+    let longestIndex = -1;
+
+    currentShelves.forEach((shelf, index) => {
+        for (let previous = 0; previous < index; previous++) {
+            if ((targetIndexes.get(currentShelves[previous]) || 0) >= (targetIndexes.get(shelf) || 0)
+                || lengths[previous] + 1 <= lengths[index]) continue;
+            lengths[index] = lengths[previous] + 1;
+            predecessors[index] = previous;
+        }
+        if (longestIndex === -1 || lengths[index] > lengths[longestIndex]) longestIndex = index;
+    });
+
+    const kept = new Set<HTMLElement>();
+
+    for (let index = longestIndex; index !== -1; index = predecessors[index]) {
+        kept.add(currentShelves[index]);
+    }
+
+    return kept;
+}
+
+function reconcileShelfOrder(shelves: HTMLElement, nextShelves: HTMLElement[]) {
+    Array.from(shelves.children).forEach(shelf => {
+        if (!nextShelves.includes(shelf as HTMLElement)) shelf.remove();
+    });
+    const keptShelves = getShelvesToKeepInPlace(Array.from(shelves.children) as HTMLElement[], nextShelves);
+    let nextAnchor: HTMLElement | null = null;
+
+    for (let index = nextShelves.length - 1; index >= 0; index--) {
+        const shelf = nextShelves[index];
+
+        if (!keptShelves.has(shelf)) {
+            const movedRail = shelf.parentElement === shelves ?
+                shelf.querySelector<HTMLElement>('.ptv-cinematic-shelf__rail') :
+                null;
+            const scrollLeft = movedRail?.scrollLeft || 0;
+
+            shelves.insertBefore(shelf, nextAnchor);
+            if (movedRail) {
+                // The browser clamps this signed offset according to its own LTR or RTL scroll model.
+                movedRail.scrollLeft = scrollLeft;
+            }
+        }
+        nextAnchor = shelf;
+    }
+}
 
 function getRelatedMediaType(item: PtvRelatedVideoItem): PtvRecommendationMediaType {
     const type = String(item.Type || '').toLocaleLowerCase();
@@ -203,7 +299,7 @@ function createCard(card: PtvCinematicCard, shelf: PtvCinematicShelf, family: Pt
     return anchor;
 }
 
-function createShelf(shelf: PtvCinematicShelf, family: PtvCinematicMediaFamily, shelfIndex: number) {
+function createShelf(shelf: PtvCinematicShelf, family: PtvCinematicMediaFamily) {
     const presentation = shelf.presentation || 'cards';
     const section = createElement('section', `ptv-cinematic-shelf ptv-cinematic-shelf--${presentation}`);
     const headingRow = createElement('div', 'ptv-cinematic-shelf__heading');
@@ -212,7 +308,7 @@ function createShelf(shelf: PtvCinematicShelf, family: PtvCinematicMediaFamily, 
     const description = createElement('p', 'ptv-cinematic-shelf__description', shelf.description);
     const order = createElement('span', 'ptv-cinematic-shelf__order', shelf.orderLabel);
     const rail = createElement('div', 'ptv-cinematic-shelf__rail');
-    const headingId = `ptv-cinematic-shelf-heading-${shelfIndex}`;
+    const headingId = `ptv-cinematic-shelf-heading-${encodeURIComponent(shelf.id)}`;
 
     section.dataset.ptvRelationship = shelf.relationship;
     section.dataset.ptvShelfId = shelf.id;
@@ -251,7 +347,7 @@ function getGatewayFallback(model: PtvCinematicDetailsModel): PtvCinematicGatewa
     };
 }
 
-function createGateway(model: PtvCinematicDetailsModel, section: HTMLElement) {
+function createGateway(model: PtvCinematicDetailsModel) {
     const gateway = model.gateway || getGatewayFallback(model);
     const intro = createElement('div', 'ptv-cinematic-details__intro ptv-details-glass');
     const introCopy = createElement('div', 'ptv-cinematic-details__intro-copy');
@@ -277,7 +373,9 @@ function createGateway(model: PtvCinematicDetailsModel, section: HTMLElement) {
         button.type = 'button';
         button.dataset.ptvFocusKey = `details:cinematic:gateway:${action.shelfId}`;
         button.addEventListener('click', () => {
-            const target = section.querySelector<HTMLElement>(`[data-ptv-shelf-id="${action.shelfId}"]`);
+            const section = button.closest<HTMLElement>('.ptv-cinematic-details');
+            const target = Array.from(section?.querySelectorAll<HTMLElement>('[data-ptv-shelf-id]') || [])
+                .find(shelf => shelf.dataset.ptvShelfId === action.shelfId);
             const focusTarget = target?.querySelector<HTMLElement>('[data-ptv-focus-key]');
             const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
@@ -328,11 +426,11 @@ export function createPtvCinematicDetailsElement(
 ) {
     const section = createElement('section', `ptv-cinematic-details ptv-cinematic-details--${model.family}`);
     const shelves = createElement('div', 'ptv-cinematic-details__shelves');
-    const appendShelf = (shelf: PtvCinematicShelf, shelfIndex: number) => {
+    const appendShelf = (shelf: PtvCinematicShelf) => {
         if (options.signal?.aborted) return;
 
         try {
-            shelves.append(createShelf(shelf, model.family, shelfIndex));
+            shelves.append(createShelf(shelf, model.family));
             section.dataset.ptvSettledShelfCount = String(shelves.children.length);
         } catch {
             section.dataset.ptvFailedShelfCount = String(Number(section.dataset.ptvFailedShelfCount || 0) + 1);
@@ -345,16 +443,21 @@ export function createPtvCinematicDetailsElement(
     section.dataset.ptvMediaFamily = model.family;
     section.dataset.ptvRequestedShelfCount = String(model.shelves.length);
     section.dataset.ptvSourceSettled = options.sourceSettled === false ? 'false' : 'true';
-    section.append(createGateway(model, section), shelves);
+    section.append(createGateway(model), shelves);
 
     if (!options.progressive) {
         model.shelves.forEach(appendShelf);
         return section;
     }
 
-    if (model.shelves[0]) appendShelf(model.shelves[0], 0);
-    model.shelves.slice(1).forEach((shelf, index) => {
-        window.setTimeout(() => appendShelf(shelf, index + 1), (index + 1) * 16);
+    if (model.shelves[0]) appendShelf(model.shelves[0]);
+    const timers = model.shelves.slice(1).map((shelf, index) =>
+        window.setTimeout(() => appendShelf(shelf), (index + 1) * 16));
+
+    progressiveShelfTimers.set(section, () => {
+        timers.forEach(timer => {
+            window.clearTimeout(timer);
+        });
     });
 
     return section;
@@ -415,18 +518,31 @@ export async function loadPtvCinematicDetailsElement(
     initialSection.dataset.ptvSourceSettled = 'false';
     let sourceRetired = false;
     let timeoutId: number | null = null;
+    let discardTimeoutId: number | null = null;
     let abortEnrichment = () => undefined;
     let pendingEnrichments = 3;
+    let pendingLateEnrichments = 2;
     let currentData = emptyData;
     let currentRelatedItems: PtvRelatedVideoItem[] = [];
     let currentRelationships: Awaited<typeof relationshipPromise> = [];
     let sourceState: 'failed' | 'pending' | 'settled' = 'pending';
+    let gatewaySignature = initialModel.shelves.length ? getGatewaySignature(initialModel) : '';
+    let shelfSignatures = new Map(initialModel.shelves.map(shelf => [
+        shelf.id,
+        getShelfSignature(shelf, initialModel.family)
+    ]));
     const discardEmptySection = () => {
         if (initialSection.querySelector('[data-ptv-shelf-id]')) return;
 
         initialSection.hidden = true;
         initialSection.setAttribute('aria-busy', 'false');
-        window.setTimeout(() => initialSection.remove(), 0);
+        if (!options.signal?.aborted && pendingEnrichments
+            && (!sourceRetired || pendingLateEnrichments)) return;
+        if (discardTimeoutId !== null) return;
+        discardTimeoutId = window.setTimeout(() => {
+            discardTimeoutId = null;
+            if (!initialSection.querySelector('[data-ptv-shelf-id]')) initialSection.remove();
+        }, 0);
     };
     const releaseSource = () => {
         if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -435,10 +551,12 @@ export async function loadPtvCinematicDetailsElement(
     };
     const finishEnrichment = () => {
         pendingEnrichments = Math.max(0, pendingEnrichments - 1);
-        if (pendingEnrichments) return;
-
-        releaseSource();
-        discardEmptySection();
+        if (!pendingEnrichments) releaseSource();
+        if (sourceRetired || !pendingEnrichments) discardEmptySection();
+    };
+    const finishLateEnrichment = () => {
+        pendingLateEnrichments = Math.max(0, pendingLateEnrichments - 1);
+        finishEnrichment();
     };
     const renderEnrichment = () => {
         if (options.signal?.aborted) return;
@@ -452,49 +570,81 @@ export async function loadPtvCinematicDetailsElement(
 
         if (!enrichedModel.shelves.length) return;
 
-        const enrichedSection = createPtvCinematicDetailsElement(enrichedModel, {
-            signal: options.signal,
-            sourceSettled: sourceState === 'settled'
-        });
         const activeElement = initialSection.ownerDocument.activeElement;
         const activeFocusKey = activeElement instanceof HTMLElement && initialSection.contains(activeElement) ?
             activeElement.dataset.ptvFocusKey || '' :
             '';
-        const railOffsets = new Map(Array.from(initialSection.querySelectorAll<HTMLElement>('[data-ptv-shelf-id]'))
-            .map(shelf => [
-                shelf.dataset.ptvShelfId || '',
-                shelf.querySelector<HTMLElement>('.ptv-cinematic-shelf__rail')?.scrollLeft || 0
-            ]));
+        cancelProgressiveShelves(initialSection);
+        applySectionMetadata(initialSection, enrichedModel, sourceState, sourceRetired);
+        const nextGatewaySignature = getGatewaySignature(enrichedModel);
+        let shelves = initialSection.querySelector<HTMLElement>('.ptv-cinematic-details__shelves');
 
-        Array.from(initialSection.attributes).forEach(attribute => {
-            initialSection.removeAttribute(attribute.name);
-        });
-        Array.from(enrichedSection.attributes).forEach(attribute => {
-            initialSection.setAttribute(attribute.name, attribute.value);
-        });
-        if (sourceRetired) initialSection.dataset.ptvSourceSettled = 'retired';
-        else if (sourceState === 'failed') initialSection.dataset.ptvSourceSettled = 'failed';
-        initialSection.replaceChildren(...enrichedSection.childNodes);
-        railOffsets.forEach((scrollLeft, shelfId) => {
-            const rail = Array.from(initialSection.querySelectorAll<HTMLElement>('[data-ptv-shelf-id]'))
-                .find(shelf => shelf.dataset.ptvShelfId === shelfId)
-                ?.querySelector<HTMLElement>('.ptv-cinematic-shelf__rail');
-
-            if (rail) rail.scrollLeft = scrollLeft;
-        });
-        imageLoader.lazyChildren(initialSection);
-
-        if (activeFocusKey && initialSection.isConnected) {
-            const focusTarget = Array.from(initialSection.querySelectorAll<HTMLElement>('[data-ptv-focus-key]'))
-                .find(element => element.dataset.ptvFocusKey === activeFocusKey);
-
-            if (focusTarget) focusPtvTvElement(focusTarget, 'details-cinematic-enrichment');
+        if (!shelves) {
+            shelves = createElement('div', 'ptv-cinematic-details__shelves');
+            initialSection.replaceChildren(createGateway(enrichedModel), shelves);
+        } else if (gatewaySignature !== nextGatewaySignature) {
+            initialSection.querySelector('.ptv-cinematic-details__intro')?.replaceWith(createGateway(enrichedModel));
         }
+        gatewaySignature = nextGatewaySignature;
+
+        const existingShelves = new Map(Array.from(shelves.children, child => [
+            (child as HTMLElement).dataset.ptvShelfId || '',
+            child as HTMLElement
+        ]));
+        const nextShelfSignatures = new Map<string, string>();
+        const nextShelves: HTMLElement[] = [];
+        const artworkShelves: HTMLElement[] = [];
+        const railOffsets = new Map<HTMLElement, number>();
+        let failedShelfCount = 0;
+
+        enrichedModel.shelves.forEach(shelf => {
+            const signature = getShelfSignature(shelf, enrichedModel.family);
+            const existing = existingShelves.get(shelf.id);
+            let next = existing;
+
+            if (!existing || shelfSignatures.get(shelf.id) !== signature) {
+                try {
+                    next = createShelf(shelf, enrichedModel.family);
+                    const previousRail = existing?.querySelector<HTMLElement>('.ptv-cinematic-shelf__rail');
+                    const nextRail = next.querySelector<HTMLElement>('.ptv-cinematic-shelf__rail');
+
+                    if (previousRail && nextRail) railOffsets.set(nextRail, previousRail.scrollLeft);
+                    artworkShelves.push(next);
+                } catch {
+                    failedShelfCount += 1;
+                    return;
+                }
+            }
+
+            if (!next) return;
+            nextShelfSignatures.set(shelf.id, signature);
+            nextShelves.push(next);
+        });
+
+        reconcileShelfOrder(shelves, nextShelves);
+        railOffsets.forEach((scrollLeft, rail) => {
+            rail.scrollLeft = scrollLeft;
+        });
+        shelfSignatures = nextShelfSignatures;
+        initialSection.dataset.ptvSettledShelfCount = String(nextShelves.length);
+        if (failedShelfCount) initialSection.dataset.ptvFailedShelfCount = String(failedShelfCount);
+        else delete initialSection.dataset.ptvFailedShelfCount;
+        if (nextShelves.length) {
+            if (discardTimeoutId !== null) window.clearTimeout(discardTimeoutId);
+            discardTimeoutId = null;
+            initialSection.hidden = false;
+        }
+        artworkShelves.forEach(shelf => {
+            imageLoader.lazyChildren(shelf);
+        });
+
+        restoreCinematicFocus(initialSection, activeElement, activeFocusKey);
     };
 
     const retireSource = () => {
         sourceRetired = true;
         initialSection.dataset.ptvSourceSettled = 'retired';
+        cancelProgressiveShelves(initialSection);
         if (!requestSignal.aborted) enrichmentController.abort();
         discardEmptySection();
         timeoutId = null;
@@ -502,6 +652,7 @@ export async function loadPtvCinematicDetailsElement(
     abortEnrichment = () => {
         sourceRetired = true;
         initialSection.dataset.ptvSourceSettled = 'retired';
+        cancelProgressiveShelves(initialSection);
         if (!requestSignal.aborted) enrichmentController.abort();
         if (!relatedSignal.aborted) relatedController.abort();
         discardEmptySection();
@@ -514,14 +665,14 @@ export async function loadPtvCinematicDetailsElement(
     void relationshipPromise.then(relationships => {
         currentRelationships = relationships;
         renderEnrichment();
-    }).catch(() => undefined).finally(finishEnrichment);
+    }).catch(() => undefined).finally(finishLateEnrichment);
 
     void relatedPromise.then(items => {
         currentRelatedItems = items;
         renderEnrichment();
     }).catch(error => {
         if (relatedSignal.aborted || error?.name === 'AbortError') return;
-    }).finally(finishEnrichment);
+    }).finally(finishLateEnrichment);
 
     void sourcePromise.then(data => {
         if (sourceRetired) return;

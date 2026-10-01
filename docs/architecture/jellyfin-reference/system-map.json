@@ -3297,7 +3297,7 @@
     },
     "details": {
       "classification": "STOCK_WRAPPED",
-      "ptvChange": "PTV observes stock Details rendering, reconciles item/readback state, and applies route-generation-aware enhancements.",
+      "ptvChange": "PTV observes stock Details rendering, reconciles item/readback state, and applies route-generation-aware enhancements. Cinematic enrichment retains unchanged keyed shelves and artwork nodes, loads artwork only for changed shelves, and retires progressive timers before reconciliation or owner teardown. A hidden empty skeleton may adopt a late exact result only under its current owner.",
       "risk": "HIGH",
       "conflictClass": "INTENTIONAL_WRAPPER",
       "chapterRefs": [
@@ -3312,6 +3312,14 @@
           "file": "src/ptv/modules/details/index.js",
           "symbol": "details enhancement/readback/lifecycle",
           "lines": "648-860",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/details/detailsCinematicExperience.ts",
+          "symbol": "cinematic enrichment keyed shelf reconciliation and retirement",
+          "lines": "45-91, 248-286, 375-410, 467-647",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]
