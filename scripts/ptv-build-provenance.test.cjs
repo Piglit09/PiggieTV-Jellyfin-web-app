@@ -6,12 +6,14 @@ const {
     resolvePtvCommitSha
 } = require('./ptv-build-provenance.cjs');
 
-function gitStub({ dirty = false, sha = '0123456789ab' } = {}) {
+function gitStub({ dirty = false, sha = '0123456789abcdef0123456789abcdef01234567' } = {}) {
     const calls = [];
     const execFileSync = (command, args) => {
         calls.push({ args, command });
 
-        if (args[0] === 'rev-parse') return `${sha}\n`;
+        if (args[0] === 'rev-parse') {
+            return `${args.includes('--short=12') ? sha.slice(0, 12) : sha}\n`;
+        }
         if (args[0] === 'status') return dirty ? ' M src/example.ts\n' : '';
 
         throw new Error(`Unexpected git command: ${args.join(' ')}`);
@@ -20,37 +22,37 @@ function gitStub({ dirty = false, sha = '0123456789ab' } = {}) {
     return { calls, execFileSync };
 }
 
-test('reports the true short commit SHA for a clean checkout', () => {
+test('reports the complete commit SHA for a clean checkout', () => {
     const git = gitStub();
 
     assert.equal(resolvePtvCommitSha({
         cwd: '/repo',
         env: {},
         execFileSync: git.execFileSync
-    }), '0123456789ab');
+    }), '0123456789abcdef0123456789abcdef01234567');
     assert.deepEqual(git.calls.map(call => call.args), [
-        [ 'rev-parse', '--short=12', 'HEAD' ],
+        [ 'rev-parse', 'HEAD' ],
         [ 'status', '--porcelain=v1', '--untracked-files=normal' ]
     ]);
 });
 
 test('adds an explicit dirty suffix without replacing the SHA with a release tag', () => {
-    const git = gitStub({ dirty: true, sha: 'ABCDEF123456' });
+    const git = gitStub({ dirty: true, sha: 'ABCDEF1234567890ABCDEF1234567890ABCDEF12' });
 
     assert.equal(resolvePtvCommitSha({
         cwd: '/repo',
         env: {},
         execFileSync: git.execFileSync
-    }), 'abcdef123456-dirty');
+    }), 'abcdef1234567890abcdef1234567890abcdef12-dirty');
 });
 
 test('accepts a validated build-system override without invoking git', () => {
     const git = gitStub();
 
     assert.equal(resolvePtvCommitSha({
-        env: { PTV_COMMIT_SHA: 'FEDCBA9876543210-dirty' },
+        env: { PTV_COMMIT_SHA: 'FEDCBA9876543210FEDCBA9876543210FEDCBA98-dirty' },
         execFileSync: git.execFileSync
-    }), 'fedcba9876543210-dirty');
+    }), 'fedcba9876543210fedcba9876543210fedcba98-dirty');
     assert.equal(git.calls.length, 0);
 });
 

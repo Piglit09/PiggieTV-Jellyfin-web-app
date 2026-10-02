@@ -1,0 +1,37 @@
+{
+  "baseline": {
+    "activePlaybackCount": 2,
+    "activePlaybackSessionIds": [
+      "redacted-session-1",
+      "redacted-session-2"
+    ],
+    "scanMediaLibrary": {
+      "Id": "redacted-refresh-library-task",
+      "Key": "RefreshLibrary",
+      "State": "Idle",
+      "LastExecutionResult": {
+        "Status": "Completed",
+        "StartTimeUtc": "2026-09-19T04:00:00.0000000Z",
+        "EndTimeUtc": "2026-09-19T04:05:00.0000000Z"
+      }
+    }
+  },
+  "scheduledTasks": [
+    {
+      "Id": "redacted-other-task",
+      "Key": "RefreshPeople",
+      "State": "Idle",
+      "LastExecutionResult": null
+    },
+    {
+      "Id": "redacted-refresh-library-task",
+      "Key": "RefreshLibrary",
+      "State": "Idle",
+      "LastExecutionResult": {
+        "Status": "Completed",
+        "StartTimeUtc": "2026-09-19T04:00:00.0000000Z",
+        "EndTimeUtc": "2026-09-19T04:05:00.0000000Z"
+      }
+    }
+  ]
+}

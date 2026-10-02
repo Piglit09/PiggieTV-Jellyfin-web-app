@@ -63,7 +63,7 @@ import {
     PTV_MUSIC_API_REQUEST_CONCURRENCY,
     PTV_MUSIC_PLAYLIST_PROBE_CONCURRENCY
 } from './musicApi';
-import type { PtvMusicItem } from './musicTypes';
+import type { PtvMusicHomeData, PtvMusicItem } from './musicTypes';
 
 function getPlaylistCandidates(count: number): PtvMusicItem[] {
     return Array.from({ length: count }, (_, index) => ({
@@ -102,6 +102,52 @@ function createPtvMusicRequestTracker() {
     };
 }
 
+const fullMusicHomeStorageKey = 'ptv:music-home-snapshot:server-1:user-1:full:v2';
+
+function confirmedEmptyHomeEntry(expiresAt: number): { data: PtvMusicHomeData; expiresAt: number; schemaVersion: number } {
+    return {
+        data: {
+            completeness: 'complete' as const,
+            generatedAt: 1,
+            isPartial: false,
+            library: { id: 'music-library-1', name: 'Music' },
+            nextEligibleRefreshAt: 1,
+            refreshReason: 'full-home-snapshot',
+            sectionTimings: [{ durationMs: 1, id: 'tracks', itemCount: 0, status: 'ok' as const }],
+            sections: [],
+            stats: { albumCount: 0, artistCount: 0, trackCount: 0 }
+        },
+        expiresAt,
+        schemaVersion: 2
+    };
+}
+
+function populatedHomeMocks() {
+    vi.mocked(getPtvUserViews).mockResolvedValue({
+        Items: [{ CollectionType: 'music', Id: 'music-library-1', Name: 'Music', Type: 'CollectionFolder' }],
+        TotalRecordCount: 1
+    });
+    vi.mocked(getPtvItems).mockImplementation(async query => {
+        const type = String(query?.IncludeItemTypes || 'Audio');
+        let itemType = 'Audio';
+
+        if (type === 'MusicAlbum') itemType = 'MusicAlbum';
+        if (type === 'MusicArtist') itemType = 'MusicArtist';
+
+        return {
+            Items: [{
+                Id: `${type}-1`,
+                Name: `${type} 1`,
+                Type: itemType
+            }],
+            TotalRecordCount: 1
+        };
+    });
+    vi.mocked(getPtvRecentlyAdded).mockResolvedValue([{ Id: 'recent-1', Name: 'Recent', Type: 'Audio' }]);
+    vi.mocked(getPtvResumeItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+    vi.mocked(getPtvFavoriteItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+}
+
 describe('PiggieTV Music list requests', () => {
     beforeEach(() => {
         vi.mocked(getPtvCurrentUserId).mockReturnValue('user-1');
@@ -114,6 +160,7 @@ describe('PiggieTV Music list requests', () => {
         vi.mocked(requestPtvJson).mockReset();
         vi.mocked(recordPtvEvent).mockReset();
         invalidatePtvMusicHomeCache();
+        localStorage.removeItem('ptv.music.liked.v2:server-1:user-1');
     });
 
     it('uses the lean card profile and bounds playlist content probes', async () => {
@@ -477,6 +524,77 @@ describe('PiggieTV Music list requests', () => {
             + vi.mocked(getPtvResumeItems).mock.calls.length
             + vi.mocked(getPtvFavoriteItems).mock.calls.length
         ).toBe(13);
+    });
+
+    it('bypasses a stale confirmed-empty persistent Home snapshot and replaces it with live Music data', async () => {
+        localStorage.setItem(fullMusicHomeStorageKey, JSON.stringify(confirmedEmptyHomeEntry(Date.now() - 1)));
+        populatedHomeMocks();
+
+        const data = await getPtvMusicHome();
+        const stored = JSON.parse(localStorage.getItem(fullMusicHomeStorageKey) || '{}');
+
+        expect(getPtvItems).toHaveBeenCalled();
+        expect(data.stats.trackCount).toBeGreaterThan(0);
+        expect(stored.data.stats.trackCount).toBeGreaterThan(0);
+        expect(stored.expiresAt).toBeGreaterThan(Date.now());
+    });
+
+    it('uses a fresh confirmed-empty persistent Home snapshot without a transport request', async () => {
+        localStorage.setItem(fullMusicHomeStorageKey, JSON.stringify(confirmedEmptyHomeEntry(Date.now() + 60_000)));
+
+        await expect(getPtvMusicHome()).resolves.toMatchObject({
+            sections: [],
+            stats: { albumCount: 0, artistCount: 0, trackCount: 0 }
+        });
+        expect(getPtvUserViews).not.toHaveBeenCalled();
+        expect(getPtvItems).not.toHaveBeenCalled();
+    });
+
+    it('continues to use a stale non-empty persistent Home snapshot when stale reads are allowed', async () => {
+        const entry = confirmedEmptyHomeEntry(Date.now() - 1);
+
+        entry.data.sections = [{
+            id: 'songs',
+            items: [{ Id: 'track-1', Name: 'Track 1', Type: 'Audio' }],
+            kind: 'track',
+            title: 'Songs'
+        }];
+        entry.data.stats.trackCount = 1;
+        localStorage.setItem(fullMusicHomeStorageKey, JSON.stringify(entry));
+
+        await expect(getPtvMusicHome()).resolves.toMatchObject({ stats: { trackCount: 1 } });
+        expect(getPtvUserViews).not.toHaveBeenCalled();
+        expect(getPtvItems).not.toHaveBeenCalled();
+    });
+
+    it('retains a stale confirmed-empty persistent snapshot when the required live Home load fails', async () => {
+        const entry = confirmedEmptyHomeEntry(Date.now() - 1);
+        const serialized = JSON.stringify(entry);
+
+        localStorage.setItem(fullMusicHomeStorageKey, serialized);
+        vi.mocked(getPtvUserViews).mockRejectedValue(new Error('Jellyfin unavailable'));
+        vi.mocked(getPtvItems).mockRejectedValue(new Error('Jellyfin unavailable'));
+        vi.mocked(getPtvRecentlyAdded).mockRejectedValue(new Error('Jellyfin unavailable'));
+        vi.mocked(getPtvResumeItems).mockRejectedValue(new Error('Jellyfin unavailable'));
+        vi.mocked(getPtvFavoriteItems).mockRejectedValue(new Error('Jellyfin unavailable'));
+
+        await expect(getPtvMusicHome()).rejects.toThrow('Music full load failed before any library items were confirmed');
+        expect(getPtvUserViews).toHaveBeenCalled();
+        expect(localStorage.getItem(fullMusicHomeStorageKey)).toBe(serialized);
+    });
+
+    it('replaces a persistent Home snapshot during normal force refresh', async () => {
+        localStorage.setItem(fullMusicHomeStorageKey, JSON.stringify(confirmedEmptyHomeEntry(Date.now() + 60_000)));
+        populatedHomeMocks();
+
+        await expect(getPtvMusicHome({ forceRefresh: true })).resolves.toMatchObject({
+            completeness: 'complete',
+            isPartial: false
+        });
+        const stored = JSON.parse(localStorage.getItem(fullMusicHomeStorageKey) || '{}');
+
+        expect(getPtvItems).toHaveBeenCalled();
+        expect(stored.data.stats.trackCount).toBeGreaterThan(0);
     });
 
     it('publishes the first usable shelf before library discovery completes', async () => {

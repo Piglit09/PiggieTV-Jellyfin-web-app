@@ -776,7 +776,9 @@ public sealed class PtvMetadataQualityIndexedStore : IPtvMetadataQualityIndexedS
                     compatibility_fingerprint = @fingerprint
                 WHERE generation_id = @generation;
                 """;
-            command.Parameters.AddWithValue("@state", GenerationValidating);
+            command.Parameters.AddWithValue(
+                "@state",
+                sourceHash is null ? GenerationBuilding : GenerationValidating);
             command.Parameters.AddWithValue("@completed", ToTicks(now));
             command.Parameters.AddWithValue("@sourceHash", (object?)sourceHash ?? DBNull.Value);
             command.Parameters.AddWithValue("@sourceLength", sourceLength);

@@ -1,0 +1,120 @@
+{
+  "status": {
+    "state": "idle",
+    "activeRun": null,
+    "storeErrorCode": null,
+    "providerVerificationEnabled": false,
+    "aiEnabled": false,
+    "aiConfigured": false,
+    "ai": {
+      "enabled": false,
+      "credentialConfigured": false,
+      "credentialSource": "missing",
+      "configuredModel": "gpt-5.6-luna",
+      "effectiveModel": null,
+      "modelSource": "default",
+      "lastTestStatus": null,
+      "lastTestAt": null,
+      "lastTestErrorCode": null,
+      "lastTestModel": null
+    }
+  },
+  "summary": {
+    "counts": {
+      "totalScanned": 0,
+      "healthy": 0,
+      "needsReview": 0,
+      "likelyIncorrect": 0,
+      "incomplete": 0,
+      "unavailable": 0,
+      "dismissed": 0,
+      "resolved": 0
+    },
+    "lastScanAt": null,
+    "libraries": [
+      {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "name": "Movies"
+      },
+      {
+        "id": "22222222-2222-2222-2222-222222222222",
+        "name": "Shows"
+      },
+      {
+        "id": "33333333-3333-3333-3333-333333333333",
+        "name": "Music"
+      }
+    ],
+    "ruleVersion": "3",
+    "scannerVersion": "3",
+    "scan": {
+      "runId": null,
+      "state": "idle",
+      "mode": null,
+      "startedAt": null,
+      "completedAt": null,
+      "itemCount": null,
+      "processedCount": null,
+      "errorMessage": null
+    },
+    "diagnostics": {
+      "cacheState": "indexed-summary",
+      "totalMs": 4.25,
+      "persistedResultsLoaded": 0,
+      "itemsEvaluated": 0,
+      "rowsReturned": 0,
+      "stages": {
+        "indexedQuery": 3.75,
+        "libraryDiscovery": 0.25,
+        "authorization": 0.25
+      },
+      "operations": {
+        "databaseQueries": 3,
+        "storeFileReads": 0,
+        "jsonDeserializations": 0,
+        "metadataWrites": 0,
+        "providerRequests": 0,
+        "archiveReads": 0,
+        "libraryDiscoveryCalls": 1
+      }
+    }
+  },
+  "results": {
+    "totalRecordCount": 0,
+    "startIndex": 0,
+    "limit": 50,
+    "items": [],
+    "diagnostics": {
+      "cacheState": "indexed-results",
+      "totalMs": 1.5,
+      "persistedResultsLoaded": 0,
+      "itemsEvaluated": 0,
+      "rowsReturned": 0,
+      "stages": {
+        "indexedQuery": 1.25,
+        "authorization": 0.25
+      },
+      "operations": {
+        "databaseQueries": 3,
+        "storeFileReads": 0,
+        "jsonDeserializations": 0,
+        "metadataWrites": 0,
+        "providerRequests": 0,
+        "archiveReads": 0
+      }
+    }
+  },
+  "store": {
+    "generationState": "ACTIVE",
+    "activeGenerationCount": 1,
+    "buildingGenerationCount": 0,
+    "validatingGenerationCount": 0,
+    "failedGenerationCount": 6,
+    "resultCount": 0,
+    "activePointerMatches": true,
+    "pendingSourceHashCount": 0,
+    "dirtyActiveCount": 0,
+    "rollbackJsonPresent": true,
+    "rollbackJsonIsRegularFile": true
+  }
+}

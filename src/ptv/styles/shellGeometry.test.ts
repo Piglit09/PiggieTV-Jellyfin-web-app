@@ -10,6 +10,22 @@ const musicSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/music/m
 const booksSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/books/books.scss'), 'utf8');
 const collectionsSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/collections/collections.scss'), 'utf8');
 const detailsSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/details/details-shell.scss'), 'utf8');
+const settingsSource = readFileSync(resolve(process.cwd(), 'src/ptv/modules/settings/settings.scss'), 'utf8');
+
+function readScssBlock(source: string, selector: string) {
+    const selectorStart = source.indexOf(selector);
+    if (selectorStart < 0) throw new Error(`Missing SCSS selector ${selector}`);
+    const blockStart = source.indexOf('{', selectorStart);
+
+    if (blockStart < 0) throw new Error(`Missing SCSS block for ${selector}`);
+    let depth = 0;
+    for (let index = blockStart; index < source.length; index += 1) {
+        if (source[index] === '{') depth += 1;
+        if (source[index] === '}') depth -= 1;
+        if (depth === 0) return source.slice(blockStart + 1, index);
+    }
+    throw new Error(`Unclosed SCSS block for ${selector}`);
+}
 
 describe('PTV shell geometry ownership', () => {
     it('does not convert Jellyfin route containers into normal-flow shell content', () => {
@@ -37,5 +53,16 @@ describe('PTV shell geometry ownership', () => {
         expect(shellSource).toMatch(/--ptv-utility-safe-top:\s*calc\(var\(--ptv-shell-header-top/);
         expect(shellSource).toContain('--ptv-shell-header-clearance-height: 126px');
         expect(homeSource).toMatch(/\.ptv-native-home-controls\s*\{[^}]*top:\s*var\(--ptv-utility-safe-top/);
+    });
+
+    it('keeps the mobile settings scrollport inset scoped to the settings page', () => {
+        const mobileBlock = readScssBlock(settingsSource, '@media (max-width: 720px)');
+        const settingsPageBlock = readScssBlock(mobileBlock, '#ptvSettingsPage.ptv-settings-page');
+
+        expect(settingsPageBlock).toMatch(/margin-top:\s*126px/);
+        expect(settingsPageBlock).toMatch(/height:\s*calc\(100% - 126px\)/);
+        expect(settingsPageBlock).toMatch(/min-height:\s*0/);
+        expect(settingsPageBlock).toMatch(/overflow-y:\s*auto/);
+        expect(mobileBlock).not.toMatch(/\.ptv-admin-library-row\s*\{[^}]*margin-top:\s*126px/);
     });
 });

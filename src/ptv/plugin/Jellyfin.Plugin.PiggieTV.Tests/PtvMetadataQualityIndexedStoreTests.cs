@@ -45,6 +45,41 @@ public sealed class PtvMetadataQualityIndexedStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task EmptyStoreBootstrapExportsAndActivatesAnEmptyGeneration()
+    {
+        var legacy = CreateLegacyStore();
+        Assert.False(File.Exists(legacy.ResultsPath));
+        var indexed = CreateIndexedStore(legacy);
+
+        await indexed.EnsureReadyAsync();
+
+        var summary = await indexed.ReadSummaryAsync();
+        var page = await indexed.QueryResultsAsync(new PtvMetadataQualityResultQuery { Limit = 50 });
+        var generationId = summary.GenerationId;
+
+        Assert.True(File.Exists(legacy.ResultsPath));
+        Assert.Equal(0, summary.Counts.TotalScanned);
+        Assert.Equal(0, page.TotalRecordCount);
+        Assert.Empty(page.Items);
+        Assert.Empty((await legacy.ReadAsync()).ItemResults);
+        Assert.Null(await indexed.GetErrorCodeAsync());
+
+        await using var connection = OpenDatabase(indexed.DatabasePath);
+        await connection.OpenAsync();
+        Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM mq_generation;"));
+        Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM mq_generation WHERE state = 'ACTIVE';"));
+        Assert.Equal(0L, await ScalarLongAsync(connection, "SELECT COUNT(*) FROM mq_generation WHERE state IN ('BUILDING', 'VALIDATING', 'FAILED');"));
+        Assert.Equal(0L, await ScalarLongAsync(
+            connection,
+            "SELECT COUNT(*) FROM mq_generation WHERE pending_source_hash IS NOT NULL OR (state = 'ACTIVE' AND snapshot_dirty = 1);"));
+
+        var restarted = CreateIndexedStore(legacy);
+        var restartedSummary = await restarted.ReadSummaryAsync();
+        Assert.Equal(generationId, restartedSummary.GenerationId);
+        Assert.Equal(0, restartedSummary.Counts.TotalScanned);
+    }
+
+    [Fact]
     public async Task InitializationDeadlineRenewsWhileImportReportsProgress()
     {
         var inactivityTimeout = TimeSpan.FromSeconds(1);

@@ -30,7 +30,7 @@ function resolvePtvCommitSha(options = {}) {
     const cwd = options.cwd || path.resolve(__dirname, '..');
     const execFileSync = options.execFileSync || childProcess.execFileSync;
     const commitSha = normalizePtvCommitSha(
-        runGit(execFileSync, [ 'rev-parse', '--short=12', 'HEAD' ], cwd),
+        runGit(execFileSync, [ 'rev-parse', 'HEAD' ], cwd),
         'git rev-parse'
     );
     const dirty = Boolean(runGit(

@@ -452,37 +452,53 @@ function readPersistentMusicHomeCache(cacheKey: string, initialOnly = false, all
     const entry = readPtvLocalStorageJson<MusicHomeCacheEntry | null>(storageKey, null);
     const homeCacheReadMs = Number((getMusicPerformanceNow() - startedAt).toFixed(1));
     const isFresh = Boolean(entry && entry.expiresAt > Date.now());
-
-    if (
+    const hasValidEntry = Boolean(
         entry?.schemaVersion === MUSIC_HOME_PERSISTENT_CACHE_SCHEMA_VERSION
         && entry.data
         && canUseMusicHomeCache(entry.data)
-        && (isFresh || allowStale)
-    ) {
+    );
+    const isStaleConfirmedEmpty = Boolean(
+        hasValidEntry
+        && !isFresh
+        && isConfirmedEmptyMusicHomeCache(entry!.data)
+    );
+    const canReadEntry = Boolean(
+        hasValidEntry
+        && (isFresh || (allowStale && !isStaleConfirmedEmpty))
+    );
+
+    if (canReadEntry) {
         const activeCache = initialOnly ? musicHomeSummaryCache : musicHomeCache;
 
         activeCache.set(cacheKey, {
-            ...entry,
-            expiresAt: isFresh ? entry.expiresAt : Date.now() + 1000
+            ...entry!,
+            expiresAt: isFresh ? entry!.expiresAt : Date.now() + 1000
         });
         recordPtvEvent('cache', 'music-home-persistent-cache-hit', {
-            cacheAgeMs: Math.max(0, Date.now() - entry.data.generatedAt),
-            completeness: entry.data.completeness || null,
+            cacheAgeMs: Math.max(0, Date.now() - entry!.data.generatedAt),
+            completeness: entry!.data.completeness || null,
             homeCacheHit: true,
             homeCacheReadMs,
             initialOnly,
-            itemCount: getMusicHomeItemCount(entry.data),
+            itemCount: getMusicHomeItemCount(entry!.data),
             staleHit: !isFresh,
-            sectionCount: entry.data.sections.length
+            sectionCount: entry!.data.sections.length
         });
 
-        return entry.data;
+        return entry!.data;
     }
 
-    if (entry) {
-        removePtvLocalStorageKey(storageKey);
+    if (isStaleConfirmedEmpty && allowStale) {
+        recordPtvEvent('cache', 'music-home-persistent-cache-miss', {
+            homeCacheHit: false,
+            homeCacheReadMs,
+            initialOnly,
+            reason: 'stale-confirmed-empty'
+        });
+        return null;
     }
 
+    if (entry) removePtvLocalStorageKey(storageKey);
     recordPtvEvent('cache', 'music-home-persistent-cache-miss', {
         homeCacheHit: false,
         homeCacheReadMs,
