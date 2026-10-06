@@ -18,15 +18,15 @@ jobs:
         shell: bash
         working-directory: source
     env:
-      PTV_APPROVED_SOURCE_COMMIT: 682e7760ccd85edb71ece66f5435912d095c612a
-      PTV_APPROVED_SOURCE_TREE: 8540c998c5dd73593ced8630275f2ced570c0d91
+      PTV_APPROVED_SOURCE_COMMIT: e52fde989b864faefaebfbc788769b6d292895f9
+      PTV_APPROVED_SOURCE_TREE: bc9bf7474b448db91ddb99d6462e9361baab2c83
       PTV_EXPECTED_VERSION: '0.5.66'
       PTV_BUILD_ID: ptv-web-0.5.66
     steps:
       - name: Checkout the fixed approved source commit
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
-          ref: 682e7760ccd85edb71ece66f5435912d095c612a
+          ref: e52fde989b864faefaebfbc788769b6d292895f9
           path: source
           fetch-depth: 1
           persist-credentials: false
