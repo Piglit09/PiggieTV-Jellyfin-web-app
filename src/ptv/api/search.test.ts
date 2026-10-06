@@ -98,20 +98,28 @@ describe('Movie search primary outcomes', () => {
     });
 
     it('renders recovered Movies while retaining a timed-out primary diagnostic and duration', async () => {
-        vi.mocked(getPtvItems).mockImplementation((query?: PtvItemQuery, _options?) => {
-            if (!query) return Promise.resolve({ Items: [] });
-            if (query.SearchTerm) return new Promise(() => undefined);
-            if (query.Ids) return Promise.resolve({ Items: [toyStoryFive] });
-            return Promise.resolve({ Items: [...toyStoryOneToFour, toyStoryFive], TotalRecordCount: 5 });
-        });
+        vi.useFakeTimers({ toFake: [ 'clearTimeout', 'performance', 'setTimeout' ] });
 
-        const result = await searchPtvItems(movieSearchOptions());
+        try {
+            vi.mocked(getPtvItems).mockImplementation((query?: PtvItemQuery, _options?) => {
+                if (!query) return Promise.resolve({ Items: [] });
+                if (query.SearchTerm) return new Promise(() => undefined);
+                if (query.Ids) return Promise.resolve({ Items: [toyStoryFive] });
+                return Promise.resolve({ Items: [...toyStoryOneToFour, toyStoryFive], TotalRecordCount: 5 });
+            });
 
-        expect(result.Items).toHaveLength(5);
-        expect(result.ptvSearchRecoveryDiagnostics.primaryStatus).toBe('timeout');
-        expect(result.ptvSearchRecoveryDiagnostics.primaryDurationMs).toBeGreaterThanOrEqual(5);
-        expect(result.ptvSearchRecoveryDiagnostics.recoveryReason).toBe('primary-timeout');
-        expect(result.ptvSearchRecoveryDiagnostics.recoveryAttempted).toBe(true);
+            const search = searchPtvItems(movieSearchOptions());
+            await vi.advanceTimersByTimeAsync(5);
+            const result = await search;
+
+            expect(result.Items).toHaveLength(5);
+            expect(result.ptvSearchRecoveryDiagnostics.primaryStatus).toBe('timeout');
+            expect(result.ptvSearchRecoveryDiagnostics.primaryDurationMs).toBeGreaterThanOrEqual(5);
+            expect(result.ptvSearchRecoveryDiagnostics.recoveryReason).toBe('primary-timeout');
+            expect(result.ptvSearchRecoveryDiagnostics.recoveryAttempted).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('recovers a generic primary error and preserves it if catalog recovery also fails', async () => {

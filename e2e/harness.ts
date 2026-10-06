@@ -30,7 +30,11 @@ import {
     PtvFocusedBrowseLoadOwner,
     type PtvFocusedBrowseLoaderScope
 } from '../src/ptv/pages/browse/focusedBrowseLoader';
-import { PtvUpdateService } from '../src/ptv/services/updateService';
+import { getPtvServiceWorkerScriptUrl, PtvUpdateService } from '../src/ptv/services/updateService';
+import {
+    PTV_UPDATE_GENERATION_REQUEST,
+    PTV_UPDATE_GENERATION_RESPONSE
+} from '../src/ptv/services/updateGeneration';
 import { getPtvRouteOwnership } from '../src/ptv/shell/routes';
 import {
     getPtvDropdownOverlayPosition,
@@ -2883,23 +2887,48 @@ async function startUpdateScenario() {
     const runtimeRoot = addElement(runtimeHost, 'div', { className: 'ptv-runtime-root' });
 
     const controllerListeners = new Map<string, () => void>();
+    const generation = {
+        buildDate: '2026-01-02T00:00:00.000Z',
+        buildId: 'ptv-e2e-update',
+        commitSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        ptvWebVersion: '0.0.2'
+    };
     const waitingWorker = {
-        postMessage: () => {
+        postMessage: (message: unknown, ports: Transferable[]): void => {
+            const type = (message as { type?: string }).type;
+
+            if (type === PTV_UPDATE_GENERATION_REQUEST) {
+                (ports[0] as MessagePort).postMessage({ generation, type: PTV_UPDATE_GENERATION_RESPONSE });
+                return;
+            }
+            if (type !== 'SKIP_WAITING') return;
             document.documentElement.dataset.skipWaitingRequested = 'true';
-            window.queueMicrotask(() => controllerListeners.get('controllerchange')?.());
+            window.queueMicrotask(() => {
+                waitingWorker.state = 'activated';
+                registration.waiting = null;
+                registration.active = waitingWorker;
+                serviceWorker.controller = waitingWorker;
+                controllerListeners.get('controllerchange')?.();
+            });
         },
+        scriptURL: new URL(getPtvServiceWorkerScriptUrl(), window.location.href).href,
         state: 'installed'
+    };
+    const registration: { active: typeof waitingWorker | null; waiting: typeof waitingWorker | null } = {
+        active: null,
+        waiting: waitingWorker
+    };
+    const serviceWorker = {
+        addEventListener: (type: string, listener: () => void) => controllerListeners.set(type, listener),
+        controller: null as typeof waitingWorker | null,
+        getRegistration: async () => registration
     };
     const service = new PtvUpdateService({
         getActivityReason: () => params.get('active') === '1' ? 'Playback is active.' : '',
         reload: () => {
             document.documentElement.dataset.reloadRequested = 'true';
         },
-        serviceWorker: {
-            addEventListener: (type, listener) => controllerListeners.set(type, listener),
-            controller: {},
-            getRegistration: async () => ({ waiting: waitingWorker })
-        },
+        serviceWorker,
         sessionStorage: window.sessionStorage
     });
 
