@@ -153,7 +153,9 @@ export function isPotentialReaderItem(item: Record<string, any> | null | undefin
 export function createJellyfinReaderSource(item: Record<string, any>): ReaderSource {
     const apiClient = ServerConnections.getApiClient(item.ServerId);
     const { extension, format } = getFormat(item);
-    const downloadUrl = item.Id ? apiClient.getItemDownloadUrl(item.Id) : item.Url || item.Path;
+    const downloadUrl = item.Id ? apiClient.getUrl(`Items/${item.Id}/Download`, {
+        ApiKey: apiClient.accessToken()
+    }) : item.Url || item.Path;
     const metadata = createMetadata(apiClient, item, format, extension);
     const unsupportedReason = format === 'unsupported' ?
         `PiggieTV Reader does not support ${extension ? `.${extension}` : 'this'} format yet.` :

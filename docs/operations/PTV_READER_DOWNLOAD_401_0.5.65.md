@@ -1,0 +1,24 @@
+# PTV Reader download 401: Atlas impact and release proof
+
+## Pre-change Atlas Impact Record (2026-10-06)
+
+- **Scope:** Repair PTV Reader's authenticated Jellyfin Book download URL for PDF, EPUB, comic, and manga files on VM115. Keep the existing policy-protected `/Items/{id}/Download` endpoint.
+- **Baseline:** `Jellyfin-Web-PiggieTV`, isolated branch `fix/ptv-reader-download-0.5.65`, HEAD `255bfc55969e305a9c7644ed28665903698c79b8` (the deployed Web 0.5.64 source); `ptv-version.json` 0.5.64; no dirty paths before this report. The original user checkout is an older 0.5.57 tree with pre-existing changes and is not a deployment source.
+- **Stock authoritative owner and contract:** Jellyfin Server 10.11.11 `AuthorizationContext` accepts canonical query `ApiKey` regardless of `EnableLegacyAuthorization`; lowercase `api_key` requires legacy authorization. It resolves the token as a user device token before a server API key. The Book download action remains under the `Download` permission. `VERIFIED_FROM_SOURCE` in Atlas chapters 04, 11, 24 and the pinned Server source.
+- **PTV owner and modification class:** `createJellyfinReaderSource` in `jellyfinBookProvider.ts` owns the Reader download URL; ReaderApp and its format engines consume that URL. PTV Reading is `STOCK_REPLACED` plus `NEW_PTV_SYSTEM` per chapter 20; this edit extends that existing owner.
+- **Affected map graph, routes, and risk:** `authenticationAndSession -> permissionsAndLibraryAccess`, `reading -> libraryAndItemProjection`; `/Items/{id}/Download`; `serverAuthorizationVsWebVisibility`. No new route, mutation, API capability, or owner.
+- **Identity, permission, security:** Use the current selected Server ApiClient and its current user device token. Keep Server `Download` permission and item visibility authoritative. Do not create a server API key, enable legacy auth, use `/File`, introduce a proxy, or log tokens. Production has legacy authorization disabled and the Piggie user's Downloads permission enabled. `VERIFIED_FROM_SOURCE` / `VERIFIED_BY_TEST`.
+- **DTO, mutation, readback, convergence:** No DTO projection or persistence change; no mutation/readback. Server item indexing and file availability remain independent of HTTP authentication.
+- **Cache, lifecycle, request, image, playback, configuration:** Same Reader URL consumer and one download request per open. No cache key, lifecycle, image, playback, session, Plugin, or persisted configuration owner changes.
+- **Downstream surfaces:** PDF, EPUB, CBZ/CBR reader loads; Books/Manga/Comics details and Reading cards. Music playback is a regression check because it shares the media storage change, not this URL owner.
+- **Pre-code characterization/security proof:** Live PDF and comic open returned 401; actual file byte reads as `jellyfin` succeeded; Server legacy authorization is false; user's Downloads permission is enabled; installed `jellyfin-apiclient` emits lowercase `api_key`; 0.5.64 Reader baseline has 51 passing tests.
+- **Post-code proof:** Focused provider and full Reader tests; TypeScript and targeted ESLint; version check; production build and provenance; exact deployed artifact/hash, service health, and physical PDF, EPUB, comic/manga opens. Recheck music and library paths. Preserve the prior Web tree for rollback.
+- **Conflicts or UNKNOWN:** No authority conflict. Physical format proof remains UNKNOWN until deployment; production rollout may expose independent format or file issues.
+- **Active deviations/backlog:** READ-01 and DIAG-01/02 remain separate; this URL correction does not change their owner, status, or order. Reader local progress cross-device convergence remains UNKNOWN and untouched.
+- **Atlas update:** Not required for the proposed diff. Chapters 04, 11, 20, 22–25 and `system-map.json` already express the Server policy boundary and PTV Reader owner; reconcile this decision against the actual diff before handoff.
+
+## Actual diff and verification
+
+The implementation changes only `jellyfinBookProvider.ts` and its focused test. The provider retains the same selected ApiClient, current user token, Book ID, and `/Items/{id}/Download` route; it changes the query name from the client helper's legacy `api_key` to canonical `ApiKey`. `ptv-version.json` advances exactly once from 0.5.64 to 0.5.65. No Plugin code or Atlas ownership/dependency/security boundary changes. **Atlas update: not required.** The active known deviations and stabilization backlog remain unchanged.
+
+On the clean 0.5.64 baseline, 51 Reader tests passed. The new provider test failed against the old URL as expected, then all 52 Reader tests passed after the fix. The full PTV suite passed (381 files / 3444 tests). TypeScript, targeted ESLint, the repository PTV lint baseline (no finding increase), secret scan, `git diff --check`, and `npm run version:ptv:check` passed. Production build, artifact hashes, and physical checks are recorded separately during rollout.
