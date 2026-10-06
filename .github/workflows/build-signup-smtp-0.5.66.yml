@@ -1,0 +1,139 @@
+name: Temporary PTV Web 0.5.66 SMTP artifact
+
+on:
+  push:
+    branches:
+      - codex/build-signup-smtp-0.5.66
+
+permissions:
+  contents: read
+
+jobs:
+  build-approved-source:
+    name: Build the approved release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    env:
+      PTV_APPROVED_SOURCE_COMMIT: d35a5641b6f9c7c76af80a76eaae2811d91ec6dc
+      PTV_APPROVED_SOURCE_TREE: 1938f5e2198fcc9820ad3cb9fdd10475b1f95ac1
+      PTV_EXPECTED_VERSION: '0.5.66'
+      PTV_BUILD_ID: ptv-web-0.5.66
+    steps:
+      - name: Checkout the fixed approved source commit
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          ref: d35a5641b6f9c7c76af80a76eaae2811d91ec6dc
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Verify source identity and record the build timestamp
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PTV_APPROVED_SOURCE_COMMIT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$PTV_APPROVED_SOURCE_TREE"
+          test -z "$(git status --porcelain=v1 --untracked-files=normal)"
+          node -e 'if (require("./ptv-version.json").version !== process.env.PTV_EXPECTED_VERSION) process.exit(1)'
+          printf 'PTV_BUILD_DATE=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_ENV"
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit
+
+      - name: Validate the release version
+        run: npm run version:ptv:check
+
+      - name: Build the production frontend
+        run: |
+          set -euo pipefail
+          npm run build:production
+          npm run build:report
+          test -z "$(git status --porcelain=v1 --untracked-files=normal)"
+
+      - name: Package complete assets, provenance, and checksums
+        run: |
+          set -euo pipefail
+          test -s dist/index.html
+          test -s dist/runtime.bundle.js
+          test -s dist/main.jellyfin.bundle.js
+          test -s dist/serviceworker.js
+          test -z "$(find dist -type l -print -quit)"
+          test "$(node -p 'require("./scripts/ptv-build-provenance.cjs").resolvePtvCommitSha()')" = "$PTV_APPROVED_SOURCE_COMMIT"
+
+          package_root="$RUNNER_TEMP/ptv-web-0.5.66-smtp-package"
+          artifact_root="$GITHUB_WORKSPACE/artifacts"
+          mkdir -p "$package_root/metadata" "$artifact_root"
+          cp -a dist "$package_root/dist"
+
+          PTV_PACKAGE_ROOT="$package_root" node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { execFileSync } = require('node:child_process');
+          const git = args => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          const version = require('./ptv-version.json').version;
+          const metadata = {
+            schemaVersion: 1,
+            source: {
+              repository: process.env.GITHUB_REPOSITORY,
+              commit: git(['rev-parse', 'HEAD']),
+              tree: git(['rev-parse', 'HEAD^{tree}'])
+            },
+            build: {
+              ptvWebVersion: version,
+              jellyfinWebVersion: require('./package.json').version,
+              id: process.env.PTV_BUILD_ID,
+              mode: 'production',
+              date: process.env.PTV_BUILD_DATE,
+              nodeVersion: process.version,
+              npmVersion: execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim()
+            },
+            workflow: {
+              ref: process.env.GITHUB_REF,
+              workflowCommit: process.env.GITHUB_SHA,
+              runId: process.env.GITHUB_RUN_ID,
+              runAttempt: process.env.GITHUB_RUN_ATTEMPT
+            }
+          };
+          if (metadata.source.commit !== process.env.PTV_APPROVED_SOURCE_COMMIT
+              || metadata.source.tree !== process.env.PTV_APPROVED_SOURCE_TREE
+              || version !== process.env.PTV_EXPECTED_VERSION
+              || !metadata.build.date) process.exit(1);
+          fs.writeFileSync(path.join(process.env.PTV_PACKAGE_ROOT, 'metadata', 'build.json'),
+            JSON.stringify(metadata, null, 2) + '\n', 'utf8');
+          NODE
+
+          (
+            cd "$package_root"
+            find dist metadata -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+            sha256sum --check SHA256SUMS.txt
+          )
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+            -czf "$artifact_root/ptv-web-0.5.66-smtp.tar.gz" \
+            -C "$package_root" dist metadata SHA256SUMS.txt
+          tar -tzf "$artifact_root/ptv-web-0.5.66-smtp.tar.gz" > /dev/null
+          cp "$package_root/metadata/build.json" "$artifact_root/build-metadata.json"
+          cp "$package_root/SHA256SUMS.txt" "$artifact_root/DIST_SHA256SUMS.txt"
+          (
+            cd "$artifact_root"
+            sha256sum ptv-web-0.5.66-smtp.tar.gz build-metadata.json DIST_SHA256SUMS.txt > SHA256SUMS.txt
+            sha256sum --check SHA256SUMS.txt
+          )
+
+      - name: Upload the temporary deployment artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ptv-web-0.5.66-smtp
+          path: ${{ github.workspace }}/artifacts/
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
