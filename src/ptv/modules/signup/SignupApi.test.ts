@@ -20,8 +20,46 @@ import {
     isAuthoritativeSignupAdminSettings,
     normalizeSignupAdminSettings,
     saveSignupSettings,
+    type PtvSignupAdminSettingsResponse,
     type PtvSignupAdminSettingsPatch
 } from './SignupApi';
+
+function createCompleteSignupSettings(): PtvSignupAdminSettingsResponse {
+    return {
+        defaultEnabledFolderIds: [],
+        defaultPolicyPresetId: 'standard',
+        emailSettings: {
+            enabled: false,
+            fromAddress: '',
+            fromName: 'PiggieTV',
+            logoUrl: '/web/assets/logo/banner-light.png',
+            passwordConfigured: false,
+            publicBaseUrl: '',
+            resetCodeMinutes: 15,
+            resetSubject: 'Your PiggieTV password reset code',
+            smtpHost: '',
+            smtpPort: 587,
+            useSsl: true,
+            verificationLinkMinutes: 1440,
+            verificationSubject: 'Verify your PiggieTV email'
+        },
+        enabled: true,
+        ok: true,
+        pendingResetCount: 0,
+        pendingVerificationCount: 0,
+        policyPresets: [{
+            allowDownloads: false,
+            allowLiveTv: false,
+            allowRemoteControl: false,
+            allowTranscoding: true,
+            enableAllFolders: true,
+            enabledFolderIds: [],
+            id: 'standard',
+            name: 'Standard User'
+        }],
+        users: []
+    };
+}
 
 describe('signup administration settings normalization', () => {
     beforeEach(() => vi.clearAllMocks());
@@ -86,6 +124,46 @@ describe('signup administration settings normalization', () => {
             settings: { enabled: true }
         });
         expect(signupApiMocks.getSignupSettings).toHaveBeenCalledWith({ bypassCache: true });
+    });
+
+    it('allows an authoritative snapshot when the plugin omits an unset SMTP username', async () => {
+        signupApiMocks.getSignupSettings.mockResolvedValue(createCompleteSignupSettings());
+
+        await expect(getSignupSettingsSnapshot({ bypassCache: true })).resolves.toMatchObject({
+            authoritative: true,
+            settings: { emailSettings: { username: '' } }
+        });
+    });
+
+    it.each([ null, '', 'admin@piggietv.com' ])('accepts an optional SMTP username of %s', username => {
+        const response = createCompleteSignupSettings();
+        response.emailSettings.username = username;
+
+        expect(isAuthoritativeSignupAdminSettings(response)).toBe(true);
+    });
+
+    it.each([
+        { label: 'number', username: 42 },
+        { label: 'boolean', username: false },
+        { label: 'object', username: {} },
+        { label: 'array', username: [] }
+    ])('rejects a $label SMTP username', async ({ username }) => {
+        const response = createCompleteSignupSettings();
+        signupApiMocks.getSignupSettings.mockResolvedValue({
+            ...response,
+            emailSettings: { ...response.emailSettings, username }
+        });
+
+        await expect(getSignupSettingsSnapshot()).resolves.toMatchObject({ authoritative: false });
+    });
+
+    it('keeps settings with a missing required SMTP field unsafe for administrator writes', async () => {
+        const response = createCompleteSignupSettings();
+        const emailSettings: Partial<PtvSignupAdminSettingsResponse['emailSettings']> = { ...response.emailSettings };
+        delete emailSettings.smtpHost;
+        signupApiMocks.getSignupSettings.mockResolvedValue({ ...response, emailSettings });
+
+        await expect(getSignupSettingsSnapshot()).resolves.toMatchObject({ authoritative: false });
     });
 
     it('never returns raw backend error text to the UI', () => {
