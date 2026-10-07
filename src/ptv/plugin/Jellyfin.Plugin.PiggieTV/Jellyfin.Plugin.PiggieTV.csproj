@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>Jellyfin.Plugin.PiggieTV</AssemblyName>
     <RootNamespace>Jellyfin.Plugin.PiggieTV</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <PtvPluginVersion>0.5.19.0</PtvPluginVersion>
-    <PtvJellyfinPackageVersion>10.11.11</PtvJellyfinPackageVersion>
+    <PtvPluginVersion>0.5.20.0</PtvPluginVersion>
+    <PtvJellyfinPackageVersion>12.2.0</PtvJellyfinPackageVersion>
     <Version>$(PtvPluginVersion)</Version>
     <AssemblyVersion>$(PtvPluginVersion)</AssemblyVersion>
     <FileVersion>$(PtvPluginVersion)</FileVersion>
@@ -17,8 +17,8 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Jellyfin.Controller" Version="$(PtvJellyfinPackageVersion)" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Model" Version="$(PtvJellyfinPackageVersion)" ExcludeAssets="runtime" />
-    <!-- Jellyfin 10.11.11 supplies the matching managed/native SQLite runtime. -->
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.11" ExcludeAssets="runtime" />
+    <!-- Jellyfin 12.2 supplies the matching managed/native SQLite runtime. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.11" ExcludeAssets="runtime" />
     <None Include="meta.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
   </ItemGroup>
 

@@ -14,6 +14,7 @@ This index is the fast entry point for Jellyfin Server/Web 10.11.11 and the curr
 | Review active deviations and stabilization order | [system-map.json](system-map.json) → `activeKnownDeviations` / `stabilizationBacklog` | Follow each entry's evidence and closure criteria; do not infer closure from a local implementation alone |
 | Query the atlas mechanically | [system-map.json](system-map.json) | Use node references, `chapterRefs`, and each entry's `evidence` array |
 | Evaluate a newer Jellyfin implementation | [26 — Post-10.11.11 differences](26-upstream-post-10.11.11-differences.md) | Keep every such finding labeled `UPSTREAM_NEWER_THAN_10.11.11` |
+| Review the Jellyfin 12.2 PTV Plugin candidate and staged rollout | [27 — Jellyfin 12.2 compatibility](27-jellyfin-12-2-compatibility.md) | Distinguish build/test evidence from live .125 and VM115 acceptance |
 
 ## Stock system chapters
 
@@ -52,6 +53,7 @@ This index is the fast entry point for Jellyfin Server/Web 10.11.11 and the curr
 | [24 — Stock API contract reference](24-stock-api-contract-reference.md) | Authentication envelope, endpoint families, payload/status/completion semantics |
 | [25 — Known Jellyfin non-guarantees](25-known-jellyfin-non-guarantees.md) | Negative contract: behavior callers must not assume |
 | [26 — Post-10.11.11 differences](26-upstream-post-10.11.11-differences.md) | Selected newer-upstream changes, isolated from the 10.11.11 baseline |
+| [27 — Jellyfin 12.2 compatibility](27-jellyfin-12-2-compatibility.md) | Staged .125-to-VM115 Server upgrade, Plugin target, and evidence gates |
 
 ## Concept locator
 

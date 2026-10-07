@@ -140,6 +140,8 @@ Use a dedicated OpenAI project/key with restricted permissions and spend alerts 
 
 Build:
 
+The current Plugin release requires the .NET 10 SDK and targets Jellyfin Server 12.2 or newer (`targetAbi` is a minimum, not proof of runtime compatibility with later releases). A 12.0 server must keep its prior Plugin until the Server and Plugin can be upgraded together.
+
 ```powershell
 dotnet publish src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj --configuration Release --output src/ptv/plugin/bin
 ```
