@@ -6,6 +6,7 @@ import { TICKS_PER_MINUTE, TICKS_PER_SECOND } from 'constants/time';
 import { EventType } from 'constants/eventType';
 
 import { playbackManager } from '../../../components/playback/playbackmanager';
+import { matchesFetchedQueuedItem, sameQueuedItem } from '../../../components/playback/queueItemIdentity';
 import browser from '../../../scripts/browser';
 import dom from '../../../utils/dom';
 import inputManager from '../../../scripts/inputManager';
@@ -670,6 +671,7 @@ export default function (view) {
     }
 
     function resetUpNextDialog() {
+        upNextGeneration += 1;
         comingUpNextDisplayed = false;
         const dlg = currentUpNextDialog;
 
@@ -677,6 +679,7 @@ export default function (view) {
             dlg.destroy();
             currentUpNextDialog = null;
         }
+        onUpNextHidden();
     }
 
     function onPlaybackStopped(e, state) {
@@ -823,16 +826,45 @@ export default function (view) {
         }
     }
 
+    let upNextGeneration = 0;
+
     function showComingUpNext(player) {
+        if (currentVisibleMenu || currentUpNextDialog) return;
+        const generation = ++upNextGeneration;
+        const playingItem = playbackManager.currentItem(player);
+        const playingIdentity = playingItem && {
+            Id: playingItem.Id,
+            ServerId: playingItem.ServerId,
+            PlaylistItemId: playingItem.PlaylistItemId
+        };
+        const queuedItem = player?.isLocalPlayer && !player.getPlaylist ? playbackManager.getNextItem()?.item : null;
+        const queuedIdentity = queuedItem && {
+            Id: queuedItem.Id,
+            ServerId: queuedItem.ServerId,
+            PlaylistItemId: queuedItem.PlaylistItemId
+        };
         import('../../../components/upnextdialog/upnextdialog').then(({ default: UpNextDialog }) => {
-            if (!(currentVisibleMenu || currentUpNextDialog)) {
+            if (generation === upNextGeneration && player === currentPlayer && !(currentVisibleMenu || currentUpNextDialog)) {
                 currentVisibleMenu = 'upnext';
                 comingUpNextDisplayed = true;
                 playbackManager.nextItem(player).then(function (nextItem) {
+                    if (generation !== upNextGeneration) return;
+                    const playingStillCurrent = player === currentPlayer && sameQueuedItem(playingIdentity, playbackManager.currentItem(player));
+                    const currentQueuedItem = queuedIdentity ? playbackManager.getNextItem()?.item : null;
+                    const queueChanged = queuedIdentity && !sameQueuedItem(queuedIdentity, currentQueuedItem);
+                    if (!playingStillCurrent || !nextItem || queueChanged
+                        || queuedIdentity && !matchesFetchedQueuedItem(queuedIdentity, nextItem)) {
+                        // A real replacement queue can be offered on the next progress update.
+                        // Keep contradictory fetches latched to avoid a retry storm.
+                        if (playingStillCurrent && queueChanged && currentQueuedItem?.Id) comingUpNextDisplayed = false;
+                        onUpNextHidden();
+                        return;
+                    }
                     currentUpNextDialog = new UpNextDialog({
                         parent: view.querySelector('.upNextContainer'),
                         player: player,
-                        nextItem: nextItem
+                        nextItem: nextItem,
+                        queuedItem: queuedIdentity
                     });
                     Events.on(currentUpNextDialog, 'hide', onUpNextHidden);
                 }, onUpNextHidden);
@@ -1366,6 +1398,8 @@ export default function (view) {
 
     function onKeyDown(e) {
         clickedElement = e.target;
+
+        if (e.target.closest?.('.upNextContainer:not(.hide):not(.upNextDialog-hidden)')) return;
 
         if (shouldYieldVideoKeyToPtvFocusOwner(e.defaultPrevented)) return;
 
@@ -2010,7 +2044,9 @@ export default function (view) {
     let lastPointerDown = 0;
     /* eslint-disable-next-line compat/compat */
     dom.addEventListener(view, window.PointerEvent ? 'pointerdown' : 'click', function (e) {
-        if (dom.parentWithClass(e.target, ['videoOsdBottom', 'upNextContainer'])) {
+        if (dom.parentWithClass(e.target, ['upNextContainer'])) return;
+
+        if (dom.parentWithClass(e.target, ['videoOsdBottom'])) {
             showOsd();
             return;
         }

@@ -220,6 +220,33 @@ describe('PTV shell logout control', () => {
         expect(runtimeMocks.registerShell).not.toHaveBeenCalled();
     });
 
+    it('publishes measured header clearance on mount and resize, then removes it on unmount', async () => {
+        let bottom = 126;
+        const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+            return { bottom } as DOMRect;
+        });
+
+        try {
+            flushSync(() => root.render(<PTVShell headerOnly><div /></PTVShell>));
+            expect(document.documentElement.style.getPropertyValue('--ptv-shell-header-clearance')).toBe('126px');
+
+            bottom = 152;
+            window.dispatchEvent(new Event('resize'));
+            expect(document.documentElement.style.getPropertyValue('--ptv-shell-header-clearance')).toBe('152px');
+
+            bottom = 108;
+            document.documentElement.classList.add('ptv-route-detail-page');
+            await vi.waitFor(() => expect(document.documentElement.style.getPropertyValue('--ptv-shell-header-clearance')).toBe('108px'));
+            document.documentElement.classList.remove('ptv-route-detail-page');
+
+            flushSync(() => root.unmount());
+            expect(document.documentElement.style.getPropertyValue('--ptv-shell-header-clearance')).toBe('');
+            root = createRoot(container);
+        } finally {
+            measure.mockRestore();
+        }
+    });
+
     it('marks the full-screen Music route so physical TV navigation can stay pinned', () => {
         window.location.hash = '#/music/player';
 

@@ -22,8 +22,12 @@ export type PtvCinematicRelationship =
     | 'explicit-collection'
     | 'explicit-provider'
     | 'explicit-tag'
+    | 'metadata-connection'
     | 'shared-creator'
     | 'shared-genre'
+    | 'shared-label'
+    | 'shared-network'
+    | 'shared-publisher'
     | 'shared-series'
     | 'shared-studio';
 
@@ -335,12 +339,17 @@ export function getPtvCinematicMediaFamily(item: PtvRecord): PtvCinematicMediaFa
     return 'other';
 }
 
-function getCollectionKeys(item: PtvRecord) {
+function getFranchiseKeys(item: PtvRecord) {
+    return [
+        getText(item, 'Franchise', 'franchise'),
+        getText(item, 'PtvFranchiseKey', 'ptvFranchiseKey')
+    ].filter(Boolean).map(value => `name:${normalizeKey(value)}`);
+}
+
+function getExplicitCollectionKeys(item: PtvRecord) {
     const named = [
         getText(item, 'CollectionName', 'collectionName'),
-        getText(item, 'Franchise', 'franchise'),
-        getText(item, 'PtvCollectionKey', 'ptvCollectionKey'),
-        getText(item, 'PtvFranchiseKey', 'ptvFranchiseKey')
+        getText(item, 'PtvCollectionKey', 'ptvCollectionKey')
     ].filter(Boolean).map(value => `name:${normalizeKey(value)}`);
     const ids = ['BoxSetIds', 'CollectionIds', 'PtvCollectionIds'].flatMap(key => {
         const raw = item[key];
@@ -385,8 +394,16 @@ function getExplicitLinkIds(item: PtvRecord) {
     });
 }
 
+function sharesFranchise(seed: PtvRecord, candidate: PtvRecord) {
+    return intersect(getFranchiseKeys(seed), getFranchiseKeys(candidate)).length > 0;
+}
+
+function sharesNamedCollection(seed: PtvRecord, candidate: PtvRecord) {
+    return intersect(getExplicitCollectionKeys(seed), getExplicitCollectionKeys(candidate)).length > 0;
+}
+
 function sharesExplicitCollection(seed: PtvRecord, candidate: PtvRecord) {
-    return intersect(getCollectionKeys(seed), getCollectionKeys(candidate)).length > 0;
+    return sharesFranchise(seed, candidate) || sharesNamedCollection(seed, candidate);
 }
 
 function sharesSeries(seed: PtvRecord, candidate: PtvRecord) {
@@ -409,7 +426,19 @@ function getSharedPeople(seed: PtvRecord, candidate: PtvRecord, requireIds = fal
 }
 
 function sharesStudio(seed: PtvRecord, candidate: PtvRecord) {
-    return getSharedNamedValues(seed, candidate, 'Studios', 'Networks', 'Labels', 'Publishers');
+    return getSharedNamedValues(seed, candidate, 'Studios');
+}
+
+function sharesNetwork(seed: PtvRecord, candidate: PtvRecord) {
+    return getSharedNamedValues(seed, candidate, 'Networks');
+}
+
+function sharesLabel(seed: PtvRecord, candidate: PtvRecord) {
+    return getSharedNamedValues(seed, candidate, 'Labels');
+}
+
+function sharesPublisher(seed: PtvRecord, candidate: PtvRecord) {
+    return getSharedNamedValues(seed, candidate, 'Publishers');
 }
 
 function sharesGenre(seed: PtvRecord, candidate: PtvRecord) {
@@ -600,12 +629,16 @@ export function getPtvCinematicEvidenceChips(seed: PtvRecord, candidate: PtvReco
     };
 
     add(getDirectRelationship(seed, candidate));
-    if (sharesExplicitCollection(seed, candidate)) add('Same Collection');
+    if (sharesFranchise(seed, candidate)) add('Same Franchise');
+    if (sharesNamedCollection(seed, candidate)) add('Same Collection');
     if (sharesSeries(seed, candidate)) add('Part of This Series');
     getSharedPeople(seed, candidate, crossFamily).forEach(person => {
         add(getPersonChip(person));
     });
     if (!crossFamily && sharesStudio(seed, candidate).length) add('Same Studio');
+    if (!crossFamily && sharesNetwork(seed, candidate).length) add('Same Network');
+    if (!crossFamily && sharesLabel(seed, candidate).length) add('Same Label');
+    if (!crossFamily && sharesPublisher(seed, candidate).length) add('Same Publisher');
     if (!crossFamily && sharesTag(seed, candidate).length) add('Shared Tag');
     if (!crossFamily && sharesGenre(seed, candidate).length) add('Same Genre');
 
@@ -801,8 +834,6 @@ function getEntityCards(seed: PtvRecord, scores: readonly PtvRecommendationScore
     return entities.flatMap(entity => {
         if (!entity.id || seen.has(entity.id) || usedItemIds.has(entity.id)) return [];
 
-        seen.add(entity.id);
-        usedItemIds.add(entity.id);
         const relatedCount = scores.filter(score => {
             const candidate = score.item as PtvRecord;
 
@@ -815,6 +846,14 @@ function getEntityCards(seed: PtvRecord, scores: readonly PtvRecommendationScore
             return getNamedValues(candidate, `${entity.item.Type}s`, 'Studios', 'Networks', 'Collections', 'Franchises')
                 .includes(normalizeKey(entity.name));
         }).length;
+        const family = getPtvCinematicMediaFamily(seed);
+
+        if (entity.item.Type === 'Person' && (family === 'video' || family === 'series') && !relatedCount) {
+            return [];
+        }
+
+        seen.add(entity.id);
+        usedItemIds.add(entity.id);
         const countLabel = getConnectedTitleCountLabel(relatedCount);
 
         return [{
@@ -895,13 +934,32 @@ function getFamilyCopy(family: PtvCinematicMediaFamily) {
         other: { kicker: 'Explore this world', summary: 'Continue through explicit library relationships and recommendations.' },
         reading: { kicker: 'Read beyond the page', summary: 'Follow series order, authors, publishers, and explicit adaptations.' },
         series: { kicker: 'Stay in the story', summary: 'Move through the series, its creators, network, and connected media.' },
-        video: { kicker: 'Explore this universe', summary: 'Continue through explicit collections, filmmakers, studios, and connected media.' }
+        video: { kicker: 'Explore related titles', summary: 'Continue through explicit collections, filmmakers, studios, and connected media.' }
     } as const)[family];
+}
+
+function getGatewayKicker(item: PtvRecord, family: PtvCinematicMediaFamily, shelves: readonly PtvCinematicShelf[]) {
+    if (family !== 'video' && family !== 'series') return getFamilyCopy(family).kicker;
+    const timelineItems = shelves
+        .filter(shelf => shelf.presentation === 'timeline' && shelf.relationship === 'explicit-collection')
+        .flatMap(shelf => shelf.items.map(card => card.item as PtvRecord));
+
+    if (timelineItems.length && getText(item, 'Franchise', 'franchise') && timelineItems.every(candidate => (
+        sharesFranchise(item, candidate)
+    ))) return 'Explore this franchise';
+    if (timelineItems.length && getText(item, 'CollectionName', 'collectionName') && timelineItems.every(candidate => (
+        sharesNamedCollection(item, candidate)
+    ))) return 'Explore this collection';
+    if (family === 'series' && (getText(item, 'SeriesName', 'seriesName') || getText(item, 'Type', 'type') === 'Series')) {
+        return 'Explore this series';
+    }
+
+    return getFamilyCopy(family).kicker;
 }
 
 function getGatewayActionLabel(shelf: PtvCinematicShelf) {
     if (shelf.presentation === 'timeline') return shelf.orderLabel;
-    if (shelf.presentation === 'entities') return 'Explore people and places';
+    if (shelf.presentation === 'entities') return 'Explore connected sources';
 
     return 'Explore connections';
 }
@@ -971,6 +1029,9 @@ function hasExplicitConnection(seed: PtvRecord, candidate: PtvRecord) {
         || sharesArtist(seed, candidate)
         || getSharedPeople(seed, candidate).length
         || sharesStudio(seed, candidate).length
+        || sharesNetwork(seed, candidate).length
+        || sharesLabel(seed, candidate).length
+        || sharesPublisher(seed, candidate).length
         || sharesTag(seed, candidate).length
         || sharesGenre(seed, candidate).length
     );
@@ -979,7 +1040,32 @@ function hasExplicitConnection(seed: PtvRecord, candidate: PtvRecord) {
 function getExplicitShelfRelationship(seed: PtvRecord, scores: readonly PtvRecommendationScore[]): PtvCinematicRelationship {
     const first = scores[0]?.item as PtvRecord | undefined;
 
-    return first && getSharedPeople(seed, first).length ? 'shared-creator' : 'shared-studio';
+    if (!first) return 'metadata-connection';
+    if (sharesExplicitCollection(seed, first)) return 'explicit-collection';
+    if (sharesSeries(seed, first)) return 'shared-series';
+    if (getSharedPeople(seed, first).length || sharesArtist(seed, first)) return 'shared-creator';
+    if (sharesStudio(seed, first).length) return 'shared-studio';
+    if (sharesNetwork(seed, first).length) return 'shared-network';
+    if (sharesLabel(seed, first).length) return 'shared-label';
+    if (sharesPublisher(seed, first).length) return 'shared-publisher';
+    if (sharesTag(seed, first).length) return 'explicit-tag';
+    if (sharesGenre(seed, first).length) return 'shared-genre';
+
+    return 'metadata-connection';
+}
+
+function getEntityShelfRelationship(cards: readonly PtvCinematicCard[]): PtvCinematicRelationship {
+    const relationships = new Set(cards.map(card => {
+        if (card.entityType === 'Person' || card.entityType === 'Artist') return 'shared-creator';
+        if (card.entityType === 'Studio') return 'shared-studio';
+        if (card.entityType === 'Network') return 'shared-network';
+        if (card.entityType === 'Genre') return 'shared-genre';
+        if (card.entityType === 'Collection' || card.entityType === 'Franchise') return 'explicit-collection';
+
+        return 'metadata-connection';
+    }));
+
+    return relationships.size === 1 ? [...relationships][0] as PtvCinematicRelationship : 'metadata-connection';
 }
 
 function getExplicitShelfTitle(family: PtvCinematicMediaFamily) {
@@ -1028,9 +1114,14 @@ export function buildPtvCinematicDetailsModel(
 
     const directEntityCards = getEntityCards(item, scores, usedItemIds);
     const usedEntityNames = new Set(directEntityCards.map(card => normalizeKey(card.title)));
+    const peopleAlreadyInCast = family === 'video' || family === 'series' ?
+        new Set(getPeople(item).map(person => normalizeKey(person.name))) :
+        new Set<string>();
     const entityCards = [
         ...directEntityCards,
-        ...getMetadataEntityCards(discoveryLinks, usedItemIds, usedEntityNames)
+        ...getMetadataEntityCards(discoveryLinks.filter(link => (
+            link.kind !== 'creator' || !peopleAlreadyInCast.has(normalizeKey(link.query))
+        )), usedItemIds, usedEntityNames)
     ].slice(0, ENTITY_CARD_LIMIT);
 
     pushShelf(createAuthoritativeRelationshipShelf(authoritativeRelationships, usedItemIds, item));
@@ -1062,13 +1153,13 @@ export function buildPtvCinematicDetailsModel(
 
     if (entityCards.length) {
         pushShelf({
-            description: 'Open authoritative people, studio, network, collection, and franchise destinations.',
+            description: 'Open linked people, organizations, collections, and genres to explore connected titles.',
             id: 'universe-entities',
             items: entityCards,
             orderLabel: 'Explicit metadata',
             presentation: 'entities',
-            relationship: 'shared-creator',
-            title: 'People and places'
+            relationship: getEntityShelfRelationship(entityCards),
+            title: 'Explore connected sources'
         });
     }
 
@@ -1093,7 +1184,7 @@ export function buildPtvCinematicDetailsModel(
         facts: getFacts(item),
         family,
         gateway: createGateway(item, family, shelves),
-        kicker: copy.kicker,
+        kicker: getGatewayKicker(item, family, shelves),
         shelves,
         summary: copy.summary,
         title: getText(item, 'Name', 'name') || 'this title'

@@ -18,9 +18,8 @@
     --ptv-shell-overlay-motion-duration: var(--ptv-motion-medium);
     --ptv-shell-overlay-motion-ease: var(--ptv-motion-ease-emphasized);
     --ptv-content-edge: var(--ptv-layout-content-edge);
-    --ptv-shell-header-top: var(--ptv-shell-header-safe-y, 34px);
-
-    --ptv-utility-safe-top: calc(var(--ptv-shell-header-top, 34px) + var(--ptv-shell-header-clearance-height, var(--ptv-shell-header-height, 68px)) + 0.75rem);
+    --ptv-shell-header-top: calc(var(--ptv-shell-header-safe-y, 34px) + env(safe-area-inset-top));
+    --ptv-utility-safe-top: calc(var(--ptv-shell-header-clearance, 102px) + 0.75rem);
 
     min-height: 100vh;
     color: var(--ptv-color-text-primary);
@@ -28,18 +27,12 @@
 
     @media (max-width: 64rem) {
         --ptv-content-edge: var(--ptv-layout-content-edge-tablet);
-        --ptv-shell-header-top: 20px;
+        --ptv-shell-header-top: calc(20px + env(safe-area-inset-top));
     }
 
     @media (max-width: 37.5rem) {
         --ptv-content-edge: var(--ptv-layout-content-edge-phone);
-        --ptv-shell-header-top: 16px;
-    }
-}
-
-@media (min-width: 45.0625rem) and (max-width: 77.5rem) {
-    html:not(.ptv-render-tv) .ptv-app-shell {
-        --ptv-shell-header-clearance-height: 126px;
+        --ptv-shell-header-top: calc(16px + env(safe-area-inset-top));
     }
 }
 
@@ -75,6 +68,7 @@
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+    scroll-padding-top: calc(var(--ptv-shell-header-clearance, 102px) + 0.75rem);
 }
 
 .ptv-playing .ptv-app-shell .mainAnimatedPage:not(#videoOsdPage):not(.videoOsdPage) {

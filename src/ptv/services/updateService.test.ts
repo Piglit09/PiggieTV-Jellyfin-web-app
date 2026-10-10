@@ -90,6 +90,7 @@ function createFixture(options: {
     getActivityReason?: () => string;
     initialStorage?: Record<string, string>;
     registrationError?: Error;
+    storageFailure?: boolean;
     registration?: {
         active?: FixtureWorker | null;
         installing?: FixtureWorker | null;
@@ -123,9 +124,15 @@ function createFixture(options: {
         reload,
         serviceWorker,
         sessionStorage: {
-            getItem: key => storage.get(key) || null,
+            getItem: key => {
+                if (options.storageFailure) throw new Error('Storage unavailable');
+                return storage.get(key) || null;
+            },
             removeItem: key => { storage.delete(key); },
-            setItem: (key, value) => { storage.set(key, value); }
+            setItem: (key, value) => {
+                if (options.storageFailure) throw new Error('Storage unavailable');
+                storage.set(key, value);
+            }
         }
     });
 
@@ -353,6 +360,7 @@ describe('PiggieTV update service', () => {
         await settle();
         expect(fixture.service.getSnapshot().state).toBe('available');
         expect(fixture.service.applyWhenSafe()).toBe(true);
+        fixture.serviceWorker.controller = newerWorker;
         await vi.advanceTimersByTimeAsync(250);
         expect(fixture.reload).toHaveBeenCalledOnce();
         expect(fixture.storage.get('ptv:update:reloading')).toBe(JSON.stringify([
@@ -398,6 +406,7 @@ describe('PiggieTV update service', () => {
 
         expect(fixture.service.getSnapshot().state).toBe('available');
         expect(fixture.service.applyWhenSafe()).toBe(true);
+        fixture.serviceWorker.controller = newerWorker;
         await vi.advanceTimersByTimeAsync(250);
         expect(fixture.reload).toHaveBeenCalledOnce();
         expect(fixture.storage.get('ptv:update:reloading')).toBe(JSON.stringify([
@@ -427,6 +436,7 @@ describe('PiggieTV update service', () => {
         await starting;
         expect(fixture.service.getSnapshot().state).toBe('available');
         expect(fixture.service.applyWhenSafe()).toBe(true);
+        fixture.serviceWorker.controller = newerWorker;
         await vi.advanceTimersByTimeAsync(250);
         expect(fixture.reload).toHaveBeenCalledOnce();
         expect(fixture.storage.get('ptv:update:reloading')).toBe(JSON.stringify([
@@ -480,42 +490,108 @@ describe('PiggieTV update service', () => {
         expect(fixture.reload).toHaveBeenCalledOnce();
     });
 
-    it('bounds a failed reload to one attempt for the verified target generation', async () => {
+    it('reports a failed two-generation reload and allows an explicit retry', async () => {
         const fixture = createFixture({ activationTimeoutMs: 250 });
         await fixture.service.start();
         fixture.service.applyWhenSafe();
+        fixture.serviceWorker.controller = fixture.worker;
         await vi.advanceTimersByTimeAsync(250);
-        const restarted = createFixture({ initialStorage: Object.fromEntries(fixture.storage) });
+        const restarted = createFixture({
+            controller: fixture.worker,
+            initialStorage: Object.fromEntries(fixture.storage),
+            registration: { active: fixture.worker, waiting: null },
+            worker: fixture.worker
+        });
         await restarted.service.start();
-        expect(restarted.service.getSnapshot().state).toBe('idle');
+        expect(restarted.service.getSnapshot()).toMatchObject({
+            error: expect.stringContaining('did not load'),
+            state: 'error'
+        });
         expect(restarted.service.applyWhenSafe()).toBe(false);
         expect(restarted.reload).not.toHaveBeenCalled();
+        expect(await restarted.service.retryFailedUpdate()).toBe(true);
+        expect(restarted.reload).toHaveBeenCalledOnce();
     });
 
-    it('falls back once when a verified waiting worker rejects activation', async () => {
+    it('keeps a failed-reload notice dismissed for this session across reconciliation and page reload', async () => {
+        const fixture = createFixture({ activationTimeoutMs: 250 });
+        await fixture.service.start();
+        fixture.service.applyWhenSafe();
+        fixture.serviceWorker.controller = fixture.worker;
+        await vi.advanceTimersByTimeAsync(250);
+
+        const oldPage = createFixture({
+            controller: fixture.worker,
+            initialStorage: Object.fromEntries(fixture.storage),
+            registration: { active: fixture.worker, waiting: null },
+            worker: fixture.worker
+        });
+        await oldPage.service.start();
+        expect(oldPage.service.getSnapshot().state).toBe('error');
+
+        oldPage.service.dismiss();
+        expect(oldPage.service.getSnapshot().state).toBe('dismissed');
+        oldPage.worker.notifyStateChange();
+        await settle();
+        expect(oldPage.service.getSnapshot().state).toBe('dismissed');
+
+        const nextPage = createFixture({
+            controller: fixture.worker,
+            initialStorage: Object.fromEntries(oldPage.storage),
+            registration: { active: fixture.worker, waiting: null },
+            worker: fixture.worker
+        });
+        await nextPage.service.start();
+        expect(nextPage.service.getSnapshot().state).toBe('dismissed');
+        expect(nextPage.reload).not.toHaveBeenCalled();
+    });
+
+    it('reports activation failure without reloading the old page', async () => {
         const fixture = createFixture({ worker: createWorker({ skipWaitingError: new Error('activation failed') }) });
         await fixture.service.start();
         expect(fixture.service.applyWhenSafe()).toBe(true);
-        expect(fixture.service.getSnapshot().state).toBe('idle');
-        expect(fixture.reload).toHaveBeenCalledOnce();
+        expect(fixture.service.getSnapshot()).toMatchObject({ state: 'error', error: expect.stringContaining('activation failed') });
+        expect(fixture.reload).not.toHaveBeenCalled();
     });
 
-    it('reloads once if controllerchange does not arrive before the activation timeout', async () => {
+    it('reports a worker that never activates instead of reloading indefinitely', async () => {
         const fixture = createFixture({ activationTimeoutMs: 250 });
         await fixture.service.start();
         fixture.service.applyWhenSafe();
         await vi.advanceTimersByTimeAsync(249);
         expect(fixture.reload).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(1);
+        expect(fixture.service.getSnapshot()).toMatchObject({ state: 'error', error: expect.stringContaining('activate') });
+        expect(fixture.reload).not.toHaveBeenCalled();
+    });
+
+    it('reloads once when the later worker is active but controllerchange is missing', async () => {
+        const fixture = createFixture({ activationTimeoutMs: 250 });
+        await fixture.service.start();
+        fixture.service.applyWhenSafe();
+        fixture.registration.active = fixture.worker;
+        fixture.registration.waiting = null;
+        fixture.worker.state = 'activated';
+        await vi.advanceTimersByTimeAsync(250);
         expect(fixture.reload).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the current page with a recovery message when reload acknowledgement cannot persist', async () => {
+        const fixture = createFixture({ storageFailure: true });
+        await fixture.service.start();
+        fixture.service.applyWhenSafe();
         await fixture.activate();
-        expect(fixture.reload).toHaveBeenCalledOnce();
+        expect(fixture.service.getSnapshot()).toMatchObject({ state: 'error', error: expect.stringContaining('storage') });
+        expect(fixture.reload).not.toHaveBeenCalled();
     });
 
     it('falls back once for an uncontrolled page with a verified later build', async () => {
         const fixture = createFixture({ activationTimeoutMs: 250, controller: null });
         await fixture.service.start();
         fixture.service.applyWhenSafe();
+        fixture.registration.active = fixture.worker;
+        fixture.registration.waiting = null;
+        fixture.worker.state = 'activated';
         await vi.advanceTimersByTimeAsync(250);
         expect(fixture.reload).toHaveBeenCalledOnce();
     });

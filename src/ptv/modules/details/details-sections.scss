@@ -311,7 +311,7 @@
     background:
         linear-gradient(90deg, var(--ptv-cinematic-accent-soft), transparent 22%),
         linear-gradient(180deg, rgba(16, 10, 26, 0.48), rgba(7, 5, 13, 0.28));
-    scroll-margin-top: 110px;
+    scroll-margin-top: calc(var(--ptv-shell-header-clearance, 94px) + 16px);
 }
 
 .ptv-detail-page .ptv-cinematic-shelf__heading {

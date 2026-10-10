@@ -73,6 +73,84 @@ async function readHorizontalOverflow(page: Page) {
 }
 
 test.describe('PiggieTV shell surface hierarchy', () => {
+    test('uses Fold posture for shell overflow even when Android remains a mobile client', async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 840 });
+        await page.goto('/#/shows?view=latest');
+
+        const assertPosture = async (width: number, height: number, layoutClass: string, expectedOverflow: string) => {
+            await page.setViewportSize({ width, height });
+            const geometry = await page.evaluate(className => {
+                const root = document.documentElement;
+
+                root.classList.add('ptv-client-mobile');
+                root.classList.remove('ptv-layout-compact-mobile', 'ptv-layout-mobile', 'ptv-layout-tablet');
+                root.classList.add(className);
+                const nav = document.querySelector<HTMLElement>('.ptv-shell-nav-primary')!;
+                const bounds = nav.getBoundingClientRect();
+                const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+
+                return {
+                    navHit: Boolean(hit && nav.contains(hit)),
+                    overflowX: getComputedStyle(nav).overflowX,
+                    pageScrollWidth: root.scrollWidth,
+                    viewportWidth: root.clientWidth
+                };
+            }, layoutClass);
+
+            expect(geometry.overflowX).toBe(expectedOverflow);
+            expect(geometry.navHit).toBe(true);
+            expect(geometry.pageScrollWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+        };
+
+        await assertPosture(390, 840, 'ptv-layout-compact-mobile', 'auto');
+        await assertPosture(1080, 832, 'ptv-layout-tablet', 'visible');
+        await assertPosture(390, 840, 'ptv-layout-compact-mobile', 'auto');
+    });
+
+    test('keeps navigation hittable without page overflow through live viewport resizing', async ({ page }) => {
+        await page.goto('/#/shows?view=latest');
+
+        for (const width of [390, 600, 820, 1024, 1366, 390]) {
+            await page.setViewportSize({ width, height: 900 });
+            const header = page.locator('.ptv-shell-header');
+            await expect(header).toBeVisible();
+
+            const geometry = await page.evaluate(() => {
+                const headerElement = document.querySelector<HTMLElement>('.ptv-shell-header')!;
+                const nav = headerElement.querySelector<HTMLElement>('.ptv-shell-nav-primary')!;
+                const bounds = nav.getBoundingClientRect();
+                const target = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+
+                return {
+                    navHit: Boolean(target && nav.contains(target)),
+                    scrollWidth: document.documentElement.scrollWidth,
+                    viewportWidth: document.documentElement.clientWidth
+                };
+            });
+
+            expect(geometry.navHit).toBe(true);
+            expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+        }
+
+        await page.evaluate(() => window.scrollTo(0, 120));
+        const scrolled = await page.evaluate(() => {
+            const header = document.querySelector<HTMLElement>('.ptv-shell-header')!;
+            const nav = header.querySelector<HTMLElement>('.ptv-shell-nav-primary')!;
+            const bounds = nav.getBoundingClientRect();
+            const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+
+            return {
+                headerTop: header.getBoundingClientRect().top,
+                navHit: Boolean(hit && nav.contains(hit)),
+                scrollY: window.scrollY
+            };
+        });
+
+        expect(scrolled.scrollY).toBeGreaterThan(0);
+        expect(scrolled.headerTop).toBeGreaterThanOrEqual(0);
+        expect(scrolled.navHit).toBe(true);
+    });
+
     for (const route of [
         '#/home',
         '#/shows?view=latest',

@@ -8,6 +8,7 @@ import type {
 } from '../recommendations/types/recommendationTypes';
 import {
     buildPtvCinematicDetailsModel,
+    getPtvCinematicEvidenceChips,
     getPtvCinematicMediaFamily,
     type PtvAuthoritativeRelationshipCategory
 } from './detailsCinematicModel';
@@ -226,6 +227,106 @@ describe('cinematic Details model', () => {
 
         expect(explicitConnections?.relationship).toBe('shared-creator');
         expect(explicitConnections?.items[0].reason).toContain('Same Director');
+        expect(model.kicker).toBe('Explore related titles');
+        expect(model.gateway?.description).not.toContain('universe');
+        const entities = model.shelves.find(shelf => shelf.id === 'universe-entities');
+
+        expect(entities?.title).toBe('Explore connected sources');
+        expect(entities?.description).toContain('connected titles');
+        expect(entities?.items.find(card => card.itemId === 'known-person')?.reason).toBe('1 connected title');
+    });
+
+    it('names an explicit franchise, collection, or series without inferring one from shared metadata', () => {
+        const related = [score({ CollectionName: 'Avatar Collection', Franchise: 'Avatar', Genres: ['Animation'], Id: 'other', Name: 'Other', Type: 'Movie' })];
+
+        expect(buildPtvCinematicDetailsModel({
+            CollectionName: 'Avatar Collection', Franchise: 'Avatar', Id: 'franchise', Name: 'Avatar', Type: 'Movie'
+        }, data(related)).kicker).toBe('Explore this franchise');
+        expect(buildPtvCinematicDetailsModel({
+            CollectionName: 'Avatar Collection', Id: 'collection', Name: 'Avatar', Type: 'Movie'
+        }, data(related)).kicker).toBe('Explore this collection');
+        expect(buildPtvCinematicDetailsModel({
+            Id: 'series', Name: 'Avatar', SeriesName: 'Avatar', Type: 'Episode'
+        }, data([])).kicker).toBe('Explore this series');
+    });
+
+    it('uses a generic heading when a franchise item only has general metadata connections', () => {
+        const model = buildPtvCinematicDetailsModel({
+            Franchise: 'Avatar', Genres: ['Animation'], Id: 'seed', Name: 'Avatar', Type: 'Movie'
+        }, data([score({ Genres: ['Animation'], Id: 'other', Name: 'Unrelated', Type: 'Movie' })]));
+
+        expect(model.shelves.some(shelf => shelf.id === 'franchise-order')).toBe(false);
+        expect(model.kicker).toBe('Explore related titles');
+        expect(model.shelves.find(shelf => shelf.id === 'explicit-connections')?.relationship).toBe('shared-genre');
+    });
+
+    it('does not call a shared collection a franchise when franchise identity differs', () => {
+        const model = buildPtvCinematicDetailsModel({
+            CollectionName: 'Animation Collection', Franchise: 'Avatar', Id: 'seed', Name: 'Avatar', Type: 'Movie'
+        }, data([score({
+            CollectionName: 'Animation Collection', Franchise: 'Other', Id: 'other', Name: 'Other', Type: 'Movie'
+        })]));
+
+        expect(model.shelves.some(shelf => shelf.id === 'franchise-order')).toBe(true);
+        expect(model.kicker).toBe('Explore this collection');
+    });
+
+    it('does not call a franchise-only match a shared collection', () => {
+        const seed = { Franchise: 'Avatar', Id: 'seed', Name: 'Seed', Type: 'Movie' };
+        const candidate = { Franchise: 'Avatar', Id: 'other', Name: 'Other', Type: 'Movie' };
+        const chips = getPtvCinematicEvidenceChips(seed, candidate);
+
+        expect(chips).toContain('Same Franchise');
+        expect(chips).not.toContain('Same Collection');
+    });
+
+    it('does not call a mixed collection timeline a single franchise', () => {
+        const model = buildPtvCinematicDetailsModel({
+            CollectionName: 'Animation Collection', Franchise: 'Avatar', Id: 'seed', Name: 'Seed', Type: 'Movie'
+        }, data([
+            score({ CollectionName: 'Animation Collection', Franchise: 'Avatar', Id: 'avatar', Name: 'Avatar', Type: 'Movie' }),
+            score({ CollectionName: 'Animation Collection', Franchise: 'Other', Id: 'other', Name: 'Other', Type: 'Movie' })
+        ]));
+
+        expect(model.shelves.find(shelf => shelf.id === 'franchise-order')?.items).toHaveLength(2);
+        expect(model.kicker).toBe('Explore this collection');
+    });
+
+    it('uses a generic heading when no single identity covers a mixed timeline', () => {
+        const model = buildPtvCinematicDetailsModel({
+            CollectionName: 'Animation Collection', Franchise: 'Avatar', Id: 'seed', Name: 'Seed', Type: 'Movie'
+        }, data([
+            score({ Franchise: 'Avatar', Id: 'avatar', Name: 'Avatar', Type: 'Movie' }),
+            score({ CollectionName: 'Animation Collection', Id: 'collection', Name: 'Collection Film', Type: 'Movie' })
+        ]));
+
+        expect(model.shelves.find(shelf => shelf.id === 'franchise-order')?.items).toHaveLength(2);
+        expect(model.kicker).toBe('Explore related titles');
+    });
+
+    it.each([
+        ['Studios', 'Same Studio', 'shared-studio'],
+        ['Networks', 'Same Network', 'shared-network'],
+        ['Labels', 'Same Label', 'shared-label'],
+        ['Publishers', 'Same Publisher', 'shared-publisher']
+    ] as const)('labels a shared %s field by its actual kind', (field, expectedChip, expectedRelationship) => {
+        const seed = { Id: 'seed', Name: 'Seed', Type: 'Movie', [field]: ['Shared'] };
+        const candidate = { Id: 'candidate', Name: 'Candidate', Type: 'Movie', [field]: ['Shared'] };
+        const model = buildPtvCinematicDetailsModel(seed, data([score(candidate)]));
+        const shelf = model.shelves.find(entry => entry.id === 'explicit-connections');
+
+        expect(shelf?.relationship).toBe(expectedRelationship);
+        expect(shelf?.items[0].reasonChips).toContain(expectedChip);
+        expect(shelf?.items[0].reasonChips).not.toContain('Same Collection');
+    });
+
+    it('classifies a genre-only discovery entity as genre metadata', () => {
+        const model = buildPtvCinematicDetailsModel({ Id: 'seed', Name: 'Seed', Type: 'Movie' }, data([]), [{
+            ariaLabel: 'Open animation', href: '#/search?query=Animation', key: 'genre:animation',
+            kind: 'genre', label: 'Explore Animation', meta: 'Genre', query: 'Animation'
+        }]);
+
+        expect(model.shelves.find(shelf => shelf.id === 'universe-entities')?.relationship).toBe('shared-genre');
     });
 
     it('classifies supported media without changing route ownership', () => {

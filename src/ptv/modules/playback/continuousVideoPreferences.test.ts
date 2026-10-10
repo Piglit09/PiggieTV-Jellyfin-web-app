@@ -159,9 +159,10 @@ async function nextEpisode(
     transition: Transition,
     player: HtmlVideoPlayer,
     video: HTMLVideoElement,
-    adjustDuringTransition?: () => void
+    adjustDuringTransition?: () => void,
+    nextId = 'episode-2'
 ) {
-    const nextItem = episode('episode-2');
+    const nextItem = episode(nextId);
     const stopInfo = {
         player,
         state: fixture.manager.getPlayerState(),
@@ -170,22 +171,29 @@ async function nextEpisode(
     };
 
     if (transition === 'autoplay') {
-        const reportEnded = () => Events.trigger(fixture.manager, 'playbackstop', [stopInfo]);
+        let endedStops = 0;
+        const reportEnded = () => {
+            endedStops += 1;
+            Events.trigger(fixture.manager, 'playbackstop', [stopInfo]);
+        };
         Events.on(player, 'stopped', reportEnded);
         video.dispatchEvent(new Event('ended'));
         Events.off(player, 'stopped', reportEnded);
+        expect(endedStops).toBe(1);
     }
 
     // PlaybackManager stops without destruction when Next retains the player.
-    // Autoplay reaches this same change path after the native ended event.
-    await player.stop(false);
-    Events.trigger(fixture.manager, 'playbackstop', [stopInfo]);
+    // Native ended emits stopped by itself on the autoplay path.
+    if (transition !== 'autoplay') {
+        await player.stop(false);
+        Events.trigger(fixture.manager, 'playbackstop', [stopInfo]);
+    }
     adjustDuringTransition?.();
 
     const reusedVideo = await playVideo(player, nextItem);
     expect(reusedVideo).toBe(video);
-    expect(reusedVideo.getAttribute('src')).toBe('/offline/episode-2.mp4');
-    startPlayback(player, nextItem, 'session-2');
+    expect(reusedVideo.getAttribute('src')).toBe(`/offline/${nextId}.mp4`);
+    startPlayback(player, nextItem, `session-${nextId.split('-')[1]}`);
 
     return reusedVideo;
 }
@@ -230,6 +238,58 @@ describe('continuous HTML video preferences', () => {
         expect(player.isMuted()).toBe(true);
         expect(reusedVideo.muted).toBe(true);
         expect(Number(appSettings.get('volume'))).toBeCloseTo(0.042875, 12);
+    });
+
+    it('restores the custom control surface through five episode transitions', async () => {
+        window.location.hash = '#/video';
+        document.body.insertAdjacentHTML('beforeend', '<div id="videoOsdPage" class="videoOsdPage"><div class="videoOsdBottom"><div class="osdControls"></div></div></div>');
+        const { player, video } = await createVideoPlayer();
+        const control = document.querySelector('.videoOsdBottom') as HTMLElement;
+
+        for (let generation = 2; generation <= 6; generation++) {
+            const nextItem = episode(`episode-${generation}`);
+            const stopInfo = { player, state: fixture.manager.getPlayerState(), nextItem, nextMediaType: 'Video' };
+            await player.stop(false);
+            Events.trigger(fixture.manager, 'playbackstop', [stopInfo]);
+            const reusedVideo = await playVideo(player, nextItem);
+            expect(reusedVideo).toBe(video);
+            startPlayback(player, nextItem, `session-${generation}`);
+            expect(control.classList.contains('ptv-player-chrome')).toBe(true);
+            Events.trigger(document, 'showVideoOsd', [true]);
+            expect(control.classList.contains('ptv-player-chrome-forced-visible')).toBe(true);
+            expect(document.querySelector('.ptv-player-chrome-root')).not.toBeNull();
+        }
+        window.location.hash = '';
+    });
+
+    it('recovers the control surface through five native ended events and autoplay handoffs', async () => {
+        window.location.hash = '#/video';
+        document.body.insertAdjacentHTML('beforeend', '<div id="videoOsdPage" class="videoOsdPage"><div class="videoOsdBottom"><div class="osdControls"></div></div></div>');
+        const { player, video } = await createVideoPlayer();
+        const control = document.querySelector('.videoOsdBottom') as HTMLElement;
+        let activeVideo = video;
+
+        for (let generation = 2; generation <= 6; generation++) {
+            activeVideo = await nextEpisode('autoplay', player, activeVideo, undefined, `episode-${generation}`);
+            Events.trigger(document, 'showVideoOsd', [true]);
+            expect(control.classList.contains('ptv-player-chrome-forced-visible')).toBe(true);
+            expect(fixture.state.item?.Id).toBe(`episode-${generation}`);
+        }
+        window.location.hash = '';
+    });
+
+    it('uses native video controls while Safari owns video fullscreen', async () => {
+        window.location.hash = '#/video';
+        const { video } = await createVideoPlayer();
+        expect(video.controls).toBe(false);
+        video.dispatchEvent(new Event('webkitbeginfullscreen'));
+        expect(video.controls).toBe(true);
+        video.controls = false;
+        video.dispatchEvent(new Event('playing'));
+        expect(video.controls).toBe(true);
+        video.dispatchEvent(new Event('webkitendfullscreen'));
+        expect(video.controls).toBe(false);
+        window.location.hash = '';
     });
 
     it.each<Transition>(['manual Next', 'autoplay'])('keeps slider-zero silence through %s', async transition => {

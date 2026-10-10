@@ -57,6 +57,7 @@ import {
     PTV_SEARCH_DIRECT_GROUP_TIMEOUT_MS,
     PTV_SEARCH_HINT_PRIMARY_TIMEOUT_MS,
     PTV_SEARCH_MAX_CONCURRENCY,
+    retryPtvFailedSearchGroups,
     searchPtvWithRecovery
 } from './resilientSearchService';
 import type { PtvGroupedSearchHints } from './searchHintService';
@@ -204,6 +205,115 @@ beforeEach(() => {
 });
 
 describe('resilient web search', () => {
+    it('retries only failed groups with the original user and query scope', async () => {
+        getPtvSearchPrimaryOutcome.mockResolvedValue({
+            durationMs: 2,
+            items: [{ Id: 'episode-recovered', Name: 'Digimon', Type: 'Episode' }],
+            result: { Items: [] },
+            status: 'success'
+        });
+
+        const result = await retryPtvFailedSearchGroups({
+            ...options(['Movie', 'Episode']),
+            failedGroupIds: ['episodes', 'shows']
+        });
+
+        expect(result.groups.episodes).toEqual([expect.objectContaining({ Id: 'episode-recovered' })]);
+        expect(result.failedGroupStatuses).toEqual({});
+        expect(result.requestCount).toBe(1);
+        expect(searchPtvHints).not.toHaveBeenCalled();
+        expect(searchPtvItems).not.toHaveBeenCalled();
+        expect(searchPtvAuthoritativeSeries).not.toHaveBeenCalled();
+        expect(getPtvSearchPrimaryOutcome).toHaveBeenCalledWith(expect.objectContaining({
+            IncludeItemTypes: 'Episode',
+            SearchTerm: 'digimon'
+        }), expect.objectContaining({ serverId: 'server-1', userId: 'user-1' }));
+    });
+
+    it('classifies a failed retry without replacing successful groups', async () => {
+        getPtvSearchPrimaryOutcome.mockResolvedValue({
+            durationMs: 4500,
+            error: new PtvSearchPrimaryTimeoutError(4500),
+            items: [],
+            status: 'timeout'
+        });
+
+        const result = await retryPtvFailedSearchGroups({
+            ...options(['Movie', 'Episode']),
+            failedGroupIds: ['episodes']
+        });
+
+        expect(result.groups).toEqual({});
+        expect(result.failedGroupStatuses).toEqual({ episodes: 'timeout' });
+        expect(result.failedGroupReasons).toEqual({ episodes: 'client-group-deadline' });
+        expect(result.endpointPaths).toEqual({ episodes: ['Users/{user}/Items'] });
+    });
+
+    it('classifies a client batch deadline separately from a server response', async () => {
+        vi.useFakeTimers();
+
+        try {
+            getPtvSearchPrimaryOutcome.mockImplementation((_query, requestOptions) => waitForSearchAbort(requestOptions.signal));
+            const resultPromise = retryPtvFailedSearchGroups({
+                ...options(['Episode']),
+                failedGroupIds: ['episodes']
+            });
+
+            await vi.advanceTimersByTimeAsync(PTV_SEARCH_DIRECT_BATCH_TIMEOUT_MS + 1);
+            const result = await resultPromise;
+
+            expect(result.failedGroupStatuses).toEqual({ episodes: 'timeout' });
+            expect(result.failedGroupReasons).toEqual({ episodes: 'client-batch-deadline' });
+            expect(result.endpointPaths).toEqual({ episodes: ['Users/{user}/Items'] });
+            expect(result.requestCount).toBe(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('rejects a retry cancelled by a new query', async () => {
+        const controller = createPtvAbortController();
+
+        getPtvSearchPrimaryOutcome.mockImplementation((_query, requestOptions) => waitForSearchAbort(requestOptions.signal));
+        const resultPromise = retryPtvFailedSearchGroups({
+            ...options(['Episode']),
+            failedGroupIds: ['episodes'],
+            signal: controller.signal
+        });
+
+        controller.abort();
+        await expect(resultPromise).rejects.toMatchObject({ name: 'PtvSearchAbortedError' });
+    });
+
+    it('reports observed HTTP failure and the directory endpoints actually requested', async () => {
+        requestPtvJson.mockRejectedValue(Object.assign(new Error('Unavailable'), { status: 503 }));
+
+        const result = await retryPtvFailedSearchGroups({
+            ...options(['Genre', 'MusicGenre', 'Studio']),
+            failedGroupIds: ['genres', 'studios']
+        });
+
+        expect(result.failedGroupReasons).toEqual({ genres: 'http-503', studios: 'http-503' });
+        expect(result.endpointPaths).toEqual({
+            genres: ['Genres', 'MusicGenres'],
+            studios: ['Studios']
+        });
+    });
+
+    it('redacts user identity from observed Movie catalog endpoint diagnostics', async () => {
+        searchPtvItems.mockResolvedValue(movieSearchResult([], {
+            catalogRequestEndpoint: 'Users/user-1/Items',
+            catalogRequestsThisSearch: 1
+        }));
+
+        const result = await retryPtvFailedSearchGroups({
+            ...options(['Movie']),
+            failedGroupIds: ['movies']
+        });
+
+        expect(result.endpointPaths.movies).toEqual(['Users/{user}/Items', 'Users/{user}/Items']);
+    });
+
     it('keeps a successful broad hint search to one hint request plus Movie and Series enrichment', async () => {
         const groups = emptyGroups();
         let activeRequests = 0;
@@ -751,6 +861,11 @@ describe('resilient web search', () => {
 
         expect(result.primaryStatus).toBe('timeout');
         expect(result.failedGroupIds).toEqual(expect.arrayContaining(['movies', 'shows', 'episodes']));
+        expect(result.failedGroupStatuses).toEqual({
+            movies: 'timeout',
+            shows: 'timeout',
+            episodes: 'timeout'
+        });
         expect(result.groups.movies).toEqual([]);
         expect(result.groups.shows).toEqual([]);
         expect(result.groups.episodes).toEqual([]);

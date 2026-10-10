@@ -399,8 +399,8 @@ export function createPtvCinematicDetailsSkeleton(item: PtvCinematicDetailsItem)
     const section = createElement('section', 'ptv-cinematic-details ptv-cinematic-details--loading');
     const intro = createElement('div', 'ptv-cinematic-details__intro ptv-details-glass');
     const introCopy = createElement('div', 'ptv-cinematic-details__intro-copy');
-    const kicker = createElement('span', 'ptv-cinematic-details__kicker', 'Explore this universe');
-    const title = createElement('h2', 'ptv-cinematic-details__title', String(item.Name || 'Media universe'));
+    const kicker = createElement('span', 'ptv-cinematic-details__kicker', 'Explore related titles');
+    const title = createElement('h2', 'ptv-cinematic-details__title', String(item.Name || 'Related media'));
     const status = createElement('p', 'ptv-cinematic-details__status', 'Finding strong connections in your library...');
     const rail = createElement('div', 'ptv-cinematic-skeleton-rail');
 

@@ -12,6 +12,20 @@ test.describe('general runtime integration', () => {
         await expect(page.locator('#update-notice')).toHaveCount(0);
     });
 
+    test('shows recovery when a reload returns the old frontend generation', async ({ page }) => {
+        await page.goto('/?update=waiting#/home');
+        await page.getByRole('button', { name: 'Reload' }).click();
+        await expect(page.locator('html')).toHaveAttribute('data-reload-requested', 'true');
+
+        await page.reload();
+        await expect(page.locator('#update-notice')).toContainText('did not load');
+        await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+        await expect(page.locator('html')).not.toHaveAttribute('data-reload-requested', 'true');
+
+        await page.getByRole('button', { name: 'Try again' }).click();
+        await expect(page.locator('html')).toHaveAttribute('data-reload-requested', 'true');
+    });
+
     test('defers an update while playback is active', async ({ page }) => {
         await page.goto('/?update=waiting&active=1#/home');
         await page.getByRole('button', { name: 'Reload' }).click();

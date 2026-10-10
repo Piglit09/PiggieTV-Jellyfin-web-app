@@ -1069,6 +1069,44 @@ export default function PTVShell({
     }, [isSearchExpanded, openPanel, searchQuery]);
 
     useLayoutEffect(() => {
+        const header = headerRef.current;
+        if (!header) return undefined;
+
+        const publishClearance = () => {
+            document.documentElement.style.setProperty(
+                '--ptv-shell-header-clearance',
+                `${Math.max(0, header.getBoundingClientRect().bottom)}px`
+            );
+        };
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publishClearance);
+        const routeObserver = new MutationObserver(publishClearance);
+
+        publishClearance();
+        observer?.observe(header);
+        routeObserver.observe(document.documentElement, { attributeFilter: ['class'], attributes: true });
+        window.addEventListener('resize', publishClearance);
+        window.visualViewport?.addEventListener('resize', publishClearance);
+
+        return () => {
+            observer?.disconnect();
+            routeObserver.disconnect();
+            window.removeEventListener('resize', publishClearance);
+            window.visualViewport?.removeEventListener('resize', publishClearance);
+            const otherHeader = Array.from(document.querySelectorAll<HTMLElement>('.ptv-shell-header'))
+                .find(node => node !== header && node.isConnected);
+
+            if (otherHeader) {
+                document.documentElement.style.setProperty(
+                    '--ptv-shell-header-clearance',
+                    `${Math.max(0, otherHeader.getBoundingClientRect().bottom)}px`
+                );
+            } else {
+                document.documentElement.style.removeProperty('--ptv-shell-header-clearance');
+            }
+        };
+    }, []);
+
+    useLayoutEffect(() => {
         ensurePtvShellHeaderStatusBridge();
         shellMountedAt = performance.now();
         runPtvClientCacheMigration();

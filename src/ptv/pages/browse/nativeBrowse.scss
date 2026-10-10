@@ -834,7 +834,7 @@
 
 .ptv-browse-directory-tools {
     position: sticky;
-    top: var(--ptv-shell-header-height, 5rem);
+    top: calc(var(--ptv-shell-header-clearance, 102px) + 0.75rem);
     z-index: 4;
     display: flex;
     align-items: end;
@@ -1028,7 +1028,7 @@
 .ptv-browse-directory-section {
     display: grid;
     gap: 0.65rem;
-    scroll-margin-top: calc(var(--ptv-shell-header-height, 5rem) + 6rem);
+    scroll-margin-top: calc(var(--ptv-shell-header-clearance, 102px) + 1.5rem);
 }
 
 .ptv-browse-directory-section h2 {

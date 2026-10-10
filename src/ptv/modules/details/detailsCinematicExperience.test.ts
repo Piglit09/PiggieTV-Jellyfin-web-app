@@ -189,6 +189,7 @@ describe('cinematic Details experience', () => {
         const skeleton = createPtvCinematicDetailsSkeleton({ Id: 'seed', Name: 'Fixture Movie', Type: 'Movie' });
 
         expect(skeleton.getAttribute('aria-busy')).toBe('true');
+        expect(skeleton.querySelector('.ptv-cinematic-details__kicker')?.textContent).toBe('Explore related titles');
         expect(skeleton.querySelector('[role="status"]')?.textContent).toContain('Finding strong connections');
         expect(skeleton.querySelectorAll('.ptv-cinematic-skeleton-card')).toHaveLength(4);
     });
@@ -493,7 +494,8 @@ describe('cinematic Details experience', () => {
             resolveRelated = resolve;
         }));
         const section = await loadPtvCinematicDetailsElement({
-            Id: 'seed', Name: 'Seed', People: [{ Id: 'director', Name: 'Director', Type: 'Director' }], Type: 'Movie'
+            Id: 'seed', Name: 'Seed', People: [{ Id: 'director', Name: 'Director', Type: 'Director' }],
+            Studios: [{ Id: 'studio', Name: 'Studio' }], Type: 'Movie'
         }, { signal: controller.signal });
 
         document.body.append(section as HTMLElement);

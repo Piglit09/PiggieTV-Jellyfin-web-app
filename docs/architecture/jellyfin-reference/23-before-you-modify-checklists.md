@@ -433,3 +433,13 @@ These are requirements, not completion assertions. The isolated repair report re
 - [ ] Keep Jellyfin 12.2 hosted helper/runtime, physical Apply/readback and old mounted-admin-session retirement `UNKNOWN` until separately tested. Local compilation, synthetic tests and package inspection alone are not deployment/release acceptance.
 - [ ] For `refreshItem('scan', false)` on a Book with a recognized saved Reading provider ID, prove that the hook blocks before exact-provider lookup, Jellyfin refresh and item update, with a clear instruction to use guarded Identify. Do not silently fall back. Separately prove explicit recursive Scan and Books without a recognized saved Reading ID still follow their existing stock refresh paths. Do not claim stock refresh itself has the PTV identity guard.
 - [ ] Cancel a queued archive inspection as a helper slot is released. After acquisition, the host must observe cancellation before pipe creation/helper launch; no retired waiter may start a helper. Preserve the two-process cap, bounded cleanup and fail-closed capacity behavior if a child cannot be reaped. Include `TooManyHelpersWait` in focused and full Plugin-suite evidence.
+
+## Stage 4 Web responsive/playback acceptance boundary
+
+- [ ] Check measured shell clearance, sticky navigation, safe areas and hit targets at phone, Fold-like, tablet and desktop widths, including live resize and browser-toolbar changes. A viewport fixture is not physical iPad/Fold proof.
+- [ ] Keep Fold outer→inner→outer layout selection separate from the stable client-kind Home row and artwork budget. Do not refetch or broaden library-owned rows merely because the layout class changed.
+- [ ] Verify Up Next Start Now/Hide, click/touch capture, countdown/natural-end single advance, stale queue identity and five episode handoffs. Watch history/resume correctness still requires isolated server readback.
+- [ ] Check compact inline player controls for 44 px touch targets, safe-area bounds and no horizontal overflow. Test native Safari fullscreen and recoverable controls on a real iPad separately.
+- [ ] Test Search partial success, per-group and aggregate failed-only retry, scope/abort retirement and no broad library fallback. Capture failing hosted endpoints before attributing the intermittent production issue.
+- [ ] Test update generation across two local builds, activation/storage failure, unchanged generation and old-bundle recovery. The local worker fixture does not prove deployed proxy/cache coherence.
+- [ ] Re-run Stage 2 Controlled Home and Stage 3 Reading safety regressions, full Web/Plugin suites, contract, typecheck, lint/style baseline, version and build gates. Keep physical/hosted `UNKNOWN` until separately authorized proof exists.

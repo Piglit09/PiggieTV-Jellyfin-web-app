@@ -1628,7 +1628,7 @@ function isCurrentFixtureDetails(page: HTMLElement, itemId: string) {
         && (params.get('id') || '') === itemId;
 }
 
-function renderFixtureDetailsDiscovery(page: HTMLElement) {
+function renderFixtureDetailsDiscovery(page: HTMLElement, itemType = 'Movie') {
     const route = getHashRoute();
     const itemId = new URLSearchParams(route.search).get('id') || '';
     const generation = activeHash;
@@ -1651,7 +1651,7 @@ function renderFixtureDetailsDiscovery(page: HTMLElement) {
                     Studios: [{
                         Name: 'Fixture Studio'
                     }],
-                    Type: 'Movie'
+                    Type: itemType
                 });
 
                 delete page.dataset.ptvDetailsDiscoveryPendingItemId;
@@ -1718,6 +1718,16 @@ function renderFixtureDetailsDiscovery(page: HTMLElement) {
 function renderDetails() {
     document.body.classList.add('ptv-e2e-details');
     document.documentElement.classList.add('ptv-route-detail-page');
+    const fixtureKind = new URLSearchParams(getHashRoute().search).get('fixtureKind') || 'Episode';
+    const fixtureNames: Record<string, string> = {
+        Anime: 'The Floating City',
+        Book: 'The Cartographer and the Sea',
+        Cartoons: 'The Painted Valley',
+        Movie: 'The Very Long Journey Through the Glass Garden',
+        Season: 'Season 10: The Northern Passage',
+        Series: 'The Celestial Harbor'
+    };
+    const sharedFixture = Object.prototype.hasOwnProperty.call(fixtureNames, fixtureKind);
     const page = addElement(root, 'main', {
         className: 'itemDetailPage',
         id: 'itemDetailPage'
@@ -1796,28 +1806,50 @@ function renderDetails() {
         </div>
     `;
     preparePtvDetailsLayout(page);
+    if (sharedFixture) {
+        page.dataset.ptvDetailsFixtureKind = fixtureKind;
+        page.querySelectorAll<HTMLElement>('.detail-poster-fixture').forEach(poster => {
+            poster.textContent = fixtureKind;
+        });
+        const name = page.querySelector<HTMLElement>('.itemName');
+        if (name) name.textContent = fixtureNames[fixtureKind];
+        const parent = page.querySelector<HTMLElement>('.parentName');
+        if (parent) parent.textContent = fixtureKind === 'Season' ? 'The Celestial Harbor' : '';
+        const actions = page.querySelector<HTMLElement>('.mainDetailButtons');
+        const play = actions?.querySelector<HTMLElement>('.btnPlay');
+        const secondary = actions?.querySelector<HTMLElement>('.btnReplay');
+        if (play) play.textContent = fixtureKind === 'Book' ? 'Read' : 'Play';
+        if (secondary) secondary.textContent = 'Watch trailer';
+        const favorite = document.createElement('button');
+        favorite.className = 'detailButton btnFavorite';
+        favorite.type = 'button';
+        favorite.textContent = 'Favorite';
+        actions?.append(favorite);
+    }
     setPtvDetailsBackdropCandidates(page, [{
         requestedType: 'Backdrop',
         url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221600%22 height=%22900%22%3E%3Crect width=%221600%22 height=%22900%22 fill=%22%2379cbed%22/%3E%3Crect y=%22520%22 width=%221600%22 height=%22380%22 fill=%22%239b7057%22/%3E%3Ccircle cx=%221050%22 cy=%22410%22 r=%22145%22 fill=%22%23d8434d%22/%3E%3Ccircle cx=%221330%22 cy=%22425%22 r=%22125%22 fill=%22%23efe4c8%22/%3E%3C/svg%3E'
     }], 'fixture-item');
-    applyPtvEpisodeDetailsPresentation(page, {
-        CommunityRating: 8.3,
-        Genres: ['Action', 'Adventure', 'Comedy'],
-        Id: 'fixture-item',
-        IndexNumber: 1,
-        Name: 'Romance Dawn',
-        OfficialRating: 'TV-14',
-        ParentIndexNumber: 1,
-        ProductionYear: 2023,
-        RunTimeTicks: 38660000000,
-        Type: 'Episode',
-        UserData: { PlaybackPositionTicks: 120000000 }
-    });
-    setPtvDetailsHeroArtworkCandidates(page, [{
-        requestedType: 'Thumb',
-        url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22960%22 height=%22540%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%2384d2f1%22/%3E%3Cstop offset=%221%22 stop-color=%22%23e9a46d%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%22960%22 height=%22540%22 fill=%22url(%23g)%22/%3E%3Crect y=%22310%22 width=%22960%22 height=%22230%22 fill=%22%23936a50%22/%3E%3Ccircle cx=%22480%22 cy=%22255%22 r=%22105%22 fill=%22%23d8434d%22/%3E%3Ccircle cx=%22720%22 cy=%22270%22 r=%2292%22 fill=%22%23eee2c4%22/%3E%3C/svg%3E'
-    }], 'fixture-item');
-    renderFixtureDetailsDiscovery(page);
+    if (!sharedFixture) {
+        applyPtvEpisodeDetailsPresentation(page, {
+            CommunityRating: 8.3,
+            Genres: ['Action', 'Adventure', 'Comedy'],
+            Id: 'fixture-item',
+            IndexNumber: 1,
+            Name: 'Romance Dawn',
+            OfficialRating: 'TV-14',
+            ParentIndexNumber: 1,
+            ProductionYear: 2023,
+            RunTimeTicks: 38660000000,
+            Type: 'Episode',
+            UserData: { PlaybackPositionTicks: 120000000 }
+        });
+        setPtvDetailsHeroArtworkCandidates(page, [{
+            requestedType: 'Thumb',
+            url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22960%22 height=%22540%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%2384d2f1%22/%3E%3Cstop offset=%221%22 stop-color=%22%23e9a46d%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%22960%22 height=%22540%22 fill=%22url(%23g)%22/%3E%3Crect y=%22310%22 width=%22960%22 height=%22230%22 fill=%22%23936a50%22/%3E%3Ccircle cx=%22480%22 cy=%22255%22 r=%22105%22 fill=%22%23d8434d%22/%3E%3Ccircle cx=%22720%22 cy=%22270%22 r=%2292%22 fill=%22%23eee2c4%22/%3E%3C/svg%3E'
+        }], 'fixture-item');
+    }
+    renderFixtureDetailsDiscovery(page, fixtureKind === 'Anime' || fixtureKind === 'Cartoons' ? 'Series' : fixtureKind);
 }
 
 function closeFixtureQueueMenu(trigger?: HTMLButtonElement) {
@@ -2934,17 +2966,24 @@ async function startUpdateScenario() {
 
     service.subscribe(snapshot => {
         document.getElementById('update-notice')?.remove();
-        if (!['available', 'deferred'].includes(snapshot.state)) return;
+        if (!['available', 'deferred', 'error'].includes(snapshot.state)) return;
+
+        let noticeText = 'PiggieTV update available';
+        if (snapshot.state === 'deferred') noticeText = snapshot.activityReason;
+        if (snapshot.state === 'error') noticeText = snapshot.error;
 
         const notice = addElement(runtimeRoot, 'aside', {
             className: 'ptv-update-notice',
             id: 'update-notice',
-            text: snapshot.state === 'deferred' ? snapshot.activityReason : 'PiggieTV update available'
+            text: noticeText
         });
-        const apply = addElement(notice, 'button', { text: 'Reload' });
+        const apply = addElement(notice, 'button', { text: snapshot.state === 'error' ? 'Try again' : 'Reload' });
 
         apply.type = 'button';
-        apply.addEventListener('click', () => service.applyWhenSafe());
+        apply.addEventListener('click', () => {
+            if (snapshot.state === 'error') service.retryFailedUpdate();
+            else service.applyWhenSafe();
+        });
     });
     await service.start();
 }

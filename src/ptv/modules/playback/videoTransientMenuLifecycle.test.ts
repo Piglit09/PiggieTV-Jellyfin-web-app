@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import actionSheet from '../../../components/actionSheet/actionSheet';
 import { createVideoFetchingDataState } from '../../../controllers/playback/video/fetchingDataState';
+import { matchesFetchedQueuedItem, sameQueuedItem } from '../../../components/playback/queueItemIdentity';
 import { createVideoTransientMenuLifecycle, isVideoTransientMenuCancellation } from '../../../controllers/playback/video/videoTransientMenuLifecycle';
 import { runPtvIconEngine } from '../icons/ptvIconEngine';
 import * as videoInputOwnership from './videoInputOwnership';
@@ -61,10 +62,13 @@ function createController() {
     view.querySelectorAll('.osdVolumeSlider, .osdPositionSlider').forEach(slider => {
         Object.assign(slider, { enableKeyboardDragging: () => undefined });
     });
-    const firstPlayer = { id: 'first' };
-    const item = { Id: 'movie-a', ServerId: 'server-a' };
+    const firstPlayer = { id: 'first', isLocalPlayer: true };
+    const item = { Id: 'movie-a', ServerId: 'server-a', PlaylistItemId: 'playing-slot-a' };
     let player: object = firstPlayer;
     let currentItem = item;
+    let nextQueueId = 'next-a';
+    let nextQueueServerId = 'server-a';
+    let nextQueuePlaylistItemId = 'slot-a';
     let audioIndex = 0;
     let subtitleIndex = 2;
     const audioSelection = vi.fn((index: number) => {
@@ -80,9 +84,14 @@ function createController() {
     const statsImport = deferred<{ default: new (options: unknown) => object }>();
     const statsCreated = vi.fn();
     const subtitleSyncCreated = vi.fn();
+    const nextItemDeferred = deferred<{ Id: string; ServerId?: string }>();
+    const nextItemRequested = vi.fn(() => nextItemDeferred.promise);
+    const upNextCreated = vi.fn();
     const manager = {
         getCurrentPlayer: () => player,
         currentItem: () => currentItem,
+        getNextItem: () => ({ item: { Id: nextQueueId, ServerId: nextQueueServerId, PlaylistItemId: nextQueuePlaylistItemId } }),
+        nextItem: nextItemRequested,
         getPlayerState: () => ({ MediaSource: { SupportsTranscoding: true } }),
         audioTracks: () => [{ Index: 0, DisplayTitle: 'English' }, { Index: 1, DisplayTitle: 'French' }],
         getAudioStreamIndex: () => audioIndex,
@@ -97,7 +106,8 @@ function createController() {
         setSubtitleStreamIndex: subtitleSelection,
         setSecondarySubtitleStreamIndex: secondarySelection,
         supportSubtitleOffset: () => false,
-        isPlayingVideo: () => false
+        isPlayingVideo: () => false,
+        playPause: vi.fn()
     };
     let observation!: {
         audio: () => Promise<unknown>;
@@ -108,9 +118,13 @@ function createController() {
         release: () => void;
         resetIdle: () => void;
         startTimer: () => void;
+        prompt: () => void;
+        promptIfNeeded: () => void;
     };
     const deps = {
         playbackManager: manager,
+        matchesFetchedQueuedItem,
+        sameQueuedItem,
         createVideoFetchingDataState,
         createVideoTransientMenuLifecycle,
         isVideoTransientMenuCancellation,
@@ -118,8 +132,12 @@ function createController() {
         Events,
         EventType: { ['SHOW_VIDEO_OSD']: 'showVideoOsd' },
         PlayerEvent: { PromptSkip: 'promptSkip' },
+        ['TICKS_PER_MINUTE']: 600_000_000,
+        ['TICKS_PER_SECOND']: 10_000_000,
+        userSettings: { enableNextVideoInfoOverlay: () => true },
         dom: {
             whichTransitionEvent: () => 'transitionend',
+            parentWithClass: (target: Element, classes: string[]) => classes.some(name => target.closest('.' + name)),
             addEventListener: (target: EventTarget, event: string, handler: EventListener, options: AddEventListenerOptions) => target.addEventListener(event, handler, options),
             removeEventListener: (target: EventTarget, event: string, handler: EventListener, options: EventListenerOptions) => target.removeEventListener(event, handler, options)
         },
@@ -145,6 +163,18 @@ function createController() {
         pluginManager: { firstOfType: () => null },
         PluginType: { SyncPlay: 'syncplay' },
         loadModule: (path: string) => {
+            if (path.includes('upnextdialog')) {
+                return Promise.resolve({
+                    default: class {
+                        constructor(options: unknown) {
+                            upNextCreated(options);
+                        }
+                        destroy() {
+                            return undefined;
+                        }
+                    }
+                });
+            }
             if (path.includes('playersettingsmenu')) return settingsImport.promise;
             if (path.includes('playerstats')) return statsImport.promise;
             return actionImport.promise;
@@ -160,7 +190,9 @@ function createController() {
             replace: bindToPlayer,
             release: releaseCurrentPlayer,
             resetIdle,
-            startTimer: startOsdHideTimer
+            startTimer: startOsdHideTimer,
+            prompt: () => showComingUpNext(currentPlayer),
+            promptIfNeeded: () => showComingUpNextIfNeeded(currentPlayer, { Type: 'Episode' }, 6_300_000_000, 6_600_000_000)
         });
     }`;
     // The evaluated source is this checked-out controller, never external data.
@@ -170,10 +202,15 @@ function createController() {
     view.dispatchEvent(new Event('viewshow'));
     return {
         view, firstPlayer, observation, actionImport, settingsImport, settingsShow, statsImport, statsCreated, subtitleSyncCreated,
-        audioSelection, subtitleSelection, secondarySelection,
+        audioSelection, subtitleSelection, secondarySelection, nextItemDeferred, nextItemRequested, upNextCreated,
         setCurrentAudioIndex: (index: number) => { audioIndex = index; },
         setCurrentSubtitleIndex: (index: number) => { subtitleIndex = index; },
-        changeItem: () => { currentItem = { Id: 'movie-b', ServerId: 'server-a' }; },
+        changeItem: () => { currentItem = { Id: 'movie-b', ServerId: 'server-a', PlaylistItemId: 'playing-slot-a' }; },
+        changeItemServer: () => { currentItem = { Id: 'movie-a', ServerId: 'server-b', PlaylistItemId: 'playing-slot-a' }; },
+        changeItemSlot: () => { currentItem = { Id: 'movie-a', ServerId: 'server-a', PlaylistItemId: 'playing-slot-b' }; },
+        changeQueue: () => { nextQueueId = 'next-b'; },
+        changeQueueServer: () => { nextQueueServerId = 'server-b'; },
+        changeQueueSlot: () => { nextQueuePlaylistItemId = 'slot-b'; },
         playbackError: () => Events.trigger(manager, 'playbackerror', ['NoCompatibleStream']),
         replace: () => {
             player = { id: 'replacement' };
@@ -205,6 +242,117 @@ describe('native video transient menu callers', () => {
         document.documentElement.classList.remove('ptv-playing', 'ptv-player-osd-visible');
         document.body.innerHTML = '';
         vi.useRealTimers();
+    });
+
+    it('leaves pointer input on the visible Up Next prompt without revealing OSD', () => {
+        const prompt = controller.view.querySelector('.upNextContainer') as HTMLElement;
+        prompt.classList.remove('hide', 'upNextDialog-hidden');
+        const reveal = vi.fn();
+        Events.on(document, 'showVideoOsd', reveal);
+        try {
+            prompt.dispatchEvent(new Event(Reflect.get(window, 'PointerEvent') ? 'pointerdown' : 'click', { bubbles: true }));
+            expect(reveal).not.toHaveBeenCalled();
+        } finally {
+            Events.off(document, 'showVideoOsd', reveal);
+        }
+    });
+
+    it('leaves keyboard activation on the visible Up Next button', () => {
+        const prompt = controller.view.querySelector('.upNextContainer') as HTMLElement;
+        prompt.classList.remove('hide', 'upNextDialog-hidden');
+        const button = document.createElement('button');
+        prompt.append(button);
+        const reveal = vi.fn();
+        Events.on(document, 'showVideoOsd', reveal);
+        try {
+            button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            expect(reveal).not.toHaveBeenCalled();
+        } finally {
+            Events.off(document, 'showVideoOsd', reveal);
+        }
+    });
+
+    it('drops a next-item result after the current episode changes', async () => {
+        controller.observation.hide();
+        controller.observation.prompt();
+        await flush();
+        expect(controller.nextItemRequested).toHaveBeenCalledOnce();
+        controller.changeItem();
+        controller.nextItemDeferred.resolve({ Id: 'old-next' });
+        await flush();
+        expect(controller.upNextCreated).not.toHaveBeenCalled();
+    });
+
+    it('drops a next-item result after the queue changes during fetch', async () => {
+        controller.observation.hide();
+        controller.observation.prompt();
+        await flush();
+        expect(controller.nextItemRequested).toHaveBeenCalledOnce();
+        controller.changeQueue();
+        controller.nextItemDeferred.resolve({ Id: 'next-a' });
+        await flush();
+        expect(controller.upNextCreated).not.toHaveBeenCalled();
+    });
+
+    it('offers the replacement queued episode after a stale next-item result', async () => {
+        controller.observation.hide();
+        controller.observation.promptIfNeeded();
+        await flush();
+        expect(controller.nextItemRequested).toHaveBeenCalledOnce();
+
+        controller.changeQueue();
+        controller.nextItemDeferred.resolve({ Id: 'next-a', ServerId: 'server-a' });
+        await flush();
+        expect(controller.upNextCreated).not.toHaveBeenCalled();
+
+        controller.nextItemRequested.mockResolvedValueOnce({ Id: 'next-b', ServerId: 'server-a' });
+        controller.observation.promptIfNeeded();
+        await flush();
+        expect(controller.nextItemRequested).toHaveBeenCalledTimes(2);
+        expect(controller.upNextCreated).toHaveBeenCalledOnce();
+        expect(controller.upNextCreated.mock.calls[0][0]).toMatchObject({
+            queuedItem: { Id: 'next-b', ServerId: 'server-a', PlaylistItemId: 'slot-a' }
+        });
+    });
+
+    it.each([
+        ['current item server', 'changeItemServer'],
+        ['current playlist slot', 'changeItemSlot'],
+        ['queued item server', 'changeQueueServer'],
+        ['queued playlist slot', 'changeQueueSlot']
+    ] as const)('drops a next-item result when the same ID moves to a different %s', async (_identity, change) => {
+        controller.observation.hide();
+        controller.observation.prompt();
+        await flush();
+        expect(controller.nextItemRequested).toHaveBeenCalledOnce();
+        controller[change]();
+        controller.nextItemDeferred.resolve({ Id: 'next-a', ServerId: 'server-a' });
+        await flush();
+        expect(controller.upNextCreated).not.toHaveBeenCalled();
+    });
+
+    it('drops a fetched next item with the same ID but a different explicit server', async () => {
+        controller.observation.hide();
+        controller.observation.prompt();
+        await flush();
+        controller.nextItemDeferred.resolve({ Id: 'next-a', ServerId: 'server-b' });
+        await flush();
+        expect(controller.upNextCreated).not.toHaveBeenCalled();
+        controller.observation.promptIfNeeded();
+        await flush();
+        expect(controller.nextItemRequested).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the unchanged queued slot available to the Up Next prompt', async () => {
+        controller.observation.hide();
+        controller.observation.prompt();
+        await flush();
+        controller.nextItemDeferred.resolve({ Id: 'next-a', ServerId: 'server-a' });
+        await flush();
+        expect(controller.upNextCreated).toHaveBeenCalledOnce();
+        expect(controller.upNextCreated.mock.calls[0][0]).toMatchObject({
+            queuedItem: { Id: 'next-a', ServerId: 'server-a', PlaylistItemId: 'slot-a' }
+        });
     });
 
     it.each(['audio', 'subtitles'] as const)('does not reopen %s after hide during its import', async menu => {

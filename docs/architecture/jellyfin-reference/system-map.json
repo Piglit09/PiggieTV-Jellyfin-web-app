@@ -1131,7 +1131,8 @@
       "derivedOwners": [
         "legacy AppRouter bridge",
         "view manager",
-        "dialog history state"
+        "dialog history state",
+        "PTVShell measured header clearance for presentation only"
       ],
       "observers": [
         "header/navigation",
@@ -1149,6 +1150,32 @@
         "$.systems.routingAndViewLifecycle.evidence[0]",
         "$.systems.routingAndViewLifecycle.evidence[1]"
       ]
+    },
+    "responsiveShellGeometry": {
+      "authoritativeOwner": "mounted PTVShell header bounding geometry",
+      "derivedOwners": ["root --ptv-shell-header-clearance CSS value", "shell, Browse and cinematic Details sticky/scroll offsets"],
+      "refresh": ["header ResizeObserver", "root route-class change", "window resize", "visualViewport resize"],
+      "cleanup": ["disconnect observers and listeners on shell unmount", "remove or transfer the root CSS value"],
+      "nonAuthority": "Presentation geometry does not select route, user/library scope, image identity or data requests.",
+      "localCandidateEvidence": ["src/ptv/shell/PTVShell.tsx", "src/ptv/shell/ptvShell.scss", "src/ptv/styles/shell.scss", "src/ptv/pages/browse/nativeBrowse.scss", "src/ptv/modules/details/details-shell.scss"],
+      "chapterRefs": ["03-routing-navigation-lifecycle.md", "08-details-seasons-episodes.md", "22-change-impact-matrix.md"]
+    },
+    "responsiveLayoutSelection": {
+      "authoritativeOwner": "PTV clientProfile measured viewport and ten-foot signal for presentation classes",
+      "derivedOwners": ["compact/mobile/tablet/desktop shell layout classes"],
+      "selectionRule": "For non-TV layouts, visual/inner viewport width and coarse-pointer compact landscape dimensions precede mobile/tablet user-agent fallback. Viewport posture can change presentation without changing client kind.",
+      "separateBudgetOwner": "getPtvPerformanceProfile retains client-kind Home row and artwork budgets across Fold outer/inner viewport changes",
+      "nonAuthority": "Layout class is not user/library scope, route identity, image request identity or authorization.",
+      "localCandidateEvidence": ["src/ptv/core/clientProfile.ts", "src/ptv/core/clientProfile.test.ts", "src/ptv/shell/ptvShell.scss", "e2e/tests/shell-header-visual.spec.ts"],
+      "chapterRefs": ["03-routing-navigation-lifecycle.md", "06-home-data-flow.md", "22-change-impact-matrix.md"]
+    },
+    "searchFailedGroupRecovery": {
+      "authoritativeOwner": "Jellyfin user-scoped Search/Items responses within the existing PTV request plan",
+      "derivedOwners": ["NativeSearchPage failed-group state", "NativeSearchGroupRetryAction per-group control", "resilientSearchService bounded direct retry"],
+      "identity": ["server", "user", "settled query", "filter", "route/input scope", "request generation"],
+      "rule": "Each group Retry and aggregate Try again select only current error/timeout/cancelled group IDs. Successful groups remain visible. Abort or identity/scope change rejects late retry results. No broad library fallback or fabricated result is allowed.",
+      "localCandidateEvidence": ["src/ptv/pages/search/NativeSearchPage.tsx", "src/ptv/pages/search/NativeSearchGroupRetryAction.tsx", "src/ptv/pages/search/searchGroupRetryState.ts", "src/ptv/pages/search/resilientSearchService.ts"],
+      "chapterRefs": ["09-search.md", "19-failure-race-lifecycle.md", "22-change-impact-matrix.md"]
     },
     "itemMetadata": {
       "authoritativeOwner": "Jellyfin Server persisted item/domain state",
@@ -1259,14 +1286,16 @@
       "cleanup": [
         "candidate-specific dismissal/reload retirement",
         "one observation epoch fences registration reads, worker events and identity replies",
-        "activity-gated browser reload/update flow"
+        "activity-gated browser reload/update flow",
+        "activation failure remains visible and retryable; no fallback reload before active/controlling worker and stored generation acknowledgement; same-session Later dismissal survives failed-reload reconciliation for the same verified generation"
       ],
       "updateRule": "Same-origin worker MessagePort identity derives only from existing webpack provenance. Equal/older/unknown generations do not notify; verified later generations do. This worker has no fetch/cache/purge owner.",
       "localCandidateEvidence": [
         "src/ptv/services/updateGeneration.ts",
         "src/ptv/services/updateService.ts",
         "src/ptv/services/updateService.test.ts",
-        "src/serviceworker.js"
+        "src/serviceworker.js",
+        "e2e/tests/general.spec.ts old-bundle recovery fixture"
       ],
       "chapterRefs": [
         "18-build-service-worker-assets.md",
@@ -1282,7 +1311,8 @@
       "derivedOwners": ["abortable root/child action sheets", "PTV Movie/Series header", "episode-only bottom identity"],
       "identity": ["active view and visibility lease", "active manager player", "server/item", "controls visibility"],
       "cleanup": ["hide", "view/player/lease replacement", "playback start/stop/error", "view teardown"],
-      "rule": "One operation starts before lazy work and guards post-await reads, selection mutations and identity-safe finalization. Held input defers existing timers and releases on cancel/keyup/blur; no separate menu timeout. Active HTML video gain/mute belongs to the retained element across Next/autoplay, not PTV item-start enforcement. Header artwork uses existing image ownership and retires before DOM reconciliation. Audio/subtitle menu checks reflect the current stream index after icon normalization. HTML video subtitle session/fetch/renderer work is fenced by target, selection/render generation, source and media element; Off and source replacement retire old work while same-track repeats preserve a valid pending fetch.",
+      "rule": "One operation starts before lazy work and guards post-await reads, selection mutations and identity-safe finalization. Held input defers existing timers and releases on cancel/keyup/blur; no separate menu timeout. Up Next prompt owns input while visible; prompt and stock PlaybackManager share a per-playback next-advance claim against natural end. A changed queue may reoffer its replacement, and an explicit playback request retires pending autoplay before the new item starts. Safari native video fullscreen uses native controls and restores the prior setting on exit. Active HTML video gain/mute belongs to the retained element across Next/autoplay, not PTV item-start enforcement. Header artwork uses existing image ownership and retires before DOM reconciliation. Audio/subtitle menu checks reflect the current stream index after icon normalization. HTML video subtitle session/fetch/renderer work is fenced by target, selection/render generation, source and media element; Off and source replacement retire old work while same-track repeats preserve a valid pending fetch.",
+      "localStage4Presentation": "Custom inline OSD uses compact wrapping, at least 44 px visible touch boxes, and safe-area-aware top/bottom placement; native Safari fullscreen remains browser-owned.",
       "localCandidateStatus": "Web 0.5.62 RC1 source preparation; local Pass 02 browser acceptance passed, production/deployment not claimed",
       "files": ["src/controllers/playback/video/index.js", "src/controllers/playback/video/videoTransientMenuLifecycle.ts", "src/components/playback/playersettingsmenu.js", "src/ptv/modules/playback/videoInputOwnership.ts", "src/ptv/modules/playback/index.js", "src/ptv/modules/playback/playerHeader.ts", "src/controllers/playback/video/videoDisplayTitle.ts", "src/plugins/htmlVideoPlayer/plugin.js", "src/ptv/modules/icons/icons.scss"],
       "tests": ["videoTransientMenuLifecycle.test.ts", "htmlVideoSubtitleSelectionRace.test.ts", "streamSelectionVisual.spec.ts", "playersettingsmenu.test.ts", "continuousVideoPreferences.test.ts", "playerHeader.test.ts", "playerHeader.integration.test.ts", "playerHeader.imageLoad.test.ts", "videoDisplayTitle.test.ts", "videoInputOwnership.test.ts", "playerChromeTimer.test.ts"],
@@ -3419,6 +3449,7 @@
         "STOCK_REPLACED"
       ],
       "ptvChange": "PTV maps stable routes to native PTV pages from canonical browser URL/hash state and uses routeController as the immutable route-family lifetime/generation/AbortSignal owner while keeping hash-router compatibility. Transient presentation classes are not route identity authority.",
+      "localStage4Presentation": "Mounted PTVShell measures the header and publishes a CSS-only clearance consumed by shell, Browse and cinematic Details. clientProfile selects non-TV layout classes from measured viewport posture before user-agent fallback while preserving client-kind performance budget. Neither presentation decision changes route identity or request authority.",
       "risk": "HIGH",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
@@ -3479,6 +3510,7 @@
         "NEW_PTV_SYSTEM"
       ],
       "ptvChange": "NativeHome and PTV hooks compose/cache featured and stock-derived row data. The active legacy-compatible Home path adopts routeController lifetimes for requests, publication, Hero/rows, listeners, observers, timers, cards and images. Featured transport/memory/dashboard-readback owners preserve canonical server+user identity, authenticated Featured transport stays on the active ApiClient root, queued memory reasserts ownership, and forced row-image consumer handles retire with their exact row/route owner. Library-owned configured rows additionally require an exact Plugin scope claim and visit-local positive user-scoped membership before Home publication or retention.",
+      "localStage4Presentation": "Fold-like viewport width changes alter shell layout classes but retain the same client-kind Home row limits and image budget; Home request and image identity remain unchanged.",
       "risk": "CRITICAL",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
@@ -3546,6 +3578,8 @@
     "details": {
       "classification": "STOCK_WRAPPED",
       "ptvChange": "PTV observes stock Details rendering, reconciles item/readback state, and applies route-generation-aware enhancements. Cinematic enrichment retains unchanged keyed shelves and artwork nodes, loads artwork only for changed shelves, and retires progressive timers before reconciliation or owner teardown. A hidden empty skeleton may adopt a late exact result only under its current owner.",
+      "localStage4Presentation": "Responsive Details offsets consume PTVShell clearance. Generic related-title copy remains generic; franchise/collection wording requires explicit shared metadata, and repeated Cast people without distinct related-title value are omitted from the entity rail.",
+      "localPhase2Fixture": "The shared Details browser matrix defines Movie, Series, Season, Book, Anime and Cartoons at live-resized 360-1440 CSS px; it is not physical or complete authenticated item proof.",
       "risk": "HIGH",
       "conflictClass": "INTENTIONAL_WRAPPER",
       "chapterRefs": [
@@ -3571,6 +3605,14 @@
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]
+    },
+    "search": {
+      "classification": "STOCK_REPLACED",
+      "ptvChange": "NativeSearchPage owns grouped, user-scoped PTV Search. Stage 4 integrates per-group and aggregate failed-group-only retry keyed by settled server, user, query, filter and request scope; successful groups remain visible and stale/aborted results cannot adopt.",
+      "risk": "HIGH",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": ["09-search.md", "19-failure-race-lifecycle.md", "20-ptv-vs-stock-map.md"],
+      "localCandidateEvidence": ["src/ptv/pages/search/NativeSearchPage.tsx", "src/ptv/pages/search/NativeSearchGroupRetryAction.tsx", "src/ptv/pages/search/searchGroupRetryState.ts", "src/ptv/pages/search/resilientSearchService.ts"]
     },
     "requestCoordination": {
       "classification": "NEW_PTV_SYSTEM",

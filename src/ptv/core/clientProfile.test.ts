@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { detectPtvTvClient, detectPtvTvClientFromSignals } from './clientProfile';
+import {
+    applyPtvClientProfileClasses,
+    detectPtvTvClient,
+    detectPtvTvClientFromSignals,
+    getPtvPerformanceProfile
+} from './clientProfile';
 
 describe('PiggieTV TV client detection', () => {
     it.each([
@@ -74,5 +79,73 @@ describe('PiggieTV TV client detection', () => {
             reason: 'fire-tv-device-signal',
             tvPlatform: 'fire-tv'
         });
+    });
+
+    it('follows Fold viewport posture while retaining the Home row and image budget', () => {
+        const originalWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+        const originalHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+        const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+        const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+        const originalClasses = document.documentElement.className;
+        const originalDataset = { ...document.documentElement.dataset };
+        const userAgent = vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(
+            'Mozilla/5.0 (Linux; Android 14; SM-F946U) AppleWebKit/537.36 Chrome/126.0 Mobile Safari/537.36'
+        );
+        const setViewport = (width: number, height: number) => {
+            Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+            Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+        };
+
+        try {
+            Object.defineProperty(window, 'visualViewport', { configurable: true, value: undefined });
+            Object.defineProperty(window, 'matchMedia', {
+                configurable: true,
+                value: (query: string) => ({ matches: query === '(pointer: coarse)' || query === '(hover: none)' })
+            });
+
+            setViewport(390, 840);
+            const outer = applyPtvClientProfileClasses();
+            const outerBudget = getPtvPerformanceProfile();
+            expect(outer).toMatchObject({ isMobile: true, isTablet: false, layoutMode: 'compact-mobile' });
+            expect(document.documentElement.classList.contains('ptv-client-mobile')).toBe(true);
+
+            setViewport(1080, 832);
+            const inner = applyPtvClientProfileClasses();
+            const innerBudget = getPtvPerformanceProfile();
+            expect(inner).toMatchObject({ isMobile: true, isTablet: true, layoutMode: 'tablet' });
+            expect(document.documentElement.classList.contains('ptv-layout-mobile')).toBe(false);
+            expect(document.documentElement.classList.contains('ptv-layout-tablet')).toBe(true);
+            expect(innerBudget).toMatchObject({
+                clientKind: outerBudget.clientKind,
+                featuredRowLimit: outerBudget.featuredRowLimit,
+                heroBackdropMaxWidth: outerBudget.heroBackdropMaxWidth,
+                homeRowLimit: outerBudget.homeRowLimit,
+                rowItemLimit: outerBudget.rowItemLimit
+            });
+
+            setViewport(1440, 900);
+            const wide = applyPtvClientProfileClasses();
+            expect(wide.layoutMode).toBe('desktop');
+            expect(getPtvPerformanceProfile().heroBackdropMaxWidth).toBe(outerBudget.heroBackdropMaxWidth);
+
+            setViewport(390, 840);
+            const foldedAgain = applyPtvClientProfileClasses();
+            expect(foldedAgain).toMatchObject({ isMobile: true, isTablet: false, layoutMode: 'compact-mobile' });
+            expect(document.documentElement.classList.contains('ptv-client-mobile')).toBe(true);
+            expect(getPtvPerformanceProfile().heroBackdropMaxWidth).toBe(outerBudget.heroBackdropMaxWidth);
+        } finally {
+            userAgent.mockRestore();
+            if (originalWidth) Object.defineProperty(window, 'innerWidth', originalWidth);
+            if (originalHeight) Object.defineProperty(window, 'innerHeight', originalHeight);
+            if (originalMatchMedia) Object.defineProperty(window, 'matchMedia', originalMatchMedia);
+            else Reflect.deleteProperty(window, 'matchMedia');
+            if (originalVisualViewport) Object.defineProperty(window, 'visualViewport', originalVisualViewport);
+            else Reflect.deleteProperty(window, 'visualViewport');
+            document.documentElement.className = originalClasses;
+            Object.keys(document.documentElement.dataset).forEach(key => {
+                delete document.documentElement.dataset[key];
+            });
+            Object.assign(document.documentElement.dataset, originalDataset);
+        }
     });
 });

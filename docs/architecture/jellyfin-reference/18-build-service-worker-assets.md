@@ -120,3 +120,13 @@ sequenceDiagram
 2. Stock commit provenance is build-time `git describe`; a source export without `.git` loses it.
 3. The service worker owns notification actions and client claiming, **not** asset caching or offline content.
 4. Webpack defines artifact production but not atomic deployment, rollback, HTTP caching, or mixed-generation detection.
+
+## Stage 4 PTV update acknowledgement — isolated integration candidate
+
+This PTV extension does not change the stock worker's asset-cache non-guarantee. `[VERIFIED_FROM_SOURCE]` `PtvUpdateService` now treats activation and reload acknowledgement as separate steps: a failed `SKIP_WAITING` call or an unactivated candidate produces a visible recoverable error; a reload is requested only after the verified candidate is active/controlling and its generation key can be written and read back from session storage. The notice exposes `Try again`; it does not clear authentication or all browser storage. `src/ptv/services/updateService.ts`; `src/ptv/shell/PTVUpdateNotice.tsx`.
+
+`[VERIFIED_BY_TEST]` Focused service/notice tests cover failed activation, storage denial, no-controller fallback and a two-generation reload that returns the old bundle. If the running bundle remains old after an acknowledged reload, the service presents an error and requires an explicit retry; it does not silently suppress the new generation. `[UNKNOWN]` The exact cause of the reported production reload loop and proxy/browser asset generation behavior remain unproven; local tests cannot certify deployed asset atomicity or an already-open tab upgrade.
+
+`[VERIFIED_BY_TEST]` `e2e/tests/general.spec.ts` covers a local two-generation browser fixture where Reload returns the old frontend, the notice changes to a recoverable error, and an explicit `Try again` reattempts activation. This validates local UI/acknowledgement only; it cannot reproduce a real reverse proxy or deployed service-worker generation switch.
+
+Stage 4 review also covers a failed reload followed by **Later**: the same verified candidate stays dismissed through worker reconciliation and a new page load in that browser session. An explicit retry remains available when the error is shown. Focused RED/GREEN tests prove the local notice lifecycle; deployed asset convergence remains unverified.

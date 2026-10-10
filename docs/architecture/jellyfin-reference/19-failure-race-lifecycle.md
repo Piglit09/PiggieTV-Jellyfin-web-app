@@ -128,3 +128,10 @@ The first three are `INFERRED` from the source-separated owners; the last three 
 - Verify hard refresh, server restart, permission change, and cross-user transition.
 
 These are `INFERRED` engineering controls from the stock failure model.
+
+## Stage 4 PTV Web retirement boundaries — isolated integration candidate
+
+- `[VERIFIED_FROM_SOURCE]` Shell geometry observers retire on `PTVShell` unmount; the published clearance is presentation state, not a new route/data owner. `src/ptv/shell/PTVShell.tsx`.
+- `[VERIFIED_FROM_SOURCE]` Up Next carries current player, current item and queued-item identities across asynchronous next-item reads. Prompt advance and natural end share the active playback-generation claim. A stale item, destroyed dialog, or changed queue cannot adopt the old next result. A changed queue may reoffer its replacement; an explicit playback request retires pending autoplay even before the new item starts. `src/components/upnextdialog/upnextdialog.js`; `src/controllers/playback/video/index.js`; `src/components/playback/playbackmanager.js`.
+- `[VERIFIED_FROM_SOURCE]` Search retry carries exact settled query/filter/server/user and active request/scope; abort or scope change suppresses late adoption. Update fallback does not convert an unactivated worker into a reload; failed activation is visible. `src/ptv/pages/search/NativeSearchPage.tsx`; `src/ptv/pages/search/searchGroupRetryState.ts`; `src/ptv/services/updateService.ts`.
+- `[UNKNOWN]` Production Search failure origin, deployed worker/cache convergence, and Safari's native/fullscreen transition behavior require separate physical/environmental evidence.

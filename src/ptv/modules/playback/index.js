@@ -74,6 +74,7 @@ const MAX_RETRIED_SOURCE_KEYS = 12;
 
 let currentPlayer = null;
 let currentVideo = null;
+let nativeFullscreenControls = null;
 let currentItem = null;
 let stopWatchingDom = null;
 let playbackStateTimer = null;
@@ -1566,6 +1567,7 @@ function onPlayerPauseChange() {
 }
 
 function onNativeVideoStateChange() {
+    if (nativeFullscreenControls !== null && currentVideo) currentVideo.controls = true;
     updateFromState(currentPlayer || playbackManager.getCurrentPlayer?.());
     schedulePlaybackStateUpdate(currentPlayer || playbackManager.getCurrentPlayer?.());
 }
@@ -1609,7 +1611,9 @@ function onShowVideoOsd(_event, visible) {
     enhancePlaybackDom();
 }
 
-function onPlayerActivity() {
+function onPlayerActivity(event) {
+    if (event?.target instanceof Element && event.target.closest('.upNextContainer:not(.hide):not(.upNextDialog-hidden)')) return;
+
     if (!getPlaybackPages().length || !isPlaybackUiActive()) {
         cleanupPlaybackDom();
         return;
@@ -1672,12 +1676,28 @@ function bindVideo(video) {
     currentVideo.addEventListener('loadedmetadata', onNativeVideoProgress);
     currentVideo.addEventListener('canplay', onNativeVideoProgress);
     currentVideo.addEventListener('canplaythrough', onNativeVideoProgress);
+    currentVideo.addEventListener('webkitbeginfullscreen', onNativeVideoFullscreenBegin);
+    currentVideo.addEventListener('webkitendfullscreen', onNativeVideoFullscreenEnd);
     recordPlaybackDiagnostic('ptv-playback-video-bound', 'bind-video', {}, true);
+}
+
+function onNativeVideoFullscreenBegin() {
+    if (!currentVideo) return;
+    nativeFullscreenControls = currentVideo.controls;
+    currentVideo.controls = true;
+    document.documentElement.classList.add('ptv-native-video-fullscreen');
+}
+
+function onNativeVideoFullscreenEnd() {
+    if (currentVideo && nativeFullscreenControls !== null) currentVideo.controls = nativeFullscreenControls;
+    nativeFullscreenControls = null;
+    document.documentElement.classList.remove('ptv-native-video-fullscreen');
 }
 
 function releaseVideo() {
     if (!currentVideo) return;
 
+    onNativeVideoFullscreenEnd();
     clearPlaybackStallTimer();
     currentVideo.removeEventListener('pause', onNativeVideoStateChange);
     currentVideo.removeEventListener('play', onNativeVideoStateChange);
@@ -1691,6 +1711,8 @@ function releaseVideo() {
     currentVideo.removeEventListener('loadedmetadata', onNativeVideoProgress);
     currentVideo.removeEventListener('canplay', onNativeVideoProgress);
     currentVideo.removeEventListener('canplaythrough', onNativeVideoProgress);
+    currentVideo.removeEventListener('webkitbeginfullscreen', onNativeVideoFullscreenBegin);
+    currentVideo.removeEventListener('webkitendfullscreen', onNativeVideoFullscreenEnd);
     currentVideo = null;
 }
 

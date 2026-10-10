@@ -122,7 +122,12 @@ export class PtvUpdateService {
         // The optional API is guarded by runtime presence and unavailable clients keep the current bundle.
         // eslint-disable-next-line compat/compat
         this.serviceWorker = options.serviceWorker || navigator.serviceWorker;
-        this.sessionStorage = options.sessionStorage || window.sessionStorage;
+        try {
+            this.sessionStorage = options.sessionStorage || window.sessionStorage;
+        } catch {
+            // Some privacy modes deny access to the storage property itself.
+            this.sessionStorage = undefined;
+        }
     }
 
     getSnapshot() {
@@ -168,10 +173,31 @@ export class PtvUpdateService {
     }
 
     dismiss() {
-        if (!this.candidate) return;
-        this.writeSessionValue(DISMISSED_SESSION_KEY, this.candidate.key);
+        if (this.candidate) this.writeSessionValue(DISMISSED_SESSION_KEY, this.candidate.key);
         this.retireActivation();
         this.setSnapshot({ activityReason: '', error: '', state: 'dismissed' });
+    }
+
+    async retryFailedUpdate() {
+        if (this.snapshot.state !== 'error' || !this.serviceWorker) return false;
+        if (!this.candidate) {
+            try {
+                const registration = await this.serviceWorker.getRegistration();
+                this.observeRegistration(registration);
+                await this.reconcileWorkers();
+            } catch (error) {
+                this.setSnapshot({ activityReason: '', error: getUpdateError(error), state: 'error' });
+                return false;
+            }
+        }
+
+        const candidate = this.candidate;
+        if (!candidate) return false;
+        if (this.readSessionValue(RELOAD_SESSION_KEY) === candidate.key) {
+            this.clearSessionValue(RELOAD_SESSION_KEY);
+            this.reloadedGeneration = '';
+        }
+        return this.applyWhenSafe();
     }
 
     applyWhenSafe() {
@@ -202,8 +228,8 @@ export class PtvUpdateService {
         try {
             candidate.worker.postMessage({ type: 'SKIP_WAITING' }, []);
             this.scheduleActivationFallback(candidate.key);
-        } catch {
-            this.triggerReloadOnce(candidate.key);
+        } catch (error) {
+            this.failActivation(`The update worker could not activate: ${getUpdateError(error)} Try again.`);
         }
         return true;
     }
@@ -258,7 +284,16 @@ export class PtvUpdateService {
 
         const key = getPtvUpdateGenerationKey(generation);
         if (this.hasReloaded(key)) {
-            this.clearCandidate();
+            this.retireActivation();
+            this.candidate = { generation, key, worker };
+            const dismissed = this.readSessionValue(DISMISSED_SESSION_KEY) === key;
+            this.setSnapshot(dismissed ?
+                { activityReason: '', error: '', state: 'dismissed' } :
+                {
+                    activityReason: '',
+                    error: 'The new version did not load after reloading. Try again when the connection is stable.',
+                    state: 'error'
+                });
             return;
         }
         if (this.candidate?.key === key) {
@@ -343,8 +378,24 @@ export class PtvUpdateService {
         this.clearActivationFallback();
         this.activationFallbackTimer = window.setTimeout(() => {
             this.activationFallbackTimer = null;
+            if (this.activationGeneration !== generation || this.candidate?.key !== generation) return;
+            const active = this.serviceWorker?.controller === this.candidate.worker
+                || this.registration?.active === this.candidate.worker && this.candidate.worker.state === 'activated';
+            if (!active) {
+                const activityReason = this.getActivityReason();
+                this.retireActivation();
+                this.setSnapshot(activityReason ?
+                    { activityReason, error: '', state: 'deferred' } :
+                    { activityReason: '', error: 'The update worker did not activate. Try again.', state: 'error' });
+                return;
+            }
             this.triggerReloadOnce(generation);
         }, this.activationTimeoutMs);
+    }
+
+    private failActivation(error: string) {
+        this.retireActivation();
+        this.setSnapshot({ activityReason: '', error, state: 'error' });
     }
 
     private clearActivationFallback() {
@@ -384,11 +435,24 @@ export class PtvUpdateService {
             return;
         }
 
+        if (!this.writeSessionValue(RELOAD_SESSION_KEY, generation)) {
+            this.setSnapshot({
+                activityReason: '',
+                error: 'Browser storage could not save the update acknowledgement. Try again when storage is available.',
+                state: 'error'
+            });
+            return;
+        }
         this.reloadedGeneration = generation;
-        this.writeSessionValue(RELOAD_SESSION_KEY, generation);
         this.candidate = undefined;
         this.setSnapshot({ activityReason: '', error: '', state: 'idle' });
-        this.reload();
+        try {
+            this.reload();
+        } catch (error) {
+            this.reloadedGeneration = '';
+            this.clearSessionValue(RELOAD_SESSION_KEY);
+            this.setSnapshot({ activityReason: '', error: `Reload failed: ${getUpdateError(error)}`, state: 'error' });
+        }
     }
 
     private readSessionValue(key: string) {
@@ -402,8 +466,9 @@ export class PtvUpdateService {
     private writeSessionValue(key: string, value: string) {
         try {
             this.sessionStorage?.setItem(key, value);
+            return this.sessionStorage?.getItem(key) === value;
         } catch {
-            // Session storage is an optimization, not a requirement.
+            return false;
         }
     }
 

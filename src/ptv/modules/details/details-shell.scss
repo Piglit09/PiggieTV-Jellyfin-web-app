@@ -115,7 +115,7 @@
     max-width: none;
     margin: 0 !important;
     min-height: 0 !important;
-    padding: calc(var(--ptv-header-safe-height, 88px) + 42px) var(--ptv-content-edge, 24px) 56px !important;
+    padding: calc(var(--ptv-shell-header-clearance, var(--ptv-header-safe-height, 88px)) + 42px) var(--ptv-content-edge, 24px) 56px !important;
 }
 
 .ptv-detail-page .ptv-details-glass {
@@ -282,7 +282,7 @@
     }
 
     .ptv-detail-page .detailPageWrapperContainer {
-        padding: calc(var(--ptv-header-safe-height, 88px) + 28px) 16px 42px !important;
+        padding: calc(var(--ptv-shell-header-clearance, var(--ptv-header-safe-height, 88px)) + 28px) 16px 42px !important;
     }
 
     .ptv-detail-page .detailPagePrimaryContainer {
@@ -372,7 +372,7 @@ html .ptv-detail-page.ptv-details--episode .ptv-details-backdrop--image .ptv-det
 }
 
 .ptv-detail-page.ptv-details--episode .detailPageWrapperContainer {
-    padding: calc(var(--ptv-header-safe-height, 88px) + 132px) clamp(28px, 3vw, 58px) 64px !important;
+    padding: calc(var(--ptv-shell-header-clearance, var(--ptv-header-safe-height, 88px)) + 132px) clamp(28px, 3vw, 58px) 64px !important;
 }
 
 .ptv-detail-page.ptv-details--episode .detailPagePrimaryContainer {
@@ -398,7 +398,7 @@ html .ptv-detail-page.ptv-details--episode .ptv-details-backdrop--image .ptv-det
 
 @media (max-width: 900px) {
     .ptv-detail-page.ptv-details--episode .detailPageWrapperContainer {
-        padding: calc(var(--ptv-header-safe-height, 126px) + 20px) 18px 42px !important;
+        padding: calc(var(--ptv-shell-header-clearance, var(--ptv-header-safe-height, 126px)) + 20px) 18px 42px !important;
     }
 
     .ptv-detail-page.ptv-details--episode .detailPagePrimaryContainer {

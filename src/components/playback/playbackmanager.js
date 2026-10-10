@@ -739,6 +739,9 @@ export class PlaybackManager {
         let currentPairingId = null;
 
         this._playNextAfterEnded = true;
+        let playbackGeneration = 0;
+        let startedPlaybackGeneration = 0;
+        let nextAdvanceClaimedForGeneration = false;
         const playerStates = {};
         const bitrateRefreshes = new WeakMap();
 
@@ -2179,6 +2182,8 @@ export class PlaybackManager {
         self.play = async function (options) {
             const playbackRequest = beginPlaybackRequest(self, options);
             if (!playbackRequest) return;
+            // A new explicit request supersedes the ended item's pending autoplay lookup.
+            playbackGeneration += 1;
 
             try {
                 normalizePlayOptions(options);
@@ -2487,6 +2492,7 @@ export class PlaybackManager {
         }
 
         function cancelPlayback() {
+            nextAdvanceClaimedForGeneration = false;
             const player = self._currentPlayer;
 
             if (player) {
@@ -3354,7 +3360,8 @@ export class PlaybackManager {
 
             const newItemInfo = self._playQueueManager.getNextItemInfo();
 
-            if (newItemInfo) {
+            if (newItemInfo && !nextAdvanceClaimedForGeneration) {
+                nextAdvanceClaimedForGeneration = true;
                 console.debug('playing next track');
 
                 const newItemPlayOptions = newItemInfo.item.playOptions || getDefaultPlayOptions();
@@ -3491,6 +3498,9 @@ export class PlaybackManager {
             }
 
             setCurrentPlayerInternal(player);
+            playbackGeneration += 1;
+            startedPlaybackGeneration = playbackGeneration;
+            nextAdvanceClaimedForGeneration = false;
 
             const playerData = getPlayerData(player);
 
@@ -3530,6 +3540,9 @@ export class PlaybackManager {
         function onPlaybackStartedFromSelfManagingPlayer(e, item, mediaSource) {
             const player = this;
             setCurrentPlayerInternal(player);
+            playbackGeneration += 1;
+            startedPlaybackGeneration = playbackGeneration;
+            nextAdvanceClaimedForGeneration = false;
 
             const playOptions = item.playOptions || getDefaultPlayOptions();
             const isFirstItem = playOptions.isFirstItem;
@@ -3757,8 +3770,27 @@ export class PlaybackManager {
                 showPlaybackInfoErrorMessage(self, 'PlaybackError' + displayErrorCode);
             } else if (nextItem) {
                 const apiClient = ServerConnections.getApiClient(nextItem.item.ServerId);
+                const stoppedGeneration = playbackGeneration;
+
+                if (stoppedGeneration !== startedPlaybackGeneration) {
+                    triggerPlaybackAutoplayDecision(playbackStopInfo, false, 'new-playback-request');
+                    return;
+                }
 
                 apiClient.getCurrentUser().then(function (user) {
+                    if (playbackGeneration !== stoppedGeneration) return;
+                    const queuedNext = self._playQueueManager.getNextItemInfo();
+                    const expectedNext = nextItem.item;
+                    let sameNext = queuedNext?.item === expectedNext;
+                    if (queuedNext?.item?.Id) {
+                        sameNext = queuedNext.item.Id === expectedNext.Id
+                            && queuedNext.item.ServerId === expectedNext.ServerId
+                            && queuedNext.item.PlaylistItemId === expectedNext.PlaylistItemId;
+                    }
+                    if (!sameNext) {
+                        triggerPlaybackAutoplayDecision(playbackStopInfo, false, 'next-item-changed');
+                        return;
+                    }
                     const autoplayAllowed = user.Configuration.EnableNextEpisodeAutoPlay || nextMediaType !== MediaType.Video;
 
                     triggerPlaybackAutoplayDecision(playbackStopInfo, autoplayAllowed, autoplayAllowed ? 'user-enabled-or-non-video' : 'user-disabled-video-autoplay');

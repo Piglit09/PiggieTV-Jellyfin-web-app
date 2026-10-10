@@ -106,3 +106,11 @@ The global query client sets `networkMode:'always'` but no feature-independent s
 2. Query cancellation exists and term/scope are keyed, but server/user authority is not part of the keys.
 3. The result model is section-level and read-only; card interactions delegate to shared card/container infrastructure.
 4. Error and empty states are not distinguished in the visible Search components.
+
+## Stage 4 PTV failed-group retry — isolated integration candidate
+
+The comparison points above describe stock Search; the active PTV route replaces that view. `[VERIFIED_FROM_SOURCE]` `NativeSearchPage` keeps successful groups visible and retries only failed group IDs through `retryPtvFailedSearchGroups`. The retry key includes the settled query, filter, server and user; the active request ID, AbortSignal and full route/input scope reject late results after search or identity changes. A second retry is allowed only after the prior attempt settles. `src/ptv/pages/search/NativeSearchPage.tsx`; `searchGroupRetryState.ts`; `resilientSearchService.ts`.
+
+The direct request plan is still user scoped. The new result diagnostics distinguish HTTP status, request error, client group deadline and client batch deadline without changing the deadline or broadening the library query. `[VERIFIED_FROM_SOURCE]` `resilientSearchService.ts`. `[VERIFIED_BY_TEST]` Focused service/retry tests cover partial success, stale rejection, repeat retry, and retained groups. The observed intermittent real Search failure's server-versus-client cause remains `[UNKNOWN]` until captured in that environment; source-level retry success is not production proof.
+
+`[VERIFIED_FROM_SOURCE]` Each visible failed result group now offers its own `Retry group` action. The page also retains the aggregate `Try again` action. Both select only group IDs currently in error, timeout or cancelled state; a loading/success/empty group cannot be targeted. `NativeSearchGroupRetryAction.tsx`; `NativeSearchPage.tsx`; `searchGroupRetryState.ts`. `[VERIFIED_BY_TEST]` Focused action and retry-selection tests assert the user-visible control and single-group selection; authenticated browser/physical Search acceptance remains separate.
