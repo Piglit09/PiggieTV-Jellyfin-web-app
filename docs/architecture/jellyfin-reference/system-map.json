@@ -125,9 +125,9 @@
     "ptvWeb": {
       "version": "0.5.67",
       "versionAuthority": "ptv-version.json",
-      "worktreeState": "Stage 2 controlled Home integration candidate on base 63d13eb0b9043252959d3018bb1e6ab399cd2f5d; local changes pending checkpoint",
+      "worktreeState": "Stage 2 controlled Home integration candidate on base 63d13eb0b9043252959d3018bb1e6ab399cd2f5d; local source and Atlas checkpoints retained on the integration branch",
       "identityStatus": "VERIFIED_FROM_SOURCE",
-      "identityDetail": "Stage 2 isolated controlled Home source candidate, bumped once from the Web 0.5.66 base. The version string alone does not identify the current deployed Web artifact or this candidate's eventual commit.",
+      "identityDetail": "Stage 2 isolated controlled Home source candidate, bumped once from the Web 0.5.66 base. The version string alone does not identify the current deployed Web artifact or this candidate's recorded local commit.",
       "evidence": [
         {
           "repository": "PTV Web",
