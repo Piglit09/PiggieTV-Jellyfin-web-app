@@ -227,6 +227,7 @@ public static class PtvPluginSettingsNormalizer
     public static RowBuilderSettings NormalizeRowBuilderSettings(RowBuilderSettings? settings)
     {
         settings ??= RowBuilderSettings.CreateDefault();
+        var legacySchema = settings.SchemaVersion < 3;
         settings.Categories = (settings.Categories ?? [])
             .Where(category => category is not null)
             .Select(NormalizeRowBuilderCategory)
@@ -239,11 +240,11 @@ public static class PtvPluginSettingsNormalizer
             settings.Rules = MigrateRowBuilderCategories(settings.Categories);
         }
 
-        settings.SchemaVersion = 2;
+        settings.SchemaVersion = 3;
         settings.DefaultsInitialized = true;
         settings.Rules = (settings.Rules ?? [])
             .Where(rule => rule is not null)
-            .Select(NormalizeRowBuilderRule)
+            .Select(rule => NormalizeRowBuilderRule(rule, legacySchema))
             .Where(rule => !string.IsNullOrWhiteSpace(rule.Id))
             .DistinctBy(rule => rule.Id, StringComparer.OrdinalIgnoreCase)
             .OrderBy(rule => rule.SortPriority)
@@ -895,8 +896,21 @@ public static class PtvPluginSettingsNormalizer
         return category;
     }
 
-    private static RowBuilderRule NormalizeRowBuilderRule(RowBuilderRule rule)
+    private static RowBuilderRule NormalizeRowBuilderRule(RowBuilderRule rule, bool legacySchema)
     {
+        // Only a canonical built-in ID AND its original media/source tuple may acquire
+        // ownership during v2 migration. Display names are presentation, never identity.
+        var canonicalDefaultKey = rule.Id switch
+        {
+            "latest-movies" when rule.MediaType == "movies" && rule.SourceType == "latest" && rule.SourceValue == "movies" => "movies",
+            "latest-shows" when rule.MediaType == "shows" && rule.SourceType == "latest" && rule.SourceValue == "shows" => "shows",
+            "latest-cartoons" when rule.MediaType == "cartoons" && rule.SourceType == "latest" && rule.SourceValue == "cartoons" => "cartoons",
+            "latest-anime" when rule.MediaType == "anime" && rule.SourceType == "latest" && rule.SourceValue == "anime" => "anime",
+            "latest-music" when rule.MediaType == "music" && rule.SourceType == "latest" && rule.SourceValue == "music" => "music",
+            _ => null
+        };
+        var formerlyOwnedId = rule.Id is "latest-movies" or "latest-shows" or "latest-cartoons" or "latest-anime" or "latest-music";
+        rule.LibraryScope = NormalizeLibraryScope(rule.LibraryScope, legacySchema, canonicalDefaultKey, formerlyOwnedId, rule.SourceType);
         rule.MediaType = CleanChoice(
             rule.MediaType,
             "movies",
@@ -980,6 +994,50 @@ public static class PtvPluginSettingsNormalizer
         }
 
         return rule;
+    }
+
+    private static RowLibraryScope NormalizeLibraryScope(
+        RowLibraryScope? scope,
+        bool legacySchema,
+        string? canonicalDefaultKey,
+        bool formerlyOwnedId,
+        string? sourceType)
+    {
+        if (scope is null)
+        {
+            if (legacySchema && canonicalDefaultKey is not null)
+            {
+                return new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = canonicalDefaultKey };
+            }
+
+            return new RowLibraryScope
+            {
+                Mode = legacySchema && !formerlyOwnedId && sourceType != "library" ? "global" : "invalid"
+            };
+        }
+
+        var mode = scope.Mode?.Trim();
+        var key = scope.DefaultKey?.Trim();
+        var id = scope.VirtualFolderId?.Trim();
+        if (mode == "global" && string.IsNullOrEmpty(key) && string.IsNullOrEmpty(id) && sourceType != "library" && !formerlyOwnedId)
+        {
+            return new RowLibraryScope { Mode = "global" };
+        }
+
+        if (mode == "defaultLibrary" && key is "movies" or "shows" or "cartoons" or "anime" or "music"
+            && canonicalDefaultKey == key
+            && (id is not null ? Guid.TryParseExact(id, "N", out _) : canonicalDefaultKey == key)
+            && (id is null || Guid.Parse(id) != Guid.Empty))
+        {
+            return new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = key, VirtualFolderId = id is null ? null : Guid.Parse(id).ToString("N") };
+        }
+
+        if (mode == "virtualFolder" && string.IsNullOrEmpty(key) && Guid.TryParseExact(id, "N", out var explicitId) && explicitId != Guid.Empty)
+        {
+            return new RowLibraryScope { Mode = "virtualFolder", VirtualFolderId = explicitId.ToString("N") };
+        }
+
+        return new RowLibraryScope { Mode = "invalid" };
     }
 
     private static int? NormalizeNullableDatePart(int? value, int minimum, int maximum)

@@ -12,6 +12,8 @@ import {
     getAdminUserEmailPresentation
 } from './AdminUserPresentation';
 import { useAdminUsers } from './useAdminUsers';
+import PtvAdminUserVerification from './PtvAdminUserVerification';
+import PtvAdminCreationRecovery from './PtvAdminCreationRecovery';
 
 const AddAdminUserDialog = lazy(async () => {
     const module = await import('./AdminUserDialogs');
@@ -140,6 +142,9 @@ export default function PtvAdminUsersPage() {
                     </button>
                 </div>
             </header>
+
+            <PtvAdminUserVerification api={api} users={usersState.users} />
+            <PtvAdminCreationRecovery api={api} apiClient={apiClient} users={usersState.users} />
 
             <div className='ptv-admin-users-toolbar'>
                 <label className='ptv-admin-user-search' htmlFor='ptv-admin-user-search'>

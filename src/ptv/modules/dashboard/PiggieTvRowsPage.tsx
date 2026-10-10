@@ -16,6 +16,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { PtvLibrary } from '../../api/types';
 import { getPtvPerformanceProfile } from '../../core/clientProfile';
 import {
     recordPtvEvent,
@@ -56,8 +57,11 @@ import type {
 } from '../recommendations/types/recommendationTypes';
 import { useAdminUnsavedChanges } from '../settings/admin/configuration/useAdminUnsavedChanges';
 import {
+    getPtvBuiltInLibraryKey,
     MAX_PTV_ROW_IMPORT_BYTES,
-    parsePtvRowBuilderImport
+    normalizePtvRowLibraryScope,
+    parsePtvRowBuilderImport,
+    type PtvRowLibraryScope
 } from './rowBuilderImport';
 import {
     arePtvAdminSnapshotsEqual,
@@ -93,6 +97,7 @@ type PtvRowBuilderRule = {
     id: string;
     includeSubgenres: boolean;
     itemLimit: number;
+    libraryScope: PtvRowLibraryScope;
     mediaType: RowMediaType;
     name: string;
     providerHints: string[];
@@ -310,7 +315,7 @@ const GENRES_BY_MEDIA: Record<string, string[]> = {
 
 const DEFAULT_SETTINGS: PtvRowBuilderSettings = {
     enabled: true,
-    schemaVersion: 2,
+    schemaVersion: 3,
     defaultsInitialized: true,
     showConfiguredRowsOnHome: true,
     rules: [
@@ -347,6 +352,7 @@ function makeRule(
         sourceValue,
         generationMode,
         itemLimit,
+        libraryScope: normalizePtvRowLibraryScope({ id, mediaType, sourceType, sourceValue }, 2),
         rowCount,
         includeSubgenres: false,
         subgenreRowCount: 0,
@@ -964,7 +970,7 @@ function normalizeSeasonalSettings(value: unknown): PtvRowSeasonalSettings {
     };
 }
 
-function normalizeRule(rule: Partial<PtvRowBuilderRule> | Record<string, unknown>, index: number): PtvRowBuilderRule {
+function normalizeRule(rule: Partial<PtvRowBuilderRule> | Record<string, unknown>, index: number, schemaVersion = 3): PtvRowBuilderRule {
     const sourceType = normalizeChoice(
         getPayloadValue(rule, 'sourceType'),
         SOURCE_TYPES.map(option => option.value),
@@ -1011,6 +1017,7 @@ function normalizeRule(rule: Partial<PtvRowBuilderRule> | Record<string, unknown
         sourceValue,
         generationMode,
         itemLimit: normalizeNumber(getPayloadValue(rule, 'itemLimit'), 16),
+        libraryScope: normalizePtvRowLibraryScope(rule as Record<string, unknown>, schemaVersion),
         rowCount,
         includeSubgenres,
         subgenreRowCount,
@@ -1037,13 +1044,14 @@ function cloneSettings(settings?: Partial<PtvRowBuilderSettings> | null): PtvRow
         : hasExplicitRules
             ? []
             : DEFAULT_SETTINGS.rules;
+    const schemaVersion = Number(getPayloadValue(settings, 'schemaVersion') || 1);
     const rules = rulesSource
-        .map(normalizeRule)
+        .map((rule, index) => normalizeRule(rule, index, schemaVersion))
         .sort((left, right) => left.sortPriority - right.sortPriority);
 
     return {
         enabled: getPayloadValue(settings, 'enabled') !== false,
-        schemaVersion: 2,
+        schemaVersion: 3,
         defaultsInitialized: true,
         showConfiguredRowsOnHome: getPayloadValue(settings, 'showConfiguredRowsOnHome') === true || getPayloadValue(settings, 'enableConfiguredRows') === true,
         rules
@@ -1171,6 +1179,13 @@ function localValidation(settings: PtvRowBuilderSettings, seerrConfigured = fals
 
         if (['collection', 'genre', 'library', 'studio', 'tag', 'providerId', 'person', 'productionYear', 'officialRating', 'communityRating', 'premiereDate', 'image'].includes(rule.sourceType) && !rule.sourceValue.trim()) {
             errors.push(`Rule '${rule.name}' needs a source value.`);
+        }
+
+        if (rule.libraryScope.mode === 'invalid'
+            || (rule.libraryScope.mode === 'virtualFolder' && !rule.libraryScope.virtualFolderId)) {
+            errors.push(`Rule '${rule.name}' needs a valid library scope.`);
+        } else if (rule.libraryScope.mode !== 'global' && !getRowLibraryCollectionType(rule.mediaType)) {
+            errors.push(`Rule '${rule.name}' library scope requires movies, shows, cartoons, anime, or music.`);
         }
 
         if (rule.sourceType === 'requested' && !seerrConfigured) {
@@ -1719,6 +1734,114 @@ function isRandomGenreGeneratedRule(rule: PtvRowBuilderRule) {
     return rule.sourceType === 'genre' && rule.generationMode === 'random';
 }
 
+function getRowLibraryCollectionType(mediaType: RowMediaType) {
+    if (mediaType === 'movies') return 'movies';
+    if (mediaType === 'shows' || mediaType === 'anime' || mediaType === 'cartoons') return 'tvshows';
+    if (mediaType === 'music') return 'music';
+    return null;
+}
+
+function RowLibraryScopeControls({
+    folders,
+    index,
+    libraryListStatus,
+    onRefreshLibraries,
+    rule,
+    updateRule
+}: Readonly<{
+    folders: PtvLibrary[];
+    index: number;
+    libraryListStatus: 'error' | 'loading' | 'ready';
+    onRefreshLibraries: () => void;
+    rule: PtvRowBuilderRule;
+    updateRule: RuleUpdateHandler;
+}>) {
+    const scope = rule.libraryScope;
+    const builtInKey = getPtvBuiltInLibraryKey({
+        id: rule.id,
+        mediaType: rule.mediaType,
+        sourceType: rule.sourceType,
+        sourceValue: rule.sourceValue
+    });
+    const canUseDefault = Boolean(builtInKey);
+    const expectedCollectionType = getRowLibraryCollectionType(rule.mediaType);
+    const availableFolders = folders.filter(folder => (
+        expectedCollectionType !== null
+        && folder.CollectionType === expectedCollectionType
+        && typeof folder.Id === 'string'
+        && /^[0-9a-f]{32}$/i.test(folder.Id)
+        && !/^0{32}$/.test(folder.Id)
+    ));
+    const selectedId = scope.mode === 'defaultLibrary' || scope.mode === 'virtualFolder'
+        ? scope.virtualFolderId || ''
+        : '';
+    const selectedIsAvailable = availableFolders.some(folder => folder.Id?.toLowerCase() === selectedId);
+
+    const selectMode = (mode: string) => {
+        if (mode === 'global') {
+            updateRule(index, { libraryScope: { mode: 'global' } });
+        } else if (mode === 'defaultLibrary' && builtInKey) {
+            updateRule(index, {
+                libraryScope: {
+                    mode: 'defaultLibrary',
+                    defaultKey: builtInKey,
+                    ...(scope.mode === 'defaultLibrary' && scope.virtualFolderId ? { virtualFolderId: scope.virtualFolderId } : {})
+                }
+            });
+        } else if (mode === 'virtualFolder') {
+            updateRule(index, {
+                libraryScope: {
+                    mode: 'virtualFolder',
+                    virtualFolderId: selectedId
+                }
+            });
+        }
+    };
+
+    return (
+        <>
+            <Box className='ptv-row-rule-cell'>
+                <TextField fullWidth select label='Library scope' value={scope.mode} onChange={event => selectMode(event.target.value)}>
+                    {scope.mode === 'invalid' ? <MenuItem disabled value='invalid'>Choose scope</MenuItem> : null}
+                    <MenuItem disabled={rule.sourceType === 'library' || /^latest-(movies|shows|anime|cartoons|music)$/.test(rule.id)} value='global'>Global / discovery</MenuItem>
+                    {canUseDefault ? <MenuItem value='defaultLibrary'>Built-in library</MenuItem> : null}
+                    <MenuItem value='virtualFolder'>Specific library</MenuItem>
+                </TextField>
+            </Box>
+            {scope.mode === 'defaultLibrary' || scope.mode === 'virtualFolder' ? (
+                <Box className='ptv-row-rule-cell'>
+                    <TextField
+                        fullWidth
+                        select
+                        label='Jellyfin library'
+                        value={selectedId}
+                        helperText={scope.mode === 'defaultLibrary' ? `Built-in ${scope.defaultKey} library; its ID stays pinned after a rename.` : 'Choose the exact Jellyfin library ID.'}
+                        onChange={event => updateRule(index, {
+                            libraryScope: scope.mode === 'defaultLibrary'
+                                ? { mode: 'defaultLibrary', defaultKey: scope.defaultKey, ...(event.target.value ? { virtualFolderId: event.target.value } : {}) }
+                                : { mode: 'virtualFolder', virtualFolderId: event.target.value }
+                        })}
+                    >
+                        <MenuItem value=''>{scope.mode === 'defaultLibrary' ? 'Bind the built-in library automatically' : 'Choose a current library'}</MenuItem>
+                        {selectedId && !selectedIsAvailable ? <MenuItem disabled value={selectedId}>Saved library unavailable ({selectedId})</MenuItem> : null}
+                        {availableFolders.map(folder => (
+                            <MenuItem key={folder.Id} value={folder.Id?.toLowerCase()}>
+                                {folder.Name} ({folder.CollectionType}) — {folder.Id?.toLowerCase()}
+                            </MenuItem>
+                        ))}
+                    </TextField>
+                    {libraryListStatus === 'error' ? (
+                        <Stack direction='row' spacing={1} alignItems='center'>
+                            <Typography variant='body2'>Current library IDs could not be loaded.</Typography>
+                            <Button size='small' onClick={onRefreshLibraries}>Retry library list</Button>
+                        </Stack>
+                    ) : null}
+                </Box>
+            ) : null}
+        </>
+    );
+}
+
 function RowSourceValueControls({
     index,
     rule,
@@ -1962,6 +2085,7 @@ const PiggieTvRowsPage = () => {
     const recommendationSaveRequestRef = useRef<Promise<RecommendationSettingsSaveResult> | null>(null);
     const refreshRequestRef = useRef<Promise<void> | null>(null);
     const saveRequestRef = useRef<Promise<void> | null>(null);
+    const libraryRequestRef = useRef<{ controller: AbortController | null } | null>(null);
     const draftRevisionRef = useRef(0);
     const importInputRef = useRef<HTMLInputElement | null>(null);
     const [form, setForm] = useState<PtvRowBuilderSettings>(() => cloneSettings(DEFAULT_SETTINGS));
@@ -1979,6 +2103,8 @@ const PiggieTvRowsPage = () => {
     const [statusMessage, setStatusMessage] = useState<PtvStatusMessage | null>(null);
     const [loading, setLoading] = useState(true);
     const [loadSucceeded, setLoadSucceeded] = useState(false);
+    const [libraryFolders, setLibraryFolders] = useState<PtvLibrary[]>([]);
+    const [libraryListStatus, setLibraryListStatus] = useState<'error' | 'loading' | 'ready'>('loading');
     const [rowConflict, setRowConflict] = useState(false);
     const [previewing, setPreviewing] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
@@ -2332,6 +2458,33 @@ const PiggieTvRowsPage = () => {
             previewAbortRef.current?.abort();
         };
     }, [loadRows]);
+
+    const loadLibraryFolders = useCallback(async () => {
+        libraryRequestRef.current?.controller?.abort();
+        const request = { controller: createRowsAbortController() };
+        libraryRequestRef.current = request;
+        setLibraryListStatus('loading');
+
+        try {
+            const { getPtvMediaFolders } = await import('../../api/libraries');
+            const result = await getPtvMediaFolders({ includeHidden: true, signal: request.controller?.signal });
+            if (libraryRequestRef.current !== request || request.controller?.signal.aborted) return;
+            if (!Array.isArray(result?.Items)) throw new Error('Library list is unavailable.');
+            setLibraryFolders(result.Items);
+            setLibraryListStatus('ready');
+        } catch {
+            if (libraryRequestRef.current !== request || request.controller?.signal.aborted) return;
+            setLibraryFolders([]);
+            setLibraryListStatus('error');
+        } finally {
+            if (libraryRequestRef.current === request) libraryRequestRef.current = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        if (loadSucceeded) void loadLibraryFolders();
+        return () => libraryRequestRef.current?.controller?.abort();
+    }, [loadLibraryFolders, loadSucceeded]);
 
     const updateForm = useCallback((updater: (settings: PtvRowBuilderSettings) => PtvRowBuilderSettings) => {
         draftRevisionRef.current += 1;
@@ -3321,6 +3474,14 @@ const PiggieTvRowsPage = () => {
                                                             </TextField>
                                                         </Box>
                                                         <RowSourceValueControls index={index} rule={rule} updateRule={updateRule} />
+                                                        <RowLibraryScopeControls
+                                                            folders={libraryFolders}
+                                                            index={index}
+                                                            libraryListStatus={libraryListStatus}
+                                                            onRefreshLibraries={loadLibraryFolders}
+                                                            rule={rule}
+                                                            updateRule={updateRule}
+                                                        />
                                                         <Box className='ptv-row-rule-cell'>
                                                             <TextField fullWidth select label='Mode' value={rule.generationMode} onChange={event => updateRule(index, { generationMode: event.target.value as RowGenerationMode })}>
                                                                 {GENERATION_MODES.map(option => <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>)}

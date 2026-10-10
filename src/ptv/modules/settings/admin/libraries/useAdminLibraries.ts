@@ -17,6 +17,7 @@ import {
     loadAdminLibraries,
     loadAdminLibraryOptionsInfo,
     loadAdminLibraryTasks,
+    loadAdminLibraryTransition,
     resolveAdminLibrary
 } from './adminLibrariesService';
 
@@ -50,6 +51,7 @@ export function getAdminLibrariesQueryKeys(
             collectionType?.trim().toLowerCase() || 'mixed',
             { isNewLibrary }
         ] as const,
+        transition: [ ...scope, 'transition' ] as const,
         tasks: [ ...scope, 'scan-task', { isHidden: false } ] as const
     };
 }
@@ -80,6 +82,14 @@ export function useAdminLibraries(api?: Api, apiClient?: ApiClient) {
     const enabled = Boolean(api && serverKey);
     const queryClient = useQueryClient();
     const keys = getAdminLibrariesQueryKeys(serverKey);
+    const transitionQuery = useQuery({
+        enabled: Boolean(api && serverKey),
+        queryKey: keys.transition,
+        queryFn: ({ signal }) => loadAdminLibraryTransition(api!, signal),
+        retry: false,
+        refetchOnWindowFocus: false,
+        staleTime: 0
+    });
     const listQuery = useQuery({
         enabled,
         queryFn: ({ signal }) => loadAdminLibraries(api!, signal),
@@ -108,22 +118,27 @@ export function useAdminLibraries(api?: Api, apiClient?: ApiClient) {
         if (refreshFlight.current) return refreshFlight.current;
         const promise = Promise.allSettled([
             refetchList({ cancelRefetch: true }),
-            refetchTasks({ cancelRefetch: true })
+            refetchTasks({ cancelRefetch: true }),
+            transitionQuery.refetch({ cancelRefetch: true })
         ]).finally(() => {
             refreshFlight.current = null;
         });
         refreshFlight.current = promise;
         return promise;
-    }, [api, refetchList, refetchTasks, serverKey]);
+    }, [api, refetchList, refetchTasks, serverKey, transitionQuery]);
     const invalidate = useCallback(async () => {
         if (!serverKey) return;
         await Promise.allSettled([
             queryClient.invalidateQueries({ queryKey: keys.list }),
+            queryClient.invalidateQueries({ queryKey: keys.transition }),
             invalidateAdminLibraryConsumers(queryClient, serverKey)
         ]);
-    }, [keys.list, queryClient, serverKey]);
+    }, [keys.list, keys.transition, queryClient, serverKey]);
 
     return {
+        transition: transitionQuery.data,
+        transitionError: transitionQuery.isError,
+        refreshTransition: transitionQuery.refetch,
         globalScanTask: tasksQuery.data?.find(task => task.Key === 'RefreshLibrary') || null,
         isInitialLoading: listQuery.isPending && !listQuery.data,
         isRefreshing: listQuery.isFetching || tasksQuery.isFetching,
@@ -143,6 +158,14 @@ export function useAdminLibrary(
     const serverKey = getResolvedAdminServerId(apiClient);
     const queryClient = useQueryClient();
     const keys = getAdminLibrariesQueryKeys(serverKey, libraryId);
+    const transitionQuery = useQuery({
+        enabled: Boolean(api && serverKey),
+        queryKey: keys.transition,
+        queryFn: ({ signal }) => loadAdminLibraryTransition(api!, signal),
+        retry: false,
+        refetchOnWindowFocus: false,
+        staleTime: 0
+    });
     const scanObservationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [ scanObservation, setScanObservation ] = useState(false);
     useEffect(() => () => {
@@ -196,14 +219,16 @@ export function useAdminLibrary(
         if (!serverKey) return;
         await Promise.allSettled([
             queryClient.invalidateQueries({ queryKey: keys.list }),
+            queryClient.invalidateQueries({ queryKey: keys.transition }),
             queryClient.invalidateQueries({ queryKey: keys.detail }),
             invalidateAdminLibraryConsumers(queryClient, serverKey)
         ]);
-    }, [keys.detail, keys.list, queryClient, serverKey]);
+    }, [keys.detail, keys.list, keys.transition, queryClient, serverKey]);
     const removeCachedDetail = useCallback(() => {
         queryClient.removeQueries({ queryKey: keys.detail });
     }, [keys.detail, queryClient]);
     const adoptLibrary = useCallback(async (library: VirtualFolderInfo) => {
+        if (!library.ItemId || library.ItemId.trim().toLowerCase() !== libraryId.trim().toLowerCase()) return;
         await Promise.allSettled([
             queryClient.cancelQueries({ exact: true, queryKey: keys.detail }),
             queryClient.cancelQueries({ exact: true, queryKey: keys.list })
@@ -217,7 +242,7 @@ export function useAdminLibrary(
             ));
         });
         if (serverKey) await invalidateAdminLibraryConsumers(queryClient, serverKey);
-    }, [keys.detail, keys.list, queryClient, serverKey]);
+    }, [keys.detail, keys.list, libraryId, queryClient, serverKey]);
     const beginScanObservation = useCallback(() => {
         if (!api || !serverKey || !libraryId) return;
         if (scanObservationTimer.current) globalThis.clearTimeout(scanObservationTimer.current);
@@ -230,6 +255,9 @@ export function useAdminLibrary(
     }, [api, libraryId, refetchDetail, serverKey]);
 
     return {
+        transition: transitionQuery.data,
+        transitionError: transitionQuery.isError,
+        refreshTransition: transitionQuery.refetch,
         adoptLibrary,
         beginScanObservation,
         configuredLocations,

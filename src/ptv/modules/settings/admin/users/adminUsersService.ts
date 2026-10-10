@@ -9,6 +9,8 @@ import type {
 import { getLibraryApi } from '@jellyfin/sdk/lib/utils/api/library-api';
 import { getUserApi } from '@jellyfin/sdk/lib/utils/api/user-api';
 
+import { getCurrentPtvPluginApiClient, type HomeUserAccess, type HomeUserAccessResponse } from '../../../../core/pluginApi';
+import { acknowledgeHomeUserAccessBeginEpoch, clearHomeUserAccessRetirementHint, retireHomeUserAccessAuthority } from '../../../../pages/home/homeLibraryTransitionFreshness';
 import { loadAdminPeopleSessions } from '../people/adminPeopleService';
 
 import type {
@@ -25,6 +27,7 @@ export type AdminUsersServiceErrorCode =
     | 'invalid-username'
     | 'managed-state-conflict'
     | 'policy-unavailable'
+    | 'transition-unavailable'
     | 'user-configuration-unavailable'
     | 'users-unavailable';
 
@@ -163,6 +166,212 @@ function sameLibraryAccess(
         && sameFolderIds(left.enabledFolderIds, right.enabledFolderIds);
 }
 
+function canonicalAccessGuid(value: string) {
+    const compact = value.replace(/-/g, '');
+    return /^[a-fA-F0-9]{32}$/.test(compact) ? compact.toLowerCase() : value;
+}
+
+function captureHomeUserAccess(userId: string, policy: UserPolicy): HomeUserAccess | null {
+    if (typeof policy.EnableAllFolders !== 'boolean'
+        || policy.EnabledFolders !== undefined && !Array.isArray(policy.EnabledFolders)
+        || typeof policy.IsAdministrator !== 'boolean' || typeof policy.IsDisabled !== 'boolean') return null;
+    return {
+        userId: canonicalAccessGuid(userId),
+        enableAllFolders: policy.EnableAllFolders,
+        enabledFolders: uniqueIds((policy.EnabledFolders || []).map(canonicalAccessGuid)).sort((left, right) => left.localeCompare(right)),
+        isAdministrator: policy.IsAdministrator,
+        isDisabled: policy.IsDisabled
+    };
+}
+
+function sameHomeUserAccess(left: HomeUserAccess, right: HomeUserAccess) {
+    return left.userId === right.userId && left.enableAllFolders === right.enableAllFolders
+        && left.isAdministrator === right.isAdministrator && left.isDisabled === right.isDisabled
+        && sameFolderIds(left.enabledFolders, right.enabledFolders);
+}
+
+function normalizedRecoveryAccess(access: HomeUserAccess | null | undefined, userId: string): HomeUserAccess | null {
+    if (!access || canonicalAccessGuid(access.userId) !== userId
+        || typeof access.enableAllFolders !== 'boolean'
+        || typeof access.isAdministrator !== 'boolean' || typeof access.isDisabled !== 'boolean'
+        || !Array.isArray(access.enabledFolders)) return null;
+    const enabledFolders = access.enabledFolders.map(canonicalAccessGuid);
+    if (enabledFolders.some(id => !/^[a-f0-9]{32}$/.test(id))
+        || new Set(enabledFolders).size !== enabledFolders.length
+        || (access.enableAllFolders && enabledFolders.length > 0)) return null;
+    return { ...access, enabledFolders, userId };
+}
+
+function newAccessOperationId() {
+    // eslint-disable-next-line compat/compat
+    const cryptoApi = globalThis.crypto;
+    if (!cryptoApi?.getRandomValues) throw new AdminUsersServiceError('transition-unavailable', 'Secure access transition identity is unavailable.');
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 15) | 64;
+    bytes[8] = (bytes[8]! & 63) | 128;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function homeUserAccessClient(api: Api) {
+    const client = getCurrentPtvPluginApiClient();
+    if (!client?.matchesSdkApi(api)) {
+        throw new AdminUsersServiceError('transition-unavailable', 'The active server changed. Reload before changing access.');
+    }
+    return client;
+}
+
+export async function loadCurrentHomeUserAccess(api: Api, userId: string, signal?: AbortSignal): Promise<HomeUserAccessResponse | null> {
+    const canonicalUserId = canonicalAccessGuid(requireUserId(userId));
+    try {
+        const current = await homeUserAccessClient(api).getCurrentHomeUserAccess(canonicalUserId, { signal });
+        if (current.version !== 1 || current.userId !== canonicalUserId
+            || typeof current.held !== 'boolean' || typeof current.policyProven !== 'boolean') {
+            throw new AdminUsersServiceError('transition-unavailable', 'The account access state could not be verified.');
+        }
+        return current;
+    } catch (error) {
+        const failure = error as { status?: number; response?: { status?: number } };
+        if (failure?.status === 404 || failure?.response?.status === 404) return null;
+        throw error;
+    }
+}
+
+/** Recheck the held operation; never issue another Jellyfin policy write. */
+export async function retryExistingUserAccessCompletion(api: Api, userId: string, signal?: AbortSignal): Promise<HomeUserAccessResponse> {
+    const current = await loadCurrentHomeUserAccess(api, userId, signal);
+    if (!current || !current.held || current.policyProven || current.writeAllowed
+        || current.state !== 'pending' && current.state !== 'failed'
+        || !current.operationId || !/^[a-fA-F0-9]{8}-(?:[a-fA-F0-9]{4}-){3}[a-fA-F0-9]{12}$/.test(current.operationId)
+        || !current.accessEpoch || !/^[a-fA-F0-9]{64}$/.test(current.accessEpoch)) {
+        throw new AdminUsersServiceError('transition-unavailable', 'No held access operation can be verified for this account.');
+    }
+    const result = await homeUserAccessClient(api).completeHomeUserAccess(current.operationId, { signal });
+    if (result.version !== 1 || result.userId !== current.userId || result.operationId !== current.operationId
+        || result.accessEpoch !== current.accessEpoch || result.held || !result.policyProven
+        || result.state !== 'policy-attested' || result.writeAllowed) {
+        throw new AdminUsersServiceError('transition-unavailable', 'The account access operation remains held. Review Jellyfin policy before retrying verification.');
+    }
+    return result;
+}
+
+const controlledAccessFlights = new WeakSet<Api>();
+
+/** A failed or uncertain stock write remains held for administrator recovery. */
+async function writeExistingUserAccess(
+    api: Api,
+    userId: string,
+    expectedPolicy: UserPolicy,
+    intendedPolicy: UserPolicy,
+    signal?: AbortSignal,
+    modeOverride?: 'reproof'
+): Promise<UserPolicy> {
+    if (controlledAccessFlights.has(api)) {
+        throw new AdminUsersServiceError('transition-unavailable', 'An access change is already pending.');
+    }
+    const canonicalUserId = canonicalAccessGuid(userId);
+    const expectedAccess = captureHomeUserAccess(canonicalUserId, expectedPolicy);
+    const intendedAccess = captureHomeUserAccess(canonicalUserId, intendedPolicy);
+    if (!expectedAccess || !intendedAccess) {
+        throw new AdminUsersServiceError('policy-unavailable', 'Account access could not be verified. No changes were made.');
+    }
+    const client = homeUserAccessClient(api);
+    const operationId = newAccessOperationId();
+    controlledAccessFlights.add(api);
+    try {
+        retireHomeUserAccessAuthority(canonicalUserId, 'controlled-user-access');
+        let begun: Awaited<ReturnType<typeof client.beginHomeUserAccess>>;
+        try {
+            begun = await client.beginHomeUserAccess({
+                operationId, userId: canonicalUserId,
+                mode: modeOverride || (sameHomeUserAccess(expectedAccess, intendedAccess) ? 'preserve' : 'existing'),
+                expectedAccess, intendedAccess
+            }, { signal });
+            if (begun.version !== 1 || begun.userId !== canonicalUserId || begun.operationId !== operationId
+                || typeof begun.accessEpoch !== 'string' || !/^[a-fA-F0-9]{64}$/.test(begun.accessEpoch)
+                || !begun.held || begun.policyProven || begun.state !== 'pending' || !begun.writeAllowed) {
+                throw new AdminUsersServiceError('transition-unavailable', 'The access hold could not be verified. No changes were made.');
+            }
+            acknowledgeHomeUserAccessBeginEpoch(canonicalUserId, begun.accessEpoch);
+        } finally {
+            clearHomeUserAccessRetirementHint(canonicalUserId);
+        }
+        signal?.throwIfAborted();
+        homeUserAccessClient(api);
+        try {
+            await getUserApi(api).updateUserPolicy({ userId, userPolicy: intendedPolicy }, { signal });
+        } catch {
+            throw new AdminUsersServiceError('transition-unavailable', 'The access write is uncertain. PTV Home remains held for this account. Review the pending operation before retrying.');
+        }
+        let readbackUser: UserDto;
+        try {
+            readbackUser = await loadAdminUser(api, userId, signal);
+        } catch {
+            throw new AdminUsersServiceError('transition-unavailable', 'The access readback is unavailable. PTV Home remains held for this account.');
+        }
+        if (!readbackUser.Id || canonicalAccessGuid(readbackUser.Id) !== canonicalUserId) {
+            throw new AdminUsersServiceError('transition-unavailable', 'The account readback changed identity. PTV Home remains held for this account.');
+        }
+        if (!readbackUser.Policy) {
+            throw new AdminUsersServiceError('transition-unavailable', 'The access readback is unavailable. PTV Home remains held for this account.');
+        }
+        const readback = clonePolicy(readbackUser.Policy);
+        const actualAccess = captureHomeUserAccess(userId, readback);
+        if (!actualAccess || !sameHomeUserAccess(actualAccess, intendedAccess)) {
+            throw new AdminUsersServiceError('transition-unavailable', 'The access update could not be verified. PTV Home remains held for this account.');
+        }
+        let completed: Awaited<ReturnType<typeof client.completeHomeUserAccess>>;
+        try {
+            completed = await client.completeHomeUserAccess(operationId, { signal });
+        } catch {
+            throw new AdminUsersServiceError('transition-unavailable', 'Plugin access verification is unavailable. PTV Home remains held for this account.');
+        }
+        if (completed.version !== 1 || completed.userId !== canonicalUserId
+            || completed.operationId !== operationId || completed.accessEpoch !== begun.accessEpoch
+            || completed.held || !completed.policyProven || completed.state !== 'policy-attested' || completed.writeAllowed) {
+            throw new AdminUsersServiceError('transition-unavailable', 'The access update is awaiting verification. PTV Home remains held for this account.');
+        }
+        return readback;
+    } finally {
+        controlledAccessFlights.delete(api);
+    }
+}
+
+/** Deliberate administrator re-verification of a previously attested user. */
+export async function reverifyPreviouslyAttestedUserAccess(
+    api: Api,
+    userId: string,
+    reviewedAccess: HomeUserAccess,
+    signal?: AbortSignal
+): Promise<UserPolicy> {
+    const id = canonicalAccessGuid(requireUserId(userId));
+    if (!/^[a-f0-9]{32}$/.test(id)) {
+        throw new AdminUsersServiceError('invalid-user', 'Choose a valid account for access verification.');
+    }
+    const reviewed = normalizedRecoveryAccess(reviewedAccess, id);
+    const current = await loadCurrentHomeUserAccess(api, id, signal);
+    const actual = normalizedRecoveryAccess(current?.currentAccess, id);
+    const prior = normalizedRecoveryAccess(current?.intendedAccess, id);
+    if (!reviewed || !actual || !prior || !current
+        || current.state !== 'policy-attested' || !current.held || current.policyProven || current.writeAllowed
+        || !current.operationId || !/^[a-fA-F0-9-]{32,36}$/.test(current.operationId)
+        || !current.accessEpoch || !/^[a-fA-F0-9]{64}$/.test(current.accessEpoch)
+        || !sameHomeUserAccess(reviewed, actual)) {
+        throw new AdminUsersServiceError('transition-unavailable', 'The reviewed policy is no longer current. Refresh this account before re-verification.');
+    }
+    const user = await loadAdminUser(api, id, signal);
+    if (!user.Id || canonicalAccessGuid(user.Id) !== id) {
+        throw new AdminUsersServiceError('transition-unavailable', 'The account identity changed before verification.');
+    }
+    const policy = requirePolicy(user);
+    const stockAccess = captureHomeUserAccess(id, policy);
+    if (!stockAccess || !sameHomeUserAccess(stockAccess, reviewed)) {
+        throw new AdminUsersServiceError('transition-unavailable', 'Jellyfin policy changed after review. No verification write was made.');
+    }
+    const modeOverride = sameHomeUserAccess(prior, reviewed) ? undefined : 'reproof';
+    return writeExistingUserAccess(api, id, policy, policy, signal, modeOverride);
+}
+
 export async function loadAdminUsers(api: Api, signal?: AbortSignal): Promise<UserDto[]> {
     const response = await getUserApi(api).getUsers({}, { signal });
     if (!Array.isArray(response.data)) {
@@ -257,16 +466,30 @@ export async function updateAdminUserPolicy(
     patch: Readonly<Partial<UserPolicy>>,
     signal?: AbortSignal
 ): Promise<UserPolicy> {
+    if (Object.prototype.hasOwnProperty.call(patch, 'EnableAllFolders')
+        || Object.prototype.hasOwnProperty.call(patch, 'EnabledFolders')) {
+        throw new AdminUsersServiceError('invalid-library-selection', 'Use the verified library access controls to change folders.');
+    }
     const id = requireUserId(userId);
     const user = await loadAdminUser(api, id, signal);
+    const expectedPolicy = requirePolicy(user);
     const policy = {
-        ...requirePolicy(user),
+        ...expectedPolicy,
         ...patch
     } as UserPolicy;
-    await getUserApi(api).updateUserPolicy({
-        userId: id,
-        userPolicy: policy
-    }, { signal });
+    return writeExistingUserAccess(api, id, expectedPolicy, policy, signal);
+}
+
+/** Used only after Jellyfin has returned a newly created user ID; Plugin bootstrap gates Home. */
+export async function updateNewAdminUserPolicy(
+    api: Api,
+    userId: string,
+    patch: Readonly<Partial<UserPolicy>>,
+    signal?: AbortSignal
+): Promise<UserPolicy> {
+    const id = requireUserId(userId);
+    const policy = { ...requirePolicy(await loadAdminUser(api, id, signal)), ...patch } as UserPolicy;
+    await getUserApi(api).updateUserPolicy({ userId: id, userPolicy: policy }, { signal });
     return policy;
 }
 
@@ -304,10 +527,7 @@ export async function updateAdminUserPlaybackPolicyFromBaseline(
     ADMIN_USER_PLAYBACK_POLICY_FIELDS.forEach(field => {
         policy[field] = validEdited[field];
     });
-    await getUserApi(api).updateUserPolicy({
-        userId: id,
-        userPolicy: policy
-    }, { signal });
+    await writeExistingUserAccess(api, id, requirePolicy(user), policy, signal);
     return {
         confirmedBaseline: captureAdminUserPlaybackPolicy(policy)!,
         policy
@@ -364,7 +584,8 @@ async function saveAdminUserLibraryAccess(
             );
         }
     }
-    const knownFolderIds = new Set(folders.map(folder => folder.Id).filter((value): value is string => Boolean(value)));
+    const knownFolderIds = new Set(folders.map(folder => folder.Id)
+        .filter((value): value is string => Boolean(value)).map(canonicalAccessGuid));
 
     if (selection.mode === 'all') {
         policy.EnableAllFolders = true;
@@ -378,10 +599,11 @@ async function saveAdminUserLibraryAccess(
         }
 
         const previouslySelected = uniqueIds(policy.EnabledFolders || []);
-        const preservedUnknownIds = previouslySelected.filter(folderId => !knownFolderIds.has(folderId));
-        const requestedIds = uniqueIds(selection.selectedFolderIds);
+        const preservedUnknownIds = previouslySelected.filter(folderId => !knownFolderIds.has(canonicalAccessGuid(folderId)));
+        const requestedIds = uniqueIds(selection.selectedFolderIds).map(canonicalAccessGuid);
+        const preservedUnknownIdentity = new Set(preservedUnknownIds.map(canonicalAccessGuid));
         const invalidRequestedId = requestedIds.find(folderId => (
-            !knownFolderIds.has(folderId) && !preservedUnknownIds.includes(folderId)
+            !knownFolderIds.has(folderId) && !preservedUnknownIdentity.has(folderId)
         ));
         if (invalidRequestedId) {
             throw new AdminUsersServiceError(
@@ -391,19 +613,22 @@ async function saveAdminUserLibraryAccess(
         }
 
         policy.EnableAllFolders = false;
+        const requestedIdentity = new Set(requestedIds);
         policy.EnabledFolders = uniqueIds([
-            ...requestedIds.filter(folderId => knownFolderIds.has(folderId)),
-            ...preservedUnknownIds
+            ...requestedIds.filter(folderId => knownFolderIds.has(folderId) || preservedUnknownIdentity.has(folderId)),
+            ...preservedUnknownIds.filter(folderId => !requestedIdentity.has(canonicalAccessGuid(folderId)))
         ]);
     }
 
-    await getUserApi(api).updateUserPolicy({
-        userId: id,
-        userPolicy: policy
-    }, { signal });
+    const confirmedPolicy = baseline ?
+        await writeExistingUserAccess(api, id, requirePolicy(user), policy, signal) :
+        await updateNewAdminUserPolicy(api, id, {
+            EnableAllFolders: policy.EnableAllFolders,
+            EnabledFolders: policy.EnabledFolders
+        }, signal);
     return {
-        confirmedBaseline: captureAdminUserLibraryAccess(policy)!,
-        policy
+        confirmedBaseline: captureAdminUserLibraryAccess(confirmedPolicy)!,
+        policy: confirmedPolicy
     };
 }
 

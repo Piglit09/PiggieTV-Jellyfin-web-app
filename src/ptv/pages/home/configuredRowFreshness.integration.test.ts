@@ -25,6 +25,8 @@ import {
     retireConfiguredRowFreshness,
     verifyConfiguredRowFreshness
 } from './configuredRowFreshness';
+import { acceptHomeLibraryAuthority, beginHomeLibraryVerification,
+    getHomeLibraryAuthoritySnapshot } from './homeLibraryTransitionFreshness';
 
 const identity = 'server-a:user-a';
 const scope = 'a'.repeat(64);
@@ -96,23 +98,45 @@ function homeState(
     heroItems: Array<{ Id: string; Name: string }>,
     independentHeroItems: Array<{ Id: string; Name: string }> = []
 ): NativeHomeState {
+    const access = getHomeLibraryAuthoritySnapshot();
     return {
         debug: { home: {} as never, performance: {} as never, recommendations: {} as never },
         error: null,
+        heroAccessEpoch: access.userAccess?.accessEpoch || null,
         heroItem: heroItems[0] || null,
         heroItems,
         independentHeroItems,
         isLoading: false,
-        rows,
+        rows: rows.map(value => value.source === 'featured-cache' || value.source === 'featured-endpoint' ?
+            { ...value, homeUserAccessEpoch: access.userAccess?.accessEpoch || undefined,
+                homeLibraryRevision: access.revision } : value),
         user: null
     };
 }
 
 beforeEach(() => {
     retireConfiguredRowFreshness('test-reset');
+    const revision = beginHomeLibraryVerification(identity);
+    acceptHomeLibraryAuthority({
+        currentHomeTopology: { version: 1, epoch: 'f'.repeat(64), held: false },
+        currentHomeUserAccess: { version: 1, userId: 'user-a', accessEpoch: 'e'.repeat(64),
+            held: false, policyProven: true }
+    }, revision, identity);
 });
 
 describe('configured-row freshness Home row-builder integration', () => {
+    it('does not infer Hero authority for unknown or old access provenance', () => {
+        const independentItem = { Id: 'independent-hero', Name: 'Independent' };
+        const current = homeState([ row({ id: 'generic', items: [ independentItem ] }) ],
+            [ independentItem ], [ independentItem ]);
+
+        expect(retainCurrentNativeHomePresentation({ ...current, heroAccessEpoch: undefined }, identity).heroItems)
+            .toEqual([]);
+        expect(retainCurrentNativeHomePresentation({ ...current, heroAccessEpoch: 'd'.repeat(64) }, identity).heroItems)
+            .toEqual([]);
+        expect(retainCurrentNativeHomePresentation(current, identity).heroItems).toEqual([ independentItem ]);
+    });
+
     it('promotes and tags a configured row only through a live private proof', async () => {
         const proof = await currentProof();
         const result = createRowsFromFeaturedPayload(payload(), {

@@ -13,6 +13,8 @@ namespace Jellyfin.Plugin.PiggieTV;
 /// </summary>
 public sealed class Plugin : BasePlugin<PluginConfiguration>
 {
+    private readonly object _topologyMarkerSaveGate = new();
+    private bool _homeTopologyLedgerInitialized;
     /// <summary>
     /// Gets the build timestamp stamped into this diagnostic plugin build.
     /// </summary>
@@ -52,5 +54,25 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>
     {
         using var mutation = PtvConfiguredRowAssociationService.BeginConfigurationMutation();
         base.UpdateConfiguration(configuration);
+    }
+
+    /// <inheritdoc />
+    public override void SaveConfiguration(PluginConfiguration configuration)
+    {
+        // Jellyfin may enter here under its lazy-load lock. Use a save-only gate;
+        // acquiring the PTV configuration gate here would invert the read lock order.
+        lock (_topologyMarkerSaveGate)
+        {
+            // Reading Configuration here would invoke Jellyfin's lazy default save. Inspect
+            // the previous durable file directly instead, before a replacement overwrites it.
+            if (!_homeTopologyLedgerInitialized && File.Exists(ConfigurationFilePath))
+            {
+                var previous = (PluginConfiguration)XmlSerializer.DeserializeFromFile(typeof(PluginConfiguration), ConfigurationFilePath);
+                _homeTopologyLedgerInitialized = previous.HomeTopologyLedgerInitialized;
+            }
+            configuration.HomeTopologyLedgerInitialized |= _homeTopologyLedgerInitialized;
+            base.SaveConfiguration(configuration);
+            _homeTopologyLedgerInitialized |= configuration.HomeTopologyLedgerInitialized;
+        }
     }
 }

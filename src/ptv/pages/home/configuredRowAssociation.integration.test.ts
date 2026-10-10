@@ -216,6 +216,45 @@ describe('configured row association Home integration', () => {
             .not.toBe(getRowsEndpointSettingsHash(legacy));
     });
 
+    it('matches the Plugin schema-3 persisted row hash through both settings endpoints', async () => {
+        const persistedRows = {
+            schemaVersion: 3,
+            enabled: true,
+            defaultsInitialized: true,
+            showConfiguredRowsOnHome: true,
+            rules: [ {
+                id: 'latest-anime', name: 'Anime & Cartoons – Café', enabled: true,
+                mediaType: 'anime', sourceType: 'latest', sourceValue: 'anime',
+                includeSubgenres: true, subgenreRowCount: 2,
+                libraryScope: { mode: 'defaultLibrary', defaultKey: 'anime', virtualFolderId: '0c41907140d802bb58430fed7e2cd79e' }
+            } ],
+            categories: []
+        };
+        const responseRows = {
+            ...persistedRows,
+            currentPresentationAuthority: { version: 1, scope, generation },
+            configuredRowAssociations: configuration().configuredRowAssociations
+        };
+        // Independent .NET System.Text.Json Web-encoder/ordinal-key fixture.
+        const pluginHash = '952400211';
+
+        expect(getRowsEndpointSettingsHash(responseRows)).toBe(pluginHash);
+        mocks.getSettings.mockResolvedValue({
+            rows: responseRows,
+            rowSettings: { enableRecommendedRows: true },
+            recommendations: { enabled: true, rows: [] }
+        });
+        const fromSettings = await fetchRowsEndpointSettings();
+        expect(getRowsEndpointSettingsHash(fromSettings)).toBe(pluginHash);
+        mocks.getSettings.mockRejectedValue(new Error('simulated unavailable'));
+        mocks.getRows.mockResolvedValue(responseRows);
+        const fromRows = await fetchRowsEndpointSettings();
+        expect(getRowsEndpointSettingsHash(fromRows)).toBe(pluginHash);
+
+        expect(getRowsEndpointSettingsHash({ ...responseRows, showConfiguredRowsOnHome: false })).not.toBe(pluginHash);
+        expect(getRowsEndpointSettingsHash({ ...responseRows, rules: [ { ...persistedRows.rules[0], subgenreRowCount: 1 } ] })).not.toBe(pluginHash);
+    });
+
     it('preserves the response mapping through the primary settings endpoint', async () => {
         const config = configuration();
         mocks.getSettings.mockResolvedValue({ rows: config });

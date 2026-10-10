@@ -1,5 +1,6 @@
 using Jellyfin.Plugin.PiggieTV.Configuration;
 using Jellyfin.Plugin.PiggieTV.Models;
+using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.PiggieTV.Services;
@@ -11,14 +12,17 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
 {
     private const int MaxReadingSeriesOverridesPerRoute = 5000;
     private readonly ILogger<PtvPluginSettingsService> _logger;
+    private readonly IPtvHomeTopologyLedger? _topology;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PtvPluginSettingsService"/> class.
     /// </summary>
     /// <param name="logger">Logger.</param>
-    public PtvPluginSettingsService(ILogger<PtvPluginSettingsService> logger)
+    /// <param name="topology">Durable Home topology authority.</param>
+    public PtvPluginSettingsService(ILogger<PtvPluginSettingsService> logger, IPtvHomeTopologyLedger? topology = null)
     {
         _logger = logger;
+        _topology = topology;
         _logger.LogInformation("PiggieTV plugin settings service constructed.");
     }
 
@@ -33,6 +37,61 @@ public sealed class PtvPluginSettingsService : IPtvPluginSettingsService
         _logger.LogInformation("PiggieTV plugin settings load finished.");
 
         return PtvPluginSettingsDto.FromConfiguration(configuration);
+    }
+
+    /// <summary>
+    /// Pins uniquely discovered built-in libraries through the normal configuration mutation.
+    /// A normal settings read never performs this write. An unresolved library remains unbound.
+    /// </summary>
+    /// <param name="folders">Current Jellyfin virtual folders.</param>
+    /// <returns>False only when a required configuration write failed.</returns>
+    public bool BindDefaultLibraries(IReadOnlyList<VirtualFolderInfo> folders)
+    {
+        lock (PtvConfiguredRowAssociationService.ConfigurationGate)
+        {
+            var configuration = GetConfiguration();
+            PtvPluginSettingsNormalizer.Normalize(configuration);
+            PtvHomeTopologySnapshot? topology;
+            try { topology = _topology?.ReadAsync().GetAwaiter().GetResult(); }
+            catch { return false; }
+            if (topology?.RecoveryRequired == true || topology?.BroadHold == true
+                || (topology is null && configuration.HomeTopologyLedgerInitialized)) return false;
+            var pending = new List<(RowLibraryScope Scope, string Id)>();
+            foreach (var rule in configuration.Rows.Rules)
+            {
+                if (rule.LibraryScope is not { Mode: "defaultLibrary", VirtualFolderId: null } scope)
+                {
+                    continue;
+                }
+
+                var resolution = topology is null
+                    ? PtvHomeLibraryScopeResolver.Resolve(rule, folders)
+                    : PtvHomeLibraryScopeResolver.Resolve(rule, folders, topology);
+                if (resolution.NeedsBinding && resolution.LibraryId is { } id)
+                {
+                    pending.Add((scope, id.ToString("N")));
+                }
+            }
+
+            // A no-op observation must not retire a current Featured generation.
+            if (pending.Count == 0) return true;
+            using var mutation = PtvConfiguredRowAssociationService.BeginConfigurationMutation();
+            foreach (var (scope, id) in pending) scope.VirtualFolderId = id;
+            try
+            {
+                SaveConfiguration(configuration);
+                _logger.LogInformation("PiggieTV default library IDs pinned. Count={Count}.", pending.Count);
+                return true;
+            }
+            catch (Exception)
+            {
+                // The base plugin may still point at the same object after a failed serializer call.
+                // Never serve an unpersisted in-memory binding as an established authority.
+                foreach (var (scope, _) in pending) scope.VirtualFolderId = null;
+                _logger.LogWarning("PiggieTV default library pinning failed; owned rows remain unbound.");
+                return false;
+            }
+        }
     }
 
     /// <inheritdoc />

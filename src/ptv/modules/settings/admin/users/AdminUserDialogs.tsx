@@ -14,10 +14,23 @@ import {
     AdminUsersServiceError,
     createAdminUser,
     loadAdminUserLibraries,
-    updateAdminUserLibraryAccess,
-    updateAdminUserPassword,
-    updateAdminUserPolicy
+    updateAdminUserPassword
 } from './adminUsersService';
+import {
+    bootstrapNewAdminUser,
+    clearPendingNewAdminCreation,
+    clearPendingNewAdminUser,
+    createPendingNewAdminCreation,
+    createPendingNewAdminUser,
+    readPendingNewAdminCreation,
+    readPendingNewAdminUser,
+    reserveNewAdminUserCreation,
+    resumePendingNewAdminUser,
+    savePendingNewAdminCreation,
+    savePendingNewAdminUser,
+    type PendingNewAdminCreation,
+    type PendingNewAdminUser
+} from './adminNewUserBootstrapService';
 
 /* eslint-disable react/jsx-no-bind, jsx-a11y/label-has-associated-control, no-void, no-nested-ternary, sonarjs/no-nested-conditional */
 
@@ -65,7 +78,8 @@ export function AddAdminUserDialog({
     const [ administrator, setAdministrator ] = useState(false);
     const [ allLibraries, setAllLibraries ] = useState(true);
     const [ selectedFolderIds, setSelectedFolderIds ] = useState<string[]>([]);
-    const [ createdUser, setCreatedUser ] = useState<{ id: string; username: string } | null>(null);
+    const [ createdUser, setCreatedUser ] = useState<PendingNewAdminUser | null>(() => readPendingNewAdminUser(serverKey));
+    const [ pendingCreation, setPendingCreation ] = useState<PendingNewAdminCreation | null>(() => readPendingNewAdminCreation(serverKey));
     const [ busy, setBusy ] = useState(false);
     const [ message, setMessage ] = useState('');
     const busyRef = useRef(false);
@@ -78,14 +92,28 @@ export function AddAdminUserDialog({
         setAllLibraries(true);
         setSelectedFolderIds([]);
         setCreatedUser(null);
+        setPendingCreation(null);
         setMessage('');
         setBusy(false);
         busyRef.current = false;
     }, []);
 
     useEffect(() => {
-        if (!open) clear();
-    }, [clear, open]);
+        if (!open) {
+            clear();
+            return;
+        }
+        const pending = readPendingNewAdminUser(serverKey);
+        const creation = readPendingNewAdminCreation(serverKey);
+        setPendingCreation(creation);
+        if (pending) {
+            setCreatedUser(pending);
+            setUsername(pending.username);
+            setAdministrator(pending.administrator);
+            setAllLibraries(pending.allLibraries);
+            setSelectedFolderIds(pending.selectedFolderIds);
+        }
+    }, [clear, open, serverKey]);
 
     const close = useCallback(() => {
         if (busy) return;
@@ -97,26 +125,42 @@ export function AddAdminUserDialog({
             current.filter(id => id !== folderId) :
             [ ...current, folderId ]);
     }, []);
-    const applyAccess = useCallback(async (id: string, name: string) => {
+    const verifyCreated = useCallback(async (pending: PendingNewAdminUser, resume: boolean) => {
         if (!api || !serverKey) return;
         try {
-            await updateAdminUserPolicy(api, id, { IsAdministrator: administrator });
-            await updateAdminUserLibraryAccess(api, id, allLibraries ?
-                { mode: 'all' } :
-                { mode: 'selected', selectedFolderIds });
+            if (resume) await resumePendingNewAdminUser(api, pending);
+            else await bootstrapNewAdminUser(api, pending);
+            clearPendingNewAdminUser(serverKey, pending.id);
+            clearPendingNewAdminCreation(serverKey, pending.creationOperationId);
             setPassword('');
             setConfirmPassword('');
-            onCreated(id);
+            onCreated(pending.id);
         } catch (error) {
             setPassword('');
             setConfirmPassword('');
-            setCreatedUser({ id, username: name });
-            setMessage(`${name} was created, but access settings could not be saved. ${safeMutationMessage(error, 'Try the access settings again.')}`);
+            setCreatedUser(pending);
+            setMessage(`${pending.username} was created, but verification is pending. ${safeMutationMessage(error, 'Check verification again, or open this account for administrator recovery.')}`);
         }
-    }, [administrator, allLibraries, api, onCreated, selectedFolderIds, serverKey]);
+    }, [api, onCreated, serverKey]);
     const submit = useCallback(async (event: React.FormEvent) => {
         event.preventDefault();
         if (!api || !serverKey || busy || busyRef.current) return;
+        if (createdUser) {
+            busyRef.current = true;
+            setBusy(true);
+            setMessage('');
+            try {
+                await verifyCreated(createdUser, true);
+            } finally {
+                busyRef.current = false;
+                setBusy(false);
+            }
+            return;
+        }
+        if (pendingCreation) {
+            setMessage('An earlier account creation needs administrator review. Resolve its reservation before creating another account.');
+            return;
+        }
         if (!username.trim()) {
             setMessage('Enter a username.');
             return;
@@ -133,35 +177,59 @@ export function AddAdminUserDialog({
         busyRef.current = true;
         setBusy(true);
         setMessage('');
+        let reservation: PendingNewAdminCreation | null = null;
         try {
-            if (createdUser) {
-                await applyAccess(createdUser.id, createdUser.username);
-                return;
-            }
+            reservation = createPendingNewAdminCreation({
+                administrator,
+                allLibraries,
+                selectedFolderIds: allLibraries ? [] : [ ...selectedFolderIds ],
+                username: username.trim()
+            });
+            setPendingCreation(reservation);
+            savePendingNewAdminCreation(serverKey, reservation);
+            await reserveNewAdminUserCreation(api, reservation);
             const user = await createAdminUser(api, {
                 password: password || undefined,
                 username: username.trim()
             });
-            await applyAccess(user.Id!, user.Name || username.trim());
+            const pending = createPendingNewAdminUser({
+                administrator,
+                allLibraries,
+                creationOperationId: reservation.creationOperationId,
+                id: user.Id!,
+                selectedFolderIds: allLibraries ? [] : [ ...selectedFolderIds ],
+                username: user.Name || username.trim()
+            });
+            setCreatedUser(pending);
+            setPassword('');
+            setConfirmPassword('');
+            savePendingNewAdminUser(serverKey, pending);
+            await verifyCreated(pending, false);
         } catch (error) {
             setPassword('');
             setConfirmPassword('');
-            setMessage(safeMutationMessage(error, 'We could not create this account.'));
+            setMessage(reservation ?
+                `The creation request for ${reservation.username} needs administrator review. Reservation ${reservation.creationOperationId} remains active. Do not create this account again until its outcome is checked.` :
+                safeMutationMessage(error, 'We could not create this account.'));
         } finally {
             busyRef.current = false;
             setBusy(false);
         }
     }, [
         api,
-        applyAccess,
+        administrator,
+        allLibraries,
         busy,
         confirmPassword,
         createdUser,
         foldersQuery.data,
         foldersQuery.isError,
         password,
+        pendingCreation,
+        selectedFolderIds,
         serverKey,
-        username
+        username,
+        verifyCreated
     ]);
 
     return (
@@ -181,7 +249,7 @@ export function AddAdminUserDialog({
                         <span>Username</span>
                         <input
                             autoComplete='off'
-                            disabled={Boolean(createdUser)}
+                            disabled={Boolean(createdUser || pendingCreation)}
                             onChange={event => setUsername(event.currentTarget.value)}
                             required
                             value={username}
@@ -192,7 +260,7 @@ export function AddAdminUserDialog({
                             <span>Password (optional)</span>
                             <input
                                 autoComplete='new-password'
-                                disabled={Boolean(createdUser)}
+                                disabled={Boolean(createdUser || pendingCreation)}
                                 onChange={event => setPassword(event.currentTarget.value)}
                                 type='password'
                                 value={password}
@@ -202,7 +270,7 @@ export function AddAdminUserDialog({
                             <span>Confirm password</span>
                             <input
                                 autoComplete='new-password'
-                                disabled={Boolean(createdUser)}
+                                disabled={Boolean(createdUser || pendingCreation)}
                                 onChange={event => setConfirmPassword(event.currentTarget.value)}
                                 type='password'
                                 value={confirmPassword}
@@ -216,12 +284,13 @@ export function AddAdminUserDialog({
                         </span>
                         <input
                             checked={administrator}
+                            disabled={Boolean(createdUser || pendingCreation)}
                             onChange={event => setAdministrator(event.currentTarget.checked)}
                             role='switch'
                             type='checkbox'
                         />
                     </label>
-                    <fieldset className='ptv-admin-user-field' disabled={foldersQuery.isPending || foldersQuery.isError}>
+                    <fieldset className='ptv-admin-user-field' disabled={Boolean(createdUser || pendingCreation) || foldersQuery.isPending || foldersQuery.isError}>
                         <legend>Library access</legend>
                         <label className='ptv-admin-user-library'>
                             <input checked={allLibraries} name='new-user-library-access' onChange={() => setAllLibraries(true)} type='radio' />
@@ -251,6 +320,16 @@ export function AddAdminUserDialog({
                             Library access could not be loaded. The account will not be created until it is available.
                         </p>
                     )}
+                    {createdUser && (
+                        <p className='ptv-admin-user-status-message' role='status'>
+                            {createdUser.username} was created (ID: {createdUser.id}). Plugin verification is required before Home access. This account remains available for administrator recovery after closing or reloading this page.
+                        </p>
+                    )}
+                    {pendingCreation && !createdUser && (
+                        <p className='ptv-admin-user-status-message' role='status'>
+                            The creation reservation for {pendingCreation.username} remains active (ID: {pendingCreation.creationOperationId}). Review possible accounts on the Users page before creating another one.
+                        </p>
+                    )}
                     {message && <p aria-live='polite' className='ptv-admin-user-status-message is-error'>{message}</p>}
                 </form>
             </DialogContent>
@@ -259,16 +338,16 @@ export function AddAdminUserDialog({
                     <button disabled={busy || !serverKey} onClick={() => void foldersQuery.refetch()} type='button'>Retry libraries</button>
                 )}
                 {createdUser && (
-                    <button disabled={busy} onClick={() => onCreated(createdUser.id)} type='button'>Open User</button>
+                    <button disabled={busy} onClick={() => onCreated(createdUser.id)} type='button'>Open User for recovery</button>
                 )}
                 <button disabled={busy} onClick={close} type='button'>Cancel</button>
                 <button
                     className='is-primary'
-                    disabled={busy || !serverKey || foldersQuery.isPending || foldersQuery.isError}
+                    disabled={busy || !serverKey || (Boolean(pendingCreation) && !createdUser) || (!createdUser && (foldersQuery.isPending || foldersQuery.isError))}
                     form='ptv-add-user-form'
                     type='submit'
                 >
-                    {busy ? 'Saving…' : createdUser ? 'Retry access settings' : 'Create User'}
+                    {busy ? 'Saving…' : createdUser ? 'Check verification' : 'Create User'}
                 </button>
             </DialogActions>
         </Dialog>

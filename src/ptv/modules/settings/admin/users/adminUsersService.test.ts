@@ -15,6 +15,32 @@ const sdkMocks = vi.hoisted(() => ({
     updateUserPassword: vi.fn(),
     updateUserPolicy: vi.fn()
 }));
+const transitionMocks = vi.hoisted(() => ({
+    activeUserId: '',
+    acknowledgeUser: vi.fn(),
+    begin: vi.fn(),
+    clearUserHint: vi.fn(),
+    complete: vi.fn(),
+    current: vi.fn(),
+    matchesSdkApi: vi.fn(() => true),
+    retireUser: vi.fn()
+}));
+
+vi.mock('../../../../core/pluginApi', () => ({
+    getCurrentPtvPluginApiClient: () => ({
+        beginHomeUserAccess: transitionMocks.begin,
+        completeHomeUserAccess: transitionMocks.complete,
+        getCurrentHomeUserAccess: transitionMocks.current,
+        matchesSdkApi: transitionMocks.matchesSdkApi
+    })
+}));
+
+vi.mock('../../../../pages/home/homeLibraryTransitionFreshness', () => ({
+    acknowledgeHomeUserAccessBeginEpoch: transitionMocks.acknowledgeUser,
+    clearHomeUserAccessRetirementHint: transitionMocks.clearUserHint,
+    retireHomeLibraryAuthority: vi.fn(),
+    retireHomeUserAccessAuthority: transitionMocks.retireUser
+}));
 
 vi.mock('@jellyfin/sdk/lib/utils/api/library-api', () => ({
     getLibraryApi: () => ({ getMediaFolders: sdkMocks.getMediaFolders })
@@ -44,9 +70,12 @@ import {
     createAdminUser,
     deleteAdminUser,
     loadAdminUserLibraries,
+    loadCurrentHomeUserAccess,
     loadAdminUsers,
     loadAdminUserSessions,
     resetAdminUserPassword,
+    retryExistingUserAccessCompletion,
+    reverifyPreviouslyAttestedUserAccess,
     setAdminUserAdministrator,
     setAdminUserEnabled,
     updateAdminUserConfiguration,
@@ -72,6 +101,8 @@ function policy(overrides: Partial<UserPolicy> = {}): UserPolicy {
         EnablePlaybackRemuxing: true,
         EnableRemoteAccess: true,
         EnableVideoPlaybackTranscoding: true,
+        IsAdministrator: false,
+        IsDisabled: false,
         PasswordResetProviderId: 'default-reset',
         ...overrides
     };
@@ -134,6 +165,37 @@ describe('admin users service reads', () => {
 describe('admin users service mutations', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        transitionMocks.activeUserId = '';
+        transitionMocks.matchesSdkApi.mockReturnValue(true);
+        transitionMocks.begin.mockImplementation(async intent => {
+            transitionMocks.activeUserId = intent.userId;
+            return {
+                version: 1,
+                userId: intent.userId,
+                accessEpoch: 'a'.repeat(64),
+                held: true,
+                operationId: intent.operationId,
+                policyProven: false,
+                state: 'pending',
+                writeAllowed: true
+            };
+        });
+        transitionMocks.complete.mockImplementation(async operationId => ({
+            version: 1,
+            userId: transitionMocks.activeUserId,
+            accessEpoch: 'a'.repeat(64),
+            held: false,
+            operationId,
+            policyProven: true,
+            state: 'policy-attested',
+            writeAllowed: false
+        }));
+        transitionMocks.current.mockResolvedValue({
+            version: 1, userId: '11111111111111111111111111111111',
+            accessEpoch: 'a'.repeat(64), held: true, policyProven: false,
+            operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            state: 'pending', writeAllowed: false
+        });
         sdkMocks.createUserByName.mockResolvedValue({ data: user() });
         sdkMocks.deleteUser.mockResolvedValue({ data: undefined });
         sdkMocks.getMediaFolders.mockResolvedValue({
@@ -143,7 +205,402 @@ describe('admin users service mutations', () => {
         sdkMocks.updateUser.mockResolvedValue({ data: undefined });
         sdkMocks.updateUserConfiguration.mockResolvedValue({ data: undefined });
         sdkMocks.updateUserPassword.mockResolvedValue({ data: undefined });
+        sdkMocks.updateUserPolicy.mockImplementation(async ({ userId, userPolicy }) => {
+            sdkMocks.getUserById.mockResolvedValue({ data: user({ Id: userId, Policy: userPolicy }) });
+            return { data: undefined };
+        });
+    });
+
+    it('holds an existing user before one policy write and completes only after exact readback', async () => {
+        const id = '11111111111111111111111111111111';
+        const events: string[] = [];
+        const current = policy({ EnableAllFolders: false, EnabledFolders: [ 'movies' ], IsAdministrator: false, IsDisabled: false });
+        const intended = policy({ EnableAllFolders: false, EnabledFolders: [ 'shows' ], IsAdministrator: false, IsDisabled: false });
+        sdkMocks.getUserById.mockImplementation(async () => {
+            events.push('read');
+            return { data: user({ Id: id, Policy: events.includes('write') ? intended : current }) };
+        });
+        transitionMocks.begin.mockImplementation(async intent => {
+            events.push('begin');
+            transitionMocks.activeUserId = intent.userId;
+            return { version: 1, userId: intent.userId, accessEpoch: 'a'.repeat(64), held: true,
+                operationId: intent.operationId, policyProven: false, state: 'pending', writeAllowed: true };
+        });
+        transitionMocks.acknowledgeUser.mockImplementation(() => {
+            events.push('ack');
+        });
+        sdkMocks.updateUserPolicy.mockImplementation(async () => {
+            events.push('write');
+            return { data: undefined };
+        });
+        transitionMocks.complete.mockImplementation(async operationId => {
+            events.push('complete');
+            return { version: 1, userId: transitionMocks.activeUserId, accessEpoch: 'a'.repeat(64), held: false,
+                operationId, policyProven: true, state: 'policy-attested', writeAllowed: false };
+        });
+
+        const saved = await updateAdminUserLibraryAccessFromBaseline(
+            api, id, { enableAllFolders: false, enabledFolderIds: [ 'movies' ] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        );
+
+        expect(events).toEqual([ 'read', 'begin', 'ack', 'write', 'read', 'complete' ]);
+        expect(transitionMocks.retireUser).toHaveBeenCalledWith(id, 'controlled-user-access');
+        expect(transitionMocks.retireUser).toHaveBeenCalledBefore(transitionMocks.begin);
+        expect(transitionMocks.clearUserHint).toHaveBeenCalledWith(id);
+        expect(transitionMocks.clearUserHint).toHaveBeenCalledAfter(transitionMocks.begin);
+        expect(transitionMocks.acknowledgeUser).toHaveBeenCalledWith(id, 'a'.repeat(64));
+        expect(transitionMocks.acknowledgeUser).toHaveBeenCalledBefore(sdkMocks.updateUserPolicy);
+        expect(transitionMocks.begin).toHaveBeenCalledWith(expect.objectContaining({
+            mode: 'existing',
+            userId: id,
+            expectedAccess: {
+                userId: id, enableAllFolders: false, enabledFolders: [ 'movies' ],
+                isAdministrator: false, isDisabled: false
+            },
+            intendedAccess: {
+                userId: id, enableAllFolders: false, enabledFolders: [ 'shows' ],
+                isAdministrator: false, isDisabled: false
+            }
+        }), { signal: undefined });
+        expect(transitionMocks.complete).toHaveBeenCalledWith(expect.any(String), { signal: undefined });
+        expect(saved.policy.EnabledFolders).toEqual([ 'shows' ]);
+    });
+
+    it('does not write if the durable pre-write hold fails', async () => {
+        transitionMocks.begin.mockRejectedValue(new Error('ledger unavailable'));
+        await expect(updateAdminUserLibraryAccessFromBaseline(
+            api, '11111111111111111111111111111111',
+            { enableAllFolders: true, enabledFolderIds: [] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        )).rejects.toThrow();
+        expect(sdkMocks.updateUserPolicy).not.toHaveBeenCalled();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+    });
+
+    it('does not complete a hold after readback returns another account identity', async () => {
+        const id = '11111111111111111111111111111111';
+        const oldPolicy = policy({ EnableAllFolders: true, EnabledFolders: [] });
+        const newPolicy = policy({ EnableAllFolders: false, EnabledFolders: [ 'shows' ] });
+        sdkMocks.getUserById
+            .mockResolvedValueOnce({ data: user({ Id: id, Policy: oldPolicy }) })
+            .mockResolvedValueOnce({ data: user({ Id: '22222222222222222222222222222222', Policy: newPolicy }) });
         sdkMocks.updateUserPolicy.mockResolvedValue({ data: undefined });
+
+        await expect(updateAdminUserLibraryAccessFromBaseline(
+            api, id, { enableAllFolders: true, enabledFolderIds: [] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        )).rejects.toMatchObject({ code: 'transition-unavailable' });
+        expect(sdkMocks.updateUserPolicy).toHaveBeenCalledOnce();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+    });
+
+    it('sends canonical account and folder IDs to the Plugin hold', async () => {
+        const uppercaseId = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+        const uppercaseFolder = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+        const lowercaseFolder = 'cccccccccccccccccccccccccccccccc';
+        const serverPolicy = policy({
+            EnableAllFolders: false,
+            EnabledFolders: [ uppercaseFolder ],
+            IsAdministrator: false,
+            IsDisabled: false
+        });
+        sdkMocks.getMediaFolders.mockResolvedValue({ data: { Items: [
+            { Id: uppercaseFolder, Name: 'Movies' },
+            { Id: lowercaseFolder, Name: 'Shows' }
+        ] } });
+        sdkMocks.getUserById.mockResolvedValue({ data: user({ Id: uppercaseId, Policy: serverPolicy }) });
+
+        await updateAdminUserLibraryAccessFromBaseline(
+            api, uppercaseId,
+            { enableAllFolders: false, enabledFolderIds: [ uppercaseFolder ] },
+            { mode: 'selected', selectedFolderIds: [ lowercaseFolder ] }
+        );
+
+        expect(transitionMocks.begin).toHaveBeenCalledWith(expect.objectContaining({
+            userId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            expectedAccess: expect.objectContaining({
+                userId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                enabledFolders: [ 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ]
+            }),
+            intendedAccess: expect.objectContaining({ enabledFolders: [ lowercaseFolder ] })
+        }), { signal: undefined });
+    });
+
+    it('treats an omitted Jellyfin folder list as empty for an all-folders policy', async () => {
+        const id = '11111111111111111111111111111111';
+        sdkMocks.getUserById.mockResolvedValue({ data: user({ Id: id, Policy: policy({
+            EnableAllFolders: true,
+            EnabledFolders: undefined
+        }) }) });
+
+        await updateAdminUserLibraryAccessFromBaseline(
+            api, id, { enableAllFolders: true, enabledFolderIds: [] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        );
+
+        expect(transitionMocks.begin).toHaveBeenCalledWith(expect.objectContaining({
+            expectedAccess: expect.objectContaining({ enabledFolders: [] })
+        }), { signal: undefined });
+    });
+
+    it('reports a held recovery state when postwrite policy readback is unavailable', async () => {
+        const id = '11111111111111111111111111111111';
+        sdkMocks.getUserById
+            .mockResolvedValueOnce({ data: user({ Id: id, Policy: policy() }) })
+            .mockResolvedValueOnce({ data: user({ Id: id, Policy: undefined }) });
+        sdkMocks.updateUserPolicy.mockResolvedValue({ data: undefined });
+
+        await expect(updateAdminUserLibraryAccessFromBaseline(
+            api, id, { enableAllFolders: true, enabledFolderIds: [] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        )).rejects.toMatchObject({
+            code: 'transition-unavailable',
+            message: expect.stringContaining('remains held')
+        });
+        expect(sdkMocks.updateUserPolicy).toHaveBeenCalledOnce();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+    });
+
+    it('does not retry an uncertain stock policy write and reports the held recovery state', async () => {
+        sdkMocks.updateUserPolicy.mockRejectedValue(new Error('connection ended after request'));
+
+        await expect(updateAdminUserLibraryAccessFromBaseline(
+            api, '11111111111111111111111111111111',
+            { enableAllFolders: true, enabledFolderIds: [] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        )).rejects.toMatchObject({
+            code: 'transition-unavailable',
+            message: expect.stringContaining('remains held')
+        });
+        expect(sdkMocks.updateUserPolicy).toHaveBeenCalledOnce();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+    });
+
+    it('does not adopt a policy when Plugin Complete is unavailable after readback', async () => {
+        transitionMocks.complete.mockRejectedValue(new Error('Plugin unavailable'));
+
+        await expect(updateAdminUserLibraryAccessFromBaseline(
+            api, '11111111111111111111111111111111',
+            { enableAllFolders: true, enabledFolderIds: [] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        )).rejects.toMatchObject({
+            code: 'transition-unavailable',
+            message: expect.stringContaining('remains held')
+        });
+        expect(sdkMocks.updateUserPolicy).toHaveBeenCalledOnce();
+        expect(transitionMocks.complete).toHaveBeenCalledOnce();
+    });
+
+    it('does not adopt a completion claiming another user or lacking proven policy', async () => {
+        const id = '11111111111111111111111111111111';
+        transitionMocks.complete.mockImplementationOnce(async operationId => ({
+            version: 1, userId: '22222222222222222222222222222222',
+            accessEpoch: 'a'.repeat(64), held: false, policyProven: true,
+            operationId, state: 'policy-attested', writeAllowed: false
+        }));
+        await expect(updateAdminUserLibraryAccessFromBaseline(
+            api, id, { enableAllFolders: true, enabledFolderIds: [] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        )).rejects.toMatchObject({ code: 'transition-unavailable' });
+
+        sdkMocks.getUserById.mockResolvedValue({ data: user({ Id: id, Policy: policy() }) });
+        transitionMocks.complete.mockImplementationOnce(async operationId => ({
+            version: 1, userId: id,
+            accessEpoch: 'a'.repeat(64), held: false, policyProven: false,
+            operationId, state: 'policy-attested', writeAllowed: false
+        }));
+        await expect(updateAdminUserLibraryAccessFromBaseline(
+            api, id, { enableAllFolders: true, enabledFolderIds: [] },
+            { mode: 'selected', selectedFolderIds: [ 'shows' ] }
+        )).rejects.toMatchObject({ code: 'transition-unavailable' });
+    });
+
+    it('retries held existing access by same-operation Plugin readback without another Jellyfin write', async () => {
+        const id = '11111111111111111111111111111111';
+        transitionMocks.complete.mockResolvedValue({
+            version: 1, userId: id, accessEpoch: 'a'.repeat(64), held: false, policyProven: true,
+            operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            state: 'policy-attested', writeAllowed: false
+        });
+
+        const completed = await retryExistingUserAccessCompletion(api, id);
+
+        expect(transitionMocks.current).toHaveBeenCalledWith(id, { signal: undefined });
+        expect(transitionMocks.complete).toHaveBeenCalledWith('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', { signal: undefined });
+        expect(sdkMocks.updateUserPolicy).not.toHaveBeenCalled();
+        expect(completed.policyProven).toBe(true);
+    });
+
+    it('re-verifies stale topology from a prior attested policy only after confirmed current policy and a full PUT', async () => {
+        const id = '11111111111111111111111111111111';
+        const access = {
+            enableAllFolders: false,
+            enabledFolders: [ '22222222222222222222222222222222' ],
+            isAdministrator: false,
+            isDisabled: false,
+            userId: id
+        };
+        transitionMocks.current.mockResolvedValue({
+            version: 1, userId: id, accessEpoch: 'b'.repeat(64), held: true,
+            policyProven: false, operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            state: 'policy-attested', writeAllowed: false,
+            currentAccess: access, intendedAccess: access
+        });
+        sdkMocks.getUserById.mockResolvedValue({ data: user({
+            Id: id,
+            Policy: policy({ EnableAllFolders: false, EnabledFolders: access.enabledFolders })
+        }) });
+
+        await reverifyPreviouslyAttestedUserAccess(api, id, access);
+        expect(transitionMocks.current).toHaveBeenCalledWith(id, { signal: undefined });
+        expect(transitionMocks.begin).toHaveBeenCalledWith(expect.objectContaining({
+            mode: 'preserve', expectedAccess: access, intendedAccess: access
+        }), { signal: undefined });
+        expect(sdkMocks.updateUserPolicy).toHaveBeenCalledOnce();
+        expect(transitionMocks.complete).toHaveBeenCalledOnce();
+    });
+
+    it('reproves an explicitly reviewed out-of-band policy change only with prior attested lineage', async () => {
+        const id = '11111111111111111111111111111111';
+        const prior = {
+            enableAllFolders: false,
+            enabledFolders: [],
+            isAdministrator: false,
+            isDisabled: false,
+            userId: id
+        };
+        const current = { ...prior, enableAllFolders: true, isAdministrator: true };
+        transitionMocks.current.mockResolvedValue({
+            version: 1, userId: id, accessEpoch: 'b'.repeat(64), held: true,
+            policyProven: false, operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            state: 'policy-attested', writeAllowed: false,
+            currentAccess: current, intendedAccess: prior
+        });
+        sdkMocks.getUserById.mockResolvedValue({ data: user({ Id: id, Policy: policy({
+            EnableAllFolders: true, IsAdministrator: true
+        }) }) });
+
+        await reverifyPreviouslyAttestedUserAccess(api, id, current);
+        expect(transitionMocks.begin).toHaveBeenCalledWith(expect.objectContaining({
+            mode: 'reproof', expectedAccess: current, intendedAccess: current
+        }), { signal: undefined });
+        expect(sdkMocks.updateUserPolicy).toHaveBeenCalledOnce();
+    });
+
+    it('refuses stale or unproven recovery previews before Begin and stock writes', async () => {
+        const id = '11111111111111111111111111111111';
+        const access = {
+            enableAllFolders: true,
+            enabledFolders: [],
+            isAdministrator: false,
+            isDisabled: false,
+            userId: id
+        };
+        for (const diagnostic of [
+            { state: 'unproven', currentAccess: access, intendedAccess: access },
+            { state: 'policy-attested', currentAccess: { ...access, isAdministrator: true }, intendedAccess: access }
+        ]) {
+            transitionMocks.current.mockResolvedValueOnce({
+                version: 1, userId: id, accessEpoch: 'b'.repeat(64), held: true,
+                policyProven: false, operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                writeAllowed: false, ...diagnostic
+            });
+            await expect(reverifyPreviouslyAttestedUserAccess(api, id, access)).rejects.toThrow();
+        }
+        expect(transitionMocks.begin).not.toHaveBeenCalled();
+        expect(sdkMocks.updateUserPolicy).not.toHaveBeenCalled();
+    });
+
+    it('shows no pending Plugin operation when the target has no current access record', async () => {
+        transitionMocks.current.mockRejectedValue({ status: 404 });
+        await expect(loadCurrentHomeUserAccess(
+            api, '11111111111111111111111111111111'
+        )).resolves.toBeNull();
+        expect(sdkMocks.updateUserPolicy).not.toHaveBeenCalled();
+    });
+
+    it('puts existing role and sign-in changes behind a durable access hold', async () => {
+        sdkMocks.getUserById.mockResolvedValue({ data: user({
+            Policy: policy({ IsAdministrator: false, IsDisabled: false })
+        }) });
+        sdkMocks.updateUserPolicy.mockImplementation(async ({ userPolicy }) => {
+            sdkMocks.getUserById.mockResolvedValue({ data: user({ Policy: userPolicy }) });
+            return { data: undefined };
+        });
+
+        await setAdminUserAdministrator(api, 'user-a', true);
+        expect(transitionMocks.begin).toHaveBeenCalledWith(expect.objectContaining({
+            mode: 'existing',
+            intendedAccess: expect.objectContaining({ isAdministrator: true, isDisabled: false })
+        }), { signal: undefined });
+        expect(transitionMocks.complete).toHaveBeenCalledOnce();
+
+        await setAdminUserEnabled(api, 'user-a', false);
+        expect(transitionMocks.begin).toHaveBeenCalledTimes(2);
+        expect(transitionMocks.begin).toHaveBeenLastCalledWith(expect.objectContaining({
+            mode: 'existing',
+            intendedAccess: expect.objectContaining({ isAdministrator: true, isDisabled: true })
+        }), { signal: undefined });
+        expect(transitionMocks.complete).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects a generic folder-access patch before any Jellyfin write', async () => {
+        await expect(updateAdminUserPolicy(api, 'user-a', {
+            EnableAllFolders: true,
+            EnabledFolders: []
+        })).rejects.toMatchObject({ code: 'invalid-library-selection' });
+        expect(sdkMocks.updateUserPolicy).not.toHaveBeenCalled();
+    });
+
+    it('holds a full policy write for a non-access patch until Plugin readback completes', async () => {
+        const id = '11111111111111111111111111111111';
+        const events: string[] = [];
+        sdkMocks.getUserById.mockImplementation(async () => {
+            events.push('read');
+            return { data: user({ Id: id, Policy: policy({ EnableRemoteAccess: !events.includes('write') }) }) };
+        });
+        transitionMocks.begin.mockImplementation(async intent => {
+            events.push('begin');
+            transitionMocks.activeUserId = intent.userId;
+            return { version: 1, userId: intent.userId, accessEpoch: 'a'.repeat(64), held: true,
+                operationId: intent.operationId, policyProven: false, state: 'pending', writeAllowed: true };
+        });
+        transitionMocks.acknowledgeUser.mockImplementation(() => events.push('ack'));
+        sdkMocks.updateUserPolicy.mockImplementation(async () => {
+            events.push('write');
+            return { data: undefined };
+        });
+        transitionMocks.complete.mockImplementation(async operationId => {
+            events.push('complete');
+            return { version: 1, userId: id, accessEpoch: 'a'.repeat(64), held: false,
+                operationId, policyProven: true, state: 'policy-attested', writeAllowed: false };
+        });
+
+        await updateAdminUserPolicy(api, id, { EnableRemoteAccess: false });
+
+        expect(events).toEqual([ 'read', 'begin', 'ack', 'write', 'read', 'complete' ]);
+        expect(transitionMocks.begin).toHaveBeenCalledWith(expect.objectContaining({
+            mode: 'preserve',
+            expectedAccess: expect.objectContaining({ enableAllFolders: true, isAdministrator: false, isDisabled: false }),
+            intendedAccess: expect.objectContaining({ enableAllFolders: true, isAdministrator: false, isDisabled: false })
+        }), { signal: undefined });
+        expect(transitionMocks.retireUser).toHaveBeenCalledWith(id, 'controlled-user-access');
+    });
+
+    it('blocks a playback full policy write when the Plugin hold is unavailable', async () => {
+        const id = '11111111111111111111111111111111';
+        const baseline = captureAdminUserPlaybackPolicy(policy())!;
+        transitionMocks.begin.mockRejectedValue(new Error('Plugin hold unavailable'));
+        sdkMocks.getUserById.mockResolvedValue({ data: user({ Id: id, Policy: policy() }) });
+
+        await expect(updateAdminUserPlaybackPolicyFromBaseline(api, id, baseline, {
+            ...baseline, EnableContentDownloading: false
+        })).rejects.toThrow('Plugin hold unavailable');
+
+        expect(transitionMocks.begin).toHaveBeenCalledWith(expect.objectContaining({ mode: 'preserve' }), { signal: undefined });
+        expect(sdkMocks.updateUserPolicy).not.toHaveBeenCalled();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
     });
 
     it('refetches and preserves the complete policy before patching a role or enabled flag', async () => {
@@ -177,7 +634,7 @@ describe('admin users service mutations', () => {
             userId: 'user-a',
             userPolicy: expect.objectContaining({ IsDisabled: true })
         }, { signal: undefined });
-        expect(sdkMocks.getUserById).toHaveBeenCalledTimes(2);
+        expect(sdkMocks.getUserById).toHaveBeenCalledTimes(4);
     });
 
     it('fails closed without a full authoritative policy', async () => {
@@ -271,6 +728,23 @@ describe('admin users service mutations', () => {
                 EnableAllFolders: false,
                 EnabledFolders: [ 'shows', 'retired-library' ]
             })
+        }, { signal: undefined });
+    });
+
+    it('matches a canonical new-user folder selection against dashed Jellyfin folder IDs', async () => {
+        const folderN = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+        const folderD = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+        sdkMocks.getMediaFolders.mockResolvedValue({ data: { Items: [ { Id: folderD, Name: 'Movies' } ] } });
+
+        const saved = await updateAdminUserLibraryAccess(api, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', {
+            mode: 'selected',
+            selectedFolderIds: [ folderN ]
+        });
+
+        expect(saved.EnabledFolders).toEqual([ folderN ]);
+        expect(sdkMocks.updateUserPolicy).toHaveBeenCalledWith({
+            userId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            userPolicy: expect.objectContaining({ EnabledFolders: [ folderN ], EnableAllFolders: false })
         }, { signal: undefined });
     });
 

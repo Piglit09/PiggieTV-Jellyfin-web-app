@@ -1,3 +1,6 @@
+import { getHomeLibraryAuthoritySnapshot, isHomeLibraryAuthorityRetired, isHomeUserAccessReadyForIdentity,
+    parseCurrentHomeUserAccess,
+    subscribeHomeLibraryAuthority } from '../../pages/home/homeLibraryTransitionFreshness';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import Events from '../../../utils/events';
 
@@ -28,12 +31,15 @@ export type FeaturedPayload = {
     currentPresentationAuthority?: unknown;
     emptyLibraryConfirmed?: boolean;
     generationState?: string;
+    /** Response-only proof for Hero candidates authorized for one user's access epoch. */
+    heroAccessEpoch?: string;
     heroItems: unknown[];
     payloadClassification?: string;
     recommendationConfigHash?: string;
     rowConfigApplied?: boolean;
     rowConfigHash?: string;
     rowConfigVersion?: number;
+    scopeSchemaVersion?: number;
     rowDiagnostics?: unknown[];
     sections?: unknown[];
     sectionItems: Record<string, unknown[]>;
@@ -53,7 +59,7 @@ type FeaturedPayloadRowSourceSummary = {
 };
 
 type FeaturedCacheEntry = {
-    version: typeof FEATURED_CACHE_VERSION;
+    version: number;
     createdAt: number;
     expiresAt: number;
     payload: FeaturedPayload;
@@ -73,6 +79,7 @@ type FeaturedServerCacheDocument = {
 type DebugWindow = Window & Partial<Record<'PTV_DEBUG', boolean>>;
 
 type PtvPluginStatusForCache = {
+    currentHomeTopology?: unknown;
     featureFlags?: Record<string, boolean>;
     features?: Record<string, boolean> | string[];
     ok?: boolean;
@@ -446,6 +453,21 @@ function normalizePresentationAuthority(payload: FeaturedPayload | Record<string
     return readConfiguredPresentationAuthority(payload) || undefined;
 }
 
+function readScopeSchemaVersion(payload: FeaturedPayload | Record<string, unknown>) {
+    const keys = Object.keys(payload).filter(key => key.toLowerCase() === 'scopeschemaversion');
+    if (keys.length !== 1) return undefined;
+    const version = (payload as Record<string, unknown>)[keys[0]];
+    return version === 1 || version === 2 ? version : undefined;
+}
+
+function readHeroAccessEpoch(payload: unknown) {
+    if (!isRecord(payload)) return undefined;
+    const keys = Object.keys(payload).filter(key => key.toLowerCase() === 'heroaccessepoch');
+    if (keys.length !== 1 || keys[0] !== 'heroAccessEpoch') return undefined;
+    const epoch = payload.heroAccessEpoch;
+    return typeof epoch === 'string' && /^[a-fA-F0-9]{64}$/.test(epoch) ? epoch : undefined;
+}
+
 function normalizePayload(payload: FeaturedPayload | Record<string, unknown>): FeaturedPayload {
     const emptyLibraryConfirmed = getPayloadField(payload, 'emptyLibraryConfirmed', 'EmptyLibraryConfirmed');
     const generationState = getPayloadField(payload, 'generationState', 'GenerationState');
@@ -469,6 +491,7 @@ function normalizePayload(payload: FeaturedPayload | Record<string, unknown>): F
         rowConfigApplied: typeof rowConfigApplied === 'boolean' ? rowConfigApplied : undefined,
         rowConfigHash: typeof rowConfigHash === 'string' && rowConfigHash.trim() ? rowConfigHash.trim() : undefined,
         rowConfigVersion: typeof rowConfigVersion === 'number' ? rowConfigVersion : undefined,
+        scopeSchemaVersion: readScopeSchemaVersion(payload),
         rowDiagnostics: Array.isArray(rowDiagnostics) ? rowDiagnostics : [],
         sections: Array.isArray(sections) ? sections : [],
         sectionItems: normalizeSectionItems(sectionItems)
@@ -497,13 +520,20 @@ const SHARED_PAYLOAD_USER_FIELDS = new Set([
     'RecommendationReason',
     'UserData'
 ]);
+const TRANSIENT_MEMBERSHIP_FIELDS = new Set([
+    'membershipproof',
+    'provenitemids',
+    'verifieditemids',
+    'verifiedlibraryids',
+    'membershipgeneration'
+]);
 
 function sanitizeSharedPayloadValue(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(sanitizeSharedPayloadValue);
     if (!isRecord(value)) return value;
 
     return Object.keys(value).reduce<Record<string, unknown>>((sanitized, key) => {
-        if (!SHARED_PAYLOAD_USER_FIELDS.has(key)) {
+        if (!SHARED_PAYLOAD_USER_FIELDS.has(key) && !TRANSIENT_MEMBERSHIP_FIELDS.has(key.toLowerCase())) {
             sanitized[key] = sanitizeSharedPayloadValue(value[key]);
         }
 
@@ -556,6 +586,7 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
         rowConfigApplied: normalizedPayload.rowConfigApplied,
         rowConfigHash: normalizedPayload.rowConfigHash,
         rowConfigVersion: normalizedPayload.rowConfigVersion,
+        scopeSchemaVersion: normalizedPayload.scopeSchemaVersion,
         rowDiagnostics: sanitizeSharedPayloadValue(normalizedPayload.rowDiagnostics) as unknown[],
         sections: sanitizeSharedPayloadValue(normalizedPayload.sections) as unknown[],
         sectionItems: Object.keys(normalizedPayload.sectionItems).reduce<Record<string, unknown[]>>(
@@ -570,7 +601,14 @@ function compactPayload(payload: FeaturedPayload): FeaturedPayload {
 }
 
 export function sanitizeFeaturedPayloadForSharedCache(payload: FeaturedPayload) {
-    return compactPayload(payload);
+    const shared = rejectMalformedTopologyClaims(compactPayload(payload));
+    // This document is shared across accounts. A per-user epoch belongs only on
+    // the Plugin's authorized response, never in the stored candidate payload.
+    return { ...shared, sections: shared.sections?.map(section => {
+        if (!isRecord(section) || !isOwnedSection(section)) return section;
+        return Object.fromEntries(Object.entries(section)
+            .filter(([key]) => key.toLowerCase() !== 'useraccessepoch'));
+    }) };
 }
 
 function getPayloadItemCount(payload: FeaturedPayload) {
@@ -724,7 +762,7 @@ function getTopLevelKeys(value: unknown) {
     return isRecord(value) ? Object.keys(value).slice(0, 32) : [];
 }
 
-function isSupportedFeaturedCacheVersion(value: unknown): value is number {
+function isSupportedFeaturedCacheVersion(value: unknown): value is typeof FEATURED_CACHE_VERSION {
     const version = coerceVersion(value);
 
     return version !== null && SUPPORTED_FEATURED_CACHE_VERSIONS.includes(version);
@@ -736,12 +774,6 @@ function getCacheEntryVersion(value: unknown) {
     return coerceVersion(getRecordField(value, 'version', 'Version', 'cacheVersion', 'CacheVersion'));
 }
 
-function hasLegacyFeaturedCacheShape(payload: unknown) {
-    return isRecord(payload)
-        && Array.isArray(getPayloadField(payload, 'heroItems', 'HeroItems'))
-        && isRecord(getPayloadField(payload, 'sectionItems', 'SectionItems'));
-}
-
 function explainCacheEntryRejection(value: unknown) {
     if (value === undefined) return 'missing-featured-content';
     if (value === null) return 'empty-featured-content';
@@ -749,10 +781,12 @@ function explainCacheEntryRejection(value: unknown) {
     const payload = getRecordField(value, 'payload', 'Payload');
     const version = getRecordField(value, 'version', 'Version', 'cacheVersion', 'CacheVersion');
 
-    if (!isSupportedFeaturedCacheVersion(version) && !(coerceVersion(version) === null && hasLegacyFeaturedCacheShape(payload))) return 'unsupported-cache-version';
+    if (coerceVersion(version) === null || coerceVersion(version) === 7) return 'legacy-unproven-scope';
+    if (!isSupportedFeaturedCacheVersion(version)) return 'unsupported-cache-version';
     if (coerceFiniteNumber(getRecordField(value, 'createdAt', 'CreatedAt')) === null) return 'missing-created-at';
     if (coerceFiniteNumber(getRecordField(value, 'expiresAt', 'ExpiresAt')) === null) return 'missing-expires-at';
     if (!isRecord(payload)) return 'missing-payload';
+    if (normalizePayload(payload).scopeSchemaVersion !== 2) return 'missing-scope-schema';
 
     return 'unknown-cache-entry-rejection';
 }
@@ -821,6 +855,11 @@ function mergePayload(payload: FeaturedPayload, fallbackPayload?: FeaturedPayloa
     const matchingAuthority = primaryAuthority && fallbackAuthority
         && primaryAuthority.scope === fallbackAuthority.scope
         && primaryAuthority.generation === fallbackAuthority.generation;
+    // A fallback from another generation is not a source for this document.
+    // Keep the fresh payload's scope marker and rows together, or let the
+    // write boundary reject that fresh payload if it has no valid marker.
+    if (!matchingAuthority || normalizedPayload.scopeSchemaVersion !== 2
+        || normalizedFallbackPayload.scopeSchemaVersion !== 2) return normalizedPayload;
     const sectionItems = {
         ...normalizedFallbackPayload.sectionItems
     };
@@ -834,8 +873,7 @@ function mergePayload(payload: FeaturedPayload, fallbackPayload?: FeaturedPayloa
     });
 
     return {
-        // Mixed/fallback-derived content cannot inherit one side's presentation proof.
-        currentPresentationAuthority: matchingAuthority ? primaryAuthority : undefined,
+        currentPresentationAuthority: primaryAuthority,
         heroItems: normalizedPayload.heroItems.length ?
             normalizedPayload.heroItems :
             normalizedFallbackPayload.heroItems,
@@ -843,17 +881,17 @@ function mergePayload(payload: FeaturedPayload, fallbackPayload?: FeaturedPayloa
         rowConfigApplied: normalizedPayload.rowConfigApplied ?? normalizedFallbackPayload.rowConfigApplied,
         rowConfigHash: normalizedPayload.rowConfigHash || normalizedFallbackPayload.rowConfigHash,
         rowConfigVersion: normalizedPayload.rowConfigVersion ?? normalizedFallbackPayload.rowConfigVersion,
+        scopeSchemaVersion: 2,
         rowDiagnostics: normalizedPayload.rowDiagnostics?.length ?
             normalizedPayload.rowDiagnostics :
             normalizedFallbackPayload.rowDiagnostics,
-        sections: normalizedPayload.sections?.length ?
-            normalizedPayload.sections :
-            normalizedFallbackPayload.sections,
+        sections: [ ...(normalizedPayload.sections || []), ...(normalizedFallbackPayload.sections || []).filter(section =>
+            !normalizedPayload.sections?.some(primary => isRecord(primary) && isRecord(section) && primary.id === section.id)) ],
         sectionItems
     };
 }
 
-function parseCacheEntryValue(value: unknown): FeaturedCacheEntry | null {
+function parseCacheEntryValue(value: unknown, authorizedResponse = false): FeaturedCacheEntry | null {
     if (!isRecord(value)) return null;
 
     const version = getCacheEntryVersion(value);
@@ -861,16 +899,21 @@ function parseCacheEntryValue(value: unknown): FeaturedCacheEntry | null {
     const expiresAt = coerceFiniteNumber(getRecordField(value, 'expiresAt', 'ExpiresAt'));
     const payload = getRecordField(value, 'payload', 'Payload');
 
-    if (!isSupportedFeaturedCacheVersion(version) && !(version === null && hasLegacyFeaturedCacheShape(payload))) return null;
+    if (!isSupportedFeaturedCacheVersion(version) && version !== 8) return null;
     if (createdAt === null) return null;
     if (expiresAt === null) return null;
     if (!isRecord(payload)) return null;
+    if (version === 9 && normalizePayload(payload).scopeSchemaVersion !== 2) return null;
+    if (version === 8 && normalizePayload(payload).scopeSchemaVersion !== 1) return null;
 
+    const sanitizedPayload = version === 8 ? projectTopology(compactPayload(normalizePayload(payload)), null) :
+        sanitizeFeaturedPayloadForSharedCache(normalizePayload(payload));
+    const heroAccessEpoch = authorizedResponse && version !== 8 ? readHeroAccessEpoch(payload) : undefined;
     return {
-        version: FEATURED_CACHE_VERSION,
+        version,
         createdAt,
         expiresAt,
-        payload: compactPayload(normalizePayload(payload))
+        payload: heroAccessEpoch ? { ...sanitizedPayload, heroAccessEpoch } : sanitizedPayload
     };
 }
 
@@ -923,7 +966,7 @@ function getServerDocumentSource(value: unknown) {
     return isDocumentLike ? value : null;
 }
 
-function normalizeServerDocument(value: unknown): FeaturedServerCacheDocument {
+function normalizeServerDocument(value: unknown, authorizedResponse = false): FeaturedServerCacheDocument {
     const document = getServerDocumentSource(value);
 
     if (!document) {
@@ -939,7 +982,7 @@ function normalizeServerDocument(value: unknown): FeaturedServerCacheDocument {
     return {
         ...document,
         version: SERVER_CACHE_DOCUMENT_VERSION,
-        featuredContent: parseCacheEntryValue(featuredContent),
+        featuredContent: parseCacheEntryValue(featuredContent, authorizedResponse),
         featuredContentSettings: parseCacheSettings(featuredContentSettings),
         updatedAt: typeof updatedAt === 'number' ? updatedAt : undefined
     };
@@ -990,14 +1033,15 @@ function hasPluginFeature(status: PtvPluginStatusForCache | null, feature: strin
     return false;
 }
 
-function readPluginStatusForCache(owner: FeaturedCacheIdentityOwner) {
+function readPluginStatusForCache(owner: FeaturedCacheIdentityOwner, fresh = false) {
     assertFeaturedCacheOwnerCurrent(owner);
+    const libraryRevision = getHomeLibraryAuthoritySnapshot().revision;
 
-    if (lastPluginStatus && Date.now() - lastPluginStatusReadAt < PLUGIN_STATUS_CACHE_MS) {
+    if (!fresh && lastPluginStatus && Date.now() - lastPluginStatusReadAt < PLUGIN_STATUS_CACHE_MS) {
         return resolveForFeaturedCacheOwner(owner, lastPluginStatus);
     }
 
-    if (inflightPluginStatus) return inflightPluginStatus;
+    if (!fresh && inflightPluginStatus) return inflightPluginStatus;
 
     const pluginApi = getCurrentPtvPluginApiClient();
 
@@ -1006,14 +1050,16 @@ function readPluginStatusForCache(owner: FeaturedCacheIdentityOwner) {
     }
 
     const statusRequest = runPluginRequestWithTimeout(
-        signal => pluginApi.getStatus<PtvPluginStatusForCache>({ signal }),
+        signal => pluginApi.getStatus<PtvPluginStatusForCache>({ signal, ...(fresh ? { bypassCache: true } : {}) }),
         SERVER_STATUS_READ_TIMEOUT_MS,
         'PiggieTV plugin status request timed out.'
     )
         .then(status => {
             assertFeaturedCacheOwnerCurrent(owner);
-            lastPluginStatus = status;
-            lastPluginStatusReadAt = Date.now();
+            if (getHomeLibraryAuthoritySnapshot().revision === libraryRevision) {
+                lastPluginStatus = status;
+                lastPluginStatusReadAt = Date.now();
+            }
 
             return status;
         })
@@ -1021,8 +1067,10 @@ function readPluginStatusForCache(owner: FeaturedCacheIdentityOwner) {
             if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
 
             debugLog('plugin status unavailable for cache capability check', err);
-            lastPluginStatus = null;
-            lastPluginStatusReadAt = Date.now();
+            if (getHomeLibraryAuthoritySnapshot().revision === libraryRevision) {
+                lastPluginStatus = null;
+                lastPluginStatusReadAt = Date.now();
+            }
 
             return null;
         })
@@ -1070,8 +1118,9 @@ function recordPluginCacheCapabilities(status: PtvPluginStatusForCache | null) {
     }
 }
 
-function readPluginDocument(owner: FeaturedCacheIdentityOwner) {
+function readPluginDocument(owner: FeaturedCacheIdentityOwner, skipDiagnosticStatus = false) {
     assertFeaturedCacheOwnerCurrent(owner);
+    const libraryRevision = getHomeLibraryAuthoritySnapshot().revision;
     const pluginApi = getCurrentPtvPluginApiClient();
 
     if (!pluginApi) {
@@ -1080,11 +1129,13 @@ function readPluginDocument(owner: FeaturedCacheIdentityOwner) {
 
     // Status is diagnostic only: the cache endpoint is attempted regardless of
     // the advertised capability. Do not serialize these independent requests.
-    void readPluginStatusForCache(owner)
-        .then(status => {
-            if (isFeaturedCacheOwnerCurrent(owner)) recordPluginCacheCapabilities(status);
-        })
-        .catch(() => undefined);
+    if (!skipDiagnosticStatus) {
+        void readPluginStatusForCache(owner)
+            .then(status => {
+                if (isFeaturedCacheOwnerCurrent(owner)) recordPluginCacheCapabilities(status);
+            })
+            .catch(() => undefined);
+    }
 
     return runPluginRequestWithTimeout(
         signal => pluginApi.getFeaturedContentCacheDocument({ signal }),
@@ -1093,10 +1144,11 @@ function readPluginDocument(owner: FeaturedCacheIdentityOwner) {
     )
         .then(document => {
             assertFeaturedCacheOwnerCurrent(owner);
+            if (getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) return normalizeServerDocument(document, true);
             const rawResponseByteSize = getSerializedByteSize(document);
             const rawTopLevelKeys = getTopLevelKeys(document);
-            const normalizedDocument = normalizeServerDocument(document);
-            const entry = parseCacheEntryValue(normalizedDocument.featuredContent);
+            const normalizedDocument = normalizeServerDocument(document, true);
+            const entry = parseCacheEntryValue(normalizedDocument.featuredContent, true);
             // A newly received response can retire CURRENT even when this read is
             // only persistence readback. Its captured identity was checked above.
             observeConfiguredRowAuthority(readConfiguredPresentationAuthority(entry?.payload));
@@ -1127,7 +1179,7 @@ function readPluginDocument(owner: FeaturedCacheIdentityOwner) {
         })
         .catch((error: unknown) => {
             if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
-            observeConfiguredRowAuthority(null);
+            if (getHomeLibraryAuthoritySnapshot().revision === libraryRevision) observeConfiguredRowAuthority(null);
             throw error;
         });
 }
@@ -1207,12 +1259,13 @@ function applyServerCacheDocument(
     source: string
 ) {
     assertFeaturedCacheOwnerCurrent(owner);
-    const normalizedDocument = normalizeServerDocument(document);
+    const authorizedResponse = source === 'server-read';
+    const normalizedDocument = normalizeServerDocument(document, authorizedResponse);
     const previousEntry = memoryCacheEntry;
     const rawDocumentSource = isRecord(document) ? getServerDocumentSource(document) : null;
     const rawFeaturedContent = rawDocumentSource ? getRecordField(rawDocumentSource, 'featuredContent', 'FeaturedContent') : undefined;
     const detectedVersion = getCacheEntryVersion(rawFeaturedContent);
-    const nextEntry = parseCacheEntryValue(normalizedDocument.featuredContent);
+    const nextEntry = parseCacheEntryValue(normalizedDocument.featuredContent, authorizedResponse);
     // Hydration also receives ordinary new responses. Rejected replacements must
     // not silently preserve CURRENT merely because their old content survives.
     observeConfiguredRowAuthority(readConfiguredPresentationAuthority(nextEntry?.payload));
@@ -1299,6 +1352,10 @@ function writeServerDocument(owner: FeaturedCacheIdentityOwner, nextDocument: Fe
     assertFeaturedCacheOwnerCurrent(owner);
     const normalizedDocument: FeaturedServerCacheDocument = {
         ...nextDocument,
+        featuredContent: nextDocument.featuredContent ? {
+            ...nextDocument.featuredContent,
+            payload: sanitizeFeaturedPayloadForSharedCache(nextDocument.featuredContent.payload)
+        } : nextDocument.featuredContent,
         version: SERVER_CACHE_DOCUMENT_VERSION,
         updatedAt: Date.now()
     };
@@ -1351,6 +1408,7 @@ function clearServerDocument(owner: FeaturedCacheIdentityOwner) {
 function readServerCacheEntry(owner: FeaturedCacheIdentityOwner) {
     assertFeaturedCacheOwnerCurrent(owner);
     if (inflightServerRead) return inflightServerRead;
+    const libraryRevision = getHomeLibraryAuthoritySnapshot().revision;
 
     if (!canReadServerCacheNow()) {
         debugLog('server cache read suppressed by backoff', {
@@ -1374,6 +1432,9 @@ function readServerCacheEntry(owner: FeaturedCacheIdentityOwner) {
     const serverRead = timePtvAsync('cache', 'read-server-cache', () => readServerDocument(owner))
         .then(document => {
             assertFeaturedCacheOwnerCurrent(owner);
+            if (isHomeLibraryAuthorityRetired() || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) {
+                return parseCacheEntryValue(normalizeServerDocument(document, true).featuredContent, true);
+            }
             return applyServerCacheDocument(owner, document, 'server-read');
         })
         .catch((err: unknown) => {
@@ -1429,11 +1490,14 @@ export function createFeaturedContentCacheDocumentHydrator(reason = 'manual') {
     } catch {
         return null;
     }
+    const libraryRevision = getHomeLibraryAuthoritySnapshot().revision;
 
     return (document: unknown) => {
-        if (!isFeaturedCacheOwnerCurrent(owner)) return null;
+        if (!isFeaturedCacheOwnerCurrent(owner) || isHomeLibraryAuthorityRetired()
+            || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) return null;
 
-        return hydrateFeaturedContentCacheFromDocument(owner, document, reason);
+        const entry = hydrateFeaturedContentCacheFromDocument(owner, document, reason);
+        return entry ? { ...entry, payload: projectTopology(entry.payload, null) } : null;
     };
 }
 
@@ -1500,7 +1564,7 @@ function updateMemoryCacheExpiry(ttlMs: number) {
     };
 }
 
-function persistServerState(owner: FeaturedCacheIdentityOwner, entry: FeaturedCacheEntry | null) {
+function persistServerState(owner: FeaturedCacheIdentityOwner, entry: FeaturedCacheEntry | null, libraryRevision?: number) {
     assertFeaturedCacheOwnerCurrent(owner);
     return timePtvAsync('cache', 'persist-server-cache', () => readServerDocument(owner)
         .catch((err: unknown) => {
@@ -1512,6 +1576,10 @@ function persistServerState(owner: FeaturedCacheIdentityOwner, entry: FeaturedCa
         })
         .then(document => {
             assertFeaturedCacheOwnerCurrent(owner);
+            if (libraryRevision !== undefined && (isHomeLibraryAuthorityRetired()
+                || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision)) {
+                return;
+            }
             return writeServerDocument(owner, {
                 ...document,
                 featuredContent: entry,
@@ -1564,8 +1632,15 @@ export function setFeaturedContentCacheTtlMs(ttlMs: number, options: { persist?:
 
 function writeCacheEntry(owner: FeaturedCacheIdentityOwner, payload: FeaturedPayload) {
     assertFeaturedCacheOwnerCurrent(owner);
+    const libraryRevision = getHomeLibraryAuthoritySnapshot().revision;
     const createdAt = Date.now();
-    const compactPayloadValue = compactPayload(payload);
+    const compactPayloadValue = sanitizeFeaturedPayloadForSharedCache(payload);
+    if (compactPayloadValue.scopeSchemaVersion !== 2) {
+        const error = 'Featured content refresh rejected: missing scope schema.';
+        lastRefreshError = error;
+        recordPtvEvent('cache', 'featured-cache-entry-write-rejected', { reason: 'missing-scope-schema' });
+        return Promise.reject(new Error(error));
+    }
     // A mixed-generation merge intentionally has no proof. Publication cannot
     // retain configured CURRENT from either input, nor can it grant new CURRENT.
     observeConfiguredRowAuthority(readConfiguredPresentationAuthority(compactPayloadValue));
@@ -1599,9 +1674,13 @@ function writeCacheEntry(owner: FeaturedCacheIdentityOwner, payload: FeaturedPay
         payloadSize
     });
 
-    return persistServerState(owner, entry)
+    return persistServerState(owner, entry, libraryRevision)
         .then(() => {
             assertFeaturedCacheOwnerCurrent(owner);
+            if (isHomeLibraryAuthorityRetired() || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) {
+                if (memoryCacheEntry === entry) memoryCacheEntry = null;
+                return entry;
+            }
             lastCacheStorage = getSuccessfulServerStorage();
             lastCacheWriteError = null;
             debugLog('stored fresh payload on server', {
@@ -1629,6 +1708,10 @@ function writeCacheEntry(owner: FeaturedCacheIdentityOwner, payload: FeaturedPay
         })
         .catch((err: unknown) => {
             if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
+            if (isHomeLibraryAuthorityRetired() || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) {
+                if (memoryCacheEntry === entry) memoryCacheEntry = null;
+                return entry;
+            }
 
             lastCacheStorage = 'memory';
             lastCacheWriteError = getErrorMessage(err);
@@ -1668,12 +1751,16 @@ function refreshFeaturedContent(
 ) {
     assertFeaturedCacheOwnerCurrent(owner);
     const startedAt = performance.now();
+    const libraryRevision = getHomeLibraryAuthoritySnapshot().revision;
 
     lastRefreshError = null;
 
     const refreshRequest = timePtvAsync('cache', 'refresh-featured-content', fetcher)
         .then(payload => {
             assertFeaturedCacheOwnerCurrent(owner);
+            if (isHomeLibraryAuthorityRetired() || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) {
+                return projectTopology(payload, null);
+            }
             observeConfiguredRowAuthority(readConfiguredPresentationAuthority(payload));
             const refreshSummary = summarizeFeaturedContentPayload(payload);
 
@@ -1690,6 +1777,9 @@ function refreshFeaturedContent(
             return writeCacheEntry(owner, normalizedPayload)
                 .then(entry => {
                     assertFeaturedCacheOwnerCurrent(owner);
+                    if (isHomeLibraryAuthorityRetired() || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) {
+                        return projectTopology(entry.payload, null);
+                    }
                     lastRefreshDurationMs = Math.round(performance.now() - startedAt);
                     lastRefreshError = null;
 
@@ -1744,7 +1834,7 @@ export function isFeaturedContentCacheFresh() {
     return Boolean(memoryCacheEntry && Date.now() < memoryCacheEntry.expiresAt);
 }
 
-export function getCachedFeaturedContentPayload(options: { allowStale?: boolean } = {}): Promise<FeaturedPayload | null> {
+function getCachedFeaturedContentPayloadUnchecked(options: { allowStale?: boolean } = {}): Promise<FeaturedPayload | null> {
     let owner: FeaturedCacheIdentityOwner;
 
     try {
@@ -1916,7 +2006,7 @@ export function getFeaturedContentCacheStatus(options: { prime?: boolean } = {})
     };
 }
 
-export function forceRefreshFeaturedContentCache(fetcher?: () => Promise<FeaturedPayload>) {
+function forceRefreshFeaturedContentCacheUnchecked(fetcher?: () => Promise<FeaturedPayload>) {
     let owner: FeaturedCacheIdentityOwner;
 
     try {
@@ -2004,7 +2094,7 @@ function resolveCachedFeaturedContent(
     return refreshFeaturedContent(owner, fetcher);
 }
 
-export function getFeaturedContent(fetcher: () => Promise<FeaturedPayload>): Promise<FeaturedPayload> {
+function getFeaturedContentUnchecked(fetcher: () => Promise<FeaturedPayload>): Promise<FeaturedPayload> {
     let owner: FeaturedCacheIdentityOwner;
 
     try {
@@ -2072,3 +2162,131 @@ function scheduleInitialCachePrime() {
 }
 
 scheduleInitialCachePrime();
+
+type CurrentHomeTopology = { version: 1; epoch: string; held: boolean };
+
+function strictField(value: Record<string, unknown>, name: string) {
+    const keys = Object.keys(value).filter(key => key.toLowerCase() === name.toLowerCase());
+    return keys.length === 1 && keys[0] === name ? value[name] : undefined;
+}
+
+function parseCurrentHomeTopology(status: unknown): CurrentHomeTopology | null {
+    if (!isRecord(status)) return null;
+    const value = strictField(status, 'currentHomeTopology');
+    if (!isRecord(value) || Object.keys(value).sort((left, right) => left.localeCompare(right)).join(',') !== 'epoch,held,version'
+        || value.version !== 1 || typeof value.epoch !== 'string' || !/^[a-fA-F0-9]{64}$/.test(value.epoch)
+        || typeof value.held !== 'boolean') return null;
+    return { version: 1, epoch: value.epoch, held: value.held };
+}
+
+function isOwnedSection(section: Record<string, unknown>) {
+    return Object.keys(section).some(key => ['topologyepoch', 'bindinggeneration', 'libraryid', 'useraccessepoch'].includes(key.toLowerCase()) && section[key] != null)
+        || Object.keys(section).some(key => key.toLowerCase() === 'scopetype' && section[key] !== 'global');
+}
+
+function isEligibleTopologySection(section: Record<string, unknown>, schema: number | undefined,
+    topology: CurrentHomeTopology | null, accessEpoch: string | null) {
+    if (!isOwnedSection(section)) return schema === 2 || strictField(section, 'scopeType') === 'global';
+    const generation = strictField(section, 'bindingGeneration');
+    return schema === 2 && Boolean(topology) && !topology?.held
+        && strictField(section, 'scopeType') === 'library'
+        && strictField(section, 'topologyEpoch') === topology?.epoch
+        && Boolean(accessEpoch) && strictField(section, 'userAccessEpoch') === accessEpoch
+        && typeof generation === 'number' && Number.isSafeInteger(generation) && generation >= 0;
+}
+
+function projectTopology(payload: FeaturedPayload, topology: CurrentHomeTopology | null,
+    accessEpoch: string | null = null): FeaturedPayload {
+    const sections = payload.sections || [];
+    const accepted: unknown[] = [];
+    const sectionItems: Record<string, unknown[]> = {};
+    const counts = new Map<string, number>();
+    for (const section of sections) {
+        if (isRecord(section) && typeof strictField(section, 'id') === 'string') {
+            const id = (strictField(section, 'id') as string).toLowerCase();
+            counts.set(id, (counts.get(id) || 0) + 1);
+        }
+    }
+    for (const section of sections) {
+        if (!isRecord(section)) continue;
+        const id = strictField(section, 'id');
+        if (typeof id !== 'string' || !id || counts.get(id.toLowerCase()) !== 1) continue;
+        if (!isEligibleTopologySection(section, payload.scopeSchemaVersion, topology, accessEpoch)) continue;
+        accepted.push(section);
+        if (Object.prototype.hasOwnProperty.call(payload.sectionItems, id)) sectionItems[id] = payload.sectionItems[id];
+    }
+    return { ...payload, heroItems: topology && accessEpoch && readHeroAccessEpoch(payload) === accessEpoch ?
+        payload.heroItems : [], sections: accepted, sectionItems };
+}
+
+async function withCurrentTopology<T extends FeaturedPayload | null>(read: () => Promise<T>): Promise<T> {
+    const owner = requireCurrentFeaturedCacheOwner();
+    // Share the one live request with the ordinary cache capability read. A prior
+    // cached status is not authority for a new adoption, including a memory hit.
+    const revision = getHomeLibraryAuthoritySnapshot().revision;
+    const status = readPluginStatusForCache(owner, true).catch(() => null);
+    const payload = await read();
+    const hasOwned = payload?.sections?.some(section => isRecord(section) && isOwnedSection(section));
+    const current = hasOwned || Boolean(payload?.heroItems?.length) ? await status : null;
+    assertFeaturedCacheOwnerCurrent(owner);
+    const topology = !isHomeLibraryAuthorityRetired() && getHomeLibraryAuthoritySnapshot().revision === revision
+        && isHomeUserAccessReadyForIdentity(current, owner.key) ?
+        parseCurrentHomeTopology(current) : null;
+    const accessEpoch = topology ? parseCurrentHomeUserAccess(current)?.accessEpoch || null : null;
+    return (payload ? projectTopology(payload, topology, accessEpoch) : payload) as T;
+}
+
+export function getFeaturedContent(fetcher: () => Promise<FeaturedPayload>): Promise<FeaturedPayload> {
+    return withCurrentTopology(() => getFeaturedContentUnchecked(fetcher));
+}
+
+/** Home candidates carry no adoption proof; only Home's final status/membership gate may publish them. */
+export function getCachedFeaturedContentPayload(options: { allowStale?: boolean; homeVerificationCandidates?: boolean } = {}): Promise<FeaturedPayload | null> {
+    if (!readCurrentFeaturedCacheIdentityKey()) return getCachedFeaturedContentPayloadUnchecked(options);
+    if (options.homeVerificationCandidates) {
+        const owner = requireCurrentFeaturedCacheOwner();
+        if (memoryCacheEntry && (options.allowStale || Date.now() < memoryCacheEntry.expiresAt)) {
+            return resolveForFeaturedCacheOwner(owner, { ...memoryCacheEntry.payload, homeFeaturedCacheVersion: memoryCacheEntry.version });
+        }
+        // Keep these unproved candidates out of memory/last-good publication and
+        // leave the existing generic cache adoption path fail-closed.
+        return readPluginDocument(owner, true).then(document => {
+            assertFeaturedCacheOwnerCurrent(owner);
+            const entry = parseCacheEntryValue(normalizeServerDocument(document, true).featuredContent, true);
+            if (!entry || !options.allowStale && Date.now() >= entry.expiresAt) return null;
+            return { ...entry.payload, homeFeaturedCacheVersion: entry.version };
+        });
+    }
+    return withCurrentTopology(() => getCachedFeaturedContentPayloadUnchecked(options));
+}
+
+export function forceRefreshFeaturedContentCache(fetcher?: () => Promise<FeaturedPayload>): Promise<FeaturedPayload> {
+    return withCurrentTopology(() => forceRefreshFeaturedContentCacheUnchecked(fetcher));
+}
+
+function rejectMalformedTopologyClaims(payload: FeaturedPayload): FeaturedPayload {
+    const rejected = new Set<string>();
+    const sections = (payload.sections || []).filter(section => {
+        if (!isRecord(section) || !isOwnedSection(section)) return true;
+        const epoch = strictField(section, 'topologyEpoch');
+        const generation = strictField(section, 'bindingGeneration');
+        const valid = payload.scopeSchemaVersion === 2 && strictField(section, 'scopeType') === 'library'
+            && typeof epoch === 'string' && /^[a-fA-F0-9]{64}$/.test(epoch)
+            && typeof generation === 'number' && Number.isSafeInteger(generation) && generation >= 0;
+        if (!valid && typeof section.id === 'string') rejected.add(section.id.toLowerCase());
+        return valid;
+    });
+    return { ...payload, sections, sectionItems: Object.fromEntries(Object.entries(payload.sectionItems)
+        .filter(([id]) => !rejected.has(id.toLowerCase()))) };
+}
+
+subscribeHomeLibraryAuthority(() => {
+    if (!isHomeLibraryAuthorityRetired()) return;
+    memoryCacheEntry = null;
+    inflightServerRead = null;
+    inflightFeaturedContent = null;
+    inflightPluginStatus = null;
+    lastPluginStatus = null;
+    lastPluginStatusReadAt = 0;
+    nextServerReadAllowedAt = 0;
+});

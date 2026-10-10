@@ -7,6 +7,7 @@ import type { LibraryOptionsResultDto } from '@jellyfin/sdk/lib/generated-client
 import { MetadataRefreshMode } from '@jellyfin/sdk/lib/generated-client/models/metadata-refresh-mode';
 import type { VirtualFolderInfo } from '@jellyfin/sdk/lib/generated-client/models/virtual-folder-info';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { HomeTransitionResponse } from '../../../../core/pluginApi';
 
 import { normalizeAdminLibraryOptions } from './adminLibrariesAdapters';
 import type { AdminLibraryProviderSummary } from './adminLibrariesModel';
@@ -28,6 +29,22 @@ const sdkMocks = vi.hoisted(() => ({
     startTask: vi.fn(),
     updateLibraryOptions: vi.fn(),
     validatePath: vi.fn()
+}));
+
+const transitionMocks = vi.hoisted(() => ({ begin: vi.fn(), complete: vi.fn(), retire: vi.fn(), acknowledge: vi.fn(), clearHint: vi.fn(), current: vi.fn() }));
+vi.mock('../../../../core/pluginApi', () => ({
+    getCurrentPtvPluginApiClient: () => ({
+        getCurrentServerId: () => 'server-a',
+        matchesSdkApi: () => true,
+        beginHomeTransition: transitionMocks.begin,
+        completeHomeTransition: transitionMocks.complete,
+        getCurrentHomeTransition: transitionMocks.current
+    })
+}));
+vi.mock('../../../../pages/home/homeLibraryTransitionFreshness', () => ({
+    retireHomeLibraryAuthority: transitionMocks.retire,
+    acknowledgeHomeLibraryBeginEpoch: transitionMocks.acknowledge,
+    clearHomeLibraryRetirementHint: transitionMocks.clearHint
 }));
 
 vi.mock('@jellyfin/sdk/lib/utils/api/environment-api', () => ({
@@ -84,6 +101,9 @@ import {
     loadAdminLibraryTasks,
     removeAdminLibrary,
     removeAdminLibraryPath,
+    rebindAdminLibraryTransition,
+    retryAdminLibraryTransitionConvergence,
+    retryAdminLibraryTransitionGeneration,
     renameAdminLibrary,
     resolveAdminLibrary,
     startAdminLibrariesScan,
@@ -133,6 +153,23 @@ function creationOptions(): LibraryOptionsResultDto {
         }]
     };
 }
+
+const testEpoch = 'a'.repeat(64);
+
+beforeEach(() => {
+    let intent: { operationId?: string; intendedLibrary?: { libraryId: string; name: string; collectionType: string; roots: string[]; options: LibraryOptions } } = {};
+    transitionMocks.begin.mockImplementation(async value => {
+        intent = value;
+        return { operationId: value.operationId, epoch: testEpoch, held: true, state: 'pending', writeAllowed: true };
+    });
+    transitionMocks.complete.mockImplementation(async () => ({ operationId: intent.operationId, epoch: testEpoch, held: true, state: 'pending', authority: 'binding-required', library: intent.intendedLibrary ? {
+        ItemId: intent.intendedLibrary.libraryId || 'library-a', Name: intent.intendedLibrary.name,
+        CollectionType: intent.intendedLibrary.collectionType, Locations: intent.intendedLibrary.roots, LibraryOptions: intent.intendedLibrary.options
+    } : null }));
+    transitionMocks.retire.mockReset();
+    transitionMocks.acknowledge.mockReset();
+    transitionMocks.clearHint.mockReset();
+});
 
 describe('administrator libraries service reads', () => {
     beforeEach(() => {
@@ -756,6 +793,7 @@ describe('administrator libraries service mutations', () => {
             realTimeMonitoring: false
         }, confirmed);
 
+        if (!saved) throw new Error('Plugin readback must prove this saved definition');
         expect(saved.LibraryOptions).toMatchObject({
             Enabled: false,
             EnableRealtimeMonitor: false,
@@ -877,6 +915,7 @@ describe('administrator libraries service mutations', () => {
             confirmedOptions
         );
 
+        if (!saved) throw new Error('Plugin readback must prove this saved definition');
         expect(saved.LibraryOptions).toMatchObject({
             Enabled: false,
             FutureField: { Nested: [{ Keep: 'yes' }] },
@@ -930,6 +969,7 @@ describe('administrator libraries service mutations', () => {
             metadataSavers: [{ available: true, enabled: true, name: 'Nfo' }]
         }, confirmedOptions);
 
+        if (!saved) throw new Error('Plugin readback must prove this saved definition');
         expect(saved.LibraryOptions).toMatchObject({
             Enabled: false,
             FutureField: { Keep: true },
@@ -1167,5 +1207,351 @@ describe('administrator library scan requests', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe('controlled library transition envelope', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        sdkMocks.getVirtualFolders.mockResolvedValue({ data: [library()] });
+        sdkMocks.validatePath.mockResolvedValue({ data: undefined });
+        transitionMocks.begin.mockImplementation(async value => ({ operationId: value.operationId, epoch: testEpoch, held: true, state: 'pending', writeAllowed: true }));
+        transitionMocks.complete.mockResolvedValue({ operationId: 'operation-a', epoch: testEpoch, held: true, state: 'pending', authority: 'unresolved', library: null });
+    });
+    it.each(['create', 'rename', 'delete', 'add-path', 'remove-path', 'options', 'providers'])('orders retirement, durable Begin, one %s write and Plugin Complete', async kind => {
+        const order: string[] = [];
+        transitionMocks.retire.mockImplementation(() => order.push('retire'));
+        transitionMocks.acknowledge.mockImplementation(() => order.push('acknowledge'));
+        transitionMocks.clearHint.mockImplementation(() => order.push('clear-hint'));
+        transitionMocks.begin.mockImplementation(async value => {
+            order.push('begin');
+            return { operationId: value.operationId, epoch: testEpoch, held: true, state: 'pending', writeAllowed: true };
+        });
+        transitionMocks.complete.mockImplementation(async () => {
+            order.push('complete');
+            return { operationId: 'operation-a', epoch: testEpoch, held: true, state: 'pending', authority: 'unresolved', library: null };
+        });
+        const write = async () => {
+            order.push('write');
+            return { data: undefined };
+        };
+        for (const name of ['addVirtualFolder', 'renameVirtualFolder', 'removeVirtualFolder', 'addMediaPath', 'removeMediaPath', 'updateLibraryOptions'] as const) sdkMocks[name].mockImplementation(write);
+        if (kind === 'create') await createAdminLibrary(api, { name: 'New', collectionType: 'movies', locations: ['/new'] }, creationOptions());
+        if (kind === 'rename') await renameAdminLibrary(api, 'library-a', 'Films', 'Movies');
+        if (kind === 'delete') await removeAdminLibrary(api, 'library-a');
+        if (kind === 'add-path') await addAdminLibraryPath(api, 'library-a', '/new');
+        if (kind === 'remove-path') await removeAdminLibraryPath(api, 'library-a', '/media/movies');
+        if (kind === 'options') await updateAdminLibraryOptions(api, 'library-a', { enabled: false }, normalizeAdminLibraryOptions(library().LibraryOptions!));
+        if (kind === 'providers') {
+            const providers = { metadataSavers: [], groups: [] } as unknown as AdminLibraryProviderSummary;
+            await updateAdminLibraryProviders(api, 'library-a', providers, providers, library().LibraryOptions!);
+        }
+        expect(order).toEqual(['retire', 'begin', 'acknowledge', 'clear-hint', 'write', 'complete']);
+    });
+    it('records Mixed and final-root removal exactly while keeping the stock no-refresh write', async () => {
+        sdkMocks.getVirtualFolders.mockResolvedValueOnce({ data: [library({ CollectionType: undefined })] });
+        await removeAdminLibraryPath(api, 'library-a', '/media/movies');
+        expect(transitionMocks.begin.mock.calls[0][0]).toMatchObject({ expectedLibrary: { collectionType: 'mixed', roots: ['/media/movies'] }, intendedLibrary: { collectionType: 'mixed', roots: [], options: { PathInfos: [] } } });
+        expect(sdkMocks.removeMediaPath).toHaveBeenCalledWith({ name: 'Movies', path: '/media/movies', refreshLibrary: false }, { signal: undefined });
+    });
+    it('never repeats a stock write after a replayed Begin', async () => {
+        transitionMocks.begin.mockImplementationOnce(async value => ({ operationId: value.operationId, epoch: testEpoch, held: true, state: 'pending', writeAllowed: false }));
+        await expect(removeAdminLibrary(api, 'library-a')).rejects.toThrow();
+        expect(sdkMocks.removeVirtualFolder).not.toHaveBeenCalled();
+    });
+    it('creates an operation ID on HTTP clients with getRandomValues but no randomUUID', async () => {
+        vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => bytes.fill(7) });
+        try {
+            await removeAdminLibrary(api, 'library-a');
+            expect(transitionMocks.begin.mock.calls[0][0].operationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+        } finally { vi.unstubAllGlobals(); }
+    });
+    it('rejects a Begin acknowledgment for a different operation before stock write', async () => {
+        transitionMocks.begin.mockResolvedValueOnce({ operationId: 'different-operation', epoch: testEpoch, held: true, state: 'pending', writeAllowed: true });
+        await expect(removeAdminLibrary(api, 'library-a')).rejects.toThrow();
+        expect(sdkMocks.removeVirtualFolder).not.toHaveBeenCalled();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+        expect(transitionMocks.clearHint).toHaveBeenCalledOnce();
+    });
+    it('rejects a malformed Begin epoch before stock write', async () => {
+        transitionMocks.begin.mockImplementationOnce(async value => ({ operationId: value.operationId, epoch: 'not-a-valid-epoch', held: true, state: 'pending', writeAllowed: true }));
+        await expect(removeAdminLibrary(api, 'library-a')).rejects.toThrow();
+        expect(sdkMocks.removeVirtualFolder).not.toHaveBeenCalled();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+        expect(transitionMocks.clearHint).toHaveBeenCalledOnce();
+    });
+    it('performs zero Jellyfin writes when Begin persistence fails', async () => {
+        transitionMocks.begin.mockRejectedValueOnce(new Error('persistence failed'));
+        await expect(removeAdminLibrary(api, 'library-a')).rejects.toThrow('persistence failed');
+        expect(sdkMocks.removeVirtualFolder).not.toHaveBeenCalled();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+        expect(transitionMocks.clearHint).toHaveBeenCalledOnce();
+    });
+    it('leaves an uncertain stock write held without Complete or retry', async () => {
+        sdkMocks.renameVirtualFolder.mockRejectedValueOnce(new Error('connection lost'));
+        await expect(renameAdminLibrary(api, 'library-a', 'Films', 'Movies')).rejects.toThrow();
+        expect(transitionMocks.begin).toHaveBeenCalledOnce();
+        expect(sdkMocks.renameVirtualFolder).toHaveBeenCalledOnce();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+    });
+    it('does not adopt an old folder attached to unresolved completion evidence', async () => {
+        transitionMocks.complete.mockImplementationOnce(async operationId => ({ operationId, epoch: testEpoch, held: true, state: 'pending', authority: 'unresolved', library: library() }));
+        sdkMocks.renameVirtualFolder.mockResolvedValueOnce({ status: 204 });
+        expect(await renameAdminLibrary(api, 'library-a', 'Films', 'Movies')).toBeNull();
+    });
+    it('does not adopt readback for a mismatched completion operation', async () => {
+        transitionMocks.complete.mockResolvedValueOnce({ operationId: 'different', epoch: testEpoch, held: true, state: 'pending', authority: 'binding-required', library: library({ Name: 'Films' }) });
+        sdkMocks.renameVirtualFolder.mockResolvedValueOnce({ status: 204 });
+        expect(await renameAdminLibrary(api, 'library-a', 'Films', 'Movies')).toBeNull();
+    });
+    it('does not adopt a synthetic old ID after rename 204 with null authoritative ID', async () => {
+        sdkMocks.renameVirtualFolder.mockResolvedValueOnce({ status: 204 });
+        sdkMocks.getVirtualFolders.mockResolvedValueOnce({ data: [library()] }).mockResolvedValue({ data: [library({ Name: 'Films', ItemId: null })] });
+        expect(await renameAdminLibrary(api, 'library-a', 'Films', 'Movies')).toBeNull();
+    });
+
+    it('uses an empty diagnostic Complete body and passes the AbortSignal separately', async () => {
+        const controller = new globalThis['AbortController']();
+        sdkMocks.removeVirtualFolder.mockResolvedValueOnce({ status: 204 });
+        await removeAdminLibrary(api, 'library-a', undefined, controller.signal);
+        expect(transitionMocks.complete).toHaveBeenCalledWith(expect.any(String), {}, { signal: controller.signal });
+    });
+});
+
+describe('explicit administrator home binding', () => {
+    const selectedId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const diagnostic = (): HomeTransitionResponse => ({
+        operationId: 'operation-a', epoch: testEpoch, held: true, state: 'pending' as const,
+        authority: 'binding-required' as const, affectedRuleIds: ['anime', 'movies'], writeAllowed: false,
+        library: library({ ItemId: selectedId })
+    });
+    const bindings = [
+        { ruleId: 'anime', libraryId: selectedId },
+        { ruleId: 'movies', libraryId: selectedId }
+    ];
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+    it('submits every explicitly selected rule and records only the verified new Plugin epoch', async () => {
+        const nextEpoch = 'b'.repeat(64);
+        transitionMocks.complete.mockResolvedValueOnce({
+            operationId: 'operation-a', epoch: nextEpoch, held: false,
+            state: 'complete', authority: 'bound', affectedRuleIds: [],
+            library: library({ ItemId: selectedId })
+        });
+        const result = await rebindAdminLibraryTransition(api, diagnostic(), bindings);
+        expect(result.state).toBe('complete');
+        expect(transitionMocks.complete).toHaveBeenCalledWith('operation-a', { bindings }, { signal: undefined });
+        expect(transitionMocks.acknowledge).toHaveBeenCalledWith(nextEpoch);
+    });
+    it('rebinds a verified completed operation after the broad hold has been released', async () => {
+        const released = { ...diagnostic(), state: 'complete' as const, held: false };
+        const nextEpoch = 'b'.repeat(64);
+        transitionMocks.complete.mockResolvedValueOnce({
+            ...released, epoch: nextEpoch, authority: 'bound'
+        });
+        const result = await rebindAdminLibraryTransition(api, released, bindings);
+        expect(result.epoch).toBe(nextEpoch);
+        expect(transitionMocks.complete).toHaveBeenCalledWith('operation-a', { bindings }, { signal: undefined });
+        expect(transitionMocks.acknowledge).toHaveBeenCalledWith(nextEpoch);
+    });
+    it('accepts an already-rotated completed diagnostic only when an idempotent retry finally binds that same epoch', async () => {
+        const released = { ...diagnostic(), state: 'complete' as const, held: false };
+        transitionMocks.complete.mockResolvedValueOnce({ ...released, authority: 'bound', affectedRuleIds: [] });
+        const result = await rebindAdminLibraryTransition(api, released, bindings);
+        expect(result.epoch).toBe(testEpoch);
+        expect(result.authority).toBe('bound');
+        expect(transitionMocks.complete).toHaveBeenCalledWith('operation-a', { bindings }, { signal: undefined });
+        expect(transitionMocks.acknowledge).toHaveBeenCalledWith(testEpoch);
+    });
+    it('rejects a same-epoch bound response when the input diagnostic is still held before rebind', async () => {
+        transitionMocks.complete.mockResolvedValueOnce({
+            ...diagnostic(), held: false, state: 'complete', authority: 'bound', affectedRuleIds: []
+        });
+        await expect(rebindAdminLibraryTransition(api, diagnostic(), bindings)).rejects.toThrow();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+    it.each([
+        ['missing candidate', { ...diagnostic(), library: null }, bindings],
+        ['unresolved candidate', { ...diagnostic(), authority: 'unresolved' as const }, bindings],
+        ['released but unresolved', { ...diagnostic(), state: 'complete' as const, held: false, authority: 'unresolved' as const }, bindings],
+        ['released but still pending', { ...diagnostic(), state: 'pending' as const, held: false }, bindings],
+        ['malformed diagnostic epoch', { ...diagnostic(), epoch: 'storage-hint' }, bindings],
+        ['wrong folder', diagnostic(), [{ ruleId: 'anime', libraryId: 'wrong' }, bindings[1]]],
+        ['partial rules', diagnostic(), [bindings[0]]],
+        ['duplicate rules', diagnostic(), [bindings[0], bindings[0]]],
+        ['wrong rule', diagnostic(), [bindings[0], { ruleId: 'other', libraryId: selectedId }]]
+    ])('refuses %s without sending a rebind request', async (_name, current, selection) => {
+        await expect(rebindAdminLibraryTransition(api, current, selection)).rejects.toThrow();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+    it('keeps the old expected epoch if the Plugin returns a different operation', async () => {
+        transitionMocks.complete.mockResolvedValueOnce({
+            operationId: 'operation-b', epoch: 'b'.repeat(64), held: false, state: 'complete'
+        });
+        await expect(rebindAdminLibraryTransition(api, diagnostic(), bindings)).rejects.toThrow();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+    it('rejects same-epoch unresolved Plugin readback without acknowledging it', async () => {
+        transitionMocks.complete.mockResolvedValueOnce({
+            operationId: 'operation-a', epoch: testEpoch, held: true, state: 'pending',
+            authority: 'unresolved', library: null, affectedRuleIds: ['anime', 'movies']
+        });
+        await expect(rebindAdminLibraryTransition(api, diagnostic(), bindings)).rejects.toThrow();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+    it('rejects a released same-epoch non-bound retry while preserving local retirement', async () => {
+        const released = { ...diagnostic(), state: 'complete' as const, held: false };
+        transitionMocks.complete.mockResolvedValueOnce({ ...released, authority: 'binding-required' });
+        await expect(rebindAdminLibraryTransition(api, released, bindings)).rejects.toThrow();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+    it('keeps local authority retired while fresh generation is still held', async () => {
+        const nextEpoch = 'b'.repeat(64);
+        transitionMocks.complete.mockResolvedValueOnce({
+            operationId: 'operation-a', epoch: nextEpoch, held: true, state: 'pending',
+            authority: 'binding-required', library: library({ ItemId: selectedId }),
+            affectedRuleIds: ['anime', 'movies']
+        });
+        const result = await rebindAdminLibraryTransition(api, diagnostic(), bindings);
+        expect(result.held).toBe(true);
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+    it.each([
+        ['unresolved', false, 'complete'],
+        ['binding-required', false, 'complete'],
+        ['bound', true, 'complete'],
+        ['bound', true, 'pending']
+    ] as const)('does not acknowledge a rotated but %s / held=%s / %s Plugin response', async (authority, held, state) => {
+        const nextEpoch = 'b'.repeat(64);
+        transitionMocks.complete.mockResolvedValueOnce({
+            operationId: 'operation-a', epoch: nextEpoch, held, state, authority,
+            affectedRuleIds: ['anime', 'movies'], library: library({ ItemId: selectedId })
+        });
+        const result = await rebindAdminLibraryTransition(api, diagnostic(), bindings);
+        expect(result.epoch).toBe(nextEpoch);
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+});
+
+describe('explicit administrator Home generation retry', () => {
+    const diagnostic = (): HomeTransitionResponse => ({
+        operationId: 'operation-a', epoch: testEpoch, held: false, state: 'complete',
+        authority: 'generation-pending', affectedRuleIds: [], writeAllowed: false, library: null
+    });
+    beforeEach(() => vi.clearAllMocks());
+
+    it('retries the verified current operation without bindings and only acknowledges final bound authority', async () => {
+        const current = diagnostic();
+        const signal = new globalThis['AbortController']().signal;
+        transitionMocks.complete.mockResolvedValueOnce({ ...current, authority: 'bound' });
+        const result = await retryAdminLibraryTransitionGeneration(api, current, signal);
+        expect(result.authority).toBe('bound');
+        expect(transitionMocks.complete).toHaveBeenCalledWith('operation-a', {}, { signal });
+        expect(transitionMocks.acknowledge).toHaveBeenCalledWith(testEpoch);
+    });
+
+    it.each([
+        ['still pending', { authority: 'generation-pending', held: false, state: 'complete' }],
+        ['unresolved', { authority: 'unresolved', held: false, state: 'complete' }],
+        ['held', { authority: 'bound', held: true, state: 'pending' }]
+    ] as const)('keeps local retirement sticky when retry is %s', async (_name, overrides) => {
+        const current = diagnostic();
+        transitionMocks.complete.mockResolvedValueOnce({ ...current, ...overrides });
+        await retryAdminLibraryTransitionGeneration(api, current);
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['a pending rule', { affectedRuleIds: ['anime'] as string[] }],
+        ['the wrong authority', { authority: 'binding-required' }],
+        ['a held operation', { held: true }],
+        ['a malformed epoch', { epoch: 'storage-hint' }],
+        ['a missing operation', { operationId: null }]
+    ] as const)('refuses retry for %s', async (_name, overrides) => {
+        await expect(retryAdminLibraryTransitionGeneration(api, { ...diagnostic(), ...overrides })).rejects.toThrow();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['changed operation', { operationId: 'operation-b' }],
+        ['rotated epoch', { epoch: 'b'.repeat(64) }],
+        ['malformed epoch', { epoch: 'storage-hint' }]
+    ])('refuses a %s response without acknowledging it', async (_name, overrides) => {
+        transitionMocks.complete.mockResolvedValueOnce({ ...diagnostic(), authority: 'bound', ...overrides });
+        await expect(retryAdminLibraryTransitionGeneration(api, diagnostic())).rejects.toThrow();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+});
+
+describe('explicit administrator Jellyfin convergence retry', () => {
+    const diagnostic = (state: 'pending' | 'failed' = 'pending'): HomeTransitionResponse => ({
+        operationId: 'operation-a', epoch: testEpoch, held: true, state,
+        authority: 'unresolved', affectedRuleIds: ['anime'], writeAllowed: false, library: null
+    });
+    beforeEach(() => vi.clearAllMocks());
+
+    it.each(['pending', 'failed'] as const)('retries a held %s operation once without stock writes or authority acknowledgment', async state => {
+        const current = diagnostic(state);
+        const signal = new globalThis['AbortController']().signal;
+        transitionMocks.complete.mockResolvedValueOnce(current);
+        const result = await retryAdminLibraryTransitionConvergence(api, current, signal);
+        expect(result).toEqual(current);
+        expect(transitionMocks.complete).toHaveBeenCalledOnce();
+        expect(transitionMocks.complete).toHaveBeenCalledWith('operation-a', {}, { signal });
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+        for (const stockWrite of [ sdkMocks.addVirtualFolder, sdkMocks.removeVirtualFolder,
+            sdkMocks.renameVirtualFolder, sdkMocks.updateLibraryOptions, sdkMocks.addMediaPath,
+            sdkMocks.removeMediaPath, sdkMocks.refreshItem, sdkMocks.startTask ]) {
+            expect(stockWrite).not.toHaveBeenCalled();
+        }
+    });
+
+    it('leaves local Home authority retired after unique readback while affected rules need binding', async () => {
+        const current = diagnostic();
+        transitionMocks.complete.mockResolvedValueOnce({ ...current, held: false, state: 'complete',
+            authority: 'binding-required', library: library({ ItemId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }) });
+        const result = await retryAdminLibraryTransitionConvergence(api, current);
+        expect(result.authority).toBe('binding-required');
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+
+    it('acknowledges only the final durable release with bound authority and no affected rules', async () => {
+        const current = diagnostic();
+        transitionMocks.complete.mockResolvedValueOnce({ ...current, held: false, state: 'complete',
+            authority: 'bound', affectedRuleIds: [] });
+        const result = await retryAdminLibraryTransitionConvergence(api, current);
+        expect(result.authority).toBe('bound');
+        expect(transitionMocks.acknowledge).toHaveBeenCalledWith(testEpoch);
+    });
+
+    it.each([
+        ['no operation', { operationId: null }],
+        ['blank operation', { operationId: '  ' }],
+        ['malformed epoch', { epoch: 'storage-hint' }],
+        ['malformed hold', { held: 'true' as unknown as boolean }],
+        ['released hold', { held: false }],
+        ['completed operation', { state: 'complete' }],
+        ['binding choice', { authority: 'binding-required' }]
+    ] as const)('rejects a %s diagnostic before Complete', async (_name, overrides) => {
+        await expect(retryAdminLibraryTransitionConvergence(api, { ...diagnostic(), ...overrides })).rejects.toThrow();
+        expect(transitionMocks.complete).not.toHaveBeenCalled();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['changed operation', { operationId: 'operation-b' }],
+        ['changed epoch', { epoch: 'b'.repeat(64) }],
+        ['malformed epoch', { epoch: 'storage-hint' }],
+        ['malformed hold', { held: 'false' }],
+        ['missing write authorization status', { writeAllowed: undefined }],
+        ['released pending state', { held: false, state: 'pending' }],
+        ['bound with affected rules', { held: false, state: 'complete', authority: 'bound' }]
+    ])('rejects a %s Complete response without acknowledging it', async (_name, overrides) => {
+        transitionMocks.complete.mockResolvedValueOnce({ ...diagnostic(), ...overrides });
+        await expect(retryAdminLibraryTransitionConvergence(api, diagnostic())).rejects.toThrow();
+        expect(transitionMocks.acknowledge).not.toHaveBeenCalled();
     });
 });

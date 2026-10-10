@@ -161,7 +161,10 @@ const featured = () => ({
 });
 const status = () => ({
     configuredPresentationBindings: [ { rule, section } ],
-    currentPresentationAuthority: authority()
+    currentPresentationAuthority: authority(),
+    currentHomeTopology: { version: 1, epoch: 'f'.repeat(64), held: false },
+    currentHomeUserAccess: { version: 1, userId: 'user-a', accessEpoch: 'e'.repeat(64),
+        held: false, policyProven: true }
 });
 
 function deferred<T>(): Deferred<T> {
@@ -272,7 +275,7 @@ describe('useNativeHomeData configured-row final proof integration', () => {
         expect(mocks.getFeaturedContentCacheDocument).not.toHaveBeenCalled();
     });
 
-    it('retires configured last-good output but preserves generic output before remount proof inputs resolve', async () => {
+    it('retires configured output and withholds the Plugin generic shelf until remount proof resolves', async () => {
         const initial = stageInputs();
         await act(async () => root.render(<Harness />));
         initial.rowSettings.resolve(settings());
@@ -297,7 +300,7 @@ describe('useNativeHomeData configured-row final proof integration', () => {
         await flush();
 
         expect(mocks.getStatus).not.toHaveBeenCalled();
-        expect(latestState?.rows.map(row => row.id)).toContain('featured-generic-latest-authorized');
+        expect(latestState?.rows.map(row => row.id)).not.toContain('featured-generic-latest-authorized');
         expect(latestState?.rows.some(row => row.rowType === 'configured-rule')).toBe(false);
     });
 

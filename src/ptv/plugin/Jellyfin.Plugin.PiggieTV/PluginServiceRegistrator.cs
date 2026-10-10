@@ -19,8 +19,26 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
 
         Console.WriteLine(startMessage);
         Trace.TraceInformation(startMessage);
-        serviceCollection.AddSingleton(_ => new PtvConfiguredRowAssociationService(applicationHost.SystemId));
+        serviceCollection.AddSingleton(provider => new PtvConfiguredRowAssociationService(applicationHost.SystemId, topology: provider.GetRequiredService<IPtvHomeTopologyLedger>()));
         serviceCollection.AddSingleton<IPtvFeaturedContentStore, PtvFeaturedContentStore>();
+        serviceCollection.AddSingleton<IPtvHomeTopologyLedger>(provider =>
+        {
+            var paths = provider.GetRequiredService<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            return new PtvHomeTopologyLedger(Path.Combine(paths.PluginConfigurationsPath, "PiggieTV"), applicationHost.SystemId,
+                () => Plugin.Instance?.Configuration.HomeTopologyLedgerInitialized ?? throw new InvalidOperationException("Plugin configuration unavailable."),
+                () =>
+                {
+                    var plugin = Plugin.Instance ?? throw new InvalidOperationException("Plugin configuration unavailable.");
+                    plugin.Configuration.HomeTopologyLedgerInitialized = true;
+                    try { plugin.SaveConfiguration(); }
+                    catch { plugin.Configuration.HomeTopologyLedgerInitialized = false; throw; }
+                });
+        });
+        serviceCollection.AddSingleton<IPtvHomeUserAccessLedger>(provider =>
+        {
+            var paths = provider.GetRequiredService<MediaBrowser.Common.Configuration.IApplicationPaths>();
+            return new PtvHomeUserAccessLedger(Path.Combine(paths.PluginConfigurationsPath, "PiggieTV"), applicationHost.SystemId);
+        });
         serviceCollection.AddSingleton<IPtvFeaturedContentAuthorizationService, PtvFeaturedContentAuthorizationService>();
         serviceCollection.AddSingleton<IPtvRemoteDiagnosticsStore, PtvRemoteDiagnosticsStore>();
         serviceCollection.AddSingleton<IPtvMediaReportStore, PtvMediaReportStore>();

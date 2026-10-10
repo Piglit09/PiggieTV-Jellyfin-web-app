@@ -418,6 +418,35 @@
     border: 0;
 }
 
+.ptv-home-transition-rebind {
+    fieldset {
+        display: grid;
+        gap: 10px;
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+    }
+
+    fieldset fieldset { margin-top: 8px; }
+
+    legend {
+        margin-bottom: 8px;
+        color: var(--ptv-color-text-soft);
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+
+    label {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        overflow-wrap: anywhere;
+    }
+
+    button { justify-self: start; }
+}
+
 .ptv-admin-library-field {
     display: grid;
     gap: 7px;

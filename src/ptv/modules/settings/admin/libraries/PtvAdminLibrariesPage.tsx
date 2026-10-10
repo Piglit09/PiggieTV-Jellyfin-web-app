@@ -13,6 +13,7 @@ import {
     formatAdminLibraryFolderCount
 } from './AdminLibraryPresentation';
 import { useAdminLibraries } from './useAdminLibraries';
+import PtvHomeTransitionRebind from './PtvHomeTransitionRebind';
 
 const AddAdminLibraryDialog = lazy(async () => {
     const module = await import('./AdminLibraryDialogs');
@@ -146,13 +147,19 @@ export default function PtvAdminLibrariesPage() {
                         <PtvIcon name='refresh' size='17px' />
                         {scanBusy || state.globalScanTask?.State === 'Running' ? 'Scanning…' : 'Scan All Libraries'}
                     </button>
-                    <button className='is-primary' onClick={openAdd} type='button'>
+                    <button className='is-primary' disabled={state.transition?.held} onClick={openAdd} type='button'>
                         <PtvIcon name='libraries' size='17px' />
                         Add Library
                     </button>
                 </div>
             </header>
 
+            <PtvHomeTransitionRebind
+                api={api}
+                onChanged={() => { void state.refreshTransition(); }}
+                transition={state.transition}
+                transitionError={state.transitionError}
+            />
             <div className='ptv-admin-libraries-toolbar'>
                 <label className='ptv-admin-library-search' htmlFor='ptv-admin-library-search'>
                     <PtvIcon name='search' size='18px' />

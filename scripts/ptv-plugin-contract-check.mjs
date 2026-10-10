@@ -4,7 +4,10 @@ import path from 'node:path';
 const root = process.cwd();
 const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const frontendConfig = read('src/ptv/core/config.ts');
+const frontendTransport = read('src/ptv/core/pluginApi.ts');
 const apiRoutes = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvApiRoutes.cs');
+const homeTransitionsController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvHomeTransitionsController.cs');
+const homeUserAccessController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvHomeUserAccessController.cs');
 const cacheValidator = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentValidator.cs');
 const statusController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs');
 const relationshipController = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvRelationshipController.cs');
@@ -14,7 +17,7 @@ const statusResponse = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvS
 const project = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
 const pluginManifest = JSON.parse(read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/meta.json'));
 const packageJson = JSON.parse(read('package.json'));
-const expectedPluginVersion = '0.5.20.0';
+const expectedPluginVersion = '0.5.21.0';
 
 function requiredMatch(source, pattern, label) {
     const match = source.match(pattern);
@@ -37,6 +40,8 @@ const requiredRoutes = [
     ['status', "status: 'Ptv/v1/status'"],
     ['featured', "featuredContent: 'Ptv/v1/featured'"],
     ['featured refresh', "featuredContentRefresh: 'Ptv/v1/featured/refresh'"],
+    ['controlled Home topology route', "homeTransitions: 'Ptv/v1/home-transitions'"],
+    ['controlled Home user-access route', "homeUserAccess: 'Ptv/v1/home-user-access'"],
     ['Google Books metadata', "googleBooksMetadataSearch: 'Ptv/v1/reading/metadata/googlebooks/search'"],
     ['Reading metadata providers', "readingMetadataProviders: 'Ptv/v1/reading/metadata/providers'"],
     ['Reading metadata search', "readingMetadataSearch: 'Ptv/v1/reading/metadata/search'"],
@@ -69,6 +74,8 @@ for (const [label, sourceText] of requiredRoutes) {
 }
 
 const backendContracts = [
+    ['controlled Home topology route', apiRoutes, /public const string HomeTransitions\s*=\s*"Ptv\/v1\/home-transitions"/],
+    ['controlled Home user-access route', apiRoutes, /public const string HomeUserAccess\s*=\s*"Ptv\/v1\/home-user-access"/],
     ['Reading metadata controller', readingMetadataController, /\[Route\("Ptv\/v1\/reading\/metadata"\)\]/],
     ['Reading metadata providers route', readingMetadataController, /\[HttpGet\("providers"\)\]/],
     ['Reading metadata search route', readingMetadataController, /\[HttpPost\("search"\)\]/],
@@ -100,6 +107,61 @@ const backendContracts = [
 
 for (const [label, source, pattern] of backendContracts) {
     if (!pattern.test(source)) failures.push(`Missing plugin ${label}.`);
+}
+
+function frontendAction(name) {
+    const start = frontendTransport.indexOf(`${name}(`);
+    if (start < 0) return '';
+    const end = frontendTransport.indexOf('\n        },', start);
+    return end < 0 ? '' : frontendTransport.slice(start, end);
+}
+
+const homeFrontendActions = [
+    ['topology Begin POST', 'beginHomeTransition', '${PTV_PLUGIN_API.endpoints.homeTransitions}/begin'],
+    ['topology Complete POST', 'completeHomeTransition', '${PTV_PLUGIN_API.endpoints.homeTransitions}/${encodeURIComponent(operationId)}/complete'],
+    ['user-access Begin POST', 'beginHomeUserAccess', '${PTV_PLUGIN_API.endpoints.homeUserAccess}/begin'],
+    ['user-access Complete POST', 'completeHomeUserAccess', '${PTV_PLUGIN_API.endpoints.homeUserAccess}/${encodeURIComponent(operationId)}/complete']
+];
+
+for (const [label, name, routePath] of homeFrontendActions) {
+    const action = frontendAction(name);
+    if (!action.includes(routePath) || !/\bmethod:\s*'POST'/.test(action)) {
+        failures.push(`Missing frontend controlled Home ${label}.`);
+    }
+}
+
+function pluginActionPreamble(source, route, name) {
+    const attribute = `[HttpPost("${route}")]`;
+    const routeIndex = source.indexOf(attribute);
+    if (routeIndex < 0) return '';
+    const declaration = `public async Task<IActionResult> ${name}(`;
+    const methodIndex = source.indexOf(declaration, routeIndex + attribute.length);
+    if (methodIndex < 0 || methodIndex - routeIndex > 100) return '';
+    const bodyIndex = source.indexOf('{', methodIndex + declaration.length);
+    if (bodyIndex < 0 || bodyIndex - methodIndex > 500) return '';
+    return source.slice(bodyIndex, bodyIndex + 350);
+}
+
+const homePluginControllers = [
+    ['topology', homeTransitionsController, 'HomeTransitions', 'PtvHomeTransitionsController'],
+    ['user-access', homeUserAccessController, 'HomeUserAccess', 'PtvHomeUserAccessController']
+];
+const administratorGuard = /if\s*\(!await IsAdministrator\(\)\.ConfigureAwait\(false\)\)\s*return Forbid\(\);/;
+
+for (const [label, source, routeConstant, controller] of homePluginControllers) {
+    const controllerBoundary = new RegExp(`\\[Authorize\\]\\s*\\[Route\\(PtvApiRoutes\\.${routeConstant}\\)\\]\\s*public sealed class ${controller}\\(`);
+    if (!controllerBoundary.test(source)
+        || !/private async Task<bool> IsAdministrator\(\)[\s\S]{0,180}Policies\.RequiresElevation/.test(source)) {
+        failures.push(`Missing plugin controlled Home ${label} administrator boundary.`);
+    }
+    for (const [name, route] of [['Begin', 'begin'], ['Complete', '{operationId:guid}/complete']]) {
+        const preamble = pluginActionPreamble(source, route, name);
+        if (!preamble) {
+            failures.push(`Missing plugin controlled Home ${label} ${name} POST.`);
+        } else if (!administratorGuard.test(preamble)) {
+            failures.push(`Missing plugin controlled Home ${label} ${name} administrator guard.`);
+        }
+    }
 }
 
 if (failures.length) {

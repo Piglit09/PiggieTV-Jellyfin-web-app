@@ -40,16 +40,18 @@ import {
     ADMIN_LIBRARY_SCAN_OBSERVATION_MS,
     useAdminLibrary
 } from './useAdminLibraries';
+import PtvHomeTransitionRebind from './PtvHomeTransitionRebind';
 
 /* eslint-disable react/jsx-no-bind, jsx-a11y/label-has-associated-control, no-void, no-nested-ternary, sonarjs/no-nested-conditional, sonarjs/cognitive-complexity */
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict';
+type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict' | 'unresolved';
 
 const LIBRARY_METADATA_ROUTE = getPtvAdminDestination('library-metadata')?.href;
 const LIBRARY_NFO_ROUTE = getPtvAdminDestination('nfo-settings')?.href;
 const METADATA_MANAGER_ROUTE = getPtvAdminDestination('metadata-manager')?.href;
 
 function LibrarySaveState({ message, state }: Readonly<{ message: string; state: SaveState }>) {
+    if (state === 'unresolved') return <span role='status'>Jellyfin accepted the change. Library authority is unresolved; Home library rows remain held. Reload the library list before continuing.</span>;
     if (state === 'idle') return null;
     const text = state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'conflict' ?
         'This library changed on the server. Reload it before saving.' : message;
@@ -275,7 +277,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
     const providersDirty = Boolean(
         providers && confirmedProviders && !areAdminLibraryProvidersEqual(providers, confirmedProviders)
     );
-    const mutationBusy = generalState === 'saving'
+    const mutationBusy = Boolean(state.transition?.held) || generalState === 'unresolved' || optionsState === 'unresolved' || providersState === 'unresolved' || generalState === 'saving'
         || optionsState === 'saving'
         || providersState === 'saving';
     const dirty = nameDirty || optionsDirty || providersDirty;
@@ -310,7 +312,18 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
         setGeneralState('saving');
         try {
             const saved = await renameAdminLibrary(api, libraryId, name, confirmedName);
+            if (!saved?.ItemId) {
+                setGeneralState('unresolved');
+                void state.refreshTransition?.();
+                return;
+            }
+            if (saved.ItemId !== libraryId) {
+                await state.invalidate();
+                navigate(`/settings/admin/libraries/${encodeURIComponent(saved.ItemId)}`, { replace: true });
+                return;
+            }
             await state.adoptLibrary(saved);
+            void state.refreshTransition?.();
             const savedName = saved.Name?.trim() || name.trim();
             setConfirmedName(savedName);
             setName(savedName);
@@ -319,9 +332,10 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
             setGeneralState(error instanceof AdminLibrariesServiceError && error.code === 'conflict' ?
                 'conflict' : 'error');
         } finally {
+            void state.refreshTransition?.();
             mutationBusyRef.current = false;
         }
-    }, [api, confirmedName, detail, libraryId, name, nameDirty, state]);
+    }, [api, confirmedName, detail, libraryId, name, nameDirty, navigate, state]);
     const saveOptions = useCallback(async () => {
         if (!api || !detail || !options || !confirmedOptions || mutationBusyRef.current || !optionsDirty) return;
         mutationBusyRef.current = true;
@@ -334,7 +348,13 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                 patch,
                 confirmedOptions
             );
+            if (!saved?.ItemId) {
+                setOptionsState('unresolved');
+                void state.refreshTransition?.();
+                return;
+            }
             await state.adoptLibrary(saved);
+            void state.refreshTransition?.();
             const savedOptions = normalizeAdminLibraryOptions(saved.LibraryOptions!);
             setOptions({ ...savedOptions });
             setConfirmedOptions({ ...savedOptions });
@@ -352,6 +372,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
             setOptionsState(error instanceof AdminLibrariesServiceError && error.code === 'conflict' ?
                 'conflict' : 'error');
         } finally {
+            void state.refreshTransition?.();
             mutationBusyRef.current = false;
         }
     }, [api, confirmedOptions, detail, libraryId, options, optionsDirty, providers, providersDirty, state]);
@@ -376,7 +397,13 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                 confirmedProviders,
                 confirmedProviderOptions
             );
+            if (!saved?.ItemId) {
+                setProvidersState('unresolved');
+                void state.refreshTransition?.();
+                return;
+            }
             await state.adoptLibrary(saved);
+            void state.refreshTransition?.();
             const savedProviders = normalizeAdminLibraryProviders(
                 saved.LibraryOptions!,
                 state.providerOptions
@@ -394,6 +421,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
             setProvidersState(error instanceof AdminLibrariesServiceError && error.code === 'conflict' ?
                 'conflict' : 'error');
         } finally {
+            void state.refreshTransition?.();
             mutationBusyRef.current = false;
         }
     }, [api, confirmedProviders, detail, libraryId, optionsDirty, providers, providersDirty, state]);
@@ -410,6 +438,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
         } catch {
             setActionMessage('We could not add that media folder.');
         } finally {
+            void state.refreshTransition?.();
             pathBusyRef.current = false;
             setPathBusy(false);
         }
@@ -427,6 +456,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
         } catch {
             setActionMessage('We could not remove that media folder.');
         } finally {
+            void state.refreshTransition?.();
             pathBusyRef.current = false;
             setPathBusy(false);
         }
@@ -499,13 +529,17 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
     ));
 
     if (state.loading) {
-        return <div className='ptv-admin-library-detail-loading' role='status'>Loading library…</div>;
+        return <>
+            <div className='ptv-admin-library-detail-loading' role='status'>Loading library…</div>
+            <PtvHomeTransitionRebind api={api} onChanged={() => { void state.refreshTransition(); }} transition={state.transition} transitionError={state.transitionError} />
+        </>;
     }
     if (state.error || !detail) {
         return (
             <section className='ptv-admin-libraries-error' role='alert'>
                 <PtvIcon name='alerts' size='30px' />
                 <h1>Library unavailable</h1>
+                <PtvHomeTransitionRebind api={api} onChanged={() => { void state.refreshTransition(); }} transition={state.transition} transitionError={state.transitionError} />
                 <p>This library may have moved or changed on the server.</p>
                 <button onClick={() => void state.refetch()} type='button'>Retry</button>
                 <Link className='ptv-admin-library-button' to='/settings/admin/libraries'>Back to Libraries</Link>
@@ -533,6 +567,7 @@ export default function PtvAdminLibraryDetail({ libraryId }: Readonly<{ libraryI
                     {!detail.pathManagementSupported && <AdminLibraryBadge tone='info'>Managed by server</AdminLibraryBadge>}
                 </div>
             </header>
+            <PtvHomeTransitionRebind api={api} onChanged={() => { void state.refreshTransition(); }} transition={state.transition} transitionError={state.transitionError} />
             {actionMessage && <p aria-live='polite' className={`ptv-admin-library-status-message${/could not/i.test(actionMessage) ? ' is-error' : ' is-success'}`}>{actionMessage}</p>}
             {state.scanStatusError && (
                 <p aria-live='polite' className='ptv-admin-library-status-message is-error'>

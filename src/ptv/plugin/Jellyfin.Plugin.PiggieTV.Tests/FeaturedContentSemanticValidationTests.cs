@@ -28,6 +28,7 @@ public sealed class FeaturedContentSemanticValidationTests
     {
         var payload = CreatePayload();
         payload["sectionItems"] = new JsonObject { ["recent"] = new JsonArray(new JsonObject { ["Id"] = "synthetic-item" }) };
+        payload["sections"] = new JsonArray(new JsonObject { ["id"] = "recent" });
 
         var document = PtvFeaturedContentValidator.ValidateForSave(CreateDocument(payload), JsonOptions);
 
@@ -49,6 +50,7 @@ public sealed class FeaturedContentSemanticValidationTests
 
     private static JsonObject CreatePayload() => new()
     {
+        ["scopeSchemaVersion"] = 2,
         ["heroItems"] = new JsonArray(),
         ["sectionItems"] = new JsonObject(),
         ["sections"] = new JsonArray()

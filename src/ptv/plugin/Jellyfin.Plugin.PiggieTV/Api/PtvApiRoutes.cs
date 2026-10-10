@@ -10,6 +10,12 @@ public static class PtvApiRoutes
     /// </summary>
     public const string Root = "Ptv";
 
+    /// <summary>Administrator controlled library transition routes.</summary>
+    public const string HomeTransitions = "Ptv/v1/home-transitions";
+
+    /// <summary>Administrator controlled user policy and verification routes.</summary>
+    public const string HomeUserAccess = "Ptv/v1/home-user-access";
+
     /// <summary>
     /// Current public API version.
     /// </summary>

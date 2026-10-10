@@ -337,8 +337,14 @@ export function AddAdminLibraryDialog({
                 locations,
                 name
             }, optionsQuery.data);
+            if (!created?.ItemId) {
+                createLockedRef.current = true;
+                setCreateLocked(true);
+                setMessage('Jellyfin accepted the request, but library authority is unresolved. Home library rows remain held. Close this dialog and reload the Libraries list before continuing.');
+                return;
+            }
             clear();
-            onCreated(created?.ItemId || null);
+            onCreated(created.ItemId);
         } catch (error) {
             const createOutcomeUncertain = (
                 error instanceof AdminLibrariesServiceError

@@ -159,6 +159,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     private readonly IPtvFeaturedContentStore _store;
     private readonly IPtvTmdbMetadataService _tmdbMetadataService;
     private readonly PtvConfiguredRowAssociationService? _associations;
+    private readonly IPtvPluginSettingsService? _settingsService;
     private readonly TimeProvider _timeProvider;
     private long? _lastRefreshCompletedAt;
     private long? _lastRefreshDurationMs;
@@ -203,19 +204,22 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
     /// <param name="tmdbMetadataService">Optional TMDb metadata enrichment service.</param>
     /// <param name="associations">Optional process-local configured-row provenance owner.</param>
     /// <param name="timeProvider">Refresh scheduling clock; defaults to the system clock.</param>
+    /// <param name="settingsService">Settings mutation owner for first-time library pinning.</param>
     public PtvFeaturedContentRefreshService(
         IPtvFeaturedContentStore store,
         ILibraryManager libraryManager,
         ILogger<PtvFeaturedContentRefreshService> logger,
         IPtvTmdbMetadataService tmdbMetadataService,
         PtvConfiguredRowAssociationService? associations = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IPtvPluginSettingsService? settingsService = null)
     {
         _store = store;
         _libraryManager = libraryManager;
         _logger = logger;
         _tmdbMetadataService = tmdbMetadataService;
         _associations = associations;
+        _settingsService = settingsService;
         _timeProvider = timeProvider ?? TimeProvider.System;
 
         _logger.LogInformation("PiggieTV featured-content refresh service constructed.");
@@ -292,6 +296,74 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> StageTransitionCandidatesAsync(string epoch,
+        IReadOnlyDictionary<string, string> selectedBindings, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selectedBindings);
+        if (_associations is null || string.IsNullOrEmpty(epoch)) return false;
+        await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var generation = _associations.CaptureGeneration();
+            var topology = _associations.ReadTopology();
+            if (generation is null || generation.AmbiguousRules || topology is null || topology.RecoveryRequired
+                || topology.Epoch != epoch || generation.TopologyEpoch != epoch) return false;
+            var rules = generation.CreateConfiguration().Rows.Rules;
+            var owned = rules.Where(rule => rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder")
+                .ToDictionary(rule => rule.Id, StringComparer.Ordinal);
+            if (selectedBindings.Keys.Any(ruleId => !owned.ContainsKey(ruleId))) return false;
+            var folders = _libraryManager.GetVirtualFolders().ToArray();
+            var provider = new PtvHomeLibraryCandidates(_libraryManager);
+            foreach (var rule in owned.Values)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var raw = PtvHomeLibraryScopeResolver.Resolve(rule, folders);
+                var selected = selectedBindings.TryGetValue(rule.Id, out var selectedId);
+                if (!selected && (!topology.Bindings.TryGetValue(rule.Id, out var binding) || binding.Tombstoned)) continue;
+                var expected = selected ? selectedId : topology.Bindings[rule.Id].CollectionFolderId;
+                var affectedTombstone = selected && topology.Operation?.Intent.AffectedRuleIds.Contains(rule.Id, StringComparer.Ordinal) == true
+                    && topology.Bindings.TryGetValue(rule.Id, out var affectedBinding) && affectedBinding.Tombstoned;
+                if (affectedTombstone && !PtvHomeLibraryScopeResolver.CanRebindAffectedOldScope(rule, topology)) return false;
+                if (!Guid.TryParseExact(expected, "N", out var id) || id == Guid.Empty)
+                {
+                    if (selected) return false;
+                    continue;
+                }
+                if (selected && affectedTombstone && raw.LibraryId != id
+                    && PtvHomeLibraryScopeResolver.CanRebindAffectedOldScope(rule, topology))
+                    raw = PtvHomeLibraryScopeResolver.ResolveSelectedCurrent(rule, folders, id);
+                else if (!affectedTombstone && topology.Bindings.TryGetValue(rule.Id, out var rebound)
+                    && !rebound.Tombstoned && PtvHomeLibraryScopeResolver.HasVerifiedEffectiveBinding(rule, topology, rebound)
+                    && (raw.LibraryId != id || raw.NeedsBinding))
+                    raw = PtvHomeLibraryScopeResolver.ResolveSelectedCurrent(rule, folders, id);
+                if (raw.LibraryId != id || raw.Status is not ("resolved" or "bindingRequired"))
+                {
+                    if (selected) return false;
+                    continue;
+                }
+                if (!rule.Enabled) continue;
+                var types = rule.MediaType switch
+                {
+                    "movies" => MovieTypes,
+                    "shows" or "anime" or "cartoons" => SeriesTypes,
+                    "music" => MusicTypes,
+                    _ => []
+                };
+                if (types.Length == 0) return false;
+                // One CollectionFolder ancestor covers every local and remote root of this library.
+                _ = provider.GetCandidates(id, types, cancellationToken);
+            }
+            return _associations.IsCurrentTopology(generation) && _associations.ReadTopology()?.Epoch == epoch;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            _logger.LogWarning("PiggieTV transition candidate staging failed; owned publication remains withheld.");
+            return false;
+        }
+        finally { _refreshGate.Release(); }
+    }
+
     private async Task<PtvFeaturedContentStoreStatus> RefreshUnderGateAsync(CancellationToken cancellationToken)
     {
         var startedAt = DateTimeOffset.UtcNow;
@@ -308,6 +380,17 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(GetRefreshTimeout());
             var refreshToken = timeoutSource.Token;
+            if (_settingsService is PtvPluginSettingsService settingsService)
+            {
+                try
+                {
+                    settingsService.BindDefaultLibraries(_libraryManager.GetVirtualFolders().ToArray());
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning("PiggieTV library binding unavailable; unbound owned rows will be withheld.");
+                }
+            }
             var generation = _associations?.CaptureGeneration();
             var configuration = generation?.CreateConfiguration() ?? GetConfiguration();
 
@@ -436,10 +519,15 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         var rowSettings = PtvPluginSettingsNormalizer.NormalizeRowBuilderSettings(
             CloneRowBuilderSettings(settings ?? configuration.Rows));
         var validation = ValidateRowBuilderSettings(rowSettings);
+        var topology = _associations?.ReadTopology();
         var candidates = GetCandidateItems();
-        var tmdbFacts = await GetTmdbFactsSafelyAsync(candidates).ConfigureAwait(false);
+        var scopedCandidates = _associations?.HasCurrentOwnedPublicationReady() == true
+            ? ResolveOwnedCandidatePools(rowSettings, cancellationToken, topology)
+            : new Dictionary<string, IReadOnlyList<BaseItem>>(StringComparer.OrdinalIgnoreCase);
+        var enrichmentCandidates = candidates.Concat(scopedCandidates.Values.SelectMany(items => items)).DistinctBy(item => item.Id).ToArray();
+        var tmdbFacts = await GetTmdbFactsSafelyAsync(enrichmentCandidates).ConfigureAwait(false);
         var peopleByItemId = NeedsPeopleMetadata(rowSettings)
-            ? BuildPeopleMetadataIndex(candidates)
+            ? BuildPeopleMetadataIndex(enrichmentCandidates)
             : new Dictionary<Guid, IReadOnlyList<string>>();
         var generatedRows = BuildConfiguredRows(
             rowSettings,
@@ -448,8 +536,13 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             peopleByItemId,
             configuration.RowSettings.RowMaxItems,
             includeEmptyRows: true,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            scopedCandidates: scopedCandidates);
 
+        var currentTopology = _associations?.ReadTopology();
+        generatedRows.RemoveAll(row => row.Rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder"
+            && (topology?.Epoch != currentTopology?.Epoch || PtvFeaturedTopology.Generation(currentTopology, row.Rule.Id) is null
+                || _associations?.HasCurrentOwnedPublicationReady() != true));
         foreach (var row in generatedRows.Where(row => row.Items.Count == 0))
         {
             validation.Warnings.Add($"Row '{row.Title}' has no matching items.");
@@ -806,7 +899,11 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         var heroMaxItems = configuration.HeroSettings.HeroMaxItems;
         var candidates = GetCandidateItems();
         _logger.LogInformation("PiggieTV featured-content candidate items fetched: {CandidateCount}.", candidates.Count);
-        var tmdbFacts = await GetTmdbFactsSafelyAsync(candidates).ConfigureAwait(false);
+        var rowSettings = PtvPluginSettingsNormalizer.NormalizeRowBuilderSettings(configuration.Rows);
+        var topology = _associations?.ReadTopology();
+        var scopedCandidates = ResolveOwnedCandidatePools(rowSettings, cancellationToken, topology);
+        var enrichmentCandidates = candidates.Concat(scopedCandidates.Values.SelectMany(items => items)).DistinctBy(item => item.Id).ToArray();
+        var tmdbFacts = await GetTmdbFactsSafelyAsync(enrichmentCandidates).ConfigureAwait(false);
         var movies = candidates.Where(item => IsType(item, MovieTypes)).ToArray();
         var series = candidates.Where(item => IsType(item, SeriesTypes)).ToArray();
         var albums = candidates.Where(item => IsType(item, MusicTypes)).ToArray();
@@ -816,7 +913,6 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             .Concat(SelectHeroItems(movies, heroMovieLimit, "Recommended Movies"))
             .Take(heroMaxItems)
             .ToArray();
-        var rowSettings = PtvPluginSettingsNormalizer.NormalizeRowBuilderSettings(configuration.Rows);
         var recommendationSettings = PtvPluginSettingsNormalizer.NormalizeRecommendationSettings(configuration.Recommendations);
         var rowConfigHash = ComputeRowConfigHash(rowSettings);
         var recommendationConfigHash = string.IsNullOrWhiteSpace(recommendationSettings.RecommendationConfigHash)
@@ -825,7 +921,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         var rowConfigApplied = rowSettings.SchemaVersion >= 2;
         var includeConfiguredRows = rowConfigApplied && rowSettings.Enabled;
         var peopleByItemId = includeConfiguredRows && NeedsPeopleMetadata(rowSettings)
-            ? BuildPeopleMetadataIndex(candidates)
+            ? BuildPeopleMetadataIndex(enrichmentCandidates)
             : new Dictionary<Guid, IReadOnlyList<string>>();
         var generatedRows = includeConfiguredRows
             ? BuildConfiguredRows(
@@ -835,7 +931,8 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 peopleByItemId,
                 rowLimit,
                 includeEmptyRows: false,
-                cancellationToken: cancellationToken)
+                cancellationToken: cancellationToken,
+                scopedCandidates: scopedCandidates)
             : [];
         var sectionItems = rowConfigApplied
             ? ToSectionItemsJson(generatedRows)
@@ -843,6 +940,20 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         var sectionDefinitions = rowConfigApplied
             ? ToSectionDefinitionsJson(generatedRows, rowConfigHash)
             : ToLegacySectionDefinitionsJson(sectionItems);
+        foreach (var section in sectionDefinitions.OfType<JsonObject>())
+        {
+            if (!PtvFeaturedTopology.Owned(section, rowSettings)) continue;
+            section["topologyEpoch"] = topology?.Epoch;
+            var ruleId = PtvFeaturedTopology.Text(section, "sourceRuleId") ?? string.Empty;
+            section["bindingGeneration"] = PtvFeaturedTopology.Generation(topology, ruleId);
+            var rule = rowSettings.Rules.FirstOrDefault(candidate => candidate.Id == ruleId);
+            if (rule is not null && topology?.Bindings.TryGetValue(ruleId, out var binding) == true
+                && PtvHomeLibraryScopeResolver.HasVerifiedEffectiveBinding(rule, topology, binding))
+            {
+                section["libraryId"] = binding.CollectionFolderId;
+                section["resolvedScopeHash"] = PtvHomeLibraryScopeResolver.ComputeScopeHash(rule, "resolved", binding.CollectionFolderId);
+            }
+        }
         var rowDiagnostics = rowConfigApplied
             ? ToDiagnosticsJson(generatedRows, rowConfigHash)
             : [];
@@ -873,6 +984,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
             ["rowConfigHash"] = rowConfigHash,
             ["recommendationConfigHash"] = recommendationConfigHash,
             ["rowConfigVersion"] = rowSettings.SchemaVersion,
+            ["scopeSchemaVersion"] = 2,
             ["rowDiagnostics"] = rowDiagnostics
         };
     }
@@ -935,7 +1047,8 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         IReadOnlyDictionary<Guid, IReadOnlyList<string>> peopleByItemId,
         int rowLimit,
         bool includeEmptyRows,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, IReadOnlyList<BaseItem>> scopedCandidates)
     {
         settings = PtvPluginSettingsNormalizer.NormalizeRowBuilderSettings(settings);
 
@@ -949,6 +1062,10 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         foreach (var rule in settings.Rules.Where(rule => rule.Enabled).OrderBy(rule => rule.SortPriority))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (rule.LibraryScope is null || rule.LibraryScope.Mode == "invalid") continue;
+            var owned = rule.LibraryScope.Mode is "defaultLibrary" or "virtualFolder";
+            if (owned && !scopedCandidates.TryGetValue(rule.Id, out _)) continue;
+            var rulePool = owned ? scopedCandidates[rule.Id] : candidates;
 
             if (IsVirtualRowRule(rule))
             {
@@ -956,7 +1073,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 continue;
             }
 
-            var sources = GetRuleSources(rule, candidates, tmdbFacts, peopleByItemId)
+            var sources = GetRuleSources(rule, rulePool, tmdbFacts, peopleByItemId)
                 .Where(source => !string.IsNullOrWhiteSpace(source))
                 .ToArray();
             var plannedRowCount = GetPlannedRuleRowCount(rule);
@@ -968,7 +1085,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
                 cancellationToken.ThrowIfCancellationRequested();
                 var stopwatch = Stopwatch.StartNew();
-                var ruleCandidates = candidates
+                var ruleCandidates = rulePool
                     .Where(item => IsAllowedForRule(item, rule, tmdbFacts))
                     .ToArray();
                 var matchingItems = ruleCandidates
@@ -1046,6 +1163,65 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         return dedupedRows;
     }
 
+    private IReadOnlyDictionary<string, IReadOnlyList<BaseItem>> ResolveOwnedCandidatePools(
+        RowBuilderSettings settings,
+        CancellationToken cancellationToken,
+        PtvHomeTopologySnapshot? topology)
+    {
+        var ownedRules = settings.Rules.Where(rule => rule.Enabled && rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder")
+            .Where(rule => PtvFeaturedTopology.Generation(topology, rule.Id) is not null).ToArray();
+        if (ownedRules.Length == 0) return new Dictionary<string, IReadOnlyList<BaseItem>>();
+
+        MediaBrowser.Model.Entities.VirtualFolderInfo[] folders;
+        try
+        {
+            folders = _libraryManager.GetVirtualFolders().ToArray();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning("PiggieTV Home scope. Code=home-scope-unresolved; RuleCount={RuleCount}; Reason=library-discovery-failed.", ownedRules.Length);
+            return new Dictionary<string, IReadOnlyList<BaseItem>>();
+        }
+
+        var provider = new PtvHomeLibraryCandidates(_libraryManager);
+        var pools = new Dictionary<string, IReadOnlyList<BaseItem>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rule in ownedRules)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var resolution = PtvHomeLibraryScopeResolver.Resolve(rule, folders, topology);
+            if (resolution.Status != "resolved" || resolution.LibraryId is not { } id)
+            {
+                _logger.LogInformation("PiggieTV Home scope. Code={Code}; RuleId={RuleId}; Reason={Reason}; Count=0.",
+                    resolution.Status == "ambiguous" ? "home-scope-ambiguous" : "home-scope-unresolved", rule.Id, resolution.Status);
+                continue;
+            }
+
+            var types = rule.MediaType switch
+            {
+                "movies" => MovieTypes,
+                "shows" or "anime" or "cartoons" => SeriesTypes,
+                "music" => MusicTypes,
+                _ => []
+            };
+            if (types.Length == 0) continue;
+            try
+            {
+                pools[rule.Id] = provider.GetCandidates(id, types, cancellationToken)
+                    .Where(IsSupportedType)
+                    .Where(HasRenderableImage)
+                    .ToArray();
+                _logger.LogInformation("PiggieTV Home scope. Code=home-scope-resolved; RuleId={RuleId}; CandidateCount={CandidateCount}.",
+                    rule.Id, pools[rule.Id].Count);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning("PiggieTV Home scope. Code=home-scope-unresolved; RuleId={RuleId}; Reason=membership-query-failed; Count=0.", rule.Id);
+            }
+        }
+
+        return pools;
+    }
+
     private static bool IsVirtualRowRule(RowBuilderRule rule)
     {
         return string.Equals(rule.SourceType, "continueWatching", StringComparison.OrdinalIgnoreCase)
@@ -1108,6 +1284,12 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                     MediaType = rule.MediaType,
                     SourceType = rule.SourceType,
                     SourceValue = rule.SourceValue,
+                    LibraryScope = rule.LibraryScope is null ? null : new RowLibraryScope
+                    {
+                        Mode = rule.LibraryScope.Mode,
+                        DefaultKey = rule.LibraryScope.DefaultKey,
+                        VirtualFolderId = rule.LibraryScope.VirtualFolderId
+                    },
                     GenerationMode = rule.GenerationMode,
                     ItemLimit = rule.ItemLimit,
                     RowCount = rule.RowCount,
@@ -1678,17 +1860,19 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
         RowBuilderRule rule,
         IReadOnlyDictionary<Guid, PtvTmdbItemFacts>? tmdbFacts)
     {
-        if (!IsType(item, GetAllowedTypes(rule.MediaType)))
+        var owned = rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder";
+        var allowedTypes = owned && rule.MediaType is "anime" or "cartoons" ? SeriesTypes : GetAllowedTypes(rule.MediaType);
+        if (!IsType(item, allowedTypes))
         {
             return false;
         }
 
-        if (string.Equals(rule.MediaType, "anime", StringComparison.OrdinalIgnoreCase))
+        if (!owned && string.Equals(rule.MediaType, "anime", StringComparison.OrdinalIgnoreCase))
         {
             return IsAnimeItem(item, tmdbFacts);
         }
 
-        if (string.Equals(rule.MediaType, "cartoons", StringComparison.OrdinalIgnoreCase))
+        if (!owned && string.Equals(rule.MediaType, "cartoons", StringComparison.OrdinalIgnoreCase))
         {
             return IsFamilyAnimationItem(item, tmdbFacts);
         }
@@ -1767,6 +1951,7 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
 
         if (string.Equals(rule.SourceType, "library", StringComparison.OrdinalIgnoreCase))
         {
+            if (rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder") return true;
             return MatchesSourceValue(GetItemType(item), matchSource)
                 || (!string.IsNullOrWhiteSpace(item.Path) && item.Path.Contains(matchSource, StringComparison.OrdinalIgnoreCase));
         }
@@ -2718,6 +2903,14 @@ public sealed class PtvFeaturedContentRefreshService : BackgroundService, IPtvFe
                 ["source"] = row.Source,
                 ["sourceValue"] = row.Rule.SourceValue,
                 ["sourceRuleId"] = row.Rule.Id,
+                ["scopeType"] = row.Rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder" ? "library" : "global",
+                ["libraryId"] = row.Rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder"
+                    ? row.Rule.LibraryScope.VirtualFolderId
+                    : null,
+                ["bindingKey"] = row.Rule.LibraryScope?.DefaultKey,
+                ["resolvedScopeHash"] = PtvHomeLibraryScopeResolver.ComputeScopeHash(
+                    row.Rule,
+                    row.Rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder" ? "resolved" : "global"),
                 ["sourceGroupId"] = string.IsNullOrWhiteSpace(row.Rule.GroupTitle) ? "configured-rules" : Slugify(row.Rule.GroupTitle),
                 ["rowConfigHash"] = rowConfigHash,
                 ["configHash"] = rowConfigHash,

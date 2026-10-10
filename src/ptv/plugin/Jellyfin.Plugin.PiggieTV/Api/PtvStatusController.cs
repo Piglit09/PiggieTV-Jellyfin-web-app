@@ -97,8 +97,33 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 _logger.LogInformation("Advertising feature: remoteDiagnostics");
 
                 var presentationProof = await GetCurrentPresentationProofAsync().ConfigureAwait(false);
+                var userAccess = await GetCurrentHomeUserAccessAsync(cancellationToken).ConfigureAwait(false);
+                var associations = _serviceProvider.GetService<PtvConfiguredRowAssociationService>();
+                var topology = associations?.ReadTopology();
+                var finalTopology = associations?.ReadTopology();
+                if (topology?.Epoch != finalTopology?.Epoch || topology?.Sequence != finalTopology?.Sequence
+                    || PtvFeaturedTopology.Available(topology) != PtvFeaturedTopology.Available(finalTopology))
+                {
+                    // Begin may have retired owned bindings after the proof was captured.
+                    presentationProof = await GetCurrentPresentationProofAsync().ConfigureAwait(false);
+                    finalTopology = associations?.ReadTopology();
+                }
+                topology = finalTopology;
+                // A controlled user policy Begin can persist its hold while status is
+                // being assembled without changing the topology epoch. Re-read at the
+                // response boundary so an earlier ready observation cannot be emitted.
+                userAccess = await GetCurrentHomeUserAccessAsync(cancellationToken).ConfigureAwait(false);
                 var safeResponse = new
                 {
+                    currentHomeTopology = new { version = 1, epoch = topology?.Epoch ?? string.Empty, held = !PtvFeaturedTopology.Available(topology) },
+                    currentHomeUserAccess = userAccess is null ? null : new
+                    {
+                        version = userAccess.Version,
+                        userId = userAccess.UserId,
+                        accessEpoch = userAccess.AccessEpoch,
+                        held = userAccess.Held,
+                        policyProven = userAccess.PolicyProven
+                    },
                     currentPresentationAuthority = presentationProof?.Authority,
                     configuredPresentationBindings = presentationProof?.Bindings,
                     apiPath = $"/{PtvApiRoutes.Root}/{PtvApiRoutes.V1}",
@@ -380,6 +405,9 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             }
 
             var document = authorization.Document;
+            var initialAccess = await GetCurrentHomeUserAccessAsync(cancellationToken).ConfigureAwait(false);
+            if (initialAccess is not { Held: false, PolicyProven: true, AccessEpoch: not null })
+                PtvFeaturedTopology.WithholdUnprovenUserContent(document.FeaturedContent?["payload"] as JsonObject);
             var featuredStatus = PtvFeaturedContentStatus.FromDocument(document);
             var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(document).Length;
 
@@ -398,6 +426,16 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 serializedBytes);
 
             GetOptionalService<PtvConfiguredRowAssociationService>(PtvApiRoutes.V1Featured)?.FinalizeResponse(document);
+            // A controlled Begin may have persisted a user hold while the cache was
+            // being authorized. Reject that late owned result even with unchanged topology.
+            var finalAccess = await GetCurrentHomeUserAccessAsync(cancellationToken).ConfigureAwait(false);
+            if (initialAccess is not { Held: false, PolicyProven: true, AccessEpoch: not null }
+                || finalAccess is not { Held: false, PolicyProven: true, AccessEpoch: not null }
+                || initialAccess.AccessEpoch != finalAccess.AccessEpoch)
+                PtvFeaturedTopology.WithholdUnprovenUserContent(document.FeaturedContent?["payload"] as JsonObject);
+            else
+                PtvFeaturedTopology.BindUserAccessEpoch(document.FeaturedContent?["payload"] as JsonObject,
+                    finalAccess.AccessEpoch);
             return Ok(document);
         }
         catch (Exception)
@@ -3078,6 +3116,31 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             // Do not expose/log private configuration, identity, token or exception content here.
             _logger.LogWarning("PiggieTV presentation authority unavailable. Category=authority-uncertain.");
             return null;
+        }
+    }
+
+    private async Task<PtvHomeUserAccessView?> GetCurrentHomeUserAccessAsync(CancellationToken cancellationToken)
+    {
+        if (HttpContext is null || !TryGetAuthenticatedUserId(out var userId)) return null;
+        try
+        {
+            var users = GetOptionalService<IUserManager>(PtvApiRoutes.V1StatusLower);
+            var user = users?.GetUserById(userId);
+            if (user is null) return null;
+            var ledger = GetOptionalService<IPtvHomeUserAccessLedger>(PtvApiRoutes.V1StatusLower);
+            if (ledger is null) return new PtvHomeUserAccessView { UserId = userId.ToString("N") };
+            var topology = GetOptionalService<PtvConfiguredRowAssociationService>(PtvApiRoutes.V1StatusLower)?.ReadTopology();
+            var libraries = GetOptionalService<ILibraryManager>(PtvApiRoutes.V1StatusLower);
+            if (libraries is null) return new PtvHomeUserAccessView { UserId = userId.ToString("N") };
+            var currentLibraries = PtvHomeUserAccessController.ReadAccessibleLibraries(libraries, user);
+            return await ledger.ReadAsync(userId, PtvHomeUserAccessController.Access(user),
+                PtvHomeUserAccessController.UsableEpoch(topology), cancellationToken,
+                currentLibraries).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // Status remains available while owned Home proof fails closed.
+            return new PtvHomeUserAccessView { UserId = userId.ToString("N") };
         }
     }
 

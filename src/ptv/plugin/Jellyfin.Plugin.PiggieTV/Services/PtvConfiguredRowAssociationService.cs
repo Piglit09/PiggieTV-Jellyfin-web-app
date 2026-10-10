@@ -20,14 +20,23 @@ public sealed class PtvConfiguredRowAssociationService
     private readonly string _serverId;
     private readonly Func<PluginConfiguration?> _configuration;
     private StoreBinding? _binding;
+    private readonly IPtvHomeTopologyLedger? _topology;
 
     /// <summary>Creates the process-local issuer for Jellyfin's exact immutable system identity.</summary>
     /// <param name="serverId">Jellyfin application host system ID.</param>
     /// <param name="configuration">Configuration authority; optional isolated test seam.</param>
-    public PtvConfiguredRowAssociationService(string serverId, Func<PluginConfiguration?>? configuration = null)
+    /// <param name="topology">Durable library-only topology authority; missing authority fails owned rows closed.</param>
+    public PtvConfiguredRowAssociationService(string serverId, Func<PluginConfiguration?>? configuration = null, IPtvHomeTopologyLedger? topology = null)
     {
         _serverId = serverId;
+        _topology = topology;
         _configuration = configuration ?? (() => Plugin.Instance?.Configuration);
+    }
+
+    internal PtvHomeTopologySnapshot? ReadTopology()
+    {
+        try { return _topology?.ReadAsync().GetAwaiter().GetResult(); }
+        catch { return null; }
     }
 
     // The scope must begin BEFORE in-place configuration mutation. It is synchronous/reentrant;
@@ -45,6 +54,7 @@ public sealed class PtvConfiguredRowAssociationService
         lock (ConfigurationGate)
         {
             if (string.IsNullOrWhiteSpace(_serverId) || _configuration() is not { } current) return null;
+            var topology = ReadTopology();
             PluginConfiguration snapshot;
             try
             {
@@ -64,7 +74,8 @@ public sealed class PtvConfiguredRowAssociationService
             var ambiguous = ids.Any(string.IsNullOrWhiteSpace) || ids.Distinct(StringComparer.OrdinalIgnoreCase).Count() != ids.Length;
             PtvPluginSettingsNormalizer.Normalize(snapshot);
             var serialized = JsonSerializer.Serialize(snapshot, JsonOptions);
-            return new Generation(this, _configurationEpoch, serialized, Digest(snapshot), ambiguous);
+            return new Generation(this, _configurationEpoch, serialized, Digest(snapshot), ambiguous,
+                topology?.Epoch, topology?.Sequence, topology is not { BroadHold: false, RecoveryRequired: false });
         }
     }
 
@@ -78,19 +89,87 @@ public sealed class PtvConfiguredRowAssociationService
         }
     }
 
+    internal bool IsCurrentTopology(Generation generation)
+    {
+        lock (ConfigurationGate)
+        {
+            if (!IsCurrent(generation)) return false;
+            var topology = ReadTopology();
+            return topology?.Epoch == generation.TopologyEpoch && topology?.Sequence == generation.TopologySequence;
+        }
+    }
+
+    private bool IsCurrentOwnedTopology(Generation generation)
+    {
+        lock (ConfigurationGate)
+        {
+            if (!IsCurrent(generation)) return false;
+            var topology = ReadTopology();
+            return PtvFeaturedTopology.Available(topology) && topology!.Epoch == generation.TopologyEpoch
+                && topology.Sequence == generation.TopologySequence;
+        }
+    }
+
+    internal void FilterStoredTopology(PtvFeaturedContentDocument document, bool publicRead = false)
+    {
+        var topology = ReadTopology();
+        lock (ConfigurationGate)
+        {
+            var binding = _binding;
+            var trusted = binding is not null && IsCurrent(binding.Generation) && Digest(document) == binding.DocumentDigest;
+            var ownedTopology = publicRead && topology?.BindingAuthorityRequired == true
+                && !HasCurrentOwnedPublicationReady() ? null : topology;
+            if (document.FeaturedContent is JsonObject featured && featured["payload"] is JsonObject payload)
+                PtvFeaturedTopology.Filter(payload, ownedTopology, CaptureGeneration()?.CreateConfiguration().Rows,
+                    featured["version"]?.ToJsonString() == "9" && payload["scopeSchemaVersion"]?.ToJsonString() == "2");
+            // Preserve the original global presentation generation through this exact,
+            // server-owned library-only projection. Never register client/persisted data.
+            if (trusted) binding!.TopologyFilteredDigest = Digest(document);
+        }
+    }
+
     // Called only under the existing store gate. There is exactly one bounded binding, not a history.
     internal void RetireStoreBinding()
     {
         lock (ConfigurationGate) _binding = null;
     }
 
+    // Durable Begin has already persisted the broad hold. Retire only library aliases,
+    // including aliases reachable by projections captured before Begin.
+    internal void RetireLibraryPresentation()
+    {
+        lock (ConfigurationGate)
+        {
+            if (_binding is not { } binding) return;
+            var rules = binding.Generation.CreateConfiguration().Rows?.Rules ?? [];
+            var owned = rules.Where(rule => rule.LibraryScope?.Mode != "global").Select(rule => rule.Id).ToHashSet(StringComparer.Ordinal);
+            foreach (var section in binding.SectionOwners.Where(pair => owned.Contains(pair.Value.RuleId)))
+                binding.RetiredLibrarySections.Add(section.Key);
+        }
+    }
+
     internal void RegisterGeneratedWrite(Generation generation, PtvFeaturedContentDocument normalizedDocument)
     {
         lock (ConfigurationGate)
         {
+            // A retired topology can still produce independently valid global rows.
+            // Owned aliases are checked against the current ledger when issued.
             _binding = IsCurrent(generation)
-                ? new StoreBinding(generation, Digest(normalizedDocument), GetSectionOwners(normalizedDocument, generation))
+                ? new StoreBinding(generation, Digest(normalizedDocument), GetSectionOwners(normalizedDocument, generation),
+                    !generation.TopologyHeld && IsCurrentOwnedTopology(generation))
                 : null;
+        }
+    }
+
+    // Commit the disk replacement and its presentation provenance as one observable step.
+    // A failed replacement leaves the prior global binding attached to the retained file.
+    internal void CommitStoreReplacement(Action replace, Generation? generation, PtvFeaturedContentDocument normalizedDocument)
+    {
+        lock (ConfigurationGate)
+        {
+            replace();
+            if (generation is null) _binding = null;
+            else RegisterGeneratedWrite(generation, normalizedDocument);
         }
     }
 
@@ -99,7 +178,19 @@ public sealed class PtvConfiguredRowAssociationService
     {
         lock (ConfigurationGate)
         {
-            return _binding is { } binding && IsCurrent(binding.Generation) && Digest(document) == binding.DocumentDigest;
+            return _binding is { } binding && IsCurrentTopology(binding.Generation)
+                && (Digest(document) == binding.DocumentDigest || Digest(document) == binding.TopologyFilteredDigest);
+        }
+    }
+
+    internal bool HasCurrentOwnedPublicationReady()
+    {
+        lock (ConfigurationGate)
+        {
+            var topology = ReadTopology();
+            if (!PtvFeaturedTopology.Available(topology)) return false;
+            if (!topology!.BindingAuthorityRequired && topology.Sequence <= 1) return true;
+            return _binding is { OwnedReadyAtCommit: true } binding && IsCurrentOwnedTopology(binding.Generation);
         }
     }
 
@@ -108,7 +199,7 @@ public sealed class PtvConfiguredRowAssociationService
         lock (ConfigurationGate)
         {
             var binding = _binding;
-            if (userId == Guid.Empty || binding is null || !IsCurrent(binding.Generation) || Digest(document) != binding.DocumentDigest) return null;
+            if (userId == Guid.Empty || binding is null || !IsCurrent(binding.Generation) || Digest(document) != binding.DocumentDigest && Digest(document) != binding.TopologyFilteredDigest) return null;
             return new Projection(this, binding, userId);
         }
     }
@@ -128,6 +219,9 @@ public sealed class PtvConfiguredRowAssociationService
 
     internal void FinalizeResponse(PtvFeaturedContentDocument document)
     {
+        var topology = ReadTopology();
+        PtvFeaturedTopology.FilterPublication(document.FeaturedContent?["payload"] as JsonObject,
+            HasCurrentOwnedPublicationReady() ? topology : null);
         lock (ConfigurationGate)
         {
             var payload = document.FeaturedContent?["payload"] as JsonObject;
@@ -136,16 +230,24 @@ public sealed class PtvConfiguredRowAssociationService
             {
                 // Only the detached, already authorized/sanitized response receives authority.
                 if (payload is not null) payload["currentPresentationAuthority"] = projection.CreateAuthority();
-                return;
             }
-            payload?.Remove("currentPresentationAuthority");
-            if (projection is null) return;
-            if (payload?["sections"] is JsonArray sections)
+            else
             {
-                foreach (var section in sections.OfType<JsonObject>()) section.Remove("configuredRowAssociation");
+                payload?.Remove("currentPresentationAuthority");
+                if (projection is not null)
+                {
+                    if (payload?["sections"] is JsonArray sections)
+                    {
+                        foreach (var section in sections.OfType<JsonObject>()) section.Remove("configuredRowAssociation");
+                    }
+                    document.ConfiguredRowProjection = null;
+                }
             }
-            document.ConfiguredRowProjection = null;
         }
+        // Authorization may have completed against the prior snapshot. Re-read at the
+        // response boundary even when the old document won the store read race.
+        PtvFeaturedTopology.FilterPublication(document.FeaturedContent?["payload"] as JsonObject,
+            HasCurrentOwnedPublicationReady() ? ReadTopology() : null);
     }
 
     internal JsonObject CreateSettingsResponse(PtvPluginSettingsDto settings, Guid userId)
@@ -220,7 +322,11 @@ public sealed class PtvConfiguredRowAssociationService
             // The raw generated ID is only the exact lookup used by the authorization projector.
             // In particular genre/random IDs can contain an ordinal. Neither that ID nor any
             // title/source/ordinal determines the public section instance: a private nonce does.
-            owners.Add(group.Key, new SectionOwner(rule.Id, Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32))));
+            owners.Add(group.Key, new SectionOwner(rule.Id, Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)),
+                ReadString(section, "libraryId"), ReadString(section, "topologyEpoch"),
+                section["bindingGeneration"] is JsonValue value && value.TryGetValue<long>(out var generationNumber)
+                    ? generationNumber : null,
+                ReadString(section, "resolvedScopeHash")));
         }
         return owners;
     }
@@ -270,20 +376,28 @@ public sealed class PtvConfiguredRowAssociationService
         public void Dispose() => Monitor.Exit(ConfigurationGate);
     }
 
-    internal sealed class Generation(PtvConfiguredRowAssociationService owner, long epoch, string serialized, string binding, bool ambiguousRules)
+    internal sealed class Generation(PtvConfiguredRowAssociationService owner, long epoch, string serialized, string binding,
+        bool ambiguousRules, string? topologyEpoch, long? topologySequence, bool topologyHeld)
     {
         internal PtvConfiguredRowAssociationService Owner { get; } = owner;
         internal long Epoch { get; } = epoch;
         internal string Binding { get; } = binding;
         internal bool AmbiguousRules { get; } = ambiguousRules;
+        internal string? TopologyEpoch { get; } = topologyEpoch;
+        internal long? TopologySequence { get; } = topologySequence;
+        internal bool TopologyHeld { get; } = topologyHeld;
         internal PluginConfiguration CreateConfiguration() => JsonSerializer.Deserialize<PluginConfiguration>(serialized, JsonOptions)!;
     }
 
-    internal sealed record SectionOwner(string RuleId, string InstanceNonce);
-    internal sealed record StoreBinding(Generation Generation, string DocumentDigest, IReadOnlyDictionary<string, SectionOwner> SectionOwners)
+    internal sealed record SectionOwner(string RuleId, string InstanceNonce, string LibraryId,
+        string TopologyEpoch, long? BindingGeneration, string ResolvedScopeHash);
+    internal sealed record StoreBinding(Generation Generation, string DocumentDigest, IReadOnlyDictionary<string, SectionOwner> SectionOwners,
+        bool OwnedReadyAtCommit)
     {
         // Configuration scope alone cannot distinguish same-config regeneration or PUT/Clear.
         // This private instance identity is created only for a trusted generated store binding.
+        internal string? TopologyFilteredDigest { get; set; }
+        internal HashSet<string> RetiredLibrarySections { get; } = new(StringComparer.OrdinalIgnoreCase);
         internal string GenerationNonce { get; } = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
     }
 
@@ -309,22 +423,52 @@ public sealed class PtvConfiguredRowAssociationService
         internal JsonArray CreateBindings()
         {
             var pairs = new JsonArray();
+            var topology = _owner.ReadTopology();
+            var rules = Binding.Generation.CreateConfiguration().Rows?.Rules ?? [];
             foreach (var sourceSectionId in Binding.SectionOwners.Keys)
             {
-                var alias = ForSection(sourceSectionId)!;
-                pairs.Add(new JsonObject { ["rule"] = alias["rule"]!.DeepClone(), ["section"] = alias["section"]!.DeepClone() });
+                var alias = ForSection(sourceSectionId);
+                if (alias is null) continue;
+                var pair = new JsonObject { ["rule"] = alias["rule"]!.DeepClone(), ["section"] = alias["section"]!.DeepClone() };
+                var owner = Binding.SectionOwners[sourceSectionId];
+                var rule = rules.FirstOrDefault(candidate => candidate.Id == owner.RuleId);
+                if (rule is not null && topology is { BroadHold: false, RecoveryRequired: false }
+                    && topology.Bindings.TryGetValue(rule.Id, out var rebound)
+                    && PtvHomeLibraryScopeResolver.HasVerifiedEffectiveBinding(rule, topology, rebound)
+                    && rule.LibraryScope?.VirtualFolderId != rebound.CollectionFolderId
+                    && owner.LibraryId == rebound.CollectionFolderId && owner.TopologyEpoch == topology.Epoch
+                    && owner.BindingGeneration == rebound.Generation
+                    && owner.ResolvedScopeHash == PtvHomeLibraryScopeResolver.ComputeScopeHash(rule, "resolved", rebound.CollectionFolderId)
+                    && _owner.IsCurrentOwnedTopology(Binding.Generation) && _owner.HasCurrentOwnedPublicationReady())
+                {
+                    pair["libraryId"] = rebound.CollectionFolderId;
+                    pair["topologyEpoch"] = topology.Epoch;
+                    pair["bindingGeneration"] = rebound.Generation;
+                    pair["explicitRebind"] = rebound.ReboundOperationId is not null;
+                }
+                pairs.Add(pair);
             }
             return pairs;
         }
         internal string RuleToken(string ruleId) => _owner.Token("ptv-configured-row-v1", "rule", Scope, ruleId);
-        internal JsonObject? ForSection(string sourceSectionId) => Binding.SectionOwners.TryGetValue(sourceSectionId, out var sectionOwner)
-            ? new JsonObject
+        internal JsonObject? ForSection(string sourceSectionId)
+        {
+            lock (ConfigurationGate)
             {
-                ["version"] = 1,
-                ["scope"] = Scope,
-                ["rule"] = RuleToken(sectionOwner.RuleId),
-                ["section"] = _owner.Token("ptv-configured-row-v1", "section", Scope, sectionOwner.RuleId, sectionOwner.InstanceNonce)
+                if (Binding.RetiredLibrarySections.Contains(sourceSectionId)
+                    || !Binding.SectionOwners.TryGetValue(sourceSectionId, out var sectionOwner)) return null;
+                var owned = Binding.Generation.CreateConfiguration().Rows?.Rules.Any(rule =>
+                    rule.Id == sectionOwner.RuleId && rule.LibraryScope?.Mode != "global") == true;
+                if (owned && (!_owner.IsCurrentOwnedTopology(Binding.Generation)
+                    || !_owner.HasCurrentOwnedPublicationReady())) return null;
+                return new JsonObject
+                {
+                    ["version"] = 1,
+                    ["scope"] = Scope,
+                    ["rule"] = RuleToken(sectionOwner.RuleId),
+                    ["section"] = _owner.Token("ptv-configured-row-v1", "section", Scope, sectionOwner.RuleId, sectionOwner.InstanceNonce)
+                };
             }
-            : null;
+        }
     }
 }

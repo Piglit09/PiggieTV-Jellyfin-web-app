@@ -15,11 +15,13 @@ using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Querying;
 using MediaBrowser.Model.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -27,11 +29,545 @@ namespace Jellyfin.Plugin.PiggieTV.Tests;
 
 // Component/controller calls, not hosted HTTP or Jellyfin middleware integration tests.
 [Collection("Configured row association serial")]
-public sealed class PtvConfiguredRowAssociationTests
+public sealed partial class PtvConfiguredRowAssociationTests
 {
     private static readonly Guid UserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid OtherUserId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid[] ItemIds = Enumerable.Range(1, 4).Select(i => Guid.Parse($"aaaaaaaa-aaaa-aaaa-aaaa-{i:D12}")).ToArray();
+
+    [Fact]
+    public async Task OwnedLatestRowsUseExactLibraryBeforeSelectionAndPreview()
+    {
+        using var fixture = new Fixture();
+        var ids = new[] { "anime", "cartoons", "shows", "movies" }
+            .ToDictionary(key => key, key => Guid.Parse($"dddddddd-dddd-dddd-dddd-{Array.IndexOf(new[] { "anime", "cartoons", "shows", "movies" }, key) + 1:D12}"));
+        fixture.Configuration.Rows = new RowBuilderSettings
+        {
+            SchemaVersion = 3,
+            Rules = ids.Select(pair => new RowBuilderRule
+            {
+                Id = "latest-" + pair.Key,
+                Name = "Latest " + pair.Key,
+                MediaType = pair.Key,
+                SourceType = "latest",
+                SourceValue = pair.Key,
+                GenerationMode = "latest",
+                LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = pair.Key, VirtualFolderId = pair.Value.ToString("N") }
+            }).ToList()
+        };
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        var proxy = (LibraryProxy)(object)libraries;
+        proxy.Folders = ids.Select(pair => new VirtualFolderInfo
+        {
+            ItemId = pair.Value.ToString("N"),
+            Name = char.ToUpperInvariant(pair.Key[0]) + pair.Key[1..],
+            CollectionType = pair.Key == "movies" ? CollectionTypeOptions.movies : CollectionTypeOptions.tvshows,
+            Locations = pair.Key == "anime" ? ["/media-local/Anime", "/mnt/ptv-media/Anime"] : ["/fake"]
+        }).ToArray();
+        proxy.ScopedItems = ids.ToDictionary(pair => pair.Value, pair =>
+            Enumerable.Range(1, 2).Select(index => pair.Key == "movies"
+                ? (BaseItem)NewMovie(pair.Key, index)
+                : NewSeries(pair.Key, index)).ToArray());
+        proxy.Root = new AggregateFolder
+        {
+            Children = Enumerable.Range(1, 1301).Select(index => (BaseItem)new Movie
+            {
+                Id = Guid.Parse($"abababab-abab-abab-abab-{index:D12}"),
+                Name = "Foreign movie " + index,
+                ForcedSortName = "Foreign movie " + index,
+                ImageInfos = [new ItemImageInfo { Type = ImageType.Primary, DateModified = DateTime.UtcNow, Path = "test-image" }]
+            }).ToArray()
+        };
+        using var refresh = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
+        var preview = await refresh.PreviewRowsAsync(fixture.Configuration.Rows, CancellationToken.None);
+        Assert.Equal(4, preview.Rows.Count);
+        Assert.All(preview.Rows, row => Assert.Equal(2, row.ItemCount));
+
+        var status = await refresh.RefreshAsync(CancellationToken.None);
+        Assert.Equal(9, status.Document.FeaturedContent!["version"]!.GetValue<int>());
+        Assert.Equal(2, Payload(status.Document)["scopeSchemaVersion"]!.GetValue<int>());
+        foreach (var section in Sections(status.Document))
+        {
+            var ruleId = section!["sourceRuleId"]!.GetValue<string>();
+            var key = ruleId["latest-".Length..];
+            Assert.Equal("library", section["scopeType"]!.GetValue<string>());
+            Assert.Equal(ids[key].ToString("N"), section["libraryId"]!.GetValue<string>());
+            Assert.False(string.IsNullOrWhiteSpace(section["resolvedScopeHash"]!.GetValue<string>()));
+        }
+        var sectionItems = Payload(status.Document)["sectionItems"]!.AsObject();
+        foreach (var pair in ids)
+        {
+            var actual = sectionItems["latest-" + pair.Key]!.AsArray()
+                .Select(item => Guid.Parse(item!["Id"]!.GetValue<string>())).ToArray();
+            Assert.Equal(proxy.ScopedItems[pair.Value].Select(item => item.Id), actual);
+        }
+        Assert.Equal(8, proxy.ScopedQueryCalls); // preview and refresh, one complete page per library
+    }
+
+    private static Series NewSeries(string category, int index) => new()
+    {
+        Id = Guid.Parse($"eeeeeeee-eeee-eeee-{Math.Abs(category.GetHashCode()) % 10000:D4}-{index:D12}"),
+        Name = category + " " + index,
+        ForcedSortName = category + " " + index,
+        Path = category == "anime" ? (index == 1 ? "/media-local/Anime/one" : "/mnt/ptv-media/Anime/two") : "/fake/" + category,
+        DateCreated = DateTime.UtcNow.AddMinutes(-index),
+        ImageInfos = [new ItemImageInfo { Type = ImageType.Primary, DateModified = DateTime.UtcNow, Path = "test-image" }]
+    };
+
+    private static Movie NewMovie(string category, int index) => new()
+    {
+        Id = Guid.Parse($"ffffffff-ffff-ffff-ffff-{index:D12}"),
+        Name = category + " anime-like " + index,
+        ForcedSortName = category + " anime-like " + index,
+        DateCreated = DateTime.UtcNow.AddMinutes(-index),
+        ImageInfos = [new ItemImageInfo { Type = ImageType.Primary, DateModified = DateTime.UtcNow, Path = "test-image" }]
+    };
+
+    [Fact]
+    public async Task OwnedQueryFailureWithholdsOnlyAffectedRow()
+    {
+        using var fixture = new Fixture();
+        var libraryId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        fixture.Configuration.Rows = new RowBuilderSettings
+        {
+            SchemaVersion = 3,
+            Rules =
+            [
+                new RowBuilderRule { Id = "owned", MediaType = "movies", SourceType = "latest", SourceValue = "movies", LibraryScope = new RowLibraryScope { Mode = "virtualFolder", VirtualFolderId = libraryId.ToString("N") } },
+                new RowBuilderRule { Id = "editorial", MediaType = "movies", SourceType = "latest", SourceValue = "movies", LibraryScope = new RowLibraryScope { Mode = "global" } }
+            ]
+        };
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        var proxy = (LibraryProxy)(object)libraries;
+        proxy.Root = new AggregateFolder { Children = [NewMovie("global", 1)] };
+        proxy.Folders = [new VirtualFolderInfo { ItemId = libraryId.ToString("N"), Name = "Movies", CollectionType = CollectionTypeOptions.movies, Locations = ["/fake"] }];
+        proxy.FailScopedQuery = true;
+        using var refresh = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
+        var status = await refresh.RefreshAsync(CancellationToken.None);
+        var sections = Payload(status.Document)["sectionItems"]!.AsObject();
+        Assert.Null(sections["owned"]);
+        Assert.Single(sections["editorial"]!.AsArray());
+    }
+
+    [Theory]
+    [InlineData("latest", "latest", "movies")]
+    [InlineData("latest", "random", "movies")]
+    [InlineData("latest", "highestRated", "movies")]
+    [InlineData("genre", "latest", "Comedy")]
+    [InlineData("studio", "latest", "Studio")]
+    public async Task OwnedMembershipPrecedesEveryConfiguredRanking(string sourceType, string generationMode, string sourceValue)
+    {
+        using var fixture = new Fixture();
+        var libraryId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+        var owned = NewMovie("owned", 1);
+        owned.Genres = ["Comedy"];
+        owned.Studios = ["Studio"];
+        owned.CommunityRating = 5;
+        var foreign = NewMovie("global", 2);
+        foreign.Genres = ["Comedy"];
+        foreign.Studios = ["Studio"];
+        foreign.CommunityRating = 10;
+        fixture.Configuration.Rows = new RowBuilderSettings
+        {
+            SchemaVersion = 3,
+            Rules = [new RowBuilderRule
+            {
+                Id = "owned-rank", MediaType = "movies", SourceType = sourceType, SourceValue = sourceValue,
+                GenerationMode = generationMode,
+                LibraryScope = new RowLibraryScope { Mode = "virtualFolder", VirtualFolderId = libraryId.ToString("N") }
+            }]
+        };
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        var proxy = (LibraryProxy)(object)libraries;
+        proxy.Root = new AggregateFolder { Children = [foreign] };
+        proxy.Folders = [new VirtualFolderInfo { ItemId = libraryId.ToString("N"), Name = "Movies", CollectionType = CollectionTypeOptions.movies, Locations = ["/fake"] }];
+        proxy.ScopedItems[libraryId] = [owned];
+        using var refresh = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
+        var status = await refresh.RefreshAsync(CancellationToken.None);
+        var rows = Payload(status.Document)["sectionItems"]!.AsObject();
+        var row = Assert.Single(rows);
+        Assert.Equal(owned.Id.ToString("N"), Guid.Parse(Assert.Single(row.Value!.AsArray())!["Id"]!.GetValue<string>()).ToString("N"));
+    }
+
+    [Theory]
+    [InlineData("renamed", true)]
+    [InlineData("libraryDenied", false)]
+    [InlineData("deleted", false)]
+    [InlineData("rebound", false)]
+    [InlineData("wrongType", false)]
+    [InlineData("hashMismatch", false)]
+    [InlineData("legacyV7", false)]
+    public async Task OwnedResponseRevalidatesScopeAndRemovesOrphanItems(string scenario, bool expectRow)
+    {
+        using var fixture = new Fixture();
+        var libraryId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var item = NewMovie("owned", 1);
+        fixture.Configuration.Rows = new RowBuilderSettings
+        {
+            SchemaVersion = 3,
+            Rules = [new RowBuilderRule
+            {
+                Id = "owned", MediaType = "movies", SourceType = "latest", SourceValue = "movies",
+                LibraryScope = new RowLibraryScope { Mode = "virtualFolder", VirtualFolderId = libraryId.ToString("N") }
+            }]
+        };
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        var proxy = (LibraryProxy)(object)libraries;
+        proxy.Root = new AggregateFolder { Children = [] };
+        proxy.Folders = [new VirtualFolderInfo { ItemId = libraryId.ToString("N"), Name = "Movies", CollectionType = CollectionTypeOptions.movies, Locations = ["/fake"] }];
+        proxy.ScopedItems[libraryId] = [item];
+        proxy.Allowed = [item.Id, libraryId];
+        using var refresh = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
+        await refresh.RefreshAsync(CancellationToken.None);
+        var document = await fixture.Store.ReadAsync(CancellationToken.None);
+        Assert.Single(Sections(document));
+
+        switch (scenario)
+        {
+            case "renamed": proxy.Folders[0].Name = "Renamed Movies"; break;
+            case "libraryDenied": proxy.Allowed.Remove(libraryId); break;
+            case "deleted": proxy.Folders = []; break;
+            case "rebound": fixture.Configuration.Rows.Rules[0].LibraryScope!.VirtualFolderId = Guid.NewGuid().ToString("N"); break;
+            case "wrongType": proxy.Folders[0].CollectionType = CollectionTypeOptions.tvshows; break;
+            case "hashMismatch": Sections(document)[0]!["resolvedScopeHash"] = "forged"; break;
+            case "legacyV7": document.FeaturedContent!["version"] = 7; break;
+        }
+
+        var response = new PtvFeaturedContentAuthorizationService(Users(UserId), libraries, fixture.Authority)
+            .AuthorizeForUser(document, UserId).Document!;
+        Assert.Equal(expectRow ? 1 : 0, Sections(response).Count);
+        Assert.Equal(expectRow ? 1 : 0, Payload(response)["sectionItems"]!.AsObject().Count);
+    }
+
+    [Fact]
+    public async Task ClientCannotForgeOwnedCacheWrite()
+    {
+        using var fixture = new Fixture();
+        var libraryId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        fixture.Configuration.Rows.Rules[0].LibraryScope = new RowLibraryScope
+        {
+            Mode = "virtualFolder", VirtualFolderId = libraryId.ToString("N")
+        };
+        var forged = Document();
+        Payload(forged)["scopeSchemaVersion"] = 2;
+        var section = Assert.Single(Sections(forged))!.AsObject();
+        section["scopeType"] = "library";
+        section["libraryId"] = libraryId.ToString("N");
+        section["resolvedScopeHash"] = "forged";
+
+        await Assert.ThrowsAsync<PtvFeaturedContentValidationException>(
+            () => fixture.Store.WriteAsync(forged, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("SourceRuleId", "owned")]
+    [InlineData("ScopeType", "library")]
+    [InlineData("scopeType", "library")]
+    public async Task ClientScopeValidationRejectsCaseVariantsAndAmbiguity(string field, string value)
+    {
+        using var fixture = new Fixture();
+        fixture.Configuration.Rows.Rules[0].LibraryScope = new RowLibraryScope
+        {
+            Mode = "virtualFolder", VirtualFolderId = Guid.NewGuid().ToString("N")
+        };
+        fixture.Configuration.Rows.Rules[0].Id = "owned";
+        var forged = Document();
+        var section = Assert.Single(Sections(forged))!.AsObject();
+        if (field == "SourceRuleId") section.Remove("sourceRuleId");
+        section[field] = value;
+
+        await Assert.ThrowsAsync<PtvFeaturedContentValidationException>(
+            () => fixture.Store.WriteAsync(forged, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("case-conflict")]
+    [InlineData("non-string")]
+    [InlineData("trimmed-owned")]
+    [InlineData("contradictory-rules")]
+    public async Task ClientScopeValidationRejectsMalformedClaims(string scenario)
+    {
+        using var fixture = new Fixture();
+        fixture.Configuration.Rows.Rules[0].Id = "owned";
+        fixture.Configuration.Rows.Rules[0].LibraryScope = new RowLibraryScope
+        {
+            Mode = "virtualFolder", VirtualFolderId = Guid.NewGuid().ToString("N")
+        };
+        var document = Document();
+        var section = Assert.Single(Sections(document))!.AsObject();
+        switch (scenario)
+        {
+            case "case-conflict": section["scopeType"] = "global"; section["ScopeType"] = "library"; break;
+            case "non-string": section["scopeType"] = new JsonObject(); break;
+            case "trimmed-owned": section["scopeType"] = " Library "; break;
+            case "contradictory-rules": section["ruleId"] = "owned"; break;
+        }
+
+        await Assert.ThrowsAsync<PtvFeaturedContentValidationException>(
+            () => fixture.Store.WriteAsync(document, CancellationToken.None));
+    }
+
+    [Fact]
+    public void VersionEightOrphanItemsNeverBecomeGenericRows()
+    {
+        using var fixture = new Fixture();
+        var document = Document();
+        Payload(document)["sections"] = new JsonArray();
+        Payload(document).Remove("scopeSchemaVersion");
+
+        var response = fixture.Project(document, 1, associations: false);
+
+        Assert.Empty(Sections(response));
+        Assert.Empty(Payload(response)["sectionItems"]!.AsObject());
+    }
+
+    [Fact]
+    public void LegacyGlobalDocumentIsNotRelabelledAsVersionEight()
+    {
+        using var fixture = new Fixture();
+        var document = Document();
+        document.FeaturedContent!["version"] = 7;
+
+        var response = fixture.Project(document, 1, associations: false);
+
+        Assert.Equal(7, response.FeaturedContent!["version"]!.GetValue<int>());
+        Assert.Empty(Sections(response));
+        Assert.Empty(Payload(response)["sectionItems"]!.AsObject());
+    }
+
+    [Fact]
+    public async Task OwnedClaimWithNonconfiguredRowTypeIsRejected()
+    {
+        using var fixture = new Fixture();
+        var libraryId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        fixture.Configuration.Rows.Rules[0].LibraryScope = new RowLibraryScope { Mode = "virtualFolder", VirtualFolderId = libraryId.ToString("N") };
+        var item = NewMovie("owned", 1);
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        var proxy = (LibraryProxy)(object)libraries;
+        proxy.Root = new AggregateFolder { Children = [] };
+        proxy.Folders = [new VirtualFolderInfo { ItemId = libraryId.ToString("N"), Name = "Movies", CollectionType = CollectionTypeOptions.movies, Locations = ["/fake"] }];
+        proxy.ScopedItems[libraryId] = [item];
+        proxy.Allowed = [libraryId, item.Id];
+        using var refresh = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
+        var document = (await refresh.RefreshAsync(CancellationToken.None)).Document;
+        Assert.Single(Sections(document));
+        Sections(document)[0]!["rowType"] = "generic";
+
+        var response = new PtvFeaturedContentAuthorizationService(Users(UserId), libraries, fixture.Authority)
+            .AuthorizeForUser(document, UserId).Document!;
+
+        Assert.Empty(Sections(response));
+        Assert.Empty(Payload(response)["sectionItems"]!.AsObject());
+    }
+
+    [Fact]
+    public void PartiallyRedactedOwnedRowRetainsScopeWithoutPrivateSectionIdentity()
+    {
+        using var fixture = new Fixture();
+        var libraryId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        fixture.Configuration.Rows.Rules[0].LibraryScope = new RowLibraryScope { Mode = "virtualFolder", VirtualFolderId = libraryId.ToString("N") };
+        var document = Document(("PRIVATE_SENTINEL_section", "rule-a"));
+        Payload(document)["scopeSchemaVersion"] = 2;
+        var section = Assert.Single(Sections(document))!.AsObject();
+        section["scopeType"] = "library";
+        section["libraryId"] = libraryId.ToString("N");
+        section["bindingKey"] = "";
+        section["topologyEpoch"] = fixture.Ledger.State.Epoch;
+        section["bindingGeneration"] = 0L;
+        section["resolvedScopeHash"] = PtvHomeLibraryScopeResolver.ComputeScopeHash(fixture.Configuration.Rows.Rules[0], "resolved");
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        var proxy = (LibraryProxy)(object)libraries;
+        proxy.Folders = [new VirtualFolderInfo { ItemId = libraryId.ToString("N"), Name = "Movies", CollectionType = CollectionTypeOptions.movies, Locations = ["/fake"] }];
+        proxy.Allowed = ItemIds.Take(1).Append(libraryId).ToHashSet();
+
+        var response = new PtvFeaturedContentAuthorizationService(Users(UserId, OtherUserId), libraries, fixture.Authority)
+            .AuthorizeForUser(document, OtherUserId).Document!;
+        var projected = Assert.Single(Sections(response))!;
+        var wire = JsonSerializer.Serialize(response);
+
+        Assert.DoesNotContain("PRIVATE_SENTINEL", wire);
+        Assert.DoesNotContain("PRIVATE_SELECTOR", wire);
+        Assert.Null(projected["sourceRuleId"]);
+        Assert.Equal("library", projected["scopeType"]!.GetValue<string>());
+        Assert.Equal(libraryId.ToString("N"), projected["libraryId"]!.GetValue<string>());
+        Assert.Single(Payload(response)["sectionItems"]!.AsObject());
+    }
+
+    [Fact]
+    public void RepeatedRejectedOwnedDocumentLogsOneSafeReasonPerGeneration()
+    {
+        using var fixture = new Fixture();
+        fixture.Configuration.Rows.Rules[0].LibraryScope = new RowLibraryScope
+        {
+            Mode = "virtualFolder", VirtualFolderId = Guid.NewGuid().ToString("N")
+        };
+        var document = Document();
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        var logger = new ScopeLogger();
+        var projector = new PtvFeaturedContentAuthorizationService(Users(UserId), libraries, fixture.Authority, logger);
+
+        projector.AuthorizeForUser(document, UserId);
+        projector.AuthorizeForUser(document, UserId);
+
+        Assert.Single(logger.Messages);
+        Assert.Contains("home-poisoned-payload-rejected", logger.Messages[0]);
+        Assert.DoesNotContain("PRIVATE_SELECTOR", logger.Messages[0]);
+        Assert.DoesNotContain(ItemIds[0].ToString("N"), logger.Messages[0]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MigratesCanonicalV2RulesAndPersistsIds(bool failSave)
+    {
+        using var fixture = new Fixture();
+        var original = Plugin.Instance;
+        var xml = DispatchProxy.Create<IXmlSerializer, XmlProxy>();
+        var proxy = (XmlProxy)(object)xml;
+        var plugin = new Plugin(fixture.Paths, xml);
+        var pinned = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        try
+        {
+            plugin.UpdateConfiguration(new PluginConfiguration
+            {
+                Rows = new RowBuilderSettings
+                {
+                    SchemaVersion = 2,
+                    Rules = [new RowBuilderRule { Id = "latest-anime", Name = "Renamed shelf", MediaType = "anime", SourceType = "latest", SourceValue = "anime" }]
+                }
+            });
+            proxy.FailWrites = failSave;
+            var service = new PtvPluginSettingsService(NullLogger<PtvPluginSettingsService>.Instance);
+            var folders = new[] { new VirtualFolderInfo { ItemId = pinned.ToString("N"), Name = "Anime", CollectionType = CollectionTypeOptions.tvshows, Locations = ["/fake"] } };
+
+            Assert.Equal(!failSave, service.BindDefaultLibraries(folders));
+            var read = service.GetSettings();
+            Assert.Equal(failSave ? null : pinned.ToString("N"), read.Rows.Rules.Single().LibraryScope?.VirtualFolderId);
+            if (failSave)
+            {
+                Assert.True(PtvHomeLibraryScopeResolver.Resolve(read.Rows.Rules.Single(), folders).NeedsBinding);
+            }
+            Assert.Equal(failSave ? 1 : 2, proxy.Writes);
+            if (!failSave)
+            {
+                var epoch = new PtvConfiguredRowAssociationService("server-a").CaptureGeneration()!.Epoch;
+                Assert.True(service.BindDefaultLibraries(folders));
+                Assert.Equal(epoch, new PtvConfiguredRowAssociationService("server-a").CaptureGeneration()!.Epoch);
+                Assert.Equal(2, proxy.Writes);
+            }
+        }
+        finally
+        {
+            typeof(Plugin).GetField("<Instance>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, original);
+        }
+    }
+
+    [Fact]
+    public async Task ResetResaveAndDefaultPinCannotClearDeletedLibraryTombstone()
+    {
+        using var fixture = new Fixture();
+        var previous = Plugin.Instance;
+        var plugin = new Plugin(fixture.Paths, DispatchProxy.Create<IXmlSerializer, XmlProxy>());
+        var libraryId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var rule = new RowBuilderRule
+        {
+            Id = "latest-anime", Name = "Anime", MediaType = "anime", SourceType = "latest", SourceValue = "anime",
+            LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = "anime" }
+        };
+        try
+        {
+            plugin.UpdateConfiguration(new PluginConfiguration { Rows = new RowBuilderSettings { Rules = [rule] } });
+            var ledger = new PtvHomeTopologyLedger(Path.Combine(fixture.Paths.PluginConfigurationsPath, "PiggieTV"),
+                "server-a", () => plugin.Configuration.HomeTopologyLedgerInitialized,
+                () => { plugin.Configuration.HomeTopologyLedgerInitialized = true; plugin.SaveConfiguration(); });
+            await ledger.ReadAsync();
+            var begun = await ledger.BeginAsync(new PtvHomeTransitionIntent
+            {
+                OperationId = Guid.NewGuid(), Kind = "delete", ServerId = "server-a", AffectedRuleIds = [rule.Id],
+                ExpectedLibrary = new PtvHomeLibraryDefinition
+                {
+                    LibraryId = libraryId.ToString("N"), CollectionType = "tvshows", Name = "Anime", Roots = ["/anime"],
+                    Options = JsonSerializer.SerializeToElement(new { })
+                }
+            });
+            await ledger.CompleteAsync(begun.Operation!.Intent.OperationId,
+                new PtvVerifiedTransitionReadback(begun.Epoch, null, null, true, true, true));
+            var settings = (PtvPluginSettingsService)Activator.CreateInstance(typeof(PtvPluginSettingsService),
+                NullLogger<PtvPluginSettingsService>.Instance, ledger)!;
+            settings.ResetSettings();
+            settings.SaveSettings(new PtvPluginSettingsPatchDto { Rows = new RowBuilderSettings { Rules = [rule] } });
+            var sameNameAndId = new VirtualFolderInfo
+            {
+                ItemId = libraryId.ToString("N"), Name = "Anime", CollectionType = CollectionTypeOptions.tvshows,
+                Locations = ["/anime"]
+            };
+
+            Assert.True(settings.BindDefaultLibraries([sameNameAndId]));
+            Assert.Null(settings.GetSettings().Rows.Rules.Single().LibraryScope?.VirtualFolderId);
+            Assert.True((await ledger.ReadAsync()).Bindings[rule.Id].Tombstoned);
+        }
+        finally
+        {
+            typeof(Plugin).GetField("<Instance>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, previous);
+        }
+    }
+
+    [Fact]
+    public async Task FirstControlledBeginSeedsUnaffectedUnpinnedDefaultWithoutAutoPinOrGlobalProofLoss()
+    {
+        using var fixture = new Fixture();
+        var previous = Plugin.Instance;
+        var xml = DispatchProxy.Create<IXmlSerializer, XmlProxy>();
+        var writes = (XmlProxy)(object)xml;
+        var plugin = new Plugin(fixture.Paths, xml);
+        var animeId = Guid.Parse("33333333-3333-3333-3333-333333333333").ToString("N");
+        var rule = new RowBuilderRule { Id = "latest-anime", MediaType = "anime", SourceType = "latest", SourceValue = "anime",
+            LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = "anime" } };
+        try
+        {
+            plugin.UpdateConfiguration(new PluginConfiguration { Rows = new RowBuilderSettings { Rules =
+            [rule, new RowBuilderRule { Id = "global", MediaType = "movies", SourceType = "latest", SourceValue = "movies",
+                LibraryScope = new RowLibraryScope { Mode = "global" } }] } });
+            var ledger = new PtvHomeTopologyLedger(Path.Combine(fixture.Paths.PluginConfigurationsPath, "PiggieTV"),
+                "server-a", () => plugin.Configuration.HomeTopologyLedgerInitialized,
+                () => { plugin.Configuration.HomeTopologyLedgerInitialized = true; plugin.SaveConfiguration(); });
+            await ledger.ReadAsync();
+            var authority = new PtvConfiguredRowAssociationService("server-a", () => plugin.Configuration, ledger);
+            var store = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, authority);
+            var raw = await store.WriteGeneratedAsync(Document(("global", "global")), authority.CaptureGeneration()!, CancellationToken.None);
+            Assert.Single(authority.CaptureCurrentPresentationProof(UserId, true)!.Bindings!);
+            var before = new PtvHomeLibraryDefinition { LibraryId = Guid.NewGuid().ToString("N"), Name = "Movies",
+                CollectionType = "movies", Roots = ["/movies"], Options = JsonSerializer.SerializeToElement(new { }) };
+            var intended = new PtvHomeLibraryDefinition { LibraryId = string.Empty, Name = "Films",
+                CollectionType = "movies", Roots = ["/movies"], Options = before.Options };
+            var intent = new PtvHomeTransitionIntent { OperationId = Guid.NewGuid(), ServerId = "server-a",
+                Kind = "rename", ExpectedLibrary = before, IntendedLibrary = intended };
+            var begun = await ledger.BeginAsync(intent, new Dictionary<string, string> { [rule.Id] = animeId },
+                new Dictionary<string, string> { [rule.Id] = PtvHomeLibraryScopeResolver.ScopeFingerprint(rule) });
+            authority.RetireLibraryPresentation();
+            var verified = new PtvHomeLibraryDefinition { LibraryId = Guid.NewGuid().ToString("N"), Name = "Films",
+                CollectionType = "movies", Roots = ["/movies"], Options = before.Options };
+            await ledger.CompleteAsync(intent.OperationId,
+                new PtvVerifiedTransitionReadback(begun.Epoch, verified, null, true, true, true));
+            var beforeWrites = writes.Writes;
+            var settings = new PtvPluginSettingsService(NullLogger<PtvPluginSettingsService>.Instance, ledger);
+            var folders = new[] { new VirtualFolderInfo { ItemId = animeId, Name = "Anime",
+                CollectionType = CollectionTypeOptions.tvshows, Locations = ["/anime"] } };
+
+            Assert.True(settings.BindDefaultLibraries(folders));
+
+            Assert.Equal(beforeWrites, writes.Writes);
+            Assert.Null(plugin.Configuration.Rows.Rules.Single(candidate => candidate.Id == rule.Id).LibraryScope!.VirtualFolderId);
+            Assert.Equal("resolved", PtvHomeLibraryScopeResolver.Resolve(rule, folders, await ledger.ReadAsync()).Status);
+            Assert.NotNull(authority.CaptureCurrentPresentationProof(UserId, true));
+            Assert.Single(authority.CaptureCurrentPresentationProof(UserId, true)!.Bindings!);
+            Assert.Equal("global", Assert.Single(Sections(await store.ReadAsync(CancellationToken.None)))!["id"]!.GetValue<string>());
+        }
+        finally
+        {
+            typeof(Plugin).GetField("<Instance>k__BackingField", BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, previous);
+        }
+    }
 
     [Theory]
     [InlineData(4)]
@@ -133,7 +669,7 @@ public sealed class PtvConfiguredRowAssociationTests
     public async Task SameTitlesAndMediaTypesDoNotMergeRules()
     {
         using var fixture = new Fixture();
-        fixture.Configuration.Rows.Rules.Add(new RowBuilderRule { Id = "rule-b", Name = "Same", SourceType = "latest", SourceValue = "movies", MediaType = "movies" });
+        fixture.Configuration.Rows.Rules.Add(new RowBuilderRule { Id = "rule-b", Name = "Same", SourceType = "latest", SourceValue = "movies", MediaType = "movies", LibraryScope = new RowLibraryScope { Mode = "global" } });
         var raw = await fixture.Generate(Document(("first", "rule-a"), ("second", "rule-b")));
         var aliases = Sections(fixture.Project(raw, 1)).Select(s => s!["configuredRowAssociation"]!["rule"]!.GetValue<string>()).ToArray();
         Assert.Equal(2, aliases.Distinct().Count());
@@ -145,7 +681,6 @@ public sealed class PtvConfiguredRowAssociationTests
         using var fixture = new Fixture();
         var document = Document(("generic", "rule-a"), ("unknown", "absent"));
         Sections(document)[0]!["rowType"] = "generic";
-        Payload(document)["sectionItems"]!["orphan"] = new JsonArray(Item(ItemIds[0]));
         var raw = await fixture.Generate(document);
         Assert.All(Sections(fixture.Project(raw, 1)), s => Assert.Null(s!["configuredRowAssociation"]));
     }
@@ -194,7 +729,7 @@ public sealed class PtvConfiguredRowAssociationTests
         var other = Sections(fixture.Project(raw, 1, userId: OtherUserId))[0]!["configuredRowAssociation"]!;
         Assert.NotEqual(first["scope"]!.ToJsonString(), other["scope"]!.ToJsonString());
         Assert.NotEqual(first["rule"]!.ToJsonString(), other["rule"]!.ToJsonString());
-        var restarted = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var restarted = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         Assert.Null(restarted.CreateRowsResponse(fixture.Configuration.Rows, UserId)["configuredRowAssociations"]);
         var otherServer = new PtvConfiguredRowAssociationService("server-b", () => fixture.Configuration);
         Assert.Null(otherServer.CaptureProjection(raw, UserId));
@@ -244,6 +779,11 @@ public sealed class PtvConfiguredRowAssociationTests
         if (malformed == "ambiguous-source-rule") section["SourceRuleId"] = "rule-a";
         if (malformed == "contradictory-rule") section["ruleId"] = "rule-b";
         if (malformed == "malformed-rule") section["sourceRuleId"] = new JsonObject();
+        if (malformed == "duplicate-section")
+        {
+            await Assert.ThrowsAsync<PtvFeaturedContentValidationException>(() => fixture.Generate(document));
+            return;
+        }
         var raw = await fixture.Generate(document);
         Assert.All(Sections(fixture.Project(raw, 1)), s => Assert.Null(s!["configuredRowAssociation"]));
     }
@@ -289,7 +829,7 @@ public sealed class PtvConfiguredRowAssociationTests
         Assert.Empty(fixture.Authority.CreateRowsResponse(fixture.Configuration.Rows, UserId)["configuredRowAssociations"]!["rules"]!.AsArray());
         fixture.Configuration.Rows.Rules.Clear();
         raw = await fixture.Generate();
-        Assert.Null(Sections(fixture.Project(raw, 1))[0]!["configuredRowAssociation"]);
+        Assert.Empty(Sections(fixture.Project(raw, 1)));
         fixture.Configuration.Rows.Rules.Add(new RowBuilderRule { Id = "rule-a" });
         fixture.Configuration.Rows.Rules.Add(new RowBuilderRule { Id = "rule a" });
         raw = await fixture.Generate();
@@ -327,10 +867,10 @@ public sealed class PtvConfiguredRowAssociationTests
             original.Document.UpdatedAt = DateTimeOffset.UtcNow.AddDays(-2).ToUnixTimeMilliseconds();
             original.Document.FeaturedContent!["createdAt"] = original.Document.UpdatedAt;
             original.Document.FeaturedContent!["expiresAt"] = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeMilliseconds();
-            await fixture.Store.WriteAsync(original.Document, CancellationToken.None);
+            await fixture.Store.WriteGeneratedAsync(original.Document, fixture.Authority.CaptureGeneration()!, CancellationToken.None);
         }
 
-        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var storeB = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuerB);
         var persisted = await storeB.GetStatusAsync(CancellationToken.None);
         Assert.Equal(!expired, persisted.FeaturedCacheFresh);
@@ -360,9 +900,11 @@ public sealed class PtvConfiguredRowAssociationTests
         var libraries = ConfigureLatestLibraries(fixture);
         var library = (LibraryProxy)(object)libraries;
         library.Root!.Children = library.Root.Children.Where(item => item is not MusicAlbum).ToArray();
+        var musicId = Guid.Parse("cccccccc-cccc-cccc-cccc-000000000003");
+        library.ScopedItems[musicId] = [];
         using var processA = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
         await processA.RefreshAsync(CancellationToken.None);
-        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var storeB = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuerB);
         Assert.Null(issuerB.CaptureProjection((await storeB.GetStatusAsync(CancellationToken.None)).Document, UserId));
         var enrichment = CompletedEnrichment();
@@ -385,7 +927,7 @@ public sealed class PtvConfiguredRowAssociationTests
         var libraries = ConfigureLatestLibraries(fixture);
         using var processA = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
         await processA.RefreshAsync(CancellationToken.None);
-        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var storeB = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuerB);
         var enrichment = new EnrichmentStub();
         using var processB = CreateRefresh(storeB, issuerB, libraries, enrichment);
@@ -416,9 +958,9 @@ public sealed class PtvConfiguredRowAssociationTests
             original.Document.UpdatedAt = DateTimeOffset.UtcNow.AddDays(-2).ToUnixTimeMilliseconds();
             original.Document.FeaturedContent!["createdAt"] = original.Document.UpdatedAt;
             original.Document.FeaturedContent!["expiresAt"] = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeMilliseconds();
-            await fixture.Store.WriteAsync(original.Document, CancellationToken.None);
+            await fixture.Store.WriteGeneratedAsync(original.Document, fixture.Authority.CaptureGeneration()!, CancellationToken.None);
         }
-        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var storeB = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuerB);
         var before = (await storeB.ReadAsync(CancellationToken.None)).FeaturedContent!.ToJsonString();
         var proxy = (LibraryProxy)(object)libraries;
@@ -455,7 +997,7 @@ public sealed class PtvConfiguredRowAssociationTests
         var libraries = ConfigureLatestLibraries(fixture);
         using var processA = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
         await processA.RefreshAsync(CancellationToken.None);
-        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var storeB = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuerB);
         var enrichment = new EnrichmentStub();
         using var processB = CreateRefresh(storeB, issuerB, libraries, enrichment);
@@ -531,10 +1073,10 @@ public sealed class PtvConfiguredRowAssociationTests
         var proxy = (LibraryProxy)(object)libraries;
         var allowed = Enumerable.Range(1, 48).Where(index => (index - 1) % 16 < allowedPerSection)
             .Select(index => Guid.Parse($"bbbbbbbb-bbbb-bbbb-bbbb-{index:D12}")).ToHashSet();
-        proxy.Allowed = allowed;
+        proxy.Allowed = allowed.Concat(proxy.Folders.Select(folder => Guid.Parse(folder.ItemId))).ToHashSet();
         var baseline = new PtvFeaturedContentAuthorizationService(Users(UserId, OtherUserId), libraries, fixture.Authority)
             .AuthorizeForUser(original.Document, OtherUserId).Document!;
-        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var storeB = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuerB);
         using var processB = CreateRefresh(storeB, issuerB, libraries, CompletedEnrichment());
         var restored = await processB.RefreshIfNeededAsync(CancellationToken.None);
@@ -566,7 +1108,7 @@ public sealed class PtvConfiguredRowAssociationTests
         using var fixture = new Fixture();
         var libraries = ConfigureLatestLibraries(fixture);
         await fixture.Generate();
-        var issuer = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuer = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var store = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuer);
         var enrichment = new EnrichmentStub();
         using var refresh = CreateRefresh(store, issuer, libraries, enrichment);
@@ -589,7 +1131,7 @@ public sealed class PtvConfiguredRowAssociationTests
         using var fixture = new Fixture();
         var libraries = ConfigureLatestLibraries(fixture);
         await fixture.Generate();
-        var issuer = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuer = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var store = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuer);
         var enrichment = new EnrichmentStub();
         using var refresh = CreateRefresh(store, issuer, libraries, enrichment);
@@ -611,7 +1153,7 @@ public sealed class PtvConfiguredRowAssociationTests
         var libraries = ConfigureLatestLibraries(fixture);
         using var processA = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
         await processA.RefreshAsync(CancellationToken.None);
-        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration);
+        var issuerB = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, fixture.Ledger);
         var storeB = new PtvFeaturedContentStore(fixture.Paths, NullLogger<PtvFeaturedContentStore>.Instance, issuerB);
         var enrichment = new EnrichmentStub();
         using var worker = CreateRefresh(storeB, issuerB, libraries, enrichment);
@@ -1032,7 +1574,7 @@ public sealed class PtvConfiguredRowAssociationTests
     public async Task FreshnessStatusReadsOnlyCurrentEligiblePairsAndReturnsDetachedObjects()
     {
         using var fixture = new Fixture();
-        var document = Document(("first", "rule-a"), ("second", "rule-a"), ("generic", "rule-a"), ("unknown", "absent"), ("duplicate", "rule-a"), ("duplicate", "rule-a"));
+        var document = Document(("first", "rule-a"), ("second", "rule-a"), ("generic", "rule-a"), ("unknown", "absent"));
         Sections(document)[2]!["rowType"] = "generic";
         var raw = await fixture.Generate(document);
         var first = await ReadStatus(fixture);
@@ -1119,8 +1661,14 @@ public sealed class PtvConfiguredRowAssociationTests
         var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
         ((LibraryProxy)(object)libraries).Allowed = ItemIds.Take(2).ToHashSet();
         var projector = new PtvFeaturedContentAuthorizationService(users, libraries, fixture.Authority);
-        using var services = StatusServices(fixture, projector: projector);
         var userId = restricted ? OtherUserId : UserId;
+        var ledger = new PtvHomeUserAccessLedger(Path.Combine(fixture.Paths.PluginConfigurationsPath,
+            $"featured-proof-{userId:N}"), "server-a");
+        var currentAccess = PtvHomeUserAccessController.Access(((UserProxy)(object)users).Users[userId]);
+        var epoch = fixture.Authority.ReadTopology()!.Epoch;
+        var batch = await ledger.BeginVerificationBatchAsync([userId], epoch);
+        await ledger.VerifyBatchCandidateAsync(batch.Id, userId, currentAccess, currentAccess, [], epoch);
+        using var services = StatusServices(fixture, users: users, projector: projector, access: ledger, libraries: libraries);
         var controller = Controller(services, userId);
         var result = Assert.IsType<OkObjectResult>((await controller.GetFeaturedContent(CancellationToken.None)).Result);
         var document = Assert.IsType<PtvFeaturedContentDocument>(result.Value);
@@ -1129,6 +1677,78 @@ public sealed class PtvConfiguredRowAssociationTests
         Assert.Null(Payload(document)["configuredPresentationBindings"]);
         Assert.Equal(2, Payload(document)["sectionItems"]![Sections(document)[0]!["id"]!.GetValue<string>()]!.AsArray().Count);
         Assert.DoesNotContain("currentPresentationAuthority", JsonSerializer.Serialize(raw));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task FeaturedBindsOwnedRowsToCurrentUserEpochWhileKeepingGlobal(int scenario)
+    {
+        using var fixture = new Fixture();
+        var libraryId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        fixture.Configuration.Rows.Rules.Add(new RowBuilderRule
+        {
+            Id = "owned", Name = "Owned", MediaType = "movies", SourceType = "latest", SourceValue = "movies",
+            LibraryScope = new RowLibraryScope { Mode = "virtualFolder", VirtualFolderId = libraryId.ToString("N") }
+        });
+        var source = Document(("global", "rule-a"), ("owned", "owned"));
+        var owned = Sections(source)[1]!.AsObject();
+        owned["scopeType"] = "library";
+        owned["libraryId"] = libraryId.ToString("N");
+        owned["bindingKey"] = "";
+        owned["topologyEpoch"] = fixture.Ledger.State.Epoch;
+        owned["bindingGeneration"] = 0L;
+        owned["resolvedScopeHash"] = PtvHomeLibraryScopeResolver.ComputeScopeHash(fixture.Configuration.Rows.Rules[1], "resolved");
+        var raw = await fixture.Generate(source);
+        Assert.Equal(2, Sections(raw).Count);
+        var users = Users(UserId);
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        ((LibraryProxy)(object)libraries).Allowed = ItemIds.Append(libraryId).ToHashSet();
+        ((LibraryProxy)(object)libraries).CurrentCollections.Add(libraryId);
+        ((LibraryProxy)(object)libraries).Folders = [new VirtualFolderInfo { ItemId = libraryId.ToString("N"), Name = "Movies", CollectionType = CollectionTypeOptions.movies, Locations = ["/fake"] }];
+        var projector = new PtvFeaturedContentAuthorizationService(users, libraries, fixture.Authority);
+        var ledger = new PtvHomeUserAccessLedger(Path.Combine(fixture.Paths.PluginConfigurationsPath, "featured-access"), "server-a");
+        IPtvHomeUserAccessLedger access = ledger;
+        string? accessEpoch = null;
+        if (scenario >= 1)
+        {
+            var current = PtvHomeUserAccessController.Access(((UserProxy)(object)users).Users[UserId]);
+            var epoch = fixture.Authority.ReadTopology()!.Epoch;
+            var batch = await ledger.BeginVerificationBatchAsync([UserId], epoch);
+            accessEpoch = (await ledger.VerifyBatchCandidateAsync(batch.Id, UserId, current, current,
+                [libraryId.ToString("N")], epoch)).AccessEpoch;
+            if (scenario == 1) access = new BeginAfterFirstAccessRead(ledger, current, epoch);
+        }
+        using var services = StatusServices(fixture, users: users, projector: projector, access: access,
+            libraries: libraries);
+
+        var result = Assert.IsType<OkObjectResult>((await Controller(services, UserId).GetFeaturedContent(CancellationToken.None)).Result);
+        var document = Assert.IsType<PtvFeaturedContentDocument>(result.Value);
+        Assert.Equal(scenario == 2 ? ["global", "owned"] : [],
+            Sections(document).Select(section => section!["id"]!.GetValue<string>()).ToArray());
+        if (scenario == 2)
+        {
+            Assert.NotEmpty(Payload(document)["heroItems"]!.AsArray());
+            Assert.Equal(accessEpoch, Payload(document)["heroAccessEpoch"]!.GetValue<string>());
+            Assert.Equal(accessEpoch, Sections(document)[1]!["userAccessEpoch"]!.GetValue<string>());
+            Assert.Null(Sections(document)[0]!["userAccessEpoch"]);
+            Assert.DoesNotContain("userAccessEpoch", JsonSerializer.Serialize(raw));
+            var statusResult = Assert.IsType<OkObjectResult>(await Controller(services, UserId).GetStatus(false, CancellationToken.None));
+            var status = JsonSerializer.SerializeToNode(statusResult.Value)!;
+            Assert.Equal(Sections(document)[1]!["userAccessEpoch"]!.GetValue<string>(),
+                status["currentHomeUserAccess"]!["accessEpoch"]!.GetValue<string>());
+        }
+        else
+        {
+            Assert.Null(Payload(document)["sectionItems"]!["owned"]);
+            Assert.Empty(Payload(document)["heroItems"]!.AsArray());
+            Assert.Null(Payload(document)["heroAccessEpoch"]);
+        }
+        if (scenario == 2) Assert.NotNull(Payload(document)["sectionItems"]!["global"]);
+        else Assert.Null(Payload(document)["sectionItems"]!["global"]);
+        Assert.NotNull(Payload(document)["currentPresentationAuthority"]);
+        if (access is BeginAfterFirstAccessRead racing) Assert.True(racing.Began);
     }
 
     [Fact]
@@ -1145,6 +1765,108 @@ public sealed class PtvConfiguredRowAssociationTests
         var status = JsonSerializer.SerializeToNode(result.Value)!;
         AssertAuthority(status["currentPresentationAuthority"]);
         Assert.Single(status["configuredPresentationBindings"]!.AsArray());
+    }
+
+    [Fact]
+    public async Task StatusReportsUnknownAuthenticatedUserAsHomeOwnershipUnproven()
+    {
+        using var fixture = new Fixture();
+        await fixture.Generate();
+        var access = new PtvHomeUserAccessLedger(Path.Combine(fixture.Paths.PluginConfigurationsPath, "PiggieTV-user-access"), "server-a");
+        using var services = new ServiceCollection()
+            .AddSingleton(fixture.Authority)
+            .AddSingleton<IPtvHomeUserAccessLedger>(access)
+            .AddSingleton(Users(UserId))
+            .AddSingleton<IAuthorizationService>(new AuthorizationStub())
+            .BuildServiceProvider();
+
+        var result = Assert.IsType<OkObjectResult>(await Controller(services, UserId).GetStatus(false, CancellationToken.None));
+        var status = JsonSerializer.SerializeToNode(result.Value)!;
+        var userAccess = Assert.IsType<JsonObject>(status["currentHomeUserAccess"]);
+        Assert.Equal(UserId.ToString("N"), userAccess["userId"]!.GetValue<string>());
+        Assert.True(userAccess["held"]!.GetValue<bool>());
+        Assert.False(userAccess["policyProven"]!.GetValue<bool>());
+        Assert.Null(userAccess["accessEpoch"]);
+        Assert.Equal(["accessEpoch", "held", "policyProven", "userId", "version"],
+            userAccess.Select(property => property.Key).Order(StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public async Task SafeStatusRejectsAccessProofHeldAfterItsFirstRead()
+    {
+        using var fixture = new Fixture();
+        await fixture.Generate();
+        var users = Users(UserId);
+        var user = ((UserProxy)(object)users).Users[UserId];
+        var access = PtvHomeUserAccessController.Access(user);
+        var ledger = new PtvHomeUserAccessLedger(Path.Combine(fixture.Paths.PluginConfigurationsPath, "access-race"), "server-a");
+        var epoch = fixture.Authority.ReadTopology()!.Epoch;
+        var batch = await ledger.BeginVerificationBatchAsync([UserId], epoch);
+        await ledger.VerifyBatchCandidateAsync(batch.Id, UserId, access, access, [], epoch);
+        var racing = new BeginAfterFirstAccessRead(ledger, access, epoch);
+        var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
+        using var services = new ServiceCollection()
+            .AddSingleton(fixture.Authority)
+            .AddSingleton(users)
+            .AddSingleton(libraries)
+            .AddSingleton<IPtvHomeUserAccessLedger>(racing)
+            .AddSingleton<IAuthorizationService>(new AuthorizationStub())
+            .BuildServiceProvider();
+
+        var response = Assert.IsType<OkObjectResult>(await Controller(services, UserId).GetStatus(false, CancellationToken.None));
+        var status = JsonSerializer.SerializeToNode(response.Value)!.AsObject();
+        var userAccess = status["currentHomeUserAccess"]!.AsObject();
+        Assert.True(racing.Began);
+        Assert.True(userAccess["held"]!.GetValue<bool>());
+        Assert.False(userAccess["policyProven"]!.GetValue<bool>());
+        Assert.Equal(["accessEpoch", "held", "policyProven", "userId", "version"],
+            userAccess.Select(property => property.Key).Order(StringComparer.Ordinal).ToArray());
+    }
+
+    private sealed class BeginAfterFirstAccessRead(
+        PtvHomeUserAccessLedger inner, PtvHomeAccessDefinition access, string topologyEpoch) : IPtvHomeUserAccessLedger
+    {
+        public bool Began { get; private set; }
+        public async Task<PtvHomeUserAccessView> ReadAsync(Guid userId, PtvHomeAccessDefinition? currentAccess,
+            string? epoch, CancellationToken token = default, IReadOnlyCollection<string>? currentAccessibleLibraryIds = null)
+        {
+            var view = await inner.ReadAsync(userId, currentAccess, epoch, token, currentAccessibleLibraryIds);
+            if (!Began)
+            {
+                Began = true;
+                await inner.BeginAsync(new PtvHomeUserAccessIntent
+                {
+                    OperationId = Guid.NewGuid(), UserId = userId.ToString("N"), Mode = "preserve",
+                    ExpectedAccess = access, IntendedAccess = access
+                }, access, topologyEpoch, token);
+            }
+            return view;
+        }
+        public Task<PtvHomeUserAccessView> BeginAsync(PtvHomeUserAccessIntent intent, PtvHomeAccessDefinition current,
+            string epoch, CancellationToken token = default) => inner.BeginAsync(intent, current, epoch, token);
+        public Task<PtvHomeUserAccessView> CompleteAsync(Guid operationId, PtvHomeAccessDefinition? current,
+            string? epoch, CancellationToken token = default, IReadOnlyCollection<string>? currentAccessibleLibraryIds = null) =>
+            inner.CompleteAsync(operationId, current, epoch, token, currentAccessibleLibraryIds);
+        public Task<Guid?> GetOperationUserAsync(Guid operationId, CancellationToken token = default) => inner.GetOperationUserAsync(operationId, token);
+        public Task<PtvHomeUserVerificationBatch> BeginVerificationBatchAsync(IReadOnlyCollection<Guid> ids,
+            string epoch, CancellationToken token = default, bool replace = false) => inner.BeginVerificationBatchAsync(ids, epoch, token, replace);
+        public Task<PtvHomeUserVerificationBatch?> ReadVerificationBatchAsync(CancellationToken token = default) => inner.ReadVerificationBatchAsync(token);
+        public Task<PtvHomeUserAccessView> VerifyBatchCandidateAsync(Guid batchId, Guid userId,
+            PtvHomeAccessDefinition current, PtvHomeAccessDefinition intended, IReadOnlyCollection<string> libraries, string epoch,
+            CancellationToken token = default) => inner.VerifyBatchCandidateAsync(batchId, userId, current, intended, libraries, epoch, token);
+        public Task RecoverCorruptAsync(CancellationToken token = default) => inner.RecoverCorruptAsync(token);
+        public Task<bool> RequiresRecoveryAsync(CancellationToken token = default) => inner.RequiresRecoveryAsync(token);
+        public Task<PtvHomeUserMigrationState?> ReadMigrationStateAsync(CancellationToken token = default) => inner.ReadMigrationStateAsync(token);
+        public Task<bool> IsControlledCreatedAsync(Guid userId, CancellationToken token = default) => inner.IsControlledCreatedAsync(userId, token);
+        public Task<bool> IsLateUnverifiedAsync(Guid userId, CancellationToken token = default) => inner.IsLateUnverifiedAsync(userId, token);
+        public Task<PtvHomeUserCreationView> ReserveCreationAsync(Guid id, IReadOnlyCollection<Guid> baseline,
+            CancellationToken token = default) => inner.ReserveCreationAsync(id, baseline, token);
+        public Task<PtvHomeUserCreationView> BindCreationAsync(Guid id, Guid userId,
+            CancellationToken token = default) => inner.BindCreationAsync(id, userId, token);
+        public Task<PtvHomeUserCreationRecovery> RecoverCreationAsync(Guid id, IReadOnlyCollection<Guid> current,
+            CancellationToken token = default) => inner.RecoverCreationAsync(id, current, token);
+        public Task<IReadOnlyList<PtvHomeUserPendingCreation>> ReadPendingCreationsAsync(IReadOnlyCollection<Guid> current,
+            CancellationToken token = default) => inner.ReadPendingCreationsAsync(current, token);
     }
 
     [Theory]
@@ -1194,7 +1916,7 @@ public sealed class PtvConfiguredRowAssociationTests
         return authority;
     }
 
-    private static ServiceProvider StatusServices(Fixture fixture, PtvConfiguredRowAssociationService? authority = null, bool includeUsers = true, IUserManager? users = null, IPtvFeaturedContentAuthorizationService? projector = null)
+    private static ServiceProvider StatusServices(Fixture fixture, PtvConfiguredRowAssociationService? authority = null, bool includeUsers = true, IUserManager? users = null, IPtvFeaturedContentAuthorizationService? projector = null, IPtvHomeUserAccessLedger? access = null, ILibraryManager? libraries = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(authority ?? fixture.Authority)
@@ -1203,6 +1925,8 @@ public sealed class PtvConfiguredRowAssociationTests
             .AddSingleton<IPtvPluginSettingsService>(new SettingsStub(PtvPluginSettingsDto.FromConfiguration(fixture.Configuration)));
         if (includeUsers) services.AddSingleton(users ?? Users(UserId, OtherUserId));
         if (projector is not null) services.AddSingleton(projector);
+        if (access is not null) services.AddSingleton(access);
+        if (libraries is not null) services.AddSingleton(libraries);
         return services.BuildServiceProvider();
     }
 
@@ -1233,7 +1957,7 @@ public sealed class PtvConfiguredRowAssociationTests
             sections.Add(new JsonObject { ["id"] = section, ["title"] = "Same", ["rowType"] = "configured-rule", ["sourceType"] = "latest", ["sourceRuleId"] = rule, ["ruleId"] = rule, ["sourceValue"] = "PRIVATE_SELECTOR", ["mediaType"] = "movies" });
         }
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        return new PtvFeaturedContentDocument { Version = 1, UpdatedAt = now, FeaturedContent = new JsonObject { ["version"] = 7, ["createdAt"] = now, ["expiresAt"] = now + 3_600_000, ["payload"] = new JsonObject { ["heroItems"] = new JsonArray(Item(ItemIds[0])), ["sections"] = sections, ["sectionItems"] = sectionItems, ["rowDiagnostics"] = new JsonArray() } } };
+        return new PtvFeaturedContentDocument { Version = 1, UpdatedAt = now, FeaturedContent = new JsonObject { ["version"] = PtvFeaturedContentValidator.FeaturedCacheVersion, ["createdAt"] = now, ["expiresAt"] = now + 3_600_000, ["payload"] = new JsonObject { ["scopeSchemaVersion"] = 2, ["heroItems"] = new JsonArray(Item(ItemIds[0])), ["sections"] = sections, ["sectionItems"] = sectionItems, ["rowDiagnostics"] = new JsonArray() } } };
     }
 
     // Advance only the retained owner's retry eligibility; no wall-clock waits or product test hook.
@@ -1246,13 +1970,17 @@ public sealed class PtvConfiguredRowAssociationTests
 
     private static ILibraryManager ConfigureLatestLibraries(Fixture fixture)
     {
+        var kinds = new[] { "movies", "shows", "music" };
+        var libraryIds = kinds.Select((kind, index) => (kind, id: Guid.Parse($"cccccccc-cccc-cccc-cccc-{index + 1:D12}")))
+            .ToDictionary(pair => pair.kind, pair => pair.id);
         fixture.Configuration.Rows.Rules = new[] { "movies", "shows", "music" }.Select(kind => new RowBuilderRule
         {
             Id = "latest-" + kind,
             Name = "Latest " + kind,
             SourceType = "latest",
             SourceValue = kind,
-            MediaType = kind
+            MediaType = kind,
+            LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = kind, VirtualFolderId = libraryIds[kind].ToString("N") }
         }).ToList();
         var items = Enumerable.Range(1, 48).Select(index =>
         {
@@ -1267,7 +1995,25 @@ public sealed class PtvConfiguredRowAssociationTests
         var libraries = DispatchProxy.Create<ILibraryManager, LibraryProxy>();
         var proxy = (LibraryProxy)(object)libraries;
         proxy.Root = new AggregateFolder { Children = items };
-        proxy.Allowed = items.Select(item => item.Id).ToHashSet();
+        proxy.Allowed = items.Select(item => item.Id).Concat(libraryIds.Values).ToHashSet();
+        proxy.Folders = kinds.Select(kind => new VirtualFolderInfo
+        {
+            ItemId = libraryIds[kind].ToString("N"),
+            Name = char.ToUpperInvariant(kind[0]) + kind[1..],
+            CollectionType = kind switch
+            {
+                "movies" => CollectionTypeOptions.movies,
+                "shows" => CollectionTypeOptions.tvshows,
+                _ => CollectionTypeOptions.music
+            },
+            Locations = ["/fake"]
+        }).ToArray();
+        proxy.ScopedItems = libraryIds.ToDictionary(pair => pair.Value, pair => pair.Key switch
+        {
+            "movies" => items.Take(16).ToArray(),
+            "shows" => items.Skip(16).Take(16).ToArray(),
+            _ => items.Skip(32).Take(16).ToArray()
+        });
         return libraries;
     }
 
@@ -1305,14 +2051,15 @@ public sealed class PtvConfiguredRowAssociationTests
 
     private sealed class Fixture : IDisposable
     {
-        public PluginConfiguration Configuration { get; } = new() { Rows = new RowBuilderSettings { Rules = [new RowBuilderRule { Id = "rule-a", Name = "Same", SourceType = "latest", SourceValue = "movies", MediaType = "movies" }] } };
+        public PluginConfiguration Configuration { get; } = new() { Rows = new RowBuilderSettings { Rules = [new RowBuilderRule { Id = "rule-a", Name = "Same", SourceType = "latest", SourceValue = "movies", MediaType = "movies", LibraryScope = new RowLibraryScope { Mode = "global" } }] } };
         public TestPaths Paths { get; } = new();
+        public TopologyStub Ledger { get; } = new();
         public PtvConfiguredRowAssociationService Authority { get; }
         public PtvFeaturedContentStore Store { get; }
         public Fixture()
         {
             PtvPluginSettingsNormalizer.Normalize(Configuration);
-            Authority = new PtvConfiguredRowAssociationService("server-a", () => Configuration);
+            Authority = new PtvConfiguredRowAssociationService("server-a", () => Configuration, Ledger);
             Store = new PtvFeaturedContentStore(Paths, NullLogger<PtvFeaturedContentStore>.Instance, Authority);
         }
         public Task<PtvFeaturedContentDocument> Generate(PtvFeaturedContentDocument? document = null) => Store.WriteGeneratedAsync(document ?? Document(), Authority.CaptureGeneration()!, CancellationToken.None);
@@ -1352,22 +2099,43 @@ public sealed class PtvConfiguredRowAssociationTests
     }
     public class LibraryProxy : DispatchProxy
     {
+        public VirtualFolderInfo[] Folders { get; set; } = [];
+        public Dictionary<Guid, BaseItem[]> ScopedItems { get; set; } = [];
+        public int ScopedQueryCalls { get; private set; }
+        public bool FailScopedQuery { get; set; }
         public bool FailEnumeration { get; set; }
         public int Enumerations { get; private set; }
         public HashSet<Guid> Allowed { get; set; } = [];
+        public HashSet<Guid> CurrentCollections { get; set; } = [];
         public AggregateFolder? Root { get; set; }
+        public Action? OnRoot { get; set; }
         public Action? OnLookup { get; set; }
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (targetMethod?.Name == "get_RootFolder")
             {
                 Enumerations++;
+                OnRoot?.Invoke();
                 if (FailEnumeration) throw new InvalidOperationException("Synthetic enumeration failure.");
                 return Root;
+            }
+            if (targetMethod?.Name == "GetVirtualFolders") return Folders.ToList();
+            if (targetMethod?.Name == "QueryItems" && args?[0] is InternalItemsQuery query)
+            {
+                if (FailScopedQuery) throw new IOException("Synthetic scoped query failure.");
+                ScopedQueryCalls++;
+                var libraryId = Assert.Single(query.AncestorIds);
+                var items = ScopedItems.GetValueOrDefault(libraryId) ?? [];
+                return new QueryResult<BaseItem>
+                {
+                    Items = items.Skip(query.StartIndex ?? 0).Take(query.Limit ?? items.Length).ToArray(),
+                    TotalRecordCount = items.Length
+                };
             }
             if (targetMethod?.Name == "GetItemById" && args?[0] is Guid id)
             {
                 OnLookup?.Invoke();
+                if (CurrentCollections.Contains(id)) return new CollectionFolder { Id = id };
                 return Allowed.Contains(id) ? new Movie { Id = id } : null;
             }
             throw new NotSupportedException(targetMethod?.Name);
@@ -1376,9 +2144,15 @@ public sealed class PtvConfiguredRowAssociationTests
     public class XmlProxy : DispatchProxy
     {
         public int Writes { get; private set; }
+        public bool FailWrites { get; set; }
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
-            if (targetMethod?.Name == "SerializeToFile") { Writes++; return null; }
+            if (targetMethod?.Name == "SerializeToFile")
+            {
+                if (FailWrites) throw new IOException("Synthetic persistence failure.");
+                Writes++;
+                return null;
+            }
             throw new NotSupportedException(targetMethod?.Name);
         }
     }
@@ -1445,6 +2219,19 @@ public sealed class PtvConfiguredRowAssociationTests
         public PtvPluginSettingsDto ResetSettings() => throw new NotSupportedException();
         public PtvReadingSeriesOverridesResponse GetReadingSeriesOverrides(string routeKind) => throw new NotSupportedException();
         public PtvReadingSeriesOverridesResponse SaveReadingSeriesOverrides(string routeKind, PtvReadingSeriesOverridesUpdate update) => throw new NotSupportedException();
+    }
+    private sealed class ScopeLogger : ILogger<PtvFeaturedContentAuthorizationService>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+        private sealed class NullScope : IDisposable
+        {
+            public static NullScope Instance { get; } = new();
+            public void Dispose() { }
+        }
     }
     private sealed class AuthorizationStub : IAuthorizationService
     {

@@ -20,7 +20,7 @@ describe('PiggieTV build information', () => {
 
         expect(info.compatibility).toBe('unknown');
         expect(info.pluginVersion).toBe('unknown');
-        expect(info.cacheSchemaVersion).toBe(7);
+        expect(info.cacheSchemaVersion).toBe(9);
         expect(info.frontendBuildDate).not.toBe('unknown');
         expect(info.frontendBuildId).not.toBe('unknown');
         expect(info.ptvWebVersion).not.toBe('unknown');
@@ -54,13 +54,13 @@ describe('PiggieTV build information', () => {
 
     it('fails incompatible API and cache schema versions', () => {
         expect(classifyPtvBuildCompatibility({ apiVersion: 2 }).compatibility).toBe('version-mismatch');
-        expect(classifyPtvBuildCompatibility({ apiVersion: 1, cacheVersion: 8 }).compatibility).toBe('version-mismatch');
+        expect(classifyPtvBuildCompatibility({ apiVersion: 1, cacheVersion: 7 }).compatibility).toBe('version-mismatch');
     });
 
     it('keeps the old plugin connected but requires an upgrade for Reading persistence', () => {
         const result = classifyPtvBuildCompatibility({
             apiVersion: 1,
-            cacheVersion: 7,
+            cacheVersion: 9,
             pluginVersion: OLD_PLUGIN_VERSION,
             features: ['status', 'featuredContent']
         }, {
@@ -75,7 +75,7 @@ describe('PiggieTV build information', () => {
     it('accepts independently versioned plugin 0.5.0.0 when API, cache, and capabilities match', () => {
         const result = classifyPtvBuildCompatibility({
             apiVersion: 1,
-            cacheVersion: 7,
+            cacheVersion: 9,
             pluginVersion: CURRENT_PLUGIN_VERSION,
             ...READING_OVERRIDES_FEATURE
         }, {
@@ -88,7 +88,7 @@ describe('PiggieTV build information', () => {
     it('formats a compact diagnostics representation without runtime locations', () => {
         const info = getPtvBuildInfo({
             apiVersion: 1,
-            cacheVersion: 7,
+            cacheVersion: 9,
             pluginVersion: CURRENT_PLUGIN_VERSION,
             ...READING_OVERRIDES_FEATURE
         }, {
