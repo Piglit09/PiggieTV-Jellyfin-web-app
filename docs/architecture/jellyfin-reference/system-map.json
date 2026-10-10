@@ -902,15 +902,18 @@
     },
     "settingsAndAdmin": {
       "authoritativeOwners": [
-        "Jellyfin Server configuration managers/documents and admin controllers"
+        "Jellyfin Server configuration managers/documents and admin controllers",
+        "Jellyfin Server elevated storage and ScheduledTasks read endpoints"
       ],
       "derivedOwners": [
         "dashboard forms",
-        "query/form baselines"
+        "query/form baselines",
+        "PTV read-only admin storage view and authenticated server+user+connection-scoped query"
       ],
       "dependsOn": [
         "administrator policy",
         "configuration read",
+        "elevated storage and scheduled-task progress reads",
         "mutation acknowledgment",
         "authoritative readback",
         "cacheAndInvalidation"
@@ -927,6 +930,13 @@
           "file": "Jellyfin.Api/Controllers/ConfigurationController.cs",
           "symbol": "configuration read/write/branding actions",
           "lines": "23-162",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "0.5.71 local candidate",
+          "file": "src/ptv/modules/settings/admin/storage/useAdminStorage.ts; src/ptv/modules/settings/admin/storage/AdminStoragePanel.tsx; src/ptv/modules/settings/admin/tasks/adminTasks.scss",
+          "symbol": "administrator-scoped storage read/view and Tasks style boundary",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]

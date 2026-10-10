@@ -81,7 +81,8 @@ function toTimestamp(value: string | null): number {
 
 function clampPercentage(value: number | null | undefined): number | null {
     if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-    return Math.min(100, Math.max(0, Math.round(value)));
+    const bounded = Math.min(100, Math.max(0, value));
+    return bounded < 100 ? Math.min(99.9, Math.round(bounded * 10) / 10) : 100;
 }
 
 function formatCount(count: number, singular: string, plural = `${singular}s`) {
@@ -684,6 +685,10 @@ function getTaskPriority(state: AdminTaskState, isRecent: boolean, important: bo
 
 function getTaskProgress(task: TaskInfo, state: AdminTaskState) {
     if (state !== 'running' && state !== 'cancelling') return null;
+    if (typeof task.CurrentProgressPercentage !== 'number'
+        || !Number.isFinite(task.CurrentProgressPercentage)
+        || task.CurrentProgressPercentage < 0
+        || task.CurrentProgressPercentage > 100) return null;
     return clampPercentage(task.CurrentProgressPercentage);
 }
 

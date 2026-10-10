@@ -26,6 +26,9 @@ vi.mock('./useAdminDashboard', () => ({
 vi.mock('./metadataQuality/AdminMetadataQualityOverviewCard', () => ({
     default: () => <section data-testid='metadata-quality-overview'>Metadata Quality</section>
 }));
+vi.mock('./storage/AdminStoragePanel', () => ({
+    default: () => <section data-testid='overview-storage'>Storage utilization</section>
+}));
 
 import PtvAdminDashboard from './PtvAdminDashboard';
 
@@ -256,6 +259,7 @@ describe('PiggieTV administration dashboard', () => {
         expect(container.textContent).toContain('1 Movies · 1 Shows · 1 Music · 1 Reading');
         expect(container.textContent).toContain('Active Now');
         expect(container.textContent).toContain('Scheduled Tasks');
+        expect(container.querySelector('[data-testid="overview-storage"]')).not.toBeNull();
         expect(container.textContent).toContain('Attention');
         expect(container.textContent).toContain('Management');
         expect(container.textContent).not.toContain(accessToken);
@@ -390,10 +394,48 @@ describe('PiggieTV administration dashboard', () => {
         expect(container.textContent).toContain('Scan Media Library');
         expect(container.textContent).toContain('1 running');
         expect(container.textContent).toContain('Running now');
+        expect(container.textContent).toContain('36%');
         expect(container.textContent).not.toContain('Started ');
         expect(container.querySelector('a[href="/settings/admin/tasks"]')?.textContent).toContain('View Tasks');
         expect(Array.from(container.querySelectorAll('button'))
             .some(button => button.textContent === 'Retry sessions')).toBe(true);
+    });
+
+    it('distinguishes zero progress from unavailable running-task progress', async () => {
+        const base = createSnapshot();
+        useDashboard(createSnapshot({
+            tasks: {
+                ...base.tasks,
+                recent: [
+                    {
+                        completedAt: null,
+                        name: 'Starting task',
+                        progressPercent: 0,
+                        severity: 'info',
+                        startedAt: null,
+                        state: 'running',
+                        statusLabel: 'Running'
+                    },
+                    {
+                        completedAt: null,
+                        name: 'Unreported task',
+                        progressPercent: null,
+                        severity: 'info',
+                        startedAt: null,
+                        state: 'running',
+                        statusLabel: 'Running'
+                    }
+                ]
+            }
+        }));
+
+        await renderDashboard();
+
+        const rows = Array.from(container.querySelectorAll('.ptv-admin-task-row'));
+        expect(rows[0].textContent).toContain('0%');
+        expect(rows[0].querySelector('progress')?.value).toBe(0);
+        expect(rows[1].textContent).toContain('Progress unavailable');
+        expect(rows[1].querySelector('progress')).toBeNull();
     });
 
     it('uses a lightweight empty state when no one is streaming', async () => {

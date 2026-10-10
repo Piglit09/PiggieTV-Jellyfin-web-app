@@ -27,6 +27,7 @@ import {
 } from './useAdminDashboard';
 import { usePtvAdminNavigationContext } from './adminNavigationContext';
 import AdminMetadataQualityOverviewCard from './metadataQuality/AdminMetadataQualityOverviewCard';
+import AdminStoragePanel from './storage/AdminStoragePanel';
 
 type PtvAdminDashboardProps = Readonly<{
     api?: Api;
@@ -192,18 +193,23 @@ function taskTime(task: AdminTaskSummaryItem) {
 }
 
 function TaskRow({ task }: Readonly<{ task: AdminTaskSummaryItem }>) {
+    const running = task.state === 'running' || task.state === 'cancelling';
     return (
         <li className='ptv-admin-task-row'>
             <span>
                 <strong>{task.name}</strong>
-                {(task.state === 'running' || task.state === 'cancelling') && task.progressPercent !== null && (
-                    <progress
-                        aria-label={`${task.name} progress`}
-                        className='ptv-admin-task-progress'
-                        max='100'
-                        value={task.progressPercent}
-                    />
+                {running && task.progressPercent !== null && (
+                    <span className='ptv-admin-task-progress-detail'>
+                        <progress
+                            aria-label={`${task.name} progress`}
+                            className='ptv-admin-task-progress'
+                            max='100'
+                            value={task.progressPercent}
+                        />
+                        <span className='ptv-admin-task-percent'>{task.progressPercent}%</span>
+                    </span>
                 )}
+                {running && task.progressPercent === null && <small>Progress unavailable</small>}
             </span>
             <time dateTime={task.completedAt || task.startedAt || undefined} title={formatAbsoluteTime(task.completedAt || task.startedAt)}>
                 {taskTime(task)}
@@ -689,6 +695,7 @@ export default function PtvAdminDashboard({
                 />
                 <AttentionPanel loading={overallIsLoading} snapshot={snapshot} sourceStates={sourceStates} />
             </div>
+            <AdminStoragePanel api={api} apiClient={apiClient} />
             <AdminMetadataQualityOverviewCard apiClient={apiClient} />
             <ManagementSection categories={managementCategories} />
         </div>

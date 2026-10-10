@@ -383,7 +383,7 @@ describe('admin dashboard task normalization', () => {
         ]);
         expect(result.recent.find(item => item.name === 'Never run task')).toBeUndefined();
         expect(result.recent.find(item => item.state === 'running')).toMatchObject({
-            progressPercent: 52,
+            progressPercent: 52.4,
             startedAt: null
         });
     });
@@ -394,6 +394,36 @@ describe('admin dashboard task normalization', () => {
             recent: [],
             runningCount: null,
             state: 'unavailable'
+        });
+    });
+
+    it('does not fabricate a percentage for malformed running-task progress', () => {
+        const result = normalizeAdminTasks([
+            task({ Name: 'Missing', State: 'Running' }),
+            task({ CurrentProgressPercentage: -1, Name: 'Negative', State: 'Running' }),
+            task({ CurrentProgressPercentage: 120, Name: 'Beyond total', State: 'Running' }),
+            task({ CurrentProgressPercentage: 0, Name: 'Zero', State: 'Running' })
+        ], { now: NOW });
+
+        expect(Object.fromEntries(result.recent.map(item => [ item.name, item.progressPercent ]))).toEqual({
+            'Beyond total': null,
+            Missing: null,
+            Negative: null,
+            Zero: 0
+        });
+    });
+
+    it('does not report a running task complete before Jellyfin reports 100 percent', () => {
+        const result = normalizeAdminTasks([
+            task({ CurrentProgressPercentage: 99.6, Name: 'Almost complete', State: 'Running' }),
+            task({ CurrentProgressPercentage: 99.99, Name: 'Nearly complete', State: 'Running' }),
+            task({ CurrentProgressPercentage: 100, Name: 'Complete reading', State: 'Running' })
+        ], { now: NOW });
+
+        expect(Object.fromEntries(result.recent.map(item => [ item.name, item.progressPercent ]))).toEqual({
+            'Almost complete': 99.6,
+            'Complete reading': 100,
+            'Nearly complete': 99.9
         });
     });
 });

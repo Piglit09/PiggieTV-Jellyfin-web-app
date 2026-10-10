@@ -16,6 +16,7 @@ import {
 } from '../../configuration/AdminConfigurationPrimitives';
 import { useAdminConfigurationForm } from '../../configuration/useAdminConfigurationForm';
 import { useAdminUnsavedChanges } from '../../configuration/useAdminUnsavedChanges';
+import AdminStoragePanel from '../../storage/AdminStoragePanel';
 import {
     AdminServerConfigurationError,
     type AdminServerGeneralSettings,
@@ -140,23 +141,20 @@ export default function AdminServerGeneralPage() {
         }
     }, [ confirmation, state ]);
 
-    if (state.loading && !available) return <AdminConfigurationSkeleton />;
-    if (!available || !formState.form) {
-        return (
-            <AdminConfigurationError
-                loading={false}
-                message="General settings couldn't be loaded."
-                onRetry={() => void state.refetch()}
-                retrying={state.fetching}
-            />
-        );
-    }
-
+    const form = available ? formState.form : null;
     const system = state.snapshot?.system;
     let pendingRestart = 'Unknown';
     if (system?.pendingRestart === true) pendingRestart = 'Yes';
     if (system?.pendingRestart === false) pendingRestart = 'No';
     const controlsDisabled = state.saving || formState.serverChanged;
+    const unavailableConfiguration = !form && (state.loading ? <AdminConfigurationSkeleton /> : (
+        <AdminConfigurationError
+            loading={false}
+            message="General settings couldn't be loaded."
+            onRetry={() => void state.refetch()}
+            retrying={state.fetching}
+        />
+    ));
     return (
         <section aria-labelledby='ptv-server-general-title' className='ptv-admin-server-section'>
             <header className='ptv-admin-server-section-heading'>
@@ -164,13 +162,15 @@ export default function AdminServerGeneralPage() {
                 {state.fetching ? <span role='status'>Refreshing</span> : null}
             </header>
 
-            {formState.serverChanged ? (
+            {unavailableConfiguration}
+
+            {form && formState.serverChanged ? (
                 <AdminConfigurationNotice action={<button onClick={() => void reload()} type='button'>Reload server values</button>} tone='warning'>
                     <strong>These settings changed on the server while you were editing.</strong>
                     <p>Your edits remain visible, but must be reloaded before saving.</p>
                 </AdminConfigurationNotice>
             ) : null}
-            {state.languagesError ? (
+            {form && state.languagesError ? (
                 <AdminConfigurationNotice action={<button onClick={() => void state.refetchLanguages()} type='button'>Retry languages</button>}>
                     <strong>Language choices are temporarily unavailable.</strong>
                     <p>The currently configured culture is preserved.</p>
@@ -178,48 +178,54 @@ export default function AdminServerGeneralPage() {
             ) : null}
 
             <div className='ptv-admin-configuration-grid'>
-                <AdminConfigurationPanel description='How this server identifies itself and presents administrative language.' title='Identity & Language'>
-                    <AdminConfigurationText description='Name displayed to clients that connect to this server.' disabled={controlsDisabled} id='ptv-server-name' label='Server name' onChange={value => update('serverName', value)} value={formState.form.serverName} />
-                    <AdminConfigurationSelect description='Server administration display culture.' disabled={controlsDisabled || Boolean(state.languagesError)} id='ptv-server-culture' label='Display language' onChange={value => update('uiCulture', value)} value={formState.form.uiCulture}>
-                        {state.languages.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </AdminConfigurationSelect>
-                    <AdminConfigurationToggle checked={formState.form.quickConnectAvailable} description='Allow supported clients to use Quick Connect.' disabled={controlsDisabled} id='ptv-server-quick-connect' label='Quick Connect' onChange={value => update('quickConnectAvailable', value)} />
-                </AdminConfigurationPanel>
+                {form ? <>
+                    <AdminConfigurationPanel description='How this server identifies itself and presents administrative language.' title='Identity & Language'>
+                        <AdminConfigurationText description='Name displayed to clients that connect to this server.' disabled={controlsDisabled} id='ptv-server-name' label='Server name' onChange={value => update('serverName', value)} value={form.serverName} />
+                        <AdminConfigurationSelect description='Server administration display culture.' disabled={controlsDisabled || Boolean(state.languagesError)} id='ptv-server-culture' label='Display language' onChange={value => update('uiCulture', value)} value={form.uiCulture}>
+                            {state.languages.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </AdminConfigurationSelect>
+                        <AdminConfigurationToggle checked={form.quickConnectAvailable} description='Allow supported clients to use Quick Connect.' disabled={controlsDisabled} id='ptv-server-quick-connect' label='Quick Connect' onChange={value => update('quickConnectAvailable', value)} />
+                    </AdminConfigurationPanel>
 
-                <AdminConfigurationPanel description='Authoritative server paths. Changes may require a restart.' title='Storage Paths'>
-                    <AdminConfigurationText description='Directory used for server cache data.' disabled={controlsDisabled} id='ptv-server-cache-path' label='Cache path' onChange={value => update('cachePath', value)} value={formState.form.cachePath} />
-                    <AdminConfigurationText description='Directory used for server metadata.' disabled={controlsDisabled} id='ptv-server-metadata-path' label='Metadata path' onChange={value => update('metadataPath', value)} value={formState.form.metadataPath} />
-                </AdminConfigurationPanel>
+                    <AdminConfigurationPanel description='Authoritative server paths. Changes may require a restart.' title='Storage Paths'>
+                        <AdminConfigurationText description='Directory used for server cache data.' disabled={controlsDisabled} id='ptv-server-cache-path' label='Cache path' onChange={value => update('cachePath', value)} value={form.cachePath} />
+                        <AdminConfigurationText description='Directory used for server metadata.' disabled={controlsDisabled} id='ptv-server-metadata-path' label='Metadata path' onChange={value => update('metadataPath', value)} value={form.metadataPath} />
+                    </AdminConfigurationPanel>
+                </> : null}
 
-                <AdminConfigurationPanel description='Limits used by library and image processing work.' title='Processing'>
-                    <AdminConfigurationNumber description='Zero keeps Jellyfin automatic behavior.' disabled={controlsDisabled} error={scanConcurrency === null ? 'Enter a whole number, 0 or greater.' : ''} id='ptv-server-scan-concurrency' label='Library scan concurrency' min={0} onChange={value => update('libraryScanFanoutConcurrency', value)} value={formState.form.libraryScanFanoutConcurrency} />
-                    <AdminConfigurationNumber description='Maximum parallel image encoding work. Zero preserves automatic behavior.' disabled={controlsDisabled} error={imageConcurrency === null ? 'Enter a whole number, 0 or greater.' : ''} id='ptv-server-image-concurrency' label='Parallel image encoding' min={0} onChange={value => update('parallelImageEncodingLimit', value)} value={formState.form.parallelImageEncodingLimit} />
-                </AdminConfigurationPanel>
+                <AdminStoragePanel api={api} apiClient={apiClient} />
 
-                <AdminConfigurationPanel description='Read-only information from the connected Jellyfin server.' title='Server Status'>
-                    <dl className='ptv-admin-server-definition-list'>
-                        <div><dt>Product</dt><dd>{system?.productName || 'Unavailable'}</dd></div>
-                        <div><dt>Version</dt><dd>{system?.version || 'Unavailable'}</dd></div>
-                        <div><dt>Operating system</dt><dd>{system?.operatingSystem || 'Unavailable'}</dd></div>
-                        <div><dt>Pending restart</dt><dd>{pendingRestart}</dd></div>
-                    </dl>
-                    {state.systemError ? <p className='ptv-admin-server-muted'>System status is temporarily unavailable. Configuration remains usable.</p> : null}
-                </AdminConfigurationPanel>
+                {form ? <>
+                    <AdminConfigurationPanel description='Limits used by library and image processing work.' title='Processing'>
+                        <AdminConfigurationNumber description='Zero keeps Jellyfin automatic behavior.' disabled={controlsDisabled} error={scanConcurrency === null ? 'Enter a whole number, 0 or greater.' : ''} id='ptv-server-scan-concurrency' label='Library scan concurrency' min={0} onChange={value => update('libraryScanFanoutConcurrency', value)} value={form.libraryScanFanoutConcurrency} />
+                        <AdminConfigurationNumber description='Maximum parallel image encoding work. Zero preserves automatic behavior.' disabled={controlsDisabled} error={imageConcurrency === null ? 'Enter a whole number, 0 or greater.' : ''} id='ptv-server-image-concurrency' label='Parallel image encoding' min={0} onChange={value => update('parallelImageEncodingLimit', value)} value={form.parallelImageEncodingLimit} />
+                    </AdminConfigurationPanel>
 
-                <AdminConfigurationPanel description='These requests interrupt every connected client and active operation.' title='Server Power' wide>
-                    <div className='ptv-admin-server-danger-row'>
-                        <div><strong>Restart or shut down the server</strong><small>Use only when you are prepared for an immediate service interruption.</small></div>
-                        <div>
-                            <button disabled={Boolean(state.powerAction) || system?.canSelfRestart === false} onClick={() => setConfirmation('restart')} type='button'>Restart Server</button>
-                            <button className='is-danger' disabled={Boolean(state.powerAction)} onClick={() => setConfirmation('shutdown')} type='button'>Shut Down</button>
+                    <AdminConfigurationPanel description='Read-only information from the connected Jellyfin server.' title='Server Status'>
+                        <dl className='ptv-admin-server-definition-list'>
+                            <div><dt>Product</dt><dd>{system?.productName || 'Unavailable'}</dd></div>
+                            <div><dt>Version</dt><dd>{system?.version || 'Unavailable'}</dd></div>
+                            <div><dt>Operating system</dt><dd>{system?.operatingSystem || 'Unavailable'}</dd></div>
+                            <div><dt>Pending restart</dt><dd>{pendingRestart}</dd></div>
+                        </dl>
+                        {state.systemError ? <p className='ptv-admin-server-muted'>System status is temporarily unavailable. Configuration remains usable.</p> : null}
+                    </AdminConfigurationPanel>
+
+                    <AdminConfigurationPanel description='These requests interrupt every connected client and active operation.' title='Server Power' wide>
+                        <div className='ptv-admin-server-danger-row'>
+                            <div><strong>Restart or shut down the server</strong><small>Use only when you are prepared for an immediate service interruption.</small></div>
+                            <div>
+                                <button disabled={Boolean(state.powerAction) || system?.canSelfRestart === false} onClick={() => setConfirmation('restart')} type='button'>Restart Server</button>
+                                <button className='is-danger' disabled={Boolean(state.powerAction)} onClick={() => setConfirmation('shutdown')} type='button'>Shut Down</button>
+                            </div>
                         </div>
-                    </div>
-                </AdminConfigurationPanel>
+                    </AdminConfigurationPanel>
+                </> : null}
             </div>
 
-            <AdminConfigurationActions dirty={formState.dirty} feedback={feedback} onReset={reset} onSave={() => void save()} saveDisabled={!formState.dirty || !valid || formState.serverChanged} saving={state.saving} />
+            {form ? <AdminConfigurationActions dirty={formState.dirty} feedback={feedback} onReset={reset} onSave={() => void save()} saveDisabled={!formState.dirty || !valid || formState.serverChanged} saving={state.saving} /> : null}
 
-            <ConfirmDialog
+            {form ? <ConfirmDialog
                 confirmButtonColor='error'
                 confirmButtonText={confirmation === 'restart' ? 'Restart Server' : 'Shut Down Server'}
                 onCancel={() => setConfirmation(null)}
@@ -227,7 +233,7 @@ export default function AdminServerGeneralPage() {
                 open={Boolean(confirmation)}
                 text={confirmation === 'restart' ? 'Restart PiggieTV now? Active streams and administrative work will be interrupted.' : 'Shut down PiggieTV now? The server will remain unavailable until it is started outside this app.'}
                 title={confirmation === 'restart' ? 'Restart server?' : 'Shut down server?'}
-            />
+            /> : null}
         </section>
     );
 }
