@@ -123,14 +123,15 @@
       ]
     },
     "ptvWeb": {
-      "version": "0.5.57",
+      "version": "0.5.67",
       "versionAuthority": "ptv-version.json",
-      "worktreeState": "dirty",
+      "worktreeState": "Stage 2 controlled Home integration candidate on base 63d13eb0b9043252959d3018bb1e6ab399cd2f5d; local changes pending checkpoint",
       "identityStatus": "VERIFIED_FROM_SOURCE",
+      "identityDetail": "Stage 2 isolated controlled Home source candidate, bumped once from the Web 0.5.66 base. The version string alone does not identify the current deployed Web artifact or this candidate's eventual commit.",
       "evidence": [
         {
           "repository": "PTV Web",
-          "version": "current worktree",
+          "version": "Stage 2 source candidate 0.5.67; base 0.5.66",
           "file": "ptv-version.json",
           "symbol": "version",
           "lines": "2",
@@ -142,16 +143,16 @@
       ]
     },
     "ptvPlugin": {
-      "version": "0.5.20.0",
+      "version": "0.5.21.0",
       "targetFramework": "net10.0",
       "jellyfinPackageVersion": "12.2.0",
       "targetAbi": "12.2.0.0",
       "identityStatus": "VERIFIED_FROM_SOURCE",
-      "identityDetail": "Jellyfin 12.2 Plugin candidate in the isolated 0.5.66 release worktree; staged .125 and production VM115 runtime smoke validation passed on Server 12.2.0.",
+      "identityDetail": "Stage 2 controlled Home Plugin source candidate on the Jellyfin 12.2/.NET 10 compatibility base, bumped once from 0.5.20.0. Earlier .125 and production VM115 runtime smoke evidence belongs to the 0.5.20.0 source line, not this integrated candidate.",
       "evidence": [
         {
           "repository": "PTV Plugin embedded source",
-          "version": "0.5.20.0",
+          "version": "Stage 2 source candidate 0.5.21.0; base 0.5.20.0",
           "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj",
           "symbol": "TargetFramework/Version/PackageReference",
           "lines": "3, 9-21",
@@ -1020,6 +1021,19 @@
         "$.ptvOverrides.configuredHomePresentation.evidence[1]"
       ]
     },
+    "configuredHomeRowLibraryOwnership": {
+      "authoritativeOwner": "Jellyfin VirtualFolder ItemId for configured library identity and Jellyfin user-aware views/item reads for current-user visibility",
+      "settingsOwner": "PtvPluginSettingsService persists schema-3 RowLibraryScope and pins one uniquely matched built-in default through its normal configuration mutation",
+      "generationOwner": "PtvFeaturedContentRefreshService uses complete paged recursive CollectionFolder candidate pools for library-owned rules; global rows retain their separate candidate pool",
+      "responseOwner": "PtvFeaturedContentAuthorizationService checks the current rule, folder binding and Jellyfin user access before serializing an owned section",
+      "webDerivedOwner": "one Home-visit membership authority proves positive user-scoped item IDs and retires with route, generation or identity; restricted users take their scope claim only from a fresh authorized Featured response, not administrator settings or a cached copy",
+      "topologyTransitionOwner": "PtvHomeTopologyLedger durably holds before a controlled stock library write, and PtvHomeTransitionsController proves bounded natural convergence before release; selected rebind and release persist atomically",
+      "userAccessProofOwner": "PtvHomeUserAccessLedger persists per-user holds and proofs bound to authoritative policy, current topology epoch, and exact user-aware accessible-library IDs; administrator migration and new-user bootstrap have separate workflows",
+      "identity": ["pinned library ItemId and collection type", "current row rule and generated scope claim", "Jellyfin server and user", "Home route generation", "topology epoch and library revision", "per-user access epoch and exact accessible-library set"],
+      "rule": "Names and media type only constrain first-time default binding; neither a shared candidate, authorized item, scope hash, nor cached response alone proves current library membership. Every PTV Featured row requires current per-user proof, and owned rows additionally require positive visit-local membership. Missing, stale, or corrupt proof fails closed; no Web membership proof is persisted.",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md"],
+      "evidenceRefs": ["$.ptvOverrides.homeRowLibraryOwnership.evidence[0]", "$.ptvOverrides.homeRowLibraryOwnership.evidence[1]", "$.ptvOverrides.homeRowLibraryOwnership.evidence[2]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[1]"]
+    },
     "authenticatedPrincipal": {
       "authoritativeOwner": "Jellyfin Server authentication context",
       "creator": "authentication middleware",
@@ -1234,10 +1248,20 @@
       {
         "from": "settingsAndAdmin",
         "to": "home",
-        "reason": "Configured presentation requires an explicit point-in-time final status proof after settings and Featured inputs; observed retirement fences derived rows and previews.",
+        "reason": "Configured presentation requires an explicit point-in-time final status proof after settings and Featured inputs; observed retirement fences derived rows and previews. Controlled Home authority adds durable holds and per-user verification before a library-owned row may publish.",
         "evidenceRefs": [
           "$.ptvOverrides.configuredHomePresentation.evidence[0]",
-          "$.ptvOverrides.configuredHomePresentation.evidence[1]"
+          "$.ptvOverrides.configuredHomePresentation.evidence[1]",
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]"
+        ]
+      },
+      {
+        "from": "settingsAndAdmin",
+        "to": "cacheAndInvalidation",
+        "reason": "Controlled topology and user-access changes durably hold PTV Home authority before stock writes; a fresh final convergence or per-user policy/membership proof governs Featured staging and cache retirement.",
+        "evidenceRefs": [
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]",
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[1]"
         ]
       },
       {
@@ -1259,12 +1283,22 @@
         ]
       },
       {
+        "from": "permissionsAndLibraryAccess",
+        "to": "home",
+        "reason": "All PTV Featured rows require current durable per-user policy, topology epoch, and exact user-aware accessible-library proof; owned Home rows additionally require fresh visit-local item membership.",
+        "evidenceRefs": [
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]",
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[3]"
+        ]
+      },
+      {
         "from": "libraryAndItemProjection",
         "to": "home",
-        "reason": "Home rows consume user-scoped item projections.",
+        "reason": "Home rows consume user-scoped item projections; library-owned configured rows additionally require positive membership in the pinned library for the current user.",
         "evidenceRefs": [
           "$.systems.home.evidence[0]",
-          "$.systems.libraryAndItemProjection.evidence[1]"
+          "$.systems.libraryAndItemProjection.evidence[1]",
+          "$.ptvOverrides.homeRowLibraryOwnership.evidence[2]"
         ]
       },
       {
@@ -1471,6 +1505,37 @@
         "19-failure-race-lifecycle.md"
       ]
     },
+    "homeDefaultLibraryPin": {
+      "authority": "PTV Plugin settings service under its existing configuration mutation gate",
+      "trigger": "existing Featured refresh observes exactly one unpinned built-in default match by initial name and CollectionType",
+      "write": "persist the matched VirtualFolder ItemId in schema-3 RowLibraryScope before treating it as a resolved owned rule",
+      "failureRule": "no-op observation does not mutate; ambiguous or failed persistence leaves the row unbound and cannot grant an in-memory-only binding",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "23-before-you-modify-checklists.md"],
+      "evidenceRefs": ["$.ptvOverrides.homeRowLibraryOwnership.evidence[0]"]
+    },
+    "controlledHomeLibraryTransition": {
+      "authority": "Jellyfin owns stock virtual-folder mutation; PtvHomeTopologyLedger owns PTV pre-write hold, affected tombstones, and durable release/rebind",
+      "sequence": "administrator Begin persists hold before stock write; Complete makes at most three immediate bounded read-only natural-convergence snapshots, privately stages Featured, then requires a fresh final snapshot before durable release; selected rebind and release are atomic",
+      "failureRule": "uncertain, delayed, cancelled, drifted, duplicate, null, or stale-old-child evidence keeps hold; an isolated Jellyfin 12 rename left ItemId/UserView absent in the accepted completion window, so automatic convergence is unproven and administrator recovery is required; no selected binding may release the broad hold only with affected tombstones retained; explicit retry uses the same operation without a stock rewrite",
+      "excludedActions": ["ValidateTopLibraryFolders", "PTV provider refresh", "global scan", "refreshLibrary=true"],
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidenceRefs": ["$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[1]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[2]"]
+    },
+    "controlledExistingUserAccess": {
+      "authority": "Jellyfin owns policy and current user-aware accessible libraries; PtvHomeUserAccessLedger owns PTV per-user hold and proof",
+      "sequence": "administrator Begin persists hold for known ID before stock policy write; Complete compares intended policy, current topology epoch, and exact current user-aware accessible-library set",
+      "failureRule": "missing, corrupt, stale, mismatched, or interrupted proof keeps owned Home unavailable and administrator recovery possible",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md"],
+      "evidenceRefs": ["$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]"]
+    },
+    "newUserBootstrapAndMigration": {
+      "authority": "Jellyfin creates the user before returning its ID; PTV reservation, ledger, and administrator verification own Home eligibility proof, not account existence",
+      "sequence": "new user remains unproven after ID binding until intended/restrictive policy write, authoritative readback, current-epoch durable per-user proof, and fresh membership; first-install migration freezes exact existing IDs and proves each individually",
+      "prewriteHold": "NEW_USER_PREWRITE_HOLD = NOT_APPLICABLE",
+      "failureRule": "temporary broad/default Jellyfin access, new ID outside fixed cohort, interrupted batch, or missing/corrupt/stale proof cannot authorize owned Home or PTV Featured rows; preserve administrator recovery",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidenceRefs": ["$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[3]"]
+    },
     "libraryRefresh": {
       "authority": "Jellyfin Server library/refresh task mechanisms",
       "completionRule": "An accepted asynchronous refresh start is not proof of completion.",
@@ -1625,8 +1690,27 @@
     "ptvV1": {
       "authority": "PTV Plugin authenticated controllers plus Jellyfin services used by each route",
       "routeRegistry": "PtvApiRoutes",
-      "securityRule": "Plugin payload authorization must be complete before serialization; Web filtering is defense-in-depth only.",
+      "securityRule": "Plugin payload authorization must be complete before serialization; all PTV Featured rows require current durable per-user proof, and Web filtering is additional presentation protection.",
       "configuredPresentationCandidate": "Isolated PATCHED response-only currentPresentationAuthority {version:1,scope:hex64,generation:hex64} on protected status, administrator settings/rows and authorized Featured payload. Status atomically includes administrator-only exact configuredPresentationBindings. This is presentation provenance, not item authorization or a payload signature; absent trusted binding fails closed.",
+      "homeRowLibraryScope": {
+        "routes": ["GET/POST /Ptv/v1/rows", "GET/POST /Ptv/v1/settings", "GET /Ptv/v1/featured"],
+        "routesChanged": false,
+        "rowSettingsSchema": 3,
+        "featuredCacheVersion": 9,
+        "scopeSchemaVersion": 2,
+        "scopeModes": ["global", "defaultLibrary", "virtualFolder"],
+        "rule": "Pinned VirtualFolder ItemId identifies an owned row's library. Current generated scope claims and per-user Jellyfin access are validated before response; a restricted user's claim comes only from a fresh authorized Featured response because administrator row settings are forbidden. Web Home separately proves positive current-user item membership. Scope metadata is not an authorization token or a continuous-currentness guarantee."
+      },
+      "homeUserAccess": {
+        "baseRoute": "/Ptv/v1/home-user-access",
+        "routes": ["GET current", "POST begin", "POST {operationId}/complete", "POST verification-batches", "POST verification-batches/new", "GET verification-batches/current", "POST verification-batches/{batchId}/users/{userId}/verify", "POST creations/reserve", "POST creations/{creationOperationId}/bind", "GET creations/current", "POST creations/{creationOperationId}/recover", "GET verification-summary", "POST recover-corrupt"],
+        "rule": "Administrator controlled existing-user changes require durable pre-write hold; new-account creation has no pre-ID hold and must fail closed through policy readback, current-epoch durable proof, and fresh membership. Migration freezes exact candidate IDs and verifies each separately."
+      },
+      "homeTransitions": {
+        "baseRoute": "/Ptv/v1/home-transitions",
+        "routes": ["GET current", "POST begin", "POST {operationId}/complete"],
+        "rule": "Persist topology hold before stock mutation; complete after bounded configured-folder, active-top-child, and exact-item natural-convergence proof plus fresh final snapshot; selected binding is atomic with release, and no selection retains affected tombstones."
+      },
       "chapterRefs": [
         "20-ptv-vs-stock-map.md",
         "24-stock-api-contract-reference.md"
@@ -1660,6 +1744,18 @@
         "23-before-you-modify-checklists.md",
         "25-known-jellyfin-non-guarantees.md"
       ]
+    },
+    "configuredHomeLibraryMembership": {
+      "risk": "HIGH",
+      "rule": "A title, media type, global candidate pool, old cache entry, scope hash, or item-access result alone does not prove membership in one pinned library. Require current durable per-user policy/epoch/exact accessible-library proof for every PTV Featured row; owned rows also require resolved persisted ID, coherent current generated claim, per-user server authorization, and positive visit-local user-scoped membership. Partial scans retain only positively proven IDs; failures and route/identity retirement cannot borrow cached proof, rows, or row-derived Hero state.",
+      "affected": ["settingsAndAdmin", "permissionsAndLibraryAccess", "libraryAndItemProjection", "home", "cacheAndInvalidation"],
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"]
+    },
+    "controlledHomeAuthorityTransition": {
+      "risk": "CRITICAL",
+      "rule": "Known-user and library controlled mutations require durable pre-write holds; new accounts have no pre-ID hold and remain unproven until restrictive policy, authoritative readback, durable per-user proof, and fresh membership. Natural folder convergence is bounded and read-only; uncertainty keeps hold/tombstones. Arbitrary out-of-band Jellyfin changes cannot guarantee immediate retirement of every already-mounted remote client before a fresh authority signal.",
+      "affected": ["settingsAndAdmin", "permissionsAndLibraryAccess", "libraryAndItemProjection", "home", "cacheAndInvalidation"],
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"]
     },
     "serverAuthorizationVsWebVisibility": {
       "risk": "CRITICAL",
@@ -3129,6 +3225,77 @@
         }
       ]
     },
+    "homeRowLibraryOwnership": {
+      "classification": ["STOCK_REPLACED", "NEW_PTV_SYSTEM"],
+      "ptvChange": "Row Builder schema 3 persists explicit global/defaultLibrary/virtualFolder scope. The existing Plugin settings mutation pins a unique built-in VirtualFolder ItemId; the existing Featured refresh owner generates owned rows from complete recursive library pools and emits v9/scope-schema-2 claims. The per-user response projector rechecks current scope and Jellyfin access. Restricted users take the server-issued claim only from a fresh authorized Featured response. Web Home uses one bounded visit-local user-scoped membership owner and publishes only positively proven owned item IDs in Plugin order.",
+      "stockContractPreserved": "Jellyfin owns virtual-folder identity, user-visible views and user-aware item access; its separate endpoint snapshots do not form an atomic membership lease.",
+      "risk": "HIGH",
+      "conflictClass": "RACE_RISK",
+      "localStatus": "Canonical checkpoint 678592eb is source/test-proven locally. Stage 2 Web 0.5.67 / Plugin 0.5.21.0 integration passes local Web and Plugin suites, including scoped Featured and ownership regressions; populated hosted physical/request-pressure acceptance remains open. The user-provided operational screenshot's 9 sections and 119 items are shared cache counts, not per-user completeness or isolation proof. No deployment or release claim.",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md"],
+      "evidence": [
+        {
+          "repository": "PTV Plugin local source",
+          "version": "Canonical checkpoint 678592eb; Stage 2 local source integration Web 0.5.67 / Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Configuration/PluginConfiguration.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvPluginSettingsNormalizer.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeLibraryScopeResolver.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvPluginSettingsService.cs",
+          "symbol": "RowLibraryScope / NormalizeLibraryScope / Resolve / BindDefaultLibraries",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Plugin local source",
+          "version": "Canonical checkpoint 678592eb; Stage 2 local source integration Web 0.5.67 / Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeLibraryCandidates.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentRefreshService.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentStore.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentValidator.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentAuthorizationService.cs",
+          "symbol": "GetCandidates / ResolveOwnedCandidatePools / ValidateClientScope / HasCurrentScopeSchema / ValidateCurrentScopes",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web local source",
+          "version": "Canonical checkpoint 678592eb; Stage 2 local source integration Web 0.5.67 / Plugin 0.5.21.0",
+          "file": "src/ptv/modules/dashboard/rowBuilderImport.ts; src/ptv/modules/dashboard/PiggieTvRowsPage.tsx; src/ptv/modules/cache/featuredContentCache.ts; src/ptv/pages/home/homeLibraryOwnership.ts; src/ptv/pages/home/homeLibraryMembership.ts; src/ptv/pages/home/hooks.ts",
+          "symbol": "normalizePtvRowLibraryScope / RowLibraryScopeControls / scopeSchemaVersion / resolveHomeLibraryOwnershipClaim / createHomeLibraryMembershipAuthority / useNativeHomeData",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "controlledHomeAuthorityTransitions": {
+      "classification": ["NEW_PTV_SYSTEM", "STOCK_WRAPPED"],
+      "ptvChange": "Durable Plugin topology and per-user access ledgers hold controlled mutations before stock writes where the ID exists. New-account creation uses fail-closed known-ID bootstrap and fixed-ID administrator migration, not a fabricated pre-ID hold. Plugin Featured requires current per-user proof for all rows. Web Home retires stale PTV responses and separately proves owned membership. Bounded administrator readback of natural folder convergence precedes topology release; selected rebind and release are atomic.",
+      "stockContractPreserved": "Jellyfin owns account creation, user policy, user-aware library visibility, virtual-folder configuration, and active top-folder state. No PTV ValidateTopLibraryFolders, provider refresh, global scan, or refreshLibrary=true is invoked for convergence proof. Stock mutation internals and lazy UserRoot initialization are separate effects.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "localStatus": "Canonical checkpoint 678592eb: existing-user controlled access PASS and new-user bootstrap fail-closed PASS in local acceptance; NEW_USER_PREWRITE_HOLD is NOT_APPLICABLE. Stage 2 Web 0.5.67 / Plugin 0.5.21.0 source integration passes local suites, including additional guards that keep same-ID rename held and prevent create from tombstoning unrelated unpinned defaults. Controlled rename is SAFE_FAIL_CLOSED with held row when no new CollectionFolder ID appears; automatic natural convergence/recovery remains unproven after the observed Jellyfin 12 null ItemId/UserView. Arbitrary out-of-band Jellyfin mutation cannot guarantee retirement of every already-mounted remote client before fresh authority is observed. Hosted physical acceptance and release gates remain open. NOT RELEASE READY; no deployment claim.",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidence": [
+        {
+          "repository": "PTV Plugin local source",
+          "version": "Canonical checkpoint 678592eb, Plugin 0.5.19.0; Stage 2 local source integration Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvHomeUserAccessController.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeUserAccessLedger.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvSignupCreationReservation.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvSignupUserAccessBootstrap.cs",
+          "symbol": "Begin/Complete, fixed-ID verification, durable current-epoch accessible-library proof, creation reservation and bootstrap",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Plugin local source",
+          "version": "Canonical checkpoint 678592eb, Plugin 0.5.19.0; Stage 2 local source integration Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvHomeTransitionsController.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeTopologyLedger.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV.Tests/PtvHomeTransitionControllerTests.cs",
+          "symbol": "bounded natural-convergence snapshot, fresh final readback, CompleteAndRebindAsync, explicit retry",
+          "status": "VERIFIED_BY_TEST"
+        },
+        {
+          "repository": "Retained exact Jellyfin 12 source",
+          "version": "server commit 6c073e19ddf604b2369c638716164fdab4c952dc; newer than stock 10.11.11 baseline",
+          "file": "Emby.Server.Implementations/Library/LibraryManager.cs",
+          "symbol": "GetVirtualFolders(false), GetUserRootFolder, GetItemList nonrecursive repository path, ValidateTopLibraryFolders provider work",
+          "status": "UPSTREAM_NEWER_THAN_10.11.11"
+        },
+        {
+          "repository": "PTV Plugin and Web local source/tests",
+          "version": "Canonical checkpoint 678592eb, Web 0.5.62 / Plugin 0.5.19.0; Stage 2 local source integration Web 0.5.67 / Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedTopology.cs; src/ptv/modules/cache/featuredContentCache.ts; src/ptv/pages/home/hooks.ts; src/ptv/plugin/Jellyfin.Plugin.PiggieTV.Tests/PtvHomeUserAccessTests.cs",
+          "symbol": "all-PTV-Featured proof gate, Web cache/late-result retirement, per-user migration and bootstrap regressions",
+          "status": "VERIFIED_BY_TEST"
+        }
+      ]
+    },
     "bootstrapAndCoreRuntime": {
       "classification": [
         "STOCK_EXTENDED",
@@ -3234,7 +3401,7 @@
         "STOCK_REPLACED",
         "NEW_PTV_SYSTEM"
       ],
-      "ptvChange": "NativeHome and PTV hooks compose/cache featured and stock-derived row data. The active legacy-compatible Home path adopts routeController lifetimes for requests, publication, Hero/rows, listeners, observers, timers, cards and images. Featured transport/memory/dashboard-readback owners preserve canonical server+user identity, authenticated Featured transport stays on the active ApiClient root, queued memory reasserts ownership, and forced row-image consumer handles retire with their exact row/route owner.",
+      "ptvChange": "NativeHome and PTV hooks compose/cache featured and stock-derived row data. The active legacy-compatible Home path adopts routeController lifetimes for requests, publication, Hero/rows, listeners, observers, timers, cards and images. Featured transport/memory/dashboard-readback owners preserve canonical server+user identity, authenticated Featured transport stays on the active ApiClient root, queued memory reasserts ownership, and forced row-image consumer handles retire with their exact row/route owner. Library-owned configured rows additionally require an exact Plugin scope claim and visit-local positive user-scoped membership before Home publication or retention.",
       "risk": "CRITICAL",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
