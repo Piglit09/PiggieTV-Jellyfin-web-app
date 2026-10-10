@@ -12,6 +12,15 @@ import type {
     AdminMetadataStudio
 } from './adminMetadataManagerModel';
 import type {
+    AdminReadingArchiveState,
+    AdminReadingIdentityAssessment,
+    AdminReadingIdentityEvidenceSource,
+    AdminReadingIdentityFinding,
+    AdminReadingIdentityRecord,
+    AdminReadingIdentitySource,
+    AdminReadingIdentitySources,
+    AdminReadingRunEvidenceKind,
+    AdminReadingScopedProviderId,
     AdminReadingMediaClass,
     AdminReadingLocalInspectionState,
     AdminReadingMetadataCandidate,
@@ -39,6 +48,10 @@ const PROVIDER_FAILURE_KINDS = new Set<AdminReadingProviderFailureKind>([
 const LOCAL_INSPECTION_STATES = new Set<AdminReadingLocalInspectionState>([
     'inspected', 'not-found', 'rejected', 'unavailable', 'unknown', 'unsupported'
 ]);
+const IDENTITY_SOURCES = new Set<AdminReadingIdentitySource>([ 'FileName', 'ImmediateFolder', 'ComicInfo', 'CurrentItem', 'Provider' ]);
+const EVIDENCE_SOURCES = new Set<AdminReadingIdentityEvidenceSource>([ 'unknown', 'filename', 'folder', 'existing-metadata', 'local-metadata', 'administrator', 'provider' ]);
+const RUN_EVIDENCE = new Set<AdminReadingRunEvidenceKind>([ 'Unknown', 'ExplicitRun', 'ExplicitVolume' ]);
+const ARCHIVE_STATES = new Set<AdminReadingArchiveState>([ 'inspected', 'absent', 'unverified', 'not-attempted' ]);
 const STORED_READING_PROVIDERS = [
     { displayName: 'Comic Vine', provider: 'comic-vine' },
     { displayName: 'Grand Comics Database (GCD)', provider: 'gcd' },
@@ -75,6 +88,154 @@ function text(value: unknown, maximumLength = 512) {
 
 function nullableText(value: unknown, maximumLength = 512) {
     return text(value, maximumLength) || null;
+}
+
+function isTransportRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function identityText(value: unknown, maximumLength = 256): string | null {
+    const bounded = nullableText(value, maximumLength);
+    if (!bounded || /(?:\/|\\|%3[a-f0-9]|\?[^\s]|#[^\d\s]|[<>])/i.test(bounded)) return null;
+    return bounded;
+}
+
+function opaqueText(value: unknown, maximumLength = 4096): string | null {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    return raw && raw.length <= maximumLength && /^[A-Za-z0-9._~+/=:-]+$/.test(raw) ? raw : null;
+}
+
+function identitySource(value: unknown): AdminReadingIdentitySource {
+    return typeof value === 'string' && IDENTITY_SOURCES.has(value as AdminReadingIdentitySource) ? value as AdminReadingIdentitySource : 'Provider';
+}
+
+function evidenceSource(value: unknown): AdminReadingIdentityEvidenceSource {
+    return typeof value === 'string' && EVIDENCE_SOURCES.has(value as AdminReadingIdentityEvidenceSource) ? value as AdminReadingIdentityEvidenceSource : 'unknown';
+}
+
+function runEvidence(value: unknown): AdminReadingRunEvidenceKind {
+    return typeof value === 'string' && RUN_EVIDENCE.has(value as AdminReadingRunEvidenceKind) ? value as AdminReadingRunEvidenceKind : 'Unknown';
+}
+
+function publicationDate(value: unknown): string | null {
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value.slice(0, 40) : null;
+}
+
+function normalizeScopedId(value: unknown): AdminReadingScopedProviderId | null {
+    const source = transportRecord(value);
+    const namespace = identityText(source.namespace, 64);
+    const scope = source.scope;
+    const id = identityText(source.value, 256);
+    return namespace && id && (scope === 'Unknown' || scope === 'Issue' || scope === 'Series') ? { namespace, scope, value: id } : null;
+}
+
+function normalizeIdentityRecord(value: unknown): AdminReadingIdentityRecord {
+    const source = transportRecord(value);
+    return {
+        hasRedactedIdentity: source.hasRedactedIdentity === true,
+        seriesTitle: identityText(source.seriesTitle),
+        issueNumber: identityText(source.issueNumber, 32),
+        volumeOrRunLabel: identityText(source.volumeOrRunLabel, 64),
+        issuePublicationYear: integer(source.issuePublicationYear),
+        issuePublicationDate: publicationDate(source.issuePublicationDate),
+        runEvidenceKind: runEvidence(source.runEvidenceKind),
+        source: identitySource(source.source),
+        providerIds: Array.isArray(source.providerIds) ? source.providerIds.map(normalizeScopedId).filter((id): id is AdminReadingScopedProviderId => Boolean(id)).slice(0, 32) : []
+    };
+}
+
+function hasTypedIdentityRecord(value: unknown, expectedSource: AdminReadingIdentitySource): boolean {
+    if (!isTransportRecord(value)) return false;
+    const source = transportRecord(value);
+    const nullableString = (entry: unknown) => entry === null || typeof entry === 'string';
+    return source.source === expectedSource
+        && typeof source.hasRedactedIdentity === 'boolean'
+        && nullableString(source.seriesTitle)
+        && nullableString(source.issueNumber)
+        && nullableString(source.volumeOrRunLabel)
+        && (source.issuePublicationYear === null || integer(source.issuePublicationYear) !== null)
+        && (source.issuePublicationDate === null || publicationDate(source.issuePublicationDate) !== null)
+        && RUN_EVIDENCE.has(source.runEvidenceKind as AdminReadingRunEvidenceKind)
+        && Array.isArray(source.providerIds)
+        && source.providerIds.every(id => normalizeScopedId(id) !== null);
+}
+
+function hasTypedIdentitySources(value: unknown): boolean {
+    if (!isTransportRecord(value)) return false;
+    const source = transportRecord(value);
+    return ARCHIVE_STATES.has(source.archiveState as AdminReadingArchiveState)
+        && (source.archiveReasonCode === null || typeof source.archiveReasonCode === 'string')
+        && (source.archiveState !== 'unverified' || Boolean(identityText(source.archiveReasonCode, 128)))
+        && hasTypedIdentityRecord(source.fileName, 'FileName')
+        && hasTypedIdentityRecord(source.immediateFolder, 'ImmediateFolder')
+        && hasTypedIdentityRecord(source.comicInfo, 'ComicInfo')
+        && hasTypedIdentityRecord(source.currentItem, 'CurrentItem');
+}
+
+function hasTypedFinding(value: unknown): boolean {
+    if (!isTransportRecord(value)) return false;
+    const source = transportRecord(value);
+    return Boolean(identityText(source.code, 128) && identityText(source.field, 64))
+        && IDENTITY_SOURCES.has(source.leftSource as AdminReadingIdentitySource)
+        && IDENTITY_SOURCES.has(source.rightSource as AdminReadingIdentitySource)
+        && typeof source.isConflict === 'boolean'
+        && typeof source.isMaterialUncertainty === 'boolean';
+}
+
+function normalizeIdentitySources(value: unknown): AdminReadingIdentitySources {
+    const source = transportRecord(value);
+    return {
+        archiveState: typeof source.archiveState === 'string' && ARCHIVE_STATES.has(source.archiveState as AdminReadingArchiveState) ? source.archiveState as AdminReadingArchiveState : 'not-attempted',
+        archiveReasonCode: identityText(source.archiveReasonCode, 128),
+        fileName: normalizeIdentityRecord(source.fileName),
+        immediateFolder: normalizeIdentityRecord(source.immediateFolder),
+        comicInfo: normalizeIdentityRecord(source.comicInfo),
+        currentItem: normalizeIdentityRecord(source.currentItem)
+    };
+}
+
+function normalizeFinding(value: unknown): AdminReadingIdentityFinding | null {
+    const source = transportRecord(value);
+    const code = identityText(source.code, 128);
+    if (!code) return null;
+    return {
+        code,
+        field: identityText(source.field, 64) || '',
+        leftSource: identitySource(source.leftSource),
+        leftValue: identityText(source.leftValue),
+        rightSource: identitySource(source.rightSource),
+        rightValue: identityText(source.rightValue),
+        isConflict: source.isConflict === true,
+        isMaterialUncertainty: source.isMaterialUncertainty === true
+    };
+}
+
+export function normalizeAdminReadingIdentityAssessment(value: unknown): AdminReadingIdentityAssessment {
+    const source = transportRecord(value);
+    const itemId = opaqueText(source.itemId, 128);
+    const provider = identityText(source.provider, 128);
+    const providerId = identityText(source.providerId, 256);
+    const searchGeneration = opaqueText(source.searchGeneration, 128);
+    const archiveRevision = opaqueText(source.archiveRevision, 256);
+    const assessmentDigest = opaqueText(source.assessmentDigest, 256);
+    if (!itemId || !provider || !providerId || !searchGeneration || !archiveRevision || !assessmentDigest
+        || !hasTypedIdentitySources(source.sources) || !hasTypedIdentityRecord(source.candidate, 'Provider')
+        || !Array.isArray(source.findings) || !source.findings.every(hasTypedFinding)
+        || typeof source.revisionChanged !== 'boolean'
+        || typeof source.requiresConflictAcknowledgment !== 'boolean'
+        || typeof source.requiresUnverifiedAcknowledgment !== 'boolean') {
+        throw new Error('Reading identity reassessment returned an invalid response.');
+    }
+    return {
+        itemId, provider, providerId, searchGeneration, archiveRevision,
+        revisionChanged: source.revisionChanged === true,
+        sources: normalizeIdentitySources(source.sources),
+        candidate: normalizeIdentityRecord(source.candidate),
+        findings: source.findings.map(normalizeFinding).filter((finding): finding is AdminReadingIdentityFinding => Boolean(finding)).slice(0, 64),
+        requiresConflictAcknowledgment: source.requiresConflictAcknowledgment === true,
+        requiresUnverifiedAcknowledgment: source.requiresUnverifiedAcknowledgment === true,
+        assessmentDigest
+    };
 }
 
 function integer(value: unknown) {
@@ -192,6 +353,19 @@ export function normalizeAdminReadingMetadataCandidate(value: unknown): AdminRea
     if (!provider || !providerId || !title) return null;
     const score = finiteNumber(source.score);
     return {
+        assessmentContext: opaqueText(source.assessmentContext, 16 * 1024),
+        archiveRevision: opaqueText(source.archiveRevision, 256),
+        assessmentDigest: opaqueText(source.assessmentDigest, 256),
+        identityAssessment: source.identityAssessment ? normalizeAdminReadingIdentityAssessment(source.identityAssessment) : null,
+        hasRedactedIdentity: source.hasRedactedIdentity === true,
+        runEvidenceKind: runEvidence(source.runEvidenceKind),
+        identityProviderIds: Array.isArray(source.identityProviderIds) ? source.identityProviderIds.map(normalizeScopedId).filter((id): id is AdminReadingScopedProviderId => Boolean(id)).slice(0, 32) : [],
+        seriesTitleEvidence: evidenceSource(source.seriesTitleEvidence),
+        issueNumberEvidence: evidenceSource(source.issueNumberEvidence),
+        seriesStartYearEvidence: evidenceSource(source.seriesStartYearEvidence),
+        issuePublicationYear: integer(source.issuePublicationYear),
+        issuePublicationDate: publicationDate(source.issuePublicationDate),
+        issuePublicationEvidence: evidenceSource(source.issuePublicationEvidence),
         alternateTitles: stringArray(source.alternateTitles),
         artists: credits(source.artists),
         authors: credits(source.authors),
@@ -234,6 +408,25 @@ function normalizeStructuredQuery(value: unknown): AdminReadingStructuredQuery {
     const classification = transportRecord(source.classification);
     const providerId = transportRecord(source.providerId);
     return {
+        seriesTitleEvidence: evidenceSource(source.seriesTitleEvidence),
+        issueNumberEvidence: evidenceSource(source.issueNumberEvidence),
+        seriesStartYear: integer(source.seriesStartYear),
+        seriesStartYearEvidence: evidenceSource(source.seriesStartYearEvidence),
+        issuePublicationYear: integer(source.issuePublicationYear),
+        issuePublicationDate: publicationDate(source.issuePublicationDate),
+        issuePublicationEvidence: evidenceSource(source.issuePublicationEvidence),
+        folderCorroboratesSeriesTitle: source.folderCorroboratesSeriesTitle === true,
+        folderCorroboratesSeriesStartYear: source.folderCorroboratesSeriesStartYear === true,
+        identityConflicts: Array.isArray(source.identityConflicts) ? source.identityConflicts.map(entry => {
+            const conflict = transportRecord(entry);
+            return {
+                field: identityText(conflict.field, 64) || '',
+                preferredSource: evidenceSource(conflict.preferredSource),
+                preferredValue: identityText(conflict.preferredValue),
+                conflictingSource: evidenceSource(conflict.conflictingSource),
+                conflictingValue: identityText(conflict.conflictingValue)
+            };
+        }).filter(conflict => conflict.field).slice(0, 64) : [],
         alternateTitles: stringArray(source.alternateTitles),
         author: nullableText(source.author, 256),
         chapterNumber: nullableText(source.chapterNumber, 32),
@@ -294,6 +487,8 @@ export function normalizeAdminReadingMetadataSearchResponse(value: unknown): Adm
         (entry): entry is AdminReadingMetadataCandidate => Boolean(entry)
     ).slice(0, 30) : [];
     return {
+        searchGeneration: opaqueText(source.searchGeneration, 128),
+        identitySources: normalizeIdentitySources(source.identitySources),
         candidates,
         localMetadata: {
             sources: stringArray(localMetadata.sources, 2, 32),

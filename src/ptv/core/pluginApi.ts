@@ -2165,6 +2165,16 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 }
             );
         },
+        reassessReadingMetadata<TResponse = unknown, TRequest = unknown>(
+            body: TRequest,
+            options?: PtvPluginRequestOptions
+        ) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.readingMetadataReassess,
+                { ...options, body, method: 'POST', bypassCache: true }
+            );
+        },
         getReadingSeriesOverrides<T = unknown>(routeKind: string, options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
                 apiClient,

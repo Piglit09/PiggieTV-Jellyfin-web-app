@@ -27,6 +27,34 @@ public enum PtvReadingLocalInspectionState
     Unavailable
 }
 
+/// <summary>Independent outcome of inspecting embedded ComicInfo in the archive.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PtvComicInfoArchiveInspectionState>))]
+public enum PtvComicInfoArchiveInspectionState
+{
+    [JsonStringEnumMemberName("not-attempted")]
+    NotAttempted,
+    [JsonStringEnumMemberName("inspected")]
+    Inspected,
+    [JsonStringEnumMemberName("absent")]
+    Absent,
+    [JsonStringEnumMemberName("unverified")]
+    Unverified
+}
+
+/// <summary>Source-specific archive evidence, unaffected by adjacent OPF success.</summary>
+public sealed class PtvComicInfoArchiveInspection
+{
+    /// <summary>Internal byte digest used only inside authenticated archive revisions.</summary>
+    [JsonIgnore]
+    public string? ContentDigest { get; set; }
+
+    public PtvComicInfoArchiveInspectionState State { get; set; } = PtvComicInfoArchiveInspectionState.NotAttempted;
+
+    public string? ReasonCode { get; set; }
+
+    public PtvReadingLocalMetadataEvidence? Metadata { get; set; }
+}
+
 /// <summary>Bounded local evidence extracted from ComicInfo.xml or an adjacent OPF document.</summary>
 public sealed class PtvReadingLocalMetadataEvidence
 {
@@ -79,6 +107,8 @@ public sealed class PtvReadingLocalMetadataEvidence
 public sealed class PtvReadingLocalMetadataInspectionResult
 {
     public PtvReadingLocalInspectionState State { get; set; } = PtvReadingLocalInspectionState.NotFound;
+
+    public PtvComicInfoArchiveInspection ComicInfo { get; set; } = new();
 
     public string? FileName { get; set; }
 

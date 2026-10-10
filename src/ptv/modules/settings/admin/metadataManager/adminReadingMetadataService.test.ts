@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     loadAdminReadingMetadataProviders,
+    reassessAdminReadingIdentity,
     searchAdminReadingMetadata,
     type AdminReadingMetadataApiClient
 } from './adminReadingMetadataService';
@@ -10,12 +11,60 @@ import type { AdminReadingMetadataSearchRequest } from './adminReadingMetadataMo
 function client(methods: Partial<AdminReadingMetadataApiClient>): AdminReadingMetadataApiClient {
     return {
         getReadingMetadataProviders: vi.fn(),
+        reassessReadingMetadata: vi.fn(),
         searchReadingMetadata: vi.fn(),
         ...methods
     } as unknown as AdminReadingMetadataApiClient;
 }
 
+function identityRecord(source: string) {
+    return {
+        Source: source, HasRedactedIdentity: false, RunEvidenceKind: 'Unknown', ProviderIds: [],
+        SeriesTitle: null, IssueNumber: null, VolumeOrRunLabel: null,
+        IssuePublicationYear: null, IssuePublicationDate: null
+    };
+}
+
 describe('Reading metadata service', () => {
+    it('posts a signed candidate context and returns only a valid typed reassessment', async () => {
+        const reassessReadingMetadata = vi.fn().mockResolvedValue({
+            ItemId: 'item-a', Provider: 'gcd', ProviderId: '123', SearchGeneration: 'search-1',
+            ArchiveRevision: 'revision-1', RevisionChanged: false, AssessmentDigest: 'digest-1',
+            Sources: { ArchiveState: 'unverified', ArchiveReasonCode: 'HELPER_UNAVAILABLE',
+                FileName: identityRecord('FileName'), ImmediateFolder: identityRecord('ImmediateFolder'),
+                ComicInfo: identityRecord('ComicInfo'), CurrentItem: identityRecord('CurrentItem') },
+            Candidate: identityRecord('Provider'), Findings: [],
+            RequiresConflictAcknowledgment: false, RequiresUnverifiedAcknowledgment: true
+        });
+        const request = { itemId: 'item-a', candidateContext: 'signed-context', displayedRevision: 'revision-1' };
+        // eslint-disable-next-line compat/compat
+        const signal = new AbortController().signal;
+        const assessment = await reassessAdminReadingIdentity(client({ reassessReadingMetadata }), request, signal);
+        expect(reassessReadingMetadata).toHaveBeenCalledWith({
+            ItemId: 'item-a', CandidateContext: 'signed-context', DisplayedRevision: 'revision-1'
+        }, { signal, bypassCache: true });
+        expect(assessment).toMatchObject({ sources: { archiveState: 'unverified', archiveReasonCode: 'HELPER_UNAVAILABLE' }, requiresUnverifiedAcknowledgment: true });
+    });
+
+    it.each([401, 403, 503])('rejects reassessment HTTP %i without fabricating an unverified result', async status => {
+        const reassessReadingMetadata = vi.fn().mockRejectedValue({ status, message: 'C:\\private\\secret.cbz' });
+        await expect(reassessAdminReadingIdentity(client({ reassessReadingMetadata }), {
+            itemId: 'item-a', candidateContext: 'signed-context', displayedRevision: null
+        })).rejects.toThrow('Reading identity could not be reassessed. Apply is blocked.');
+        expect(reassessReadingMetadata).toHaveBeenCalledOnce();
+    });
+
+    it('rejects an old Plugin without the reassessment method and an invalid 200 contract', async () => {
+        await expect(reassessAdminReadingIdentity(client({ reassessReadingMetadata: undefined }), {
+            itemId: 'item-a', candidateContext: 'signed-context', displayedRevision: null
+        })).rejects.toThrow('Reading identity reassessment is unavailable.');
+        await expect(reassessAdminReadingIdentity(client({ reassessReadingMetadata: vi.fn().mockResolvedValue({
+            Sources: { ArchiveState: 'unverified', ArchiveReasonCode: 'HELPER_UNAVAILABLE' }
+        }) }), { itemId: 'item-a', candidateContext: 'signed-context', displayedRevision: null })).rejects.toThrow(
+            'Reading identity could not be reassessed. Apply is blocked.'
+        );
+    });
+
     it('loads and normalizes provider status through the authenticated plugin client', async () => {
         const getReadingMetadataProviders = vi.fn().mockResolvedValue({
             Providers: [{
@@ -90,6 +139,7 @@ describe('Reading metadata service', () => {
             }
         });
         const request: AdminReadingMetadataSearchRequest = {
+            searchGeneration: 'deliberate-search-id',
             author: 'Writer One',
             chapterNumber: '31',
             isbn: '9780000000000',

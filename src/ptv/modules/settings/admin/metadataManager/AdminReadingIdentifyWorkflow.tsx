@@ -14,6 +14,10 @@ import {
 import { adminReadingProviderDisplayName } from './adminReadingMetadataAdapters';
 import {
     ADMIN_READING_PROVIDER_AUTO,
+    type AdminReadingApplyApproval,
+    type AdminReadingIdentityAssessment,
+    type AdminReadingIdentityRecord,
+    type AdminReadingIdentitySources,
     type AdminReadingLocalMetadataSummary,
     type AdminReadingMediaClass,
     type AdminReadingMetadataCandidate,
@@ -27,6 +31,8 @@ import {
 /* eslint-disable react/jsx-no-bind */
 
 export type AdminReadingIdentifyWorkflowProps = Readonly<{
+    serverId?: string | null;
+    userId?: string;
     applyError: string | null;
     applying: boolean;
     error: string | null;
@@ -41,7 +47,7 @@ export type AdminReadingIdentifyWorkflowProps = Readonly<{
     itemId: string;
     itemName: string;
     message: string | null;
-    onApply: (candidate: AdminReadingMetadataCandidate) => Promise<void>;
+    onApply: (candidate: AdminReadingMetadataCandidate, approval: AdminReadingApplyApproval) => Promise<void>;
     onClearApplyError: () => void;
     onLoadProviders: () => void;
     onRetryProviders: () => void;
@@ -254,6 +260,18 @@ function ParsedQueryPreview({ response }: Readonly<{ response: AdminReadingMetad
                 <div><dt>Author</dt><dd>{fieldValue(query.author)}</dd></div>
                 <div><dt>ISBN</dt><dd>{fieldValue(query.isbn)}</dd></div>
             </dl>
+            {response.identitySources ? <ParsedIdentityEvidence sources={response.identitySources} /> : null}
+            {query.identityConflicts?.length ? (
+                <ul aria-label='Parsed source disagreements'>
+                    {query.identityConflicts.map(conflict => (
+                        <li key={JSON.stringify(conflict)}>
+                            Identity conflict: {EVIDENCE_SOURCE_LABELS[conflict.preferredSource]}: {conflict.preferredValue || 'Unknown'}
+                            {' / '}{EVIDENCE_SOURCE_LABELS[conflict.conflictingSource]}: {conflict.conflictingValue || 'Unknown'}
+                            {' / '}{identityFieldLabel(conflict.field)}
+                        </li>
+                    ))}
+                </ul>
+            ) : null}
             {query.alternateTitles.length ? (
                 <p className='ptv-reading-parsed-titles'>
                     <strong>Alternate titles</strong>
@@ -345,6 +363,148 @@ function CandidateSources({ candidate }: Readonly<{ candidate: AdminReadingMetad
     );
 }
 
+const IDENTITY_SOURCE_LABELS = {
+    ComicInfo: 'ComicInfo', CurrentItem: 'Current item', FileName: 'File name',
+    ImmediateFolder: 'Immediate folder', Provider: 'Provider'
+} as const;
+
+const EVIDENCE_SOURCE_LABELS = {
+    unknown: 'Unknown source', filename: 'File name', folder: 'Immediate folder',
+    'existing-metadata': 'Current item', 'local-metadata': 'Local metadata', administrator: 'Administrator', provider: 'Provider'
+} as const;
+
+function identityFieldLabel(field: string) {
+    return ({ SeriesTitle: 'Series', IssueNumber: 'Issue', VolumeOrRunLabel: 'Volume/run label',
+        IssuePublicationYear: 'Issue publication year', IssuePublicationDate: 'Issue publication date',
+        SeriesStartYear: 'Series start year' } as Record<string, string>)[field] || field;
+}
+
+function ArchiveIdentityState({ sources }: Readonly<{ sources: AdminReadingIdentitySources }>) {
+    const reason = sources.archiveReasonCode?.replace(/_/g, ' ').toLowerCase();
+    switch (sources.archiveState) {
+        case 'absent': return <p>No embedded ComicInfo found</p>;
+        case 'inspected': return <p>Embedded ComicInfo inspected{reason ? `: ${reason}` : ''}.</p>;
+        case 'not-attempted': return <p>Archive identity was not inspected: {reason || 'inspection not attempted'}. Identity unverified.</p>;
+        case 'unverified': return <p>Archive identity could not be verified: {reason || 'inspection unavailable'}.</p>;
+    }
+}
+
+function TypedIdentityEvidence({ record }: Readonly<{ record: AdminReadingIdentityRecord }>) {
+    const source = IDENTITY_SOURCE_LABELS[record.source];
+    const runLabel = record.runEvidenceKind === 'ExplicitRun' ? 'Run' : 'Volume';
+    return (
+        <div>
+            {record.seriesTitle ? <p>{source} / Series: {record.seriesTitle}</p> : null}
+            {record.issueNumber ? <p>{source} / Issue: {record.issueNumber}</p> : null}
+            {record.volumeOrRunLabel && record.runEvidenceKind !== 'Unknown' ? <p>{source} / {runLabel}: {record.volumeOrRunLabel}</p> : null}
+            {record.issuePublicationDate || record.issuePublicationYear ? (
+                <p>{source} / Issue publication: {record.issuePublicationDate || record.issuePublicationYear}</p>
+            ) : null}
+        </div>
+    );
+}
+
+function ParsedIdentityEvidence({ sources }: Readonly<{ sources: AdminReadingIdentitySources }>) {
+    return (
+        <section aria-label='Source identity evidence'>
+            <ArchiveIdentityState sources={sources} />
+            <TypedIdentityEvidence record={sources.fileName} />
+            <TypedIdentityEvidence record={sources.immediateFolder} />
+            <TypedIdentityEvidence record={sources.comicInfo} />
+            <TypedIdentityEvidence record={sources.currentItem} />
+        </section>
+    );
+}
+
+function CandidateIdentityEvidence({ candidate }: Readonly<{ candidate: AdminReadingMetadataCandidate }>) {
+    const record = candidate.identityAssessment?.candidate;
+    const publication = candidate.issuePublicationEvidence === 'provider' ?
+        candidate.issuePublicationDate || candidate.issuePublicationYear : null;
+    let run: string | number | null = null;
+    if (candidate.runEvidenceKind === 'ExplicitRun') run = candidate.startYear;
+    if (candidate.runEvidenceKind === 'ExplicitVolume') run = candidate.volumeNumber;
+    return (
+        <div>
+            {record ? <TypedIdentityEvidence record={record} /> : (
+                <>
+                    {run ? <p>Provider / {candidate.runEvidenceKind === 'ExplicitRun' ? 'Run' : 'Volume'}: {run}</p> : null}
+                    {publication ? <p>Provider / Issue publication: {publication}</p> : null}
+                </>
+            )}
+            {candidate.year ? <p>Provider year (unclassified): {candidate.year}</p> : null}
+            {candidate.startYear && candidate.runEvidenceKind !== 'ExplicitRun' ? <p>Provider start year (unclassified): {candidate.startYear}</p> : null}
+        </div>
+    );
+}
+
+function IdentityWarnings({ assessment }: Readonly<{ assessment: AdminReadingIdentityAssessment | null | undefined }>) {
+    if (!assessment) return null;
+    return (
+        <div className='ptv-reading-identity-warnings'>
+            <ArchiveIdentityState sources={assessment.sources} />
+            {assessment.findings.filter(finding => finding.isConflict || finding.isMaterialUncertainty).map(finding => (
+                <p key={JSON.stringify(finding)}>
+                    <strong>{finding.isConflict ? 'Identity conflict' : 'Identity unverified'}: </strong>
+                    {IDENTITY_SOURCE_LABELS[finding.leftSource]}: {finding.leftValue || 'Unknown'}
+                    {' · '}{IDENTITY_SOURCE_LABELS[finding.rightSource]}: {finding.rightValue || 'Unknown'}
+                    {' · '}{finding.code === 'RUN_IDENTITY_UNDETERMINED' ? 'Run identity undetermined: the provider has no confirmed run label.' : identityFieldLabel(finding.field)}
+                </p>
+            ))}
+        </div>
+    );
+}
+
+function ReadingApplyReview({ candidate, props, closeApply }: Readonly<{
+    candidate: AdminReadingMetadataCandidate;
+    props: AdminReadingIdentifyWorkflowProps;
+    closeApply: () => void;
+}>) {
+    const [ conflictChecked, setConflictChecked ] = useState(false);
+    const [ unverifiedChecked, setUnverifiedChecked ] = useState(false);
+    const assessment = candidate.identityAssessment;
+    const hasContext = Boolean(candidate.assessmentContext && candidate.assessmentDigest && candidate.archiveRevision
+        && assessment?.searchGeneration && assessment.itemId === props.itemId
+        && assessment.provider === candidate.provider && assessment.providerId === candidate.providerId
+        && assessment.assessmentDigest === candidate.assessmentDigest && assessment.archiveRevision === candidate.archiveRevision);
+    const canApply = hasContext && !props.applying
+        && (!assessment?.requiresConflictAcknowledgment || conflictChecked)
+        && (!assessment?.requiresUnverifiedAcknowledgment || unverifiedChecked);
+    const applyLabel = assessment?.requiresConflictAcknowledgment ? 'Apply despite conflict' : 'Apply match';
+    const confirmApply = () => {
+        if (!canApply || !assessment) return;
+        const approval: AdminReadingApplyApproval = {
+            assessmentContext: candidate.assessmentContext!, assessmentDigest: assessment.assessmentDigest,
+            archiveRevision: assessment.archiveRevision, searchGeneration: assessment.searchGeneration,
+            acknowledgedConflictCodes: conflictChecked ? assessment.findings.filter(finding => finding.isConflict).map(finding => finding.code) : [],
+            acknowledgedUnverifiedCodes: unverifiedChecked ? assessment.findings.filter(finding => finding.isMaterialUncertainty).map(finding => finding.code) : []
+        };
+        props.onApply(candidate, approval).then(closeApply, () => undefined);
+    };
+    return (
+        <>
+            <DialogTitle id='ptv-reading-apply-title'>Apply this metadata match?</DialogTitle>
+            <DialogContent>
+                <DialogContentText id='ptv-reading-apply-description'>
+                    {`Apply “${candidate.title}” from ${adminReadingProviderDisplayName(candidate.provider)} to “${props.itemName}”? Locked fields stay protected, and artwork is not replaced automatically.`}
+                </DialogContentText>
+                <IdentityWarnings assessment={assessment} />
+                {!hasContext ? <p role='alert'>Identity review is unavailable. Search again with an updated PiggieTV Plugin before applying.</p> : null}
+                {assessment?.requiresConflictAcknowledgment ? (
+                    <label><input type='checkbox' checked={conflictChecked} disabled={props.applying} onChange={event => setConflictChecked(event.target.checked)} /> I reviewed the identity conflicts and want to apply this match.</label>
+                ) : null}
+                {assessment?.requiresUnverifiedAcknowledgment ? (
+                    <label><input type='checkbox' checked={unverifiedChecked} disabled={props.applying} onChange={event => setUnverifiedChecked(event.target.checked)} /> I understand that identity could not be fully verified and want to apply this match.</label>
+                ) : null}
+                {props.applyError ? <p aria-live='assertive' className='ptv-metadata-workflow-message is-error' role='alert'>{props.applyError}</p> : null}
+            </DialogContent>
+            <DialogActions className='ptv-metadata-workflow-dialog-actions'>
+                <button disabled={props.applying} onClick={closeApply} type='button'>Cancel</button>
+                <button className='is-primary' disabled={!canApply} onClick={confirmApply} type='button'>{props.applying ? 'Applying…' : applyLabel}</button>
+            </DialogActions>
+        </>
+    );
+}
+
 function CandidateCard({
     applying,
     candidate,
@@ -375,7 +535,6 @@ function CandidateCard({
                         <p>{[
                             candidate.seriesTitle,
                             issueOrVolume,
-                            candidate.year,
                             candidate.publisher
                         ].filter(Boolean).join(' · ')}</p>
                     </div>
@@ -392,10 +551,12 @@ function CandidateCard({
                     {candidate.totalVolumes !== null ? <span>{candidate.totalVolumes} volumes</span> : null}
                     {candidate.totalChapters !== null ? <span>{candidate.totalChapters} chapters</span> : null}
                 </div>
+                <CandidateIdentityEvidence candidate={candidate} />
                 <CandidateAliases aliases={aliases} />
                 <CandidateCreators creators={creators} />
                 {description ? <p className='ptv-reading-candidate-description'>{description}</p> : null}
                 <CandidateReasons candidate={candidate} rank={rank} />
+                <IdentityWarnings assessment={candidate.identityAssessment} />
                 <CandidateSources candidate={{
                     ...candidate,
                     provider: adminReadingProviderDisplayName(candidate.provider)
@@ -640,7 +801,15 @@ function CandidateResults({
 
 export default function AdminReadingIdentifyWorkflow(props: AdminReadingIdentifyWorkflowProps) {
     const [ fields, setFields ] = useState<ReadingSearchFields>(() => initialFields(props));
-    const [ selectedCandidate, setSelectedCandidate ] = useState<AdminReadingMetadataCandidate | null>(null);
+    const selectionScope = JSON.stringify([ props.serverId, props.userId, props.itemId, props.response?.searchGeneration ]);
+    const [ selection, setSelection ] = useState<{ candidate: AdminReadingMetadataCandidate; scope: string } | null>(null);
+    const selectedCandidate = selection?.scope === selectionScope && !props.searching ? props.response?.candidates.find(candidate =>
+        candidate.provider === selection.candidate.provider && candidate.providerId === selection.candidate.providerId
+    ) ?? null : null;
+    const setSelectedCandidate = (candidate: AdminReadingMetadataCandidate | null) => setSelection(candidate ? { candidate, scope: selectionScope } : null);
+    useEffect(() => {
+        if (selection && !selectedCandidate) setSelection(null);
+    }, [ selection, selectedCandidate ]);
     const initialPropsRef = useRef(props);
     const titleInputRef = useRef<HTMLInputElement>(null);
     initialPropsRef.current = props;
@@ -648,7 +817,7 @@ export default function AdminReadingIdentifyWorkflow(props: AdminReadingIdentify
     useEffect(() => {
         const initial = initialPropsRef.current;
         setFields(initialFields(initial));
-        setSelectedCandidate(null);
+        setSelection(null);
         initial.onLoadProviders();
     }, [ props.itemId ]);
 
@@ -740,10 +909,6 @@ export default function AdminReadingIdentifyWorkflow(props: AdminReadingIdentify
         props.onClearApplyError();
         setSelectedCandidate(candidate);
     };
-    const confirmApply = () => {
-        if (!selectedCandidate || props.applying) return;
-        props.onApply(selectedCandidate).then(closeApply, () => undefined);
-    };
     const providerFailureCount = props.response?.providerResults.filter(result => Boolean(result.failure)).length || 0;
 
     return (
@@ -808,23 +973,16 @@ export default function AdminReadingIdentifyWorkflow(props: AdminReadingIdentify
                 onClose={() => !props.applying && closeApply()}
                 open={Boolean(selectedCandidate)}
             >
-                <DialogTitle id='ptv-reading-apply-title'>Apply this metadata match?</DialogTitle>
-                <DialogContent>
-                    <DialogContentText id='ptv-reading-apply-description'>
-                        {selectedCandidate ? `Apply “${selectedCandidate.title}” from ${adminReadingProviderDisplayName(selectedCandidate.provider)} to “${props.itemName}”? Locked fields stay protected, and artwork is not replaced automatically.` : ''}
-                    </DialogContentText>
-                    {props.applyError && (
-                        <p aria-live='assertive' className='ptv-metadata-workflow-message is-error' role='alert'>
-                            {props.applyError}
-                        </p>
-                    )}
-                </DialogContent>
-                <DialogActions className='ptv-metadata-workflow-dialog-actions'>
-                    <button disabled={props.applying} onClick={closeApply} type='button'>Cancel</button>
-                    <button className='is-primary' disabled={props.applying} onClick={confirmApply} type='button'>
-                        {props.applying ? 'Applying…' : 'Apply match'}
-                    </button>
-                </DialogActions>
+                {selectedCandidate ? (
+                    <ReadingApplyReview
+                        key={JSON.stringify([ selectionScope, selectedCandidate.provider, selectedCandidate.providerId,
+                            selectedCandidate.assessmentContext, selectedCandidate.archiveRevision,
+                            selectedCandidate.assessmentDigest, selectedCandidate.identityAssessment ])}
+                        candidate={selectedCandidate}
+                        props={props}
+                        closeApply={closeApply}
+                    />
+                ) : null}
             </Dialog>
         </section>
     );

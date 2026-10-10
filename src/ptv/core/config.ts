@@ -243,6 +243,7 @@ export const PTV_PLUGIN_API = {
         googleBooksMetadataSearch: 'Ptv/v1/reading/metadata/googlebooks/search',
         readingMetadataProviders: 'Ptv/v1/reading/metadata/providers',
         readingMetadataSearch: 'Ptv/v1/reading/metadata/search',
+        readingMetadataReassess: 'Ptv/v1/reading/metadata/reassess',
         readingSeriesOverrides: 'Ptv/v1/reading/series-overrides',
         relationships: 'Ptv/v1/relationships',
         musicMetadataSearch: 'Ptv/v1/music/metadata/search',

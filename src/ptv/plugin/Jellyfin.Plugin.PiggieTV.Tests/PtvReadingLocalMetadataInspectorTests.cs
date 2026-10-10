@@ -189,6 +189,120 @@ public sealed class PtvReadingLocalMetadataInspectorTests : IDisposable
     }
 
     [Fact]
+    public async Task OpfCannotMaskComicInfoFailure()
+    {
+        var path = CreateArchive("broken.cbz", "ComicInfo.xml", "<ComicInfo><Title>broken");
+        await File.WriteAllTextAsync(Path.ChangeExtension(path, ".opf"),
+            "<package><metadata><title>OPF title</title></metadata></package>");
+
+        var result = await CreateInspector().InspectAsync(path, CreateContext(), CreateQuery(), CancellationToken.None);
+
+        Assert.Equal(PtvReadingLocalInspectionState.Inspected, result.State);
+        Assert.Equal(PtvComicInfoArchiveInspectionState.Unverified, result.ComicInfo.State);
+        Assert.Equal("COMICINFO_XML_REJECTED", result.ComicInfo.ReasonCode);
+        Assert.Null(result.ComicInfo.Metadata);
+        Assert.Equal("OPF title", result.Metadata.Title);
+    }
+
+    [Fact]
+    public async Task MissingPathIsNotAttempted()
+    {
+        var host = new ReadingArchiveHost(new PtvComicInfoBytesResult("inspected", "COMICINFO_FOUND",
+            Encoding.UTF8.GetBytes("<ComicInfo><Series>Must not read</Series></ComicInfo>")));
+
+        var result = await new PtvReadingLocalMetadataInspector(host).InspectForApplyAsync(
+            "", CreateContext(), CreateQuery(), CancellationToken.None);
+
+        Assert.Equal(PtvComicInfoArchiveInspectionState.NotAttempted, result.ComicInfo.State);
+        Assert.Null(result.ComicInfo.Metadata);
+        Assert.Equal(0, host.Calls);
+    }
+
+    [Fact]
+    public async Task CbrRootComicInfoParsed()
+    {
+        var path = Path.Combine(_root, "comic.cbr");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        var host = new ReadingArchiveHost(new PtvComicInfoBytesResult("inspected", "COMICINFO_FOUND",
+            Encoding.UTF8.GetBytes("<ComicInfo><Series>Orbit</Series><Number>9</Number><Volume>2018</Volume></ComicInfo>")));
+
+        var result = await new PtvReadingLocalMetadataInspector(host).InspectForApplyAsync(
+            path, CreateContext(), CreateQuery(), CancellationToken.None);
+
+        Assert.Equal(PtvComicInfoArchiveInspectionState.Inspected, result.ComicInfo.State);
+        Assert.Equal("Orbit", result.ComicInfo.Metadata?.SeriesTitle);
+        Assert.Equal("9", result.ComicInfo.Metadata?.IssueNumber);
+        Assert.Equal("2018", result.ComicInfo.Metadata?.VolumeNumber);
+        Assert.Equal(path, host.LastPath);
+    }
+
+    [Theory]
+    [InlineData("<ComicInfo><Series>broken")]
+    [InlineData("<!DOCTYPE ComicInfo [<!ENTITY xxe SYSTEM 'file:///private/secret'>]><ComicInfo><Series>&xxe;</Series></ComicInfo>")]
+    public async Task MalformedOrDtdXmlUnverified(string xml)
+    {
+        var path = Path.Combine(_root, "unsafe.cbr");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        var host = new ReadingArchiveHost(new PtvComicInfoBytesResult("inspected", "COMICINFO_FOUND", Encoding.UTF8.GetBytes(xml)));
+
+        var result = await new PtvReadingLocalMetadataInspector(host).InspectForApplyAsync(
+            path, CreateContext(), CreateQuery(), CancellationToken.None);
+
+        Assert.Equal(PtvComicInfoArchiveInspectionState.Unverified, result.ComicInfo.State);
+        Assert.Equal("COMICINFO_XML_REJECTED", result.ComicInfo.ReasonCode);
+        Assert.Null(result.ComicInfo.Metadata);
+        Assert.DoesNotContain("private", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task InspectForApplyReadsFreshBytes()
+    {
+        var path = Path.Combine(_root, "changing.cbz");
+        await File.WriteAllTextAsync(path, "<ComicInfo><Series>Before</Series></ComicInfo>");
+        var host = new FileReadingArchiveHost();
+        var inspector = new PtvReadingLocalMetadataInspector(host);
+
+        var first = await inspector.InspectForApplyAsync(path, CreateContext(), CreateQuery(), CancellationToken.None);
+        await File.WriteAllTextAsync(path, "<ComicInfo><Series>After</Series></ComicInfo>");
+        var second = await inspector.InspectForApplyAsync(path, CreateContext(), CreateQuery(), CancellationToken.None);
+
+        Assert.Equal("Before", first.ComicInfo.Metadata?.SeriesTitle);
+        Assert.Equal("After", second.ComicInfo.Metadata?.SeriesTitle);
+        Assert.Equal(2, host.Calls);
+    }
+
+    [Fact]
+    public async Task UnsupportedApplyFormatIsUnverifiedWithoutHostRead()
+    {
+        var path = Path.Combine(_root, "unknown.bin");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        var host = new ReadingArchiveHost(new PtvComicInfoBytesResult("absent", "COMICINFO_ABSENT", []));
+
+        var result = await new PtvReadingLocalMetadataInspector(host).InspectForApplyAsync(
+            path, CreateContext(), CreateQuery(), CancellationToken.None);
+
+        Assert.Equal(PtvComicInfoArchiveInspectionState.Unverified, result.ComicInfo.State);
+        Assert.Equal("COMICINFO_ARCHIVE_UNSUPPORTED", result.ComicInfo.ReasonCode);
+        Assert.Equal(0, host.Calls);
+    }
+
+    [Fact]
+    public async Task UnconfiguredApplyHostIsUnverifiedEvenWhenOpfSucceeds()
+    {
+        var path = CreateArchive("offline.cbz", "ComicInfo.xml", "<ComicInfo><Series>Archive</Series></ComicInfo>");
+        await File.WriteAllTextAsync(Path.ChangeExtension(path, ".opf"),
+            "<package><metadata><title>OPF title</title></metadata></package>");
+
+        var result = await CreateInspector().InspectForApplyAsync(
+            path, CreateContext(), CreateQuery(), CancellationToken.None);
+
+        Assert.Equal(PtvReadingLocalInspectionState.Inspected, result.State);
+        Assert.Equal(PtvComicInfoArchiveInspectionState.Unverified, result.ComicInfo.State);
+        Assert.Equal("HELPER_UNAVAILABLE", result.ComicInfo.ReasonCode);
+        Assert.Equal("OPF title", result.Metadata.Title);
+    }
+
+    [Fact]
     public async Task CbrIsExplicitlyUnsupportedAndNeverOpenedOrMutated()
     {
         var path = Path.Combine(_root, "legacy.cbr");
@@ -261,6 +375,29 @@ public sealed class PtvReadingLocalMetadataInspectorTests : IDisposable
     }
 
     private static PtvReadingLocalMetadataInspector CreateInspector() => new();
+
+    private sealed class ReadingArchiveHost(PtvComicInfoBytesResult result) : IPtvArchiveInspectionHost
+    {
+        public int Calls { get; private set; }
+        public string? LastPath { get; private set; }
+        public Task<PtvComicInfoBytesResult> ReadComicInfoAsync(string authoritativePath, CancellationToken cancellationToken)
+        {
+            Calls++;
+            LastPath = authoritativePath;
+            return Task.FromResult(result);
+        }
+    }
+
+    private sealed class FileReadingArchiveHost : IPtvArchiveInspectionHost
+    {
+        public int Calls { get; private set; }
+        public async Task<PtvComicInfoBytesResult> ReadComicInfoAsync(string authoritativePath, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return new PtvComicInfoBytesResult("inspected", "COMICINFO_FOUND",
+                await File.ReadAllBytesAsync(authoritativePath, cancellationToken));
+        }
+    }
 
     private static PtvMetadataSearchContext CreateContext() => new();
 

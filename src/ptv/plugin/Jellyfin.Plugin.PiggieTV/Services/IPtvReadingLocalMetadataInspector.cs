@@ -19,4 +19,11 @@ public interface IPtvReadingLocalMetadataInspector
         PtvMetadataSearchContext context,
         PtvStructuredMetadataQuery query,
         CancellationToken cancellationToken);
+
+    /// <summary>Reassesses archive evidence through the isolated host using current source bytes.</summary>
+    Task<PtvReadingLocalMetadataInspectionResult> InspectForApplyAsync(
+        string sourcePath,
+        PtvMetadataSearchContext context,
+        PtvStructuredMetadataQuery query,
+        CancellationToken cancellationToken);
 }

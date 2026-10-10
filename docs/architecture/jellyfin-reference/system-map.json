@@ -780,6 +780,52 @@
         }
       ]
     },
+    "ptvReadingIdentityGuard": {
+      "authoritativeOwners": [
+        "Jellyfin Book entity, resolved file path, manual item metadata write, user-scoped DTO, images, relationships and UserData"
+      ],
+      "derivedOwners": [
+        "PTV Plugin bounded ComicInfo archive inspector, source-specific identity assessor and signed candidate context",
+        "PTV shared administrator Reading Identify review and guarded manual save"
+      ],
+      "classification": ["STOCK_WRAPPED", "NEW_PTV_SYSTEM"],
+      "scope": "Explicit PTV Reading Identify Apply in Metadata Manager and Metadata Quality; recognized-provider nonrecursive Book Scan is blocked before its former PTV exact-provider write; explicit recursive Scan, stock Identify and Jellyfin refresh are outside the guard",
+      "route": "POST /Ptv/v1/reading/metadata/reassess; authenticated administrator with Policies.RequiresElevation",
+      "contract": "Search-issued context binds administrator, item, provider identity and scope, search generation and typed provenance for at most 15 minutes and one Plugin process; reassess bypasses search cache/provider fetch and returns current typed conflict or unverified evidence plus opaque revision",
+      "mutationOrder": "fresh form conflict check -> reassess current archive/item -> independently acknowledged review -> manual Jellyfin updateItem -> exact authoritative readback",
+      "scanDispatch": "Nonrecursive Book Scan with a recognized saved Reading provider ID rejects before provider lookup, stock refresh or item update and directs the administrator to guarded Identify; no automatic fallback. Explicit recursive Scan and Books without a recognized saved Reading ID retain their stock refresh paths.",
+      "lifecycle": "Changed server/user/item/candidate/generation/revision/assessment retires old review and acknowledgments; denied or failed reassessment makes zero item updates",
+      "queuedCancellation": "After the two-helper semaphore grants a queued waiter, recheck the linked cancellation token before pipe creation or helper launch; cleanup releases safe capacity, but failed child reap consumes the slot until restart rather than allowing a third process",
+      "resourceBoundary": "At most two helpers/server and five seconds; 512 MiB hard Windows Job or delegated Linux cgroup limit before archive input; missing helper or unenforceable limit yields typed unverified identity",
+      "package": "Main Plugin files plus separately packaged self-contained linux-x64 and win-x64 helper trees; source commit and artifact hashes required before any deployment",
+      "nonGuarantees": [
+        "No atomic archive-to-Jellyfin metadata transaction",
+        "No provider candidate correctness or freshness guarantee",
+        "No guard for stock writers, explicit recursive Scan or older mounted Web admin clients",
+        "No image/cache/relationship convergence from mutation acknowledgment",
+        "Local tests do not prove Linux/Windows Jellyfin service helper binding or resource limits"
+      ],
+      "componentRefs": ["ptvPlugin", "ptvReading"],
+      "dependsOn": ["reading", "metadataIdentify", "settingsAndAdmin", "libraryAndItemProjection", "cacheAndInvalidation"],
+      "stage3PhysicalStatus": "NOT_TESTED; Jellyfin .50 and .125 not contacted in source integration",
+      "chapterRefs": ["11-reading.md", "13-metadata-identify.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidence": [
+        {
+          "repository": "PTV Reading lineage",
+          "version": "db873570c4 source candidate",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvReadingMetadataIdentificationService.cs",
+          "symbol": "ReassessAsync / fresh identity evidence",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Reading lineage",
+          "version": "db873570c4 source candidate",
+          "file": "src/ptv/modules/settings/admin/metadataManager/adminMetadataManagerService.ts",
+          "symbol": "manual save beforeUpdate guard and readback",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
     "metadataIdentify": {
       "authoritativeOwners": [
         "Jellyfin Server metadata/provider pipeline and persisted item state"
@@ -1320,6 +1366,15 @@
         ]
       },
       {
+        "from": "ptvReadingIdentityGuard",
+        "to": "metadataIdentify",
+        "reason": "The PTV administrator Reading guard reassesses current archive and candidate identity before the existing manual Jellyfin item metadata write; it does not replace the stock mutation or its readback.",
+        "evidenceRefs": [
+          "$.systems.ptvReadingIdentityGuard.evidence[0]",
+          "$.systems.ptvReadingIdentityGuard.evidence[1]"
+        ]
+      },
+      {
         "from": "metadataIdentify",
         "to": "libraryAndItemProjection",
         "reason": "Identify mutates server state; later reads project the result.",
@@ -1472,6 +1527,14 @@
         "22-change-impact-matrix.md",
         "25-known-jellyfin-non-guarantees.md"
       ]
+    },
+    "ptvReadingManualIdentifyApply": {
+      "authority": "Jellyfin Server ItemUpdateController and persisted Book metadata; PTV Plugin preflight is read-only",
+      "preWriteGuard": "Current administrator/item/candidate context, fresh form check, fresh source-specific reassessment and separate conflict/unverified acknowledgments; any uncertainty blocks before updateItem",
+      "retiredBypass": "The former PTV exact-provider nonrecursive Book Scan with a saved Reading provider ID is blocked before search/write and redirects the administrator to guarded Identify; explicit recursive stock Scan remains unchanged",
+      "acknowledgment": "Manual update response is distinct from exact authoritative readback and independent image/cache/relationship convergence",
+      "requiredReconciliation": ["exact user-scoped item readback", "locked-field and relationship preservation", "image-tag/artwork outcome", "stale review and concurrent save retirement"],
+      "chapterRefs": ["11-reading.md", "13-metadata-identify.md", "21-ownership-conflicts.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"]
     },
     "userData": {
       "authority": "Jellyfin Server user item data",
@@ -1706,6 +1769,14 @@
         "routes": ["GET current", "POST begin", "POST {operationId}/complete", "POST verification-batches", "POST verification-batches/new", "GET verification-batches/current", "POST verification-batches/{batchId}/users/{userId}/verify", "POST creations/reserve", "POST creations/{creationOperationId}/bind", "GET creations/current", "POST creations/{creationOperationId}/recover", "GET verification-summary", "POST recover-corrupt"],
         "rule": "Administrator controlled existing-user changes require durable pre-write hold; new-account creation has no pre-ID hold and must fail closed through policy readback, current-epoch durable proof, and fresh membership. Migration freezes exact candidate IDs and verifies each separately."
       },
+      "readingIdentityReassessment": {
+        "route": "POST /Ptv/v1/reading/metadata/reassess",
+        "access": "authenticated Jellyfin administrator; server-side elevation required",
+        "request": "exact item ID, bounded signed candidate context and displayed assessment/archive revision",
+        "response": "typed source-labeled assessment, conflict/unverified reasons and opaque current revision; no file path or raw ComicInfo XML",
+        "completion": "read-only point-in-time reassessment, not a metadata write or future archive lock",
+        "failure": "missing/expired/tampered context, denied user, missing route/item, malformed response or infrastructure failure blocks Apply"
+      },
       "homeTransitions": {
         "baseRoute": "/Ptv/v1/home-transitions",
         "routes": ["GET current", "POST begin", "POST {operationId}/complete"],
@@ -1823,6 +1894,12 @@
         "21-ownership-conflicts.md",
         "22-change-impact-matrix.md"
       ]
+    },
+    "readingIdentityBeforeMutation": {
+      "risk": "CRITICAL",
+      "rule": "A source-specific archive conflict or typed unverified result requires its own explicit current-review acknowledgment; stale or failed administrator reassessment cannot reach Jellyfin updateItem. A recognized-provider nonrecursive Book Scan must block before its former exact-provider write instead of bypassing review or falling back. A successful reassessment does not atomically lock archive bytes through the later write; explicit recursive Scan and stock refresh remain outside the guard.",
+      "affected": ["ptvReadingIdentityGuard", "metadataIdentify", "settingsAndAdmin", "libraryAndItemProjection", "images", "cacheAndInvalidation"],
+      "chapterRefs": ["11-reading.md", "13-metadata-identify.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"]
     },
     "mutationAcknowledgmentVsConvergence": {
       "risk": "HIGH",
@@ -3575,6 +3652,17 @@
           "lines": "23-116",
           "status": "VERIFIED_FROM_SOURCE"
         }
+      ]
+    },
+    "readingIdentityGuard": {
+      "classification": ["STOCK_WRAPPED", "NEW_PTV_SYSTEM"],
+      "ptvChange": "Adds bounded source-specific ComicInfo evidence and an administrator-only fresh pre-write reassessment to the existing shared Reading Identify/manual save workflow. Retires the PTV nonrecursive saved-provider Book Scan writer by blocking it before search/write with direction to Identify. Explicit recursive Scan and stock refresh remain unchanged; Jellyfin remains metadata authority.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": ["11-reading.md", "13-metadata-identify.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidence": [
+        {"repository": "PTV Reading lineage", "version": "db873570c4 source candidate", "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvReadingMetadataController.cs", "symbol": "administrator reassess route", "status": "VERIFIED_FROM_SOURCE"},
+        {"repository": "PTV Reading lineage", "version": "db873570c4 source candidate", "file": "src/ptv/modules/settings/admin/metadataManager/useAdminMetadataIdentifyController.ts", "symbol": "current review and approval binding", "status": "VERIFIED_FROM_SOURCE"}
       ]
     },
     "music": {

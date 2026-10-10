@@ -402,6 +402,21 @@ public sealed class PtvReadingMatchScoreReason
 /// <summary>A safe normalized result shared by every Reading metadata provider.</summary>
 public sealed class PtvNormalizedMetadataCandidate
 {
+    public string? AssessmentContext { get; set; }
+    public string? ArchiveRevision { get; set; }
+    public string? AssessmentDigest { get; set; }
+
+    /// <summary>Identity text was withheld by the transport boundary and requires review.</summary>
+    public bool HasRedactedIdentity { get; set; }
+    /// <summary>Explicit run/volume semantics supplied by a proved adapter mapping.</summary>
+    public PtvReadingRunEvidenceKind RunEvidenceKind { get; set; }
+
+    /// <summary>Provider-scoped identities; arbitrary ExternalIds are not proof.</summary>
+    public List<PtvReadingScopedProviderId> IdentityProviderIds { get; set; } = [];
+
+    /// <summary>Source-specific review evidence, independent of ranking.</summary>
+    public PtvReadingIdentityAssessment? IdentityAssessment { get; set; }
+
     public string Provider { get; set; } = string.Empty;
 
     public string ProviderId { get; set; } = string.Empty;
@@ -507,20 +522,28 @@ public sealed class PtvNormalizedMetadataCandidate
     {
         return new PtvNormalizedMetadataCandidate
         {
+            HasRedactedIdentity = HasRedactedIdentity || new[] { Title, SeriesTitle, IssueNumber, VolumeNumber, ChapterNumber }
+                .Any(PtvReadingIdentityText.IsUnsafe),
+            RunEvidenceKind = RunEvidenceKind,
+            IdentityProviderIds = IdentityProviderIds.Take(32).Select(id => id.ToBoundedTransportModel()).ToList(),
+            IdentityAssessment = IdentityAssessment,
+            AssessmentContext = AssessmentContext,
+            ArchiveRevision = ArchiveRevision,
+            AssessmentDigest = AssessmentDigest,
             Provider = Bound(Provider, PtvReadingMetadataLimits.MaximumIdentifierLength),
             ProviderId = Bound(ProviderId, PtvReadingMetadataLimits.MaximumIdentifierLength),
             MediaClass = MediaClass,
-            Title = Bound(Title, PtvReadingMetadataLimits.MaximumTitleLength),
+            Title = PtvReadingIdentityText.Bound(Title, PtvReadingMetadataLimits.MaximumTitleLength) ?? string.Empty,
             AlternateTitles = BoundStrings(AlternateTitles, PtvReadingMetadataLimits.MaximumTitleLength),
             LocalizedTitles = BoundDictionary(LocalizedTitles, PtvReadingMetadataLimits.MaximumTitleLength),
-            SeriesTitle = BoundNullable(SeriesTitle, PtvReadingMetadataLimits.MaximumTitleLength),
+            SeriesTitle = PtvReadingIdentityText.Bound(SeriesTitle, PtvReadingMetadataLimits.MaximumTitleLength),
             SeriesTitleEvidence = SeriesTitleEvidence,
-            IssueNumber = BoundNullable(IssueNumber, 32),
+            IssueNumber = PtvReadingIdentityText.Bound(IssueNumber, 32),
             IssueNumberEvidence = IssueNumberEvidence,
             EditionKind = EditionKind,
             EditionKindEvidence = EditionKindEvidence,
-            VolumeNumber = BoundNullable(VolumeNumber, 32),
-            ChapterNumber = BoundNullable(ChapterNumber, 32),
+            VolumeNumber = PtvReadingIdentityText.Bound(VolumeNumber, 32),
+            ChapterNumber = PtvReadingIdentityText.Bound(ChapterNumber, 32),
             Year = Year,
             StartYear = StartYear,
             SeriesStartYearEvidence = SeriesStartYearEvidence,

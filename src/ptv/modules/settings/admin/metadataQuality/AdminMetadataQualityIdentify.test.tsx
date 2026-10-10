@@ -2,6 +2,9 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { normalizeAdminReadingMetadataSearchResponse } from '../metadataManager/adminReadingMetadataAdapters';
+import { identityAssessment } from '../metadataManager/adminReadingIdentityTestFixtures';
+import type { AdminMetadataIdentifyPanelProps } from '../metadataManager/AdminMetadataIdentifyPanel';
 import type { AdminMetadataItemBundle } from '../metadataManager/adminMetadataManagerModel';
 import AdminMetadataQualityIdentify, {
     createAdminMetadataQualityIdentifyPrefill
@@ -9,6 +12,7 @@ import AdminMetadataQualityIdentify, {
 import type { AdminMetadataQualityDetail } from './adminMetadataQualityModel';
 
 const identifyMocks = vi.hoisted(() => ({
+    realPanel: false,
     panel: vi.fn(),
     useApi: vi.fn(),
     useManager: vi.fn()
@@ -22,12 +26,13 @@ vi.mock('../metadataManager/useAdminMetadataManager', () => ({
     useAdminMetadataManager: identifyMocks.useManager
 }));
 
-vi.mock('../metadataManager/AdminMetadataIdentifyPanel', () => ({
-    default: (props: unknown) => {
+vi.mock('../metadataManager/AdminMetadataIdentifyPanel', async importOriginal => {
+    const actual = await importOriginal<typeof import('../metadataManager/AdminMetadataIdentifyPanel')>();
+    return { default: (props: AdminMetadataIdentifyPanelProps) => {
         identifyMocks.panel(props);
-        return null;
-    }
-}));
+        return identifyMocks.realPanel ? <actual.default {...props} /> : null;
+    } };
+});
 
 /* eslint-disable @typescript-eslint/naming-convention */
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -96,6 +101,7 @@ describe('Metadata Quality inline Identify adapter', () => {
     let root: Root;
 
     beforeEach(() => {
+        identifyMocks.realPanel = false;
         identifyMocks.useApi.mockReturnValue({
             __legacyApiClient__: { serverInfo: vi.fn() },
             api: {},
@@ -187,5 +193,54 @@ describe('Metadata Quality inline Identify adapter', () => {
             seriesTitle: 'Deadpool',
             year: 2020
         });
+    });
+    it('shows archive failure in the shared parsed evidence even with OPF success and no matches', async () => {
+        identifyMocks.realPanel = true;
+        const bundle = itemBundle();
+        const response = normalizeAdminReadingMetadataSearchResponse({ candidates: [] });
+        identifyMocks.useManager.mockReturnValue(managerState({
+            itemBundle: { ...bundle, item: { ...bundle.item, type: 'Book' } },
+            fetchReadingProviders: vi.fn(async () => ({ providers: [] })),
+            searchReadingIdentify: vi.fn(async () => ({ ...response,
+                localMetadata: { state: 'inspected', sources: [ 'OPF' ], warnings: [] },
+                identitySources: { ...identityAssessment().sources, archiveState: 'unverified', archiveReasonCode: 'HELPER_UNAVAILABLE' }
+            }))
+        }));
+        await act(async () => root.render(<AdminMetadataQualityIdentify detail={qualityDetail({ providerVerified: false })} />));
+        await act(async () => Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Search')?.click());
+        expect(container.querySelector('.ptv-reading-parsed-query')?.textContent).toContain('Archive identity could not be verified');
+        expect(container.textContent).toContain('helper unavailable');
+        expect(container.textContent).toContain('No matches found');
+    });
+
+    it('renders the real shared Reading workflow and requires the conflict acknowledgment', async () => {
+        identifyMocks.realPanel = true;
+        const bundle = itemBundle();
+        const assessment = identityAssessment({ itemId: 'item-a', requiresConflictAcknowledgment: true,
+            findings: [ { code: 'ISSUE_CONFLICT', field: 'Issue', leftSource: 'ComicInfo', leftValue: '1',
+                rightSource: 'Provider', rightValue: '9', isConflict: true, isMaterialUncertainty: false } ] });
+        const response = normalizeAdminReadingMetadataSearchResponse({ candidates: [ {
+            title: 'Synthetic match', provider: 'ComicVine', providerId: '4000-123'
+        } ] });
+        const candidate = { ...response.candidates[0], assessmentContext: 'signed-context', archiveRevision: 'revision-a',
+            assessmentDigest: 'digest-a', identityAssessment: assessment };
+        const applyIdentifyResult = vi.fn(async () => bundle);
+        identifyMocks.useManager.mockReturnValue(managerState({
+            identityScope: { serverId: 'server-a', userId: 'admin-a' },
+            itemBundle: { ...bundle, item: { ...bundle.item, type: 'Book' } },
+            fetchReadingProviders: vi.fn(async () => ({ providers: [] })),
+            searchReadingIdentify: vi.fn(async () => ({ ...response, candidates: [ candidate ] })), applyIdentifyResult
+        }));
+        const button = (text: string) => Array.from(document.body.querySelectorAll('button')).find(item => item.textContent === text);
+        await act(async () => root.render(<AdminMetadataQualityIdentify detail={qualityDetail({ providerVerified: false })} />));
+        await act(async () => button('Search')?.click());
+        await act(async () => button('Review match')?.click());
+        expect(document.body.textContent).toContain('ComicInfo: 1');
+        expect(button('Apply despite conflict')?.disabled).toBe(true);
+        const checkbox = document.body.querySelector<HTMLInputElement>('input[type="checkbox"]');
+        expect(checkbox?.checked).toBe(false);
+        await act(async () => checkbox?.click());
+        expect(button('Apply despite conflict')?.disabled).toBe(false);
+        expect(applyIdentifyResult).not.toHaveBeenCalled();
     });
 });

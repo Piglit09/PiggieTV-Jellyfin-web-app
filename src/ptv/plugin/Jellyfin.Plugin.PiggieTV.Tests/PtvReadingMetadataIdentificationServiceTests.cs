@@ -19,6 +19,67 @@ namespace Jellyfin.Plugin.PiggieTV.Tests;
 
 public sealed class PtvReadingMetadataIdentificationServiceTests
 {
+    [Theory]
+    [InlineData("https://private.invalid/?token=secret")]
+    [InlineData("download?opaque-secret")]
+    [InlineData("download#opaque-secret")]
+    [InlineData("download%3Fopaque-secret")]
+    public async Task SearchSerializationDoesNotEchoUnsafeEmbeddedIdentityThroughQuery(string unsafeText)
+    {
+        var item = ReadingItem("Orbit #9.cbz");
+        var provider = Provider("gcd", PtvReadingMediaClass.Comic);
+        provider.DirectCandidate = Candidate("gcd", "123", "Orbit", PtvReadingMediaClass.Comic);
+        provider.DirectCandidate.SeriesTitle = "Orbit"; provider.DirectCandidate.IssueNumber = "9";
+        var metadata = new PtvReadingLocalMetadataEvidence { SeriesTitle = unsafeText, IssueNumber = "9" };
+        var inspector = new RecordingInspector { Result = new() { State = PtvReadingLocalInspectionState.Inspected,
+            Metadata = metadata, ComicInfo = new() { State = PtvComicInfoArchiveInspectionState.Inspected, Metadata = metadata } } };
+        var result = await CreateService(item, [provider], inspector).SearchAsync(new()
+        { ItemId = item.Id.ToString("N"), Provider = "gcd", ProviderId = "123", MediaClass = PtvReadingMediaClass.Comic }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
+        Assert.DoesNotContain("secret", JsonSerializer.Serialize(result));
+        Assert.True(Assert.Single(result.Candidates).IdentityAssessment!.RequiresUnverifiedAcknowledgment);
+    }
+
+    [Fact]
+    public async Task SearchProjectsIndependentEmbeddedConflictBesideDirectCandidate()
+    {
+        var provider = Provider("gcd", PtvReadingMediaClass.Comic);
+        provider.DirectCandidate = Candidate("gcd", "123", "Orbit", PtvReadingMediaClass.Comic);
+        provider.DirectCandidate.SeriesTitle = "Orbit";
+        provider.DirectCandidate.IssueNumber = "9";
+        var item = ReadingItem("Other #009 (2019).cbz");
+        var inspector = new RecordingInspector
+        {
+            Result = new()
+            {
+                State = PtvReadingLocalInspectionState.Inspected,
+                Metadata = new() { SeriesTitle = "Orbit", IssueNumber = "9" },
+                ComicInfo = new() { State = PtvComicInfoArchiveInspectionState.Inspected,
+                    Metadata = new() { SeriesTitle = "Orbit", IssueNumber = "9", VolumeNumber = "2018" } }
+            }
+        };
+        var result = await CreateService(item, [provider], inspector).SearchAsync(new()
+        { ItemId = item.Id.ToString("N"), Provider = "gcd", ProviderId = "123", MediaClass = PtvReadingMediaClass.Comic }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
+        var candidate = Assert.Single(result.Candidates);
+        Assert.NotNull(candidate.IdentityAssessment);
+        Assert.True(candidate.IdentityAssessment.RequiresConflictAcknowledgment);
+        Assert.True(candidate.IdentityAssessment.RequiresUnverifiedAcknowledgment);
+        Assert.Equal("Other", candidate.IdentityAssessment.Sources.FileName.SeriesTitle);
+        Assert.Equal(candidate.IdentityAssessment.AssessmentDigest, Assert.Single(Assert.Single(result.ProviderResults).Candidates).IdentityAssessment!.AssessmentDigest);
+    }
+
+    [Fact]
+    public async Task MergedEmbeddedSeriesDoesNotInheritDifferentFilenameFolderCorroboration()
+    {
+        var item = ReadingItem("Other #9.cbz"); item.Path = "/comics/Other (2019)/Other #9.cbz";
+        var inspector = new RecordingInspector { Result = new()
+        { State = PtvReadingLocalInspectionState.Inspected, Metadata = new() { SeriesTitle = "Orbit" } } };
+        var result = await CreateService(item, [Provider("gcd", PtvReadingMediaClass.Comic)], inspector).SearchAsync(new()
+        { ItemId = item.Id.ToString("N"), Provider = "gcd", MediaClass = PtvReadingMediaClass.Comic }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
+        Assert.Equal("Orbit", result.Query.SeriesTitle);
+        Assert.False(result.Query.FolderCorroboratesSeriesTitle);
+        Assert.False(result.Query.FolderCorroboratesSeriesStartYear);
+    }
+
     [Fact]
     public void ControllerContractIsAdminOnlyBoundedAndObservational()
     {
@@ -35,7 +96,8 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(method => method.GetCustomAttributes<HttpMethodAttribute>(inherit: true).Any())
             .ToArray();
-        Assert.Equal(2, declaredActions.Length);
+        Assert.Equal(3, declaredActions.Length);
+        AssertRoute(nameof(PtvReadingMetadataController.Reassess), typeof(HttpPostAttribute), "reassess");
         Assert.DoesNotContain(declaredActions, method =>
             method.GetCustomAttributes(inherit: true).Any(attribute =>
                 attribute is HttpPutAttribute or HttpPatchAttribute or HttpDeleteAttribute)
@@ -45,7 +107,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             || method.Name.Contains("delete", StringComparison.OrdinalIgnoreCase));
 
         Assert.Equal(
-            [nameof(IPtvReadingMetadataIdentificationService.GetProvidersAsync), nameof(IPtvReadingMetadataIdentificationService.SearchAsync)],
+            [nameof(IPtvReadingMetadataIdentificationService.GetProvidersAsync), nameof(IPtvReadingMetadataIdentificationService.ReassessAsync), nameof(IPtvReadingMetadataIdentificationService.SearchAsync)],
             typeof(IPtvReadingMetadataIdentificationService).GetMethods().Select(method => method.Name).Order().ToArray());
     }
 
@@ -121,10 +183,10 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
 
         var invalid = await Assert.ThrowsAsync<PtvReadingMetadataServiceException>(() => invalidService.SearchAsync(
             new PtvReadingMetadataSearchRequest { ItemId = "not-a-guid", MediaClass = PtvReadingMediaClass.Comic },
-            CancellationToken.None));
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None));
         var missing = await Assert.ThrowsAsync<PtvReadingMetadataServiceException>(() => invalidService.SearchAsync(
             new PtvReadingMetadataSearchRequest { ItemId = Guid.NewGuid().ToString("N"), MediaClass = PtvReadingMediaClass.Comic },
-            CancellationToken.None));
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None));
 
         Assert.Equal("PTV_READING_ITEM_INVALID", invalid.Code);
         Assert.Equal("PTV_READING_ITEM_NOT_FOUND", missing.Code);
@@ -152,7 +214,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             ItemId = item.Id.ToString("N"),
             MediaClass = mediaClass,
             Title = "Sample"
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         var expected = expectedProviders.Split(',').ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var provider in new[] { comicVine, aniList, mangaDex, googleBooks })
@@ -177,7 +239,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             Provider = "MangaDex",
             ProviderId = "md-42",
             Title = "this title must not drive fuzzy search"
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         var candidate = Assert.Single(response.Candidates);
         Assert.Equal("md-42", candidate.ProviderId);
@@ -202,7 +264,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             ItemId = item.Id.ToString("N"),
             MediaClass = PtvReadingMediaClass.Manga,
             Title = "Monster"
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         Assert.Contains(response.Candidates, candidate => candidate.ProviderId == "md-1");
         var failed = Assert.Single(response.ProviderResults, result => result.Provider == "AniList");
@@ -229,7 +291,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             Title = "Saga",
             IssueNumber = "1",
             Year = 2012
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         Assert.Equal("strong", response.Candidates[0].ProviderId);
         Assert.True(response.Candidates[0].Score > response.Candidates[1].Score);
@@ -259,7 +321,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             Title = "Deadpool",
             IssueNumber = "9",
             SeriesStartYear = 2019
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         Assert.Equal(30, response.Candidates.Count);
         Assert.Equal("candidate-40", response.Candidates[0].ProviderId);
@@ -303,7 +365,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             Title = "Vagabond",
             Author = "Takehiko Inoue",
             Year = 1998
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         var merged = Assert.Single(response.Candidates);
         Assert.Equal("AniList + MangaDex", merged.Provider);
@@ -328,7 +390,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             MediaClass = PtvReadingMediaClass.Manga,
             Title = "Orange",
             Year = 2012
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         Assert.Equal(2, response.Candidates.Count);
         Assert.DoesNotContain(response.Candidates, candidate => candidate.Provider == "AniList + MangaDex");
@@ -375,7 +437,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             ItemId = item.Id.ToString("N"),
             MediaClass = PtvReadingMediaClass.Manga,
             Title = "共有タイトル"
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         Assert.Equal(2, response.Candidates.Count);
         Assert.DoesNotContain(response.Candidates, candidate => candidate.Provider == "AniList + MangaDex");
@@ -404,7 +466,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             ItemId = item.Id.ToString("N"),
             MediaClass = PtvReadingMediaClass.Comic,
             Title = "Bounded"
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         Assert.Equal(30, response.Candidates.Count);
         var transported = response.Candidates
@@ -452,7 +514,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
         var response = await service.SearchAsync(new PtvReadingMetadataSearchRequest
         {
             ItemId = item.Id.ToString("N")
-        }, CancellationToken.None);
+        }, Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), CancellationToken.None);
 
         Assert.Equal(1, inspector.Calls);
         Assert.Equal(item.Path, inspector.LastSourcePath);
@@ -528,7 +590,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             inspector ?? new RecordingInspector(),
             new PtvReadingMetadataParser(),
             new PtvReadingMetadataScorer(),
-            NullLogger<PtvReadingMetadataIdentificationService>.Instance);
+            NullLogger<PtvReadingMetadataIdentificationService>.Instance, new PtvReadingCandidateContextCodec());
 
     private static ILibraryManager CreateLibraryManager(BaseItem? item)
     {
@@ -586,7 +648,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
                 HttpContext = new DefaultHttpContext
                 {
                     User = authenticated
-                        ? new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin")], "Test"))
+                        ? new ClaimsPrincipal(new ClaimsIdentity([new Claim("Jellyfin-UserId", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")], "Test"))
                         : new ClaimsPrincipal(new ClaimsIdentity())
                 }
             }
@@ -637,6 +699,13 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
             LastSourcePath = sourcePath;
             return Task.FromResult(Result);
         }
+
+        public Task<PtvReadingLocalMetadataInspectionResult> InspectForApplyAsync(
+            string sourcePath,
+            PtvMetadataSearchContext context,
+            PtvStructuredMetadataQuery query,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Result);
     }
 
     private sealed class RecordingProvider : IPtvReadingMetadataProvider
@@ -712,6 +781,8 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
 
     private sealed class RecordingIdentificationService : IPtvReadingMetadataIdentificationService
     {
+        public Task<PtvReadingIdentityAssessment> ReassessAsync(PtvReadingIdentityReassessRequest request, Guid administratorId, CancellationToken cancellationToken)
+        { CallCount++; return Task.FromResult(new PtvReadingIdentityAssessment()); }
         public int CallCount { get; private set; }
 
         public Task<PtvReadingMetadataProvidersResponse> GetProvidersAsync(CancellationToken cancellationToken)
@@ -722,6 +793,7 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
 
         public Task<PtvReadingMetadataSearchResponse> SearchAsync(
             PtvReadingMetadataSearchRequest request,
+            Guid administratorId,
             CancellationToken cancellationToken)
         {
             CallCount++;
@@ -734,11 +806,14 @@ public sealed class PtvReadingMetadataIdentificationServiceTests
 
     private sealed class ThrowingIdentificationService(Exception exception) : IPtvReadingMetadataIdentificationService
     {
+        public Task<PtvReadingIdentityAssessment> ReassessAsync(PtvReadingIdentityReassessRequest request, Guid administratorId, CancellationToken cancellationToken) => Task.FromException<PtvReadingIdentityAssessment>(exception);
+
         public Task<PtvReadingMetadataProvidersResponse> GetProvidersAsync(CancellationToken cancellationToken) =>
             Task.FromException<PtvReadingMetadataProvidersResponse>(exception);
 
         public Task<PtvReadingMetadataSearchResponse> SearchAsync(
             PtvReadingMetadataSearchRequest request,
+            Guid administratorId,
             CancellationToken cancellationToken) =>
             Task.FromException<PtvReadingMetadataSearchResponse>(exception);
     }

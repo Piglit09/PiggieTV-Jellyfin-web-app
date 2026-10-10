@@ -190,6 +190,70 @@ describe('Metadata Manager service', () => {
         apiMocks.applySearchCriteria.mockResolvedValue({});
     });
 
+    it('NoUpdateBeforeAcknowledgedFreshPreflight', async () => {
+        const confirmedForm = normalizeAdminMetadataForm(rawItem());
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => {
+            release = resolve;
+        });
+        const beforeUpdate = vi.fn(async () => gate);
+        const pending = saveAdminMetadataItem(api, {
+            itemId: 'item-a', confirmedForm, desiredForm: { ...confirmedForm, name: 'Changed' },
+            guardKey: 'approved-a', beforeUpdate
+        });
+        await vi.waitFor(() => expect(beforeUpdate).toHaveBeenCalledOnce());
+        expect(apiMocks.updateItem).not.toHaveBeenCalled();
+        release();
+        await pending;
+        expect(apiMocks.updateItem).toHaveBeenCalledOnce();
+    });
+
+    it.each(['expired context', 'denied context', 'changed archive'])('ExpiredOrDeniedContextBlocksUpdate: %s', async reason => {
+        const confirmedForm = normalizeAdminMetadataForm(rawItem());
+        const failure = new Error(reason);
+        await expect(saveAdminMetadataItem(api, {
+            itemId: 'item-a', confirmedForm, desiredForm: { ...confirmedForm, name: 'Changed' },
+            guardKey: reason, beforeUpdate: async () => { throw failure; }
+        })).rejects.toBe(failure);
+        expect(apiMocks.updateItem).not.toHaveBeenCalled();
+    });
+
+    it.each(['guard', 'desired form', 'confirmed form', 'user'])('ConcurrentDifferentGuardDoesNotShareFlight: %s', async difference => {
+        const confirmedForm = normalizeAdminMetadataForm(rawItem());
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => {
+            release = resolve;
+        });
+        const input = { itemId: 'item-a', confirmedForm, desiredForm: { ...confirmedForm, name: 'Changed' },
+            guardKey: 'guard-a', beforeUpdate: async () => gate };
+        const first = saveAdminMetadataItem(api, input);
+        const other = { ...input, userId: undefined as string | undefined };
+        if (difference === 'guard') other.guardKey = 'guard-b';
+        if (difference === 'user') other.userId = 'other-user';
+        if (difference === 'desired form') other.desiredForm = { ...input.desiredForm, name: 'Other' };
+        if (difference === 'confirmed form') other.confirmedForm = { ...confirmedForm, name: 'Other' };
+        const second = saveAdminMetadataItem(api, other);
+        try {
+            expect(second).not.toBe(first);
+            await expect(second).rejects.toMatchObject({ code: 'conflict' });
+            expect(apiMocks.updateItem).not.toHaveBeenCalled();
+        } finally {
+            release();
+            await first;
+        }
+    });
+
+    it('FormConflictStopsBeforePreflight', async () => {
+        const confirmedForm = normalizeAdminMetadataForm(rawItem());
+        const beforeUpdate = vi.fn();
+        apiMocks.getItem.mockResolvedValue({ data: rawItem({ Name: 'Other editor' }) });
+        await expect(saveAdminMetadataItem(api, { itemId: 'item-a', confirmedForm,
+            desiredForm: { ...confirmedForm, name: 'Changed' }, beforeUpdate, guardKey: 'a'
+        })).rejects.toMatchObject({ code: 'conflict' });
+        expect(beforeUpdate).not.toHaveBeenCalled();
+        expect(apiMocks.updateItem).not.toHaveBeenCalled();
+    });
+
     it('loads only media-folder roots and forwards AbortSignal', async () => {
         // eslint-disable-next-line compat/compat
         const controller = new AbortController();
@@ -325,17 +389,22 @@ describe('Metadata Manager service', () => {
         });
     });
 
-    it('refetches, patches the fresh complete DTO, updates the exact item, then refetches', async () => {
+    it('SuccessfulReadbackPreservesLocksArtworkRelationshipsUserData', async () => {
         const authoritative = rawItem({
+            UserData: { IsFavorite: true, Played: true }, ParentId: 'parent-a', LockedFields: ['Genres'],
             FutureTopLevel: { nested: [ 'preserve' ] }
         } as never);
         const confirmedForm = normalizeAdminMetadataForm(authoritative);
         const desiredForm = { ...confirmedForm, name: 'Renamed', overview: 'Updated overview' };
+        const beforeUpdate = vi.fn(async () => {
+            expect(apiMocks.updateItem).not.toHaveBeenCalled();
+        });
         apiMocks.getItem
             .mockResolvedValueOnce({ data: authoritative })
             .mockResolvedValueOnce({ data: rawItem({ ...authoritative, Name: 'Renamed', Overview: 'Updated overview' }) });
 
         const saved = await saveAdminMetadataItem(api, {
+            beforeUpdate, guardKey: 'approved',
             confirmedForm,
             desiredForm,
             itemId: 'item-a',
@@ -346,6 +415,11 @@ describe('Metadata Manager service', () => {
         expect(apiMocks.updateItem).toHaveBeenCalledOnce();
         const outgoing = apiMocks.updateItem.mock.calls[0][0].baseItemDto as BaseItemDto;
         expect(apiMocks.updateItem.mock.calls[0][0].itemId).toBe('item-a');
+        expect(beforeUpdate).toHaveBeenCalledOnce();
+        expect(outgoing.UserData).toEqual(authoritative.UserData);
+        expect(outgoing.LockedFields).toEqual(authoritative.LockedFields);
+        expect(outgoing.ParentId).toBe(authoritative.ParentId);
+        expect(outgoing.ImageTags).toEqual(authoritative.ImageTags);
         expect(outgoing.Name).toBe('Renamed');
         expect(outgoing.Overview).toBe('Updated overview');
         expect(outgoing.ProviderIds).toEqual({ Imdb: 'tt123', PluginId: 'keep-me' });

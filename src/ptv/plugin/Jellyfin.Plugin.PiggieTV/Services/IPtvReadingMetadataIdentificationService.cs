@@ -9,5 +9,8 @@ public interface IPtvReadingMetadataIdentificationService
 
     Task<PtvReadingMetadataSearchResponse> SearchAsync(
         PtvReadingMetadataSearchRequest request,
+        Guid administratorId,
         CancellationToken cancellationToken);
+    Task<PtvReadingIdentityAssessment> ReassessAsync(PtvReadingIdentityReassessRequest request,
+        Guid administratorId, CancellationToken cancellationToken);
 }

@@ -17,7 +17,7 @@ const statusResponse = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvS
 const project = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
 const pluginManifest = JSON.parse(read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/meta.json'));
 const packageJson = JSON.parse(read('package.json'));
-const expectedPluginVersion = '0.5.21.0';
+const expectedPluginVersion = '0.5.22.0';
 
 function requiredMatch(source, pattern, label) {
     const match = source.match(pattern);
@@ -45,6 +45,7 @@ const requiredRoutes = [
     ['Google Books metadata', "googleBooksMetadataSearch: 'Ptv/v1/reading/metadata/googlebooks/search'"],
     ['Reading metadata providers', "readingMetadataProviders: 'Ptv/v1/reading/metadata/providers'"],
     ['Reading metadata search', "readingMetadataSearch: 'Ptv/v1/reading/metadata/search'"],
+    ['Reading identity reassess route', "readingMetadataReassess: 'Ptv/v1/reading/metadata/reassess'"],
     ['reading series overrides', "readingSeriesOverrides: 'Ptv/v1/reading/series-overrides'"],
     ['authoritative relationships', "relationships: 'Ptv/v1/relationships'"],
     ['recommendation policy v2', "recommendationPolicyRank: 'Ptv/v2/recommendations/rank'"],
@@ -130,6 +131,19 @@ for (const [label, name, routePath] of homeFrontendActions) {
     }
 }
 
+const readingActionStart = frontendTransport.indexOf('reassessReadingMetadata<');
+const readingActionEnd = frontendTransport.indexOf('\n        },', readingActionStart);
+const readingAction = readingActionStart < 0 || readingActionEnd < 0 ?
+    '' :
+    frontendTransport.slice(readingActionStart, readingActionEnd);
+if (!readingAction.includes('PTV_PLUGIN_API.endpoints.readingMetadataReassess')
+    || !/\bmethod:\s*'POST'/.test(readingAction)) {
+    failures.push('Missing frontend Reading identity reassess POST.');
+}
+if (!/\bbypassCache:\s*true/.test(readingAction)) {
+    failures.push('Missing frontend Reading identity reassess bypassCache.');
+}
+
 function pluginActionPreamble(source, route, name) {
     const attribute = `[HttpPost("${route}")]`;
     const routeIndex = source.indexOf(attribute);
@@ -161,6 +175,40 @@ for (const [label, source, routeConstant, controller] of homePluginControllers) 
         } else if (!administratorGuard.test(preamble)) {
             failures.push(`Missing plugin controlled Home ${label} ${name} administrator guard.`);
         }
+    }
+}
+
+const readingControllerBoundary = /\[Authorize\]\s*\[Route\("Ptv\/v1\/reading\/metadata"\)\]\s*public sealed class PtvReadingMetadataController/;
+const readingAdminPolicy = /private async Task<bool> IsAdministratorAsync\(\)[\s\S]{0,400}Policies\.RequiresElevation/;
+if (!readingControllerBoundary.test(readingMetadataController)
+    || !readingAdminPolicy.test(readingMetadataController)) {
+    failures.push('Missing plugin Reading identity reassess administrator boundary.');
+}
+
+const readingReassessRoute = readingMetadataController.indexOf('[HttpPost("reassess")]');
+const readingReassessMethod = readingReassessRoute < 0 ? -1 : readingMetadataController.indexOf(
+    'public async Task<ActionResult<PtvReadingIdentityAssessment>> Reassess(',
+    readingReassessRoute
+);
+const readingReassessBody = readingReassessMethod < 0 ? -1 : readingMetadataController.indexOf('{', readingReassessMethod);
+const readingReassessEnd = readingReassessBody < 0 ? -1 : readingMetadataController.indexOf(
+    'private bool TryGetAuthenticatedUserId(',
+    readingReassessBody
+);
+const readingReassessAction = readingReassessRoute < 0
+    || readingReassessMethod - readingReassessRoute > 800
+    || readingReassessBody < 0
+    || readingReassessEnd < 0 ?
+    '' :
+    readingMetadataController.slice(readingReassessBody, readingReassessEnd);
+if (!readingReassessAction) {
+    failures.push('Missing plugin Reading identity reassess POST.');
+} else {
+    if (!/if\s*\(!await IsAdministratorAsync\(\)\.ConfigureAwait\(false\)\) return Forbid\(\);/.test(readingReassessAction)) {
+        failures.push('Missing plugin Reading identity reassess administrator guard.');
+    }
+    if (!/if\s*\(!TryGetAuthenticatedUserId\(out var administratorId\)\) return Unauthorized\(\);/.test(readingReassessAction)) {
+        failures.push('Missing plugin Reading identity reassess authenticated user binding.');
     }
 }
 

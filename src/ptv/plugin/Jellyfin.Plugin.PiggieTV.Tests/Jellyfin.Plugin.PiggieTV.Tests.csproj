@@ -21,5 +21,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Jellyfin.Plugin.PiggieTV\Jellyfin.Plugin.PiggieTV.csproj" />
+    <ProjectReference Include="..\Ptv.ComicInfo.Helper\Ptv.ComicInfo.Helper.csproj" Aliases="archivehelper" />
   </ItemGroup>
 </Project>

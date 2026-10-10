@@ -313,6 +313,11 @@ public sealed partial class PtvGcdReadingMetadataProvider : IPtvReadingMetadataP
             };
             candidate.ExternalIds["GCD"] = issueId;
             candidate.ExternalIds["GCDSeries"] = seriesId;
+            candidate.IdentityProviderIds =
+            [
+                new() { Namespace = "GCD", Scope = PtvReadingProviderIdScope.Issue, Value = issueId },
+                new() { Namespace = "GCDSeries", Scope = PtvReadingProviderIdScope.Series, Value = seriesId }
+            ];
             candidates.Add(candidate.ToBoundedTransportModel());
         }
     }
@@ -380,6 +385,11 @@ public sealed partial class PtvGcdReadingMetadataProvider : IPtvReadingMetadataP
         AddStoryEvidence(candidate, issue);
         candidate.ExternalIds["GCD"] = issueId;
         candidate.ExternalIds["GCDSeries"] = seriesId;
+        candidate.IdentityProviderIds =
+        [
+            new() { Namespace = "GCD", Scope = PtvReadingProviderIdScope.Issue, Value = issueId },
+            new() { Namespace = "GCDSeries", Scope = PtvReadingProviderIdScope.Series, Value = seriesId }
+        ];
         return candidate;
     }
 

@@ -338,11 +338,8 @@ export default function PtvAdminMetadataManagerPage({
                         'Save or reset your metadata edits before refreshing this item.'
                     );
                 }
-                const result = await state.refreshItem(mode, recursive);
-                const message = result.kind === 'reading-exact' ?
-                    `Metadata refreshed from the saved ${result.provider} identity. Artwork was not replaced.` :
-                    'Refresh requested. Jellyfin will process it in the background.';
-                setRefreshMessage(message);
+                await state.refreshItem(mode, recursive);
+                setRefreshMessage('Refresh requested. Jellyfin will process it in the background.');
             } catch (error) {
                 const message = safeMessage(error, "We couldn't request a metadata refresh.");
                 setRefreshError(message);

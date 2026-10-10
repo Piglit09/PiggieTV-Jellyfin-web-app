@@ -65,6 +65,7 @@ This index is the fast entry point for Jellyfin Server/Web 10.11.11 and the curr
 | API keys | [04](04-user-permissions-library-access.md), [24](24-stock-api-contract-reference.md) | [23](23-before-you-modify-checklists.md) |
 | Application host / dependency injection / plugins | [01](01-system-overview.md), [15](15-settings-admin-mutations.md) | [20](20-ptv-vs-stock-map.md), [24](24-stock-api-contract-reference.md) |
 | Artwork replacement / provider images | [12](12-images-artwork-cache.md), [13](13-metadata-identify.md), [24](24-stock-api-contract-reference.md) | [22](22-change-impact-matrix.md), [23](23-before-you-modify-checklists.md) |
+| Embedded comic identity and Reading Apply review | [11](11-reading.md), [13](13-metadata-identify.md), [24](24-stock-api-contract-reference.md) | [20](20-ptv-vs-stock-map.md), [21](21-ownership-conflicts.md), [23](23-before-you-modify-checklists.md), [25](25-known-jellyfin-non-guarantees.md) |
 | Authentication / login / token restoration | [02](02-startup-session-auth.md), [04](04-user-permissions-library-access.md), [24](24-stock-api-contract-reference.md) | [16](16-caching-invalidation.md), [23](23-before-you-modify-checklists.md) |
 | Back navigation / dialogs / history | [03](03-routing-navigation-lifecycle.md), [19](19-failure-race-lifecycle.md) | [21](21-ownership-conflicts.md), [23](23-before-you-modify-checklists.md) |
 | Books / EPUB / PDF / comic archives | [05](05-library-item-relationships.md), [11](11-reading.md) | [20](20-ptv-vs-stock-map.md), [23](23-before-you-modify-checklists.md) |

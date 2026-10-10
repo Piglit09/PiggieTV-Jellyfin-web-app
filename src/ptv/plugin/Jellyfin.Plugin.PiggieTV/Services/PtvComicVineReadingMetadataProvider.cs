@@ -274,10 +274,15 @@ public sealed class PtvComicVineReadingMetadataProvider : IPtvReadingMetadataPro
         foreach (var result in results ?? [])
         {
             var title = PtvReadingMetadataSafety.Text(result.Name);
-            var providerId = result.ProviderIds
-                .FirstOrDefault(pair => pair.Key.Contains("ComicVine", StringComparison.OrdinalIgnoreCase)
+            var claimedIds = result.ProviderIds
+                .Where(pair => pair.Key.Contains("ComicVine", StringComparison.OrdinalIgnoreCase)
                     || pair.Key.Contains("Comic Vine", StringComparison.OrdinalIgnoreCase))
-                .Value;
+                .Select(pair => pair.Value?.Trim()).Distinct(StringComparer.Ordinal).ToArray();
+            // Upstream issue/volume key semantics are unproved. Never silently pick one
+            // when that namespace makes contradictory claims, or truncate an opaque ID.
+            if (claimedIds.Length != 1 || claimedIds[0] is not { Length: > 0 and <= 256 }
+                || !claimedIds[0]!.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')) continue;
+            var providerId = claimedIds[0];
             providerId = PtvReadingMetadataSafety.Text(providerId, 256);
             if (title is null || providerId is null || !identities.Add(providerId))
             {
@@ -324,6 +329,7 @@ public sealed class PtvComicVineReadingMetadataProvider : IPtvReadingMetadataPro
                 CoverUrl = PtvReadingMetadataSafety.HttpUrl(result.ImageUrl)
             };
             candidate.ExternalIds["ComicVine"] = providerId;
+            candidate.IdentityProviderIds = [new() { Namespace = "ComicVine", Scope = PtvReadingProviderIdScope.Unknown, Value = providerId }];
             foreach (var pair in result.ProviderIds.Take(32))
             {
                 var key = PtvReadingMetadataSafety.Text(pair.Key, 64);

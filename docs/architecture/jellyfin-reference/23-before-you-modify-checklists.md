@@ -419,3 +419,17 @@ These are requirements, not completion assertions. The isolated repair report re
 - [ ] Label unexecuted tests and unverified runtime behavior `UNKNOWN`.
 - [ ] Preserve a rollback for release/deploy or Plugin/Jellyfin runtime changes.
 - [ ] Assign `PASS` only when the requested invariant is proven at its actual trust/lifecycle boundary; use `PASS_WITH_GAPS` or `HOLD` when evidence is incomplete.
+
+## Stage 3 PTV overlay — embedded Reading identity acceptance
+
+- [ ] Confirm the current branch, exact source commit, clean/dirty state and controlled changed paths; do not substitute the operational Web/Plugin version label for commit and artifact identity.
+- [ ] Test the Plugin `POST /Ptv/v1/reading/metadata/reassess` method, elevated policy, server-derived administrator/item identity, signed context expiry and restart invalidation, missing/old Plugin behavior, typed response and no path/XML/token transport.
+- [ ] Inspect CBZ and CBR root ComicInfo through bounded read-only helper work. Preserve `Inspected`, `Absent`, `Unverified` and `NotAttempted`; OPF success, high score and cache hit cannot mask unverified ComicInfo.
+- [ ] Prove package completeness and both self-contained helper RID trees from one source SHA. Prove Windows Job assignment and Linux delegated cgroup membership before archive input under the actual service identity before claiming that platform supports CBR inspection; otherwise fail closed as unverified.
+- [ ] Verify archive size/entry/XML/output/ratio bounds, five-second process-tree deadline, two-helper cap, no media writes, no sibling RAR volume opening and no child accumulation.
+- [ ] In both shared administrator Identify entry points, require independent acknowledgment of displayed conflict and unverified reasons; retire checks on item/user/server/candidate/generation/digest/revision change.
+- [ ] Assert a fresh form comparison and reassessment occur immediately before manual `updateItem`. Auth, context, route, transport, malformed response or changed evidence must produce zero item updates. After a permitted update, read back exact authoritative metadata and preserve locks, artwork, relationships and `UserData`.
+- [ ] Re-run Stage 2 Controlled Home safety/isolation tests after shared Plugin DI/Web transport changes, then full Web/Plugin, contract, typecheck, lint/style baseline, version and build gates.
+- [ ] Keep Jellyfin 12.2 hosted helper/runtime, physical Apply/readback and old mounted-admin-session retirement `UNKNOWN` until separately tested. Local compilation, synthetic tests and package inspection alone are not deployment/release acceptance.
+- [ ] For `refreshItem('scan', false)` on a Book with a recognized saved Reading provider ID, prove that the hook blocks before exact-provider lookup, Jellyfin refresh and item update, with a clear instruction to use guarded Identify. Do not silently fall back. Separately prove explicit recursive Scan and Books without a recognized saved Reading ID still follow their existing stock refresh paths. Do not claim stock refresh itself has the PTV identity guard.
+- [ ] Cancel a queued archive inspection as a helper slot is released. After acquisition, the host must observe cancellation before pipe creation/helper launch; no retired waiter may start a helper. Preserve the two-process cap, bounded cleanup and fail-closed capacity behavior if a child cannot be reaped. Include `TooManyHelpersWait` in focused and full Plugin-suite evidence.

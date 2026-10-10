@@ -62,6 +62,8 @@ export type LoadAdminMetadataRootsInput = Readonly<{
 }>;
 
 export type SaveAdminMetadataItemInput = ItemIdentityInput & Readonly<{
+    beforeUpdate?: (fresh: AdminMetadataItemBundle) => Promise<void>;
+    guardKey?: string;
     confirmedForm: AdminMetadataForm;
     desiredForm: AdminMetadataForm;
 }>;
@@ -303,7 +305,7 @@ async function reloadAdminMetadataItemAfterMutation(
     }
 }
 
-const saveFlights = new WeakMap<Api, Map<string, Promise<AdminMetadataItemBundle>>>();
+const saveFlights = new WeakMap<Api, Map<string, Readonly<{ input: SaveAdminMetadataItemInput; promise: Promise<AdminMetadataItemBundle> }>>>();
 
 /** Refetches, compares the material form, patches the fresh DTO, updates and refetches. */
 export function saveAdminMetadataItem(
@@ -320,7 +322,13 @@ export function saveAdminMetadataItem(
         saveFlights.set(api, flights);
     }
     const active = flights.get(itemId);
-    if (active) return active;
+    if (active) {
+        if (active.input.guardKey === input.guardKey && active.input.userId === input.userId
+            && Boolean(active.input.beforeUpdate) === Boolean(input.beforeUpdate)
+            && areAdminMetadataFormsEqual(active.input.confirmedForm, input.confirmedForm)
+            && areAdminMetadataFormsEqual(active.input.desiredForm, input.desiredForm)) return active.promise;
+        return Promise.reject(new AdminMetadataManagerServiceError('conflict', 'Another metadata save is in progress. Review the item again before saving.'));
+    }
     const promise = (async () => {
         const authoritative = await loadAdminMetadataItemBundle(api, input, signal);
         const fields = authoritative.editor.editableFields;
@@ -339,6 +347,7 @@ export function saveAdminMetadataItem(
             input.confirmedForm,
             fields
         );
+        await input.beforeUpdate?.(authoritative);
         try {
             await getItemUpdateApi(api).updateItem({ itemId, baseItemDto: patched }, { signal });
         } catch (error) {
@@ -351,7 +360,7 @@ export function saveAdminMetadataItem(
             'Metadata was saved, but the updated item could not be reloaded. Reload the page before trying again.'
         );
     })().finally(() => flights?.delete(itemId));
-    flights.set(itemId, promise);
+    flights.set(itemId, { input, promise });
     return promise;
 }
 

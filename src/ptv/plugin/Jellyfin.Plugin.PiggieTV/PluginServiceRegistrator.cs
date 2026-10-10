@@ -15,7 +15,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
-        var startMessage = $"Registering PiggieTV API controllers and services. BuildTimestampUtc={Plugin.BuildTimestampUtc}. ExpectedRoutes=GET /Ptv/v1/status; GET /Ptv/v1/settings; GET /Ptv/v1/featured; POST /Ptv/v1/featured/refresh; GET /Ptv/v1/recommendations; POST /Ptv/v2/recommendations/rank; GET /Ptv/v1/relationships/{{sourceItemId}}; POST /Ptv/v1/relationships; PUT/DELETE /Ptv/v1/relationships/{{mappingId}}; GET /Ptv/v1/music/metadata/search; GET /Ptv/v1/reading/metadata/googlebooks/search; GET /Ptv/v1/reading/metadata/providers; POST /Ptv/v1/reading/metadata/search; GET /Ptv/v1/integrations/status; GET /Ptv/v1/integrations/calendar-availability; GET /Ptv/v1/calendar; GET /Ptv/v1/integrations/arr/calendar; GET /Ptv/v1/tags; GET /Ptv/v1/random/movie; POST /Ptv/v1/diagnostics/clients/check-in; POST /Ptv/v1/reports/media.";
+        var startMessage = $"Registering PiggieTV API controllers and services. BuildTimestampUtc={Plugin.BuildTimestampUtc}. ExpectedRoutes=GET /Ptv/v1/status; GET /Ptv/v1/settings; GET /Ptv/v1/featured; POST /Ptv/v1/featured/refresh; GET /Ptv/v1/recommendations; POST /Ptv/v2/recommendations/rank; GET /Ptv/v1/relationships/{{sourceItemId}}; POST /Ptv/v1/relationships; PUT/DELETE /Ptv/v1/relationships/{{mappingId}}; GET /Ptv/v1/music/metadata/search; GET /Ptv/v1/reading/metadata/googlebooks/search; GET /Ptv/v1/reading/metadata/providers; POST /Ptv/v1/reading/metadata/search; POST /Ptv/v1/reading/metadata/reassess; GET /Ptv/v1/integrations/status; GET /Ptv/v1/integrations/calendar-availability; GET /Ptv/v1/calendar; GET /Ptv/v1/integrations/arr/calendar; GET /Ptv/v1/tags; GET /Ptv/v1/random/movie; POST /Ptv/v1/diagnostics/clients/check-in; POST /Ptv/v1/reports/media.";
 
         Console.WriteLine(startMessage);
         Trace.TraceInformation(startMessage);
@@ -61,6 +61,8 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IPtvTmdbMetadataService, PtvTmdbMetadataService>();
         serviceCollection.AddSingleton<IPtvMusicMetadataLookupService, PtvMusicMetadataLookupService>();
         serviceCollection.AddSingleton<IPtvGoogleBooksMetadataLookupService, PtvGoogleBooksMetadataLookupService>();
+        serviceCollection.AddSingleton<PtvReadingCandidateContextCodec>();
+        serviceCollection.AddSingleton<IPtvArchiveInspectionHost>(_ => PtvPackagedArchiveInspection.Create());
         serviceCollection.AddSingleton<PtvReadingMetadataParser>();
         serviceCollection.AddSingleton<PtvReadingMetadataScorer>();
         serviceCollection.AddSingleton<IPtvReadingLocalMetadataInspector, PtvReadingLocalMetadataInspector>();
