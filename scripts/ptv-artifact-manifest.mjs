@@ -104,7 +104,11 @@ function inventory(root, prefix = '') {
             files.push({ path: name, size: bytes.length, sha256: hash(bytes) });
         }
     }
-    return files;
+    return files.sort((left, right) => {
+        if (left.path < right.path) return -1;
+        if (left.path > right.path) return 1;
+        return 0;
+    });
 }
 
 function assertWebPayload(artifactRoot, files, sourceCommit, sourceDirty) {

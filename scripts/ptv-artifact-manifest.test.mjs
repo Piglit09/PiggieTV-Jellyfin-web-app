@@ -59,6 +59,15 @@ test('records every final file, versions, full commit and a deterministic digest
     assert.equal(verifyManifest(manifest, options(data)), true);
 }));
 
+test('sorts nested artifact paths globally before signing and verification', () => withFixture(data => {
+    fs.mkdirSync(path.join(data.artifactRoot, 'a'));
+    fs.writeFileSync(path.join(data.artifactRoot, 'a', 'nested.txt'), 'nested');
+    fs.writeFileSync(path.join(data.artifactRoot, 'a.txt'), 'sibling');
+    const manifest = buildManifest(options(data));
+    assert.deepEqual(manifest.files.map(file => file.path).slice(0, 2), [ 'a.txt', 'a/nested.txt' ]);
+    assert.equal(verifyManifest(manifest, options(data)), true);
+}));
+
 test('rejects modified, missing and extra final package files', () => withFixture(data => {
     const manifest = buildManifest(options(data));
     fs.writeFileSync(path.join(data.artifactRoot, 'config.json'), '{"changed":true}');
