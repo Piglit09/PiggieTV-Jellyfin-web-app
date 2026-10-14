@@ -58,6 +58,9 @@ jobs:
       - name: Focused PiggieTV tests
         run: npm run test:ptv -- --run
 
+      - name: Artifact provenance and package-integrity tests
+        run: node --test scripts/ptv-build-provenance.test.cjs scripts/ptv-artifact-manifest.test.mjs scripts/ptv-plugin-package.test.mjs
+
       - name: Full Vitest suite
         run: npm test -- --run
 
@@ -105,8 +108,17 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --no-audit
 
+      - name: Verify exact CI source
+        run: node scripts/ptv-workspace-preflight.mjs build --ci-ref "$(git rev-parse HEAD)"
+
       - name: Build production frontend
         run: npm run build:production
+
+      - name: Verify complete production artifact
+        run: |
+          node scripts/ptv-workspace-preflight.mjs package --ci-ref "$(git rev-parse HEAD)"
+          node scripts/ptv-artifact-manifest.mjs create --artifact dist --output "$RUNNER_TEMP/ptv-production-manifest.json" --mode production
+          node scripts/ptv-artifact-manifest.mjs verify --artifact dist --manifest "$RUNNER_TEMP/ptv-production-manifest.json"
 
       - name: Summarize bundle
         run: npm run build:report

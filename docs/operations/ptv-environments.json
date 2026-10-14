@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "projectId": "PTV_WEB",
+  "environments": [
+    {
+      "id": "JF_PRODUCTION_50",
+      "role": "PRODUCTION",
+      "host": "10.16.0.50",
+      "currentRuntimeIdentity": "UNKNOWN",
+      "deployment": {
+        "enabled": false,
+        "targetPath": null,
+        "reason": "Production is denied by default; an exact task-specific approval and independently verified rollback are required."
+      }
+    },
+    {
+      "id": "JF_DEVELOPMENT_125",
+      "role": "DEVELOPMENT",
+      "host": "10.16.0.125",
+      "currentRuntimeIdentity": "UNKNOWN",
+      "deployment": {
+        "enabled": false,
+        "targetPath": null,
+        "reason": "Current-state rollback and Beta-user isolation have not been accepted."
+      }
+    }
+  ],
+  "unregisteredInstances": "DENIED"
+}

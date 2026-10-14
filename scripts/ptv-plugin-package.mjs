@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { buildManifest, verifyManifest } from './ptv-artifact-manifest.mjs';
 
 const roots = ['Jellyfin.Plugin.PiggieTV.deps.json', 'Jellyfin.Plugin.PiggieTV.dll', 'Jellyfin.Plugin.PiggieTV.pdb', 'Jellyfin.Plugin.PiggieTV.xml', 'meta.json'];
 const boundary = { memoryBytes: 536870912, maxHelpers: 2, deadlineMilliseconds: 5000, windows: 'JobObject-before-resume', linux: 'cgroup-v2-before-input', linuxEnvironment: 'PTV_COMICINFO_CGROUP_ROOT', unavailable: 'unverified' };
@@ -71,6 +72,14 @@ function tarEntry(name, bytes, mode) {
     header.write(checksum.toString(8).padStart(6, '0') + '\0 ', 148, 8);
     return Buffer.concat([header, bytes, Buffer.alloc((512 - bytes.length % 512) % 512)]);
 }
+
+function removeOwnedStaging(packagesRoot, staging, prefix) {
+    const root = fs.realpathSync.native(packagesRoot);
+    const candidate = fs.realpathSync.native(staging);
+    assert.equal(path.dirname(candidate), root, 'Refusing cleanup outside the Plugin package output root');
+    assert(path.basename(candidate).startsWith(prefix), 'Refusing cleanup of an unknown package directory');
+    fs.rmSync(candidate, { recursive: true, force: true });
+}
 export function composePackage(root, { sourceCommit, version }) {
     assert(/^[0-9a-f]{40}$/.test(sourceCommit), 'A clean source commit is required');
     const files = validatePayload(root, version);
@@ -108,29 +117,75 @@ export function verifyPackage(archive, manifest) {
     return true;
 }
 
+export function writeVerifiedPackage({ packagesRoot, sourceRoot, sourceCommit, result }) {
+    assert(/^[0-9a-f]{40}$/u.test(sourceCommit), 'A full clean source commit is required');
+    fs.mkdirSync(packagesRoot, { recursive: true });
+    const output = path.join(packagesRoot, sourceCommit);
+    const externalManifest = path.join(packagesRoot, `${sourceCommit}.artifact-manifest.json`);
+    assert(!fs.existsSync(output) && !fs.existsSync(externalManifest), 'Package already exists; never merge or overwrite release payloads');
+    const prefix = `.final-${sourceCommit}-`;
+    const staging = fs.mkdtempSync(path.join(packagesRoot, prefix));
+    const prepared = path.join(staging, 'package');
+    let preserveStaging = false;
+    try {
+        fs.mkdirSync(prepared);
+        fs.writeFileSync(path.join(prepared, 'PiggieTV.tar'), result.archive);
+        fs.writeFileSync(path.join(prepared, 'package-manifest.json'), JSON.stringify(result.manifest, null, 2) + '\n');
+        const artifactManifest = buildManifest({ artifactRoot: prepared, sourceRoot, projectId: 'PTV_PLUGIN', buildMode: 'package' });
+        verifyManifest(artifactManifest, { artifactRoot: prepared, sourceRoot, buildMode: 'package' });
+        const stagedManifest = path.join(staging, 'artifact-manifest.json');
+        fs.writeFileSync(stagedManifest, JSON.stringify(artifactManifest, null, 2) + '\n', { flag: 'wx' });
+        assert(!fs.existsSync(output) && !fs.existsSync(externalManifest), 'Package destination appeared during staging');
+        fs.renameSync(prepared, output);
+        try {
+            fs.renameSync(stagedManifest, externalManifest);
+        } catch (error) {
+            try {
+                fs.renameSync(output, prepared);
+            } catch (rollbackError) {
+                preserveStaging = true;
+                throw new AggregateError([error, rollbackError], 'Package publication failed and rollback needs manual recovery');
+            }
+            throw error;
+        }
+        return { output, externalManifest, artifactManifest };
+    } finally {
+        if (!preserveStaging) removeOwnedStaging(packagesRoot, staging, prefix);
+    }
+}
+
 // Always publish into a fresh directory. The CLI refuses dirty tracked or untracked
 // source so a sourceCommit can never disguise modified inputs as an accepted build.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     // eslint-disable-next-line sonarjs/no-os-command-from-path -- Build operator supplies a trusted Git/.NET PATH.
-    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } }).trim();
     assert.equal(git('status', '--porcelain', '--untracked-files=normal'), '', 'Commit source before packaging');
     const sourceCommit = git('rev-parse', 'HEAD');
+    const ciRef = process.env.GITHUB_ACTIONS === 'true' ? ['--ci-ref', sourceCommit] : [];
+    execFileSync(process.execPath, [path.join(root, 'scripts/ptv-workspace-preflight.mjs'), 'package', ...ciRef], { cwd: root, stdio: 'inherit' });
     const project = path.join(root, 'src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
     const version = fs.readFileSync(project, 'utf8').match(/<PtvPluginVersion>([^<]+)</)[1];
-    const output = path.join(root, 'src/ptv/plugin/bin/packages', sourceCommit);
-    assert(!fs.existsSync(output), 'Use a new clean output directory. Never merge release payloads');
-    fs.mkdirSync(output, { recursive: true });
-    const payload = path.join(output, 'payload');
-    // eslint-disable-next-line sonarjs/no-os-command-from-path -- Build operator supplies the required .NET 10 SDK on PATH.
-    const publish = (projectPath, destination, extra = []) => execFileSync('dotnet', ['publish', projectPath, '--configuration', 'Release', '--output', destination, '-p:ContinuousIntegrationBuild=true', ...extra], { cwd: root, stdio: 'inherit' });
-    publish(project, payload);
-    for (const rid of ['linux-x64', 'win-x64']) publish(path.join(root, 'src/ptv/plugin/Ptv.ComicInfo.Helper/Ptv.ComicInfo.Helper.csproj'), path.join(payload, 'helpers', rid), ['--runtime', rid, '--self-contained', 'true']);
-    assert.equal(git('rev-parse', 'HEAD'), sourceCommit);
-    assert.equal(git('status', '--porcelain', '--untracked-files=normal'), '');
-    const result = composePackage(payload, { sourceCommit, version });
-    fs.writeFileSync(path.join(output, 'PiggieTV.tar'), result.archive);
-    fs.writeFileSync(path.join(output, 'package-manifest.json'), JSON.stringify(result.manifest, null, 2) + '\n');
-    console.log(JSON.stringify({ sourceCommit, version, archiveSha256: result.manifest.archiveSha256, output }));
+    const packagesRoot = path.join(root, 'src/ptv/plugin/bin/packages');
+    const output = path.join(packagesRoot, sourceCommit);
+    const externalManifest = path.join(packagesRoot, `${sourceCommit}.artifact-manifest.json`);
+    assert(!fs.existsSync(output) && !fs.existsSync(externalManifest), 'Package already exists; never merge or overwrite release payloads');
+    fs.mkdirSync(packagesRoot, { recursive: true });
+    const prefix = `.payload-${sourceCommit}-`;
+    const staging = fs.mkdtempSync(path.join(packagesRoot, prefix));
+    try {
+        const payload = path.join(staging, 'payload');
+        // eslint-disable-next-line sonarjs/no-os-command-from-path -- Build operator supplies the required .NET 10 SDK on PATH.
+        const publish = (projectPath, destination, extra = []) => execFileSync('dotnet', ['publish', projectPath, '--configuration', 'Release', '--output', destination, '-p:ContinuousIntegrationBuild=true', ...extra], { cwd: root, stdio: 'inherit' });
+        publish(project, payload);
+        for (const rid of ['linux-x64', 'win-x64']) publish(path.join(root, 'src/ptv/plugin/Ptv.ComicInfo.Helper/Ptv.ComicInfo.Helper.csproj'), path.join(payload, 'helpers', rid), ['--runtime', rid, '--self-contained', 'true']);
+        assert.equal(git('rev-parse', 'HEAD'), sourceCommit);
+        assert.equal(git('status', '--porcelain', '--untracked-files=normal'), '');
+        const result = composePackage(payload, { sourceCommit, version });
+        const published = writeVerifiedPackage({ packagesRoot, sourceRoot: root, sourceCommit, result });
+        console.log(JSON.stringify({ sourceCommit, version, archiveSha256: result.manifest.archiveSha256, output: published.output }));
+    } finally {
+        removeOwnedStaging(packagesRoot, staging, prefix);
+    }
 }
 /* eslint-enable sonarjs/no-hardcoded-ip */

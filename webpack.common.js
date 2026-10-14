@@ -1,4 +1,5 @@
 const fg = require('fast-glob');
+const { execFileSync } = require('node:child_process');
 const path = require('path');
 const { CleanWebpackPlugin } = require('clean-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
@@ -9,6 +10,12 @@ const { DefinePlugin, IgnorePlugin } = require('webpack');
 const packageJson = require('./package.json');
 const { resolvePtvCommitSha } = require('./scripts/ptv-build-provenance.cjs');
 const { readPtvVersion } = require('./scripts/ptv-version.cjs');
+
+// Covers direct webpack invocations as well as the supported npm scripts.
+execFileSync(process.execPath, [path.resolve(__dirname, 'scripts/ptv-workspace-preflight.mjs'), 'build'], {
+    cwd: __dirname,
+    stdio: 'inherit'
+});
 
 const Assets = [
     'native-promise-only/npo.js',
@@ -27,12 +34,7 @@ const PTV_ACCEPTANCE_LEDGER = !!JSON.parse(process.env.PTV_ACCEPTANCE_LEDGER || 
 const PTV_BUILD_DATE = process.env.PTV_BUILD_DATE || new Date().toISOString();
 const PTV_VERSION = readPtvVersion();
 const PTV_BUILD_ID = process.env.PTV_BUILD_ID || `ptv-web-${PTV_VERSION}`;
-let COMMIT_SHA = 'unavailable';
-try {
-    COMMIT_SHA = resolvePtvCommitSha();
-} catch (err) {
-    console.warn('Failed to resolve the PTV commit SHA. Is git installed?', err);
-}
+const COMMIT_SHA = resolvePtvCommitSha();
 
 const NODE_MODULES_REGEX = /[\\/]node_modules[\\/]/;
 

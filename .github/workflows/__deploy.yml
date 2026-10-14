@@ -20,6 +20,9 @@ on:
 jobs:
   cf-pages:
     name: CloudFlare Pages 📃
+    # This is the inherited upstream Jellyfin workflow. PiggieTV deployments
+    # require a separate operator-controlled approval and must never use it.
+    if: ${{ github.repository == 'jellyfin/jellyfin-web' }}
     runs-on: ubuntu-latest
     environment: 
       name: ${{ inputs.branch == 'master' && 'Production' || 'Preview' }}
@@ -45,7 +48,7 @@ jobs:
   compose-comment:
     name: Compose and push comment 📝
     # Always run so the comment is composed for the workflow summary
-    if: ${{ always() }}
+    if: ${{ always() && github.repository == 'jellyfin/jellyfin-web' }}
     uses: ./.github/workflows/__job_messages.yml
     secrets: inherit
     needs:

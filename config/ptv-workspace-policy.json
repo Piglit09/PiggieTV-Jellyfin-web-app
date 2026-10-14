@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "projectId": "PTV_WEB",
+  "sourceRoot": "C:\\Users\\Piggie\\Documents\\GitHub\\Jellyfin-Web-PiggieTV",
+  "gitCommonDirectory": "C:\\Users\\Piggie\\Documents\\GitHub\\Jellyfin-Web-PiggieTV\\.git",
+  "expectedRemote": "https://github.com/Piglit09/PiggieTV-Jellyfin-web-app.git",
+  "artifactRoot": "C:\\Users\\Piggie\\Documents\\GitHub\\_PTV-Artifacts",
+  "environmentRegistry": "docs/operations/ptv-environments.json",
+  "sourceOwnership": {
+    "web": "src/ptv and stock-compatible Web source",
+    "plugin": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV"
+  },
+  "versionSources": {
+    "web": "ptv-version.json",
+    "plugin": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj"
+  },
+  "buildModes": ["development", "production", "fixture", "ci-exact-ref"],
+  "buildEntrypoints": ["npm run build:development", "npm run build:production", "npm run test:e2e:build", "Plugin Release build wrapper"],
+  "packageEntrypoints": ["scripts/ptv-artifact-manifest.mjs", "scripts/ptv-plugin-package.mjs"],
+  "deploymentEntrypoints": ["scripts/deploy-jellyfin-web.ps1"],
+  "ci": {
+    "repository": "Piglit09/PiggieTV-Jellyfin-web-app",
+    "buildOnly": true,
+    "requiresExactRef": true
+  },
+  "operatorPolicy": {
+    "kind": "windows-registry",
+    "key": "HKLM\\SOFTWARE\\PiggieTV\\WorkspaceAuthority",
+    "value": "PolicyJson"
+  },
+  "localOperations": {
+    "audit": true,
+    "edit": true,
+    "build": true,
+    "packageFromCleanCommit": true,
+    "deployWithoutOperatorPolicy": false
+  }
+}

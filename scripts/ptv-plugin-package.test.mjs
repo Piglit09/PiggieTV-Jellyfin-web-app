@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
+import { verifyManifest } from './ptv-artifact-manifest.mjs';
 
 const modulePath = new URL('./ptv-plugin-package.mjs', import.meta.url);
 const sha = 'a'.repeat(40);
@@ -37,6 +39,26 @@ async function api() {
         assert.fail('Deterministic package implementation is missing');
     }
     return result;
+}
+function sourceFixture() {
+    const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ptv-package-source-'));
+    const put = (name, data) => {
+        const file = path.join(sourceRoot, name);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, data);
+    };
+    put('.gitignore', 'src/ptv/plugin/bin/\n');
+    put('ptv-version.json', '{"version":"0.5.71"}\n');
+    put('package.json', '{"version":"10.11.11"}\n');
+    put('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj', `<Project><PtvPluginVersion>${version}</PtvPluginVersion></Project>`);
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- Disposable fixture Git uses the test runner's trusted PATH.
+    const git = (...args) => execFileSync('git', args, { cwd: sourceRoot, encoding: 'utf8', stdio: [ 'ignore', 'pipe', 'ignore' ] }).trim();
+    git('init', '-q');
+    git('config', 'user.name', 'PTV fixture');
+    git('config', 'user.email', 'ptv-fixture@example.invalid');
+    git('add', '.');
+    git('commit', '-qm', 'fixture');
+    return { sourceRoot, sourceCommit: git('rev-parse', 'HEAD'), packagesRoot: path.join(sourceRoot, 'src/ptv/plugin/bin/packages') };
 }
 test('package round trip is deterministic, preserves Linux executable mode, and binds every byte to source', async () => {
     const { composePackage, verifyPackage } = await api();
@@ -87,6 +109,28 @@ test('rejects wrong declared version, helper assembly loading, extra root file, 
         assert.throws(() => composePackage(root, { sourceCommit: sha, version }));
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+test('final Plugin package excludes compiler payload and failed staging allows a clean retry', async () => {
+    const { composePackage, writeVerifiedPackage } = await api();
+    const payload = fixture();
+    const source = sourceFixture();
+    try {
+        const result = composePackage(payload.root, { sourceCommit: source.sourceCommit, version });
+        const invalid = { ...result, archive: Buffer.from(result.archive) };
+        invalid.archive[600] ^= 1;
+        assert.throws(() => writeVerifiedPackage({ ...source, result: invalid }), /archive hash/u);
+        assert(!fs.existsSync(path.join(source.packagesRoot, source.sourceCommit)), 'A failed stage must not reserve the final commit path');
+        assert.deepEqual(fs.readdirSync(source.packagesRoot), [], 'A failed stage must not leave an unusable output');
+        const published = writeVerifiedPackage({ ...source, result });
+        assert.deepEqual(fs.readdirSync(published.output).sort(), [ 'PiggieTV.tar', 'package-manifest.json' ]);
+        assert.equal(verifyManifest(published.artifactManifest, { artifactRoot: published.output, sourceRoot: source.sourceRoot, buildMode: 'package' }), true);
+        assert(fs.existsSync(published.externalManifest));
+        assert.throws(() => writeVerifiedPackage({ ...source, result }), /already exists/u);
+        assert.deepEqual(fs.readdirSync(published.output).sort(), [ 'PiggieTV.tar', 'package-manifest.json' ]);
+    } finally {
+        fs.rmSync(payload.root, { recursive: true, force: true });
+        fs.rmSync(source.sourceRoot, { recursive: true, force: true });
     }
 });
 /* eslint-enable compat/compat, sonarjs/no-hardcoded-ip */

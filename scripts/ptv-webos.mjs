@@ -29,6 +29,8 @@ Commands:
 Notes:
   --dry-run prints the exact ares command without invoking it. It does not
   require the ares CLI, a connected device, or an existing IPK file.
+  Live device commands are disabled until a separately approved, protected
+  device policy and package provenance are installed.
   This repository does not contain or assume a packaged webOS application.`;
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/u;
@@ -205,6 +207,13 @@ async function main(rawArguments) {
     if (!command || command === 'help' || command === '--help' || options.has('--help')) {
         console.log(HELP);
         return 0;
+    }
+
+    // The web repository has no approved LG target or package authority.
+    // Preserve offline command previews, but never contact a device from
+    // this entrypoint until protected device policy is implemented.
+    if (!options.has('--dry-run')) {
+        fail('Live webOS device actions are disabled pending separate target approval and package provenance.');
     }
 
     const builtCommand = buildCommand(command, options);

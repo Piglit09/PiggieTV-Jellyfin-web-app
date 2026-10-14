@@ -1038,6 +1038,18 @@
     }
   },
   "owners": {
+    "buildArtifactAndDeploymentGovernance": {
+      "authoritativeOwner": "Approved PTV Web Git checkout for source and build identity; independently protected operator policy for deployment approval",
+      "derivedOwners": ["workspace preflight", "whole-artifact SHA-256 manifest", "Web and Plugin package entrypoints", "registered deployment wrapper"],
+      "identity": ["resolved source root and Git common directory", "origin remote", "full source commit", "Web and Plugin version authorities", "final artifact file hashes", "registered target and protected approval"],
+      "rule": "Supported build and package entrypoints fail closed for an unapproved root or source identity. Release packages require clean committed source. A final transformed artifact must be rehashed; deployment requires a protected task-specific approval and verified rollback. Production and development Jellyfin targets are denied by default.",
+      "nonGuarantee": "Repository scripts do not prevent arbitrary manual filesystem writes or replace independently controlled operating-system permissions. Local fixture tests do not prove hosted or physical acceptance.",
+      "chapterRefs": ["18-build-service-worker-assets.md", "23-before-you-modify-checklists.md"],
+      "localEvidence": {
+        "baseCommit": "a8928478c7a28093f72431bf01271d878dee928d",
+        "status": "PHASE6_GOVERNANCE_LOCAL_ONLY_NOT_DEPLOYED"
+      }
+    },
     "browseLibraryPresentation": {
       "authoritativeOwner": "Jellyfin authenticated ordinary ParentId item/Resume reads, with user-aware Ancestors proof for nested parents",
       "derivedOwners": ["NativeBrowsePage resolved route scope", "browseData scoped reader and focused/directory caches", "browseRecommendations projection of global ranks onto fresh scoped DTOs", "usePtvBrowseBackdrop exact scope/availability owner and shell image retirement"],
