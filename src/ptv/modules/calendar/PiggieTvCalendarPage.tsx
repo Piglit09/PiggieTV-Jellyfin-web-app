@@ -16,6 +16,7 @@ import {
     getCurrentPtvPluginApiClient,
     normalizePtvApiError
 } from '../../core/pluginApi';
+import PTVShell from '../../shell/PTVShell';
 import {
     capturePtvRouteCriticalLifecycleOwner,
     recordPtvRouteCriticalPending,
@@ -303,135 +304,137 @@ const PiggieTvCalendarPage = () => {
             title='Release Calendar'
             className='mainAnimatedPage type-interior ptv-calendar-page'
         >
-            <Box className='content-primary ptv-calendar-content'>
-                <Stack spacing={3}>
-                    <Stack direction='row' alignItems='flex-start' justifyContent='space-between' gap={2} flexWrap='wrap'>
-                        <Box>
-                            <Typography variant='h1' className='ptv-calendar-title'>Release Calendar</Typography>
-                            <Typography className='ptv-calendar-subtitle'>
-                                Upcoming releases from configured Sonarr, Radarr, and Lidarr services.
-                            </Typography>
-                        </Box>
-                        <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
-                            <Chip className='ptv-status-badge ptv-status-badge-info' label={`${activeServiceCount} active services`} size='small' />
-                            <Chip className='ptv-status-badge ptv-status-badge-backend' label={`${items.length} releases`} size='small' />
-                            <Button type='button' variant='contained' onClick={loadCalendar} disabled={loading}>
-                                {loading ? 'Refreshing...' : 'Refresh'}
-                            </Button>
-                        </Stack>
-                    </Stack>
-
-                    {errorMessage ? <Alert severity='warning'>{errorMessage}</Alert> : null}
-                    {!loading && services.length > 0 && configuredServiceCount === 0 ? (
-                        <Alert severity='info'>
-                            Configure and save a Sonarr, Radarr, or Lidarr API key in the PiggieTV dashboard to enable the release calendar.
-                        </Alert>
-                    ) : null}
-
-                    {!loading && configuredServiceCount > 0 && activeServiceCount === 0 ? (
-                        <Alert severity='warning'>
-                            Configured calendar providers are currently unavailable. Review each provider status and retry.
-                        </Alert>
-                    ) : null}
-
-                    <Grid container spacing={2}>
-                        {services.map(service => (
-                            <Grid key={service.service} size={{ xs: 12, sm: 6, md: 3 }}>
-                                <Card className='ptv-dashboard-card ptv-calendar-service-card'>
-                                    <CardContent>
-                                        <Stack spacing={1}>
-                                            <Stack direction='row' justifyContent='space-between' alignItems='center' gap={1}>
-                                                <Typography variant='h2'>{getServiceLabel(service.service)}</Typography>
-                                                <Chip
-                                                    className={`ptv-status-badge ${isHealthyCalendarService(service) ? 'ptv-status-badge-info' : 'ptv-status-badge-path'}`}
-                                                    label={getCalendarServiceState(service)}
-                                                    size='small'
-                                                />
-                                            </Stack>
-                                            <Typography className='ptv-calendar-service-meta'>
-                                                {service.supported === false ? 'No calendar adapter' : `${service.itemCount || 0} items`}
-                                            </Typography>
-                                            {isConfiguredCalendarService(service) && service.error ? (
-                                                <Typography className='ptv-calendar-service-error'>{getCalendarServiceErrorMessage(service)}</Typography>
-                                            ) : null}
-                                        </Stack>
-                                    </CardContent>
-                                </Card>
-                            </Grid>
-                        ))}
-                    </Grid>
-
-                    {serviceErrors.length > 0 ? (
-                        <Alert severity='warning'>
-                            Some calendar providers returned warnings. PiggieTV will still show data from the services that responded.
-                        </Alert>
-                    ) : null}
-
-                    <Card className='ptv-dashboard-card ptv-calendar-list-card'>
-                        <CardContent>
-                            <Stack spacing={2.5}>
-                                <Stack direction='row' justifyContent='space-between' alignItems='center' gap={1} flexWrap='wrap'>
-                                    <Box>
-                                        <Typography variant='h2'>Upcoming</Typography>
-                                        <Typography className='ptv-calendar-service-meta'>
-                                            {calendar?.start || 'today'} through {calendar?.end || 'upcoming'}
-                                        </Typography>
-                                    </Box>
-                                </Stack>
-                                <Divider />
-
-                                {loading && !calendar ? (
-                                    <Typography className='ptv-calendar-empty'>Loading upcoming media...</Typography>
-                                ) : null}
-
-                                {!loading && groups.length === 0 ? (
-                                    <Typography className='ptv-calendar-empty'>
-                                        {calendar?.message || 'No upcoming releases were found.'}
-                                    </Typography>
-                                ) : null}
-
-                                {groups.map(group => (
-                                    <Box key={group.key} className='ptv-calendar-day-group'>
-                                        <Typography className='ptv-calendar-day-heading'>{group.dateLabel}</Typography>
-                                        <Grid container spacing={1.5}>
-                                            {group.items.map(item => (
-                                                <Grid key={item.id} size={{ xs: 12, md: 6, xl: 4 }}>
-                                                    <Box className='ptv-calendar-item'>
-                                                        <Stack spacing={1}>
-                                                            <Stack direction='row' justifyContent='space-between' alignItems='center' gap={1}>
-                                                                <Chip
-                                                                    className='ptv-status-badge ptv-status-badge-info'
-                                                                    label={getServiceLabel(item.service)}
-                                                                    size='small'
-                                                                />
-                                                                <Chip
-                                                                    className='ptv-status-badge ptv-status-badge-path'
-                                                                    label={item.hasFile ? 'downloaded' : 'upcoming'}
-                                                                    size='small'
-                                                                />
-                                                            </Stack>
-                                                            <Typography className='ptv-calendar-item-title'>{item.title}</Typography>
-                                                            {getEpisodeLabel(item) ? (
-                                                                <Typography className='ptv-calendar-item-meta'>{getEpisodeLabel(item)}</Typography>
-                                                            ) : null}
-                                                            {item.seriesTitle && item.seriesTitle !== item.title ? (
-                                                                <Typography className='ptv-calendar-item-meta'>{item.seriesTitle}</Typography>
-                                                            ) : null}
-                                                            {item.overview ? (
-                                                                <Typography className='ptv-calendar-item-overview'>{item.overview}</Typography>
-                                                            ) : null}
-                                                        </Stack>
-                                                    </Box>
-                                                </Grid>
-                                            ))}
-                                        </Grid>
-                                    </Box>
-                                ))}
+            <PTVShell section='request' showBackButton title='Release Calendar'>
+                <Box className='content-primary ptv-calendar-content'>
+                    <Stack spacing={3}>
+                        <Stack direction='row' alignItems='flex-start' justifyContent='space-between' gap={2} flexWrap='wrap'>
+                            <Box>
+                                <Typography variant='h1' className='ptv-calendar-title'>Release Calendar</Typography>
+                                <Typography className='ptv-calendar-subtitle'>
+                                    Upcoming releases from configured Sonarr, Radarr, and Lidarr services.
+                                </Typography>
+                            </Box>
+                            <Stack direction='row' spacing={1} flexWrap='wrap' useFlexGap>
+                                <Chip className='ptv-status-badge ptv-status-badge-info' label={`${activeServiceCount} active services`} size='small' />
+                                <Chip className='ptv-status-badge ptv-status-badge-backend' label={`${items.length} releases`} size='small' />
+                                <Button type='button' variant='contained' onClick={loadCalendar} disabled={loading}>
+                                    {loading ? 'Refreshing...' : 'Refresh'}
+                                </Button>
                             </Stack>
-                        </CardContent>
-                    </Card>
-                </Stack>
-            </Box>
+                        </Stack>
+
+                        {errorMessage ? <Alert severity='warning'>{errorMessage}</Alert> : null}
+                        {!loading && services.length > 0 && configuredServiceCount === 0 ? (
+                            <Alert severity='info'>
+                                Configure and save a Sonarr, Radarr, or Lidarr API key in the PiggieTV dashboard to enable the release calendar.
+                            </Alert>
+                        ) : null}
+
+                        {!loading && configuredServiceCount > 0 && activeServiceCount === 0 ? (
+                            <Alert severity='warning'>
+                                Configured calendar providers are currently unavailable. Review each provider status and retry.
+                            </Alert>
+                        ) : null}
+
+                        <Grid container spacing={2}>
+                            {services.map(service => (
+                                <Grid key={service.service} size={{ xs: 12, sm: 6, md: 3 }}>
+                                    <Card className='ptv-dashboard-card ptv-calendar-service-card'>
+                                        <CardContent>
+                                            <Stack spacing={1}>
+                                                <Stack direction='row' justifyContent='space-between' alignItems='center' gap={1}>
+                                                    <Typography variant='h2'>{getServiceLabel(service.service)}</Typography>
+                                                    <Chip
+                                                        className={`ptv-status-badge ${isHealthyCalendarService(service) ? 'ptv-status-badge-info' : 'ptv-status-badge-path'}`}
+                                                        label={getCalendarServiceState(service)}
+                                                        size='small'
+                                                    />
+                                                </Stack>
+                                                <Typography className='ptv-calendar-service-meta'>
+                                                    {service.supported === false ? 'No calendar adapter' : `${service.itemCount || 0} items`}
+                                                </Typography>
+                                                {isConfiguredCalendarService(service) && service.error ? (
+                                                    <Typography className='ptv-calendar-service-error'>{getCalendarServiceErrorMessage(service)}</Typography>
+                                                ) : null}
+                                            </Stack>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+                            ))}
+                        </Grid>
+
+                        {serviceErrors.length > 0 ? (
+                            <Alert severity='warning'>
+                                Some calendar providers returned warnings. PiggieTV will still show data from the services that responded.
+                            </Alert>
+                        ) : null}
+
+                        <Card className='ptv-dashboard-card ptv-calendar-list-card'>
+                            <CardContent>
+                                <Stack spacing={2.5}>
+                                    <Stack direction='row' justifyContent='space-between' alignItems='center' gap={1} flexWrap='wrap'>
+                                        <Box>
+                                            <Typography variant='h2'>Upcoming</Typography>
+                                            <Typography className='ptv-calendar-service-meta'>
+                                                {calendar?.start || 'today'} through {calendar?.end || 'upcoming'}
+                                            </Typography>
+                                        </Box>
+                                    </Stack>
+                                    <Divider />
+
+                                    {loading && !calendar ? (
+                                        <Typography className='ptv-calendar-empty'>Loading upcoming media...</Typography>
+                                    ) : null}
+
+                                    {!loading && groups.length === 0 ? (
+                                        <Typography className='ptv-calendar-empty'>
+                                            {calendar?.message || 'No upcoming releases were found.'}
+                                        </Typography>
+                                    ) : null}
+
+                                    {groups.map(group => (
+                                        <Box key={group.key} className='ptv-calendar-day-group'>
+                                            <Typography className='ptv-calendar-day-heading'>{group.dateLabel}</Typography>
+                                            <Grid container spacing={1.5}>
+                                                {group.items.map(item => (
+                                                    <Grid key={item.id} size={{ xs: 12, md: 6, xl: 4 }}>
+                                                        <Box className='ptv-calendar-item'>
+                                                            <Stack spacing={1}>
+                                                                <Stack direction='row' justifyContent='space-between' alignItems='center' gap={1}>
+                                                                    <Chip
+                                                                        className='ptv-status-badge ptv-status-badge-info'
+                                                                        label={getServiceLabel(item.service)}
+                                                                        size='small'
+                                                                    />
+                                                                    <Chip
+                                                                        className='ptv-status-badge ptv-status-badge-path'
+                                                                        label={item.hasFile ? 'downloaded' : 'upcoming'}
+                                                                        size='small'
+                                                                    />
+                                                                </Stack>
+                                                                <Typography className='ptv-calendar-item-title'>{item.title}</Typography>
+                                                                {getEpisodeLabel(item) ? (
+                                                                    <Typography className='ptv-calendar-item-meta'>{getEpisodeLabel(item)}</Typography>
+                                                                ) : null}
+                                                                {item.seriesTitle && item.seriesTitle !== item.title ? (
+                                                                    <Typography className='ptv-calendar-item-meta'>{item.seriesTitle}</Typography>
+                                                                ) : null}
+                                                                {item.overview ? (
+                                                                    <Typography className='ptv-calendar-item-overview'>{item.overview}</Typography>
+                                                                ) : null}
+                                                            </Stack>
+                                                        </Box>
+                                                    </Grid>
+                                                ))}
+                                            </Grid>
+                                        </Box>
+                                    ))}
+                                </Stack>
+                            </CardContent>
+                        </Card>
+                    </Stack>
+                </Box>
+            </PTVShell>
         </Page>
     );
 };

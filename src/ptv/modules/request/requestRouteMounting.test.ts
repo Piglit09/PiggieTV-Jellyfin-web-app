@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHashRouter } from 'react-router-dom';
 
 const routeMocks = vi.hoisted(() => ({
     dispatch: vi.fn(),
@@ -71,6 +72,65 @@ describe('PTV Request direct-route mounting', () => {
         expect(document.querySelector('[data-ptv-request-view="true"]')).toBeNull();
         expect(document.documentElement.classList.contains('ptv-request-active'))
             .toBe(false);
+    });
+
+    it('returns a direct Request entry to the rendered Home route on Close', async () => {
+        window.history.replaceState({}, '', '#/requests');
+        const router = createHashRouter([
+            { path: '/home', element: null },
+            { path: '*', element: null }
+        ]);
+
+        try {
+            expect(router.state.matches.at(-1)?.route.path).toBe('*');
+
+            await import('./index');
+            const closeButton = document.querySelector<HTMLButtonElement>('.ptv-request-close');
+
+            expect(closeButton).not.toBeNull();
+            closeButton?.click();
+
+            expect(window.location.hash).toBe('#/home');
+            expect(router.state.location.pathname).toBe('/home');
+            expect(router.state.matches.at(-1)?.route.path).toBe('/home');
+            expect(document.querySelector('[data-ptv-request-view="true"]')).toBeNull();
+        } finally {
+            router.dispose();
+        }
+    });
+
+    it('ignores an unknown previous route when closing a direct Request entry', async () => {
+        window.history.replaceState({}, '', '#/not-a-ptv-route');
+        const { openRequestPortal } = await import('./index');
+
+        window.history.replaceState({}, '', '#/requests');
+        openRequestPortal({ pushHistory: false });
+        document.querySelector<HTMLButtonElement>('.ptv-request-close')?.click();
+
+        expect(window.location.hash).toBe('#/home');
+    });
+
+    it('returns to a known PTV route when closing without a Request history marker', async () => {
+        window.history.replaceState({}, '', '#/calendar');
+        const { openRequestPortal } = await import('./index');
+
+        window.history.replaceState({}, '', '#/requests');
+        openRequestPortal({ pushHistory: false });
+        document.querySelector<HTMLButtonElement>('.ptv-request-close')?.click();
+
+        expect(window.location.hash).toBe('#/calendar');
+    });
+
+    it('preserves browser Back for a Request opened from Home', async () => {
+        const { openRequestPortal } = await import('./index');
+        const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+
+        openRequestPortal();
+        expect(window.history.state?.ptvRequestActive).toBe(true);
+
+        document.querySelector<HTMLButtonElement>('.ptv-request-close')?.click();
+
+        expect(back).toHaveBeenCalledOnce();
     });
 
     it('registers URL-owned routing independently of Request presentation state', async () => {

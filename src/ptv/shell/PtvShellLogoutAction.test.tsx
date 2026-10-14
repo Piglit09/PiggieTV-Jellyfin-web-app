@@ -292,6 +292,19 @@ describe('PTV shell logout control', () => {
         expect(labels).not.toContain('Calendar');
     });
 
+    it('provides Home and Back exits for a direct Calendar entry even before Calendar setup', () => {
+        window.location.hash = '#/calendar';
+        flushSync(() => root.render(
+            <PTVShell section='request' showBackButton title='Release Calendar'>
+                <div />
+            </PTVShell>
+        ));
+
+        expect(container.querySelector<HTMLAnchorElement>('a[aria-label="PiggieTV Home"]')?.getAttribute('href'))
+            .toBe('#/home');
+        expect(container.querySelector<HTMLButtonElement>('button[aria-label="Back"]')).not.toBeNull();
+    });
+
     it('applies the same Calendar gate to Request page context navigation', () => {
         flushSync(() => root.render(
             <PTVShell section='request' title='Requests'>

@@ -21,6 +21,19 @@ vi.mock('components/Page', () => ({
     )
 }));
 
+vi.mock('../../shell/PTVShell', () => ({
+    default: ({ children, section, showBackButton, title }: {
+        children: React.ReactNode;
+        section: string;
+        showBackButton: boolean;
+        title: string;
+    }) => (
+        <div data-shell-section={section} data-show-back-button={String(showBackButton)} data-shell-title={title}>
+            {children}
+        </div>
+    )
+}));
+
 vi.mock('../../core/pluginApi', () => ({
     getCurrentPtvPluginApiClient: () => ({
         getArrCalendar: calendarMocks.getArrCalendar
@@ -84,6 +97,7 @@ describe('Release Calendar lifecycle', () => {
     afterEach(() => {
         act(() => root.unmount());
         container.remove();
+        window.location.hash = '';
         Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', false);
     });
 
@@ -93,6 +107,21 @@ describe('Release Calendar lifecycle', () => {
             await Promise.resolve();
         });
     }
+
+    it('keeps shared navigation and a safe Home exit on direct Calendar entry', async () => {
+        calendarMocks.getArrCalendar.mockResolvedValue(calendarResponse({
+            items: [],
+            services: []
+        }));
+        window.location.hash = '#/calendar';
+
+        await renderCalendar();
+
+        const shell = container.querySelector<HTMLElement>('[data-shell-section="request"]');
+        expect(shell?.getAttribute('data-show-back-button')).toBe('true');
+        expect(shell?.getAttribute('data-shell-title')).toBe('Release Calendar');
+        expect(container.textContent).toContain('0 releases');
+    });
 
     it('loads a bounded range and reaches a healthy terminal state', async () => {
         calendarMocks.getArrCalendar.mockResolvedValue(calendarResponse());
