@@ -3432,6 +3432,7 @@
       ],
       "stockContractPreserved": "Stock server connection and React render sequence remain present.",
       "ptvChange": "PTV styles, modules, shell, observability and runtime initialize around the stock-derived bootstrap. Connection-dependent Plugin identity listeners are installed only after module evaluation reaches a runtime client access, avoiding eager reads through the existing Jellyfin connection-barrel cycle.",
+      "hostedOriginRestriction": "For an HTTP(S) /web document, PTV discovery, stock-derived API client initialization, saved-server reconnect, and PTV Plugin API retries are constrained to the document's Jellyfin server root, including any BaseUrl prefix. Other saved credentials are retained during initialization but cannot be selected or probed by that hosted page; stock logout still clears saved authentication fields globally. Development and non-hosted clients retain split-origin behavior. This is client connection selection, not server authorization or reverse-proxy routing proof.",
       "risk": "HIGH",
       "conflictClass": "INTENTIONAL_WRAPPER",
       "chapterRefs": [
@@ -3462,6 +3463,13 @@
           "symbol": "partial-barrel module-evaluation regression and emitted production-dist cold-bootstrap gate",
           "lines": "full test/harness files",
           "status": "VERIFIED_BY_TEST"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "0.5.73 local candidate",
+          "file": "src/ptv/core/urlOrigins.ts; src/ptv/core/serverOriginSelection.ts; src/lib/jellyfin-apiclient/connectionManager.js; src/ptv/core/pluginApi.ts; src/ptv/core/serverOriginSelection.test.ts; src/lib/jellyfin-apiclient/connectionManager.hostedOrigin.test.ts; src/ptv/core/pluginApiAuthentication.test.ts",
+          "symbol": "hosted Web server-root discovery, API client initialization, saved-server selection, reconnect and Plugin API retry restriction",
+          "status": "VERIFIED_FROM_SOURCE / VERIFIED_BY_TEST"
         }
       ]
     },

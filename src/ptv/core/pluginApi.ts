@@ -19,6 +19,7 @@ import type {
 } from './recommendations/recommendationPolicyContracts';
 import {
     classifyPtvRequestUrl,
+    getPtvHostedServerRoot,
     isPtvWebpackDevServerOrigin,
     resolvePtvServerUrlForPage,
     type PtvRequestOriginKind
@@ -819,6 +820,9 @@ function getPluginRootCandidates(
     params?: Record<string, unknown>,
     options: { requireApiClientRoot?: boolean } = {}
 ) {
+    const hostedRoot = getPtvHostedServerRoot();
+    if (hostedRoot) return [hostedRoot];
+
     const rootCandidates: string[] = [];
     const apiClientRoot = getPluginRootFromApiClient(apiClient, path, params);
 

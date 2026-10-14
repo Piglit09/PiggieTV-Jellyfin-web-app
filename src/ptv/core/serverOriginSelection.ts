@@ -1,4 +1,4 @@
-import { resolvePtvServerUrlForPage } from './urlOrigins';
+import { getPtvHostedServerRoot, resolvePtvServerUrlForPage } from './urlOrigins';
 
 type PtvSavedServer = {
     ExchangeToken?: string;
@@ -116,6 +116,9 @@ export function buildPtvServerOriginCandidates({
     requestedServer,
     runtimeUrls = []
 }: PtvServerOriginCandidatesOptions) {
+    const hostedRoot = !development ? getPtvHostedServerRoot() : '';
+    if (hostedRoot) return [hostedRoot];
+
     const candidates: string[] = [];
 
     addCandidate(candidates, requestedServerUrl);
