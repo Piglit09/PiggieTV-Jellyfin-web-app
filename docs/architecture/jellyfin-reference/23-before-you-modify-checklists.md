@@ -210,10 +210,14 @@ Album, album-artist, artist and Audio child relationships are separate Server fi
 - [ ] If deriving display artist from children, require bounded credible consensus; never infer from title text or rewrite Jellyfin metadata.
 - [ ] Preserve the previous valid relationship when a sparse same-item readback omits it; do not preserve across a different item/generation.
 - [ ] Keep exact track IDs/order/`UserData` and media sources separate from album metadata adoption.
+- [ ] For Jellyfin 12.2 album-track queries, prove the requested `MusicAlbum` ID is visible in a separately paged, user-aware search under the selected Music library. Do not use `Ids` with `ParentId` as membership proof or treat album title/path as identity.
+- [ ] Page recursive `ParentId=album` Audio children and `AlbumIds` relationship results; admit only exact `Audio.AlbumId`, deduplicate by item ID, and sort by disc/track number without replacing returned DTOs.
+- [ ] Fail closed on missing album/library/track identity, incomplete or excessive paging, abort, route retirement, and server/user change. Do not use an unscoped-empty fallback for album tracks.
 - [ ] Coalesce library discovery and identical list requests; record a cold/warm transport and concurrency budget.
 - [ ] Retire route work on abort/unmount/identity change. PTV's music coordinator exposes route-work cancellation and scoped discovery. `VERIFIED_FROM_SOURCE` — PTV-WEB@worktree, `musicApi.ts`, lines 241-425 and 526-605.
 - [ ] Test album relationship present, sparse omission, unanimous children, disagreeing children, zero children and old/new Identify generations.
 - [ ] Test albums/artists/tracks/playlists independently and one section failure without destroying others.
+- [ ] Test flat and nested-disc albums, foreign album/library tracks, restricted user, same-title albums, multi-page results, exact queue order, and current-user changes. Issue #38 requires separate authenticated hosted and physical acceptance; local fixtures alone cannot close it.
 - [ ] Verify Play, Shuffle, Mix, Play Next, queue, Favorite and Now Playing before/during/after metadata adoption.
 
 ## Reading and reader lifecycle

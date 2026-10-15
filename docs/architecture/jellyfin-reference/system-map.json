@@ -350,6 +350,7 @@
       "kind": "native PTV system",
       "responsibilities": [
         "music discovery and relationship reconciliation",
+        "user-visible Music album membership proof and bounded nested-disc track projection",
         "Music Identify adoption",
         "native audio queue and playback view state"
       ],
@@ -3742,13 +3743,22 @@
         "STOCK_REPLACED",
         "NEW_PTV_SYSTEM"
       ],
-      "ptvChange": "PTV owns native Music discovery, relationship reconciliation, queue and native audio playback surfaces while using Jellyfin item/stream/report APIs.",
+      "ptvChange": "PTV owns native Music discovery, relationship reconciliation, queue and native audio playback surfaces while using Jellyfin item/stream/report APIs. The Issue #38 local candidate resolves nested-disc album tracks with a separately proven user-visible Music album identity and exact Audio AlbumId filtering.",
       "risk": "CRITICAL",
       "conflictClass": "RACE_RISK",
+      "albumTrackLocalCandidate": {
+        "authority": "Jellyfin user-aware MusicAlbum and Audio item responses; PTV does not infer membership from filename, title, or path",
+        "membership": "Require the requested album ID in a paged Music-scoped MusicAlbum search under the selected user-visible Music library. Do not combine Ids and ParentId as membership proof because Jellyfin 12.2 may let Ids override ParentId.",
+        "trackProjection": "Page recursive ParentId album descendants and the AlbumIds relationship query; admit only Audio whose exact AlbumId equals the requested album ID; deduplicate by item ID and order by disc, track, sort name, and ID.",
+        "lifecycle": "Bound page count and reject incomplete pages; abort results on route cancellation or server/user display-identity change. Do not use the shared unscoped-empty fallback.",
+        "acceptance": "Local source/test candidate only. Authenticated hosted candidate and physical Music playback/queue acceptance remain pending separate installation authorization."
+      },
       "chapterRefs": [
         "10-music.md",
         "20-ptv-vs-stock-map.md",
-        "21-ownership-conflicts.md"
+        "21-ownership-conflicts.md",
+        "22-change-impact-matrix.md",
+        "23-before-you-modify-checklists.md"
       ],
       "evidence": [
         {
@@ -3765,6 +3775,13 @@
           "file": "src/ptv/modules/music/musicQueue.ts",
           "symbol": "native audio/queue ownership",
           "lines": "1010-1085,1309-1453",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web local Issue #38 candidate",
+          "version": "unreleased source",
+          "file": "src/ptv/modules/music/musicApi.ts",
+          "symbol": "fetchPtvMusicAlbumTracks Music-scoped membership and nested-disc projection",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]

@@ -101,6 +101,7 @@ const MUSIC_LIBRARY_PAGE_SIZE = 48;
 const MUSIC_LIBRARY_FETCH_CAP = PTV_MUSIC_LIBRARY_RETAIN_LIMIT;
 const MUSIC_LIBRARY_INDEX_CACHE_SCHEMA_VERSION = 2;
 const MAX_GENERATOR_PAGE_SIZE = 100;
+const MAX_MUSIC_ALBUM_QUERY_PAGES = 40;
 const UNKNOWN_ARTIST_LABEL = 'Unknown Artist';
 const UNKNOWN_TRACK_LABEL = 'Unknown Track';
 const UNKNOWN_DISPLAY_VALUES = new Set([
@@ -2262,18 +2263,121 @@ export async function fetchPtvMusicAlbumsByArtist(
     }, signal).then(result => uniquePtvMusicItems(result.Items || []));
 }
 
-export function fetchPtvMusicAlbumTracks(
+async function fetchPtvMusicAlbumQueryPages(
+    query: PtvItemQuery,
+    pageSize: number,
+    requestIdentity: string,
+    signal?: AbortSignal,
+    stopWhen?: (item: PtvMusicItem) => boolean
+): Promise<PtvMusicItem[]> {
+    const items: PtvMusicItem[] = [];
+
+    for (let page = 0; page < MAX_MUSIC_ALBUM_QUERY_PAGES; page += 1) {
+        throwIfPtvMusicAlbumRequestRetired(requestIdentity, signal);
+        const result = await getItems<PtvMusicItem>({
+            ...query,
+            Limit: pageSize,
+            StartIndex: items.length
+        }, signal);
+        throwIfPtvMusicAlbumRequestRetired(requestIdentity, signal);
+
+        const batch = result.Items || [];
+        const total = Number(result.TotalRecordCount);
+
+        if (!batch.length) {
+            if (hasPtvMusicAlbumPageGap(total, items.length)) {
+                throw new Error('Jellyfin returned an incomplete Music album page.');
+            }
+
+            return items;
+        }
+
+        items.push(...batch);
+        if (stopWhen && batch.some(stopWhen)) return items;
+        if (isPtvMusicAlbumPageComplete(batch.length, pageSize, total, items.length)) return items;
+    }
+
+    throw new Error('Music album query exceeded the safe page limit.');
+}
+
+function hasPtvMusicAlbumPageGap(total: number, itemCount: number) {
+    return Number.isFinite(total) && total > itemCount;
+}
+
+function isPtvMusicAlbumPageComplete(batchSize: number, pageSize: number, total: number, itemCount: number) {
+    if (Number.isFinite(total) && total > 0 && itemCount >= total) return true;
+
+    return batchSize < pageSize && !hasPtvMusicAlbumPageGap(total, itemCount);
+}
+
+function getPtvMusicAlbumPageSize(limit: number) {
+    return Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 25), 100) : 100;
+}
+
+function throwIfPtvMusicAlbumRequestRetired(requestIdentity: string, signal?: AbortSignal) {
+    throwIfPtvMusicRouteWorkRetired({ signal });
+    if (getMusicDisplayIdentityKey() !== requestIdentity) {
+        throw createPtvMusicAbortError('PiggieTV Music identity changed during the album request.');
+    }
+}
+
+function comparePtvMusicAlbumTracks(left: PtvMusicItem, right: PtvMusicItem) {
+    const disc = Math.max(1, left.ParentIndexNumber ?? 1) - Math.max(1, right.ParentIndexNumber ?? 1);
+    const track = (left.IndexNumber ?? Number.MAX_SAFE_INTEGER) - (right.IndexNumber ?? Number.MAX_SAFE_INTEGER);
+
+    return disc || track || String(left.SortName || left.Name || '').localeCompare(String(right.SortName || right.Name || ''))
+        || String(left.Id || '').localeCompare(String(right.Id || ''));
+}
+
+export async function fetchPtvMusicAlbumTracks(
     albumId: string,
     limit = 100,
     signal?: AbortSignal
 ): Promise<PtvMusicItem[]> {
-    if (!albumId) return Promise.resolve([]);
+    if (!albumId || !getPtvCurrentUserId()) return [];
 
-    return fetchPtvMusicTracks({
-        AlbumIds: albumId,
+    const requestIdentity = getMusicDisplayIdentityKey();
+    if (!requestIdentity) return [];
+    const library = await getPtvMusicLibrary(signal);
+    throwIfPtvMusicAlbumRequestRetired(requestIdentity, signal);
+    if (!library?.id) return [];
+
+    const album = await runPtvMusicApiRequest(() => getPtvItem<PtvMusicItem>(albumId, { signal }), signal);
+    throwIfPtvMusicAlbumRequestRetired(requestIdentity, signal);
+    if (album?.Id !== albumId || album.Type !== 'MusicAlbum' || !album.Name?.trim()) return [];
+
+    const pageSize = getPtvMusicAlbumPageSize(limit);
+    // Jellyfin 12.2 can ignore ParentId when Ids is present; search within the selected view instead.
+    const visibleAlbums = await fetchPtvMusicAlbumQueryPages({
+        IncludeItemTypes: 'MusicAlbum',
+        ParentId: library.id,
+        Recursive: true,
+        SearchTerm: album.Name
+    }, pageSize, requestIdentity, signal, item => item.Id === albumId && item.Type === 'MusicAlbum');
+    if (!visibleAlbums.some(item => item.Id === albumId && item.Type === 'MusicAlbum')) return [];
+
+    const trackOrder = {
         SortBy: 'ParentIndexNumber,IndexNumber,SortName',
         SortOrder: 'Ascending'
-    }, limit, signal);
+    };
+    const descendants = await fetchPtvMusicAlbumQueryPages({
+        IncludeItemTypes: 'Audio',
+        ParentId: albumId,
+        Recursive: true,
+        ...trackOrder
+    }, pageSize, requestIdentity, signal);
+    const related = await fetchPtvMusicAlbumQueryPages({
+        AlbumIds: albumId,
+        IncludeItemTypes: 'Audio',
+        ParentId: library.id,
+        Recursive: true,
+        ...trackOrder
+    }, pageSize, requestIdentity, signal);
+
+    throwIfPtvMusicAlbumRequestRetired(requestIdentity, signal);
+    return uniquePtvMusicItems([ ...descendants, ...related ]
+        .filter(item => item.Type === 'Audio' && item.AlbumId === albumId))
+        .sort(comparePtvMusicAlbumTracks);
 }
 
 export function fetchPtvMusicPlaylistTracks(
