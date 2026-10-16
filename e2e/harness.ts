@@ -86,7 +86,7 @@ if (!root) throw new Error('PiggieTV browser harness root is missing.');
 const style = document.createElement('style');
 
 style.textContent = `
-    * { box-sizing: border-box; }
+    *:not(.ptv-native-home-scroller) { box-sizing: border-box; }
     html { min-height: 100%; background: #090812; color: #fff; font-family: sans-serif; }
     body { min-height: 140vh; margin: 0; }
     body.ptv-e2e-settings-layout { height: 100vh; min-height: 100vh; overflow: hidden; }
