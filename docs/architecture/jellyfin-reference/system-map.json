@@ -1176,11 +1176,11 @@
     },
     "responsiveShellGeometry": {
       "authoritativeOwner": "mounted PTVShell header bounding geometry",
-      "derivedOwners": ["root --ptv-shell-header-clearance CSS value", "shell, Browse and cinematic Details sticky/scroll offsets"],
+      "derivedOwners": ["root --ptv-shell-header-clearance CSS value", "shell, Browse and cinematic Details sticky/scroll offsets", "Calendar section-navigation and content clearance"],
       "refresh": ["header ResizeObserver", "root route-class change", "window resize", "visualViewport resize"],
       "cleanup": ["disconnect observers and listeners on shell unmount", "remove or transfer the root CSS value"],
       "nonAuthority": "Presentation geometry does not select route, user/library scope, image identity or data requests.",
-      "localCandidateEvidence": ["src/ptv/shell/PTVShell.tsx", "src/ptv/shell/ptvShell.scss", "src/ptv/styles/shell.scss", "src/ptv/pages/browse/nativeBrowse.scss", "src/ptv/modules/details/details-shell.scss"],
+      "localCandidateEvidence": ["src/ptv/shell/PTVShell.tsx", "src/ptv/shell/ptvShell.scss", "src/ptv/styles/shell.scss", "src/ptv/pages/browse/nativeBrowse.scss", "src/ptv/modules/details/details-shell.scss", "src/ptv/modules/calendar/calendar.scss", "e2e/tests/calendar-layout.spec.ts"],
       "chapterRefs": ["03-routing-navigation-lifecycle.md", "08-details-seasons-episodes.md", "22-change-impact-matrix.md"]
     },
     "responsiveLayoutSelection": {
