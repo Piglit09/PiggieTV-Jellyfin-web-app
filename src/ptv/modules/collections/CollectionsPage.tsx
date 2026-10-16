@@ -70,6 +70,7 @@ import {
     type PtvCollectionSectionId,
     type PtvPortableCollection
 } from './collectionTypes';
+import { MemberCard } from './CollectionMemberCard';
 
 import './collections.scss';
 
@@ -454,32 +455,6 @@ function CollectionHero({ collection }: Readonly<{ collection: PtvPortableCollec
     );
 }
 
-function MemberCard({
-    member,
-    surface
-}: Readonly<{
-    member: PtvCollectionMemberSummary;
-    surface: string;
-}>) {
-    return (
-        <article className='ptv-collection-memberCard'>
-            <a
-                aria-label={`Open ${member.title}`}
-                data-ptv-focus-key={getPtvCollectionSurfaceFocusKey(
-                    `members-${surface}`,
-                    getPtvCollectionFocusKey(member.key)
-                )}
-                href={getMemberHref(member)}
-            >
-                <span className='ptv-collection-memberIndex'>{member.collectionOrder + 1}</span>
-                <strong>{member.title}</strong>
-                <span>{formatSource(member.mediaCategory)}</span>
-                {member.progress.started ? <span>{member.progress.completed ? 'Completed' : `${member.progress.percent}% complete`}</span> : null}
-            </a>
-        </article>
-    );
-}
-
 function CollectionDetails({
     collection,
     order,
@@ -579,7 +554,16 @@ function CollectionDetails({
                 <section className='ptv-collection-members' aria-labelledby={`ptv-collection-members-${getPtvCollectionFocusKey(section)}`} key={section}>
                     <h2 id={`ptv-collection-members-${getPtvCollectionFocusKey(section)}`}>{formatSource(section)}</h2>
                     <div className='ptv-collection-memberGrid' data-ptv-focus-group={`collection-members-${getPtvCollectionFocusKey(section)}`}>
-                        {members.map(member => <MemberCard key={member.key} member={member} surface={section} />)}
+                        {members.map(member => <MemberCard
+                            focusKey={getPtvCollectionSurfaceFocusKey(
+                                `members-${section}`,
+                                getPtvCollectionFocusKey(member.key)
+                            )}
+                            href={getMemberHref(member)}
+                            key={member.key}
+                            mediaLabel={formatSource(member.mediaCategory)}
+                            member={member}
+                        />)}
                     </div>
                 </section>
             ))}
