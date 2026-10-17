@@ -48,6 +48,10 @@ with operational context in [Handoff](../HANDOFF.md) and ownership rules in
 
 - [Phase F3: Premium Collections and Cross-Library Discovery](collections/phase-f3-premium-collections.md) - route-lazy Collections landing and Details, explicit cross-library relationships, scoped personalization, integration boundaries, and rollback notes.
 
+## Future architecture: PTV Channels
+
+- [PTV Channels Architecture RFC v1](architecture/PTV_CHANNELS_RFC_V1.md) - draft architecture and shared API proposal. Scheduler prototype and production implementation remain on hold.
+
 ## Active closure: F3A2
 
 - Decision: HOLD.
