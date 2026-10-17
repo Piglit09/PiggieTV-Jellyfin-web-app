@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
+import { canonicalDigest, verifyManifest } from './ptv-artifact-manifest.mjs';
 
 const officialVersionSources = {
     web: 'ptv-version.json',
@@ -169,6 +170,64 @@ function hashFile(file) {
     return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+export function approvalProtectedFromCurrentProcess(approvalPath) {
+    if (process.platform !== 'win32') return false;
+    const protectedRoot = 'C:\\ProgramData\\PiggieTV\\WorkspaceAuthority\\Approvals';
+    if (!insidePath(approvalPath, protectedRoot) || samePath(approvalPath, protectedRoot)) return false;
+    let handle;
+    try {
+        handle = fs.openSync(approvalPath, 'r+');
+        return false;
+    } catch (error) {
+        if (error?.code !== 'EACCES' && error?.code !== 'EPERM') return false;
+    } finally {
+        if (handle !== undefined) fs.closeSync(handle);
+    }
+    try {
+        const script = [
+            "$ErrorActionPreference='Stop'",
+            '$identity=[System.Security.Principal.WindowsIdentity]::GetCurrent()',
+            '$principal=[System.Security.Principal.WindowsPrincipal]::new($identity)',
+            '$elevated=$identity.IsSystem -or $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)',
+            "$protectedRoot='C:\\ProgramData\\PiggieTV\\WorkspaceAuthority\\Approvals'",
+            "$protectedAncestor='C:\\ProgramData\\PiggieTV'",
+            '$approval=[System.IO.Path]::GetFullPath($env:PTV_APPROVAL_PATH)',
+            '$prefix=[System.IO.Path]::GetFullPath($protectedRoot).TrimEnd("\\")+"\\"',
+            'if(-not $approval.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw "Approval root mismatch"}',
+            '$paths=@($approval)',
+            '$parent=[System.IO.Path]::GetDirectoryName($approval)',
+            'while($true){ $paths+= $parent; if($parent -ieq $protectedAncestor){break};',
+            '  $parent=[System.IO.Path]::GetDirectoryName($parent);',
+            '  if(-not $parent -or -not $parent.StartsWith($protectedAncestor,[StringComparison]::OrdinalIgnoreCase)){throw "Approval ancestor mismatch"} }',
+            '$records=@(foreach($p in $paths) {',
+            '  $acl=Get-Acl -LiteralPath $p',
+            '  @{ ownerSid=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;',
+            '     aces=@($acl.Access | ForEach-Object { @{ sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value;',
+            '       type=$_.AccessControlType.ToString(); rights=[int64]$_.FileSystemRights } }) }',
+            '})',
+            '@{ elevated=[bool]$elevated; records=$records } | ConvertTo-Json -Compress -Depth 5'
+        ].join('\n');
+        const output = execFileSync(powershellExecutable, ['-NoProfile', '-NonInteractive', '-Command', script], {
+            encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, PTV_APPROVAL_PATH: approvalPath }
+        });
+        const evidence = JSON.parse(output);
+        return approvalAclSafe(evidence);
+    } catch {
+        return false;
+    }
+}
+
+export function approvalAclSafe(evidence) {
+    const privileged = new Set(['S-1-5-18', 'S-1-5-32-544']);
+    const writeMask = 0x2 | 0x4 | 0x10 | 0x40 | 0x100 | 0x10000 | 0x40000 | 0x80000;
+    return evidence?.elevated === false && Array.isArray(evidence.records) && evidence.records.length >= 4
+        && evidence.records.every(record => privileged.has(record.ownerSid) && Array.isArray(record.aces)
+            && record.aces.every(ace => ace.type !== 'Allow'
+                || (typeof ace.rights === 'number' && typeof ace.sid === 'string'
+                    && ((ace.rights & writeMask) === 0 || privileged.has(ace.sid)))));
+}
+
 function readJson(file, label) {
     try {
         return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -181,6 +240,7 @@ function registeredEnvironment(flags, registry) {
     if (typeof flags.environmentId !== 'string' || !flags.environmentId) deny('Deployment environment ID is required');
     const environment = registry.environments?.find(item => item.id === flags.environmentId);
     if (!environment) deny('Unregistered deployment environment');
+    if (environment.role === 'PRODUCTION' || environment.id === 'JF_PRODUCTION_50') deny('Production deployment is denied');
     if (environment.deployment?.enabled !== true || !environment.deployment?.targetPath) deny('Deployment is denied for this environment');
     return environment;
 }
@@ -188,17 +248,35 @@ function registeredEnvironment(flags, registry) {
 function verifiedManifest(flags, identity, versions) {
     if (!flags.artifactManifest) deny('Exact artifact manifest is required');
     const manifest = readJson(flags.artifactManifest, 'Artifact manifest');
-    if (manifest.sourceCommit !== identity.head || !/^[0-9a-f]{64}$/.test(manifest.manifestDigest ?? '') || manifest.sourceDirty !== false) {
+    const frozen = flags.frozenSourceCommit !== undefined;
+    const sourceCommit = frozen ? flags.frozenSourceCommit : identity.head;
+    if (!validFullSha(sourceCommit) || manifest.sourceCommit !== sourceCommit
+        || !/^[0-9a-f]{64}$/.test(manifest.manifestDigest ?? '') || manifest.sourceDirty !== false) {
         deny('Artifact manifest provenance does not match clean source');
     }
     if (!manifest.sourceRoot || !samePath(manifest.sourceRoot, identity.root)) deny('Artifact source root mismatch');
-    if (manifest.sourceVersions?.web !== versions.web || manifest.sourceVersions?.plugin !== versions.plugin) {
+    if (!frozen && (manifest.sourceVersions?.web !== versions.web || manifest.sourceVersions?.plugin !== versions.plugin)) {
         deny('Artifact manifest source version mismatch');
     }
-    return manifest;
+    if (!frozen) return { manifest, sourceCommit, sourceTree: git(identity.root, 'rev-parse', 'HEAD^{tree}'), archiveSha256: null };
+    if (git(identity.root, 'cat-file', '-t', sourceCommit) !== 'commit') deny('Frozen source is not a Git commit');
+    const sourceTree = git(identity.root, 'rev-parse', `${sourceCommit}^{tree}`);
+    if (!validFullSha(sourceTree)) deny('Frozen source tree identity is invalid');
+    if (!flags.artifactRoot || !flags.artifactArchive) deny('Frozen artifact requires staged files and exact archive');
+    if (manifest.manifestDigest !== canonicalDigest(manifest)) deny('Artifact manifest digest mismatch');
+    try {
+        verifyManifest(manifest, { artifactRoot: flags.artifactRoot, sourceRoot: identity.root, frozenSourceCommit: sourceCommit });
+    } catch (error) {
+        deny(`Frozen artifact verification failed: ${error.message}`);
+    }
+    const archive = existingRealPath(flags.artifactArchive, 'Frozen artifact archive');
+    if (!samePath(path.resolve(flags.artifactArchive), archive) || !fs.lstatSync(archive).isFile()) {
+        deny('Frozen artifact archive must be a regular file at its approved path');
+    }
+    return { manifest, sourceCommit, sourceTree, archiveSha256: hashFile(archive) };
 }
 
-function verifiedAuthorization({ flags, identity, policy, environment, operatorPolicy }) {
+function verifiedAuthorization({ flags, identity, policy, environment, operatorPolicy, protectedApprovalProbe }) {
     if (!flags.approvalRecord) deny('Operator approval record is required');
     if (!flags.rollbackReference) deny('Verified rollback reference is required');
     if (!operatorPolicy || operatorPolicy.schemaVersion !== 1 || operatorPolicy.projectId !== 'PTV_WEB') {
@@ -220,6 +298,7 @@ function verifiedAuthorization({ flags, identity, policy, environment, operatorP
     if (!samePath(authorization.approvalRecordPath, approvalPath) || hashFile(approvalPath) !== authorization.approvalSha256) {
         deny('Operator approval record identity or hash mismatch');
     }
+    if (!protectedApprovalProbe(approvalPath)) deny('Operator approval is writable by the current task token or lacks protected ACLs');
     const rollbackPath = existingRealPath(flags.rollbackReference, 'Rollback evidence');
     if (!samePath(authorization.rollbackReference, rollbackPath) || hashFile(rollbackPath) !== authorization.rollbackSha256) {
         deny('Rollback evidence identity or hash mismatch');
@@ -227,8 +306,9 @@ function verifiedAuthorization({ flags, identity, policy, environment, operatorP
     return { authorization, targetPath, approvalPath, rollbackPath };
 }
 
-function validateRollback({ rollbackPath, environment, targetPath, identity, manifest, versions }) {
+function validateRollback({ rollbackPath, environment, targetPath, identity, verified, versions }) {
     const rollback = readJson(rollbackPath, 'Rollback evidence');
+    const { manifest, sourceCommit, sourceTree, archiveSha256 } = verified;
     const backupPath = rollback.backupPath && path.isAbsolute(rollback.backupPath) ?
         existingRealPath(rollback.backupPath, 'Rollback backup') : null;
     const backupDate = Date.parse(rollback.createdAt);
@@ -236,43 +316,137 @@ function validateRollback({ rollbackPath, environment, targetPath, identity, man
         rollback.schemaVersion === 1,
         rollback.environmentId === environment.id,
         samePath(rollback.targetPath, targetPath),
-        rollback.candidateSourceCommit === identity.head,
+        rollback.candidateSourceCommit === sourceCommit,
         rollback.artifactManifestDigest === manifest.manifestDigest
     ];
+    if (archiveSha256) {
+        matchingIdentity.push(rollback.candidateSourceTree === sourceTree,
+            rollback.candidateArchiveSha256 === archiveSha256);
+    }
     const validBackup = backupPath && /^[0-9a-f]{64}$/.test(rollback.backupSha256 ?? '')
         && !insidePath(backupPath, identity.root) && !insidePath(backupPath, targetPath)
         && fs.statSync(backupPath).isFile();
     const validDate = Number.isFinite(backupDate) && backupDate <= Date.now() + 300_000;
     if (!matchingIdentity.every(Boolean) || !validBackup || !validDate) deny('Rollback evidence is incomplete or mismatched');
-    if (rollback.candidateVersions?.web !== versions.web || rollback.candidateVersions?.plugin !== versions.plugin) {
+    const expectedVersions = archiveSha256 ? manifest.sourceVersions : versions;
+    if (rollback.candidateVersions?.web !== expectedVersions.web || rollback.candidateVersions?.plugin !== expectedVersions.plugin) {
         deny('Rollback candidate version mismatch');
     }
     if (hashFile(backupPath) !== rollback.backupSha256) deny('Rollback backup hash mismatch');
+    return rollback;
 }
 
-function validateApproval({ approvalPath, environment, identity, manifest, authorization, rollbackPath }) {
+function utcTimestamp(value) {
+    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value) ?
+        Date.parse(value) : Number.NaN;
+}
+
+function validMaintenanceUserIds(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return false;
+    const valid = ids.every(id => typeof id === 'string' && /^[A-Za-z0-9._-]{2,128}$/.test(id));
+    return valid && new Set(ids.map(id => id.toLowerCase())).size === ids.length;
+}
+
+function validRecoveryApproval(approval, authorization) {
+    const fields = ['recoveryAuthorized', 'recoveryTransactionId', 'recoveryTransactionJournalSha256'];
+    if (approval.recoveryAuthorized !== true) {
+        return fields.every(field => !Object.hasOwn(approval, field) && !Object.hasOwn(authorization, field));
+    }
+    return authorization.recoveryAuthorized === true
+        && /^[0-9a-f]{32}$/.test(approval.recoveryTransactionId ?? '')
+        && authorization.recoveryTransactionId === approval.recoveryTransactionId
+        && /^[0-9a-f]{64}$/.test(authorization.recoveryTransactionJournalSha256 ?? '')
+        && (!Object.hasOwn(approval, 'recoveryTransactionJournalSha256')
+            || approval.recoveryTransactionJournalSha256 === authorization.recoveryTransactionJournalSha256);
+}
+
+function validFrozenMaintenanceApproval(approval, authorization, now) {
+    const start = utcTimestamp(approval.maintenanceWindowStartUtc);
+    const end = utcTimestamp(approval.maintenanceWindowEndUtc);
+    const betaRouteVerified = utcTimestamp(approval.betaRouteVerifiedAtUtc);
+    const expiration = utcTimestamp(approval.expiresAt);
+    const fields = ['taskId', 'serverId', 'maintenanceWindowStartUtc', 'maintenanceWindowEndUtc',
+        'userImpactAttested', 'betaIsolationAttested', 'betaRouteVerifiedAtUtc',
+        'betaRouteBoundToExpectedServer', 'noUnapprovedAudience', 'expiresAt'];
+    return approval.schemaVersion === 1 && approval.operatorApproved === true
+        && approval.operation === 'web-only-frozen-artifact-deployment'
+        && authorization.operation === approval.operation
+        && /^[A-Za-z0-9][A-Za-z0-9._-]{3,127}$/.test(approval.taskId ?? '')
+        && /^[0-9a-f]{32}$/.test(approval.serverId ?? '')
+        && fields.every(field => authorization[field] === approval[field])
+        && approval.userImpactAttested === true && approval.betaIsolationAttested === true
+        && approval.betaRouteBoundToExpectedServer === true && approval.noUnapprovedAudience === true
+        && Number.isFinite(start) && Number.isFinite(end) && start <= now && end > now
+        && end - start <= 2 * 60 * 60 * 1000
+        && Number.isFinite(betaRouteVerified) && betaRouteVerified <= now && now - betaRouteVerified <= 5 * 60 * 1000
+        && Number.isFinite(expiration) && expiration > now && expiration - now <= 24 * 60 * 60 * 1000
+        && validMaintenanceUserIds(approval.maintenanceUserIds)
+        && validMaintenanceUserIds(authorization.maintenanceUserIds)
+        && approval.maintenanceUserIds.length === authorization.maintenanceUserIds.length
+        && approval.maintenanceUserIds.every((id, index) => id === authorization.maintenanceUserIds[index])
+        && validRecoveryApproval(approval, authorization);
+}
+
+function validateApproval({ approvalPath, environment, verified, authorization, rollbackPath, rollback }) {
     const approval = readJson(approvalPath, 'Operator approval record');
+    const { manifest, sourceCommit, sourceTree, archiveSha256 } = verified;
     const expiration = Date.parse(approval.expiresAt);
+    const now = Date.now();
     const valid = [
         typeof approval.taskId === 'string' && Boolean(approval.taskId.trim()),
         approval.environmentId === environment.id,
-        approval.sourceCommit === identity.head,
+        approval.sourceCommit === sourceCommit,
         approval.artifactManifestDigest === manifest.manifestDigest,
         samePath(approval.targetPath, authorization.targetPath),
         samePath(approval.rollbackReference, rollbackPath),
-        Number.isFinite(expiration) && expiration > Date.now()
+        Number.isFinite(expiration) && expiration > now
     ];
+    if (archiveSha256) {
+        valid.push(
+            approval.sourceTree === sourceTree,
+            approval.artifactArchiveSha256 === archiveSha256,
+            approval.rollbackBackupSha256 === rollback.backupSha256,
+            authorization.sourceCommit === sourceCommit,
+            authorization.sourceTree === sourceTree,
+            authorization.artifactManifestDigest === manifest.manifestDigest,
+            authorization.artifactArchiveSha256 === archiveSha256,
+            authorization.rollbackBackupSha256 === rollback.backupSha256,
+            validFrozenMaintenanceApproval(approval, authorization, now)
+        );
+    }
     if (!valid.every(Boolean)) deny('Invalid or expired operator approval record');
+    return archiveSha256 ? {
+        taskId: approval.taskId,
+        serverId: approval.serverId,
+        maintenanceWindowStartUtc: approval.maintenanceWindowStartUtc,
+        maintenanceWindowEndUtc: approval.maintenanceWindowEndUtc,
+        betaRouteVerifiedAtUtc: approval.betaRouteVerifiedAtUtc,
+        betaRouteBoundToExpectedServer: approval.betaRouteBoundToExpectedServer,
+        noUnapprovedAudience: approval.noUnapprovedAudience,
+        ...(approval.recoveryAuthorized === true ? {
+            recoveryAuthorized: true,
+            recoveryTransactionId: approval.recoveryTransactionId,
+            recoveryTransactionJournalSha256: authorization.recoveryTransactionJournalSha256
+        } : {})
+    } : { taskId: approval.taskId };
 }
 
-function validateDeployment({ flags, identity, policy, registry, operatorPolicy, versions }) {
+function validateDeployment({ flags, identity, policy, registry, operatorPolicy, versions, protectedApprovalProbe }) {
+    const frozenFields = [flags.artifactArchive, flags.artifactRoot, flags.frozenSourceCommit];
+    if (frozenFields.some(Boolean) && !frozenFields.every(Boolean)) {
+        deny('Frozen deployment requires archive, staged artifact root and exact source commit together');
+    }
     const environment = registeredEnvironment(flags, registry);
-    const manifest = verifiedManifest(flags, identity, versions);
-    const evidence = verifiedAuthorization({ flags, identity, policy, environment, operatorPolicy });
-    validateRollback({ rollbackPath: evidence.rollbackPath, environment, targetPath: evidence.targetPath, identity, manifest, versions });
-    validateApproval({ approvalPath: evidence.approvalPath, environment, identity, manifest,
-        authorization: evidence.authorization, rollbackPath: evidence.rollbackPath });
-    return { environmentId: environment.id, targetPath: evidence.targetPath, artifactManifestDigest: manifest.manifestDigest };
+    const verified = verifiedManifest(flags, identity, versions);
+    const evidence = verifiedAuthorization({ flags, identity, policy, environment, operatorPolicy, protectedApprovalProbe });
+    const rollback = validateRollback({ rollbackPath: evidence.rollbackPath, environment, targetPath: evidence.targetPath,
+        identity, verified, versions });
+    const approvalIdentity = validateApproval({ approvalPath: evidence.approvalPath, environment, verified,
+        authorization: evidence.authorization, rollbackPath: evidence.rollbackPath, rollback });
+    return { environmentId: environment.id, targetPath: evidence.targetPath,
+        sourceCommit: verified.sourceCommit, sourceTree: verified.sourceTree,
+        archiveSha256: verified.archiveSha256, artifactManifestDigest: verified.manifest.manifestDigest,
+        approvalIdentity };
 }
 
 function auditResult(base, identity, policy, authority) {
@@ -317,6 +491,7 @@ export function evaluatePreflight({
     env = process.env,
     ciContext,
     operatorPolicy,
+    protectedApprovalProbe = approvalProtectedFromCurrentProcess,
     runtimePlatform = process.platform
 }) {
     if (!allowedModes.has(mode)) deny('Unknown preflight mode');
@@ -334,6 +509,9 @@ export function evaluatePreflight({
         dirty: identity.dirty
     };
     if (mode === 'audit') return auditResult(base, identity, policy, authority);
+    if (mode !== 'deploy' && (flags.artifactArchive || flags.artifactRoot || flags.frozenSourceCommit)) {
+        deny('Frozen artifact options are deployment-only');
+    }
     validatePolicy(policy, authority);
     const ciRef = ciReference(mode, flags, identity, ciContext, runtimePlatform);
     validateSourceLocation(identity, policy, ciRef);
@@ -342,7 +520,7 @@ export function evaluatePreflight({
     if ((mode === 'package' || mode === 'deploy') && identity.dirty) deny('Release package or deployment requires clean committed source');
     if (mode === 'deploy') {
         if (registry?.schemaVersion !== 1 || registry.projectId !== 'PTV_WEB') deny('Environment registry is invalid');
-        const deployment = validateDeployment({ flags, identity, policy, registry, operatorPolicy, versions });
+        const deployment = validateDeployment({ flags, identity, policy, registry, operatorPolicy, versions, protectedApprovalProbe });
         return { ...base, versions, authority: 'approved', ...deployment };
     }
     return { ...base, versions, authority: 'approved' };
@@ -355,6 +533,9 @@ function parseArgs(argv) {
         '--source-root': 'sourceRoot',
         '--environment-id': 'environmentId',
         '--artifact-manifest': 'artifactManifest',
+        '--artifact-root': 'artifactRoot',
+        '--artifact-archive': 'artifactArchive',
+        '--frozen-source-commit': 'frozenSourceCommit',
         '--approval-record': 'approvalRecord',
         '--rollback-reference': 'rollbackReference',
         '--ci-ref': 'ciRef'
@@ -376,11 +557,27 @@ function readOperatorPolicy(policy) {
     try {
         const aclScript = [
             "$ErrorActionPreference='Stop'",
-            "$acl=Get-Acl -LiteralPath 'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\PiggieTV\\WorkspaceAuthority'",
-            '$owner=(New-Object System.Security.Principal.NTAccount($acl.Owner)).Translate([System.Security.Principal.SecurityIdentifier]).Value',
-            '$aces=@($acl.Access | ForEach-Object { @{ sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; type=$_.AccessControlType.ToString(); rights=[int64]$_.RegistryRights } })',
-            '@{ ownerSid=$owner; aces=$aces } | ConvertTo-Json -Compress -Depth 4'
-        ].join(';');
+            "$keys=@('Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\PiggieTV\\WorkspaceAuthority','Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\PiggieTV')",
+            '$records=@(foreach($key in $keys){',
+            '  $acl=Get-Acl -LiteralPath $key',
+            '  @{ownerSid=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;',
+            '    aces=@($acl.Access | ForEach-Object { @{sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; type=$_.AccessControlType.ToString(); rights=[int64]$_.RegistryRights} })}',
+            '})',
+            '$identity=[System.Security.Principal.WindowsIdentity]::GetCurrent()',
+            '$principal=[System.Security.Principal.WindowsPrincipal]::new($identity)',
+            '$writable=$identity.IsSystem -or $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)',
+            '$base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Default)',
+            "foreach($keyName in @('SOFTWARE\\PiggieTV\\WorkspaceAuthority','SOFTWARE\\PiggieTV')) {",
+            "  foreach($rightName in @('SetValue','CreateSubKey','Delete','ChangePermissions','TakeOwnership')) {",
+            '    $right=[Enum]::Parse([Microsoft.Win32.RegistryRights],$rightName)',
+            '    try { $probe=$base.OpenSubKey($keyName,$right); if($null -ne $probe) { $writable=$true; $probe.Dispose() } }',
+            '    catch [System.UnauthorizedAccessException] {}',
+            '    catch [System.Security.SecurityException] {}',
+            '  }',
+            '}',
+            '$base.Dispose()',
+            '@{ records=$records; currentTokenCanWrite=[bool]$writable } | ConvertTo-Json -Compress -Depth 5'
+        ].join('\n');
         const aclOutput = execFileSync(powershellExecutable, ['-NoProfile', '-NonInteractive', '-Command', aclScript], {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'pipe']
@@ -402,13 +599,12 @@ function readOperatorPolicy(policy) {
 
 export function operatorAclSafe(acl) {
     const privilegedSids = new Set(['S-1-5-18', 'S-1-5-32-544']);
-    if (!acl || !privilegedSids.has(acl.ownerSid) || !Array.isArray(acl.aces)) return false;
+    if (!acl || acl.currentTokenCanWrite !== false || !Array.isArray(acl.records) || acl.records.length !== 2) return false;
     const writeMask = 0x2 | 0x4 | 0x10000 | 0x40000 | 0x80000;
-    return acl.aces.every(ace => {
-        if (ace.type !== 'Allow') return true;
-        if (typeof ace.rights !== 'number' || typeof ace.sid !== 'string') return false;
-        return (ace.rights & writeMask) === 0 || privilegedSids.has(ace.sid);
-    });
+    return acl.records.every(record => privilegedSids.has(record.ownerSid) && Array.isArray(record.aces)
+        && record.aces.every(ace => ace.type !== 'Allow'
+            || (typeof ace.rights === 'number' && typeof ace.sid === 'string'
+                && ((ace.rights & writeMask) === 0 || privilegedSids.has(ace.sid)))));
 }
 
 function readCiEventHeadSha() {

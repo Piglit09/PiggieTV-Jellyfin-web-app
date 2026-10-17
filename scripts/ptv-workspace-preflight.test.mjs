@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
 
-import { evaluatePreflight, operatorAclSafe } from './ptv-workspace-preflight.mjs';
+import { approvalAclSafe, approvalProtectedFromCurrentProcess, evaluatePreflight, operatorAclSafe } from './ptv-workspace-preflight.mjs';
+import { buildManifest } from './ptv-artifact-manifest.mjs';
 
 const fixtures = [];
 const remote = 'https://github.com/Piglit09/PiggieTV-Jellyfin-web-app.git';
@@ -26,6 +27,7 @@ function fixture() {
     git(root, 'config', 'user.email', 'fixture@example.invalid');
     git(root, 'remote', 'add', 'origin', remote);
     fs.writeFileSync(path.join(root, 'ptv-version.json'), '{"version":"0.5.71"}\n');
+    fs.writeFileSync(path.join(root, 'package.json'), '{"version":"10.11.11"}\n');
     const plugin = path.join(root, 'src', 'ptv', 'plugin', 'Jellyfin.Plugin.PiggieTV');
     fs.mkdirSync(plugin, { recursive: true });
     fs.writeFileSync(path.join(plugin, 'Jellyfin.Plugin.PiggieTV.csproj'), '<Project><PropertyGroup><PtvPluginVersion>0.5.22.0</PtvPluginVersion></PropertyGroup></Project>\n');
@@ -67,7 +69,76 @@ function fixture() {
 }
 
 function check(f, mode, extra = {}) {
-    return evaluatePreflight({ mode, cwd: f.root, policy: f.policy, authority: f.authority, registry: f.registry, ...extra });
+    return evaluatePreflight({ mode, cwd: f.root, policy: f.policy, authority: f.authority, registry: f.registry,
+        protectedApprovalProbe: () => true, ...extra });
+}
+
+function frozenFixture() {
+    const f = fixture();
+    const artifactRoot = path.join(f.base, 'frozen-artifact');
+    fs.mkdirSync(artifactRoot);
+    fs.writeFileSync(path.join(artifactRoot, 'index.html'), '<html>fixture</html>');
+    fs.writeFileSync(path.join(artifactRoot, 'config.json'), '{}');
+    fs.writeFileSync(path.join(artifactRoot, 'main.js'), `const commit = '${f.head}';`);
+    const manifest = buildManifest({ artifactRoot, sourceRoot: f.root, projectId: 'PTV_WEB', buildMode: 'production' });
+    const manifestPath = path.join(f.base, 'frozen-manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    const archive = path.join(f.base, 'frozen.zip');
+    fs.writeFileSync(archive, 'fixture frozen archive bytes');
+    const sha256 = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    const archiveSha256 = sha256(archive);
+    const sourceTree = git(f.root, 'rev-parse', `${f.head}^{tree}`);
+    const target = path.join(f.base, 'mock-target');
+    fs.mkdirSync(target);
+    f.registry.environments.push({ id: 'MOCK', role: 'TEST', host: null, deployment: { enabled: true, targetPath: target } });
+    const backup = path.join(f.base, 'backup.zip');
+    fs.writeFileSync(backup, 'fixture previous Web archive');
+    const rollback = path.join(f.base, 'rollback.json');
+    fs.writeFileSync(rollback, JSON.stringify({
+        schemaVersion: 1, environmentId: 'MOCK', targetPath: target,
+        candidateSourceCommit: f.head, candidateSourceTree: sourceTree,
+        artifactManifestDigest: manifest.manifestDigest, candidateArchiveSha256: archiveSha256,
+        candidateVersions: { web: '0.5.71', plugin: '0.5.22.0' },
+        backupPath: backup, backupSha256: sha256(backup), createdAt: new Date(Date.now() - 1000).toISOString()
+    }));
+    const approvalBinding = {
+        taskId: 'frozen-fixture', serverId: 'c1858e3f2d09468fb546ad9cfe438283',
+        maintenanceWindowStartUtc: new Date(Date.now() - 60_000).toISOString(),
+        maintenanceWindowEndUtc: new Date(Date.now() + 60_000).toISOString(),
+        userImpactAttested: true, betaIsolationAttested: true,
+        betaRouteBoundToExpectedServer: true, noUnapprovedAudience: true,
+        betaRouteVerifiedAtUtc: new Date(Date.now() - 30_000).toISOString(),
+        maintenanceUserIds: ['test-maintainer']
+    };
+    const approval = path.join(f.base, 'approval.json');
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    fs.writeFileSync(approval, JSON.stringify({
+        schemaVersion: 1, operatorApproved: true, operation: 'web-only-frozen-artifact-deployment',
+        ...approvalBinding, environmentId: 'MOCK', sourceCommit: f.head, sourceTree,
+        artifactManifestDigest: manifest.manifestDigest, artifactArchiveSha256: archiveSha256,
+        rollbackBackupSha256: sha256(backup), targetPath: target, rollbackReference: rollback,
+        expiresAt
+    }));
+    const authorization = {
+        environmentId: 'MOCK', enabled: true, targetPath: target,
+        operation: 'web-only-frozen-artifact-deployment', ...approvalBinding, expiresAt,
+        sourceCommit: f.head, sourceTree, artifactManifestDigest: manifest.manifestDigest,
+        artifactArchiveSha256: archiveSha256, rollbackBackupSha256: sha256(backup),
+        approvalRecordPath: approval, approvalSha256: sha256(approval),
+        rollbackReference: rollback, rollbackSha256: sha256(rollback)
+    };
+    const operatorPolicy = {
+        schemaVersion: 1, projectId: 'PTV_WEB', sourceRoot: f.root,
+        gitCommonDirectory: path.join(f.root, '.git'), expectedRemote: remote,
+        deployments: [authorization]
+    };
+    const flags = { environmentId: 'MOCK', artifactManifest: manifestPath, artifactArchive: archive,
+        artifactRoot, frozenSourceCommit: f.head, approvalRecord: approval, rollbackReference: rollback };
+    fs.writeFileSync(path.join(f.root, 'handoff.md'), 'Documentation-only follow-up.\n');
+    git(f.root, 'add', 'handoff.md');
+    git(f.root, 'commit', '-qm', 'docs follow-up');
+    return { ...f, flags, operatorPolicy, authorization, manifest, manifestPath, archive,
+        archiveSha256, sourceTree, target, backup, rollback, approval, sha256 };
 }
 
 afterEach(() => {
@@ -209,6 +280,187 @@ test('accepts only an exact protected mock deployment approval', () => {
     assert.deepEqual(fs.readdirSync(target), []);
 });
 
+test('accepts a clean later HEAD only for the exact independently approved frozen Web archive', () => {
+    const f = frozenFixture();
+    assert.throws(() => check(f, 'deploy', { flags: { ...f.flags, frozenSourceCommit: undefined },
+        operatorPolicy: f.operatorPolicy }), /source commit|manifest provenance/i);
+    const result = check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy });
+    assert.equal(result.sourceCommit, f.head);
+    assert.equal(result.sourceTree, f.sourceTree);
+    assert.equal(result.archiveSha256, f.archiveSha256);
+    assert.equal(result.artifactManifestDigest, f.manifest.manifestDigest);
+    assert.equal(result.targetPath, f.target);
+    assert.deepEqual(result.approvalIdentity, {
+        taskId: 'frozen-fixture', serverId: 'c1858e3f2d09468fb546ad9cfe438283',
+        maintenanceWindowStartUtc: f.authorization.maintenanceWindowStartUtc,
+        maintenanceWindowEndUtc: f.authorization.maintenanceWindowEndUtc,
+        betaRouteVerifiedAtUtc: f.authorization.betaRouteVerifiedAtUtc,
+        betaRouteBoundToExpectedServer: true, noUnapprovedAudience: true
+    });
+    assert.equal(JSON.stringify(result).includes('test-maintainer'), false);
+    assert.deepEqual(fs.readdirSync(f.target), []);
+});
+
+test('frozen deployment requires matching and current operator maintenance evidence', () => {
+    const f = frozenFixture();
+    const original = JSON.parse(fs.readFileSync(f.approval, 'utf8'));
+    const deniedApproval = (field, value) => {
+        const modified = { ...original, [field]: value };
+        fs.writeFileSync(f.approval, JSON.stringify(modified));
+        f.authorization.approvalSha256 = f.sha256(f.approval);
+        assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    };
+    for (const field of ['taskId', 'serverId', 'maintenanceWindowStartUtc', 'maintenanceWindowEndUtc',
+        'userImpactAttested', 'betaIsolationAttested', 'betaRouteVerifiedAtUtc', 'maintenanceUserIds',
+        'betaRouteBoundToExpectedServer', 'noUnapprovedAudience']) {
+        deniedApproval(field, undefined);
+    }
+    deniedApproval('taskId', 'wrong-task');
+    deniedApproval('serverId', '0'.repeat(32));
+    deniedApproval('maintenanceWindowStartUtc', new Date(Date.now() + 10_000).toISOString());
+    deniedApproval('maintenanceWindowEndUtc', new Date(Date.now() - 10_000).toISOString());
+    deniedApproval('userImpactAttested', false);
+    deniedApproval('betaIsolationAttested', false);
+    deniedApproval('betaRouteBoundToExpectedServer', false);
+    deniedApproval('noUnapprovedAudience', false);
+    deniedApproval('betaRouteVerifiedAtUtc', new Date(Date.now() - 301_000).toISOString());
+    deniedApproval('maintenanceUserIds', ['different-maintainer']);
+    deniedApproval('maintenanceUserIds', []);
+    deniedApproval('maintenanceUserIds', ['test-maintainer', 'TEST-maintainer']);
+    deniedApproval('expiresAt', new Date(Date.now() - 1000).toISOString());
+    assert.deepEqual(fs.readdirSync(f.target), []);
+});
+
+test('frozen deployment denies inconsistent protected-policy maintenance evidence', () => {
+    const f = frozenFixture();
+    for (const field of ['taskId', 'serverId', 'maintenanceWindowStartUtc', 'maintenanceWindowEndUtc',
+        'userImpactAttested', 'betaIsolationAttested', 'betaRouteVerifiedAtUtc', 'maintenanceUserIds',
+        'betaRouteBoundToExpectedServer', 'noUnapprovedAudience']) {
+        const original = f.authorization[field];
+        delete f.authorization[field];
+        assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+        f.authorization[field] = original;
+    }
+    f.authorization.taskId = 'other-task';
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    assert.deepEqual(fs.readdirSync(f.target), []);
+});
+
+test('frozen recovery approval pins the transaction and journal hash in protected policy', () => {
+    const f = frozenFixture();
+    const transactionId = 'a'.repeat(32);
+    const journalSha256 = 'b'.repeat(64);
+    const approval = JSON.parse(fs.readFileSync(f.approval, 'utf8'));
+    approval.recoveryAuthorized = true;
+    approval.recoveryTransactionId = transactionId;
+    fs.writeFileSync(f.approval, JSON.stringify(approval));
+    f.authorization.approvalSha256 = f.sha256(f.approval);
+    f.authorization.recoveryAuthorized = true;
+    f.authorization.recoveryTransactionId = transactionId;
+    f.authorization.recoveryTransactionJournalSha256 = journalSha256;
+    const result = check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy });
+    assert.equal(result.approvalIdentity.recoveryAuthorized, true);
+    assert.equal(result.approvalIdentity.recoveryTransactionId, transactionId);
+    assert.equal(result.approvalIdentity.recoveryTransactionJournalSha256, journalSha256);
+    assert.deepEqual(fs.readdirSync(f.target), []);
+
+    delete approval.recoveryTransactionId;
+    fs.writeFileSync(f.approval, JSON.stringify(approval));
+    f.authorization.approvalSha256 = f.sha256(f.approval);
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    approval.recoveryTransactionId = 'c'.repeat(32);
+    fs.writeFileSync(f.approval, JSON.stringify(approval));
+    f.authorization.approvalSha256 = f.sha256(f.approval);
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    approval.recoveryTransactionId = transactionId;
+    fs.writeFileSync(f.approval, JSON.stringify(approval));
+    f.authorization.approvalSha256 = f.sha256(f.approval);
+    f.authorization.recoveryTransactionJournalSha256 = 'not-a-sha';
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    f.authorization.recoveryTransactionJournalSha256 = journalSha256;
+    delete f.authorization.recoveryTransactionId;
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    f.authorization.recoveryTransactionId = transactionId;
+    delete f.authorization.recoveryTransactionJournalSha256;
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    f.authorization.recoveryTransactionJournalSha256 = journalSha256;
+    f.authorization.recoveryAuthorized = false;
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    assert.deepEqual(fs.readdirSync(f.target), []);
+});
+
+test('ordinary frozen deployment rejects every recovery field on either approval or policy', () => {
+    const f = frozenFixture();
+    const original = JSON.parse(fs.readFileSync(f.approval, 'utf8'));
+    const recoveryFields = [
+        ['recoveryAuthorized', false],
+        ['recoveryTransactionId', 'a'.repeat(32)],
+        ['recoveryTransactionJournalSha256', 'b'.repeat(64)]
+    ];
+    for (const [field, value] of recoveryFields) {
+        fs.writeFileSync(f.approval, JSON.stringify({ ...original, [field]: value }));
+        f.authorization.approvalSha256 = f.sha256(f.approval);
+        assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    }
+    fs.writeFileSync(f.approval, JSON.stringify(original));
+    f.authorization.approvalSha256 = f.sha256(f.approval);
+    for (const [field, value] of recoveryFields) {
+        f.authorization[field] = value;
+        assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+        delete f.authorization[field];
+    }
+    assert.deepEqual(fs.readdirSync(f.target), []);
+});
+
+test('frozen deployment denies archive tampering and approval for a different tree', () => {
+    const f = frozenFixture();
+    fs.appendFileSync(f.archive, 'tampered');
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /rollback|approval|archive hash/i);
+    fs.writeFileSync(f.archive, 'fixture frozen archive bytes');
+    const approval = JSON.parse(fs.readFileSync(f.approval, 'utf8'));
+    approval.sourceTree = '0'.repeat(40);
+    fs.writeFileSync(f.approval, JSON.stringify(approval));
+    f.authorization.approvalSha256 = f.sha256(f.approval);
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /approval/i);
+    assert.deepEqual(fs.readdirSync(f.target), []);
+});
+
+test('frozen deployment denies approval material writable by the current task token', () => {
+    const f = frozenFixture();
+    assert.equal(approvalProtectedFromCurrentProcess(f.approval), false);
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy,
+        protectedApprovalProbe: () => false }), /approval.*writable|approval.*protected/i);
+    assert.deepEqual(fs.readdirSync(f.target), []);
+});
+
+test('frozen deployment denies a missing staged file, unknown commit and dirty current checkout', () => {
+    const f = frozenFixture();
+    fs.rmSync(path.join(f.flags.artifactRoot, 'config.json'));
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /inventory|artifact verification/i);
+    fs.writeFileSync(path.join(f.flags.artifactRoot, 'config.json'), '{}');
+    assert.throws(() => check(f, 'deploy', { flags: { ...f.flags, frozenSourceCommit: '0'.repeat(40) },
+        operatorPolicy: f.operatorPolicy }), /commit|provenance/i);
+    fs.writeFileSync(path.join(f.root, 'uncommitted.txt'), 'dirty');
+    assert.throws(() => check(f, 'deploy', { flags: f.flags, operatorPolicy: f.operatorPolicy }), /clean/i);
+    assert.deepEqual(fs.readdirSync(f.target), []);
+});
+
+test('artifact archive and staged-root options cannot silently fall back to current-HEAD deployment', () => {
+    const f = fixture();
+    assert.throws(() => check(f, 'deploy', { flags: {
+        environmentId: 'JF_DEVELOPMENT_125', artifactArchive: path.join(f.base, 'candidate.zip')
+    } }), /frozen|archive/i);
+});
+
+test('production role remains denied even if a task-writable registry entry is enabled', () => {
+    const f = fixture();
+    const target = path.join(f.base, 'mock-production');
+    fs.mkdirSync(target);
+    f.registry.environments[0].deployment = { enabled: true, targetPath: target };
+    assert.throws(() => check(f, 'deploy', { flags: { environmentId: 'JF_PRODUCTION_50' } }), /production.*denied/i);
+    assert.deepEqual(fs.readdirSync(target), []);
+});
+
 test('CI exact ref exception requires clean source and matching GitHub Actions identity', () => {
     const f = fixture();
     const ci = { actions: true, repository: 'Piglit09/PiggieTV-Jellyfin-web-app', workspace: f.root, sha: f.head };
@@ -237,13 +489,38 @@ test('rejects an escaping symlink for mutating modes', () => {
 });
 
 test('rejects operator Registry ACLs that grant task users write access', () => {
-    const safe = { ownerSid: 'S-1-5-32-544', aces: [
+    const key = { ownerSid: 'S-1-5-32-544', aces: [
         { sid: 'S-1-5-18', type: 'Allow', rights: 0xF003F },
         { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x20019 }
     ] };
+    const safe = { currentTokenCanWrite: false, records: [ key, { ...key, aces: [...key.aces] } ] };
     assert.equal(operatorAclSafe(safe), true);
-    assert.equal(operatorAclSafe({ ...safe, ownerSid: 'S-1-5-21-1234' }), false);
-    assert.equal(operatorAclSafe({ ...safe, aces: [...safe.aces, { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x2 }] }), false);
-    assert.equal(operatorAclSafe({ ownerSid: 'S-1-5-32-544', aces: [] }), true);
+    assert.equal(operatorAclSafe({ ...safe, records: [{ ...key, ownerSid: 'S-1-5-21-1234' }, key] }), false);
+    assert.equal(operatorAclSafe({ ...safe, records: [key, { ...key, aces: [...key.aces,
+        { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x4 }] }] }), false);
+    assert.equal(operatorAclSafe({ ...safe, currentTokenCanWrite: true }), false);
+    assert.equal(operatorAclSafe({ currentTokenCanWrite: false, records: [key] }), false);
+    assert.equal(operatorAclSafe({ ...safe, records: [key, { ownerSid: 'S-1-5-32-544', aces: [] }] }), true);
     assert.equal(operatorAclSafe(null), false);
+});
+
+test('protected approval requires privileged ownership and every ancestor to deny replacement', () => {
+    const protectedRecord = { ownerSid: 'S-1-5-32-544', aces: [
+        { sid: 'S-1-5-32-544', type: 'Allow', rights: 0x1F01FF },
+        { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x1200A9 }
+    ] };
+    const safe = { elevated: false, records: Array.from({ length: 4 }, () => ({
+        ...protectedRecord, aces: [...protectedRecord.aces]
+    })) };
+    assert.equal(approvalAclSafe(safe), true);
+    assert.equal(approvalAclSafe({ ...safe, records: [
+        { ...protectedRecord, ownerSid: 'S-1-5-21-1234' }, ...safe.records.slice(1)
+    ] }), false);
+    assert.equal(approvalAclSafe({ ...safe, records: [
+        ...safe.records.slice(0, 3), { ...protectedRecord, aces: [
+            ...protectedRecord.aces, { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x10000 }
+        ] }
+    ] }), false);
+    assert.equal(approvalAclSafe({ ...safe, records: safe.records.slice(0, 2) }), false);
+    assert.equal(approvalAclSafe({ ...safe, elevated: true }), false);
 });

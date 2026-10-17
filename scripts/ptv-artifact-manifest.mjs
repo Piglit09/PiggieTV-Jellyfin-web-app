@@ -78,6 +78,17 @@ function sourceInfo(sourceRoot) {
     };
 }
 
+function committedVersions(root, commit) {
+    assert(COMMIT_PATTERN.test(commit) && git(root, 'cat-file', '-t', commit) === 'commit', 'Unknown frozen source Git commit');
+    const web = JSON.parse(git(root, 'show', `${commit}:ptv-version.json`)).version;
+    const packageVersion = JSON.parse(git(root, 'show', `${commit}:package.json`)).version;
+    const pluginProject = git(root, 'show', `${commit}:src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj`);
+    const plugin = pluginProject.match(/<PtvPluginVersion>([^<]+)<\/PtvPluginVersion>/u)?.[1];
+    assert(typeof web === 'string' && web && typeof packageVersion === 'string' && packageVersion && plugin,
+        'Frozen source version authorities are incomplete');
+    return { web, plugin, package: packageVersion };
+}
+
 function validRelativePath(name) {
     return typeof name === 'string' && name.length > 0 && !name.includes('\\') && !name.includes(':')
         && !name.startsWith('/') && name.split('/').every(part => part && part !== '.' && part !== '..');
@@ -150,7 +161,7 @@ export function buildManifest({ artifactRoot, sourceRoot, projectId = 'PTV_WEB',
     return { ...unsigned, manifestDigest: canonicalDigest(unsigned) };
 }
 
-export function verifyManifest(manifest, { artifactRoot, sourceRoot, buildMode } = {}) {
+export function verifyManifest(manifest, { artifactRoot, sourceRoot, buildMode, frozenSourceCommit } = {}) {
     assert(manifest && typeof manifest === 'object' && !Array.isArray(manifest), 'Invalid artifact manifest');
     assert.equal(manifest.schemaVersion, 1, 'Unsupported artifact manifest schema');
     assert(SHA256_PATTERN.test(manifest.manifestDigest), 'Invalid manifest digest');
@@ -160,11 +171,20 @@ export function verifyManifest(manifest, { artifactRoot, sourceRoot, buildMode }
     assert(!buildMode || buildMode === manifest.buildMode, 'Build mode mismatch');
     const source = sourceInfo(sourceRoot);
     assert.equal(manifest.sourceRoot.toLowerCase(), source.sourceRoot.toLowerCase(), 'Source root mismatch');
-    assert.equal(manifest.sourceCommit, source.sourceCommit, 'Artifact source commit differs from current Git HEAD');
-    assert.equal(manifest.sourceBranch, source.sourceBranch, 'Source branch mismatch');
-    assert.equal(manifest.sourceDirty, source.sourceDirty, 'Source dirty state mismatch');
-    assert.deepEqual(manifest.sourceVersions, source.sourceVersions, 'Source version mismatch');
-    validateBuildMode(manifest.buildMode, source.sourceDirty);
+    if (frozenSourceCommit !== undefined) {
+        assert.equal(manifest.projectId, 'PTV_WEB', 'Frozen source verification is Web-only');
+        assert.equal(manifest.buildMode, 'production', 'Frozen deployment requires production build mode');
+        assert.equal(manifest.sourceCommit, frozenSourceCommit, 'Frozen artifact source commit mismatch');
+        assert.equal(manifest.sourceDirty, false, 'Frozen artifact requires clean committed source');
+        assert.equal(source.sourceDirty, false, 'Frozen artifact verification requires a clean current checkout');
+        assert.deepEqual(manifest.sourceVersions, committedVersions(source.sourceRoot, frozenSourceCommit), 'Frozen source version mismatch');
+    } else {
+        assert.equal(manifest.sourceCommit, source.sourceCommit, 'Artifact source commit differs from current Git HEAD');
+        assert.equal(manifest.sourceBranch, source.sourceBranch, 'Source branch mismatch');
+        assert.equal(manifest.sourceDirty, source.sourceDirty, 'Source dirty state mismatch');
+        assert.deepEqual(manifest.sourceVersions, source.sourceVersions, 'Source version mismatch');
+    }
+    validateBuildMode(manifest.buildMode, manifest.sourceDirty);
     assert(Array.isArray(manifest.files) && manifest.files.length > 0, 'Manifest file inventory missing');
     let previous = '';
     for (const file of manifest.files) {
@@ -182,8 +202,8 @@ export function verifyManifest(manifest, { artifactRoot, sourceRoot, buildMode }
         assert.equal(actual[index].size, manifest.files[index].size, `Artifact file size mismatch: ${actual[index].path}`);
         assert.equal(actual[index].sha256, manifest.files[index].sha256, `Artifact file hash mismatch: ${actual[index].path}`);
     }
-    if (manifest.projectId === 'PTV_WEB') assertWebPayload(artifact, actual, source.sourceCommit, source.sourceDirty);
-    else assertPluginPayload(artifact, actual, source.sourceCommit, source.sourceVersions.plugin);
+    if (manifest.projectId === 'PTV_WEB') assertWebPayload(artifact, actual, manifest.sourceCommit, manifest.sourceDirty);
+    else assertPluginPayload(artifact, actual, manifest.sourceCommit, manifest.sourceVersions.plugin);
     return true;
 }
 
@@ -192,7 +212,7 @@ function argumentsFromCli(argv) {
     assert(operation === 'create' || operation === 'verify', 'Use create or verify');
     assert(rest.length % 2 === 0, 'Every option needs a value');
     const values = new Map();
-    const allowed = new Set([ '--artifact', '--output', '--manifest', '--mode', '--project', '--source-root' ]);
+    const allowed = new Set([ '--artifact', '--output', '--manifest', '--mode', '--project', '--source-root', '--frozen-source-commit' ]);
     for (let index = 0; index < rest.length; index += 2) {
         assert(allowed.has(rest[index]) && !values.has(rest[index]), `Invalid or duplicate option: ${rest[index]}`);
         values.set(rest[index], rest[index + 1]);
@@ -227,7 +247,7 @@ function cli() {
         const manifestPath = values.get('--manifest');
         assert(manifestPath, '--manifest is required');
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        verifyManifest(manifest, { artifactRoot, sourceRoot });
+        verifyManifest(manifest, { artifactRoot, sourceRoot, frozenSourceCommit: values.get('--frozen-source-commit') });
         console.log(manifest.manifestDigest);
     }
 }

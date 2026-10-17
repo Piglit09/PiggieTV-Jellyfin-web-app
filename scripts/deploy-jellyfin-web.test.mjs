@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,140 +10,178 @@ import test from 'node:test';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const deployScript = path.join(scriptDir, 'deploy-jellyfin-web.ps1');
 const webosScript = path.join(scriptDir, 'ptv-webos.mjs');
-const windowsRoot = process.env.SystemRoot;
-assert.ok(windowsRoot && path.isAbsolute(windowsRoot), 'Windows system root is required for deployment fixture tests');
-const powershellExe = path.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-assert.ok(fs.existsSync(powershellExe), 'The system PowerShell executable is required for deployment fixture tests');
+const pwsh = process.env.PTV_PWSH ?? 'pwsh';
 
 function fixture(t) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ptv-deploy-fixture-'));
-    assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ptv-web-deploy-denial-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-    const artifact = path.join(root, 'artifact');
     const target = path.join(root, 'target');
-    fs.mkdirSync(artifact);
     fs.mkdirSync(target);
-    fs.writeFileSync(path.join(artifact, 'index.html'), 'candidate');
-    fs.writeFileSync(path.join(target, 'sentinel.txt'), 'accepted install unchanged');
-    const manifest = path.join(root, 'manifest.json');
+    fs.writeFileSync(path.join(target, 'sentinel.txt'), 'untouched');
+    const archive = path.join(root, 'candidate.zip');
+    const manifest = path.join(root, 'candidate-manifest.json');
     const approval = path.join(root, 'approval.json');
     const rollback = path.join(root, 'rollback.json');
-    fs.writeFileSync(manifest, '{}');
-    fs.writeFileSync(approval, '{}');
-    fs.writeFileSync(rollback, '{}');
-    return { artifact, target, manifest, approval, rollback };
+    for (const file of [archive, manifest, approval, rollback]) fs.writeFileSync(file, '{}');
+    return { root, target, archive, manifest, approval, rollback };
 }
 
-const psQuote = value => "'" + value.replaceAll("'", "''") + "'";
-
-function deploy(f, additional = []) {
-    return spawnSync(powershellExe, [
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', deployScript,
-        '-EnvironmentId', 'JF_PRODUCTION_50',
-        '-Artifact', f.artifact,
-        '-ArtifactManifest', f.manifest,
-        '-ApprovalRecord', f.approval,
-        '-RollbackReference', f.rollback,
-        ...additional
-    ], { encoding: 'utf8', windowsHide: true });
+function invoke(f, extra = [], environment = 'JF_DEVELOPMENT_125') {
+    return spawnSync(pwsh, [ '-NoProfile', '-File', deployScript,
+        '-EnvironmentId', environment, '-Artifact', f.archive,
+        '-ArtifactManifest', f.manifest, '-ApprovalRecord', f.approval,
+        '-RollbackReference', f.rollback, ...extra ], { encoding: 'utf8', windowsHide: true });
 }
+
+function unchanged(f) {
+    assert.deepEqual(fs.readdirSync(f.target), [ 'sentinel.txt' ]);
+    assert.equal(fs.readFileSync(path.join(f.target, 'sentinel.txt'), 'utf8'), 'untouched');
+}
+
+function recoveryEvidenceFixture(t, mutate = null) {
+    const f = fixture(t);
+    const approval = {
+        schemaVersion: 1, operatorApproved: true, taskId: 'PTV-WEB-075-RECOVER',
+        environmentId: 'JF_DEVELOPMENT_125', operation: 'web-only-frozen-artifact-deployment',
+        serverId: 'c1858e3f2d09468fb546ad9cfe438283',
+        expiresAt: '2026-10-17T19:00:00Z', maintenanceWindowStartUtc: '2026-10-17T17:45:00Z',
+        maintenanceWindowEndUtc: '2026-10-17T18:30:00Z', userImpactAttested: true,
+        betaIsolationAttested: true, betaRouteBoundToExpectedServer: true,
+        noUnapprovedAudience: true, betaRouteVerifiedAtUtc: '2026-10-17T17:59:40Z',
+        recoveryAuthorized: true, recoveryTransactionId: 'a'.repeat(32),
+        maintenanceUserIds: ['11111111111111111111111111111111']
+    };
+    const observation = {
+        origin: 'http://127.0.0.1:8096', environmentId: 'JF_DEVELOPMENT_125',
+        capturedAtUtc: '2026-10-17T17:59:55Z',
+        system: { Id: approval.serverId, ServerName: 'PTV Testing', Version: '12.2.0' },
+        plugin: { ok: true, pluginVersion: '0.5.22.0' },
+        sessions: { authenticated: true, administrator: true,
+            requesterUserId: '11111111111111111111111111111111',
+            capturedAtUtc: '2026-10-17T17:59:55Z', recentActivityWindowSeconds: 960,
+            items: [{ UserId: '11111111111111111111111111111111',
+                LastActivityDate: '2026-10-17T17:59:40Z', IsActive: true,
+                NowPlayingItem: null, PlayState: null, TranscodingInfo: null }] },
+        betaIsolation: { verified: true, routeBoundToExpectedServer: true,
+            noUnapprovedAudience: true, approvalTaskId: approval.taskId,
+            checkedAtUtc: approval.betaRouteVerifiedAtUtc },
+        conflictingDeployment: false
+    };
+    if (mutate) mutate(approval, observation);
+    fs.writeFileSync(f.approval, JSON.stringify(approval));
+    fs.writeFileSync(f.manifest, JSON.stringify(observation));
+    const harness = path.join(f.root, 'recovery-evidence.ps1');
+    fs.writeFileSync(harness, `
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile('${deployScript.replaceAll("'", "''")}', [ref]$tokens, [ref]$errors)
+$definition = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Test-RecoveryEvidence' }, $true)
+if ($null -eq $definition) { throw 'Test-RecoveryEvidence function missing' }
+Invoke-Expression $definition.Extent.Text
+$approval = Get-Content -LiteralPath '${f.approval.replaceAll("'", "''")}' -Raw | ConvertFrom-Json -AsHashtable
+$observation = Get-Content -LiteralPath '${f.manifest.replaceAll("'", "''")}' -Raw | ConvertFrom-Json -AsHashtable
+Test-RecoveryEvidence -Approval $approval -Observation $observation -ExpectedServerId 'c1858e3f2d09468fb546ad9cfe438283' -TransactionId ('a' * 32) -NowUtc ([DateTimeOffset]::Parse('2026-10-17T18:00:00Z')) | Out-Null
+`);
+    return spawnSync(pwsh, ['-NoProfile', '-File', harness], { encoding: 'utf8', windowsHide: true });
+}
+
+test('unknown and production environments are denied before any target write', t => {
+    const f = fixture(t);
+    for (const id of ['JF_PRODUCTION_50', 'JF_UNKNOWN']) {
+        const result = invoke(f, [], id);
+        assert.notEqual(result.status, 0, `${id} was unexpectedly accepted`);
+        assert.match(result.stderr + result.stdout, /JF_DEVELOPMENT_125|environment|target/i);
+        unchanged(f);
+    }
+});
 
 test('an arbitrary target override is rejected before any target write', t => {
     const f = fixture(t);
-    const result = deploy(f, [ '-Target', f.target ]);
+    const result = invoke(f, ['-Target', f.target]);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr + result.stdout, /Target|parameter/u);
-    assert.equal(fs.readFileSync(path.join(f.target, 'sentinel.txt'), 'utf8'), 'accepted install unchanged');
-    assert.deepEqual(fs.readdirSync(f.target), [ 'sentinel.txt' ]);
+    unchanged(f);
 });
 
-test('production is denied without a protected approval and complete artifact', t => {
+test('the wrapper rejects a substitute artifact before asking for live access', t => {
     const f = fixture(t);
-    const result = deploy(f);
+    const result = invoke(f);
     assert.notEqual(result.status, 0);
-    assert.equal(fs.readFileSync(path.join(f.target, 'sentinel.txt'), 'utf8'), 'accepted install unchanged');
-    assert.deepEqual(fs.readdirSync(f.target), [ 'sentinel.txt' ]);
+    assert.match(result.stderr + result.stdout, /frozen artifact path|approved candidate|frozen candidate/i);
+    unchanged(f);
 });
 
-test('an approved mock target receives verified files with index.html last', t => {
+test('explicit recovery mode still denies a substitute artifact without touching a fixture target', t => {
     const f = fixture(t);
-    fs.mkdirSync(path.join(f.artifact, 'assets'));
-    fs.writeFileSync(path.join(f.artifact, 'assets', 'app.js'), 'fixture bundle');
-    const sha256 = data => createHash('sha256').update(data).digest('hex');
-    const manifest = {
-        projectId: 'PTV_WEB',
-        sourceDirty: false,
-        sourceCommit: 'a'.repeat(40),
-        sourceVersions: { web: '0.5.71', plugin: '0.5.22.0' },
-        manifestDigest: 'b'.repeat(64),
-        files: [
-            { path: 'assets/app.js', sha256: sha256('fixture bundle') },
-            { path: 'index.html', sha256: sha256('candidate') }
-        ]
-    };
-    fs.writeFileSync(f.manifest, JSON.stringify(manifest));
-    const backup = path.join(path.dirname(f.manifest), 'prior-web-backup.zip');
-    fs.writeFileSync(backup, 'verified fixture backup');
-    const rollbackRecord = JSON.stringify({
-        schemaVersion: 1,
-        environmentId: 'JF_MOCK',
-        targetPath: f.target,
-        candidateSourceCommit: manifest.sourceCommit,
-        candidateVersions: manifest.sourceVersions,
-        artifactManifestDigest: manifest.manifestDigest,
-        backupPath: backup,
-        backupSha256: sha256('verified fixture backup'),
-        createdAt: new Date(Date.now() - 60_000).toISOString()
-    });
-    fs.writeFileSync(f.rollback, rollbackRecord);
-    const copyLog = path.join(path.dirname(f.manifest), 'copy-order.txt');
-    const preflightResult = JSON.stringify({ environmentId: 'JF_MOCK', targetPath: f.target, artifactManifestDigest: manifest.manifestDigest });
-    const mockScript = path.join(path.dirname(f.manifest), 'approved-mock.ps1');
-    fs.writeFileSync(mockScript, `
-Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
-function global:node {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
-    $global:LASTEXITCODE = 0
-    if ($Arguments[0] -like '*ptv-workspace-preflight.mjs') {
-        Write-Output ${psQuote(preflightResult)}
-    } elseif ($Arguments[0] -like '*ptv-artifact-manifest.mjs') {
-        Write-Output 'fixture manifest verified'
-    } else {
-        throw 'Unexpected governance command'
-    }
-}
-function global:Copy-Item {
-    param([string]$LiteralPath, [string]$Destination, [switch]$Force)
-    Add-Content -LiteralPath ${psQuote(copyLog)} -Value ([IO.Path]::GetFileName($LiteralPath))
-    Microsoft.PowerShell.Management\\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
-}
-& ${psQuote(deployScript)} -EnvironmentId JF_MOCK -Artifact ${psQuote(f.artifact)} -ArtifactManifest ${psQuote(f.manifest)} -ApprovalRecord ${psQuote(f.approval)} -RollbackReference ${psQuote(f.rollback)}
-if (-not $?) { exit 1 }
+    const result = invoke(f, ['-Recover']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr + result.stdout, /frozen artifact path|approved candidate/i);
+    unchanged(f);
+});
+
+test('deployment entrypoint has no arbitrary target parameter or legacy overlay publisher', () => {
+    const source = fs.readFileSync(deployScript, 'utf8');
+    assert.doesNotMatch(source, /\[string\]\$Target\b/u);
+    assert.match(source, /Invoke-PTVWebExactTreePublication/u);
+    assert.match(source, /Test-PTVWebPrepublicationGate/u);
+    assert.match(source, /--frozen-source-commit/u);
+    assert.match(source, /System\/Info\/Public/u);
+    assert.match(source, /\.ptv-web-exact-tree\.lock/u);
+    assert.match(source, /Restore-PTVWebExactTreePublication/u);
+    assert.match(source, /A recovery-only approval cannot authorize a new Web publication/u);
+    assert.match(source, /recoveryTransactionJournalSha256/u);
+    const recoveryCollector = source.slice(source.indexOf('function Get-PTVWebRecoveryObservation'),
+        source.indexOf('function Test-ServedIndex'));
+    assert.match(recoveryCollector, /\/Sessions/u);
+    assert.doesNotMatch(recoveryCollector, /\/web\/index\.html/u);
+});
+
+test('reviewed recovery journal rejects post-approval modification before publication writes', t => {
+    const f = fixture(t);
+    const journal = path.join(f.root, 'transaction.json');
+    const transactionId = 'a'.repeat(32);
+    fs.writeFileSync(journal, JSON.stringify({ transactionId, state: 'PUBLISHING' }));
+    const reviewedSha = createHash('sha256').update(fs.readFileSync(journal)).digest('hex');
+    const harness = path.join(f.root, 'journal-binding.ps1');
+    fs.writeFileSync(harness, `
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile('${deployScript.replaceAll("'", "''")}', [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw 'Deployer does not parse.' }
+$definition = $ast.Find({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Assert-RecoveryJournalBinding' }, $true)
+if ($null -eq $definition) { throw 'Journal binding validator missing.' }
+Invoke-Expression $definition.Extent.Text
+Assert-RecoveryJournalBinding -JournalPath '${journal.replaceAll("'", "''")}' -ReviewedSha256 '${reviewedSha}' -TransactionId '${transactionId}' | Out-Null
 `);
-    const execute = () => spawnSync(powershellExe, [ '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', mockScript ], { encoding: 'utf8', windowsHide: true });
-    fs.writeFileSync(f.rollback, '{}');
-    const emptyRollback = execute();
-    assert.notEqual(emptyRollback.status, 0);
-    assert.deepEqual(fs.readdirSync(f.target), [ 'sentinel.txt' ]);
-    const wrongVersion = { ...JSON.parse(rollbackRecord), candidateVersions: { web: '9.9.9', plugin: '0.5.22.0' } };
-    fs.writeFileSync(f.rollback, JSON.stringify(wrongVersion));
-    const mismatchedRollback = execute();
-    assert.notEqual(mismatchedRollback.status, 0);
-    assert.deepEqual(fs.readdirSync(f.target), [ 'sentinel.txt' ]);
-    fs.writeFileSync(f.rollback, rollbackRecord);
-    fs.writeFileSync(backup, 'tampered backup');
-    const tamperedBackup = execute();
-    assert.notEqual(tamperedBackup.status, 0);
-    assert.deepEqual(fs.readdirSync(f.target), [ 'sentinel.txt' ]);
-    fs.writeFileSync(backup, 'verified fixture backup');
-    const result = execute();
+    const accepted = spawnSync(pwsh, ['-NoProfile', '-File', harness], { encoding: 'utf8', windowsHide: true });
+    assert.equal(accepted.status, 0, accepted.stderr + accepted.stdout);
+    fs.writeFileSync(journal, JSON.stringify({ transactionId, state: 'ROLLBACK_REQUIRED' }));
+    const rejected = spawnSync(pwsh, ['-NoProfile', '-File', harness], { encoding: 'utf8', windowsHide: true });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr + rejected.stdout, /changed after operator approval/u);
+    unchanged(f);
+});
+
+test('protected recovery accepts a partial-index observation when server and users are safe', t => {
+    const result = recoveryEvidenceFixture(t);
     assert.equal(result.status, 0, result.stderr + result.stdout);
-    assert.equal(fs.readFileSync(path.join(f.target, 'assets', 'app.js'), 'utf8'), 'fixture bundle');
-    assert.equal(fs.readFileSync(path.join(f.target, 'index.html'), 'utf8'), 'candidate');
-    assert.equal(fs.readFileSync(path.join(f.target, 'sentinel.txt'), 'utf8'), 'accepted install unchanged');
-    assert.deepEqual(fs.readFileSync(copyLog, 'utf8').trim().split(/\r?\n/u), [ 'app.js', 'index.html' ]);
+});
+
+test('protected recovery rejects active playback, stale Beta proof, and wrong server', t => {
+    for (const mutate of [
+        (a, o) => { o.sessions.items[0].NowPlayingItem = { Id: 'playing' }; },
+        (a, o) => {
+            a.betaRouteVerifiedAtUtc = '2026-10-17T17:45:00Z';
+            o.betaIsolation.checkedAtUtc = a.betaRouteVerifiedAtUtc;
+        },
+        (a, o) => { o.system.Id = 'different'; },
+        (a) => { a.recoveryAuthorized = false; },
+        (a) => { a.recoveryAuthorized = 'true'; },
+        (a) => { a.recoveryTransactionId = 'b'.repeat(32); }
+    ]) {
+        const result = recoveryEvidenceFixture(t, mutate);
+        assert.notEqual(result.status, 0);
+    }
 });
 
 test('webOS helper allows offline command previews but denies live device operations', () => {

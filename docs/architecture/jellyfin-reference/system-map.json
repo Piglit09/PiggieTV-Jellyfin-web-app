@@ -1041,10 +1041,10 @@
   "owners": {
     "buildArtifactAndDeploymentGovernance": {
       "authoritativeOwner": "Approved PTV Web Git checkout for source and build identity; independently protected operator policy for deployment approval",
-      "derivedOwners": ["workspace preflight", "whole-artifact SHA-256 manifest", "Web and Plugin package entrypoints", "registered deployment wrapper"],
-      "identity": ["resolved source root and Git common directory", "origin remote", "full source commit", "Web and Plugin version authorities", "final artifact file hashes", "registered target and protected approval"],
-      "rule": "Supported build and package entrypoints fail closed for an unapproved root or source identity. Release packages require clean committed source. A final transformed artifact must be rehashed; deployment requires a protected task-specific approval and verified rollback. Production and development Jellyfin targets are denied by default.",
-      "nonGuarantee": "Repository scripts do not prevent arbitrary manual filesystem writes or replace independently controlled operating-system permissions. Local fixture tests do not prove hosted or physical acceptance.",
+      "derivedOwners": ["workspace preflight", "whole-artifact SHA-256 manifest", "Web and Plugin package entrypoints", "registered deployment wrapper", "exact-tree Web publication transaction", "fresh local session and Beta-isolation gate"],
+      "identity": ["resolved source root and Git common directory", "origin remote", "full artifact source commit and committed tree", "Web and Plugin version authorities", "complete archive and file-manifest hashes", "registered target and independently protected exact-ref approval", "verified Web rollback reference"],
+      "rule": "Supported build and package entrypoints fail closed for an unapproved root or source identity. Release packages require clean committed source. A frozen artifact from an older reachable commit requires exact tree, archive, manifest, protected approval and rollback binding. Web publication validates both complete trees, retires only known obsolete assets, writes index last, and journals Web-only rollback. Fresh local server/session and Beta-isolation checks precede publication. Production and development Jellyfin targets remain denied until separately activated.",
+      "nonGuarantee": "Repository scripts do not prevent arbitrary manual filesystem writes or replace independently controlled operating-system permissions. In-place per-file Web publication is rollback-capable but not a single atomic directory switch. Local fixture tests do not prove hosted cache behavior, old-tab convergence, or physical acceptance.",
       "chapterRefs": ["18-build-service-worker-assets.md", "23-before-you-modify-checklists.md"],
       "localEvidence": {
         "baseCommit": "a8928478c7a28093f72431bf01271d878dee928d",

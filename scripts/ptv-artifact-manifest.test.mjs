@@ -121,6 +121,50 @@ test('rejects forged manifest digest and different current Git HEAD', () => with
     assert.throws(() => verifyManifest(valid, options(data)), /source commit/u);
 }));
 
+test('verifies a frozen Web artifact against its committed source after a documentation-only HEAD advance', () => withFixture(data => {
+    const manifest = buildManifest(options(data));
+    fs.writeFileSync(path.join(data.sourceRoot, 'handoff.md'), 'Documentation-only follow-up.\n');
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- Disposable fixture Git uses the test runner's trusted PATH.
+    execFileSync('git', [ 'add', 'handoff.md' ], { cwd: data.sourceRoot });
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- Disposable fixture Git uses the test runner's trusted PATH.
+    execFileSync('git', [ 'commit', '-qm', 'docs follow-up' ], { cwd: data.sourceRoot });
+    assert.throws(() => verifyManifest(manifest, options(data)), /source commit/u);
+    assert.equal(verifyManifest(manifest, { ...options(data), frozenSourceCommit: data.commit }), true);
+    assert.throws(() => verifyManifest(manifest, { ...options(data), frozenSourceCommit: '0'.repeat(40) }), /source commit|Git commit/u);
+}));
+
+test('frozen verification uses version authorities from the artifact commit and rejects forged versions', () => withFixture(data => {
+    const manifest = buildManifest(options(data));
+    fs.writeFileSync(path.join(data.sourceRoot, 'ptv-version.json'), '{"version":"0.5.72"}\n');
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- Disposable fixture Git uses the test runner's trusted PATH.
+    execFileSync('git', [ 'add', 'ptv-version.json' ], { cwd: data.sourceRoot });
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- Disposable fixture Git uses the test runner's trusted PATH.
+    execFileSync('git', [ 'commit', '-qm', 'advance Web version' ], { cwd: data.sourceRoot });
+    assert.equal(verifyManifest(manifest, { ...options(data), frozenSourceCommit: data.commit }), true);
+    const forged = { ...manifest, sourceVersions: { ...manifest.sourceVersions, web: '0.5.72' } };
+    forged.manifestDigest = canonicalDigest(forged);
+    assert.throws(() => verifyManifest(forged, { ...options(data), frozenSourceCommit: data.commit }), /Frozen source version/u);
+}));
+
+test('frozen verification rejects a payload with a forged embedded commit marker', () => withFixture(data => {
+    const manifest = buildManifest(options(data));
+    const bundle = path.join(data.artifactRoot, 'main.jellyfin.bundle.js');
+    fs.writeFileSync(bundle, 'const sourceCommit = "forged";');
+    const bytes = fs.readFileSync(bundle);
+    const entry = manifest.files.find(file => file.path === 'main.jellyfin.bundle.js');
+    entry.size = bytes.length;
+    entry.sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+    manifest.manifestDigest = canonicalDigest(manifest);
+    assert.throws(() => verifyManifest(manifest, { ...options(data), frozenSourceCommit: data.commit }), /embedded.*commit/u);
+}));
+
+test('frozen deployment verification rejects a development-mode artifact even when clean', () => withFixture(data => {
+    const manifest = buildManifest({ ...options(data), buildMode: 'development' });
+    assert.throws(() => verifyManifest(manifest, {
+        artifactRoot: data.artifactRoot, sourceRoot: data.sourceRoot, frozenSourceCommit: data.commit
+    }), /production|release mode/u);
+}));
+
 test('standalone create denies an unauthorized clean fixture before writing an artifact manifest', () => withFixture(data => {
     const manifestPath = path.join(data.base, 'final-manifest.json');
     assert.throws(() => execFileSync(process.execPath, [ scriptPath, 'create', '--artifact', data.artifactRoot, '--source-root', data.sourceRoot, '--mode', 'production', '--output', manifestPath ], { stdio: 'ignore' }));
