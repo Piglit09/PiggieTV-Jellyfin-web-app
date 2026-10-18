@@ -1400,6 +1400,24 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         [FromQuery] int? limit,
         CancellationToken cancellationToken)
     {
+        if (HttpContext is null || !TryGetAuthenticatedUserId(out var authenticatedUserId)
+            || GetOptionalService<IUserManager>("integrations/seerr/requests")?.GetUserById(authenticatedUserId) is null)
+        {
+            return Unauthorized(Error("PTV_SEERR_REQUESTS_AUTH_REQUIRED", "An authenticated Jellyfin user is required."));
+        }
+
+        Response.Headers.CacheControl = "private, no-store";
+        if (!Guid.TryParse(userId?.Trim(), out var requestedUserId) || requestedUserId == Guid.Empty)
+        {
+            return BadRequest(Error("PTV_SEERR_REQUESTS_USER_INVALID", "A valid Jellyfin user id is required."));
+        }
+
+        if (requestedUserId != authenticatedUserId)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                Error("PTV_SEERR_REQUESTS_USER_MISMATCH", "The requested user does not match the authenticated Jellyfin user."));
+        }
+
         var settings = GetNormalizedConfiguration().SeerrSettings;
 
         if (!settings.Enabled || !settings.EnableRequestsPage || string.IsNullOrWhiteSpace(settings.InternalUrl) || string.IsNullOrWhiteSpace(settings.ApiKey))
@@ -1413,20 +1431,10 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             });
         }
 
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            return Ok(new
-            {
-                ok = false,
-                Items = Array.Empty<object>(),
-                error = "A Jellyfin user id is required for the requested media row."
-            });
-        }
-
         var itemLimit = Math.Clamp(limit ?? 24, 1, 100);
         var seerrUser = await FetchProxyJsonNodeAsync(
             settings.InternalUrl,
-            $"/api/v1/user/jellyfin/{Uri.EscapeDataString(userId.Trim())}",
+            $"/api/v1/user/jellyfin/{authenticatedUserId:N}",
             settings.ApiKey,
             "Jellyseerr user lookup",
             cancellationToken).ConfigureAwait(false);
@@ -2457,7 +2465,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
 
     private static bool MatchesSeerrRequester(PtvSeerrRequestedMedia media, int seerrUserId)
     {
-        return media.RequestedByUserId is null || media.RequestedByUserId == seerrUserId;
+        return media.RequestedByUserId == seerrUserId;
     }
 
     private static bool MatchesRequestedMedia(BaseItem item, PtvSeerrRequestedMedia media)
