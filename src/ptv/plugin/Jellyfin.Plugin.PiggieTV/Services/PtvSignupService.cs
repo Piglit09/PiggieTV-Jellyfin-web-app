@@ -595,9 +595,12 @@ public sealed class PtvSignupService : IPtvSignupService
                 return Fail("The account for this reset code was not found.");
             }
 
-            await ChangePasswordAsync(user, request.Password!).ConfigureAwait(false);
-            signup.PasswordResetCodes.Remove(reset);
+            // Retire every code for this verified email before changing the Jellyfin password.
+            // A configuration write failure must not leave valid codes after a password change.
+            signup.PasswordResetCodes.RemoveAll(candidate =>
+                string.Equals(candidate.Email, email, StringComparison.OrdinalIgnoreCase));
             SaveConfiguration(configuration);
+            await ChangePasswordAsync(user, request.Password!).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "PiggieTV password reset completed. Username={Username}; Email={Email}; Remote={RemoteAddress}.",
