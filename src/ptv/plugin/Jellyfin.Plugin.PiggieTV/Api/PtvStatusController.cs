@@ -3005,9 +3005,27 @@ public sealed class PtvStatusController : BaseJellyfinApiController
 
     private IReadOnlyList<BaseItem> GetLibraryItems()
     {
-        var libraryManager = GetRequiredService<ILibraryManager>("library");
+        if (HttpContext is null || !TryGetAuthenticatedUserId(out var userId))
+        {
+            throw new InvalidOperationException("Authenticated library scope unavailable.");
+        }
 
-        return libraryManager.RootFolder.GetRecursiveChildren().ToArray();
+        var users = GetRequiredService<IUserManager>("library");
+        var user = users.GetUserById(userId)
+            ?? throw new InvalidOperationException("Authenticated library scope unavailable.");
+        var libraryManager = GetRequiredService<ILibraryManager>("library");
+        var root = libraryManager.GetUserRootFolder();
+        if (root is null || root.Id == Guid.Empty)
+        {
+            throw new InvalidOperationException("Authenticated library scope unavailable.");
+        }
+
+        return libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            ParentId = root.Id,
+            Recursive = true,
+            EnableTotalRecordCount = false
+        }).ToArray();
     }
 
     private static bool MatchesRandomKind(BaseItem item, string kind)
