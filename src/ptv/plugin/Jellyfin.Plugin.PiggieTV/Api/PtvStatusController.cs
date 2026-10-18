@@ -1365,6 +1365,23 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> RequestSeerr([FromBody] JsonObject? body, CancellationToken cancellationToken)
     {
+        if (HttpContext is null || !TryGetAuthenticatedUserId(out var userId)
+            || GetOptionalService<IUserManager>("integrations/seerr/request")?.GetUserById(userId) is null)
+        {
+            return Unauthorized(Error("PTV_SEERR_REQUEST_AUTH_REQUIRED", "An authenticated Jellyfin user is required."));
+        }
+
+        if (!await CanWriteFeaturedContentSafeAsync("integrations/seerr/request").ConfigureAwait(false))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                Error("PTV_SEERR_REQUEST_FORBIDDEN", "Administrator permission is required to request media."));
+        }
+
+        if (!TryBuildSeerrRequestPayload(body, out var requestPayload))
+        {
+            return BadRequest(Error("PTV_SEERR_REQUEST_INVALID", "A valid media request is required."));
+        }
+
         var settings = GetNormalizedConfiguration().SeerrSettings;
 
         if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.InternalUrl) || string.IsNullOrWhiteSpace(settings.ApiKey))
@@ -1381,9 +1398,53 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             settings.InternalUrl,
             "/api/v1/request",
             settings.ApiKey,
-            body ?? new JsonObject(),
+            requestPayload,
             "Jellyseerr request",
             cancellationToken).ConfigureAwait(false));
+    }
+
+    private static bool TryBuildSeerrRequestPayload(JsonObject? body, out JsonObject requestPayload)
+    {
+        requestPayload = new JsonObject();
+        if (body is null || body.Any(field => field.Key is not ("mediaType" or "mediaId" or "seasons"))
+            || body["mediaType"] is not JsonValue typeValue
+            || !typeValue.TryGetValue<string>(out var mediaType)
+            || mediaType is not ("movie" or "tv")
+            || body["mediaId"] is not JsonValue idValue
+            || !idValue.TryGetValue<int>(out var mediaId)
+            || mediaId <= 0)
+        {
+            return false;
+        }
+
+        requestPayload["mediaType"] = mediaType;
+        requestPayload["mediaId"] = mediaId;
+        if (!body.ContainsKey("seasons"))
+        {
+            return true;
+        }
+
+        if (mediaType != "tv" || body["seasons"] is not JsonArray inputSeasons
+            || inputSeasons.Count is < 1 or > 100)
+        {
+            return false;
+        }
+
+        var seasons = new JsonArray();
+        var seen = new HashSet<int>();
+        foreach (var season in inputSeasons)
+        {
+            if (season is not JsonValue seasonValue || !seasonValue.TryGetValue<int>(out var seasonNumber)
+                || seasonNumber < 0 || !seen.Add(seasonNumber))
+            {
+                return false;
+            }
+
+            seasons.Add(seasonNumber);
+        }
+
+        requestPayload["seasons"] = seasons;
+        return true;
     }
 
     /// <summary>
