@@ -1,0 +1,465 @@
+[
+  {
+    "id": "create-definition",
+    "operation": "admin-create",
+    "principal": "administrator",
+    "pathParams": { "resource": "definitions" },
+    "request": {
+      "contractVersion": "1.0",
+      "resourceType": "definition",
+      "resource": {
+        "name": "PTV Cinema",
+        "timeZone": "America/Chicago",
+        "enabled": true,
+        "blockAssignments": [{ "blockId": "block-1" }]
+      }
+    },
+    "status": 201,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"def-1\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "definition",
+      "resource": {
+        "channelId": "ch-cinema",
+        "definitionRevision": "def-1",
+        "name": "PTV Cinema",
+        "timeZone": "America/Chicago",
+        "enabled": true,
+        "blockAssignments": [{ "blockId": "block-1" }],
+        "scheduleAnchorUtc": "2026-10-18T20:00:00Z"
+      }
+    }
+  },
+  {
+    "id": "list-definitions",
+    "operation": "admin-list",
+    "principal": "administrator",
+    "pathParams": { "resource": "definitions" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "definition",
+      "resources": [{
+        "channelId": "ch-cinema",
+        "definitionRevision": "def-1",
+        "name": "PTV Cinema",
+        "timeZone": "America/Chicago",
+        "enabled": true,
+        "blockAssignments": [{ "blockId": "block-1" }],
+        "scheduleAnchorUtc": "2026-10-18T20:00:00Z"
+      }]
+    }
+  },
+  {
+    "id": "read-definition",
+    "operation": "admin-read",
+    "principal": "administrator",
+    "pathParams": { "resource": "definitions", "id": "ch-cinema" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"def-1\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "definition",
+      "resource": {
+        "channelId": "ch-cinema",
+        "definitionRevision": "def-1",
+        "name": "PTV Cinema",
+        "timeZone": "America/Chicago",
+        "enabled": true,
+        "blockAssignments": [{ "blockId": "block-1" }],
+        "scheduleAnchorUtc": "2026-10-18T20:00:00Z"
+      }
+    }
+  },
+  {
+    "id": "update-definition",
+    "operation": "admin-update",
+    "principal": "administrator",
+    "pathParams": { "resource": "definitions", "id": "ch-cinema" },
+    "requestHeaders": { "If-Match": "\"def-1\"" },
+    "request": {
+      "contractVersion": "1.0",
+      "resourceType": "definition",
+      "resource": {
+        "name": "PTV Cinema",
+        "timeZone": "America/Chicago",
+        "enabled": true,
+        "blockAssignments": [{ "blockId": "block-1" }, { "blockId": "block-2" }]
+      }
+    },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"def-2\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:31:00Z",
+      "resourceType": "definition",
+      "resource": {
+        "channelId": "ch-cinema",
+        "definitionRevision": "def-2",
+        "name": "PTV Cinema",
+        "timeZone": "America/Chicago",
+        "enabled": true,
+        "blockAssignments": [{ "blockId": "block-1" }, { "blockId": "block-2" }],
+        "scheduleAnchorUtc": "2026-10-18T20:00:00Z"
+      }
+    }
+  },
+  {
+    "id": "read-definition-after-update",
+    "operation": "admin-read",
+    "principal": "administrator",
+    "pathParams": { "resource": "definitions", "id": "ch-cinema" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"def-2\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:31:01Z",
+      "resourceType": "definition",
+      "resource": {
+        "channelId": "ch-cinema",
+        "definitionRevision": "def-2",
+        "name": "PTV Cinema",
+        "timeZone": "America/Chicago",
+        "enabled": true,
+        "blockAssignments": [{ "blockId": "block-1" }, { "blockId": "block-2" }],
+        "scheduleAnchorUtc": "2026-10-18T20:00:00Z"
+      }
+    }
+  },
+  {
+    "id": "create-collection",
+    "operation": "admin-create",
+    "principal": "administrator",
+    "pathParams": { "resource": "collections" },
+    "request": {
+      "contractVersion": "1.0",
+      "resourceType": "collection",
+      "resource": {
+        "libraryIds": ["lib-tv"],
+        "mediaType": "episode",
+        "orderingPolicy": "stableId",
+        "seriesIds": ["series-1", "series-2"],
+        "includeGenres": ["Drama"],
+        "excludeTags": ["Explicit"],
+        "minDurationMs": 1200000,
+        "maxDurationMs": 3600000
+      }
+    },
+    "status": 201,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"collection-1\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "collection",
+      "resource": {
+        "collectionId": "collection-tv",
+        "collectionRevision": "collection-1",
+        "libraryIds": ["lib-tv"],
+        "mediaType": "episode",
+        "orderingPolicy": "stableId",
+        "seriesIds": ["series-1", "series-2"],
+        "includeGenres": ["Drama"],
+        "excludeTags": ["Explicit"],
+        "minDurationMs": 1200000,
+        "maxDurationMs": 3600000
+      }
+    }
+  },
+  {
+    "id": "list-collections",
+    "operation": "admin-list",
+    "principal": "administrator",
+    "pathParams": { "resource": "collections" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "collection",
+      "resources": [{
+        "collectionId": "collection-tv",
+        "collectionRevision": "collection-1",
+        "libraryIds": ["lib-tv"],
+        "mediaType": "episode",
+        "orderingPolicy": "stableId",
+        "seriesIds": ["series-1", "series-2"],
+        "includeGenres": ["Drama"],
+        "excludeTags": ["Explicit"],
+        "minDurationMs": 1200000,
+        "maxDurationMs": 3600000
+      }]
+    }
+  },
+  {
+    "id": "read-collection",
+    "operation": "admin-read",
+    "principal": "administrator",
+    "pathParams": { "resource": "collections", "id": "collection-tv" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"collection-1\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "collection",
+      "resource": {
+        "collectionId": "collection-tv",
+        "collectionRevision": "collection-1",
+        "libraryIds": ["lib-tv"],
+        "mediaType": "episode",
+        "orderingPolicy": "stableId",
+        "seriesIds": ["series-1", "series-2"],
+        "includeGenres": ["Drama"],
+        "excludeTags": ["Explicit"],
+        "minDurationMs": 1200000,
+        "maxDurationMs": 3600000
+      }
+    }
+  },
+  {
+    "id": "update-collection",
+    "operation": "admin-update",
+    "principal": "administrator",
+    "pathParams": { "resource": "collections", "id": "collection-tv" },
+    "requestHeaders": { "If-Match": "\"collection-1\"" },
+    "request": {
+      "contractVersion": "1.0",
+      "resourceType": "collection",
+      "resource": {
+        "libraryIds": ["lib-tv"],
+        "mediaType": "episode",
+        "orderingPolicy": "stableId",
+        "seriesIds": ["series-1", "series-2", "series-3"],
+        "includeGenres": ["Drama"],
+        "excludeTags": ["Explicit"],
+        "minDurationMs": 1200000,
+        "maxDurationMs": 3600000
+      }
+    },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"collection-2\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:31:00Z",
+      "resourceType": "collection",
+      "resource": {
+        "collectionId": "collection-tv",
+        "collectionRevision": "collection-2",
+        "libraryIds": ["lib-tv"],
+        "mediaType": "episode",
+        "orderingPolicy": "stableId",
+        "seriesIds": ["series-1", "series-2", "series-3"],
+        "includeGenres": ["Drama"],
+        "excludeTags": ["Explicit"],
+        "minDurationMs": 1200000,
+        "maxDurationMs": 3600000
+      }
+    }
+  },
+  {
+    "id": "read-collection-after-update",
+    "operation": "admin-read",
+    "principal": "administrator",
+    "pathParams": { "resource": "collections", "id": "collection-tv" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"collection-2\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:31:01Z",
+      "resourceType": "collection",
+      "resource": {
+        "collectionId": "collection-tv",
+        "collectionRevision": "collection-2",
+        "libraryIds": ["lib-tv"],
+        "mediaType": "episode",
+        "orderingPolicy": "stableId",
+        "seriesIds": ["series-1", "series-2", "series-3"],
+        "includeGenres": ["Drama"],
+        "excludeTags": ["Explicit"],
+        "minDurationMs": 1200000,
+        "maxDurationMs": 3600000
+      }
+    }
+  },
+  {
+    "id": "create-block",
+    "operation": "admin-create",
+    "principal": "administrator",
+    "pathParams": { "resource": "blocks" },
+    "request": {
+      "contractVersion": "1.0",
+      "resourceType": "block",
+      "resource": {
+        "daysOfWeek": ["sunday", "wednesday"],
+        "localStart": "20:00:00",
+        "windowDurationMs": 7200000,
+        "collectionId": "collection-tv",
+        "selectionMode": "sequentialTv"
+      }
+    },
+    "status": 201,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"block-rev-1\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "block",
+      "resource": {
+        "blockId": "block-1",
+        "blockRevision": "block-rev-1",
+        "daysOfWeek": ["sunday", "wednesday"],
+        "localStart": "20:00:00",
+        "windowDurationMs": 7200000,
+        "collectionId": "collection-tv",
+        "selectionMode": "sequentialTv",
+        "repeatWindowMs": 86400000
+      }
+    }
+  },
+  {
+    "id": "list-blocks",
+    "operation": "admin-list",
+    "principal": "administrator",
+    "pathParams": { "resource": "blocks" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "block",
+      "resources": [{
+        "blockId": "block-1",
+        "blockRevision": "block-rev-1",
+        "daysOfWeek": ["sunday", "wednesday"],
+        "localStart": "20:00:00",
+        "windowDurationMs": 7200000,
+        "collectionId": "collection-tv",
+        "selectionMode": "sequentialTv",
+        "repeatWindowMs": 86400000
+      }]
+    }
+  },
+  {
+    "id": "read-block",
+    "operation": "admin-read",
+    "principal": "administrator",
+    "pathParams": { "resource": "blocks", "id": "block-1" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"block-rev-1\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "resourceType": "block",
+      "resource": {
+        "blockId": "block-1",
+        "blockRevision": "block-rev-1",
+        "daysOfWeek": ["sunday", "wednesday"],
+        "localStart": "20:00:00",
+        "windowDurationMs": 7200000,
+        "collectionId": "collection-tv",
+        "selectionMode": "sequentialTv",
+        "repeatWindowMs": 86400000
+      }
+    }
+  },
+  {
+    "id": "update-block",
+    "operation": "admin-update",
+    "principal": "administrator",
+    "pathParams": { "resource": "blocks", "id": "block-1" },
+    "requestHeaders": { "If-Match": "\"block-rev-1\"" },
+    "request": {
+      "contractVersion": "1.0",
+      "resourceType": "block",
+      "resource": {
+        "daysOfWeek": ["sunday", "wednesday"],
+        "localStart": "20:00:00",
+        "windowDurationMs": 7200000,
+        "collectionId": "collection-tv",
+        "selectionMode": "sequentialTv",
+        "repeatWindowMs": 0
+      }
+    },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"block-rev-2\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:31:00Z",
+      "resourceType": "block",
+      "resource": {
+        "blockId": "block-1",
+        "blockRevision": "block-rev-2",
+        "daysOfWeek": ["sunday", "wednesday"],
+        "localStart": "20:00:00",
+        "windowDurationMs": 7200000,
+        "collectionId": "collection-tv",
+        "selectionMode": "sequentialTv",
+        "repeatWindowMs": 0
+      }
+    }
+  },
+  {
+    "id": "read-block-after-update",
+    "operation": "admin-read",
+    "principal": "administrator",
+    "pathParams": { "resource": "blocks", "id": "block-1" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store", "ETag": "\"block-rev-2\"" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:31:01Z",
+      "resourceType": "block",
+      "resource": {
+        "blockId": "block-1",
+        "blockRevision": "block-rev-2",
+        "daysOfWeek": ["sunday", "wednesday"],
+        "localStart": "20:00:00",
+        "windowDurationMs": 7200000,
+        "collectionId": "collection-tv",
+        "selectionMode": "sequentialTv",
+        "repeatWindowMs": 0
+      }
+    }
+  },
+  {
+    "id": "preview-draft-block",
+    "operation": "admin-preview",
+    "principal": "administrator",
+    "request": {
+      "contractVersion": "1.0",
+      "channelId": "ch-cinema",
+      "fromUtc": "2026-10-19T01:00:00Z",
+      "toUtc": "2026-10-19T04:00:00Z",
+      "candidateResourceId": "block-1",
+      "candidate": {
+        "contractVersion": "1.0",
+        "resourceType": "block",
+        "resource": {
+          "daysOfWeek": ["sunday", "wednesday"],
+          "localStart": "21:00:00",
+          "windowDurationMs": 7200000,
+          "collectionId": "collection-tv",
+          "selectionMode": "sequentialTv",
+          "repeatWindowMs": 86400000
+        }
+      }
+    },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "channelId": "ch-cinema",
+      "fromUtc": "2026-10-19T01:00:00Z",
+      "toUtc": "2026-10-19T04:00:00Z",
+      "inputHashes": [{ "collectionId": "collection-tv", "inputHashSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+      "entries": [
+        { "startUtc": "2026-10-19T01:00:00Z", "endUtc": "2026-10-19T02:00:00Z", "availability": "gap" },
+        { "startUtc": "2026-10-19T02:00:00Z", "endUtc": "2026-10-19T02:45:00Z", "availability": "playable", "itemId": "jf-episode-1", "blockId": "block-1", "collectionId": "collection-tv", "repeatRelaxed": false },
+        { "startUtc": "2026-10-19T02:45:00Z", "endUtc": "2026-10-19T04:00:00Z", "availability": "gap", "blockId": "block-1" }
+      ]
+    }
+  }
+]

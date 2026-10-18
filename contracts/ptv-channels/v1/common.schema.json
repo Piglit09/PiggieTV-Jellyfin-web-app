@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json",
+  "title": "PTV Channels v1 shared scalar definitions",
+  "$defs": {
+    "contractVersion": { "const": "1.0" },
+    "opaqueId": { "type": "string", "minLength": 1 },
+    "utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "milliseconds": { "type": "integer", "minimum": 0 }
+  }
+}

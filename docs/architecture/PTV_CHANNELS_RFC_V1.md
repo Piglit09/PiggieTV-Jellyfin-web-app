@@ -2,7 +2,7 @@
 
 Date: 2026-10-18
 
-Status: **RFC v1 complete for architecture review; approval pending**
+Status: **Architecture approved 2026-10-18; machine-readable contract review pending**
 
 Decision boundary: architecture and API design **GO**; scheduler prototype **DEFERRED**; production engine, native client integration, and IPTV gateway **HOLD**.
 
@@ -94,7 +94,7 @@ Each replacement future entry gets a new `entryRevision`, while retained past/cu
 
 ## Shared API contract v1 (design complete; unimplemented)
 
-The following routes and response semantics are the v1 architecture decision, **not** an implemented API. They follow the current [PTV Core contract conventions](../../contracts/ptv-core/README.md): camelCase JSON, opaque IDs, RFC 3339 UTC timestamps, integer milliseconds for durations/positions, additive optional v1 fields, and unknown-field tolerance. The namespace is `/Ptv/v1/channels`, distinct from stock `/LiveTv/*`; `contractVersion: "1.0"` labels Channels payloads. Missing optional fields are omitted, not serialized as `null`. Before implementation, publish machine-readable schemas and fixtures that express these decisions and validate each supported client against them.
+The following routes and response semantics are the approved v1 architecture decision, **not** an implemented API. They follow the current [PTV Core contract conventions](../../contracts/ptv-core/README.md): camelCase JSON, opaque IDs, RFC 3339 UTC timestamps, integer milliseconds for durations/positions, additive optional v1 fields, and unknown-field tolerance. The namespace is `/Ptv/v1/channels`, distinct from stock `/LiveTv/*`; `contractVersion: "1.0"` labels Channels payloads. Missing optional fields are omitted, not serialized as `null`. The [machine-readable contract and fixtures](../../contracts/ptv-channels/v1/README.md) express these decisions for review; supported clients must validate against them before implementation.
 
 | Operation | Proposed route | Result |
 | --- | --- | --- |
@@ -104,9 +104,9 @@ The following routes and response semantics are the v1 architecture decision, **
 | Join / Go Live | `POST /Ptv/v1/channels/{channelId}/resolve` | Current committed program, user-authorized Jellyfin item ID, position and end time; no stream URL or claimed session. Optional `expectedProgramId` and `expectedEntryRevision` guard a stale guide click. |
 | Admin read / save / preview | `/Ptv/v1/channels/admin/...` | Administrator-only definition, collection, and block reads/writes plus side-effect-free schedule preview. |
 
-List/guide entries use one discriminated shape: `programId` (an opaque PTV slot ID unrelated to the Jellyfin item ID), `entryRevision`, `startUtc`, `endUtc`, and `availability`. `availability: "playable"` permits user-authorized title and artwork fields; `"unavailable"` and `"gap"` omit item ID, title, artwork, series, and description. The list's `now` and `next` follow the **same redaction rule** as guide entries. Item IDs are returned only by a successful resolve. A guide includes entries intersecting its requested window without clipping their stored timestamps, sorted by start time and program ID. A cursor is opaque and bound to the user, channel, window, and per-channel `timelineRevision`; a changed timeline makes it stale. Each page rechecks current permissions, so a constant timeline revision does not promise an unchanged user-visible projection after a policy change. `nextCursor` is omitted on the last page.
+List/guide entries use one discriminated shape: `programId` (an opaque PTV slot ID unrelated to the Jellyfin item ID), `entryRevision`, `startUtc`, `endUtc`, and `availability`. `availability: "playable"` permits user-authorized title, series, and description fields; `"unavailable"` and `"gap"` omit item ID, title, artwork, series, and description. The list's `now` and `next` follow the **same redaction rule** as guide entries. Among user-facing routes, item IDs are returned only by a successful resolve; an administrator preview may show candidate IDs. Artwork is deferred from the v1 wire schema until a user-scoped image transport is designed without exposing item IDs. A guide includes entries intersecting its requested window without clipping their stored timestamps, sorted by start time and program ID. A cursor is opaque and bound to the user, channel, window, and per-channel `timelineRevision`; a changed timeline makes it stale. Each page rechecks current permissions, so a constant timeline revision does not promise an unchanged user-visible projection after a policy change. `nextCursor` is omitted on the last page.
 
-The minimum capability, list, and guide payloads are illustrated below. `title` and artwork are optional only for `playable` entries; all other fields shown are required for the applicable response or entry type. A published `ready` channel has `now`, with `next` omitted only when the horizon contains no later entry. An expired or recovering channel remains in the list with `state: "horizonExpired"` or `"recovering"` and omits `now` and `next`. An unpublished channel is absent from the user list.
+The minimum capability, list, and guide payloads are illustrated below. `title` is optional only for `playable` entries; all other fields shown are required for the applicable response or entry type. A published `ready` channel has `now`, with `next` omitted only when the horizon contains no later entry. An expired or recovering channel remains in the list with `state: "horizonExpired"` or `"recovering"` and omits `now` and `next`. An unpublished channel is absent from the user list.
 
 ```json
 {
@@ -200,6 +200,7 @@ Errors use a common JSON envelope with required `contractVersion`, `serverTimeUt
 | `401` | `UNAUTHENTICATED`, `PRINCIPAL_UNAVAILABLE` | Missing credentials or no current unambiguous, enabled Jellyfin user. Clear user-scoped state; do not retry under an inferred user. |
 | `403` | `ADMIN_REQUIRED` | A resolved user lacks administrator policy for an admin route. |
 | `404` | `CHANNEL_NOT_FOUND` | Channel absent or unauthorized; the response does not distinguish them. An older Plugin may instead have no Channels route at all. |
+| `404` | `RESOURCE_NOT_FOUND` | Requested admin definition, collection, or block ID does not exist. The admin request must already have passed administrator authorization. |
 | `409` | `PROGRAM_CHANGED` | Expected program/entry revision or guide cursor is stale. Refetch the authoritative snapshot. |
 | `409` | `PROGRAM_UNAVAILABLE` | Gap, missing media, current item runtime exhausted, or item inaccessible to this user. Show an unavailable slot without item metadata. |
 | `409` | `PROGRAM_ROLLOVER` | A playable entry has fewer than or exactly 10 seconds of scheduled time left; wait for `retryAtUtc` and resolve once as specified above. |
@@ -230,7 +231,7 @@ The target for physical acceptance is a first-frame position within 10 seconds o
 
 | Gate | Required proof before moving forward |
 | --- | --- |
-| Architecture/API review | Review and approve this RFC's ownership, schedule invariants, privacy behavior, v1 wire shapes and error codes, restart/migration approach, and stock Live TV separation. Machine-readable schemas and fixtures must be produced before client or Plugin implementation; resolve every `UNKNOWN` that affects that work. |
+| Architecture/API review | RFC v1 is approved. Review the companion schemas and fixtures for ownership, privacy behavior, v1 wire shapes and error codes, and stock Live TV separation before client or Plugin implementation; resolve every `UNKNOWN` that affects that work. |
 | Isolated scheduler prototype | Remains deferred now. When permitted later, use only the approved checkout/workflow and test deterministic generation, cursor transaction/idempotence, repeat exhaustion, DST, catalog deletion, revision conflicts, restart, and corruption without production integration. |
 | Plugin integration | Complete acceptance of the current Plugin candidate, including 0.5.23.0 user-scope hardening; prove authentication, administrator writes, restricted-user redaction, current-policy recheck, cross-user cache isolation, readback, and old/new Plugin capability behavior. |
 | Web/client integration | Current Web candidate promoted; stable authentication and playback; contract fixtures pass on Web, Android TV / Fire TV, webOS, and Android Mobile. Android Auto reconnect/media-control regressions are addressed to the extent they share the playback/session lifecycle. |
@@ -258,7 +259,7 @@ The following remain `UNKNOWN` for Channels until focused proof exists:
 
 ## Decision and next checkpoint
 
-RFC v1 is complete for architecture review. Completion does not mean the architecture is approved or the Jellyfin 12.2 and physical playback unknowns are resolved. Its decisions do not unlock a scheduler prototype or production Channels work. The next checkpoint is approval of this design and its API/security boundaries, followed by evidence that the dependent Plugin, Web, and physical client release gates have improved enough to authorize an isolated scheduler prototype. Continuous IPTV broadcasting remains future work.
+RFC v1 is approved for architecture planning. The [Channels v1 contract package](../../contracts/ptv-channels/v1/README.md) is the next review gate; its local schema validation does not resolve the Jellyfin 12.2 and physical playback unknowns. Neither approval unlocks a scheduler prototype or production Channels work. Those require their separate dependent Plugin, Web, and physical-client acceptance gates. Continuous IPTV broadcasting remains future work.
 
 ## References
 

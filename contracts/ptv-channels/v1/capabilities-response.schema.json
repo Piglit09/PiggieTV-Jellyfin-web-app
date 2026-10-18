@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/capabilities-response.schema.json",
+  "title": "PTV Channels v1 capabilities response",
+  "type": "object",
+  "required": ["contractVersion", "serverTimeUtc", "enabled", "guidePastHours", "guideFutureHours", "maxGuideWindowHours", "maxEntriesPerPage"],
+  "properties": {
+    "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+    "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "enabled": { "type": "boolean" },
+    "guidePastHours": { "const": 24 },
+    "guideFutureHours": { "const": 48 },
+    "maxGuideWindowHours": { "const": 24 },
+    "maxEntriesPerPage": { "const": 500 }
+  },
+  "additionalProperties": true
+}

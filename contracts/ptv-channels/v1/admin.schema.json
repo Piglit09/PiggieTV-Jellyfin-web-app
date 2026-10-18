@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/admin.schema.json",
+  "title": "PTV Channels v1 administrator resource and preview contracts",
+  "$ref": "#/$defs/readEnvelope",
+  "$defs": {
+    "definitionFields": {
+      "type": "object",
+      "required": ["name", "timeZone", "enabled", "blockAssignments"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "timeZone": { "type": "string", "minLength": 1 },
+        "enabled": { "type": "boolean" },
+        "blockAssignments": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["blockId"],
+            "properties": { "blockId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" } },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "collectionFields": {
+      "type": "object",
+      "required": ["libraryIds", "mediaType", "orderingPolicy"],
+      "properties": {
+        "libraryIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" } },
+        "mediaType": { "enum": ["movie", "episode"] },
+        "orderingPolicy": { "const": "stableId" },
+        "seriesIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" } },
+        "includeGenres": { "$ref": "#/$defs/stringSet" },
+        "excludeGenres": { "$ref": "#/$defs/stringSet" },
+        "includeTags": { "$ref": "#/$defs/stringSet" },
+        "excludeTags": { "$ref": "#/$defs/stringSet" },
+        "minDurationMs": { "type": "integer", "minimum": 1 },
+        "maxDurationMs": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        { "if": { "properties": { "mediaType": { "const": "movie" } }, "required": ["mediaType"] }, "then": { "not": { "required": ["seriesIds"] } } }
+      ]
+    },
+    "stringSet": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "blockFields": {
+      "type": "object",
+      "required": ["daysOfWeek", "localStart", "windowDurationMs", "collectionId", "selectionMode"],
+      "properties": {
+        "daysOfWeek": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] }
+        },
+        "localStart": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$" },
+        "windowDurationMs": { "type": "integer", "minimum": 1 },
+        "collectionId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "selectionMode": { "enum": ["seededShuffle", "sequentialTv"] },
+        "repeatWindowMs": { "type": "integer", "minimum": 0, "maximum": 604800000 }
+      }
+    },
+    "definitionWrite": {
+      "allOf": [{ "$ref": "#/$defs/definitionFields" }],
+      "unevaluatedProperties": false
+    },
+    "collectionWrite": {
+      "allOf": [{ "$ref": "#/$defs/collectionFields" }],
+      "unevaluatedProperties": false
+    },
+    "blockWrite": {
+      "allOf": [{ "$ref": "#/$defs/blockFields" }],
+      "unevaluatedProperties": false
+    },
+    "definitionRead": {
+      "allOf": [{ "$ref": "#/$defs/definitionFields" }],
+      "type": "object",
+      "required": ["channelId", "definitionRevision"],
+      "properties": {
+        "channelId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "definitionRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "scheduleAnchorUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" }
+      }
+    },
+    "collectionRead": {
+      "allOf": [{ "$ref": "#/$defs/collectionFields" }],
+      "type": "object",
+      "required": ["collectionId", "collectionRevision"],
+      "properties": {
+        "collectionId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "collectionRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" }
+      }
+    },
+    "blockRead": {
+      "allOf": [{ "$ref": "#/$defs/blockFields" }],
+      "type": "object",
+      "required": ["blockId", "blockRevision", "repeatWindowMs"],
+      "properties": {
+        "blockId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "blockRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" }
+      }
+    },
+    "writeEnvelope": {
+      "oneOf": [
+        { "$ref": "#/$defs/definitionWriteEnvelope" },
+        { "$ref": "#/$defs/collectionWriteEnvelope" },
+        { "$ref": "#/$defs/blockWriteEnvelope" }
+      ]
+    },
+    "definitionWriteEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "resourceType", "resource"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "resourceType": { "const": "definition" },
+        "resource": { "$ref": "#/$defs/definitionWrite" }
+      },
+      "additionalProperties": false
+    },
+    "collectionWriteEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "resourceType", "resource"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "resourceType": { "const": "collection" },
+        "resource": { "$ref": "#/$defs/collectionWrite" }
+      },
+      "additionalProperties": false
+    },
+    "blockWriteEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "resourceType", "resource"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "resourceType": { "const": "block" },
+        "resource": { "$ref": "#/$defs/blockWrite" }
+      },
+      "additionalProperties": false
+    },
+    "readEnvelope": {
+      "oneOf": [
+        { "$ref": "#/$defs/definitionReadEnvelope" },
+        { "$ref": "#/$defs/collectionReadEnvelope" },
+        { "$ref": "#/$defs/blockReadEnvelope" }
+      ]
+    },
+    "definitionReadEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "serverTimeUtc", "resourceType", "resource"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "resourceType": { "const": "definition" },
+        "resource": { "$ref": "#/$defs/definitionRead" }
+      },
+      "additionalProperties": true
+    },
+    "collectionReadEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "serverTimeUtc", "resourceType", "resource"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "resourceType": { "const": "collection" },
+        "resource": { "$ref": "#/$defs/collectionRead" }
+      },
+      "additionalProperties": true
+    },
+    "blockReadEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "serverTimeUtc", "resourceType", "resource"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "resourceType": { "const": "block" },
+        "resource": { "$ref": "#/$defs/blockRead" }
+      },
+      "additionalProperties": true
+    },
+    "listEnvelope": {
+      "oneOf": [
+        { "$ref": "#/$defs/definitionListEnvelope" },
+        { "$ref": "#/$defs/collectionListEnvelope" },
+        { "$ref": "#/$defs/blockListEnvelope" }
+      ]
+    },
+    "definitionListEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "serverTimeUtc", "resourceType", "resources"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "resourceType": { "const": "definition" },
+        "resources": { "type": "array", "items": { "$ref": "#/$defs/definitionRead" } }
+      },
+      "additionalProperties": true
+    },
+    "collectionListEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "serverTimeUtc", "resourceType", "resources"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "resourceType": { "const": "collection" },
+        "resources": { "type": "array", "items": { "$ref": "#/$defs/collectionRead" } }
+      },
+      "additionalProperties": true
+    },
+    "blockListEnvelope": {
+      "type": "object",
+      "required": ["contractVersion", "serverTimeUtc", "resourceType", "resources"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "resourceType": { "const": "block" },
+        "resources": { "type": "array", "items": { "$ref": "#/$defs/blockRead" } }
+      },
+      "additionalProperties": true
+    },
+    "previewRequest": {
+      "type": "object",
+      "required": ["contractVersion", "channelId", "fromUtc", "toUtc"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "channelId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "fromUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "toUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "candidate": { "$ref": "#/$defs/writeEnvelope" },
+        "candidateResourceId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" }
+      },
+      "additionalProperties": false
+    },
+    "previewResponse": {
+      "type": "object",
+      "required": ["contractVersion", "serverTimeUtc", "channelId", "fromUtc", "toUtc", "inputHashes", "entries"],
+      "properties": {
+        "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+        "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "channelId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "fromUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "toUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "inputHashes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["collectionId", "inputHashSha256"],
+            "properties": {
+              "collectionId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+              "inputHashSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/previewEntry" } }
+      },
+      "additionalProperties": true
+    },
+    "previewEntry": {
+      "type": "object",
+      "required": ["startUtc", "endUtc", "availability"],
+      "properties": {
+        "startUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "endUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "availability": { "enum": ["playable", "unavailable", "gap"] },
+        "itemId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "blockId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "collectionId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "repeatRelaxed": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "availability": { "const": "playable" } }, "required": ["availability"] }, "then": { "required": ["itemId", "blockId", "collectionId"] }, "else": { "not": { "required": ["itemId"] } } }
+      ],
+      "additionalProperties": true
+    }
+  }
+}

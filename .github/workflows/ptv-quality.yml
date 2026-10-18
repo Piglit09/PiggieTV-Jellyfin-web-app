@@ -47,7 +47,7 @@ jobs:
           path: .contract-repositories/tv
           token: ${{ secrets.PTV_CROSS_REPO_TOKEN || github.token }}
 
-      - name: PTV Core schema and Android parity
+      - name: PTV Core and Channels schemas and Android parity
         env:
           PTV_ANDROID_MOBILE_REPO: ${{ github.workspace }}/.contract-repositories/mobile
           PTV_ANDROID_TV_REPO: ${{ github.workspace }}/.contract-repositories/tv
