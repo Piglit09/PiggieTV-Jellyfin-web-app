@@ -50,7 +50,7 @@ with operational context in [Handoff](../HANDOFF.md) and ownership rules in
 
 ## Future architecture: PTV Channels
 
-- [PTV Channels Architecture RFC v1](architecture/PTV_CHANNELS_RFC_V1.md) - draft architecture and shared API proposal. Scheduler prototype and production implementation remain on hold.
+- [PTV Channels Architecture RFC v1](architecture/PTV_CHANNELS_RFC_V1.md) - completed for architecture review, with approval pending. Scheduler prototype and production implementation remain on hold.
 
 ## Active closure: F3A2
 
