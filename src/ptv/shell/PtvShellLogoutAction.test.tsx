@@ -305,6 +305,53 @@ describe('PTV shell logout control', () => {
         expect(container.querySelector<HTMLButtonElement>('button[aria-label="Back"]')).not.toBeNull();
     });
 
+    it.each([
+        ['Movie Details', '#/details?id=movie', 'movies'],
+        ['Anime Movie Details', '#/details?id=anime-movie', 'movies'],
+        ['Series Details', '#/details?id=series', 'shows'],
+        ['Cartoon Details', '#/details?id=cartoon', 'shows'],
+        ['Anime Series Details', '#/details?id=anime-series', 'shows'],
+        ['Reading Details', '#/details?id=book', 'reading']
+    ])('uses the shared Movies and Shows dropdowns on %s', (_name, hash, section) => {
+        window.location.hash = hash;
+        flushSync(() => root.render(
+            <PTVShell headerOnly navigationVariant='details' section={section as 'movies' | 'anime' | 'shows' | 'cartoons' | 'reading'}>
+                <div />
+            </PTVShell>
+        ));
+
+        const movieTrigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger');
+        const showsTrigger = container.querySelector<HTMLButtonElement>('#ptv-shell-shows-trigger');
+
+        expect(movieTrigger?.getAttribute('aria-haspopup')).toBe('menu');
+        expect(showsTrigger?.getAttribute('aria-haspopup')).toBe('menu');
+        expect(movieTrigger?.parentElement?.classList.contains('is-active')).toBe(section === 'movies');
+        expect(showsTrigger?.parentElement?.classList.contains('is-active')).toBe(section === 'shows');
+        expect(container.querySelector('a.ptv-shell-nav-button[href="#/movies"]')).toBeNull();
+        expect(container.querySelector('a.ptv-shell-nav-button[href="#/shows"]')).toBeNull();
+
+        flushSync(() => movieTrigger?.click());
+        expect(movieTrigger?.getAttribute('aria-expanded')).toBe('true');
+        expect(document.querySelector('[data-ptv-shell-primary-menu="movies"] [href="#/movies?topParentId=animemovies"]')).not.toBeNull();
+    });
+
+    it.each([
+        ['Home', '#/home', 'home'],
+        ['Music', '#/music', 'music']
+    ])('keeps the existing shared navigation on %s', (_name, hash, section) => {
+        window.location.hash = hash;
+        flushSync(() => root.render(
+            <PTVShell headerOnly section={section as 'home' | 'music'}>
+                <div />
+            </PTVShell>
+        ));
+
+        expect(container.querySelector('#ptv-shell-movies-trigger')).not.toBeNull();
+        expect(container.querySelector('#ptv-shell-shows-trigger')).not.toBeNull();
+        expect(container.querySelector<HTMLAnchorElement>('a.ptv-shell-nav-button[href="#/music"]')?.classList.contains('is-active'))
+            .toBe(section === 'music');
+    });
+
     it('applies the same Calendar gate to Request page context navigation', () => {
         flushSync(() => root.render(
             <PTVShell section='request' title='Requests'>

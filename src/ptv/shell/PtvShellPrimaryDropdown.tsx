@@ -58,6 +58,7 @@ export default function PtvShellPrimaryDropdown({
     const panelRef = useRef<HTMLDivElement | null>(null);
     const triggerRef = useRef<HTMLButtonElement | null>(null);
     const gestureRef = useRef<PtvPointerGesture | null>(null);
+    const hoverCloseTimerRef = useRef<number | null>(null);
     const positionFrameRef = useRef<number | null>(null);
     const suppressNextPointerClickRef = useRef(false);
     const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
@@ -65,6 +66,11 @@ export default function PtvShellPrimaryDropdown({
         if (onClose) onClose();
         else onToggle();
     }, [onClose, onToggle]);
+    const cancelHoverClose = useCallback(() => {
+        if (hoverCloseTimerRef.current === null) return;
+        window.clearTimeout(hoverCloseTimerRef.current);
+        hoverCloseTimerRef.current = null;
+    }, []);
     const focusMenuItem = useCallback((position: 'first' | 'last' = 'first') => {
         window.requestAnimationFrame(() => {
             const items = panelRef.current?.querySelectorAll<HTMLAnchorElement>('[role="menuitem"]');
@@ -99,6 +105,22 @@ export default function PtvShellPrimaryDropdown({
             setPanelStyle(nextStyle);
         });
     }, [links.length]);
+    const handleHoverEnter = useCallback(() => {
+        if (!window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) return;
+        cancelHoverClose();
+        if (isOpen) return;
+        schedulePanelPosition();
+        onOpenFirstItem();
+    }, [cancelHoverClose, isOpen, onOpenFirstItem, schedulePanelPosition]);
+    const handleHoverLeave = useCallback(() => {
+        if (!window.matchMedia?.('(hover: hover) and (pointer: fine)').matches || !isOpen) return;
+        cancelHoverClose();
+        hoverCloseTimerRef.current = window.setTimeout(() => {
+            hoverCloseTimerRef.current = null;
+            if (panelRef.current?.contains(document.activeElement)) return;
+            requestClose();
+        }, 180);
+    }, [cancelHoverClose, isOpen, requestClose]);
     const handleTriggerKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
         if (event.defaultPrevented) return;
 
@@ -248,6 +270,12 @@ export default function PtvShellPrimaryDropdown({
         };
     }, [isOpen, schedulePanelPosition]);
 
+    useEffect(() => cancelHoverClose, [cancelHoverClose]);
+
+    useEffect(() => {
+        if (!isOpen) cancelHoverClose();
+    }, [cancelHoverClose, isOpen]);
+
     useEffect(() => {
         if (!isOpen) return undefined;
 
@@ -272,6 +300,8 @@ export default function PtvShellPrimaryDropdown({
             data-ptv-shell-primary-menu={id}
             id={panelId}
             onKeyDown={handlePanelKeyDown}
+            onMouseEnter={cancelHoverClose}
+            onMouseLeave={handleHoverLeave}
             role='menu'
             style={panelStyle}
             tabIndex={-1}
@@ -292,7 +322,11 @@ export default function PtvShellPrimaryDropdown({
     ) : null;
 
     return (
-        <div className={`ptv-shell-nav-dropdown${active ? ' is-active' : ''}${isOpen ? ' is-open' : ''}`}>
+        <div
+            className={`ptv-shell-nav-dropdown${active ? ' is-active' : ''}${isOpen ? ' is-open' : ''}`}
+            onMouseEnter={handleHoverEnter}
+            onMouseLeave={handleHoverLeave}
+        >
             <button
                 ref={triggerRef}
                 aria-controls={panelId}

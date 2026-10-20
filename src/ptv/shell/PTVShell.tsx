@@ -164,8 +164,6 @@ const PTV_SHELL_CALENDAR_LINK: PtvShellNavLink = {
 
 const PTV_SHELL_DETAILS_LINKS: readonly PtvShellNavLink[] = [
     { id: 'home', label: 'Home', href: PTV_ROUTES.home, icon: 'home' },
-    { id: 'movies', label: 'Movies', href: PTV_ROUTES.movies, icon: 'movies' },
-    { id: 'shows', label: 'Shows', href: PTV_ROUTES.shows, icon: 'shows' },
     { id: 'music', label: 'Music', href: PTV_ROUTES.music, icon: 'music' },
     { id: 'reading', label: 'Reading', href: PTV_ROUTES.reading, icon: 'books' },
     { id: 'search', label: 'Search', href: PTV_ROUTES.search, icon: 'search' }
@@ -379,8 +377,9 @@ function isTextInputTarget(target: EventTarget | null) {
     );
 }
 
-function getPtvShellNavGroups(section: PtvShellSection, hash: string): readonly PtvShellNavGroup[] {
-    const activeSection = getPtvShellPrimarySection(hash);
+function getPtvShellNavGroups(section: PtvShellSection, hash: string, details: boolean): readonly PtvShellNavGroup[] {
+    const routeSection = getPtvShellPrimarySection(hash);
+    const activeSection = details && routeSection === 'fallback' ? section : routeSection;
 
     return [
         {
@@ -945,7 +944,7 @@ export default function PTVShell({
     const [searchQuery, setSearchQuery] = useState(() => getPtvShellSearchRouteQuery() || readPtvShellSearchDraft());
     const arrCalendarAvailability = usePtvArrCalendarAvailability();
     const navGroups = useMemo(
-        () => navigationVariant === 'details' ? [] : getPtvShellNavGroups(section, hash),
+        () => getPtvShellNavGroups(section, hash, navigationVariant === 'details'),
         [hash, navigationVariant, section]
     );
     const primaryLinks = useMemo(
@@ -1177,6 +1176,9 @@ export default function PTVShell({
                     aria-label='PiggieTV media navigation'
                 >
                     <div className='ptv-shell-nav-primary'>
+                        {navigationVariant === 'details' && primaryLinks[0] ? (
+                            <PtvShellDirectLink {...primaryLinks[0]} onClick={closeHeaderTransientState} />
+                        ) : null}
                         {navGroups.map(group => (
                             <PtvShellPrimaryDropdown
                                 key={group.id}
@@ -1190,7 +1192,7 @@ export default function PTVShell({
                                 onToggle={() => handlePanelToggle(group.id as PtvShellOpenPanel)}
                             />
                         ))}
-                        {primaryLinks.map(link => (
+                        {primaryLinks.filter(link => navigationVariant !== 'details' || link.id !== 'home').map(link => (
                             <PtvShellDirectLink key={link.id} {...link} onClick={() => closeHeaderTransientState()} />
                         ))}
                     </div>
