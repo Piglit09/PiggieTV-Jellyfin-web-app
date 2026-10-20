@@ -17,7 +17,7 @@ const statusResponse = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvS
 const project = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
 const pluginManifest = JSON.parse(read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/meta.json'));
 const packageJson = JSON.parse(read('package.json'));
-const expectedPluginVersion = '0.5.23.0';
+const expectedPluginVersion = '0.5.24.0';
 
 function requiredMatch(source, pattern, label) {
     const match = source.match(pattern);

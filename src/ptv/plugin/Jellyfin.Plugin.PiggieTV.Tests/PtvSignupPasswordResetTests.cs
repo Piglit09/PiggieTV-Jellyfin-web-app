@@ -58,6 +58,56 @@ public sealed class PtvSignupPasswordResetTests
         Assert.Equal(0, fixture.UserManager.PasswordChanges);
     }
 
+    [Fact]
+    public async Task Concurrent_redemption_allows_only_one_password_change()
+    {
+        using var fixture = new Fixture();
+        fixture.AddCode("member@example.test", "member", "111222");
+        fixture.AddCode("member@example.test", "member", "333444");
+
+        var results = await Task.WhenAll(
+            fixture.Service.ConfirmPasswordResetAsync(
+                Request("member@example.test", "111222", "firstPassword1"), "test", CancellationToken.None),
+            fixture.Service.ConfirmPasswordResetAsync(
+                Request("member@example.test", "333444", "secondPassword2"), "test", CancellationToken.None));
+
+        Assert.Single(results, result => result.Ok);
+        Assert.Equal(1, fixture.UserManager.PasswordChanges);
+        Assert.Empty(fixture.Configuration.SignupSettings.PasswordResetCodes);
+        Assert.Empty(fixture.Serializer.SavedCodes);
+    }
+
+    [Fact]
+    public async Task Expired_reset_code_cannot_change_password()
+    {
+        using var fixture = new Fixture();
+        fixture.AddCode("member@example.test", "member", "111222");
+        fixture.Configuration.SignupSettings.PasswordResetCodes[0].ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1);
+
+        var result = await fixture.Service.ConfirmPasswordResetAsync(
+            Request("member@example.test", "111222", "firstPassword1"), "test", CancellationToken.None);
+
+        Assert.False(result.Ok);
+        Assert.Equal(0, fixture.UserManager.PasswordChanges);
+    }
+
+    [Fact]
+    public async Task Failed_password_change_leaves_codes_retired_for_recoverable_retry()
+    {
+        using var fixture = new Fixture();
+        fixture.AddCode("member@example.test", "member", "111222");
+        fixture.AddCode("member@example.test", "member", "333444");
+        fixture.UserManager.FailPasswordChanges = true;
+
+        var result = await fixture.Service.ConfirmPasswordResetAsync(
+            Request("member@example.test", "111222", "firstPassword1"), "test", CancellationToken.None);
+
+        Assert.False(result.Ok);
+        Assert.Equal(1, fixture.UserManager.PasswordChanges);
+        Assert.Empty(fixture.Configuration.SignupSettings.PasswordResetCodes);
+        Assert.Empty(fixture.Serializer.SavedCodes);
+    }
+
     private static PtvSignupPasswordResetConfirmRequest Request(string email, string code, string password) => new()
     {
         Email = email,
@@ -133,6 +183,7 @@ public sealed class PtvSignupPasswordResetTests
     {
         public User? User { get; set; }
         public int PasswordChanges { get; private set; }
+        public bool FailPasswordChanges { get; set; }
 
         protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
@@ -140,6 +191,7 @@ public sealed class PtvSignupPasswordResetTests
             if (method?.Name == "ChangePassword")
             {
                 PasswordChanges++;
+                if (FailPasswordChanges) return Task.FromException(new IOException("Synthetic password change failure."));
                 return Task.CompletedTask;
             }
             throw new NotSupportedException(method?.Name);

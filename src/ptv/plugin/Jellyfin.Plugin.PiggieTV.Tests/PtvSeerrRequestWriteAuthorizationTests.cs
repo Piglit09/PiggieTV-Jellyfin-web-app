@@ -26,13 +26,15 @@ public sealed class PtvSeerrRequestWriteAuthorizationTests
     private static readonly Guid OtherUserId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     [Fact]
-    public async Task RestrictedUserCannotWriteThroughSharedSeerrKeyEvenWhenIntegrationIsDisabled()
+    public async Task RestrictedUserCannotReachConfiguredSeerrThroughSharedKey()
     {
-        using var fixture = new Fixture();
+        using var seerr = new LoopbackSeerrServer();
+        using var fixture = new Fixture(seerr.Url);
         var result = await fixture.Controller(CurrentUserId.ToString("N"), elevated: false)
             .RequestSeerr(JsonNode.Parse("""{"mediaType":"movie","mediaId":123}""")!.AsObject(), CancellationToken.None);
 
         Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.False(seerr.HasPendingConnection);
     }
 
     [Fact]
@@ -182,6 +184,7 @@ public sealed class PtvSeerrRequestWriteAuthorizationTests
         }
 
         public string Url { get; }
+        public bool HasPendingConnection => _listener.Pending();
 
         public async Task<(string RequestLine, string Body)> ReadOneRequestAsync()
         {

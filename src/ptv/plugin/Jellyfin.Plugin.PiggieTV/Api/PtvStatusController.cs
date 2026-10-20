@@ -1701,8 +1701,14 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     /// </summary>
     /// <returns>Tag row definitions.</returns>
     [HttpGet("tags/rows")]
-    public ActionResult GetTagRows()
+    public async Task<ActionResult> GetTagRows()
     {
+        if (!await CanWriteFeaturedContentSafeAsync("tags/rows").ConfigureAwait(false))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                Error("PTV_TAG_ROWS_READ_FORBIDDEN", "Only Jellyfin administrators can read PiggieTV tag row settings."));
+        }
+
         var configuration = GetNormalizedConfiguration();
 
         return Ok(new
@@ -3032,7 +3038,24 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 });
             }
 
-            var items = GetLibraryItems()
+            Guid? requestedLibraryId = null;
+            if (kind == "library")
+            {
+                if (!Guid.TryParse(libraryId, out var parsedLibraryId) || parsedLibraryId == Guid.Empty)
+                {
+                    return Ok(new
+                    {
+                        ok = false,
+                        kind,
+                        libraryId,
+                        error = "A valid library is required."
+                    });
+                }
+
+                requestedLibraryId = parsedLibraryId;
+            }
+
+            var items = GetLibraryItems(requestedLibraryId)
                 .Where(item => MatchesRandomKind(item, kind))
                 .Where(item => HasVisibleName(item))
                 .ToArray();
@@ -3072,7 +3095,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         }
     }
 
-    private IReadOnlyList<BaseItem> GetLibraryItems()
+    private IReadOnlyList<BaseItem> GetLibraryItems(Guid? ancestorLibraryId = null)
     {
         if (HttpContext is null || !TryGetAuthenticatedUserId(out var userId))
         {
@@ -3089,12 +3112,15 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             throw new InvalidOperationException("Authenticated library scope unavailable.");
         }
 
-        return libraryManager.GetItemList(new InternalItemsQuery(user)
+        var query = new InternalItemsQuery(user)
         {
             ParentId = root.Id,
             Recursive = true,
             EnableTotalRecordCount = false
-        }).ToArray();
+        };
+        if (ancestorLibraryId is { } libraryId) query.AncestorIds = [libraryId];
+
+        return libraryManager.GetItemList(query).ToArray();
     }
 
     private static bool MatchesRandomKind(BaseItem item, string kind)

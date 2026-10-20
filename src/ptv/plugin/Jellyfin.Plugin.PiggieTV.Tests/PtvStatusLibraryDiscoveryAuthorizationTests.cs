@@ -6,6 +6,7 @@ using Jellyfin.Plugin.PiggieTV.Api;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,6 +23,8 @@ public sealed class PtvStatusLibraryDiscoveryAuthorizationTests
     private static readonly Guid UserRootId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid VisibleMovieId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid OtherMovieId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid VisibleLibraryId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+    private static readonly Guid OtherLibraryId = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
 
     [Fact]
     public void TagsAndRandomDiscoveryUseTheCurrentUsersVisibleItemQuery()
@@ -61,6 +64,45 @@ public sealed class PtvStatusLibraryDiscoveryAuthorizationTests
         Assert.Equal([RestrictedUserId, OtherUserId, RestrictedUserId],
             fixture.Library.Queries.Select(query => query.User!.Id));
         Assert.Equal(0, fixture.Library.GlobalRootAccessCount);
+    }
+
+    [Fact]
+    public async Task ConfiguredTagRowsAreNotDisclosedToRestrictedUsers()
+    {
+        using var fixture = new Fixture();
+
+        var denied = await fixture.Controller(RestrictedUserId.ToString("N")).GetTagRows();
+        var allowed = await fixture.Controller(OtherUserId.ToString("N"), elevated: true).GetTagRows();
+
+        Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ObjectResult>(denied).StatusCode);
+        Assert.IsType<OkObjectResult>(allowed);
+    }
+
+    [Fact]
+    public void RandomLibraryDiscoveryQueriesOnlyTheRequestedVisibleLibrary()
+    {
+        using var fixture = new Fixture();
+        var controller = fixture.Controller(RestrictedUserId.ToString("N"));
+
+        var result = Payload(controller.GetRandomLibraryItem(VisibleLibraryId.ToString("N")));
+
+        Assert.True(result.GetProperty("ok").GetBoolean());
+        Assert.Equal(VisibleMovieId.ToString("N"), result.GetProperty("item").GetProperty("id").GetString(), ignoreCase: true);
+        Assert.Equal(VisibleLibraryId, Assert.Single(Assert.Single(fixture.Library.Queries).AncestorIds));
+    }
+
+    [Fact]
+    public void RandomLibraryDiscoveryFailsClosedForUnrelatedOrInvalidLibraryIds()
+    {
+        using var fixture = new Fixture();
+        var controller = fixture.Controller(RestrictedUserId.ToString("N"));
+
+        var unrelated = Payload(controller.GetRandomLibraryItem(OtherLibraryId.ToString("N")));
+        var invalid = Payload(controller.GetRandomLibraryItem("not-a-library-id"));
+
+        Assert.False(unrelated.GetProperty("ok").GetBoolean());
+        Assert.False(invalid.GetProperty("ok").GetBoolean());
+        Assert.Equal(OtherLibraryId, Assert.Single(Assert.Single(fixture.Library.Queries).AncestorIds));
     }
 
     [Fact]
@@ -156,12 +198,17 @@ public sealed class PtvStatusLibraryDiscoveryAuthorizationTests
             _services = new ServiceCollection()
                 .AddSingleton(userManager)
                 .AddSingleton(libraryManager)
+                .AddSingleton<IAuthorizationService>(new AuthorizationStub())
                 .BuildServiceProvider();
         }
 
-        public PtvStatusController Controller(string? claim)
+        public PtvStatusController Controller(string? claim, bool elevated = false)
         {
-            var claims = claim is null ? [] : new[] { new Claim("Jellyfin-UserId", claim) };
+            var claims = claim is null ? [] : new[]
+            {
+                new Claim("Jellyfin-UserId", claim),
+                new Claim("test-elevated", elevated.ToString())
+            };
             return new PtvStatusController(NullLogger<PtvStatusController>.Instance, _services)
             {
                 ControllerContext = new ControllerContext
@@ -189,6 +236,22 @@ public sealed class PtvStatusLibraryDiscoveryAuthorizationTests
         }
     }
 
+    private sealed class AuthorizationStub : IAuthorizationService
+    {
+        public Task<AuthorizationResult> AuthorizeAsync(
+            ClaimsPrincipal user, object? resource, IEnumerable<IAuthorizationRequirement> requirements) =>
+            Task.FromResult(Authorized(user));
+
+        public Task<AuthorizationResult> AuthorizeAsync(
+            ClaimsPrincipal user, object? resource, string policyName) =>
+            Task.FromResult(Authorized(user));
+
+        private static AuthorizationResult Authorized(ClaimsPrincipal user) =>
+            user.FindFirst("test-elevated")?.Value == bool.TrueString
+                ? AuthorizationResult.Success()
+                : AuthorizationResult.Failed();
+    }
+
     public class LibraryProxy : DispatchProxy
     {
         public Dictionary<Guid, List<BaseItem>> VisibleItems { get; } = [];
@@ -211,6 +274,10 @@ public sealed class PtvStatusLibraryDiscoveryAuthorizationTests
                 if (query.User is null || !VisibleItems.ContainsKey(query.User.Id)
                     || query.ParentId != UserRootId || !query.Recursive)
                     throw new InvalidOperationException("The item query was not scoped to the current user and root.");
+                if (query.AncestorIds.Length > 0)
+                    return query.AncestorIds.SequenceEqual([VisibleLibraryId])
+                        ? VisibleItems[query.User.Id]
+                        : [];
                 return VisibleItems[query.User.Id];
             }
             throw new NotSupportedException(method?.Name);

@@ -3492,6 +3492,7 @@
       ],
       "ptvChange": "PTV maps stable routes to native PTV pages from canonical browser URL/hash state and uses routeController as the immutable route-family lifetime/generation/AbortSignal owner while keeping hash-router compatibility. Transient presentation classes are not route identity authority.",
       "localStage4Presentation": "Mounted PTVShell measures the header and publishes a CSS-only clearance consumed by shell, Browse and cinematic Details. clientProfile selects non-TV layout classes from measured viewport posture before user-agent fallback while preserving client-kind performance budget. Neither presentation decision changes route identity or request authority.",
+      "localPhase7Navigation": "PTVShell owns the same Movies/Shows dropdowns on ordinary and Details routes. Details item section supplies active-group presentation only when its hash has no primary section; canonical hash remains route authority. Fine-pointer hover shares the click/keyboard/touch menu owner and bounded portal-exit cleanup. Local tests pass; hosted and physical acceptance remain pending.",
       "risk": "HIGH",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
@@ -3802,7 +3803,7 @@
         "STOCK_REPLACED",
         "NEW_PTV_SYSTEM"
       ],
-      "ptvChange": "PTV provides a native Reading page/reader and stores reader progress/bookmarks locally.",
+      "ptvChange": "PTV provides a native Reading page/reader and stores reader progress/bookmarks locally. Phase 7 local records use a verified Jellyfin server/user identity plus item stable ID; missing identity disables persistence and legacy item-only records are not consumed.",
       "risk": "CRITICAL",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
@@ -3855,7 +3856,7 @@
     },
     "pluginApi": {
       "classification": "NEW_PTV_SYSTEM",
-      "ptvChange": "The Plugin registers PTV services/controllers and exposes authenticated PTV API routes while reusing Jellyfin DI, identity and library services. The Web Plugin client preserves each authenticated per-user response under a canonical immutable Jellyfin server+user GET cache/coalescing identity; missing identity disables sharing rather than using a global fallback. Authenticated Featured GETs use only the active ApiClient root plus compatibility route names on that root. Login/logout identity-retirement listeners bind lazily on runtime client access so this contract does not eagerly dereference the Jellyfin connection barrel during bootstrap.",
+      "ptvChange": "The Plugin registers PTV services/controllers and exposes authenticated PTV API routes while reusing Jellyfin DI, identity and library services. Phase 7 local discovery uses user-aware item queries; requested-library random selection adds the requested ancestor ID, and configured tag-row settings require administrator authorization. Existing Seerr request-history and write guards and password-reset code retirement retain their separate hosted acceptance gates. The Web Plugin client preserves each authenticated per-user response under a canonical immutable Jellyfin server+user GET cache/coalescing identity; missing identity disables sharing rather than using a global fallback. Authenticated Featured GETs use only the active ApiClient root plus compatibility route names on that root. Login/logout identity-retirement listeners bind lazily on runtime client access so this contract does not eagerly dereference the Jellyfin connection barrel during bootstrap.",
       "risk": "CRITICAL",
       "conflictClass": "INTENTIONAL_WRAPPER",
       "chapterRefs": [
