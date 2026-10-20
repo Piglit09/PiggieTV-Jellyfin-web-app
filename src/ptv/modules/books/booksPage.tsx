@@ -867,7 +867,7 @@ function getItemMeta(item: PtvReadingItem) {
 }
 
 function getReadingProgressPercent(item: PtvReadingItem) {
-    const progress = loadReaderProgress(getPtvReadingStableId(item));
+    const progress = loadReaderProgress(getPtvReadingStableId(item), item.ServerId);
 
     return typeof progress?.percent === 'number' ? progress.percent : 0;
 }

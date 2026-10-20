@@ -65,6 +65,8 @@ Logout clears the whole QueryClient and resets cached views, which is the stock 
 
 Any new cache that survives logout or keys only by item ID must independently prove server/user isolation. `INFERRED` security guardrail from the verified boundary.
 
+Phase 7 local Reader progress and bookmark records use a versioned key containing one verified Jellyfin server/user identity and the item stable ID. Missing or conflicting identity disables local persistence; old item-only records remain untouched and are never assigned to the current signer. This is browser-local isolation, not Jellyfin `UserData` or cross-device synchronization. `[VERIFIED_BY_TEST]` `src/ptv/modules/reader/readerProgressStore.test.ts`.
+
 ## PTV coordinated-request lifetime extension
 
 This section describes the current PTV coordinator and does not change the stock cache contract.
