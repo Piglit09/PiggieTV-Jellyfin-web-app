@@ -1340,6 +1340,17 @@
       "files": ["src/controllers/playback/video/index.js", "src/controllers/playback/video/videoTransientMenuLifecycle.ts", "src/components/playback/playersettingsmenu.js", "src/ptv/modules/playback/videoInputOwnership.ts", "src/ptv/modules/playback/index.js", "src/ptv/modules/playback/playerHeader.ts", "src/controllers/playback/video/videoDisplayTitle.ts", "src/plugins/htmlVideoPlayer/plugin.js", "src/ptv/modules/icons/icons.scss"],
       "tests": ["videoTransientMenuLifecycle.test.ts", "htmlVideoSubtitleSelectionRace.test.ts", "streamSelectionVisual.spec.ts", "playersettingsmenu.test.ts", "continuousVideoPreferences.test.ts", "playerHeader.test.ts", "playerHeader.integration.test.ts", "playerHeader.imageLoad.test.ts", "videoDisplayTitle.test.ts", "videoInputOwnership.test.ts", "playerChromeTimer.test.ts"],
       "chapterRefs": ["14-playback-session-transcoding.md", "21-ownership-conflicts.md", "23-before-you-modify-checklists.md"]
+    },
+    "playbackQualitySelection": {
+      "authoritativeOwners": ["Jellyfin Server PlaybackInfo, user policy and encoding services", "active Web PlaybackManager for request-local selection and client stream handoff"],
+      "derivedOwners": ["player settings menu label", "player statistics and current playback view"],
+      "identity": ["active local player", "server/item/media source", "stream-change generation", "user remote bitrate policy"],
+      "rule": "Auto connection estimates are not authorization caps. Manual tiers clone the device profile for one PlaybackInfo request with required Width/Height ceilings, validate the negotiated path before handoff, and keep the prior encoding until the selected player stream starts. Original omits the client bitrate cap; Jellyfin continues to enforce server/user policy. The menu labels are upper envelopes, not verified delivered resolution.",
+      "failureAndCleanup": "An unsupported negotiation retains the old stream. A failed quality start attempts to restore the old stream and retains its selection; a failed restoration remains a playback error. New item playback clears the prior quality label.",
+      "localCandidateStatus": "Issue #52 local source/tests only; hosted output and physical continuity unknown; no Plugin or server change",
+      "files": ["src/components/qualityOptions.js", "src/components/playback/playersettingsmenu.js", "src/components/playback/videoQualityNegotiation.js", "src/components/playback/playbackmanager.js"],
+      "tests": ["qualityOptions.player.test.ts", "playersettingsmenu.test.ts", "videoQualityNegotiation.test.ts", "playbackQualitySelection.test.ts"],
+      "chapterRefs": ["14-playback-session-transcoding.md", "23-before-you-modify-checklists.md", "25-known-jellyfin-non-guarantees.md"]
     }
   },
   "dependencies": {

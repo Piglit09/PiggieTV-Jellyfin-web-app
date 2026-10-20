@@ -41,6 +41,13 @@ import {
     runStreamChangePlay,
     waitForStreamChangePlays
 } from './streamChangeGuard';
+import {
+    VIDEO_QUALITY_TIERS,
+    createCappedVideoProfile,
+    getRemoteVideoQualityLimit,
+    selectManualVideoBitrate,
+    validateVideoQualityNegotiation
+} from './videoQualityNegotiation';
 
 import { PlayerEvent } from 'apps/stable/features/playback/constants/playerEvent';
 import { bindMediaSegmentManager } from 'apps/stable/features/playback/utils/mediaSegmentManager';
@@ -1472,6 +1479,83 @@ export class PlaybackManager {
             });
         };
 
+        self.getVideoQualitySelection = function (player) {
+            player = player || self._currentPlayer;
+            if (!player?.isLocalPlayer) return null;
+            const item = self.currentItem(player);
+            const playerData = getPlayerData(player);
+            if (item?.Id && playerData.videoQualityItemId === item.Id) {
+                return playerData.videoQualitySelection || 'auto';
+            }
+            return self.enableAutomaticBitrateDetection(player) ? 'auto' : null;
+        };
+
+        self.getVideoQualityConnectionBitrate = function (player) {
+            player = player || self._currentPlayer;
+            if (!player?.isLocalPlayer) return null;
+            const item = self.currentItem(player);
+            const playerData = getPlayerData(player);
+            const bitrate = item?.Id && playerData.videoQualityItemId === item.Id ?
+                playerData.videoQualityBaselineBitrate : self.getMaxStreamingBitrate(player);
+            return Number.isFinite(bitrate) && bitrate > 0 ? bitrate : null;
+        };
+
+        self.setVideoQualitySelection = async function (id, player) {
+            player = player || self._currentPlayer;
+            const item = player?.isLocalPlayer && self.currentItem(player);
+            if (!item || item.MediaType !== 'Video' || (id !== 'auto' && id !== 'original' && !VIDEO_QUALITY_TIERS[id])) {
+                throw new Error('Requested video quality is unavailable');
+            }
+            if (id === self.getVideoQualitySelection(player)
+                    && !(id === 'auto' && !self.getVideoQualityConnectionBitrate(player))) return;
+
+            const playerData = getPlayerData(player);
+            const apiClient = ServerConnections.getApiClient(item.ServerId);
+            const generation = beginStreamChange(playerData);
+            const baselineBitrate = playerData.videoQualityItemId === item.Id ?
+                playerData.videoQualityBaselineBitrate : self.getMaxStreamingBitrate(player);
+            const previousStreamInfo = playerData.streamInfo;
+
+            try {
+                let bitrate;
+                if (id === 'auto') {
+                    bitrate = await apiClient.detectBitrate(true);
+                } else if (id === 'original') {
+                    // Omit the client-side bitrate limit. Jellyfin still enforces its
+                    // user/server policy, while this preference can request source quality
+                    // even when source bitrate metadata is missing.
+                    bitrate = null;
+                } else {
+                    const [user, endpointInfo] = await Promise.all([
+                        apiClient.getCurrentUser(),
+                        apiClient.getEndpointInfo()
+                    ]);
+                    const hardLimit = getRemoteVideoQualityLimit(user, endpointInfo);
+                    bitrate = selectManualVideoBitrate(id, baselineBitrate, hardLimit)?.bitrate;
+                }
+
+                if (!isCurrentStreamChange(playerData, generation)) return;
+                if (id !== 'original' && (!Number.isFinite(bitrate) || bitrate <= 0)) {
+                    throw new Error('Requested video quality is unavailable');
+                }
+
+                await changeStream(player, getCurrentTicks(player), {
+                    MaxStreamingBitrate: bitrate,
+                    VideoQualityId: id
+                }, generation);
+                if (!isCurrentStreamChange(playerData, generation) || playerData.streamInfo === previousStreamInfo
+                        || !playerData.streamInfo?.started) return;
+
+                playerData.videoQualityItemId = item.Id;
+                playerData.videoQualitySelection = id;
+                playerData.videoQualityBaselineBitrate = id === 'auto' ? bitrate : baselineBitrate;
+            } catch (error) {
+                if (!isCurrentStreamChange(playerData, generation)) return;
+                completeStreamChange(playerData, generation);
+                throw error;
+            }
+        };
+
         self.isFullscreen = function (player) {
             player = player || self._currentPlayer;
             if (!player.isLocalPlayer || player.isFullscreen) {
@@ -1769,9 +1853,11 @@ export class PlaybackManager {
             const playSessionId = self.playSessionId(player);
 
             const currentItem = self.currentItem(player);
+            const qualityId = params.VideoQualityId || (playerData.videoQualityItemId === currentItem?.Id ?
+                playerData.videoQualitySelection : null);
 
             try {
-                const deviceProfile = await player.getDeviceProfile(currentItem, {
+                let deviceProfile = await player.getDeviceProfile(currentItem, {
                     isRetry: params.EnableDirectPlay === false
                 });
                 if (!isCurrentStreamChange(playerData, generation)) return;
@@ -1781,13 +1867,18 @@ export class PlaybackManager {
                 const secondarySubtitleStreamIndex = params.SecondarySubtitleStreamIndex == null ? playerData.secondarySubtitleStreamIndex : params.SecondarySubtitleStreamIndex;
 
                 let currentMediaSource = self.currentMediaSource(player);
+                const originalMediaSource = currentMediaSource;
+                if (VIDEO_QUALITY_TIERS[qualityId]) {
+                    deviceProfile = createCappedVideoProfile(deviceProfile, qualityId, originalMediaSource);
+                }
                 const apiClient = ServerConnections.getApiClient(currentItem.ServerId);
 
                 if (ticks) {
                     ticks = parseInt(ticks, 10);
                 }
 
-                const maxBitrate = params.MaxStreamingBitrate || self.getMaxStreamingBitrate(player);
+                const maxBitrate = qualityId === 'original' ? null :
+                    params.MaxStreamingBitrate || self.getMaxStreamingBitrate(player);
 
                 const currentPlayOptions = currentItem.playOptions || getDefaultPlayOptions();
 
@@ -1807,11 +1898,24 @@ export class PlaybackManager {
                 if (!isCurrentStreamChange(playerData, generation)) return;
 
                 if (!validatePlaybackInfoResult(self, result)) {
+                    if (params.VideoQualityId) throw new Error('Jellyfin rejected the selected video quality');
                     completeStreamChange(playerData, generation);
                     return;
                 }
 
+                if (params.VideoQualityId && !result.MediaSources?.length) {
+                    throw new Error('Jellyfin returned no stream for the selected video quality');
+                }
+
                 currentMediaSource = result.MediaSources[0];
+
+                if (VIDEO_QUALITY_TIERS[qualityId]) {
+                    const validation = validateVideoQualityNegotiation(qualityId, originalMediaSource, currentMediaSource);
+                    if (!validation.valid) {
+                        // Do not expose the negotiated URL: it may contain an API key.
+                        throw new Error('Jellyfin could not enforce the selected resolution ceiling');
+                    }
+                }
 
                 const streamInfo = createStreamInfo(apiClient, currentItem.MediaType, currentItem, currentMediaSource, ticks, player);
                 streamInfo.fullscreen = currentPlayOptions.fullscreen;
@@ -1826,12 +1930,19 @@ export class PlaybackManager {
                     return;
                 }
 
+                const previousMaxStreamingBitrate = playerData.maxStreamingBitrate;
                 playerData.subtitleStreamIndex = subtitleStreamIndex;
                 playerData.secondarySubtitleStreamIndex = secondarySubtitleStreamIndex;
                 playerData.audioStreamIndex = audioStreamIndex;
                 playerData.maxStreamingBitrate = maxBitrate;
 
-                await changeStreamToUrl(apiClient, player, playSessionId, streamInfo, generation);
+                try {
+                    await changeStreamToUrl(apiClient, player, playSessionId, streamInfo, generation,
+                        Boolean(params.VideoQualityId));
+                } catch (error) {
+                    playerData.maxStreamingBitrate = previousMaxStreamingBitrate;
+                    throw error;
+                }
                 if (!isCurrentStreamChange(playerData, generation)) return;
             } catch (error) {
                 if (!isCurrentStreamChange(playerData, generation)) return;
@@ -1841,10 +1952,56 @@ export class PlaybackManager {
             }
         }
 
-        async function changeStreamToUrl(apiClient, player, playSessionId, streamInfo, generation) {
+        async function changeStreamToUrl(apiClient, player, playSessionId, streamInfo, generation, preservePreviousStream = false) {
             const playerData = getPlayerData(player);
 
             if (!isCurrentStreamChange(playerData, generation)) return;
+
+            if (preservePreviousStream && playerData.streamInfo) {
+                const previousStreamInfo = playerData.streamInfo;
+                try {
+                    // Keep the previous encoding alive until the requested quality plays.
+                    await setSrcIntoPlayer(apiClient, player, streamInfo, generation, true);
+                } catch (error) {
+                    if (!isCurrentStreamChange(playerData, generation)) return;
+                    const restoredStreamInfo = {
+                        ...previousStreamInfo,
+                        playerStartPositionTicks: streamInfo.playerStartPositionTicks
+                    };
+                    const restored = await runStreamChangePlay(
+                        playerData,
+                        generation,
+                        () => {
+                            playerData.streamInfo = restoredStreamInfo;
+                            return player.play(restoredStreamInfo);
+                        },
+                        () => stopPlayerWithoutPlaybackEvents(player, unbindStopped, bindStopped)
+                    );
+                    if (!restored || !isCurrentStreamChange(playerData, generation)) return;
+                    restoredStreamInfo.started = true;
+                    restoredStreamInfo.ended = false;
+                    completeStreamChange(playerData, generation);
+                    if (streamInfo.playSessionId && streamInfo.playSessionId !== playSessionId) {
+                        try {
+                            await apiClient.stopActiveEncodings(streamInfo.playSessionId);
+                        } catch {
+                            // Restored playback is more important than cleanup of the failed encoding.
+                        }
+                    }
+                    throw error;
+                }
+                if (!isCurrentStreamChange(playerData, generation)) return;
+                if (playSessionId && streamInfo.playSessionId && streamInfo.playSessionId !== playSessionId) {
+                    try {
+                        await apiClient.stopActiveEncodings(playSessionId);
+                    } catch {
+                        // The new stream is playing; do not roll back because old-session cleanup failed.
+                        // Do not log the error: its request URL may contain an API key.
+                        ptvSafeConsole.warn('[playbackmanager] Could not retire previous encoding after quality switch.');
+                    }
+                }
+                return;
+            }
 
             if (playerData.streamInfo && playSessionId) {
                 await apiClient.stopActiveEncodings(playSessionId);
@@ -1862,7 +2019,7 @@ export class PlaybackManager {
             }
         }
 
-        async function setSrcIntoPlayer(apiClient, player, streamInfo, generation) {
+        async function setSrcIntoPlayer(apiClient, player, streamInfo, generation, throwOnStartFailure = false) {
             const playerData = getPlayerData(player);
 
             if (!isCurrentStreamChange(playerData, generation)) return;
@@ -1888,6 +2045,7 @@ export class PlaybackManager {
                 }
             } catch (e) {
                 if (!isCurrentStreamChange(playerData, generation)) return;
+                if (throwOnStartFailure) throw e;
                 if (!completeStreamChange(playerData, generation)) return;
 
                 onPlaybackError.call(player, e, {
@@ -3505,6 +3663,11 @@ export class PlaybackManager {
             const playerData = getPlayerData(player);
 
             playerData.streamInfo = streamInfo;
+            // A fresh playback negotiates from the normal profile, even when it
+            // reuses the same player and item. Do not display an earlier cap.
+            playerData.videoQualityItemId = null;
+            playerData.videoQualitySelection = null;
+            playerData.videoQualityBaselineBitrate = null;
 
             streamInfo.playbackStartTimeTicks = new Date().getTime() * 10000;
 

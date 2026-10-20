@@ -3,47 +3,36 @@ import { playbackManager } from '../playback/playbackmanager';
 import globalize from 'lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import qualityoptions from '../qualityOptions';
+import toast from '../toast/toast';
+import { getRemoteVideoQualityLimit } from './videoQualityNegotiation';
 
 function isOperationCurrent(operation) {
     return !operation || operation.isCurrent();
 }
 
-function showQualityMenu(player, btn, operation) {
+function showQualityMenu(player, btn, operation, user) {
     if (!isOperationCurrent(operation)) return Promise.resolve();
-    const videoStream = playbackManager.currentMediaSource(player).MediaStreams.filter(function (stream) {
-        return stream.Type === 'Video';
-    })[0];
+    if (!player?.isLocalPlayer || typeof playbackManager.setVideoQualitySelection !== 'function'
+            || typeof playbackManager.getVideoQualitySelection !== 'function') return Promise.resolve();
 
-    const videoCodec = videoStream ? videoStream.Codec : null;
-    const videoBitRate = videoStream ? videoStream.BitRate : null;
-
-    const options = qualityoptions.getVideoQualityOptions({
-        currentMaxBitrate: playbackManager.getMaxStreamingBitrate(player),
-        isAutomaticBitrateEnabled: playbackManager.enableAutomaticBitrateDetection(player),
-        videoCodec,
-        videoBitRate,
-        enableAuto: true
+    const videoStream = playbackManager.currentMediaSource(player)?.MediaStreams?.find(stream => stream.Type === 'Video');
+    const currentSelection = playbackManager.getVideoQualitySelection(player);
+    const apiClient = ServerConnections.getApiClient(playbackManager.currentItem(player).ServerId);
+    const hardLimit = getRemoteVideoQualityLimit(user, apiClient.getSavedEndpointInfo());
+    const options = qualityoptions.getPlayerVideoQualityOptions({
+        videoWidth: videoStream?.Width,
+        videoHeight: videoStream?.Height,
+        videoBitRate: videoStream?.BitRate,
+        currentSelection,
+        ...(hardLimit ? { maxAllowedBitrate: hardLimit } : {})
     });
 
-    const menuItems = options.map(function (o) {
-        const opt = {
-            name: o.name,
-            id: o.bitrate,
-            asideText: o.secondaryText
-        };
-
-        if (o.selected) {
-            opt.selected = true;
-        }
-
-        return opt;
-    });
-
-    const selectedId = options.filter(function (o) {
-        return o.selected;
-    });
-
-    const selectedBitrate = selectedId.length ? selectedId[0].bitrate : null;
+    const menuItems = options.map(o => ({
+        name: o.name,
+        id: o.id,
+        secondaryText: o.secondaryText,
+        selected: o.selected
+    }));
 
     return actionsheet.show({
         items: menuItems,
@@ -51,13 +40,11 @@ function showQualityMenu(player, btn, operation) {
         signal: operation?.signal
     }).then(function (id) {
         if (!isOperationCurrent(operation)) return;
-        const bitrate = parseInt(id, 10);
-        if (bitrate !== selectedBitrate) {
-            playbackManager.setMaxStreamingBitrate({
-                enableAutomaticBitrateDetection: !bitrate,
-                maxBitrate: bitrate
-            }, player);
-        }
+        if (!options.some(option => option.id === id) || id === currentSelection) return;
+        return Promise.resolve(playbackManager.setVideoQualitySelection(id, player)).catch(error => {
+            if (isOperationCurrent(operation)) toast(globalize.translate('PtvVideoQualitySwitchFailed'));
+            throw error;
+        });
     });
 }
 
@@ -97,47 +84,19 @@ function showRepeatModeMenu(player, btn, operation) {
 }
 
 function getQualitySecondaryText(player) {
-    const state = playbackManager.getPlayerState(player);
-
-    const videoStream = playbackManager.currentMediaSource(player).MediaStreams.filter(function (stream) {
-        return stream.Type === 'Video';
-    })[0];
-
-    const videoCodec = videoStream ? videoStream.Codec : null;
-    const videoBitRate = videoStream ? videoStream.BitRate : null;
-    const videoWidth = videoStream ? videoStream.Width : null;
-    const videoHeight = videoStream ? videoStream.Height : null;
-
-    const options = qualityoptions.getVideoQualityOptions({
-        currentMaxBitrate: playbackManager.getMaxStreamingBitrate(player),
-        isAutomaticBitrateEnabled: playbackManager.enableAutomaticBitrateDetection(player),
-        videoCodec,
-        videoBitRate,
-        videoWidth: videoWidth,
-        videoHeight: videoHeight,
-        enableAuto: true
+    const videoStream = playbackManager.currentMediaSource(player)?.MediaStreams?.find(stream => stream.Type === 'Video');
+    const currentSelection = playbackManager.getVideoQualitySelection(player);
+    const options = qualityoptions.getPlayerVideoQualityOptions({
+        videoWidth: videoStream?.Width,
+        videoHeight: videoStream?.Height,
+        videoBitRate: videoStream?.BitRate,
+        currentSelection
     });
-
-    let selectedOption = options.filter(function (o) {
-        return o.selected;
-    });
-
-    if (!selectedOption.length) {
-        return null;
+    const label = options.find(option => option.selected)?.name;
+    if (currentSelection === 'original' && playbackManager.getPlayerState(player)?.PlayState?.PlayMethod === 'Transcode') {
+        return `${label} · ${globalize.translate('Transcoding')}`;
     }
-
-    selectedOption = selectedOption[0];
-    let text = selectedOption.name;
-
-    if (selectedOption.autoText) {
-        if (state.PlayState && state.PlayState.PlayMethod !== 'Transcode') {
-            text += ' - Direct';
-        } else {
-            text += ' ' + selectedOption.autoText;
-        }
-    }
-
-    return text;
+    return label ?? null;
 }
 
 function showAspectRatioMenu(player, btn, operation) {
@@ -220,7 +179,11 @@ function showWithUser(options, player, user) {
         });
     }
 
-    if (options.quality && supportedCommands.includes('SetMaxStreamingBitrate')
+    if (options.quality && player?.isLocalPlayer
+            && typeof playbackManager.setVideoQualitySelection === 'function'
+            && typeof playbackManager.getVideoQualitySelection === 'function'
+            && typeof playbackManager.getVideoQualityConnectionBitrate === 'function'
+            && supportedCommands.includes('SetMaxStreamingBitrate')
             && user?.Policy?.EnableVideoPlaybackTranscoding) {
         const secondaryQualityText = getQualitySecondaryText(player);
 
@@ -262,7 +225,7 @@ function showWithUser(options, player, user) {
         positionTo: options.positionTo,
         signal: options.operation?.signal
     }).then(function (id) {
-        return handleSelectedOption(id, options, player);
+        return handleSelectedOption(id, options, player, user);
     });
 }
 
@@ -281,11 +244,11 @@ export function show(options) {
     });
 }
 
-function handleSelectedOption(id, options, player) {
+function handleSelectedOption(id, options, player, user) {
     if (!isOperationCurrent(options.operation)) return Promise.resolve();
     switch (id) {
         case 'quality':
-            return showQualityMenu(player, options.positionTo, options.operation);
+            return showQualityMenu(player, options.positionTo, options.operation, user);
         case 'aspectratio':
             return showAspectRatioMenu(player, options.positionTo, options.operation);
         case 'playbackrate':

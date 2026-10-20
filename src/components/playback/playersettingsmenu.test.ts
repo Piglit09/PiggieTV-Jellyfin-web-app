@@ -7,26 +7,40 @@ const fixture = vi.hoisted(() => ({
     sheet: vi.fn(),
     user: vi.fn(),
     bitrate: vi.fn(),
+    selection: vi.fn(),
+    toast: vi.fn(),
+    isInNetwork: false,
+    playerQualityOptions: vi.fn(),
+    currentSelection: vi.fn(),
+    playMethod: 'DirectPlay',
     aspectRatio: vi.fn(),
     rate: vi.fn(),
     repeat: vi.fn()
 }));
 vi.mock('../actionSheet/actionSheet', () => ({ default: { show: fixture.sheet } }));
-vi.mock('lib/globalize', () => ({ default: { translate: (key: string) => key } }));
+vi.mock('../toast/toast', () => ({ default: fixture.toast }));
+vi.mock('lib/globalize', () => ({ default: { translate: (key: string) => key === 'PtvVideoQualitySwitchFailed' ?
+    'Could not switch to the selected quality.' : key } }));
 vi.mock('lib/jellyfin-apiclient', () => ({
-    ServerConnections: { getApiClient: () => ({ getCurrentUser: fixture.user }) }
+    ServerConnections: { getApiClient: () => ({
+        getCurrentUser: fixture.user,
+        getSavedEndpointInfo: () => ({ IsInNetwork: fixture.isInNetwork })
+    }) }
 }));
 vi.mock('../qualityOptions', () => ({
-    default: { getVideoQualityOptions: () => [
-        { name: 'Original', bitrate: 1000, selected: true },
-        { name: 'Low', bitrate: 500, selected: false }
-    ] }
+    default: {
+        getVideoQualityOptions: () => [
+            { name: 'Original', bitrate: 1000, selected: true },
+            { name: 'Low', bitrate: 500, selected: false }
+        ],
+        getPlayerVideoQualityOptions: fixture.playerQualityOptions
+    }
 }));
 vi.mock('./playbackmanager', () => ({
     playbackManager: {
         currentItem: () => ({ Id: 'movie-a', ServerId: 'server-a' }),
-        currentMediaSource: () => ({ RunTimeTicks: 1000000, MediaStreams: [{ Type: 'Video', Codec: 'h264', BitRate: 1000 }] }),
-        getPlayerState: () => ({ PlayState: { PlayMethod: 'DirectPlay' } }),
+        currentMediaSource: () => ({ RunTimeTicks: 1000000, MediaStreams: [{ Type: 'Video', Codec: 'h264', BitRate: 1000, Width: 1920, Height: 1080 }] }),
+        getPlayerState: () => ({ PlayState: { PlayMethod: fixture.playMethod } }),
         getSupportedCommands: () => ['SetAspectRatio', 'PlaybackRate', 'SetMaxStreamingBitrate', 'SetRepeatMode'],
         getAspectRatio: () => 'auto',
         getSupportedAspectRatios: () => [{ id: 'auto', name: 'Auto' }, { id: 'fill', name: 'Fill' }],
@@ -34,8 +48,11 @@ vi.mock('./playbackmanager', () => ({
         getSupportedPlaybackRates: () => [{ id: '1', name: 'Normal' }, { id: '2', name: 'Fast' }],
         getRepeatMode: () => 'RepeatNone',
         getMaxStreamingBitrate: () => 1000,
+        getVideoQualityConnectionBitrate: () => 12_000_000,
         enableAutomaticBitrateDetection: () => false,
         setMaxStreamingBitrate: fixture.bitrate,
+        getVideoQualitySelection: fixture.currentSelection,
+        setVideoQualitySelection: fixture.selection,
         setAspectRatio: fixture.aspectRatio,
         setPlaybackRate: fixture.rate,
         setRepeatMode: fixture.repeat
@@ -67,6 +84,16 @@ describe('player settings child menu lifetime', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         fixture.user.mockResolvedValue({ Policy: { EnableVideoPlaybackTranscoding: true } });
+        fixture.currentSelection.mockReturnValue('auto');
+        fixture.playMethod = 'DirectPlay';
+        fixture.isInNetwork = false;
+        fixture.playerQualityOptions.mockReturnValue([
+            { id: 'auto', name: 'Auto', secondaryText: 'Recommended', selected: true },
+            { id: 'original', name: 'Original', secondaryText: 'Source quality' },
+            { id: 'full-hd', name: 'Full HD', secondaryText: 'Up to 1080p' },
+            { id: 'hd', name: 'HD', secondaryText: 'Up to 720p' },
+            { id: 'sd', name: 'SD', secondaryText: 'Up to 480p' }
+        ]);
     });
 
     it('does not open a settings sheet after the owning operation retires during user lookup', async () => {
@@ -81,7 +108,7 @@ describe('player settings child menu lifetime', () => {
     });
 
     it.each([
-        ['quality', '500', 'bitrate'],
+        ['quality', 'hd', 'selection'],
         ['aspectratio', 'fill', 'aspectRatio'],
         ['playbackrate', '2', 'rate'],
         ['repeatmode', 'RepeatAll', 'repeat']
@@ -90,7 +117,7 @@ describe('player settings child menu lifetime', () => {
         const child = deferred<string>();
         fixture.sheet.mockReturnValueOnce(root.promise).mockReturnValueOnce(child.promise);
         const owner = operation();
-        const player = {};
+        const player = { isLocalPlayer: true };
         const task = show({ player, operation: owner, quality: true }).catch(() => undefined);
         await flush();
         root.resolve(option);
@@ -135,5 +162,73 @@ describe('player settings child menu lifetime', () => {
         const player = {};
         await show({ player });
         expect(fixture.aspectRatio).toHaveBeenCalledExactlyOnceWith('fill', player);
+    });
+
+    it('offers the named player presets and applies a selected preset ID', async () => {
+        fixture.sheet.mockResolvedValueOnce('quality').mockResolvedValueOnce('hd');
+        const player = { isLocalPlayer: true };
+
+        await show({ player, quality: true });
+
+        const menu = fixture.sheet.mock.calls[1][0];
+        expect(menu.items.map((item: { id: string; name: string; secondaryText: string }) => [ item.id, item.name, item.secondaryText ])).toEqual([
+            [ 'auto', 'Auto', 'Recommended' ],
+            [ 'original', 'Original', 'Source quality' ],
+            [ 'full-hd', 'Full HD', 'Up to 1080p' ],
+            [ 'hd', 'HD', 'Up to 720p' ],
+            [ 'sd', 'SD', 'Up to 480p' ]
+        ]);
+        expect(fixture.playerQualityOptions).toHaveBeenCalledWith(expect.objectContaining({
+            videoWidth: 1920,
+            videoHeight: 1080,
+            currentSelection: 'auto'
+        }));
+        expect(fixture.playerQualityOptions.mock.calls.at(-1)?.[0]).not.toHaveProperty('maxAllowedBitrate');
+        expect(fixture.selection).toHaveBeenCalledExactlyOnceWith('hd', player);
+        expect(fixture.bitrate).not.toHaveBeenCalled();
+    });
+
+    it('passes a public user limit to the quality choices but not on a local connection', async () => {
+        fixture.user.mockResolvedValue({ Policy: { EnableVideoPlaybackTranscoding: true, RemoteClientBitrateLimit: 3_000_000 } });
+        fixture.sheet.mockResolvedValueOnce('quality').mockResolvedValueOnce(undefined);
+        await show({ player: { isLocalPlayer: true }, quality: true });
+        expect(fixture.playerQualityOptions.mock.calls.at(-1)?.[0].maxAllowedBitrate).toBe(3_000_000);
+
+        fixture.playerQualityOptions.mockClear();
+        fixture.isInNetwork = true;
+        fixture.sheet.mockResolvedValueOnce('quality').mockResolvedValueOnce(undefined);
+        await show({ player: { isLocalPlayer: true }, quality: true });
+        expect(fixture.playerQualityOptions.mock.calls.at(-1)?.[0]).not.toHaveProperty('maxAllowedBitrate');
+    });
+
+    it('shows a visible error when the server refuses the selected quality', async () => {
+        fixture.sheet.mockResolvedValueOnce('quality').mockResolvedValueOnce('full-hd');
+        fixture.selection.mockRejectedValueOnce(new Error('unsupported stream'));
+        await expect(show({ player: { isLocalPlayer: true }, quality: true })).rejects.toThrow();
+        expect(fixture.toast).toHaveBeenCalledWith('Could not switch to the selected quality.');
+    });
+
+    it('keeps the quality choice out of a remote player menu', async () => {
+        fixture.sheet.mockResolvedValue(undefined);
+
+        await show({ player: { isLocalPlayer: false }, quality: true }).catch(() => undefined);
+
+        expect(fixture.sheet.mock.calls[0][0].items.map((item: { id: string }) => item.id)).not.toContain('quality');
+        expect(fixture.selection).not.toHaveBeenCalled();
+    });
+
+    it('discloses conversion when Original cannot use direct playback', async () => {
+        fixture.currentSelection.mockReturnValue('original');
+        fixture.playMethod = 'Transcode';
+        fixture.playerQualityOptions.mockReturnValue([
+            { id: 'auto', name: 'Auto', secondaryText: 'Recommended' },
+            { id: 'original', name: 'Original', secondaryText: 'Source quality', selected: true }
+        ]);
+        fixture.sheet.mockResolvedValue(undefined);
+
+        await show({ player: { isLocalPlayer: true }, quality: true }).catch(() => undefined);
+
+        const quality = fixture.sheet.mock.calls[0][0].items.find((item: { id: string }) => item.id === 'quality');
+        expect(quality.asideText).toBe('Original · Transcoding');
     });
 });
