@@ -773,7 +773,11 @@ function readOperatorPolicy(policy) {
             '$records=@(foreach($key in $keys){',
             '  $acl=Get-Acl -LiteralPath $key',
             '  @{ownerSid=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;',
-            '    aces=@($acl.Access | ForEach-Object { @{sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; type=$_.AccessControlType.ToString(); rights=[int64]$_.RegistryRights} })}',
+            '    aces=@($acl.Access | ForEach-Object {',
+            '      try { $sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }',
+            '      catch { $sid=$_.IdentityReference.Value; if($sid -notmatch "^S-\\d+(?:-\\d+)+$"){ throw } }',
+            '      @{sid=$sid; type=$_.AccessControlType.ToString(); rights=[int64]$_.RegistryRights;',
+            '        propagation=$_.PropagationFlags.ToString()} })}',
             '})',
             '$identity=[System.Security.Principal.WindowsIdentity]::GetCurrent()',
             '$principal=[System.Security.Principal.WindowsPrincipal]::new($identity)',
@@ -816,7 +820,8 @@ export function operatorAclSafe(acl) {
     return acl.records.every(record => privilegedSids.has(record.ownerSid) && Array.isArray(record.aces)
         && record.aces.every(ace => ace.type !== 'Allow'
             || (typeof ace.rights === 'number' && typeof ace.sid === 'string'
-                && ((ace.rights & writeMask) === 0 || privilegedSids.has(ace.sid)))));
+                && ((ace.rights & writeMask) === 0 || privilegedSids.has(ace.sid)
+                    || (ace.sid === 'S-1-3-0' && ace.propagation === 'InheritOnly')))));
 }
 
 function readCiEventHeadSha() {
