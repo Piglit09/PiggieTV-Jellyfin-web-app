@@ -74,7 +74,15 @@ function Get-LocalBytes([string]$Route, [string]$Method = 'GET', [bool]$Authenti
     try {
         $request.Headers.CacheControl = [Net.Http.Headers.CacheControlHeaderValue]::new()
         $request.Headers.CacheControl.NoCache = $true
-        if ($Authenticated) { [void]$request.Headers.TryAddWithoutValidation('X-Emby-Token', $script:tokenText) }
+        if ($Authenticated) {
+            if ([string]::IsNullOrWhiteSpace($script:tokenText) -or $script:tokenText -match '[\r\n"]') {
+                throw 'The .125 administrator token has an invalid header format.'
+            }
+            if (-not $request.Headers.TryAddWithoutValidation('Authorization',
+                ('MediaBrowser Token="' + $script:tokenText + '"'))) {
+                throw 'Cannot set the Jellyfin 12.2 Authorization header.'
+            }
+        }
         $response = $script:http.SendAsync($request).GetAwaiter().GetResult()
         try {
             if (-not $response.IsSuccessStatusCode) { throw "Local $Route returned HTTP $([int]$response.StatusCode)." }
