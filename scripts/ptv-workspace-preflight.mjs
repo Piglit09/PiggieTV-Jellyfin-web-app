@@ -770,7 +770,6 @@ function parseArgs(argv) {
 function readOperatorPolicy(policy) {
     if (process.platform !== 'win32' || policy.operatorPolicy?.kind !== 'windows-registry'
         || policy.operatorPolicy.key !== operatorRegistryKey || policy.operatorPolicy.value !== operatorRegistryValue) return null;
-    let stage = 'Registry ACL';
     try {
         const aclScript = [
             "$ErrorActionPreference='Stop'",
@@ -806,7 +805,6 @@ function readOperatorPolicy(policy) {
             env: powershellEnvironment()
         });
         if (!operatorAclSafe(JSON.parse(aclOutput))) deny('Protected Registry ACL does not establish independent authority');
-        stage = 'Registry value';
         const valueScript = [
             "$ErrorActionPreference='Stop'",
             '$base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)',
@@ -827,7 +825,7 @@ function readOperatorPolicy(policy) {
         return JSON.parse(Buffer.from(output.trim(), 'base64').toString('utf8'));
     } catch (error) {
         if (error instanceof PreflightError) throw error;
-        deny(`Protected operator policy could not be read at ${stage}`);
+        deny('Protected operator policy could not be read');
     }
 }
 
