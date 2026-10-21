@@ -89,6 +89,39 @@ function committedVersions(root, commit) {
     return { web, plugin, package: packageVersion };
 }
 
+export function validateFrozenPluginEvidence({ commit, head, commitType, reachable, sourceDirty,
+    currentProductTree, frozenProductTree, currentPluginVersion, frozenPluginVersion }) {
+    assert(COMMIT_PATTERN.test(commit) && COMMIT_PATTERN.test(head), 'Frozen Plugin source needs full Git commits');
+    assert.equal(sourceDirty, false, 'Frozen Plugin packaging requires a clean checkout');
+    assert.equal(commitType, 'commit', 'Unknown frozen Plugin source commit');
+    assert.equal(reachable, true, 'Frozen Plugin source must be an ancestor of current HEAD');
+    assert(COMMIT_PATTERN.test(currentProductTree) && COMMIT_PATTERN.test(frozenProductTree), 'Invalid Plugin source tree identity');
+    assert.equal(currentProductTree, frozenProductTree, 'Plugin source tree differs from frozen commit');
+    assert.equal(currentPluginVersion, frozenPluginVersion, 'Plugin version differs from frozen commit');
+    return true;
+}
+
+export function frozenPluginSourceInfo(sourceRoot, commit) {
+    const source = sourceInfo(sourceRoot);
+    assert(COMMIT_PATTERN.test(commit), 'Frozen Plugin source needs a full Git commit');
+    let commitType;
+    let reachable = false;
+    try {
+        commitType = git(source.sourceRoot, 'cat-file', '-t', commit);
+        git(source.sourceRoot, 'merge-base', '--is-ancestor', commit, source.sourceCommit);
+        reachable = true;
+    } catch {
+        // Unknown or unrelated commits cannot authorize a frozen package.
+    }
+    const versions = commitType === 'commit' ? committedVersions(source.sourceRoot, commit) : null;
+    const currentProductTree = git(source.sourceRoot, 'rev-parse', 'HEAD:src/ptv/plugin');
+    const frozenProductTree = commitType === 'commit' ? git(source.sourceRoot, 'rev-parse', `${commit}:src/ptv/plugin`) : null;
+    validateFrozenPluginEvidence({ commit, head: source.sourceCommit, commitType, reachable,
+        sourceDirty: source.sourceDirty, currentProductTree, frozenProductTree,
+        currentPluginVersion: source.sourceVersions.plugin, frozenPluginVersion: versions?.plugin });
+    return { ...source, sourceCommit: commit, sourceVersions: versions, sourceProductTree: frozenProductTree };
+}
+
 function validRelativePath(name) {
     return typeof name === 'string' && name.length > 0 && !name.includes('\\') && !name.includes(':')
         && !name.startsWith('/') && name.split('/').every(part => part && part !== '.' && part !== '..');
@@ -133,13 +166,14 @@ function assertWebPayload(artifactRoot, files, sourceCommit, sourceDirty) {
     assert(embedded, 'Web artifact has no embedded current source commit');
 }
 
-function assertPluginPayload(artifactRoot, files, sourceCommit, pluginVersion) {
+function assertPluginPayload(artifactRoot, files, sourceCommit, pluginVersion, sourceProductTree) {
     const names = files.map(file => file.path);
     assert.deepEqual(names, [ 'PiggieTV.tar', 'package-manifest.json' ], 'Plugin package files are incomplete or unexpected');
     const packageManifest = JSON.parse(fs.readFileSync(path.join(artifactRoot, 'package-manifest.json'), 'utf8'));
     assert.equal(packageManifest.sourceCommit, sourceCommit, 'Plugin package source commit mismatch');
     assert.equal(packageManifest.version, pluginVersion, 'Plugin package version mismatch');
     assert.equal(packageManifest.archiveSha256, hash(fs.readFileSync(path.join(artifactRoot, 'PiggieTV.tar'))), 'Plugin archive hash mismatch');
+    if (sourceProductTree) assert.equal(packageManifest.sourceProductTree, sourceProductTree, 'Plugin package source tree mismatch');
 }
 
 function validateBuildMode(buildMode, sourceDirty) {
@@ -147,16 +181,30 @@ function validateBuildMode(buildMode, sourceDirty) {
     if (buildMode !== 'development') assert(!sourceDirty, 'Release/package artifact requires clean committed source');
 }
 
-export function buildManifest({ artifactRoot, sourceRoot, projectId = 'PTV_WEB', buildMode, createdAt = new Date().toISOString() }) {
+export function assertFrozenManifestKind(manifest) {
+    assert(manifest?.projectId === 'PTV_WEB' || manifest?.projectId === 'PTV_PLUGIN',
+        'Frozen artifact project is invalid');
+    const expectedBuildMode = manifest.projectId === 'PTV_WEB' ? 'production' : 'package';
+    assert.equal(manifest.buildMode, expectedBuildMode,
+        `Frozen ${manifest.projectId === 'PTV_WEB' ? 'Web' : 'Plugin'} artifact requires ${expectedBuildMode} build mode`);
+    return true;
+}
+
+export function buildManifest({ artifactRoot, sourceRoot, projectId = 'PTV_WEB', buildMode,
+    frozenSourceCommit, createdAt = new Date().toISOString() }) {
     const artifact = realDirectory(artifactRoot, 'Artifact root');
     assert([ ...PROJECT_IDS.values() ].includes(projectId), 'Unknown project ID');
-    const source = sourceInfo(sourceRoot);
+    const source = frozenSourceCommit === undefined ? sourceInfo(sourceRoot) : frozenPluginSourceInfo(sourceRoot, frozenSourceCommit);
+    if (frozenSourceCommit !== undefined) {
+        assert.equal(projectId, 'PTV_PLUGIN', 'Frozen manifest creation is Plugin-only');
+        assert.equal(buildMode, 'package', 'Frozen Plugin manifest creation requires package mode');
+    }
     validateBuildMode(buildMode, source.sourceDirty);
     assert(!Number.isNaN(Date.parse(createdAt)), 'Invalid build timestamp');
     const files = inventory(artifact);
     assert(files.length > 0, 'Artifact has no files');
     if (projectId === 'PTV_WEB') assertWebPayload(artifact, files, source.sourceCommit, source.sourceDirty);
-    else assertPluginPayload(artifact, files, source.sourceCommit, source.sourceVersions.plugin);
+    else assertPluginPayload(artifact, files, source.sourceCommit, source.sourceVersions.plugin, source.sourceProductTree);
     const unsigned = { schemaVersion: 1, projectId, buildMode, ...source, createdAt, files };
     return { ...unsigned, manifestDigest: canonicalDigest(unsigned) };
 }
@@ -172,12 +220,15 @@ export function verifyManifest(manifest, { artifactRoot, sourceRoot, buildMode, 
     const source = sourceInfo(sourceRoot);
     assert.equal(manifest.sourceRoot.toLowerCase(), source.sourceRoot.toLowerCase(), 'Source root mismatch');
     if (frozenSourceCommit !== undefined) {
-        assert.equal(manifest.projectId, 'PTV_WEB', 'Frozen source verification is Web-only');
-        assert.equal(manifest.buildMode, 'production', 'Frozen deployment requires production build mode');
+        assertFrozenManifestKind(manifest);
         assert.equal(manifest.sourceCommit, frozenSourceCommit, 'Frozen artifact source commit mismatch');
         assert.equal(manifest.sourceDirty, false, 'Frozen artifact requires clean committed source');
         assert.equal(source.sourceDirty, false, 'Frozen artifact verification requires a clean current checkout');
         assert.deepEqual(manifest.sourceVersions, committedVersions(source.sourceRoot, frozenSourceCommit), 'Frozen source version mismatch');
+        if (manifest.projectId === 'PTV_PLUGIN') {
+            const frozenSource = frozenPluginSourceInfo(source.sourceRoot, frozenSourceCommit);
+            assert.equal(manifest.sourceProductTree, frozenSource.sourceProductTree, 'Frozen Plugin source tree mismatch');
+        }
     } else {
         assert.equal(manifest.sourceCommit, source.sourceCommit, 'Artifact source commit differs from current Git HEAD');
         assert.equal(manifest.sourceBranch, source.sourceBranch, 'Source branch mismatch');
@@ -203,7 +254,7 @@ export function verifyManifest(manifest, { artifactRoot, sourceRoot, buildMode, 
         assert.equal(actual[index].sha256, manifest.files[index].sha256, `Artifact file hash mismatch: ${actual[index].path}`);
     }
     if (manifest.projectId === 'PTV_WEB') assertWebPayload(artifact, actual, manifest.sourceCommit, manifest.sourceDirty);
-    else assertPluginPayload(artifact, actual, manifest.sourceCommit, manifest.sourceVersions.plugin);
+    else assertPluginPayload(artifact, actual, manifest.sourceCommit, manifest.sourceVersions.plugin, manifest.sourceProductTree);
     return true;
 }
 
@@ -240,7 +291,8 @@ function cli() {
         const ciRef = process.env.GITHUB_ACTIONS === 'true' ? [ '--ci-ref', git(sourceRoot, 'rev-parse', 'HEAD') ] : [];
         execFileSync(process.execPath, [ preflight, preflightMode, ...ciRef ], { cwd: sourceRoot, stdio: 'inherit' });
         const projectId = PROJECT_IDS.get(values.get('--project') || 'web');
-        const manifest = buildManifest({ artifactRoot, sourceRoot, projectId, buildMode: mode });
+        const manifest = buildManifest({ artifactRoot, sourceRoot, projectId, buildMode: mode,
+            frozenSourceCommit: values.get('--frozen-source-commit') });
         fs.writeFileSync(outputPath, JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
         console.log(manifest.manifestDigest);
     } else {

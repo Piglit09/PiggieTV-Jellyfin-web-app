@@ -13,6 +13,15 @@ const officialVersionSources = {
 };
 const operatorRegistryKey = 'HKLM\\SOFTWARE\\PiggieTV\\WorkspaceAuthority';
 const operatorRegistryValue = 'PolicyJson';
+const developmentTarget = Object.freeze({
+    environmentId: 'JF_DEVELOPMENT_125',
+    // eslint-disable-next-line sonarjs/no-hardcoded-ip -- Sole registered development host.
+    host: '10.16.0.125',
+    serverId: 'c1858e3f2d09468fb546ad9cfe438283',
+    serverName: 'PTV Testing',
+    webTargetPath: 'C:\\Program Files\\Jellyfin\\Server\\jellyfin-web',
+    pluginTargetRoot: 'C:\\JFData\\plugins\\PiggieTV_Plugin (testing)'
+});
 const pinnedAuthority = Object.freeze({
     sourceRoot: 'C:\\Users\\Piggie\\Documents\\GitHub\\Jellyfin-Web-PiggieTV',
     gitCommonDirectory: 'C:\\Users\\Piggie\\Documents\\GitHub\\Jellyfin-Web-PiggieTV\\.git',
@@ -21,7 +30,7 @@ const pinnedAuthority = Object.freeze({
     environmentRegistry: 'docs/operations/ptv-environments.json',
     ciRepository: 'Piglit09/PiggieTV-Jellyfin-web-app'
 });
-const allowedModes = new Set(['audit', 'edit', 'build', 'package', 'deploy']);
+const allowedModes = new Set(['audit', 'edit', 'build', 'package', 'deploy', 'deploy-development']);
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const gitExecutable = process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd\\git.exe' : '/usr/bin/git';
 const powershellExecutable = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
@@ -151,6 +160,20 @@ function sourceVersions(root, policy) {
     return { web, plugin };
 }
 
+function committedSourceVersions(root, commit) {
+    try {
+        const web = JSON.parse(git(root, 'show', `${commit}:ptv-version.json`)).version;
+        const pluginSource = git(root, 'show', `${commit}:src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj`);
+        const plugin = pluginSource.match(/<PtvPluginVersion>([^<]+)<\/PtvPluginVersion>/)?.[1];
+        if (!/^\d+\.\d+\.\d+$/.test(web ?? '') || !/^\d+\.\d+\.\d+\.\d+$/.test(plugin ?? '')) {
+            deny('Frozen development source versions are invalid');
+        }
+        return { web, plugin };
+    } catch {
+        deny('Frozen development source versions could not be verified');
+    }
+}
+
 function validFullSha(value) {
     return typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
 }
@@ -243,6 +266,183 @@ function registeredEnvironment(flags, registry) {
     if (environment.role === 'PRODUCTION' || environment.id === 'JF_PRODUCTION_50') deny('Production deployment is denied');
     if (environment.deployment?.enabled !== true || !environment.deployment?.targetPath) deny('Deployment is denied for this environment');
     return environment;
+}
+
+function requireDevelopmentRegistry(registry, environmentId) {
+    if (environmentId !== developmentTarget.environmentId) deny('Only the registered .125 development environment is permitted');
+    if (registry?.schemaVersion !== 1 || registry.projectId !== 'PTV_WEB') deny('Environment registry is invalid');
+    const environments = registry.environments?.filter(item => item.id === environmentId);
+    if (environments?.length !== 1) deny('Development environment is missing or duplicated');
+    const environment = environments[0];
+    if (environment.role !== 'DEVELOPMENT' || environment.host !== developmentTarget.host
+        || environment.currentRuntimeIdentity !== developmentTarget.serverId || environment.deployment?.enabled !== true) {
+        deny('Registered development target identity or authorization is invalid');
+    }
+    return environment;
+}
+
+function requireProtectedDevelopmentProject(operatorPolicy, identity, policy, now) {
+    if (!Number.isInteger(operatorPolicy?.schemaVersion) || operatorPolicy.schemaVersion < 3
+        || !Array.isArray(operatorPolicy.projects)) {
+        deny('Protected shared development policy is absent or incompatible');
+    }
+    const issued = Date.parse(operatorPolicy.issuedUtc);
+    const expires = Date.parse(operatorPolicy.expiresUtc);
+    if (!Number.isFinite(issued) || !Number.isFinite(expires) || issued > now || expires <= now) {
+        deny('Protected shared development policy is not current');
+    }
+    const projects = operatorPolicy.projects.filter(item => item.projectId === 'PTV_WEB');
+    if (projects.length !== 1) deny('Protected Web project identity is missing or duplicated');
+    const project = projects[0];
+    if (project.state !== 'ACTIVE' || project.permissions?.testDeploy125 !== true
+        || project.permissions?.productionDeploy50 !== false || project.permissions?.githubPublish !== false) {
+        deny('Protected policy does not authorize .125 development deployment');
+    }
+    if (!samePath(project.sourceRoot, identity.root) || !samePath(project.gitCommonDir, identity.commonDir)
+        || !sameRemote(project.remote, identity.remote)
+        || !Array.isArray(project.artifactRoots) || project.artifactRoots.length !== 1
+        || !samePath(project.artifactRoots[0], policy.artifactRoot)) {
+        deny('Protected Web project source identity mismatch');
+    }
+    return project;
+}
+
+function assertDevelopmentTargetBindings(environment, project) {
+    const registered = environment.deployment;
+    const protectedTarget = project.developmentDeployment;
+    if (protectedTarget?.environmentId !== developmentTarget.environmentId
+        || protectedTarget.host !== developmentTarget.host) {
+        deny('Protected development environment mismatch');
+    }
+    for (const field of ['serverId', 'serverName']) {
+        if (registered?.[field] !== developmentTarget[field] || protectedTarget[field] !== developmentTarget[field]) {
+            deny(`Development ${field} mismatch`);
+        }
+    }
+    for (const field of ['webTargetPath', 'pluginTargetRoot']) {
+        if (!samePath(registered?.[field], developmentTarget[field])
+            || !samePath(protectedTarget[field], developmentTarget[field])) {
+            deny(`Development ${field} mismatch`);
+        }
+    }
+}
+
+export function validateDevelopmentAuthorization({ identity, policy, registry, operatorPolicy, environmentId, now = Date.now() }) {
+    const environment = requireDevelopmentRegistry(registry, environmentId);
+    const project = requireProtectedDevelopmentProject(operatorPolicy, identity, policy, now);
+    assertDevelopmentTargetBindings(environment, project);
+    return { ...developmentTarget };
+}
+
+export function validateDevelopmentManifestHeaders({ manifests, identity, versions, sourceCommit }) {
+    if (!validFullSha(sourceCommit)) deny('Development source commit is invalid');
+    const selected = ['web', 'plugin'].filter(component => manifests?.[component] !== undefined);
+    if (selected.length === 0) deny('A Web or Plugin development artifact is required');
+    const manifestDigests = {};
+    for (const component of selected) {
+        const manifest = manifests[component];
+        const expectedProject = component === 'web' ? 'PTV_WEB' : 'PTV_PLUGIN';
+        const validBuildMode = component === 'web' ?
+            manifest?.buildMode === 'production' || manifest?.buildMode === 'development' :
+            manifest?.buildMode === 'package';
+        if (manifest?.schemaVersion !== 1 || manifest.projectId !== expectedProject || !validBuildMode
+            || manifest.sourceCommit !== sourceCommit || manifest.sourceDirty !== false
+            || !samePath(manifest.sourceRoot, identity.root)
+            || manifest.sourceVersions?.web !== versions.web || manifest.sourceVersions?.plugin !== versions.plugin
+            || !/^[0-9a-f]{64}$/.test(manifest.manifestDigest ?? '')
+            || manifest.manifestDigest !== canonicalDigest(manifest)) {
+            deny(`Development ${component} artifact provenance is invalid`);
+        }
+        manifestDigests[component] = manifest.manifestDigest;
+    }
+    return { components: selected, manifestDigests };
+}
+
+export function validateDevelopmentArtifactSelection(flags) {
+    if (flags.artifactManifest || flags.artifactRoot || flags.artifactArchive
+        || flags.approvalRecord || flags.rollbackReference) {
+        deny('Legacy release deployment evidence is not accepted by development mode');
+    }
+    const selected = [];
+    for (const [component, manifestFlag, rootFlag] of [
+        ['web', 'webManifest', 'webArtifactRoot'],
+        ['plugin', 'pluginManifest', 'pluginArtifactRoot']
+    ]) {
+        const hasManifest = typeof flags[manifestFlag] === 'string' && Boolean(flags[manifestFlag].trim());
+        const hasRoot = typeof flags[rootFlag] === 'string' && Boolean(flags[rootFlag].trim());
+        if (hasManifest !== hasRoot) deny(`Development ${component} manifest and artifact root must be supplied together`);
+        if (hasManifest) selected.push(component);
+    }
+    if (selected.length === 0) deny('A Web or Plugin development artifact is required');
+    return selected;
+}
+
+export function validateDevelopmentSourceSelection({ head, frozenSourceCommit, objectType, reachable }) {
+    if (!validFullSha(head)) deny('Current development source commit is invalid');
+    if (frozenSourceCommit === undefined) return head;
+    if (!validFullSha(frozenSourceCommit) || objectType !== 'commit' || reachable !== true) {
+        deny('Frozen development source must be a reachable full commit');
+    }
+    return frozenSourceCommit;
+}
+
+function sourceCommitIsAncestor(root, commit, head) {
+    try {
+        execFileSync(gitExecutable, ['-C', root, 'merge-base', '--is-ancestor', commit, head], {
+            env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, stdio: ['ignore', 'ignore', 'ignore']
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function verifiedDevelopmentArtifacts({ flags, identity, versions, sourceCommit }) {
+    const selected = validateDevelopmentArtifactSelection(flags);
+    const manifests = {};
+    for (const component of selected) {
+        const manifestFlag = component === 'web' ? 'webManifest' : 'pluginManifest';
+        manifests[component] = readJson(flags[manifestFlag], `Development ${component} artifact manifest`);
+    }
+    const headers = validateDevelopmentManifestHeaders({ manifests, identity, versions, sourceCommit });
+    for (const component of selected) {
+        const rootFlag = component === 'web' ? 'webArtifactRoot' : 'pluginArtifactRoot';
+        try {
+            verifyManifest(manifests[component], {
+                artifactRoot: flags[rootFlag], sourceRoot: identity.root,
+                ...(flags.frozenSourceCommit !== undefined ? { frozenSourceCommit: sourceCommit } : {})
+            });
+        } catch (error) {
+            deny(`Development ${component} artifact verification failed: ${error.message}`);
+        }
+    }
+    return headers;
+}
+
+function validateDevelopmentDeployment({ flags, identity, policy, registry, operatorPolicy, currentVersions }) {
+    const target = validateDevelopmentAuthorization({ identity, policy, registry, operatorPolicy,
+        environmentId: flags.environmentId });
+    for (const field of ['webTargetPath', 'pluginTargetRoot']) {
+        const actual = existingRealPath(target[field], `Development ${field}`);
+        if (!samePath(actual, target[field]) || !fs.statSync(actual).isDirectory()) {
+            deny(`Development ${field} is not a real directory`);
+        }
+    }
+    const frozen = flags.frozenSourceCommit !== undefined;
+    const frozenCommit = flags.frozenSourceCommit;
+    const sourceCommit = validateDevelopmentSourceSelection({
+        head: identity.head,
+        frozenSourceCommit: frozenCommit,
+        objectType: frozen && validFullSha(frozenCommit) ? git(identity.root, 'cat-file', '-t', frozenCommit) : undefined,
+        reachable: frozen && validFullSha(frozenCommit) ?
+            sourceCommitIsAncestor(identity.root, frozenCommit, identity.head) : undefined
+    });
+    const versions = frozen ? committedSourceVersions(identity.root, sourceCommit) : currentVersions;
+    const artifacts = verifiedDevelopmentArtifacts({ flags, identity, versions, sourceCommit });
+    const sourceTree = git(identity.root, 'rev-parse', `${sourceCommit}^{tree}`);
+    if (!validFullSha(sourceTree)) deny('Development source tree is invalid');
+    return { ...target, sourceCommit, sourceTree, versions,
+        components: artifacts.components, manifestDigests: artifacts.manifestDigests };
 }
 
 function verifiedManifest(flags, identity, versions) {
@@ -509,7 +709,8 @@ export function evaluatePreflight({
         dirty: identity.dirty
     };
     if (mode === 'audit') return auditResult(base, identity, policy, authority);
-    if (mode !== 'deploy' && (flags.artifactArchive || flags.artifactRoot || flags.frozenSourceCommit)) {
+    if (mode !== 'deploy' && mode !== 'deploy-development'
+        && (flags.artifactArchive || flags.artifactRoot || flags.frozenSourceCommit)) {
         deny('Frozen artifact options are deployment-only');
     }
     validatePolicy(policy, authority);
@@ -517,7 +718,14 @@ export function evaluatePreflight({
     validateSourceLocation(identity, policy, ciRef);
     validateSourceProvenance({ identity, policy, ciRef, ciContext, runtimePlatform, env });
     const versions = sourceVersions(identity.root, policy);
-    if ((mode === 'package' || mode === 'deploy') && identity.dirty) deny('Release package or deployment requires clean committed source');
+    if ((mode === 'package' || mode === 'deploy' || mode === 'deploy-development') && identity.dirty) {
+        deny('Package or deployment requires clean committed source');
+    }
+    if (mode === 'deploy-development') {
+        const deployment = validateDevelopmentDeployment({ flags, identity, policy, registry,
+            operatorPolicy, currentVersions: versions });
+        return { ...base, authority: 'approved', ...deployment };
+    }
     if (mode === 'deploy') {
         if (registry?.schemaVersion !== 1 || registry.projectId !== 'PTV_WEB') deny('Environment registry is invalid');
         const deployment = validateDeployment({ flags, identity, policy, registry, operatorPolicy, versions, protectedApprovalProbe });
@@ -535,6 +743,10 @@ function parseArgs(argv) {
         '--artifact-manifest': 'artifactManifest',
         '--artifact-root': 'artifactRoot',
         '--artifact-archive': 'artifactArchive',
+        '--web-manifest': 'webManifest',
+        '--web-artifact-root': 'webArtifactRoot',
+        '--plugin-manifest': 'pluginManifest',
+        '--plugin-artifact-root': 'pluginArtifactRoot',
         '--frozen-source-commit': 'frozenSourceCommit',
         '--approval-record': 'approvalRecord',
         '--rollback-reference': 'rollbackReference',
@@ -635,7 +847,7 @@ function main() {
                 eventName: process.env.GITHUB_EVENT_NAME,
                 eventHeadSha: readCiEventHeadSha()
             },
-            operatorPolicy: mode === 'deploy' ? readOperatorPolicy(policy) : null
+            operatorPolicy: mode === 'deploy' || mode === 'deploy-development' ? readOperatorPolicy(policy) : null
         });
         process.stdout.write(`${JSON.stringify(result)}\n`);
     } catch (error) {
