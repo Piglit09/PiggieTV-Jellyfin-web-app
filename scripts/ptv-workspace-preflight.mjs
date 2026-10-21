@@ -769,9 +769,9 @@ function readOperatorPolicy(policy) {
     try {
         const aclScript = [
             "$ErrorActionPreference='Stop'",
-            "$keys=@('Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\PiggieTV\\WorkspaceAuthority','Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\PiggieTV')",
+            "$keys=@('HKLM:\\SOFTWARE\\PiggieTV\\WorkspaceAuthority','HKLM:\\SOFTWARE\\PiggieTV')",
             '$records=@(foreach($key in $keys){',
-            '  $acl=Get-Acl -LiteralPath $key',
+            '  $acl=Get-Acl -Path $key',
             '  @{ownerSid=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;',
             '    aces=@($acl.Access | ForEach-Object {',
             '      try { $sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }',
