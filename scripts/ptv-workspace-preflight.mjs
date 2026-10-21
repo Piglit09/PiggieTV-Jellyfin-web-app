@@ -786,7 +786,7 @@ function readOperatorPolicy(policy) {
             '$base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Default)',
             "foreach($keyName in @('SOFTWARE\\PiggieTV\\WorkspaceAuthority','SOFTWARE\\PiggieTV')) {",
             "  foreach($rightName in @('SetValue','CreateSubKey','Delete','ChangePermissions','TakeOwnership')) {",
-            '    $right=[Enum]::Parse([Microsoft.Win32.RegistryRights],$rightName)',
+            '    $right=[Enum]::Parse([System.Security.AccessControl.RegistryRights],$rightName)',
             '    try { $probe=$base.OpenSubKey($keyName,$right); if($null -ne $probe) { $writable=$true; $probe.Dispose() } }',
             '    catch [System.UnauthorizedAccessException] {}',
             '    catch [System.Security.SecurityException] {}',
