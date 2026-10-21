@@ -34,7 +34,6 @@ const allowedModes = new Set(['audit', 'edit', 'build', 'package', 'deploy', 'de
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const gitExecutable = process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd\\git.exe' : '/usr/bin/git';
 const powershellExecutable = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
-const regExecutable = 'C:\\Windows\\System32\\reg.exe';
 
 export class PreflightError extends Error {
     constructor(message) {
@@ -783,7 +782,7 @@ function readOperatorPolicy(policy) {
             '$identity=[System.Security.Principal.WindowsIdentity]::GetCurrent()',
             '$principal=[System.Security.Principal.WindowsPrincipal]::new($identity)',
             '$writable=$identity.IsSystem -or $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)',
-            '$base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Default)',
+            '$base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)',
             "foreach($keyName in @('SOFTWARE\\PiggieTV\\WorkspaceAuthority','SOFTWARE\\PiggieTV')) {",
             "  foreach($rightName in @('SetValue','CreateSubKey','Delete','ChangePermissions','TakeOwnership')) {",
             '    $right=[Enum]::Parse([System.Security.AccessControl.RegistryRights],$rightName)',
@@ -800,15 +799,23 @@ function readOperatorPolicy(policy) {
             stdio: ['ignore', 'pipe', 'pipe']
         });
         if (!operatorAclSafe(JSON.parse(aclOutput))) return null;
-        const output = execFileSync(regExecutable, ['query', operatorRegistryKey, '/v', operatorRegistryValue], {
+        const valueScript = [
+            "$ErrorActionPreference='Stop'",
+            '$base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)',
+            "$key=$base.OpenSubKey('SOFTWARE\\PiggieTV\\WorkspaceAuthority',$false)",
+            'if($null -eq $key){throw "Protected policy key is absent"}',
+            'try {',
+            '  if($key.GetValueKind("PolicyJson") -ne [Microsoft.Win32.RegistryValueKind]::String){throw "Protected policy type differs"}',
+            '  $value=[string]$key.GetValue("PolicyJson",$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)',
+            '  if(-not $value){throw "Protected policy is empty"}',
+            '  [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($value))',
+            '} finally { $key.Dispose(); $base.Dispose() }'
+        ].join('\n');
+        const output = execFileSync(powershellExecutable, ['-NoProfile', '-NonInteractive', '-Command', valueScript], {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'pipe']
         });
-        const line = output.split(/\r?\n/).find(value => value.includes(operatorRegistryValue) && value.includes('REG_SZ'));
-        const marker = 'REG_SZ';
-        const markerIndex = line?.indexOf(marker);
-        const json = markerIndex >= 0 ? line.slice(markerIndex + marker.length).trim() : null;
-        return json ? JSON.parse(json) : null;
+        return JSON.parse(Buffer.from(output.trim(), 'base64').toString('utf8'));
     } catch {
         return null;
     }
