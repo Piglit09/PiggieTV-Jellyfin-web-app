@@ -34,6 +34,11 @@ const allowedModes = new Set(['audit', 'edit', 'build', 'package', 'deploy', 'de
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const gitExecutable = process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd\\git.exe' : '/usr/bin/git';
 const powershellExecutable = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const windowsPowerShellModules = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules';
+
+function powershellEnvironment(extra = {}) {
+    return { ...process.env, PSModulePath: windowsPowerShellModules, ...extra };
+}
 
 export class PreflightError extends Error {
     constructor(message) {
@@ -231,7 +236,7 @@ export function approvalProtectedFromCurrentProcess(approvalPath) {
         ].join('\n');
         const output = execFileSync(powershellExecutable, ['-NoProfile', '-NonInteractive', '-Command', script], {
             encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-            env: { ...process.env, PTV_APPROVAL_PATH: approvalPath }
+            env: powershellEnvironment({ PTV_APPROVAL_PATH: approvalPath })
         });
         const evidence = JSON.parse(output);
         return approvalAclSafe(evidence);
@@ -765,6 +770,7 @@ function parseArgs(argv) {
 function readOperatorPolicy(policy) {
     if (process.platform !== 'win32' || policy.operatorPolicy?.kind !== 'windows-registry'
         || policy.operatorPolicy.key !== operatorRegistryKey || policy.operatorPolicy.value !== operatorRegistryValue) return null;
+    let stage = 'Registry ACL';
     try {
         const aclScript = [
             "$ErrorActionPreference='Stop'",
@@ -796,9 +802,11 @@ function readOperatorPolicy(policy) {
         ].join('\n');
         const aclOutput = execFileSync(powershellExecutable, ['-NoProfile', '-NonInteractive', '-Command', aclScript], {
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'pipe']
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: powershellEnvironment()
         });
-        if (!operatorAclSafe(JSON.parse(aclOutput))) return null;
+        if (!operatorAclSafe(JSON.parse(aclOutput))) deny('Protected Registry ACL does not establish independent authority');
+        stage = 'Registry value';
         const valueScript = [
             "$ErrorActionPreference='Stop'",
             '$base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)',
@@ -813,11 +821,13 @@ function readOperatorPolicy(policy) {
         ].join('\n');
         const output = execFileSync(powershellExecutable, ['-NoProfile', '-NonInteractive', '-Command', valueScript], {
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'pipe']
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: powershellEnvironment()
         });
         return JSON.parse(Buffer.from(output.trim(), 'base64').toString('utf8'));
-    } catch {
-        return null;
+    } catch (error) {
+        if (error instanceof PreflightError) throw error;
+        deny(`Protected operator policy could not be read at ${stage}`);
     }
 }
 
