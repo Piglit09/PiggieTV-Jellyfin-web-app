@@ -90,3 +90,106 @@ finally { $script:http.Dispose() }
     { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
     assert.equal(result.status, 0, result.stderr + result.stdout);
 });
+
+test('post-restart identity smoke retries only transient 503 and fails closed', () => {
+    assert.ok(pwsh, 'PowerShell 7 is required');
+    const harness = `
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile('${script.replaceAll("'", "''")}', [ref]$tokens, [ref]$errors)
+if ($errors.Count -ne 0) { throw 'Deployment script does not parse.' }
+foreach ($name in @('Get-LocalBytes', 'Get-LocalJson', 'Assert-ServerIdentity', 'Wait-PostRestartIdentity')) {
+    $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name }, $true)
+    if ($null -eq $definition) { throw "Expected deployment function $name is missing." }
+    Invoke-Expression $definition.Extent.Text
+}
+Add-Type -TypeDefinition @'
+using System;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+public sealed class ReadinessFixtureHandler : HttpMessageHandler {
+    private readonly int[] statuses;
+    private readonly string[] bodies;
+    public int Calls { get; private set; }
+    public ReadinessFixtureHandler(int[] statuses, string[] bodies) {
+        if (statuses.Length != bodies.Length) throw new ArgumentException("Each response needs a body.");
+        this.statuses = statuses;
+        this.bodies = bodies;
+    }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
+        if (request.Method.Method != "GET" || request.RequestUri.AbsoluteUri != "http://127.0.0.1:8096/System/Info/Public") {
+            throw new InvalidOperationException("Fixture received an unexpected request.");
+        }
+        int index = Calls++;
+        if (index >= statuses.Length) throw new InvalidOperationException("Fixture received an extra request.");
+        return Task.FromResult(new HttpResponseMessage((HttpStatusCode)statuses[index]) {
+            Content = new StringContent(bodies[index], Encoding.UTF8, "application/json")
+        });
+    }
+}
+'@
+$expectedServerId = 'c1858e3f2d09468fb546ad9cfe438283'
+$valid = '{"Id":"c1858e3f2d09468fb546ad9cfe438283","ServerName":"PTV Testing","Version":"12.2.0"}'
+
+$handler = [ReadinessFixtureHandler]::new([int[]]@(503, 503, 200), [string[]]@('{}', '{}', $valid))
+$script:http = [Net.Http.HttpClient]::new($handler)
+try {
+    [void](Wait-PostRestartIdentity ([DateTimeOffset]::UtcNow.AddSeconds(5)))
+    if ($handler.Calls -ne 3) { throw "Transient 503 recovery used $($handler.Calls) requests instead of three." }
+}
+finally { $script:http.Dispose() }
+
+$wrongIdentities = @(
+    @{ label = 'server ID'; body = '{"Id":"wrong","ServerName":"PTV Testing","Version":"12.2.0"}' },
+    @{ label = 'server name'; body = '{"Id":"c1858e3f2d09468fb546ad9cfe438283","ServerName":"Other","Version":"12.2.0"}' },
+    @{ label = 'server version'; body = '{"Id":"c1858e3f2d09468fb546ad9cfe438283","ServerName":"PTV Testing","Version":"0.0.0"}' }
+)
+foreach ($case in $wrongIdentities) {
+    $handler = [ReadinessFixtureHandler]::new([int[]]@(200), [string[]]@($case.body))
+    $script:http = [Net.Http.HttpClient]::new($handler)
+    try {
+        $failure = $null
+        try { [void](Wait-PostRestartIdentity ([DateTimeOffset]::UtcNow.AddSeconds(-1))) }
+        catch { $failure = $_ }
+        if ($null -eq $failure -or $failure.Exception.Message -cne 'Local Jellyfin identity differs from registered PTV Testing.') {
+            throw "Wrong $($case.label) did not fail with the identity error."
+        }
+        if ($handler.Calls -ne 1) { throw "Wrong $($case.label) was retried." }
+    }
+    finally { $script:http.Dispose() }
+}
+
+$handler = [ReadinessFixtureHandler]::new([int[]]@(503), [string[]]@('{}'))
+$script:http = [Net.Http.HttpClient]::new($handler)
+try {
+    $failure = $null
+    try { [void](Wait-PostRestartIdentity ([DateTimeOffset]::UtcNow.AddSeconds(-1))) }
+    catch { $failure = $_ }
+    if ($null -eq $failure -or $failure.Exception.Message -notmatch 'readiness|timed out|did not become ready|remained.*503') {
+        throw 'Persistent HTTP 503 did not report a readiness deadline failure.'
+    }
+    if ($handler.Calls -ne 1) { throw 'Expired readiness deadline did not stop after one HTTP 503.' }
+}
+finally { $script:http.Dispose() }
+
+$handler = [ReadinessFixtureHandler]::new([int[]]@(500), [string[]]@('{}'))
+$script:http = [Net.Http.HttpClient]::new($handler)
+try {
+    $failure = $null
+    try { [void](Wait-PostRestartIdentity ([DateTimeOffset]::UtcNow.AddSeconds(-1))) }
+    catch { $failure = $_ }
+    if ($null -eq $failure -or $failure.Exception.Message -cne 'Local /System/Info/Public returned HTTP 500.') {
+        throw 'HTTP 500 did not fail immediately with the original error.'
+    }
+    if ($handler.Calls -ne 1) { throw 'HTTP 500 was retried.' }
+}
+finally { $script:http.Dispose() }
+`;
+    const result = spawnSync(pwsh, ['-NoProfile', '-EncodedCommand',
+        Buffer.from(harness, 'utf16le').toString('base64')],
+    { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+});

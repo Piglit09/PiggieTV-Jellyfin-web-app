@@ -103,6 +103,18 @@ function Assert-ServerIdentity {
     }
     return $system
 }
+function Wait-PostRestartIdentity([DateTimeOffset]$Deadline) {
+    while ($true) {
+        try { return Assert-ServerIdentity }
+        catch {
+            if ($_.Exception.Message -cne 'Local /System/Info/Public returned HTTP 503.') { throw }
+            if ([DateTimeOffset]::UtcNow -ge $Deadline) {
+                throw 'Local Jellyfin readiness remained HTTP 503 after the Plugin restart.'
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
 function Assert-AdminIdentity {
     $user = Get-LocalJson '/Users/Me' $true
     if ($user.Policy.IsAdministrator -ne $true) { throw 'Development smoke token is not a Jellyfin administrator.' }
@@ -341,7 +353,8 @@ try {
         $restartAt = Start-OnlyJellyfin ([int]$process.ProcessId)
     }
     $phase = 'smoke'
-    [void](Assert-ServerIdentity)
+    if ($plugin) { [void](Wait-PostRestartIdentity ([DateTimeOffset]::UtcNow.AddSeconds(30))) }
+    else { [void](Assert-ServerIdentity) }
     $authSmoke = 'PENDING'
     if ($null -ne $AdminToken) {
         Assert-AdminIdentity
