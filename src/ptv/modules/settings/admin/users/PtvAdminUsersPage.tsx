@@ -108,7 +108,7 @@ function UserListSkeleton() {
 }
 
 export default function PtvAdminUsersPage() {
-    const { __legacyApiClient__: apiClient, api } = useApi();
+    const { __legacyApiClient__: apiClient, api, user: currentUser } = useApi();
     const navigate = useNavigate();
     const [ searchParams, setSearchParams ] = useSearchParams();
     const usersState = useAdminUsers(api, apiClient);
@@ -237,6 +237,7 @@ export default function PtvAdminUsersPage() {
             {addOpen && (
                 <Suspense fallback={null}>
                     <AddAdminUserDialog
+                        adminUserId={currentUser?.Id}
                         api={api}
                         apiClient={apiClient}
                         onClose={closeAdd}

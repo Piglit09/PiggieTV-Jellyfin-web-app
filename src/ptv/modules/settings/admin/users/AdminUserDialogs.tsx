@@ -5,10 +5,11 @@ import DialogTitle from '@mui/material/DialogTitle/DialogTitle';
 import type { Api } from '@jellyfin/sdk';
 import type { BaseItemDto } from '@jellyfin/sdk/lib/generated-client';
 import { useQuery } from '@tanstack/react-query';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { ApiClient } from 'jellyfin-apiclient';
 
+import { getCurrentPtvPluginApiClient } from '../../../../core/pluginApi';
 import { getResolvedAdminServerId } from '../adminServerIdentity';
 import {
     AdminUsersServiceError,
@@ -50,7 +51,61 @@ function normalizeCreationFolders(folders: readonly BaseItemDto[] | undefined) {
     });
 }
 
+type CreationPhase = 'reserving' | 'creating' | 'permissions' | 'home' | 'checking' | 'complete' | 'failed';
+type CreationIdentity = { api?: Api; adminUserId?: string; serverKey: string | null };
+
+function isCurrentIdentity(activeIdentity: React.MutableRefObject<CreationIdentity | null>, expected: CreationIdentity) {
+    return activeIdentity.current === expected;
+}
+
+function isCurrentCreationContext(activeIdentity: React.MutableRefObject<CreationIdentity | null>, expected: CreationIdentity, api: Api) {
+    return isCurrentIdentity(activeIdentity, expected) && Boolean(getCurrentPtvPluginApiClient()?.matchesSdkApi(api));
+}
+
+function updateForCurrentIdentity(
+    activeIdentity: React.MutableRefObject<CreationIdentity | null>,
+    expected: CreationIdentity,
+    update: () => void
+) {
+    if (expected.api && isCurrentCreationContext(activeIdentity, expected, expected.api)) update();
+}
+
+const CREATION_PROGRESS: Record<Exclude<CreationPhase, 'failed'>, string> = {
+    reserving: 'Reserving account creation…',
+    creating: 'Reservation created. Creating Jellyfin account…',
+    permissions: 'Jellyfin account created. Applying permissions…',
+    home: 'Permissions applied. Configuring Home access…',
+    checking: 'Checking Home access verification…',
+    complete: 'Completed. Account access verified.'
+};
+
+function creationFailureMessage(error: unknown, state: {
+    reservation: PendingNewAdminCreation | null;
+    reservationSaved: boolean;
+    reservationConfirmed: boolean;
+    jellyfinCreateStarted: boolean;
+    jellyfinCreateConfirmed: boolean;
+    confirmedUserId: string | null;
+}): string {
+    if (!state.reservationSaved || !state.reservation) {
+        return safeMutationMessage(error, 'The creation request could not be prepared. No account creation was started.');
+    }
+    const { creationOperationId, username } = state.reservation;
+    if (!state.reservationConfirmed) {
+        return `Failed — recovery required while reserving account creation. The Plugin did not confirm the creation reservation for ${username}. Its outcome is unknown. No account creation was started. Review reservation ${creationOperationId} on the Users page before trying again.`;
+    }
+    if (!state.jellyfinCreateStarted) {
+        return `Failed — recovery required before Jellyfin account creation for ${username}. Plugin reservation ${creationOperationId} was confirmed, but no Jellyfin creation request was started. Review the reservation on the Users page before trying again.`;
+    }
+    if (!state.jellyfinCreateConfirmed) {
+        return `Failed — recovery required while creating Jellyfin account ${username}. ${safeMutationMessage(error, 'Jellyfin did not confirm whether the account was created.')} Plugin reservation ${creationOperationId} remains active. Review possible accounts on the Users page before trying again.`;
+    }
+    const confirmedIdentity = state.confirmedUserId ? ` (ID: ${state.confirmedUserId})` : '';
+    return `Failed — recovery required after Jellyfin confirmed account ${username}${confirmedIdentity}. Local recovery details could not be saved. Plugin reservation ${creationOperationId} remains active. Review the account and reservation on the Users page before trying again.`;
+}
+
 export function AddAdminUserDialog({
+    adminUserId,
     api,
     apiClient,
     onClose,
@@ -58,6 +113,7 @@ export function AddAdminUserDialog({
     onReservationChanged,
     open
 }: Readonly<{
+    adminUserId?: string;
     api?: Api;
     apiClient?: ApiClient;
     onClose: () => void;
@@ -84,7 +140,23 @@ export function AddAdminUserDialog({
     const [ pendingCreation, setPendingCreation ] = useState<PendingNewAdminCreation | null>(() => readPendingNewAdminCreation(serverKey));
     const [ busy, setBusy ] = useState(false);
     const [ message, setMessage ] = useState('');
+    const [ creationPhase, setCreationPhase ] = useState<CreationPhase | null>(null);
     const busyRef = useRef(false);
+    const activeIdentityRef = useRef<CreationIdentity | null>(null);
+    const operationTokenRef = useRef(0);
+
+    useLayoutEffect(() => {
+        const identity = { adminUserId, api, serverKey };
+        activeIdentityRef.current = open ? identity : null;
+        operationTokenRef.current += 1;
+        busyRef.current = false;
+        setBusy(false);
+        return () => {
+            if (activeIdentityRef.current === identity) activeIdentityRef.current = null;
+            operationTokenRef.current += 1;
+            busyRef.current = false;
+        };
+    }, [adminUserId, api, open, serverKey]);
 
     const clear = useCallback(() => {
         setUsername('');
@@ -97,7 +169,15 @@ export function AddAdminUserDialog({
         setPendingCreation(null);
         setMessage('');
         setBusy(false);
+        setCreationPhase(null);
+        operationTokenRef.current += 1;
         busyRef.current = false;
+    }, []);
+
+    const finishOperation = useCallback((identity: CreationIdentity, operationToken: number) => {
+        if (operationTokenRef.current !== operationToken || !isCurrentIdentity(activeIdentityRef, identity)) return;
+        busyRef.current = false;
+        setBusy(false);
     }, []);
 
     useEffect(() => {
@@ -108,14 +188,16 @@ export function AddAdminUserDialog({
         const pending = readPendingNewAdminUser(serverKey);
         const creation = readPendingNewAdminCreation(serverKey);
         setPendingCreation(creation);
-        if (pending) {
-            setCreatedUser(pending);
-            setUsername(pending.username);
-            setAdministrator(pending.administrator);
-            setAllLibraries(pending.allLibraries);
-            setSelectedFolderIds(pending.selectedFolderIds);
-        }
-    }, [clear, open, serverKey]);
+        setCreatedUser(pending);
+        setUsername(pending?.username || '');
+        setPassword('');
+        setConfirmPassword('');
+        setAdministrator(pending?.administrator || false);
+        setAllLibraries(pending?.allLibraries ?? true);
+        setSelectedFolderIds(pending?.selectedFolderIds || []);
+        setMessage('');
+        setCreationPhase(null);
+    }, [adminUserId, api, clear, open, serverKey]);
 
     const close = useCallback(() => {
         if (busy) return;
@@ -129,33 +211,55 @@ export function AddAdminUserDialog({
     }, []);
     const verifyCreated = useCallback(async (pending: PendingNewAdminUser, resume: boolean) => {
         if (!api || !serverKey) return;
+        const identity = activeIdentityRef.current;
+        if (!identity || identity.api !== api || identity.serverKey !== serverKey) return;
+        const progress: { phase: 'permissions' | 'home' } = { phase: 'home' };
         try {
-            if (resume) await resumePendingNewAdminUser(api, pending);
-            else await bootstrapNewAdminUser(api, pending);
+            if (resume) {
+                updateForCurrentIdentity(activeIdentityRef, identity, () => setCreationPhase('checking'));
+                await resumePendingNewAdminUser(api, pending);
+            } else {
+                updateForCurrentIdentity(activeIdentityRef, identity, () => setCreationPhase('home'));
+                await bootstrapNewAdminUser(api, pending, phase => {
+                    progress.phase = phase;
+                    updateForCurrentIdentity(activeIdentityRef, identity, () => setCreationPhase(phase));
+                }, () => isCurrentCreationContext(activeIdentityRef, identity, api));
+            }
             clearPendingNewAdminUser(serverKey, pending.id);
             clearPendingNewAdminCreation(serverKey, pending.creationOperationId);
-            setPassword('');
-            setConfirmPassword('');
-            onCreated(pending.id);
+            updateForCurrentIdentity(activeIdentityRef, identity, () => {
+                setPassword('');
+                setConfirmPassword('');
+                setCreationPhase('complete');
+                onCreated(pending.id);
+            });
         } catch (error) {
-            setPassword('');
-            setConfirmPassword('');
-            setCreatedUser(pending);
-            setMessage(`${pending.username} was created, but verification is pending. ${safeMutationMessage(error, 'Check verification again, or open this account for administrator recovery.')}`);
+            const stage = resume ? 'checking Home access verification' :
+                progress.phase === 'permissions' ? 'applying permissions' : 'configuring Home access';
+            updateForCurrentIdentity(activeIdentityRef, identity, () => {
+                setPassword('');
+                setConfirmPassword('');
+                setCreatedUser(pending);
+                setCreationPhase('failed');
+                setMessage(`${pending.username} was created, but ${stage} failed — recovery required. ${safeMutationMessage(error, 'Check verification again, or open this account for administrator recovery.')}`);
+            });
         }
     }, [api, onCreated, serverKey]);
     const submit = useCallback(async (event: React.FormEvent) => {
         event.preventDefault();
         if (!api || !serverKey || busy || busyRef.current) return;
+        const identity = activeIdentityRef.current;
+        if (!identity || identity.api !== api || identity.serverKey !== serverKey) return;
         if (createdUser) {
+            const operationToken = ++operationTokenRef.current;
             busyRef.current = true;
             setBusy(true);
             setMessage('');
+            setCreationPhase('checking');
             try {
                 await verifyCreated(createdUser, true);
             } finally {
-                busyRef.current = false;
-                setBusy(false);
+                finishOperation(identity, operationToken);
             }
             return;
         }
@@ -178,12 +282,17 @@ export function AddAdminUserDialog({
             return;
         }
 
+        const operationToken = ++operationTokenRef.current;
         busyRef.current = true;
         setBusy(true);
         setMessage('');
+        setCreationPhase('reserving');
         let reservation: PendingNewAdminCreation | null = null;
         let reservationSaved = false;
         let reservationConfirmed = false;
+        let jellyfinCreateStarted = false;
+        let jellyfinCreateConfirmed = false;
+        let confirmedUserId: string | null = null;
         try {
             reservation = createPendingNewAdminCreation({
                 administrator,
@@ -197,13 +306,17 @@ export function AddAdminUserDialog({
             onReservationChanged?.();
             await reserveNewAdminUserCreation(api, reservation);
             reservationConfirmed = true;
-            onReservationChanged?.();
+            if (!isCurrentCreationContext(activeIdentityRef, identity, api)) return;
+            updateForCurrentIdentity(activeIdentityRef, identity, () => onReservationChanged?.());
             reservation = { ...reservation, stage: 'create-started' };
             savePendingNewAdminCreation(serverKey, reservation);
+            updateForCurrentIdentity(activeIdentityRef, identity, () => setCreationPhase('creating'));
+            jellyfinCreateStarted = true;
             const user = await createAdminUser(api, {
                 password: password || undefined,
                 username: username.trim()
             });
+            jellyfinCreateConfirmed = true;
             const pending = createPendingNewAdminUser({
                 administrator,
                 allLibraries,
@@ -212,25 +325,32 @@ export function AddAdminUserDialog({
                 selectedFolderIds: allLibraries ? [] : [ ...selectedFolderIds ],
                 username: user.Name || username.trim()
             });
-            setCreatedUser(pending);
-            setPassword('');
-            setConfirmPassword('');
+            confirmedUserId = pending.id;
+            updateForCurrentIdentity(activeIdentityRef, identity, () => {
+                setCreatedUser(pending);
+                setPassword('');
+                setConfirmPassword('');
+            });
             savePendingNewAdminUser(serverKey, pending);
+            if (!isCurrentCreationContext(activeIdentityRef, identity, api)) return;
             await verifyCreated(pending, false);
         } catch (error) {
-            setPassword('');
-            setConfirmPassword('');
-            if (!reservationSaved) {
-                setMessage(safeMutationMessage(error, 'The creation request could not be prepared. No account creation was started.'));
-            } else if (!reservationConfirmed) {
-                onReservationChanged?.();
-                setMessage(`The Plugin did not confirm the creation reservation for ${reservation!.username}. Its outcome is unknown. No account creation was started. Review reservation ${reservation!.creationOperationId} on the Users page before trying again.`);
-            } else {
-                setMessage(`The account creation or verification for ${reservation!.username} could not be confirmed. Plugin reservation ${reservation!.creationOperationId} was confirmed. Review possible accounts on the Users page before trying again.`);
-            }
+            updateForCurrentIdentity(activeIdentityRef, identity, () => {
+                setPassword('');
+                setConfirmPassword('');
+                setCreationPhase('failed');
+                setMessage(creationFailureMessage(error, {
+                    confirmedUserId,
+                    jellyfinCreateConfirmed,
+                    jellyfinCreateStarted,
+                    reservation,
+                    reservationConfirmed,
+                    reservationSaved
+                }));
+                if (reservationSaved && !reservationConfirmed) onReservationChanged?.();
+            });
         } finally {
-            busyRef.current = false;
-            setBusy(false);
+            finishOperation(identity, operationToken);
         }
     }, [
         api,
@@ -241,6 +361,7 @@ export function AddAdminUserDialog({
         createdUser,
         foldersQuery.data,
         foldersQuery.isError,
+        finishOperation,
         password,
         pendingCreation,
         onReservationChanged,
@@ -338,12 +459,17 @@ export function AddAdminUserDialog({
                             Library access could not be loaded. The account will not be created until it is available.
                         </p>
                     )}
-                    {createdUser && (
+                    {busy && creationPhase && creationPhase !== 'failed' && (
+                        <p aria-live='polite' className='ptv-admin-user-status-message' role='status'>
+                            {CREATION_PROGRESS[creationPhase]}
+                        </p>
+                    )}
+                    {createdUser && !busy && (
                         <p className='ptv-admin-user-status-message' role='status'>
                             {createdUser.username} was created (ID: {createdUser.id}). Plugin verification is required before Home access. This account remains available for administrator recovery after closing or reloading this page.
                         </p>
                     )}
-                    {pendingCreation && !createdUser && (
+                    {pendingCreation && !createdUser && !busy && (
                         <p className='ptv-admin-user-status-message' role='status'>
                             The creation request for {pendingCreation.username} is unresolved (ID: {pendingCreation.creationOperationId}). Review its Plugin reservation and possible Jellyfin accounts on the Users page before creating another one.
                         </p>

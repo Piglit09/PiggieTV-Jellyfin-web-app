@@ -403,4 +403,71 @@ describe('account creation recovery and verification coordination', () => {
         expect(container.textContent).toContain('account creation may have started');
         expect(buttonWithText(container, 'Start verification batch')?.disabled).toBe(true);
     });
+
+    it('accepts wire-shaped recovered status without a user ID and shows possible accounts', async () => {
+        const key = 'ptv-admin-new-user-creation:server-a';
+        localStorage.setItem(key, JSON.stringify({
+            administrator: false, allLibraries: false, creationOperationId: reservationId,
+            selectedFolderIds: [ possibleUserId ], stage: 'create-started', username: 'Nova'
+        }));
+        mocks.getOperationStatus.mockResolvedValue({
+            creationOperationId: reservationId, markedUserIds: [ possibleUserId ],
+            state: 'recovered', version: 1
+        });
+
+        await render(<PtvAdminCreationRecovery api={api} apiClient={apiClient} users={[]} />);
+        await act(async () => buttonWithText(container, 'Check creation request')?.click());
+        await flushAsync();
+
+        expect(localStorage.getItem(key)).toBeNull();
+        expect(container.textContent).toContain('Possible account from settled request');
+        expect(container.querySelector(`a[href="/settings/admin/users/${possibleUserId}"]`)).not.toBeNull();
+        expect(mocks.bind).not.toHaveBeenCalled();
+        expect(mocks.recover).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { stage: 'prepared', shouldClear: true },
+        { stage: 'create-started', shouldClear: false }
+    ] as const)('handles wire-shaped absent status without a user ID for $stage creation', async ({ stage, shouldClear }) => {
+        const key = 'ptv-admin-new-user-creation:server-a';
+        localStorage.setItem(key, JSON.stringify({
+            administrator: false, allLibraries: true, creationOperationId: reservationId,
+            selectedFolderIds: [], stage, username: 'Nova'
+        }));
+        mocks.getOperationStatus.mockResolvedValue({
+            creationOperationId: reservationId, markedUserIds: [], state: 'absent', version: 1
+        });
+
+        await render(<PtvAdminCreationRecovery api={api} apiClient={apiClient} users={[]} />);
+        await act(async () => buttonWithText(container, 'Check creation request')?.click());
+        await flushAsync();
+
+        expect(localStorage.getItem(key) === null).toBe(shouldClear);
+        const expectedMessage = shouldClear ? 'No account creation was started from it' : 'account creation may have started';
+        expect(container.textContent).toContain(expectedMessage);
+        expect(mocks.bind).not.toHaveBeenCalled();
+        expect(mocks.recover).not.toHaveBeenCalled();
+    });
+
+    it.each([ 'recovered', 'absent' ] as const)('rejects %s status that unexpectedly names a user', async state => {
+        const key = 'ptv-admin-new-user-creation:server-a';
+        localStorage.setItem(key, JSON.stringify({
+            administrator: false, allLibraries: true, creationOperationId: reservationId,
+            selectedFolderIds: [], stage: 'prepared', username: 'Nova'
+        }));
+        mocks.getOperationStatus.mockResolvedValue({
+            creationOperationId: reservationId, markedUserIds: [], state,
+            userId: possibleUserId, version: 1
+        });
+
+        await render(<PtvAdminCreationRecovery api={api} apiClient={apiClient} users={[]} />);
+        await act(async () => buttonWithText(container, 'Check creation request')?.click());
+        await flushAsync();
+
+        expect(localStorage.getItem(key)).not.toBeNull();
+        expect(container.textContent).toContain('creation hold remains');
+        expect(mocks.bind).not.toHaveBeenCalled();
+        expect(mocks.recover).not.toHaveBeenCalled();
+    });
 });

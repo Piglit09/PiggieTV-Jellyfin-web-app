@@ -175,7 +175,8 @@ export type HomeUserCreationReservation = {
     creationOperationId: string;
     state: 'reserved';
     migrationVerificationHeld: true;
-    userId: null;
+    /** Jellyfin may omit a nullable userId until the creation is bound. */
+    userId?: null;
     bootstrapRequired: false;
 };
 export type HomeUserCreationBinding = {
@@ -194,7 +195,8 @@ export type HomeUserCreationOperationStatus = {
     version: 1;
     creationOperationId: string;
     state: 'reserved' | 'bound' | 'recovered' | 'absent';
-    userId: string | null;
+    /** Unbound statuses may omit the nullable Jellyfin user ID. */
+    userId?: string | null;
     markedUserIds: string[];
 };
 export type HomeUserCreationRecovery = {

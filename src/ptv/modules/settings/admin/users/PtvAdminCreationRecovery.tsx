@@ -45,14 +45,15 @@ function classifyCreationStatus(status: HomeUserCreationOperationStatus, hint: P
             message: 'Another administrator bound this creation request. Open the account to review its access; Home remains unverified until Plugin proof completes.'
         };
     }
-    if (status.state === 'recovered' && status.userId === null) {
+    if (status.state === 'recovered' && (status.userId === null || status.userId === undefined)) {
         return {
             boundId: null,
             clearHold: true,
             message: 'This creation request was already settled. Review any possible new accounts before choosing their intended access.'
         };
     }
-    if (status.state === 'absent' && status.userId === null && status.markedUserIds.length === 0) {
+    if (status.state === 'absent' && (status.userId === null || status.userId === undefined)
+        && status.markedUserIds.length === 0) {
         if (hint.stage === 'prepared') {
             return {
                 boundId: null,

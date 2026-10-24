@@ -185,7 +185,7 @@ export async function reserveNewAdminUserCreation(api: Api, pending: PendingNewA
     const result = await clientFor(api).reserveHomeUserCreation({ creationOperationId: pending.creationOperationId });
     if (result.version !== 1 || normalizeGuid(result.creationOperationId) !== pending.creationOperationId
         || result.state !== 'reserved' || result.migrationVerificationHeld !== true
-        || result.userId !== null || result.bootstrapRequired !== false) {
+        || (result.userId !== null && result.userId !== undefined) || result.bootstrapRequired !== false) {
         throw new Error('Plugin did not confirm the creation reservation. No account can be created yet.');
     }
     return result;
@@ -210,16 +210,29 @@ function requireVerified(response: HomeUserAccessResponse, pending: PendingNewAd
     return response;
 }
 
+function requireCurrentCreationContext(isCurrent?: () => boolean) {
+    if (isCurrent && !isCurrent()) {
+        throw new Error('The administrator session changed during account creation. Open this account for administrator recovery.');
+    }
+}
+
 /** Begins the Plugin gate before either Jellyfin policy write, including equal default values. */
-export async function bootstrapNewAdminUser(api: Api, pending: PendingNewAdminUser): Promise<HomeUserAccessResponse> {
+export async function bootstrapNewAdminUser(
+    api: Api,
+    pending: PendingNewAdminUser,
+    onPhase?: (phase: 'permissions' | 'home') => void,
+    isCurrent?: () => boolean
+): Promise<HomeUserAccessResponse> {
     if (!isPendingNewAdminUser(pending)) throw new Error('Created account recovery details are invalid.');
     const client = clientFor(api);
+    requireCurrentCreationContext(isCurrent);
     const binding = await client.bindHomeUserCreation(pending.creationOperationId, { userId: pending.id });
     if (binding.version !== 1 || normalizeGuid(binding.creationOperationId) !== pending.creationOperationId
         || normalizeGuid(binding.userId) !== pending.id || binding.state !== 'bound'
         || binding.migrationVerificationHeld !== false || binding.bootstrapRequired !== true) {
         throw new Error('Plugin did not bind the created account. Its access remains unverified.');
     }
+    requireCurrentCreationContext(isCurrent);
     const begun = await client.beginHomeUserAccess({
         expectedAccess: null,
         intendedAccess: intendedAccess(pending),
@@ -231,13 +244,18 @@ export async function bootstrapNewAdminUser(api: Api, pending: PendingNewAdminUs
         || !begun.held || begun.policyProven || begun.state !== 'pending' || !begun.writeAllowed) {
         throw new Error('The account exists, but bootstrap cannot write its policy again. Use administrator recovery.');
     }
+    requireCurrentCreationContext(isCurrent);
+    onPhase?.('permissions');
+    await updateAdminUserLibraryAccess(api, pending.id, pending.allLibraries ?
+        { mode: 'all' } :
+        { mode: 'selected', selectedFolderIds: pending.selectedFolderIds });
+    requireCurrentCreationContext(isCurrent);
     await updateNewAdminUserPolicy(api, pending.id, {
         IsAdministrator: pending.administrator,
         IsDisabled: false
     });
-    await updateAdminUserLibraryAccess(api, pending.id, pending.allLibraries ?
-        { mode: 'all' } :
-        { mode: 'selected', selectedFolderIds: pending.selectedFolderIds });
+    requireCurrentCreationContext(isCurrent);
+    onPhase?.('home');
     return requireVerified(await client.completeHomeUserAccess(pending.operationId), pending);
 }
 
@@ -289,6 +307,31 @@ function sameAccess(left: HomeUserAccess, right: HomeUserAccess) {
             === [ ...right.enabledFolders ].sort((a, b) => a.localeCompare(b)).join('|');
 }
 
+async function writeHeldAdminUserAccess(
+    api: Api,
+    userId: string,
+    current: HomeUserAccess | null,
+    intended: HomeUserAccess
+) {
+    const writePolicy = () => updateNewAdminUserPolicy(api, userId, {
+        IsAdministrator: intended.isAdministrator,
+        IsDisabled: intended.isDisabled
+    });
+    const writeLibraries = () => updateAdminUserLibraryAccess(api, userId, intended.enableAllFolders ?
+        { mode: 'all' } :
+        { mode: 'selected', selectedFolderIds: intended.enabledFolders });
+    // Reduce an enabled account's effective role before any library expansion.
+    // When enabling or elevating it, apply the intended libraries first.
+    if (current && !current.isDisabled
+        && (intended.isDisabled || (current.isAdministrator && !intended.isAdministrator))) {
+        await writePolicy();
+        await writeLibraries();
+    } else {
+        await writeLibraries();
+        await writePolicy();
+    }
+}
+
 /** Administrator-selected policy for a recovered, controlled-created account. */
 export async function verifyUnprovenAdminUserAccess(
     api: Api,
@@ -327,13 +370,7 @@ export async function verifyUnprovenAdminUserAccess(
         || !begun.held || begun.policyProven || begun.state !== 'pending' || !begun.writeAllowed) {
         throw new Error('Plugin did not authorize the bootstrap policy write.');
     }
-    await updateNewAdminUserPolicy(api, id, {
-        IsAdministrator: intended.isAdministrator,
-        IsDisabled: intended.isDisabled
-    });
-    await updateAdminUserLibraryAccess(api, id, intended.enableAllFolders ?
-        { mode: 'all' } :
-        { mode: 'selected', selectedFolderIds: intended.enabledFolders });
+    await writeHeldAdminUserAccess(api, id, normalizeAccess(current.currentAccess, id), intended);
     const completed = await client.completeHomeUserAccess(operationId);
     if (!matchesOperation(completed, id, operationId)
         || completed.held || !completed.policyProven
@@ -370,13 +407,7 @@ export async function supersedeHeldAdminUserAccess(api: Api, userId: string): Pr
         || !begun.held || begun.policyProven || begun.state !== 'pending' || !begun.writeAllowed) {
         throw new Error('Plugin did not authorize a new policy write. The account remains held for administrator recovery.');
     }
-    await updateNewAdminUserPolicy(api, id, {
-        IsAdministrator: intended.isAdministrator,
-        IsDisabled: intended.isDisabled
-    });
-    await updateAdminUserLibraryAccess(api, id, intended.enableAllFolders ?
-        { mode: 'all' } :
-        { mode: 'selected', selectedFolderIds: intended.enabledFolders });
+    await writeHeldAdminUserAccess(api, id, currentAccess, intended);
     const completed = await client.completeHomeUserAccess(operationId);
     if (!matchesOperation(completed, id, operationId)
         || completed.held || !completed.policyProven

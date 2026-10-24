@@ -89,7 +89,6 @@ describe('new administrator user bootstrap', () => {
                 creationOperationId: request.creationOperationId,
                 migrationVerificationHeld: true,
                 state: 'reserved',
-                userId: null,
                 version: 1
             };
         });
@@ -130,10 +129,10 @@ describe('new administrator user bootstrap', () => {
         expect(readPendingNewAdminCreation('server-a')).toBeNull();
     });
 
-    it('begins before both stock policy writes and accepts only Plugin terminal readback', async () => {
+    it('begins before stock writes, restricts libraries first, and accepts only Plugin terminal readback', async () => {
         const result = await bootstrapNewAdminUser(api, pending());
 
-        expect(calls).toEqual([ 'bind', 'begin', 'policy', 'libraries', 'complete' ]);
+        expect(calls).toEqual([ 'bind', 'begin', 'libraries', 'policy', 'complete' ]);
         expect(mocks.bind).toHaveBeenCalledWith(CREATION_ID, { userId: USER_ID });
         expect(mocks.begin).toHaveBeenCalledWith({
             expectedAccess: null,
@@ -189,7 +188,7 @@ describe('new administrator user bootstrap', () => {
         };
 
         await expect(verifyUnprovenAdminUserAccess(api, USER_ID, intended)).resolves.toMatchObject({ policyProven: true });
-        expect(calls).toEqual([ 'begin', 'policy', 'libraries', 'complete' ]);
+        expect(calls).toEqual([ 'begin', 'libraries', 'policy', 'complete' ]);
         expect(mocks.begin.mock.calls[0][0]).toMatchObject({
             expectedAccess: null,
             intendedAccess: intended,
@@ -255,7 +254,7 @@ describe('new administrator user bootstrap', () => {
         });
 
         await expect(verifyUnprovenAdminUserAccess(api, USER_ID, restrictive)).resolves.toMatchObject({ policyProven: true });
-        expect(calls).toEqual([ 'begin', 'policy', 'libraries', 'complete' ]);
+        expect(calls).toEqual([ 'begin', 'libraries', 'policy', 'complete' ]);
         expect(mocks.begin.mock.calls[0][0]).toMatchObject({
             expectedAccess: restrictive,
             intendedAccess: restrictive,
@@ -570,7 +569,7 @@ describe('new administrator user bootstrap', () => {
 
         const result = await supersedeHeldAdminUserAccess(api, USER_ID);
         expect(result.state).toBe('policy-attested');
-        expect(calls).toEqual([ 'begin', 'policy', 'libraries', 'complete' ]);
+        expect(calls).toEqual([ 'begin', 'libraries', 'policy', 'complete' ]);
         expect(mocks.begin.mock.calls[0][0]).toMatchObject({
             expectedAccess: currentAccess,
             intendedAccess,
@@ -583,6 +582,51 @@ describe('new administrator user bootstrap', () => {
         expect(mocks.updateLibraries).toHaveBeenCalledWith(api, USER_ID, {
             mode: 'selected', selectedFolderIds: intendedAccess.enabledFolders
         });
+    });
+
+    it('removes active administrator privilege before a held recovery expands library access', async () => {
+        const currentAccess = {
+            enableAllFolders: false,
+            enabledFolders: [ 'dddddddddddddddddddddddddddddddd' ],
+            isAdministrator: true,
+            isDisabled: false,
+            userId: USER_ID
+        };
+        const intendedAccess = {
+            ...currentAccess,
+            enableAllFolders: true,
+            enabledFolders: [],
+            isAdministrator: false
+        };
+        mocks.current.mockResolvedValue(view({
+            currentAccess,
+            held: true,
+            intendedAccess,
+            policyProven: false,
+            state: 'failed'
+        }));
+        mocks.begin.mockImplementation(async request => {
+            calls.push('begin');
+            return view({
+                held: true,
+                operationId: request.operationId,
+                policyProven: false,
+                state: 'pending',
+                writeAllowed: true
+            });
+        });
+        mocks.complete.mockImplementation(async operationId => {
+            calls.push('complete');
+            return view({ operationId });
+        });
+
+        await supersedeHeldAdminUserAccess(api, USER_ID);
+        expect(calls).toEqual([ 'begin', 'policy', 'libraries', 'complete' ]);
+        expect(mocks.updatePolicy).toHaveBeenCalledWith(api, USER_ID, {
+            IsAdministrator: false,
+            IsDisabled: false
+        });
+        expect(mocks.updateLibraries).toHaveBeenCalledWith(api, USER_ID, { mode: 'all' });
     });
 
     it('does not write when superseding Begin is a replay or Plugin intent is unavailable', async () => {
@@ -636,6 +680,25 @@ describe('new administrator user bootstrap', () => {
         expect(mocks.reserve).toHaveBeenCalledWith({ creationOperationId: creation.creationOperationId });
         clearPendingNewAdminCreation('server-a', creation.creationOperationId);
         expect(readPendingNewAdminCreation('server-a')).toBeNull();
+    });
+
+    it('rejects a reserved response that already names a user', async () => {
+        const creation = createPendingNewAdminCreation({
+            administrator: false,
+            allLibraries: false,
+            selectedFolderIds: [ USER_ID ],
+            username: 'Nova'
+        });
+        mocks.reserve.mockResolvedValueOnce({
+            bootstrapRequired: false,
+            creationOperationId: creation.creationOperationId,
+            migrationVerificationHeld: true,
+            state: 'reserved',
+            userId: USER_ID,
+            version: 1
+        });
+
+        await expect(reserveNewAdminUserCreation(api, creation)).rejects.toThrow('Plugin did not confirm');
     });
 
     it('refuses policy writes when the Plugin does not confirm binding the created ID', async () => {
