@@ -24,6 +24,7 @@ public sealed record PtvHomeUserAccessView
     [JsonPropertyName("state")] public string State { get; init; } = "unproven";
     [JsonPropertyName("operationId")] public Guid? OperationId { get; init; }
     [JsonPropertyName("writeAllowed")] public bool WriteAllowed { get; init; }
+    [JsonIgnore] public Guid? VerificationBatchId { get; init; }
     [JsonIgnore] public Guid? SupersededOperationId { get; init; }
     [JsonIgnore] public PtvHomeAccessDefinition? ExpectedAccess { get; init; }
     [JsonIgnore] public PtvHomeAccessDefinition? IntendedAccess { get; init; }
@@ -42,6 +43,7 @@ public sealed record PtvHomeUserAccessAdminView
     [JsonPropertyName("state")] public string State { get; init; } = "unproven";
     [JsonPropertyName("operationId")] public Guid? OperationId { get; init; }
     [JsonPropertyName("writeAllowed")] public bool WriteAllowed { get; init; }
+    [JsonPropertyName("verificationBatchId")] public Guid? VerificationBatchId { get; init; }
     [JsonPropertyName("supersededOperationId")] public Guid? SupersededOperationId { get; init; }
     [JsonPropertyName("currentAccess")] public PtvHomeAccessDefinition? CurrentAccess { get; init; }
     [JsonPropertyName("expectedAccess")] public PtvHomeAccessDefinition? ExpectedAccess { get; init; }
@@ -60,6 +62,7 @@ public sealed record PtvHomeUserAccessAdminView
         State = view.State,
         OperationId = view.OperationId,
         WriteAllowed = view.WriteAllowed,
+        VerificationBatchId = view.VerificationBatchId,
         SupersededOperationId = view.SupersededOperationId,
         CurrentAccess = current,
         ExpectedAccess = view.ExpectedAccess,
@@ -128,6 +131,16 @@ public sealed record PtvHomeUserCreationView
     [JsonPropertyName("migrationVerificationHeld")] public bool MigrationVerificationHeld { get; init; }
     [JsonPropertyName("userId")] public string? UserId { get; init; }
     [JsonPropertyName("bootstrapRequired")] public bool BootstrapRequired { get; init; }
+}
+
+/// <summary>Read-only durable state of one administrator-controlled creation operation.</summary>
+public sealed record PtvHomeUserCreationStatus
+{
+    [JsonPropertyName("version")] public int Version { get; init; } = 1;
+    [JsonPropertyName("creationOperationId")] public Guid CreationOperationId { get; init; }
+    [JsonPropertyName("state")] public string State { get; init; } = "absent";
+    [JsonPropertyName("userId")] public string? UserId { get; init; }
+    [JsonPropertyName("markedUserIds")] public string[] MarkedUserIds { get; init; } = [];
 }
 
 /// <summary>Conservative administrator recovery of an uncertain create.</summary>

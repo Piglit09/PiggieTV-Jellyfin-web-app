@@ -243,6 +243,13 @@ public sealed class PtvHomeUserAccessLedger : IPtvHomeUserAccessLedger
             if (document.Records.TryGetValue(actual.UserId, out var prior)
                 && (prior.State is "pending" or "failed" || prior.Mode != "verification"))
                 throw new InvalidOperationException("Controlled user authority cannot be replaced by migration verification.");
+            if (prior is { State: "policy-attested", Mode: "verification" }
+                && prior.VerificationBatchId == batchId
+                && Same(prior.IntendedAccess, intended))
+            {
+                var existing = View(userId, prior, actual, topologyEpoch, currentLibraries: libraries);
+                if (existing.PolicyProven) return existing;
+            }
             var record = new PtvHomeUserAccessRecord
             {
                 UserId = actual.UserId,
@@ -250,6 +257,7 @@ public sealed class PtvHomeUserAccessLedger : IPtvHomeUserAccessLedger
                 TopologyEpoch = topologyEpoch,
                 State = "policy-attested",
                 Mode = "verification",
+                VerificationBatchId = batchId,
                 OperationId = Guid.NewGuid(),
                 IntendedAccess = intended,
                 AttestedAccess = actual,
@@ -341,6 +349,35 @@ public sealed class PtvHomeUserAccessLedger : IPtvHomeUserAccessLedger
             document.CreationReservations.Remove(creationOperationId);
             await PersistAsync(document, cancellationToken).ConfigureAwait(false);
             return new PtvHomeUserCreationRecovery { CreationOperationId = creationOperationId, MarkedUserIds = newIds };
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<PtvHomeUserCreationStatus> ReadCreationStatusAsync(Guid creationOperationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (creationOperationId == Guid.Empty)
+            throw new InvalidOperationException("Creation operation ID required.");
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // A missing file cannot prove an operation absent after a prior create.
+            var document = await LoadAsync(cancellationToken, requireExistingFile: true).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("User access authority requires administrator recovery.");
+            if (document.CreationBindings.TryGetValue(creationOperationId, out var bound))
+                return new PtvHomeUserCreationStatus
+                { CreationOperationId = creationOperationId, State = "bound", UserId = bound };
+            if (document.CreationRecoveries.TryGetValue(creationOperationId, out var recovered))
+                return new PtvHomeUserCreationStatus
+                { CreationOperationId = creationOperationId, State = "recovered", MarkedUserIds = [.. recovered] };
+            if (document.MigrationRecoveryRestricted
+                && !document.CreationReservations.ContainsKey(creationOperationId))
+                throw new InvalidOperationException("Creation operation provenance requires administrator recovery.");
+            return new PtvHomeUserCreationStatus
+            {
+                CreationOperationId = creationOperationId,
+                State = document.CreationReservations.ContainsKey(creationOperationId) ? "reserved" : "absent"
+            };
         }
         finally { _gate.Release(); }
     }
@@ -482,6 +519,7 @@ public sealed class PtvHomeUserAccessLedger : IPtvHomeUserAccessLedger
             PolicyProven = proven,
             State = recovery ? "recovery-required" : record?.State ?? "unproven",
             OperationId = record?.OperationId,
+            VerificationBatchId = record?.VerificationBatchId,
             SupersededOperationId = record?.SupersededOperationId,
             ExpectedAccess = record?.ExpectedAccess,
             IntendedAccess = record?.IntendedAccess,
@@ -560,10 +598,11 @@ public sealed class PtvHomeUserAccessLedger : IPtvHomeUserAccessLedger
         return ids.Select(id => id.ToString("N")).Order(StringComparer.Ordinal).ToArray();
     }
 
-    private async Task<PtvHomeUserAccessDocument?> LoadAsync(CancellationToken cancellationToken)
+    private async Task<PtvHomeUserAccessDocument?> LoadAsync(CancellationToken cancellationToken,
+        bool requireExistingFile = false)
     {
         if (_failed) return null;
-        if (!File.Exists(FilePath)) return new PtvHomeUserAccessDocument { ServerId = _serverId };
+        if (!File.Exists(FilePath)) return requireExistingFile ? null : new PtvHomeUserAccessDocument { ServerId = _serverId };
         try
         {
             var document = JsonSerializer.Deserialize<PtvHomeUserAccessDocument>(
@@ -584,6 +623,9 @@ public sealed class PtvHomeUserAccessLedger : IPtvHomeUserAccessLedger
             || document.Records is null || document.ControlledCreatedUserIds is null
             || document.CreationReservations is null || document.CreationBindings is null
             || document.CreationRecoveries is null
+            || document.CreationReservations.Keys.Any(id => document.CreationBindings.ContainsKey(id)
+                || document.CreationRecoveries.ContainsKey(id))
+            || document.CreationBindings.Keys.Any(id => document.CreationRecoveries.ContainsKey(id))
             || document.ControlledCreatedUserIds.Any(id => !Guid.TryParseExact(id, "N", out var created) || created == Guid.Empty)
             || document.CreationReservations.Count > 128
             || document.CreationReservations.Any(pair => pair.Key == Guid.Empty || pair.Value is null
@@ -608,6 +650,8 @@ public sealed class PtvHomeUserAccessLedger : IPtvHomeUserAccessLedger
                 || !ValidEpoch(pair.Value.TopologyEpoch) || pair.Value.OperationId == Guid.Empty
                 || pair.Value.State is not ("pending" or "failed" or "policy-attested")
                 || pair.Value.Mode is not ("existing" or "bootstrap" or "verification" or "preserve" or "reproof")
+                || (pair.Value.VerificationBatchId is not null
+                    && (pair.Value.Mode != "verification" || pair.Value.VerificationBatchId == Guid.Empty))
                 || (pair.Value.SupersededOperationId is not null && pair.Value.SupersededOperationId == pair.Value.OperationId)
                 || pair.Value.RecoveryHistory is null || pair.Value.RecoveryHistory.Length > 1000
                 || pair.Value.RecoveryHistory.Any(entry => entry.OperationId == Guid.Empty
@@ -712,6 +756,7 @@ public sealed class PtvHomeUserAccessLedger : IPtvHomeUserAccessLedger
         public string TopologyEpoch { get; set; } = string.Empty;
         public string State { get; set; } = "pending";
         public string Mode { get; set; } = string.Empty;
+        public Guid? VerificationBatchId { get; set; }
         public Guid OperationId { get; set; }
         public Guid? SupersededOperationId { get; set; }
         public PtvHomeUserAccessRecoveryEntry[] RecoveryHistory { get; set; } = [];

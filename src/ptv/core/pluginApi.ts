@@ -102,6 +102,7 @@ export type HomeUserAccessResponse = {
     writeAllowed: boolean;
     /** Administrator current diagnostic only; core Begin/Complete omit these fields. */
     supersededOperationId?: string | null;
+    verificationBatchId?: string | null;
     currentAccess?: HomeUserAccess | null;
     expectedAccess?: HomeUserAccess | null;
     intendedAccess?: HomeUserAccess | null;
@@ -109,6 +110,38 @@ export type HomeUserAccessResponse = {
     migrationRecoveryRestricted?: boolean;
     lateUnverified?: boolean;
 };
+
+function invalidHomeAccessResponse(): never {
+    throw Object.assign(new Error('The Plugin returned an invalid Home access policy.'), {
+        code: 'PTV_PLUGIN_ACCESS_RESPONSE_INVALID'
+    });
+}
+
+function normalizeHomeAccessDefinition(value: unknown): HomeUserAccess {
+    if (!isRecord(value)) invalidHomeAccessResponse();
+    const camelKeys = [ 'userId', 'enableAllFolders', 'enabledFolders', 'isAdministrator', 'isDisabled' ];
+    const pascalKeys = [ 'UserId', 'EnableAllFolders', 'EnabledFolders', 'IsAdministrator', 'IsDisabled' ];
+    const hasCamel = camelKeys.some(key => key in value);
+    const hasPascal = pascalKeys.some(key => key in value);
+    if (hasCamel === hasPascal) invalidHomeAccessResponse();
+    const keys = hasPascal ? pascalKeys : camelKeys;
+    const [ userId, enableAllFolders, enabledFolders, isAdministrator, isDisabled ] = keys.map(key => value[key]);
+    if (typeof userId !== 'string' || typeof enableAllFolders !== 'boolean'
+        || !Array.isArray(enabledFolders) || !enabledFolders.every(folder => typeof folder === 'string')
+        || typeof isAdministrator !== 'boolean' || typeof isDisabled !== 'boolean') invalidHomeAccessResponse();
+    return { userId, enableAllFolders, enabledFolders, isAdministrator, isDisabled };
+}
+
+function normalizeHomeUserAccessResponse(value: unknown): HomeUserAccessResponse {
+    if (!isRecord(value)) invalidHomeAccessResponse();
+    const response = { ...value };
+    for (const field of [ 'currentAccess', 'expectedAccess', 'intendedAccess' ] as const) {
+        if (field in response && response[field] !== null && response[field] !== undefined) {
+            response[field] = normalizeHomeAccessDefinition(response[field]);
+        }
+    }
+    return response as HomeUserAccessResponse;
+}
 export type HomeUserVerificationBatch = {
     id: string;
     topologyEpoch: string;
@@ -156,6 +189,13 @@ export type HomeUserCreationBinding = {
 export type HomeUserCreationCurrent = {
     pendingCount: number;
     pending: Array<{ creationOperationId: string; candidateNewUserIds: string[] }>;
+};
+export type HomeUserCreationOperationStatus = {
+    version: 1;
+    creationOperationId: string;
+    state: 'reserved' | 'bound' | 'recovered' | 'absent';
+    userId: string | null;
+    markedUserIds: string[];
 };
 export type HomeUserCreationRecovery = {
     creationOperationId: string;
@@ -1947,11 +1987,11 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
             return requestPluginJson<HomeUserAccessResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/${encodeURIComponent(operationId)}/complete`, { ...options, body: {}, method: 'POST' });
         },
         getCurrentHomeUserAccess(userId: string, options?: PtvPluginRequestOptions) {
-            return requestPluginJson<HomeUserAccessResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/current`, {
+            return requestPluginJson<unknown>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/current`, {
                 ...options,
                 bypassCache: true,
                 params: { userId }
-            });
+            }).then(normalizeHomeUserAccessResponse);
         },
         createHomeUserVerificationBatch(options?: PtvPluginRequestOptions) {
             return requestPluginJson<HomeUserVerificationBatch>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/verification-batches`, {
@@ -1987,6 +2027,11 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
             return requestPluginJson<HomeUserCreationCurrent>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/creations/current`, {
                 ...options, bypassCache: true
             });
+        },
+        getHomeUserCreationOperationStatus(creationOperationId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserCreationOperationStatus>(apiClient,
+                `${PTV_PLUGIN_API.endpoints.homeUserAccess}/creations/${encodeURIComponent(creationOperationId)}/status`,
+                { ...options, bypassCache: true });
         },
         recoverHomeUserCreation(creationOperationId: string, body: { confirmCreationRequestSettled: true }, options?: PtvPluginRequestOptions) {
             return requestPluginJson<HomeUserCreationRecovery>(apiClient,

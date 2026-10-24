@@ -197,8 +197,7 @@ function normalizedRecoveryAccess(access: HomeUserAccess | null | undefined, use
         || !Array.isArray(access.enabledFolders)) return null;
     const enabledFolders = access.enabledFolders.map(canonicalAccessGuid);
     if (enabledFolders.some(id => !/^[a-f0-9]{32}$/.test(id))
-        || new Set(enabledFolders).size !== enabledFolders.length
-        || (access.enableAllFolders && enabledFolders.length > 0)) return null;
+        || new Set(enabledFolders).size !== enabledFolders.length) return null;
     return { ...access, enabledFolders, userId };
 }
 

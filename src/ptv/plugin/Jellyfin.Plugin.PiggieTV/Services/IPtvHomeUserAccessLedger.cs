@@ -32,6 +32,8 @@ public interface IPtvHomeUserAccessLedger
         CancellationToken cancellationToken = default);
     Task<PtvHomeUserCreationRecovery> RecoverCreationAsync(Guid creationOperationId,
         IReadOnlyCollection<Guid> currentUserIds, CancellationToken cancellationToken = default);
+    Task<PtvHomeUserCreationStatus> ReadCreationStatusAsync(Guid creationOperationId,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PtvHomeUserPendingCreation>> ReadPendingCreationsAsync(
         IReadOnlyCollection<Guid> currentUserIds, CancellationToken cancellationToken = default);
 }

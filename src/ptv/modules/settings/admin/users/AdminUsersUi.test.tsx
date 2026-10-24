@@ -56,6 +56,11 @@ const pluginMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../../core/pluginApi', () => ({
+    normalizePtvApiError: (error: { code?: string; status?: number }) => ({
+        code: error?.code,
+        kind: error?.status && error.status >= 500 ? 'server' : 'unknown',
+        status: error?.status
+    }),
     getCurrentPtvPluginApiClient: () => ({
         beginHomeUserAccess: pluginMocks.begin,
         bindHomeUserCreation: pluginMocks.bind,
@@ -1056,7 +1061,10 @@ describe('PiggieTV administrator users UI', () => {
             ]
         });
         pluginMocks.createBatch.mockResolvedValue(batch);
-        pluginMocks.verifyCandidate.mockResolvedValue({ state: 'policy-attested' });
+        pluginMocks.verifyCandidate.mockImplementation(async (_batchId, candidateId) => ({
+            accessEpoch: 'a'.repeat(64), held: false, operationId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            policyProven: true, state: 'policy-attested', userId: candidateId, version: 1, writeAllowed: false
+        }));
         const reviewedAccess = {
             enableAllFolders: false,
             enabledFolders: [ 'ffffffffffffffffffffffffffffffff' ],
@@ -1144,6 +1152,335 @@ describe('PiggieTV administrator users UI', () => {
         expect(panel.textContent).toContain('Verified 1');
         expect(panel.textContent).toContain('Needs verification 2');
         expect(panel.textContent).toContain('Batch needs verification 1');
+        expect(reviewButtons[1].disabled).toBe(false);
+    });
+
+    it('keeps the review request and its failure visible beside the selected account', async () => {
+        const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        let rejectReview!: (reason: unknown) => void;
+        pluginMocks.current.mockReturnValue(new Promise((_resolve, reject) => { rejectReview = reject; }));
+        pluginMocks.getBatch.mockResolvedValue({
+            candidateUserIds: [ userId ], id: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+            needsVerificationCount: 1, stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+        });
+        uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+        await render(<PtvAdminUsersPage />);
+        await flushAsync();
+        const candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+        await act(async () => { buttonWithText(candidate, 'Review access')?.click(); });
+        expect(candidate.textContent).toContain('Reviewing current access');
+
+        await act(async () => { rejectReview({ status: 503 }); await Promise.resolve(); });
+        await flushAsync();
+        expect(candidate.querySelector('[role="alert"]')?.textContent).toContain('Plugin');
+        expect(buttonWithText(candidate, 'Verify user')).toBeUndefined();
+    });
+
+    it('reviews broad access with saved library preferences and confirms those exact values', async () => {
+        const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const folderId = 'ffffffffffffffffffffffffffffffff';
+        const batchId = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        pluginMocks.getBatch.mockResolvedValue({
+            candidateUserIds: [ userId ], id: batchId,
+            needsVerificationCount: 1, stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+        });
+        pluginMocks.current.mockResolvedValue({
+            version: 1, userId,
+            currentAccess: {
+                enableAllFolders: true, enabledFolders: [ folderId ],
+                isAdministrator: false, isDisabled: false, userId
+            }
+        });
+        pluginMocks.verifyCandidate.mockImplementation(async (_batchId, candidateId) => ({
+            accessEpoch: 'a'.repeat(64), held: false, operationId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            policyProven: true, state: 'policy-attested', userId: candidateId, version: 1, writeAllowed: false
+        }));
+        uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+        await render(<PtvAdminUsersPage />);
+        await flushAsync();
+        const candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+        await act(async () => { buttonWithText(candidate, 'Review access')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        expect(candidate.textContent).toContain('All libraries');
+        expect(candidate.textContent).toContain(folderId);
+        await act(async () => {
+            candidate.querySelector<HTMLInputElement>('input[aria-label="Confirm current access for Alex"]')?.click();
+        });
+        await act(async () => { buttonWithText(candidate, 'Verify user')?.click(); await Promise.resolve(); });
+        expect(pluginMocks.verifyCandidate).toHaveBeenCalledWith(batchId, userId, {
+            confirmCurrentPolicy: true,
+            intendedAccess: {
+                enableAllFolders: true, enabledFolders: [ folderId ],
+                isAdministrator: false, isDisabled: false, userId
+            }
+        });
+    });
+
+    it('blocks existing-batch review while a creation reservation holds verification', async () => {
+        const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        pluginMocks.getSummary.mockResolvedValue({
+            currentBatchId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', held: true,
+            migrationRecoveryRestricted: false, needsVerificationCount: 1,
+            pendingCreationReservations: 1, recoveryRequired: false,
+            topologyEpoch: 'c'.repeat(64), totalCount: 1, verifiedCount: 0
+        });
+        pluginMocks.getBatch.mockResolvedValue({
+            candidateUserIds: [ userId ], id: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+            needsVerificationCount: 1, stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+        });
+        uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+        await render(<PtvAdminUsersPage />);
+        await flushAsync();
+        const candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+        expect(buttonWithText(candidate, 'Review access')?.disabled).toBe(true);
+        expect(container.textContent).toContain('creation reservation');
+        await act(async () => buttonWithText(candidate, 'Review access')?.click());
+        expect(pluginMocks.current).not.toHaveBeenCalled();
+    });
+
+    it('preserves Plugin-confirmed verification when the following status read fails', async () => {
+        const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const batchId = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        const batch = { candidateUserIds: [ userId ], id: batchId, needsVerificationCount: 1,
+            stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0 };
+        const access = { enableAllFolders: false, enabledFolders: [],
+            isAdministrator: false, isDisabled: false, userId };
+        pluginMocks.getBatch.mockResolvedValueOnce(batch).mockRejectedValueOnce(new Error('status unavailable'));
+        pluginMocks.current.mockResolvedValue({ version: 1, userId, currentAccess: access });
+        pluginMocks.verifyCandidate.mockResolvedValue({
+            accessEpoch: 'a'.repeat(64), held: false, operationId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            version: 1, userId, state: 'policy-attested', policyProven: true, writeAllowed: false
+        });
+        uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+        await render(<PtvAdminUsersPage />);
+        await flushAsync();
+        const candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+        await act(async () => { buttonWithText(candidate, 'Review access')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        await act(async () => {
+            candidate.querySelector<HTMLInputElement>('input[aria-label="Confirm current access for Alex"]')?.click();
+        });
+        await act(async () => { buttonWithText(candidate, 'Verify user')?.click(); await Promise.resolve(); });
+        await flushAsync();
+
+        expect(candidate.textContent).toContain('Plugin confirmed');
+        expect(candidate.textContent).toContain('status could not be refreshed');
+        expect(buttonWithText(candidate, 'Verify user')).toBeUndefined();
+        expect(pluginMocks.verifyCandidate).toHaveBeenCalledOnce();
+    });
+
+    it('requires a fresh status and current-policy read after an uncertain verification response', async () => {
+        const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const batchId = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        const batch = { candidateUserIds: [ userId ], id: batchId, needsVerificationCount: 1,
+            stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0 };
+        const access = { enableAllFolders: false, enabledFolders: [],
+            isAdministrator: false, isDisabled: false, userId };
+        pluginMocks.getBatch.mockResolvedValue(batch);
+        const changedAccess = { ...access, isDisabled: true };
+        pluginMocks.current
+            .mockResolvedValueOnce({ version: 1, userId, currentAccess: access, policyProven: false })
+            .mockResolvedValueOnce({
+                version: 1, userId, currentAccess: changedAccess, intendedAccess: changedAccess,
+                accessEpoch: 'a'.repeat(64), held: false, operationId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                policyProven: true, state: 'policy-attested', writeAllowed: false
+            });
+        pluginMocks.verifyCandidate.mockRejectedValue(new Error('response lost'));
+        uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+        await render(<PtvAdminUsersPage />);
+        await flushAsync();
+        const candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+        await act(async () => { buttonWithText(candidate, 'Review access')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        await act(async () => {
+            candidate.querySelector<HTMLInputElement>('input[aria-label="Confirm current access for Alex"]')?.click();
+        });
+        await act(async () => { buttonWithText(candidate, 'Verify user')?.click(); await Promise.resolve(); });
+        await flushAsync();
+
+        expect(candidate.textContent).toContain('outcome is unknown');
+        expect(buttonWithText(candidate, 'Verify user')).toBeUndefined();
+        await act(async () => { buttonWithText(candidate, 'Check verification status')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        expect(pluginMocks.getBatch).toHaveBeenCalledTimes(2);
+        expect(pluginMocks.current).toHaveBeenCalledTimes(2);
+        expect(pluginMocks.verifyCandidate).toHaveBeenCalledOnce();
+        expect(buttonWithText(candidate, 'Verify user')).toBeUndefined();
+        expect(candidate.textContent).toContain('no matching proof');
+        expect(buttonWithText(candidate, 'Review access again')).toBeDefined();
+    });
+
+    it.each([
+        { batchId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', proofBatchId: 'ffffffffffffffffffffffffffffffff', reason: 'an earlier batch' },
+        { batchId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', proofBatchId: null, reason: 'legacy proof without a batch ID' },
+        { batchId: 'invalid-batch', proofBatchId: 'invalid-proof', reason: 'malformed batch IDs' }
+    ])('does not confirm an uncertain verification from proof belonging to $reason', async ({ batchId, proofBatchId }) => {
+        const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const access = { enableAllFolders: false, enabledFolders: [],
+            isAdministrator: false, isDisabled: false, userId };
+        pluginMocks.getBatch.mockResolvedValue({
+            candidateUserIds: [ userId ], id: batchId, needsVerificationCount: 1,
+            stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+        });
+        pluginMocks.current
+            .mockResolvedValueOnce({ version: 1, userId, currentAccess: access })
+            .mockResolvedValueOnce({
+                version: 1, userId, currentAccess: access, intendedAccess: access,
+                accessEpoch: 'a'.repeat(64), held: false,
+                operationId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                policyProven: true, state: 'policy-attested', writeAllowed: false,
+                verificationBatchId: proofBatchId
+            });
+        pluginMocks.verifyCandidate.mockRejectedValue(new Error('response lost'));
+        uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+        await render(<PtvAdminUsersPage />);
+        await flushAsync();
+        const candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+        await act(async () => { buttonWithText(candidate, 'Review access')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        await act(async () => {
+            candidate.querySelector<HTMLInputElement>('input[aria-label="Confirm current access for Alex"]')?.click();
+        });
+        await act(async () => { buttonWithText(candidate, 'Verify user')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        await act(async () => { buttonWithText(candidate, 'Check verification status')?.click(); await Promise.resolve(); });
+        await flushAsync();
+
+        expect(candidate.textContent).toContain('no matching proof');
+        expect(candidate.textContent).not.toContain('Plugin confirmed');
+        expect(buttonWithText(candidate, 'Review access again')).toBeDefined();
+    });
+
+    it('confirms an uncertain verification only after matching current batch proof is read back', async () => {
+        const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const batchId = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        const access = { enableAllFolders: false, enabledFolders: [],
+            isAdministrator: false, isDisabled: false, userId };
+        pluginMocks.getBatch.mockResolvedValue({
+            candidateUserIds: [ userId ], id: batchId, needsVerificationCount: 1,
+            stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+        });
+        pluginMocks.current
+            .mockResolvedValueOnce({ version: 1, userId, currentAccess: access })
+            .mockResolvedValueOnce({
+                version: 1, userId, currentAccess: access, intendedAccess: access,
+                accessEpoch: 'a'.repeat(64), held: false,
+                operationId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                policyProven: true, state: 'policy-attested', writeAllowed: false,
+                verificationBatchId: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
+            });
+        pluginMocks.verifyCandidate.mockRejectedValue(new Error('response lost'));
+        uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+        await render(<PtvAdminUsersPage />);
+        await flushAsync();
+        const candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+        await act(async () => { buttonWithText(candidate, 'Review access')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        await act(async () => {
+            candidate.querySelector<HTMLInputElement>('input[aria-label="Confirm current access for Alex"]')?.click();
+        });
+        await act(async () => { buttonWithText(candidate, 'Verify user')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        await act(async () => { buttonWithText(candidate, 'Check verification status')?.click(); await Promise.resolve(); });
+        await flushAsync();
+
+        expect(candidate.textContent).toContain('Plugin confirmed');
+        expect(buttonWithText(candidate, 'Verify user')).toBeUndefined();
+        expect(pluginMocks.verifyCandidate).toHaveBeenCalledOnce();
+    });
+
+    it.each([ 'unknown', 'confirmed' ] as const)(
+        'allows review of a replacement batch after a %s verification outcome', async outcome => {
+            const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+            const batchId = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+            const nextBatchId = 'ffffffffffffffffffffffffffffffff';
+            const access = { enableAllFolders: false, enabledFolders: [],
+                isAdministrator: false, isDisabled: false, userId };
+            pluginMocks.getBatch
+                .mockResolvedValueOnce({
+                    candidateUserIds: [ userId ], id: batchId, needsVerificationCount: 1,
+                    stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+                })
+                .mockResolvedValueOnce({
+                    candidateUserIds: [ userId ], id: nextBatchId, needsVerificationCount: 1,
+                    stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+                });
+            pluginMocks.current.mockResolvedValue({ version: 1, userId, currentAccess: access });
+            if (outcome === 'unknown') {
+                pluginMocks.verifyCandidate.mockRejectedValue(new Error('response lost'));
+            } else {
+                pluginMocks.verifyCandidate.mockResolvedValue({
+                    accessEpoch: 'a'.repeat(64), held: false,
+                    operationId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                    policyProven: true, state: 'policy-attested', userId,
+                    version: 1, writeAllowed: false
+                });
+            }
+            uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+            await render(<PtvAdminUsersPage />);
+            await flushAsync();
+            let candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+            await act(async () => { buttonWithText(candidate, 'Review access')?.click(); await Promise.resolve(); });
+            await flushAsync();
+            await act(async () => {
+                candidate.querySelector<HTMLInputElement>('input[aria-label="Confirm current access for Alex"]')?.click();
+            });
+            await act(async () => { buttonWithText(candidate, 'Verify user')?.click(); await Promise.resolve(); });
+            await flushAsync();
+            if (outcome === 'unknown') {
+                await act(async () => { buttonWithText(candidate, 'Check verification status')?.click(); await Promise.resolve(); });
+                await flushAsync();
+            }
+
+            candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+            expect(container.textContent).toContain('verification batch changed');
+            expect(buttonWithText(candidate, 'Review access')?.disabled).toBe(false);
+            expect(pluginMocks.verifyCandidate).toHaveBeenCalledOnce();
+        }
+    );
+
+    it('lets an administrator refresh a stale batch after an uncertain verification response', async () => {
+        const userId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        const batchId = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        const access = { enableAllFolders: false, enabledFolders: [],
+            isAdministrator: false, isDisabled: false, userId };
+        pluginMocks.getBatch
+            .mockResolvedValueOnce({
+                candidateUserIds: [ userId ], id: batchId, needsVerificationCount: 1,
+                stale: false, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+            })
+            .mockResolvedValueOnce({
+                candidateUserIds: [ userId ], id: batchId, needsVerificationCount: 1,
+                stale: true, topologyEpoch: 'c'.repeat(64), verifiedCount: 0
+            });
+        pluginMocks.current.mockResolvedValue({ version: 1, userId, currentAccess: access });
+        pluginMocks.verifyCandidate.mockRejectedValue(new Error('response lost'));
+        uiMocks.usersState = usersState({ users: [ summary({ id: userId, username: 'Alex' }) ] });
+
+        await render(<PtvAdminUsersPage />);
+        await flushAsync();
+        const candidate = container.querySelector('.ptv-admin-users-verification-candidate')!;
+        await act(async () => { buttonWithText(candidate, 'Review access')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        await act(async () => {
+            candidate.querySelector<HTMLInputElement>('input[aria-label="Confirm current access for Alex"]')?.click();
+        });
+        await act(async () => { buttonWithText(candidate, 'Verify user')?.click(); await Promise.resolve(); });
+        await flushAsync();
+        await act(async () => { buttonWithText(candidate, 'Check verification status')?.click(); await Promise.resolve(); });
+        await flushAsync();
+
+        expect(container.textContent).toContain('verification batch changed');
+        expect(buttonWithText(container, 'Refresh verification batch')?.disabled).toBe(false);
+        expect(pluginMocks.verifyCandidate).toHaveBeenCalledOnce();
     });
 
     it('keeps later accounts outside the frozen first cohort when refreshing a batch', async () => {
@@ -1439,7 +1776,8 @@ describe('PiggieTV administrator users UI', () => {
         });
         await flushAsync();
         expect(pluginMocks.recoverCreation).toHaveBeenCalledWith(reservation, { confirmCreationRequestSettled: true });
-        expect(pluginMocks.getCreations).toHaveBeenCalledTimes(2);
+        expect(pluginMocks.getCreations.mock.calls.length).toBeGreaterThanOrEqual(2);
+        expect(panel.querySelector(`a[href="/settings/admin/users/${id}"]`)).not.toBeNull();
     });
 
     it('binds a reviewed possible ID explicitly and leaves its intended policy for administrator selection', async () => {
@@ -1472,7 +1810,7 @@ describe('PiggieTV administrator users UI', () => {
         expect(container.querySelector(`a[href="/settings/admin/users/${id}"]`)).not.toBeNull();
     });
 
-    it('clears a stale local creation hint only after Plugin reports no matching reservation', async () => {
+    it('keeps an uncertain creation hint after one empty Plugin reservation read', async () => {
         const reservation = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
         const key = 'ptv-admin-new-user-creation:server-a';
         localStorage.setItem(key, JSON.stringify({
@@ -1487,7 +1825,8 @@ describe('PiggieTV administrator users UI', () => {
         await render(<PtvAdminUsersPage />);
         await flushAsync();
         expect(pluginMocks.getCreations).toHaveBeenCalled();
-        expect(localStorage.getItem(key)).toBeNull();
+        expect(localStorage.getItem(key)).not.toBeNull();
+        expect(buttonWithText(container, 'Check creation request')).toBeDefined();
     });
 
     it('requires an explicit policy choice before bootstrapping a controlled-created account after reservation recovery', async () => {

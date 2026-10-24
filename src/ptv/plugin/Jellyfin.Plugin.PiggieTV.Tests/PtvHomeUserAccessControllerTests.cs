@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Security.Claims;
+using System.Text.Json;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
@@ -105,6 +106,65 @@ public sealed class PtvHomeUserAccessControllerTests : IDisposable
         Assert.Equal(1, allCurrentUsers.VerifiedCount);
         Assert.Equal(1, allCurrentUsers.NeedsVerificationCount);
         Assert.True(allCurrentUsers.LegacyCohortStarted);
+    }
+
+    [Fact]
+    public async Task AdminCurrentReportsPersistedProofBatchRatherThanReplacementBatch()
+    {
+        var users = DispatchProxy.Create<IUserManager, UserProxy>();
+        ((UserProxy)(object)users).User = _user;
+        _user.SetPermission(PermissionKind.EnableAllFolders, true);
+        var controller = Controller(users);
+        var firstBatch = Assert.IsType<PtvHomeUserVerificationBatchStatus>(Assert.IsType<OkObjectResult>(
+            await controller.BeginVerificationBatch(CancellationToken.None)).Value);
+        var publicProof = Assert.IsType<PtvHomeUserAccessView>(Assert.IsType<OkObjectResult>(
+            await controller.VerifyBatchCandidate(firstBatch.Id, UserId,
+                Confirm(Access(true)), CancellationToken.None)).Value);
+        using (var publicJson = JsonDocument.Parse(JsonSerializer.Serialize(publicProof)))
+            Assert.False(publicJson.RootElement.TryGetProperty("verificationBatchId", out _));
+
+        var replacement = Assert.IsType<PtvHomeUserVerificationBatchStatus>(Assert.IsType<OkObjectResult>(
+            await controller.NewVerificationBatch(CancellationToken.None)).Value);
+        Assert.NotEqual(firstBatch.Id, replacement.Id);
+        var oldProof = Assert.IsType<PtvHomeUserAccessAdminView>(Assert.IsType<OkObjectResult>(
+            await controller.Current(UserId.ToString("N"), CancellationToken.None)).Value);
+        using (var oldJson = JsonDocument.Parse(JsonSerializer.Serialize(oldProof)))
+            Assert.Equal(firstBatch.Id, oldJson.RootElement.GetProperty("verificationBatchId").GetGuid());
+
+        Assert.IsType<OkObjectResult>(await controller.VerifyBatchCandidate(replacement.Id, UserId,
+            Confirm(Access(true)), CancellationToken.None));
+        var newProof = Assert.IsType<PtvHomeUserAccessAdminView>(Assert.IsType<OkObjectResult>(
+            await controller.Current(UserId.ToString("N"), CancellationToken.None)).Value);
+        using var newJson = JsonDocument.Parse(JsonSerializer.Serialize(newProof));
+        Assert.Equal(replacement.Id, newJson.RootElement.GetProperty("verificationBatchId").GetGuid());
+    }
+
+    [Fact]
+    public async Task ReplacementBatchProgressExcludesPriorBatchProof()
+    {
+        var users = DispatchProxy.Create<IUserManager, UserProxy>();
+        ((UserProxy)(object)users).User = _user;
+        _user.SetPermission(PermissionKind.EnableAllFolders, true);
+        var controller = Controller(users);
+        var firstBatch = Assert.IsType<PtvHomeUserVerificationBatchStatus>(Assert.IsType<OkObjectResult>(
+            await controller.BeginVerificationBatch(CancellationToken.None)).Value);
+        Assert.IsType<OkObjectResult>(await controller.VerifyBatchCandidate(firstBatch.Id, UserId,
+            Confirm(Access(true)), CancellationToken.None));
+
+        var replacement = Assert.IsType<PtvHomeUserVerificationBatchStatus>(Assert.IsType<OkObjectResult>(
+            await controller.NewVerificationBatch(CancellationToken.None)).Value);
+        Assert.Equal(0, replacement.VerifiedCount);
+        Assert.Equal(1, replacement.NeedsVerificationCount);
+        var global = Assert.IsType<PtvHomeUserVerificationSummary>(Assert.IsType<OkObjectResult>(
+            await controller.VerificationSummary(CancellationToken.None)).Value);
+        Assert.Equal(1, global.VerifiedCount);
+
+        Assert.IsType<OkObjectResult>(await controller.VerifyBatchCandidate(replacement.Id, UserId,
+            Confirm(Access(true)), CancellationToken.None));
+        var current = Assert.IsType<PtvHomeUserVerificationBatchStatus>(Assert.IsType<OkObjectResult>(
+            await controller.CurrentVerificationBatch(CancellationToken.None)).Value);
+        Assert.Equal(1, current.VerifiedCount);
+        Assert.Equal(0, current.NeedsVerificationCount);
     }
 
     [Fact]
@@ -245,6 +305,50 @@ public sealed class PtvHomeUserAccessControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task CreationStatusRouteIsAdministratorOnlyAndUsesStableJsonContract()
+    {
+        var route = typeof(PtvHomeUserAccessController).GetMethod(nameof(PtvHomeUserAccessController.CreationStatus))!
+            .GetCustomAttribute<HttpGetAttribute>();
+        Assert.Equal("creations/{creationOperationId:guid}/status", route?.Template);
+        var users = DispatchProxy.Create<IUserManager, UserProxy>();
+        ((UserProxy)(object)users).User = _user;
+        var operationId = Guid.NewGuid();
+        var ledger = new PtvHomeUserAccessLedger(_directory, "server-a");
+        await ledger.ReserveCreationAsync(operationId, [UserId]);
+        var controller = Controller(users);
+
+        var response = Assert.IsType<PtvHomeUserCreationStatus>(Assert.IsType<OkObjectResult>(
+            await controller.CreationStatus(operationId, CancellationToken.None)).Value);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(response));
+        Assert.Equal(1, json.RootElement.GetProperty("version").GetInt32());
+        Assert.Equal(operationId, json.RootElement.GetProperty("creationOperationId").GetGuid());
+        Assert.Equal("reserved", json.RootElement.GetProperty("state").GetString());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("userId").ValueKind);
+        Assert.Empty(json.RootElement.GetProperty("markedUserIds").EnumerateArray());
+        Assert.Equal("private, no-store", controller.Response.Headers.CacheControl.ToString());
+
+        var denied = new PtvHomeUserAccessController(ledger, new Topology(TopologyEpoch), users,
+            DispatchProxy.Create<ILibraryManager, LibraryProxy>(), new DeniedAuthorization());
+        denied.ControllerContext = new() { HttpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "member")], "Test"))
+        } };
+        Assert.IsType<ForbidResult>(await denied.CreationStatus(operationId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CreationStatusNeverReportsAbsentForCorruptLedger()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(Path.Combine(_directory, "home-user-access.json"), "{invalid json");
+        var users = DispatchProxy.Create<IUserManager, UserProxy>();
+        ((UserProxy)(object)users).User = _user;
+        var response = await Controller(users).CreationStatus(Guid.NewGuid(), CancellationToken.None);
+
+        Assert.Equal(503, Assert.IsType<ObjectResult>(response).StatusCode);
+    }
+
+    [Fact]
     public async Task VerificationSummaryCountsUnprovenUsersBeforeAnyBatchAndNewBatchIsExplicit()
     {
         var users = DispatchProxy.Create<IUserManager, UserProxy>();
@@ -381,5 +485,13 @@ public sealed class PtvHomeUserAccessControllerTests : IDisposable
             IEnumerable<IAuthorizationRequirement> requirements) => Task.FromResult(AuthorizationResult.Success());
         public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource,
             string policyName) => Task.FromResult(AuthorizationResult.Success());
+    }
+
+    private sealed class DeniedAuthorization : IAuthorizationService
+    {
+        public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource,
+            IEnumerable<IAuthorizationRequirement> requirements) => Task.FromResult(AuthorizationResult.Failed());
+        public Task<AuthorizationResult> AuthorizeAsync(ClaimsPrincipal user, object? resource,
+            string policyName) => Task.FromResult(AuthorizationResult.Failed());
     }
 }

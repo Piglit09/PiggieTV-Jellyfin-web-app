@@ -120,6 +120,16 @@ describe('new administrator user bootstrap', () => {
         });
     });
 
+    it('clears a compact local creation hint using the Plugin dashed operation ID', () => {
+        const creation = {
+            administrator: false, allLibraries: true, creationOperationId: CREATION_ID,
+            selectedFolderIds: [], username: 'Nova'
+        };
+        savePendingNewAdminCreation('server-a', creation);
+        clearPendingNewAdminCreation('server-a', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee');
+        expect(readPendingNewAdminCreation('server-a')).toBeNull();
+    });
+
     it('begins before both stock policy writes and accepts only Plugin terminal readback', async () => {
         const result = await bootstrapNewAdminUser(api, pending());
 
@@ -257,7 +267,7 @@ describe('new administrator user bootstrap', () => {
     it('uses controlled existing-user change before reproof when the recovered current policy is broad', async () => {
         const broad = {
             enableAllFolders: true,
-            enabledFolders: [],
+            enabledFolders: [ 'dddddddddddddddddddddddddddddddd' ],
             isAdministrator: false,
             isDisabled: false,
             userId: USER_ID
@@ -411,7 +421,7 @@ describe('new administrator user bootstrap', () => {
         expect(mocks.complete).not.toHaveBeenCalled();
     });
 
-    it('starts the saved bootstrap on explicit retry when Plugin reports no operation for the created ID', async () => {
+    it('keeps the status check read-only when Plugin reports an unproven created account', async () => {
         mocks.current.mockResolvedValue(view({
             accessEpoch: null,
             held: true,
@@ -420,8 +430,21 @@ describe('new administrator user bootstrap', () => {
             state: 'unproven'
         }));
 
-        await expect(resumePendingNewAdminUser(api, pending())).resolves.toEqual(view());
-        expect(calls).toEqual([ 'bind', 'begin', 'policy', 'libraries', 'complete' ]);
+        await expect(resumePendingNewAdminUser(api, pending())).rejects.toThrow('review and confirm its access');
+        expect(calls).toEqual([]);
+        expect(mocks.begin).not.toHaveBeenCalled();
+        expect(mocks.updatePolicy).not.toHaveBeenCalled();
+        expect(mocks.updateLibraries).not.toHaveBeenCalled();
+    });
+
+    it('does not bootstrap during a status check when the Plugin access record is missing', async () => {
+        mocks.current.mockRejectedValue({ status: 404 });
+
+        await expect(resumePendingNewAdminUser(api, pending())).rejects.toMatchObject({ status: 404 });
+        expect(calls).toEqual([]);
+        expect(mocks.begin).not.toHaveBeenCalled();
+        expect(mocks.updatePolicy).not.toHaveBeenCalled();
+        expect(mocks.updateLibraries).not.toHaveBeenCalled();
     });
 
     it('clears a stale browser hint after Plugin proves an explicit successor recovery operation', async () => {

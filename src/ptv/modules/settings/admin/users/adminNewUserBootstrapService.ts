@@ -22,6 +22,8 @@ export type PendingNewAdminCreation = {
     administrator: boolean;
     allLibraries: boolean;
     selectedFolderIds: string[];
+    /** Missing on older hints; never infer that stock Create was not started. */
+    stage?: 'prepared' | 'create-started';
 };
 
 export type PendingNewAdminUser = {
@@ -59,7 +61,8 @@ function isPendingNewAdminCreation(value: unknown): value is PendingNewAdminCrea
         && Array.isArray(record.selectedFolderIds)
         && record.selectedFolderIds.every(id => typeof id === 'string' && USER_ID_PATTERN.test(id))
         && new Set(record.selectedFolderIds.map(id => id.toLowerCase())).size === record.selectedFolderIds.length
-        && (!record.allLibraries || record.selectedFolderIds.length === 0);
+        && (!record.allLibraries || record.selectedFolderIds.length === 0)
+        && (record.stage === undefined || record.stage === 'prepared' || record.stage === 'create-started');
 }
 
 function normalizeGuid(value: string | null | undefined): string | null {
@@ -94,7 +97,8 @@ export function savePendingNewAdminCreation(serverId: string, pending: PendingNe
 }
 
 export function clearPendingNewAdminCreation(serverId: string, creationOperationId: string) {
-    if (readPendingNewAdminCreation(serverId)?.creationOperationId === creationOperationId) {
+    const storedId = readPendingNewAdminCreation(serverId)?.creationOperationId;
+    if (storedId && normalizeGuid(storedId) === normalizeGuid(creationOperationId)) {
         globalThis.localStorage.removeItem(creationStorageKey(serverId));
     }
 }
@@ -142,6 +146,7 @@ export function createPendingNewAdminCreation(input: Omit<PendingNewAdminCreatio
     const pending = {
         ...input,
         creationOperationId: createOperationId(),
+        stage: 'prepared' as const,
         selectedFolderIds: input.selectedFolderIds.map(id => normalizeGuid(id) || id)
     };
     if (!isPendingNewAdminCreation(pending)) throw new Error('The selected library IDs are invalid or duplicated.');
@@ -236,29 +241,15 @@ export async function bootstrapNewAdminUser(api: Api, pending: PendingNewAdminUs
     return requireVerified(await client.completeHomeUserAccess(pending.operationId), pending);
 }
 
-function isMissing(error: unknown) {
-    const candidate = error as { status?: number; response?: { status?: number } };
-    return candidate?.status === 404 || candidate?.response?.status === 404;
-}
-
-/** After reload, an uncertain stock write requires a new held administrator recovery operation. */
+/** Read-only status check after reload. Policy writes require explicit review on the account page. */
 export async function resumePendingNewAdminUser(api: Api, pending: PendingNewAdminUser): Promise<HomeUserAccessResponse> {
     if (!isPendingNewAdminUser(pending)) throw new Error('Created account recovery details are invalid.');
     const client = clientFor(api);
-    let current: HomeUserAccessResponse;
-    try {
-        current = await client.getCurrentHomeUserAccess(pending.id);
-    } catch (error) {
-        if (isMissing(error)) return bootstrapNewAdminUser(api, pending);
-        throw error;
-    }
+    const current = await client.getCurrentHomeUserAccess(pending.id);
     if (current.version === 1 && normalizeGuid(current.userId) === pending.id
         && current.state === 'unproven' && current.held && !current.policyProven
         && !current.operationId && !current.accessEpoch && !current.writeAllowed) {
-        if (current.controlledCreated === true) {
-            return verifyUnprovenAdminUserAccess(api, pending.id, intendedAccess(pending));
-        }
-        return bootstrapNewAdminUser(api, pending);
+        throw new Error('The account is unverified. Open it to review and confirm its access before applying any policy.');
     }
     if (current.version === 1 && normalizeGuid(current.userId) === pending.id
         && normalizeGuid(current.supersededOperationId) === pending.operationId
@@ -285,8 +276,7 @@ function normalizeAccess(access: HomeUserAccess | null | undefined, userId: stri
         || typeof access.isDisabled !== 'boolean'
         || !Array.isArray(access.enabledFolders)) return null;
     const folders = access.enabledFolders.map(id => normalizeGuid(id));
-    if (folders.some(id => !id) || new Set(folders).size !== folders.length
-        || (access.enableAllFolders && folders.length > 0)) return null;
+    if (folders.some(id => !id) || new Set(folders).size !== folders.length) return null;
     return { ...access, enabledFolders: folders as string[], userId };
 }
 

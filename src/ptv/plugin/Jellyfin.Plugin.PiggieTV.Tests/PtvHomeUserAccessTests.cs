@@ -509,6 +509,103 @@ public sealed class PtvHomeUserAccessTests
     }
 
     [Fact]
+    public async Task RepeatedExactBatchVerificationKeepsTheOriginalDurableProof()
+    {
+        using var fixture = new Fixture();
+        var policy = Access(all: true, folders: [LibraryId]);
+        var batch = await fixture.Ledger.BeginVerificationBatchAsync([UserId], TopologyEpoch);
+        var first = await fixture.Ledger.VerifyBatchCandidateAsync(batch.Id, UserId,
+            policy, policy, [LibraryId], TopologyEpoch);
+        var ledgerPath = Path.Combine(fixture.DirectoryPath, "home-user-access.json");
+        var firstDocument = await File.ReadAllTextAsync(ledgerPath);
+
+        var restarted = new PtvHomeUserAccessLedger(fixture.DirectoryPath, "server-a");
+        var repeated = await restarted.VerifyBatchCandidateAsync(batch.Id, UserId,
+            policy, policy, [LibraryId], TopologyEpoch);
+
+        Assert.True(repeated.PolicyProven);
+        Assert.Equal(first.AccessEpoch, repeated.AccessEpoch);
+        Assert.Equal(first.OperationId, repeated.OperationId);
+        Assert.Equal(firstDocument, await File.ReadAllTextAsync(ledgerPath));
+    }
+
+    [Fact]
+    public async Task ReplacementBatchAtSameTopologyIssuesFreshVerificationProof()
+    {
+        using var fixture = new Fixture();
+        var policy = Access(all: true, folders: [LibraryId]);
+        var firstBatch = await fixture.Ledger.BeginVerificationBatchAsync([UserId], TopologyEpoch);
+        var first = await fixture.Ledger.VerifyBatchCandidateAsync(firstBatch.Id, UserId,
+            policy, policy, [LibraryId], TopologyEpoch);
+        var replacement = await fixture.Ledger.BeginVerificationBatchAsync([UserId], TopologyEpoch, replace: true);
+
+        var repeated = await fixture.Ledger.VerifyBatchCandidateAsync(replacement.Id, UserId,
+            policy, policy, [LibraryId], TopologyEpoch);
+
+        Assert.NotEqual(firstBatch.Id, replacement.Id);
+        Assert.NotEqual(first.AccessEpoch, repeated.AccessEpoch);
+        Assert.NotEqual(first.OperationId, repeated.OperationId);
+    }
+
+    [Fact]
+    public async Task LegacyVerificationProofWithoutBatchIdentityGetsFreshProof()
+    {
+        using var fixture = new Fixture();
+        var policy = Access(all: true, folders: [LibraryId]);
+        var batch = await fixture.Ledger.BeginVerificationBatchAsync([UserId], TopologyEpoch);
+        var first = await fixture.Ledger.VerifyBatchCandidateAsync(batch.Id, UserId,
+            policy, policy, [LibraryId], TopologyEpoch);
+        var path = Path.Combine(fixture.DirectoryPath, "home-user-access.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        document["Records"]![UserId.ToString("N")]!.AsObject().Remove("VerificationBatchId");
+        await File.WriteAllTextAsync(path, document.ToJsonString());
+
+        var restarted = new PtvHomeUserAccessLedger(fixture.DirectoryPath, "server-a");
+        var repeated = await restarted.VerifyBatchCandidateAsync(batch.Id, UserId,
+            policy, policy, [LibraryId], TopologyEpoch);
+
+        Assert.NotEqual(first.AccessEpoch, repeated.AccessEpoch);
+        Assert.NotEqual(first.OperationId, repeated.OperationId);
+    }
+
+    [Fact]
+    public async Task RepeatedBatchVerificationWithChangedMembershipRequiresFreshProof()
+    {
+        using var fixture = new Fixture();
+        var policy = Access(all: false, folders: [LibraryId]);
+        var batch = await fixture.Ledger.BeginVerificationBatchAsync([UserId], TopologyEpoch);
+        var first = await fixture.Ledger.VerifyBatchCandidateAsync(batch.Id, UserId,
+            policy, policy, [LibraryId], TopologyEpoch);
+
+        var changed = await fixture.Ledger.VerifyBatchCandidateAsync(batch.Id, UserId,
+            policy, policy, [], TopologyEpoch);
+
+        Assert.NotEqual(first.AccessEpoch, changed.AccessEpoch);
+        Assert.Empty(changed.AccessibleLibraryIds);
+        Assert.False((await fixture.Ledger.ReadAsync(UserId, policy, TopologyEpoch,
+            currentAccessibleLibraryIds: [LibraryId])).PolicyProven);
+        Assert.True((await fixture.Ledger.ReadAsync(UserId, policy, TopologyEpoch,
+            currentAccessibleLibraryIds: [])).PolicyProven);
+    }
+
+    [Fact]
+    public async Task PendingCreationStillBlocksAnOtherwiseExactVerificationRetry()
+    {
+        using var fixture = new Fixture();
+        var policy = Access(all: true);
+        var batch = await fixture.Ledger.BeginVerificationBatchAsync([UserId], TopologyEpoch);
+        await fixture.Ledger.VerifyBatchCandidateAsync(batch.Id, UserId,
+            policy, policy, [LibraryId], TopologyEpoch);
+        await fixture.Ledger.ReserveCreationAsync(Guid.NewGuid(), [UserId]);
+        var ledgerPath = Path.Combine(fixture.DirectoryPath, "home-user-access.json");
+        var reservedDocument = await File.ReadAllTextAsync(ledgerPath);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Ledger.VerifyBatchCandidateAsync(
+            batch.Id, UserId, policy, policy, [LibraryId], TopologyEpoch));
+        Assert.Equal(reservedDocument, await File.ReadAllTextAsync(ledgerPath));
+    }
+
+    [Fact]
     public async Task StoredAccessibleLibrariesDoNotProveCurrentMembershipWithoutFreshReadback()
     {
         using var fixture = new Fixture();
@@ -635,6 +732,74 @@ public sealed class PtvHomeUserAccessTests
         var batch = await fixture.Ledger.BeginVerificationBatchAsync([UserId], TopologyEpoch);
         Assert.Equal([UserId.ToString("N")], batch.CandidateUserIds);
         Assert.False((await fixture.Ledger.ReadAsync(UserId, Access(all: true), TopologyEpoch)).PolicyProven);
+    }
+
+    [Fact]
+    public async Task CreationOperationStatusDistinguishesDurableStatesWithoutWriting()
+    {
+        using var fixture = new Fixture();
+        var absentId = Guid.NewGuid();
+        var reservedId = Guid.NewGuid();
+        var boundId = Guid.NewGuid();
+        var recoveredId = Guid.NewGuid();
+        var boundUser = Guid.NewGuid();
+        var markedUser = Guid.NewGuid();
+        await fixture.Ledger.BeginVerificationBatchAsync([UserId], TopologyEpoch);
+        await fixture.Ledger.ReserveCreationAsync(reservedId, [UserId]);
+        await fixture.Ledger.ReserveCreationAsync(boundId, [UserId]);
+        await fixture.Ledger.BindCreationAsync(boundId, boundUser);
+        await fixture.Ledger.ReserveCreationAsync(recoveredId, [UserId]);
+        await fixture.Ledger.RecoverCreationAsync(recoveredId, [UserId, markedUser]);
+        var path = Path.Combine(fixture.DirectoryPath, "home-user-access.json");
+        var before = await File.ReadAllTextAsync(path);
+        var restarted = new PtvHomeUserAccessLedger(fixture.DirectoryPath, "server-a");
+
+        var absent = await restarted.ReadCreationStatusAsync(absentId);
+        var reserved = await restarted.ReadCreationStatusAsync(reservedId);
+        var bound = await restarted.ReadCreationStatusAsync(boundId);
+        var recovered = await restarted.ReadCreationStatusAsync(recoveredId);
+
+        Assert.Equal((1, absentId, "absent", null),
+            (absent.Version, absent.CreationOperationId, absent.State, absent.UserId));
+        Assert.Empty(absent.MarkedUserIds);
+        Assert.Equal((reservedId, "reserved", null),
+            (reserved.CreationOperationId, reserved.State, reserved.UserId));
+        Assert.Empty(reserved.MarkedUserIds);
+        Assert.Equal((boundId, "bound", boundUser.ToString("N")),
+            (bound.CreationOperationId, bound.State, bound.UserId));
+        Assert.Empty(bound.MarkedUserIds);
+        Assert.Equal((recoveredId, "recovered", null),
+            (recovered.CreationOperationId, recovered.State, recovered.UserId));
+        Assert.Equal([markedUser.ToString("N")], recovered.MarkedUserIds);
+        Assert.Equal(before, await File.ReadAllTextAsync(path));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreationStatusFailsClosedWhenDurableLedgerIsMissingOrCorrupt(bool corrupt)
+    {
+        using var fixture = new Fixture();
+        if (corrupt)
+        {
+            Directory.CreateDirectory(fixture.DirectoryPath);
+            await File.WriteAllTextAsync(Path.Combine(fixture.DirectoryPath, "home-user-access.json"), "{invalid json");
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Ledger.ReadCreationStatusAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task CreationStatusCannotProveAbsenceAfterCorruptLedgerRecovery()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.DirectoryPath);
+        await File.WriteAllTextAsync(Path.Combine(fixture.DirectoryPath, "home-user-access.json"), "{invalid json");
+        await fixture.Ledger.RecoverCorruptAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Ledger.ReadCreationStatusAsync(Guid.NewGuid()));
     }
 
     [Fact]

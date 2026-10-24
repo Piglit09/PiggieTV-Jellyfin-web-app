@@ -55,12 +55,14 @@ export function AddAdminUserDialog({
     apiClient,
     onClose,
     onCreated,
+    onReservationChanged,
     open
 }: Readonly<{
     api?: Api;
     apiClient?: ApiClient;
     onClose: () => void;
     onCreated: (userId: string) => void;
+    onReservationChanged?: () => void;
     open: boolean;
 }>) {
     const serverKey = getResolvedAdminServerId(apiClient);
@@ -157,7 +159,9 @@ export function AddAdminUserDialog({
             }
             return;
         }
-        if (pendingCreation) {
+        const unresolvedCreation = readPendingNewAdminCreation(serverKey) || pendingCreation;
+        if (unresolvedCreation) {
+            setPendingCreation(unresolvedCreation);
             setMessage('An earlier account creation needs administrator review. Resolve its reservation before creating another account.');
             return;
         }
@@ -178,6 +182,8 @@ export function AddAdminUserDialog({
         setBusy(true);
         setMessage('');
         let reservation: PendingNewAdminCreation | null = null;
+        let reservationSaved = false;
+        let reservationConfirmed = false;
         try {
             reservation = createPendingNewAdminCreation({
                 administrator,
@@ -185,9 +191,15 @@ export function AddAdminUserDialog({
                 selectedFolderIds: allLibraries ? [] : [ ...selectedFolderIds ],
                 username: username.trim()
             });
-            setPendingCreation(reservation);
             savePendingNewAdminCreation(serverKey, reservation);
+            reservationSaved = true;
+            setPendingCreation(reservation);
+            onReservationChanged?.();
             await reserveNewAdminUserCreation(api, reservation);
+            reservationConfirmed = true;
+            onReservationChanged?.();
+            reservation = { ...reservation, stage: 'create-started' };
+            savePendingNewAdminCreation(serverKey, reservation);
             const user = await createAdminUser(api, {
                 password: password || undefined,
                 username: username.trim()
@@ -208,9 +220,14 @@ export function AddAdminUserDialog({
         } catch (error) {
             setPassword('');
             setConfirmPassword('');
-            setMessage(reservation ?
-                `The creation request for ${reservation.username} needs administrator review. Reservation ${reservation.creationOperationId} remains active. Do not create this account again until its outcome is checked.` :
-                safeMutationMessage(error, 'We could not create this account.'));
+            if (!reservationSaved) {
+                setMessage(safeMutationMessage(error, 'The creation request could not be prepared. No account creation was started.'));
+            } else if (!reservationConfirmed) {
+                onReservationChanged?.();
+                setMessage(`The Plugin did not confirm the creation reservation for ${reservation!.username}. Its outcome is unknown. No account creation was started. Review reservation ${reservation!.creationOperationId} on the Users page before trying again.`);
+            } else {
+                setMessage(`The account creation or verification for ${reservation!.username} could not be confirmed. Plugin reservation ${reservation!.creationOperationId} was confirmed. Review possible accounts on the Users page before trying again.`);
+            }
         } finally {
             busyRef.current = false;
             setBusy(false);
@@ -226,6 +243,7 @@ export function AddAdminUserDialog({
         foldersQuery.isError,
         password,
         pendingCreation,
+        onReservationChanged,
         selectedFolderIds,
         serverKey,
         username,
@@ -327,7 +345,7 @@ export function AddAdminUserDialog({
                     )}
                     {pendingCreation && !createdUser && (
                         <p className='ptv-admin-user-status-message' role='status'>
-                            The creation reservation for {pendingCreation.username} remains active (ID: {pendingCreation.creationOperationId}). Review possible accounts on the Users page before creating another one.
+                            The creation request for {pendingCreation.username} is unresolved (ID: {pendingCreation.creationOperationId}). Review its Plugin reservation and possible Jellyfin accounts on the Users page before creating another one.
                         </p>
                     )}
                     {message && <p aria-live='polite' className='ptv-admin-user-status-message is-error'>{message}</p>}

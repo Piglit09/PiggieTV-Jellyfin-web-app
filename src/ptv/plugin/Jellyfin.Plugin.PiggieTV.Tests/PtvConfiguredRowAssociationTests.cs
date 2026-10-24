@@ -1865,6 +1865,8 @@ public sealed partial class PtvConfiguredRowAssociationTests
             CancellationToken token = default) => inner.BindCreationAsync(id, userId, token);
         public Task<PtvHomeUserCreationRecovery> RecoverCreationAsync(Guid id, IReadOnlyCollection<Guid> current,
             CancellationToken token = default) => inner.RecoverCreationAsync(id, current, token);
+        public Task<PtvHomeUserCreationStatus> ReadCreationStatusAsync(Guid id,
+            CancellationToken token = default) => inner.ReadCreationStatusAsync(id, token);
         public Task<IReadOnlyList<PtvHomeUserPendingCreation>> ReadPendingCreationsAsync(IReadOnlyCollection<Guid> current,
             CancellationToken token = default) => inner.ReadPendingCreationsAsync(current, token);
     }

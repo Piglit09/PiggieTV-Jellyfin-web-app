@@ -470,7 +470,12 @@ describe('admin users service mutations', () => {
             isDisabled: false,
             userId: id
         };
-        const current = { ...prior, enableAllFolders: true, isAdministrator: true };
+        const current = {
+            ...prior,
+            enableAllFolders: true,
+            enabledFolders: [ '22222222222222222222222222222222' ],
+            isAdministrator: true
+        };
         transitionMocks.current.mockResolvedValue({
             version: 1, userId: id, accessEpoch: 'b'.repeat(64), held: true,
             policyProven: false, operationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -478,7 +483,7 @@ describe('admin users service mutations', () => {
             currentAccess: current, intendedAccess: prior
         });
         sdkMocks.getUserById.mockResolvedValue({ data: user({ Id: id, Policy: policy({
-            EnableAllFolders: true, IsAdministrator: true
+            EnableAllFolders: true, EnabledFolders: current.enabledFolders, IsAdministrator: true
         }) }) });
 
         await reverifyPreviouslyAttestedUserAccess(api, id, current);

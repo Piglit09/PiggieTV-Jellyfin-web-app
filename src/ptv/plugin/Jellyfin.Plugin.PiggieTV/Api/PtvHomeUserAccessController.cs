@@ -168,6 +168,20 @@ public sealed class PtvHomeUserAccessController(
         { return StatusCode(503, new { error = "Controlled creation recovery state unavailable." }); }
     }
 
+    [HttpGet("creations/{creationOperationId:guid}/status")]
+    public async Task<IActionResult> CreationStatus(Guid creationOperationId, CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "private, no-store";
+        if (!await IsAdministrator().ConfigureAwait(false)) return Forbid();
+        if (creationOperationId == Guid.Empty) return BadRequest();
+        try
+        {
+            return Ok(await ledger.ReadCreationStatusAsync(creationOperationId, cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        { return StatusCode(503, new { error = "Controlled creation status unavailable." }); }
+    }
+
     [HttpPost("creations/{creationOperationId:guid}/recover")]
     public async Task<IActionResult> RecoverCreation(Guid creationOperationId,
         [FromBody] PtvHomeUserCreationRecoveryRequest request, CancellationToken cancellationToken)
@@ -306,7 +320,7 @@ public sealed class PtvHomeUserAccessController(
             var membership = ReadAccessibleLibraries(userId);
             var view = await ledger.ReadAsync(userId, ReadAccess(userId), epoch, cancellationToken,
                 membership).ConfigureAwait(false);
-            if (view.PolicyProven) verified++;
+            if (view.PolicyProven && view.VerificationBatchId == batch.Id) verified++;
         }
         return new PtvHomeUserVerificationBatchStatus
         {
