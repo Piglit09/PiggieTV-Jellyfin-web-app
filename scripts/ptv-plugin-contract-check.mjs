@@ -14,7 +14,7 @@ const statusResponse = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvS
 const project = read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj');
 const pluginManifest = JSON.parse(read('src/ptv/plugin/Jellyfin.Plugin.PiggieTV/meta.json'));
 const packageJson = JSON.parse(read('package.json'));
-const expectedPluginVersion = '0.5.19.0';
+const expectedPluginVersion = '0.5.20.0';
 
 function requiredMatch(source, pattern, label) {
     const match = source.match(pattern);
@@ -60,8 +60,8 @@ if (contract.pluginVersion !== expectedPluginVersion) {
 if (contract.pluginManifestVersion !== contract.pluginVersion) {
     failures.push(`Plugin manifest mismatch: project ${contract.pluginVersion}, manifest ${contract.pluginManifestVersion}`);
 }
-if (contract.pluginTarget !== '10.11.11') {
-    failures.push(`Unexpected Jellyfin package target: expected 10.11.11, received ${contract.pluginTarget}`);
+if (contract.pluginTarget !== '12.2.0') {
+    failures.push(`Unexpected Jellyfin package target: expected 12.2.0, received ${contract.pluginTarget}`);
 }
 
 for (const [label, sourceText] of requiredRoutes) {

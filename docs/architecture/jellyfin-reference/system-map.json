@@ -142,23 +142,26 @@
       ]
     },
     "ptvPlugin": {
-      "version": "0.5.16.0",
-      "targetFramework": "net9.0",
-      "jellyfinPackageVersion": "10.11.11",
+      "version": "0.5.20.0",
+      "targetFramework": "net10.0",
+      "jellyfinPackageVersion": "12.2.0",
+      "targetAbi": "12.2.0.0",
       "identityStatus": "VERIFIED_FROM_SOURCE",
+      "identityDetail": "Jellyfin 12.2 Plugin candidate in the isolated 0.5.66 release worktree; staged .125 and production VM115 runtime smoke validation passed on Server 12.2.0.",
       "evidence": [
         {
           "repository": "PTV Plugin embedded source",
-          "version": "0.5.16.0",
+          "version": "0.5.20.0",
           "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj",
           "symbol": "TargetFramework/Version/PackageReference",
-          "lines": "4, 9-20",
+          "lines": "3, 9-21",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ],
       "chapterRefs": [
         "20-ptv-vs-stock-map.md",
-        "24-stock-api-contract-reference.md"
+        "24-stock-api-contract-reference.md",
+        "27-jellyfin-12-2-compatibility.md"
       ]
     }
   },
@@ -395,7 +398,8 @@
       ],
       "chapterRefs": [
         "20-ptv-vs-stock-map.md",
-        "24-stock-api-contract-reference.md"
+        "24-stock-api-contract-reference.md",
+        "27-jellyfin-12-2-compatibility.md"
       ],
       "evidenceRefs": [
         "$.ptvOverrides.pluginApi.evidence[0]",
@@ -1835,7 +1839,7 @@
         "implementationGate": "PASS",
         "deploymentStatus": "DEPLOYED",
         "physicalValidationStatus": "VALIDATION_PENDING",
-        "summary": "Plugin 0.5.16.0 projects the shared Featured document through Jellyfin's request-user access policy before response serialization and is deployed in production. The implementation and deterministic user-isolation matrix pass. A prior production acceptance proved the restricted response boundary; the bounded Web 0.5.56 smoke preserved anonymous rejection and showed no cross-user flash but stopped before a fresh raw restricted payload comparison, so the current-release physical status remains pending.",
+        "summary": "Plugin 0.5.16.0 introduced request-user projection of the shared Featured document before response serialization and was deployed in production during that release. The implementation and deterministic user-isolation matrix pass. A prior production acceptance proved the restricted response boundary; the bounded Web 0.5.56 smoke preserved anonymous rejection and showed no cross-user flash but stopped before a fresh raw restricted payload comparison, so a fresh physical comparison remains pending for later releases.",
         "nodeRefs": {
           "components": [
             "ptvPlugin"
@@ -1868,7 +1872,7 @@
         "evidence": [
           {
             "repository": "PTV Plugin embedded source",
-            "version": "0.5.16.0 current worktree",
+            "version": "0.5.20.0 current source; behavior introduced in 0.5.16.0",
             "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs",
             "symbol": "GetFeaturedContent",
             "lines": "329-396",
@@ -1876,7 +1880,7 @@
           },
           {
             "repository": "PTV Plugin embedded source",
-            "version": "0.5.16.0 current worktree",
+            "version": "0.5.20.0 current source; behavior introduced in 0.5.16.0",
             "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentAuthorizationService.cs",
             "symbol": "AuthorizeForUser",
             "lines": "215-305",
@@ -1900,7 +1904,7 @@
           "CHANGE-PROTOCOL.md"
         ],
         "closureCriteria": [
-          "Deploy the exact validated Plugin 0.5.16.0 artifact through a separately authorized safe deployment.",
+          "Verify that the deployed current Plugin artifact preserves the request-user projection introduced in 0.5.16.0.",
           "Prove with real administrator and restricted Jellyfin users that the final HTTP payload contains only authorized item metadata.",
           "Confirm the restricted request neither mutates nor poisons the shared cache and the following administrator response remains complete."
         ]
@@ -3560,6 +3564,7 @@
     "24-stock-api-contract-reference.md",
     "25-known-jellyfin-non-guarantees.md",
     "26-upstream-post-10.11.11-differences.md",
+    "27-jellyfin-12-2-compatibility.md",
     "INDEX.md"
   ]
 }
