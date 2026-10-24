@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
-import { canonicalDigest, verifyManifest } from './ptv-artifact-manifest.mjs';
+import { canonicalDigest, sourceTreeDirty, verifyManifest } from './ptv-artifact-manifest.mjs';
 
 const officialVersionSources = {
     web: 'ptv-version.json',
@@ -33,11 +33,31 @@ const pinnedAuthority = Object.freeze({
 const allowedModes = new Set(['audit', 'edit', 'build', 'package', 'deploy', 'deploy-development']);
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const gitExecutable = process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd\\git.exe' : '/usr/bin/git';
+const safeGitOptions = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+    '-c', 'diff.external=', '-c', 'credential.helper=', '-c', 'core.pager=',
+    '-c', 'protocol.allow=never', '-c', 'protocol.ext.allow=never'];
 const powershellExecutable = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const windowsPowerShellModules = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules';
+const protectedApprovalRoot = 'C:\\ProgramData\\PiggieTV\\WorkspaceAuthority\\Approvals';
+const protectedApprovalAncestor = 'C:\\ProgramData\\PiggieTV';
+const protectedApprovalParent = 'C:\\ProgramData';
 
 function powershellEnvironment(extra = {}) {
     return { ...process.env, PSModulePath: windowsPowerShellModules, ...extra };
+}
+
+function safeGitEnvironment() {
+    const environment = { ...process.env };
+    const blocked = new Set(['GIT_EXEC_PATH', 'GIT_EXTERNAL_DIFF', 'GIT_PAGER', 'GIT_ASKPASS',
+        'GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_EDITOR', 'GIT_SEQUENCE_EDITOR', 'GIT_DIR',
+        'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY',
+        'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES',
+        'GIT_DISCOVERY_ACROSS_FILESYSTEM', 'GIT_TEMPLATE_DIR']);
+    for (const name of Object.keys(environment)) {
+        const normalized = name.toUpperCase();
+        if (normalized.startsWith('GIT_CONFIG_') || blocked.has(normalized)) delete environment[name];
+    }
+    return { ...environment, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1' };
 }
 
 export class PreflightError extends Error {
@@ -116,9 +136,9 @@ function existingRealPath(value, label) {
 
 function git(cwd, ...args) {
     try {
-        return execFileSync(gitExecutable, ['-C', cwd, ...args], {
+        return execFileSync(gitExecutable, [...safeGitOptions, '-C', cwd, ...args], {
             encoding: 'utf8',
-            env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+            env: safeGitEnvironment(),
             stdio: ['ignore', 'pipe', 'pipe']
         }).trim();
     } catch {
@@ -134,15 +154,16 @@ function inspectGit(cwd) {
     const head = git(root, 'rev-parse', 'HEAD');
     let branch = 'DETACHED';
     try {
-        branch = execFileSync(gitExecutable, ['-C', root, 'symbolic-ref', '--quiet', '--short', 'HEAD'], {
-            encoding: 'utf8',
-            env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
-            stdio: ['ignore', 'pipe', 'ignore']
-        }).trim() || 'DETACHED';
+        branch = git(root, 'symbolic-ref', '--quiet', '--short', 'HEAD') || 'DETACHED';
     } catch {
         // Detached HEAD is expected for exact-ref CI and historical inspection.
     }
-    const dirty = git(root, 'status', '--porcelain=v1', '--untracked-files=all').length > 0;
+    let dirty;
+    try {
+        dirty = sourceTreeDirty(root);
+    } catch {
+        deny('Git cleanliness check failed');
+    }
     return { root, commonDir, remote, head, branch, dirty };
 }
 
@@ -197,10 +218,57 @@ function hashFile(file) {
     return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+export function webApprovalPathPinned(approvalPath) {
+    if (typeof approvalPath !== 'string' || !path.win32.isAbsolute(approvalPath)
+        || approvalPath.split(/[\\/]/u).some(segment => segment === '.' || segment === '..')) return false;
+    const candidate = path.win32.normalize(approvalPath);
+    if (!/^C:\\/iu.test(candidate)) return false;
+    const relative = path.win32.relative(protectedApprovalRoot, candidate);
+    return relative !== '' && relative !== '..' && !relative.startsWith('..\\')
+        && !path.win32.isAbsolute(relative);
+}
+
+function protectedApprovalAclOutput(approvalPath, ancestor = protectedApprovalAncestor) {
+    if (process.platform !== 'win32' || !webApprovalPathPinned(approvalPath)) return null;
+    try {
+        const actual = fs.realpathSync.native(approvalPath);
+        if (!samePath(actual, approvalPath) || !fs.lstatSync(approvalPath).isFile()) return null;
+    } catch { return null; }
+    try {
+        const script = [
+            "$ErrorActionPreference='Stop'",
+            '$identity=[System.Security.Principal.WindowsIdentity]::GetCurrent()',
+            '$principal=[System.Security.Principal.WindowsPrincipal]::new($identity)',
+            '$elevated=$identity.IsSystem -or $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)',
+            `$protectedRoot='${protectedApprovalRoot}'`,
+            `$protectedAncestor='${ancestor}'`,
+            '$approval=[System.IO.Path]::GetFullPath($env:PTV_APPROVAL_PATH)',
+            '$prefix=[System.IO.Path]::GetFullPath($protectedRoot).TrimEnd("\\")+"\\"',
+            'if(-not $approval.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw "Approval root mismatch"}',
+            '$paths=@($approval)',
+            '$parent=[System.IO.Path]::GetDirectoryName($approval)',
+            'while($true){ $paths+= $parent; if($parent -ieq $protectedAncestor){break};',
+            '  $parent=[System.IO.Path]::GetDirectoryName($parent);',
+            '  if(-not $parent -or -not $parent.StartsWith($protectedAncestor,[StringComparison]::OrdinalIgnoreCase)){throw "Approval ancestor mismatch"} }',
+            '$records=@(foreach($p in $paths) {',
+            '  $entry=Get-Item -LiteralPath $p -Force',
+            '  $acl=Get-Acl -LiteralPath $p',
+            '  @{ ownerSid=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;',
+            '     reparsePoint=[bool](($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0);',
+            '     aces=@($acl.Access | ForEach-Object { @{ sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value;',
+            '       type=$_.AccessControlType.ToString(); rights=[int64]$_.FileSystemRights } }) }',
+            '})',
+            '@{ elevated=[bool]$elevated; records=$records } | ConvertTo-Json -Compress -Depth 5'
+        ].join('\n');
+        return execFileSync(powershellExecutable, ['-NoProfile', '-NonInteractive', '-Command', script], {
+            encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+            env: powershellEnvironment({ PTV_APPROVAL_PATH: approvalPath })
+        });
+    } catch { return null; }
+}
+
 export function approvalProtectedFromCurrentProcess(approvalPath) {
-    if (process.platform !== 'win32') return false;
-    const protectedRoot = 'C:\\ProgramData\\PiggieTV\\WorkspaceAuthority\\Approvals';
-    if (!insidePath(approvalPath, protectedRoot) || samePath(approvalPath, protectedRoot)) return false;
+    if (process.platform !== 'win32' || !webApprovalPathPinned(approvalPath)) return false;
     let handle;
     try {
         handle = fs.openSync(approvalPath, 'r+');
@@ -211,35 +279,7 @@ export function approvalProtectedFromCurrentProcess(approvalPath) {
         if (handle !== undefined) fs.closeSync(handle);
     }
     try {
-        const script = [
-            "$ErrorActionPreference='Stop'",
-            '$identity=[System.Security.Principal.WindowsIdentity]::GetCurrent()',
-            '$principal=[System.Security.Principal.WindowsPrincipal]::new($identity)',
-            '$elevated=$identity.IsSystem -or $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)',
-            "$protectedRoot='C:\\ProgramData\\PiggieTV\\WorkspaceAuthority\\Approvals'",
-            "$protectedAncestor='C:\\ProgramData\\PiggieTV'",
-            '$approval=[System.IO.Path]::GetFullPath($env:PTV_APPROVAL_PATH)',
-            '$prefix=[System.IO.Path]::GetFullPath($protectedRoot).TrimEnd("\\")+"\\"',
-            'if(-not $approval.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw "Approval root mismatch"}',
-            '$paths=@($approval)',
-            '$parent=[System.IO.Path]::GetDirectoryName($approval)',
-            'while($true){ $paths+= $parent; if($parent -ieq $protectedAncestor){break};',
-            '  $parent=[System.IO.Path]::GetDirectoryName($parent);',
-            '  if(-not $parent -or -not $parent.StartsWith($protectedAncestor,[StringComparison]::OrdinalIgnoreCase)){throw "Approval ancestor mismatch"} }',
-            '$records=@(foreach($p in $paths) {',
-            '  $acl=Get-Acl -LiteralPath $p',
-            '  @{ ownerSid=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;',
-            '     aces=@($acl.Access | ForEach-Object { @{ sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value;',
-            '       type=$_.AccessControlType.ToString(); rights=[int64]$_.FileSystemRights } }) }',
-            '})',
-            '@{ elevated=[bool]$elevated; records=$records } | ConvertTo-Json -Compress -Depth 5'
-        ].join('\n');
-        const output = execFileSync(powershellExecutable, ['-NoProfile', '-NonInteractive', '-Command', script], {
-            encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-            env: powershellEnvironment({ PTV_APPROVAL_PATH: approvalPath })
-        });
-        const evidence = JSON.parse(output);
-        return approvalAclSafe(evidence);
+        return approvalAclSafe(JSON.parse(protectedApprovalAclOutput(approvalPath)));
     } catch {
         return false;
     }
@@ -253,6 +293,38 @@ export function approvalAclSafe(evidence) {
             && record.aces.every(ace => ace.type !== 'Allow'
                 || (typeof ace.rights === 'number' && typeof ace.sid === 'string'
                     && ((ace.rights & writeMask) === 0 || privileged.has(ace.sid)))));
+}
+
+export function webApprovalAclSafe(evidence) {
+    const privileged = new Set(['S-1-5-18', 'S-1-5-32-544']);
+    const writeMask = 0x2 | 0x4 | 0x10 | 0x40 | 0x100 | 0x10000 | 0x40000 | 0x80000
+        | 0x10000000 | 0x40000000;
+    const parentWriteMask = 0x40 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000;
+    const validRights = rights => Number.isInteger(rights) && rights >= -0x80000000
+        && rights <= 0xFFFFFFFF;
+    const safeRecord = (record, mask) => record?.reparsePoint === false
+        && privileged.has(record.ownerSid) && Array.isArray(record.aces)
+        && record.aces.every(ace => (ace.type === 'Deny'
+            && typeof ace.sid === 'string' && validRights(ace.rights))
+            || (ace.type === 'Allow' && typeof ace.sid === 'string'
+                && validRights(ace.rights)
+                && ((ace.rights & mask) === 0 || privileged.has(ace.sid))));
+    return typeof evidence?.elevated === 'boolean' && Array.isArray(evidence.records)
+        && evidence.records.length >= 5
+        && evidence.records.slice(0, -1).every(record => safeRecord(record, writeMask))
+        && safeRecord(evidence.records.at(-1), parentWriteMask);
+}
+
+export function parseWebApprovalAclEvidence(output) {
+    try {
+        return webApprovalAclSafe(JSON.parse(output));
+    } catch {
+        return false;
+    }
+}
+
+export function webApprovalProtectedForOperator(approvalPath) {
+    return parseWebApprovalAclEvidence(protectedApprovalAclOutput(approvalPath, protectedApprovalParent));
 }
 
 function readJson(file, label) {
@@ -392,9 +464,7 @@ export function validateDevelopmentSourceSelection({ head, frozenSourceCommit, o
 
 function sourceCommitIsAncestor(root, commit, head) {
     try {
-        execFileSync(gitExecutable, ['-C', root, 'merge-base', '--is-ancestor', commit, head], {
-            env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, stdio: ['ignore', 'ignore', 'ignore']
-        });
+        git(root, 'merge-base', '--is-ancestor', commit, head);
         return true;
     } catch {
         return false;
@@ -767,7 +837,7 @@ function parseArgs(argv) {
     return { mode, flags };
 }
 
-function readOperatorPolicy(policy) {
+function readProtectedOperatorPolicy(policy, aclSafe) {
     if (process.platform !== 'win32' || policy.operatorPolicy?.kind !== 'windows-registry'
         || policy.operatorPolicy.key !== operatorRegistryKey || policy.operatorPolicy.value !== operatorRegistryValue) return null;
     try {
@@ -804,7 +874,7 @@ function readOperatorPolicy(policy) {
             stdio: ['ignore', 'pipe', 'pipe'],
             env: powershellEnvironment()
         });
-        if (!operatorAclSafe(JSON.parse(aclOutput))) deny('Protected Registry ACL does not establish independent authority');
+        if (!aclSafe(JSON.parse(aclOutput))) deny('Protected Registry ACL does not establish independent authority');
         const valueScript = [
             "$ErrorActionPreference='Stop'",
             '$base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)',
@@ -829,6 +899,14 @@ function readOperatorPolicy(policy) {
     }
 }
 
+export function readOperatorPolicy(policy) {
+    return readProtectedOperatorPolicy(policy, operatorAclSafe);
+}
+
+export function readWebOperatorPolicy(policy) {
+    return readProtectedOperatorPolicy(policy, webOperatorAclSafe);
+}
+
 export function operatorAclSafe(acl) {
     const privilegedSids = new Set(['S-1-5-18', 'S-1-5-32-544']);
     if (!acl || acl.currentTokenCanWrite !== false || !Array.isArray(acl.records) || acl.records.length !== 2) return false;
@@ -838,6 +916,22 @@ export function operatorAclSafe(acl) {
             || (typeof ace.rights === 'number' && typeof ace.sid === 'string'
                 && ((ace.rights & writeMask) === 0 || privilegedSids.has(ace.sid)
                     || (ace.sid === 'S-1-3-0' && ace.propagation === 'InheritOnly')))));
+}
+
+export function webOperatorAclSafe(acl) {
+    const privileged = new Set(['S-1-5-18', 'S-1-5-32-544']);
+    const writeMask = 0x2 | 0x4 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000;
+    const validRights = rights => Number.isInteger(rights) && rights >= -0x80000000
+        && rights <= 0xFFFFFFFF;
+    return typeof acl?.currentTokenCanWrite === 'boolean' && Array.isArray(acl.records)
+        && acl.records.length === 2
+        && acl.records.every(record => privileged.has(record.ownerSid) && Array.isArray(record.aces)
+            && record.aces.every(ace => (ace.type === 'Deny' && typeof ace.sid === 'string'
+                && validRights(ace.rights))
+                || (ace.type === 'Allow' && typeof ace.sid === 'string'
+                    && validRights(ace.rights)
+                    && ((ace.rights & writeMask) === 0 || privileged.has(ace.sid)
+                        || (ace.sid === 'S-1-3-0' && ace.propagation === 'InheritOnly')))));
 }
 
 function readCiEventHeadSha() {

@@ -6,8 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
 
-import { approvalAclSafe, approvalProtectedFromCurrentProcess, evaluatePreflight, operatorAclSafe } from './ptv-workspace-preflight.mjs';
+import * as preflight from './ptv-workspace-preflight.mjs';
 import { buildManifest } from './ptv-artifact-manifest.mjs';
+
+const { approvalAclSafe, approvalProtectedFromCurrentProcess, evaluatePreflight, operatorAclSafe } = preflight;
 
 const fixtures = [];
 const remote = 'https://github.com/Piglit09/PiggieTV-Jellyfin-web-app.git';
@@ -504,6 +506,30 @@ test('rejects operator Registry ACLs that grant task users write access', () => 
     assert.equal(operatorAclSafe(null), false);
 });
 
+test('Web Registry policy accepts elevated reader but rejects nonprivileged mutation rights', () => {
+    const { webOperatorAclSafe } = preflight;
+    assert.equal(typeof webOperatorAclSafe, 'function');
+    const record = { ownerSid: 'S-1-5-32-544', aces: [
+        { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x20019 },
+        { sid: 'S-1-5-18', type: 'Allow', rights: 0xF003F }
+    ] };
+    const safe = { currentTokenCanWrite: true, records: [record, { ...record, aces: [...record.aces] }] };
+    assert.equal(operatorAclSafe(safe), false);
+    assert.equal(webOperatorAclSafe(safe), true);
+    assert.equal(webOperatorAclSafe({ ...safe, currentTokenCanWrite: false }), true);
+    assert.equal(webOperatorAclSafe({ ...safe, records: [{ ...record, ownerSid: 'S-1-5-21-1234' }, record] }), false);
+    assert.equal(webOperatorAclSafe({ ...safe, records: [record, { ...record, aces: [
+        ...record.aces, { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x4 }
+    ] }] }), false);
+    assert.equal(webOperatorAclSafe({ ...safe, records: [record, { ...record, aces: [
+        ...record.aces, { sid: 'S-1-3-0', type: 'Allow', rights: 0x4, propagation: 'None' }
+    ] }] }), false);
+    assert.equal(webOperatorAclSafe({ ...safe, records: [record, { ...record, aces: [
+        ...record.aces, { sid: 'S-1-3-0', type: 'Allow', rights: 0x4, propagation: 'InheritOnly' }
+    ] }] }), true);
+    assert.equal(webOperatorAclSafe(null), false);
+});
+
 test('protected approval requires privileged ownership and every ancestor to deny replacement', () => {
     const protectedRecord = { ownerSid: 'S-1-5-32-544', aces: [
         { sid: 'S-1-5-32-544', type: 'Allow', rights: 0x1F01FF },
@@ -523,4 +549,160 @@ test('protected approval requires privileged ownership and every ancestor to den
     ] }), false);
     assert.equal(approvalAclSafe({ ...safe, records: safe.records.slice(0, 2) }), false);
     assert.equal(approvalAclSafe({ ...safe, elevated: true }), false);
+});
+
+test('Web approval accepts an elevated operator only when every protected path has safe ACLs', () => {
+    const { webApprovalAclSafe } = preflight;
+    assert.equal(typeof webApprovalAclSafe, 'function');
+    const protectedRecord = { ownerSid: 'S-1-5-32-544', reparsePoint: false, aces: [
+        { sid: 'S-1-5-18', type: 'Allow', rights: 0x1F01FF },
+        { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x1200A9 }
+    ] };
+    const parentRecord = { ownerSid: 'S-1-5-18', reparsePoint: false, aces: [
+        { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x1201BF }
+    ] };
+    const safe = { elevated: true, records: [
+        ...Array.from({ length: 4 }, () => ({ ...protectedRecord, aces: [...protectedRecord.aces] })),
+        parentRecord
+    ] };
+    assert.equal(webApprovalAclSafe(safe), true);
+    assert.equal(webApprovalAclSafe({ ...safe, elevated: false }), true);
+    assert.equal(webApprovalAclSafe({ ...safe, records: [
+        { ...protectedRecord, aces: [{ sid: 'S-1-5-32-545', type: 'Allow', rights: -0x80000000 }] },
+        ...safe.records.slice(1)
+    ] }), true);
+    for (const index of [0, 1, 2, 3]) {
+        const records = [...safe.records];
+        records[index] = { ...protectedRecord, ownerSid: 'S-1-5-21-1234' };
+        assert.equal(webApprovalAclSafe({ ...safe, records }), false, `owner ${index}`);
+        records[index] = { ...protectedRecord, reparsePoint: true };
+        assert.equal(webApprovalAclSafe({ ...safe, records }), false, `reparse ${index}`);
+        records[index] = { ...protectedRecord, aces: [...protectedRecord.aces,
+            { sid: 'S-1-5-32-545', type: 'Allow', rights: 0x10000 }] };
+        assert.equal(webApprovalAclSafe({ ...safe, records }), false, `write ACE ${index}`);
+    }
+    for (const rights of [0x40000000, 0x10000000]) {
+        const records = [{ ...protectedRecord, aces: [
+            { sid: 'S-1-5-32-545', type: 'Allow', rights }
+        ] }, ...safe.records.slice(1)];
+        assert.equal(webApprovalAclSafe({ ...safe, records }), false, `generic write ${rights}`);
+    }
+    assert.equal(webApprovalAclSafe({ ...safe, records: safe.records.slice(0, 4) }), false);
+    assert.equal(webApprovalAclSafe({ ...safe, records: [
+        ...safe.records.slice(0, -1), { ...parentRecord, ownerSid: 'S-1-5-21-1234' }
+    ] }), false);
+    assert.equal(webApprovalAclSafe({ ...safe, records: [
+        ...safe.records.slice(0, -1), { ...parentRecord, reparsePoint: true }
+    ] }), false);
+    for (const rights of [0x40, 0x10000, 0x40000, 0x80000, 0x10000000, 0x40000000]) {
+        assert.equal(webApprovalAclSafe({ ...safe, records: [
+            ...safe.records.slice(0, -1), { ...parentRecord, aces: [
+                ...parentRecord.aces, { sid: 'S-1-5-32-545', type: 'Allow', rights }
+            ] }
+        ] }), false, `parent replacement ${rights}`);
+    }
+    assert.equal(webApprovalAclSafe({ ...safe, elevated: 'true' }), false);
+    assert.equal(webApprovalAclSafe({ ...safe, records: [
+        { ...protectedRecord, aces: [{ sid: 'S-1-5-32-545', type: 'Unknown', rights: 0x1F01FF }] },
+        ...safe.records.slice(1)
+    ] }), false);
+    assert.equal(webApprovalAclSafe(null), false);
+});
+
+test('Web approval ACL parser fails closed on malformed or incomplete PowerShell output', () => {
+    const { parseWebApprovalAclEvidence } = preflight;
+    assert.equal(typeof parseWebApprovalAclEvidence, 'function');
+    const record = { ownerSid: 'S-1-5-18', reparsePoint: false,
+        aces: [{ sid: 'S-1-5-32-545', type: 'Allow', rights: 0x1200A9 }] };
+    const parent = { ...record, aces: [{ sid: 'S-1-5-32-545', type: 'Allow', rights: 0x1201BF }] };
+    const safe = JSON.stringify({ elevated: true, records: [record, record, record, record, parent] });
+    assert.equal(parseWebApprovalAclEvidence(safe), true);
+    assert.equal(parseWebApprovalAclEvidence('{broken'), false);
+    assert.equal(parseWebApprovalAclEvidence(JSON.stringify({ elevated: true,
+        records: [record, record, record, record] })), false);
+    assert.equal(parseWebApprovalAclEvidence(JSON.stringify({ elevated: true,
+        records: [{ ...record, reparsePoint: null }, record, record, record, parent] })), false);
+});
+
+test('Web approval path must stay below the pinned protected root', () => {
+    const { webApprovalPathPinned } = preflight;
+    assert.equal(typeof webApprovalPathPinned, 'function');
+    const root = 'C:\\ProgramData\\PiggieTV\\WorkspaceAuthority\\Approvals';
+    assert.equal(webApprovalPathPinned(root + '\\ticket.json'), true);
+    assert.equal(webApprovalPathPinned(root + '\\nested\\ticket.json'), true);
+    assert.equal(webApprovalPathPinned(root), false);
+    assert.equal(webApprovalPathPinned(root + '-other\\ticket.json'), false);
+    assert.equal(webApprovalPathPinned(root + '\\..\\ticket.json'), false);
+    assert.equal(webApprovalPathPinned('D:\\ProgramData\\PiggieTV\\WorkspaceAuthority\\Approvals\\ticket.json'), false);
+    assert.equal(webApprovalPathPinned('ticket.json'), false);
+});
+
+test('workspace Git inspection ignores a task-controlled PATH', () => {
+    const f = fixture();
+    const prior = process.env.PATH;
+    try {
+        process.env.PATH = path.join(f.base, 'untrusted-tools');
+        assert.equal(check(f, 'audit').head, f.head);
+    } finally {
+        process.env.PATH = prior;
+    }
+});
+
+test('workspace Git inspection does not execute a checkout-controlled filesystem monitor', () => {
+    const f = fixture();
+    const marker = path.join(f.base, 'fsmonitor-ran.txt');
+    const monitor = path.join(f.base, 'fsmonitor.cjs');
+    fs.writeFileSync(monitor, `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran'); process.exit(1);`);
+    git(f.root, 'config', 'core.fsmonitor', `"${process.execPath}" "${monitor}"`);
+    git(f.root, 'status', '--porcelain=v1');
+    assert.equal(fs.existsSync(marker), true, 'fixture must prove Git would execute the monitor');
+    fs.rmSync(marker);
+    assert.equal(check(f, 'audit').head, f.head);
+    assert.equal(fs.existsSync(marker), false);
+});
+
+test('workspace Git inspection does not execute a checkout-controlled clean filter', () => {
+    const f = fixture();
+    const tracked = path.join(f.root, 'ptv-version.json');
+    const marker = path.join(f.base, 'clean-filter-ran.txt');
+    const filter = path.join(f.base, 'clean-filter.cjs');
+    fs.writeFileSync(path.join(f.root, '.gitattributes'), 'ptv-version.json filter=marker\n');
+    git(f.root, 'add', '.gitattributes');
+    git(f.root, 'commit', '-qm', 'fixture attributes');
+    f.head = git(f.root, 'rev-parse', 'HEAD');
+    fs.writeFileSync(filter, `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran'); process.stdin.pipe(process.stdout);`);
+    git(f.root, 'config', 'filter.marker.clean', `"${process.execPath}" "${filter}"`);
+    fs.utimesSync(tracked, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+    git(f.root, '-c', 'core.fsmonitor=false', 'status', '--porcelain=v1');
+    assert.equal(fs.existsSync(marker), true, 'fixture must prove Git status would execute the filter');
+    fs.rmSync(marker);
+    const result = check(f, 'audit');
+    assert.equal(result.head, f.head);
+    assert.equal(result.dirty, false);
+    assert.equal(fs.existsSync(marker), false);
+    fs.writeFileSync(tracked, '{"version":"0.5.71"} \n');
+    assert.equal(check(f, 'audit').dirty, true);
+    assert.equal(fs.existsSync(marker), false);
+});
+
+test('workspace Git inspection marks staged-only changes dirty', () => {
+    const f = fixture();
+    const tracked = path.join(f.root, 'ptv-version.json');
+    const original = fs.readFileSync(tracked);
+    fs.writeFileSync(tracked, '{"version":"0.5.72"}\n');
+    git(f.root, 'add', 'ptv-version.json');
+    fs.writeFileSync(tracked, original);
+    assert.equal(check(f, 'audit').dirty, true);
+});
+
+test('workspace Git inspection ignores inherited repository locator overrides', () => {
+    const f = fixture();
+    const prior = process.env.GIT_DIR;
+    try {
+        process.env.GIT_DIR = path.join(f.base, 'untrusted-git-dir');
+        assert.equal(check(f, 'audit').head, f.head);
+    } finally {
+        if (prior === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = prior;
+    }
 });

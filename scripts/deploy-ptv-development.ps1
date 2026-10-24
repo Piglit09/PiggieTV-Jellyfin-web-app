@@ -30,6 +30,9 @@ if ($FrozenSourceCommit -and $FrozenSourceCommit -cnotmatch '^[0-9a-f]{40}$') { 
 if ($plugin -and -not $VerifyOnly -and $null -eq $AdminToken) {
     throw 'Plugin installation requires a .125 administrator token for graceful shutdown and restart.'
 }
+if ($web -and -not $VerifyOnly) {
+    throw 'Web publication requires the protected Web entrypoint deploy-ptv-web-protected.ps1.'
+}
 
 $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $artifactRoot = 'C:\Users\Piggie\Documents\GitHub\_PTV-Artifacts'

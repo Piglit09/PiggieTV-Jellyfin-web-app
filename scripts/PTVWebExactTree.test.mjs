@@ -21,5 +21,5 @@ test('exact-tree publication and rollback remain bounded to disposable fixtures'
         timeout: 120_000
     });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    assert.match(result.stdout, /EXACT_TREE_FIXTURES: 32 passed, 0 failed/u);
+    assert.match(result.stdout, /EXACT_TREE_FIXTURES: 74 passed, 0 failed/u);
 });

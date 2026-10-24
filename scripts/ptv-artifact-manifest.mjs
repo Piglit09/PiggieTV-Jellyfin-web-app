@@ -9,6 +9,24 @@ const PROJECT_IDS = new Map([ [ 'web', 'PTV_WEB' ], [ 'plugin', 'PTV_PLUGIN' ] ]
 const BUILD_MODES = new Set([ 'development', 'production', 'package', 'transformed-production' ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
+const gitExecutable = process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd\\git.exe' : '/usr/bin/git';
+const safeGitOptions = [ '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+    '-c', 'diff.external=', '-c', 'credential.helper=', '-c', 'core.pager=',
+    '-c', 'protocol.allow=never', '-c', 'protocol.ext.allow=never' ];
+
+function safeGitEnvironment() {
+    const environment = { ...process.env };
+    const blocked = new Set([ 'GIT_EXEC_PATH', 'GIT_EXTERNAL_DIFF', 'GIT_PAGER', 'GIT_ASKPASS',
+        'GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_EDITOR', 'GIT_SEQUENCE_EDITOR', 'GIT_DIR',
+        'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY',
+        'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES',
+        'GIT_DISCOVERY_ACROSS_FILESYSTEM', 'GIT_TEMPLATE_DIR' ]);
+    for (const name of Object.keys(environment)) {
+        const normalized = name.toUpperCase();
+        if (normalized.startsWith('GIT_CONFIG_') || blocked.has(normalized)) delete environment[name];
+    }
+    return { ...environment, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1' };
+}
 
 function hash(bytes) {
     return crypto.createHash('sha256').update(bytes).digest('hex');
@@ -32,14 +50,145 @@ export function canonicalDigest(manifest) {
     return hash(Buffer.from(canonical(unsigned), 'utf8'));
 }
 
-function git(sourceRoot, ...args) {
-    // eslint-disable-next-line sonarjs/no-os-command-from-path -- Node-only tooling uses the operator-provided trusted Git PATH.
-    return execFileSync('git', args, {
+function gitBytes(sourceRoot, args, input) {
+    return execFileSync(gitExecutable, [ ...safeGitOptions, ...args ], {
         cwd: sourceRoot,
-        env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
-        encoding: 'utf8',
-        stdio: [ 'ignore', 'pipe', 'ignore' ]
-    }).trim();
+        env: safeGitEnvironment(),
+        input,
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: [ 'pipe', 'pipe', 'ignore' ]
+    });
+}
+
+function git(sourceRoot, ...args) {
+    return gitBytes(sourceRoot, args).toString('utf8').trim();
+}
+
+function nulRecords(bytes) {
+    if (bytes.length === 0) return [];
+    assert.equal(bytes.at(-1), 0, 'Git record stream is not NUL terminated');
+    const records = [];
+    let start = 0;
+    for (let index = 0; index < bytes.length; index++) {
+        if (bytes[index] !== 0) continue;
+        const record = bytes.subarray(start, index);
+        const decoded = record.toString('utf8');
+        assert(Buffer.from(decoded, 'utf8').equals(record), 'Invalid UTF-8 Git path');
+        records.push(decoded);
+        start = index + 1;
+    }
+    return records;
+}
+
+function trackedEntries(bytes, kind, objectFormat) {
+    const entries = new Map();
+    const oidLength = objectFormat === 'sha1' ? 40 : 64;
+    for (const record of nulRecords(bytes)) {
+        const separator = record.indexOf('\t');
+        assert(separator > 0, 'Invalid Git tracked entry');
+        const header = record.slice(0, separator).split(' ');
+        const relative = record.slice(separator + 1);
+        assert(relative && !relative.includes('\\') && !relative.includes(':') && !path.isAbsolute(relative)
+            && relative.split('/').every(part => part && part !== '.' && part !== '..'), 'Unsafe Git tracked path');
+        const [ mode, typeOrOid, stageOrOid ] = header;
+        const oid = kind === 'index' ? typeOrOid : stageOrOid;
+        assert(header.length === 3 && /^\d{6}$/u.test(mode)
+            && new RegExp(`^[0-9a-f]{${oidLength}}$`, 'u').test(oid), 'Invalid Git tracked entry');
+        if (kind === 'index') assert.equal(stageOrOid, '0', 'Unmerged Git index');
+        else assert([ 'blob', 'commit' ].includes(typeOrOid), 'Invalid Git tree entry');
+        assert(!entries.has(relative), 'Duplicate Git tracked entry');
+        entries.set(relative, { mode, oid });
+    }
+    return entries;
+}
+
+function blobOid(bytes, objectFormat) {
+    return crypto.createHash(objectFormat).update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+}
+
+function fileIsRealInsideCheckout(root, relative) {
+    const file = path.join(root, ...relative.split('/'));
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    const real = fs.realpathSync.native(file);
+    const normalized = value => process.platform === 'win32' ? path.normalize(value).toLowerCase() : path.normalize(value);
+    return normalized(real) === normalized(file);
+}
+
+function attributesForPaths(root, paths) {
+    const expectedPaths = new Set(paths);
+    const input = Buffer.from(paths.join('\0') + '\0', 'utf8');
+    const output = nulRecords(gitBytes(root,
+        [ 'check-attr', '--stdin', '-z', 'text', 'eol', 'filter', 'working-tree-encoding' ], input));
+    assert.equal(output.length, paths.length * 12, 'Incomplete Git attribute output');
+    const attributes = new Map();
+    for (let index = 0; index < output.length; index += 3) {
+        const [ relative, name, value ] = output.slice(index, index + 3);
+        assert(expectedPaths.has(relative) && [ 'text', 'eol', 'filter', 'working-tree-encoding' ].includes(name),
+            'Unexpected Git attribute output');
+        const pathAttributes = attributes.get(relative) ?? {};
+        assert(!(name in pathAttributes), 'Duplicate Git attribute output');
+        pathAttributes[name] = value;
+        attributes.set(relative, pathAttributes);
+    }
+    assert.equal(attributes.size, paths.length, 'Missing Git attributes');
+    return attributes;
+}
+
+function textNormalizationAllowed(attributes, autocrlf) {
+    if (![ 'unspecified', 'unset' ].includes(attributes.filter)
+        || ![ 'unspecified', 'unset' ].includes(attributes['working-tree-encoding'])
+        || attributes.text === 'unset') return false;
+    if ([ 'set', 'auto' ].includes(attributes.text)) return true;
+    if (attributes.text !== 'unspecified') return false;
+    if ([ 'lf', 'crlf' ].includes(attributes.eol)) return true;
+    return attributes.eol === 'unspecified' && [ 'true', 'input' ].includes(autocrlf);
+}
+
+function changedWorktreeFiles(root, staged, objectFormat) {
+    const mismatched = [];
+    try {
+        for (const [ relative, entry ] of staged) {
+            if (![ '100644', '100755' ].includes(entry.mode) || !fileIsRealInsideCheckout(root, relative)) return null;
+            const bytes = fs.readFileSync(path.join(root, ...relative.split('/')));
+            if (blobOid(bytes, objectFormat) !== entry.oid) mismatched.push({ relative, entry, bytes });
+        }
+    } catch {
+        return null;
+    }
+    return mismatched;
+}
+
+// Git status can execute a checkout-configured clean filter. Compare the committed
+// tree, index, and worktree bytes without asking Git to convert file contents.
+export function sourceTreeDirty(root) {
+    const objectFormat = git(root, 'rev-parse', '--show-object-format');
+    assert([ 'sha1', 'sha256' ].includes(objectFormat), 'Unsupported Git object format');
+    const committed = trackedEntries(gitBytes(root, [ 'ls-tree', '-r', '-z', 'HEAD' ]), 'tree', objectFormat);
+    const staged = trackedEntries(gitBytes(root, [ 'ls-files', '--stage', '-z' ]), 'index', objectFormat);
+    if (committed.size !== staged.size) return true;
+    for (const [ relative, entry ] of committed) {
+        const indexEntry = staged.get(relative);
+        if (!indexEntry || indexEntry.mode !== entry.mode || indexEntry.oid !== entry.oid) return true;
+    }
+    if (gitBytes(root, [ 'ls-files', '--others', '--exclude-standard', '-z' ]).length > 0) return true;
+    const mismatched = changedWorktreeFiles(root, staged, objectFormat);
+    if (!mismatched) return true;
+    if (mismatched.length === 0) return false;
+    const attributes = attributesForPaths(root, mismatched.map(item => item.relative));
+    let autocrlf = 'false';
+    try {
+        autocrlf = git(root, 'config', '--get', 'core.autocrlf').toLowerCase();
+    } catch {
+        // Git's default does not normalize text automatically.
+    }
+    for (const { relative, entry, bytes } of mismatched) {
+        if (!textNormalizationAllowed(attributes.get(relative), autocrlf)
+            || bytes.subarray(0, 8000).includes(0)) return true;
+        const normalized = Buffer.from(bytes.toString('binary').replaceAll('\r\n', '\n'), 'binary');
+        if (blobOid(normalized, objectFormat) !== entry.oid) return true;
+    }
+    return false;
 }
 
 function realDirectory(value, label) {
@@ -63,7 +212,7 @@ function sourceInfo(sourceRoot) {
     } catch {
         sourceBranch = 'DETACHED';
     }
-    const sourceDirty = Boolean(git(root, 'status', '--porcelain=v1', '--untracked-files=normal'));
+    const sourceDirty = sourceTreeDirty(root);
     const web = JSON.parse(fs.readFileSync(path.join(root, 'ptv-version.json'), 'utf8')).version;
     const packageVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
     const pluginProject = fs.readFileSync(path.join(root, 'src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj'), 'utf8');

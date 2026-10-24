@@ -21,6 +21,6 @@ test('pre-publication gate denies unsafe server, session, Beta, and approval evi
         timeout: 120_000
     });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    assert.match(result.stdout, /PREPUBLICATION_GATE_FIXTURES: 45 passed, 0 failed/u);
+    assert.match(result.stdout, /PREPUBLICATION_GATE_FIXTURES: 78 passed, 0 failed/u);
     assert.doesNotMatch(result.stdout + result.stderr, /fixture-sensitive-token-never-print/u);
 });

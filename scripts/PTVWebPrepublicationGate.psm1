@@ -18,6 +18,15 @@ function Get-GateField {
     return ,$property.Value
 }
 
+function Test-GateFieldPresent {
+    param($Value, [string]$Name)
+    if ($null -eq $Value) { return $false }
+    if ($Value -is [System.Collections.IDictionary]) {
+        return $Value.Contains($Name)
+    }
+    return $null -ne $Value.PSObject.Properties[$Name]
+}
+
 function Deny-Gate {
     param([string]$Code)
     # Never concatenate external values or exception text: providers may contain
@@ -28,6 +37,14 @@ function Deny-Gate {
 function Assert-Gate {
     param([bool]$Condition, [string]$Code)
     if (-not $Condition) { Deny-Gate $Code }
+}
+
+function New-GateAuthorizationHeader {
+    param([string]$Token)
+    # Jellyfin 12 uses the MediaBrowser Authorization scheme. Reject header
+    # metacharacters before quoting the token; never echo it on failure.
+    Assert-Gate ($Token -cmatch '^[A-Za-z0-9._~+/=-]+$') 'ADMIN_TOKEN_INVALID'
+    return [Net.Http.Headers.AuthenticationHeaderValue]::new('MediaBrowser', 'Token="' + $Token + '"')
 }
 
 function Get-GateTime {
@@ -67,6 +84,37 @@ function Assert-GateFreshness {
     return $time
 }
 
+function Read-GateLocalJson {
+    param([scriptblock]$RequestProvider, [string]$Route, [bool]$Authenticated)
+    try {
+        $bytes = & $RequestProvider $Route $Authenticated
+        if ($bytes -isnot [byte[]] -or $bytes.Length -eq 0) { Deny-Gate 'LOCAL_RESPONSE_INVALID' }
+        $value = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json -AsHashtable -NoEnumerate -ErrorAction Stop
+        if ($null -eq $value) { Deny-Gate 'LOCAL_RESPONSE_INVALID' }
+        return ,$value
+    }
+    catch {
+        Deny-Gate 'LOCAL_RESPONSE_INVALID'
+    }
+}
+
+function New-GateSessionInventory {
+    param($User, [array]$Items, [string]$CapturedAtUtc)
+    return [ordered]@{
+        authenticated = $true
+        administrator = (Get-GateField (Get-GateField $User 'Policy') 'IsAdministrator')
+        requesterUserId = (Get-GateField $User 'Id')
+        capturedAtUtc = $CapturedAtUtc
+        recentActivityWindowSeconds = 960
+        # Jellyfin GET /Sessions returns an unpaged array, with no filters
+        # or pagination query parameters in the requested route.
+        sourceRoute = '/Sessions'
+        inventoryComplete = $true
+        pageCount = 1
+        items = $Items
+    }
+}
+
 function Get-PTVWebLocalObservationCore {
     param(
         [Parameter(Mandatory = $true)][scriptblock]$RequestProvider,
@@ -74,25 +122,12 @@ function Get-PTVWebLocalObservationCore {
         [Parameter(Mandatory = $true)]$BetaIsolationEvidence,
         [Parameter(Mandatory = $true)][bool]$ConflictingDeployment
     )
-    function Read-LocalJson([string]$Route, [bool]$Authenticated) {
-        try {
-            $bytes = & $RequestProvider $Route $Authenticated
-            if ($bytes -isnot [byte[]] -or $bytes.Length -eq 0) { Deny-Gate 'LOCAL_RESPONSE_INVALID' }
-            $value = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json -AsHashtable -NoEnumerate -ErrorAction Stop
-            if ($null -eq $value) { Deny-Gate 'LOCAL_RESPONSE_INVALID' }
-            return ,$value
-        }
-        catch {
-            Deny-Gate 'LOCAL_RESPONSE_INVALID'
-        }
-    }
-
-    $system = Read-LocalJson '/System/Info/Public' $false
-    $user = Read-LocalJson '/Users/Me' $true
-    $plugin = Read-LocalJson '/Ptv/v1/status?full=false' $true
+    $system = Read-GateLocalJson $RequestProvider '/System/Info/Public' $false
+    $user = Read-GateLocalJson $RequestProvider '/Users/Me' $true
+    $plugin = Read-GateLocalJson $RequestProvider '/Ptv/v1/status?full=false' $true
     # Ask for every session. A server-side recent filter could hide a paused
     # stream whose last activity timestamp is older than the display window.
-    $sessions = Read-LocalJson '/Sessions' $true
+    $sessions = Read-GateLocalJson $RequestProvider '/Sessions' $true
     Assert-Gate ($sessions -is [array]) 'SESSIONS_LIST_INVALID'
     try {
         $indexBytes = & $RequestProvider '/web/index.html' $false
@@ -111,35 +146,34 @@ function Get-PTVWebLocalObservationCore {
         system = $system
         plugin = $plugin
         web = [ordered]@{ version = $BaselineWebVersion; indexSha256 = $indexHash }
-        sessions = [ordered]@{
-            authenticated = $true
-            administrator = (Get-GateField (Get-GateField $user 'Policy') 'IsAdministrator')
-            requesterUserId = (Get-GateField $user 'Id')
-            capturedAtUtc = $captured
-            recentActivityWindowSeconds = 960
-            items = $sessions
-        }
+        sessions = New-GateSessionInventory $user $sessions $captured
         betaIsolation = $BetaIsolationEvidence
         conflictingDeployment = $ConflictingDeployment
     }
 }
 
-function Get-PTVWebLocalObservation {
-    <#
-      Collects a fresh direct-loopback HTTP observation. The Beta-route
-      isolation proof and deployment-lock state must be supplied independently;
-      this function does not infer either from zero active streams.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][Security.SecureString]$AccessToken,
-        [Parameter(Mandatory = $true)][string]$BaselineWebVersion,
-        [Parameter(Mandatory = $true)]$BetaIsolationEvidence,
-        [Parameter(Mandatory = $true)][bool]$ConflictingDeployment
-    )
-    Assert-Gate ($null -ne $BetaIsolationEvidence) 'BETA_ISOLATION_UNVERIFIED'
-    Assert-Gate ($BaselineWebVersion -ceq '0.5.74') 'WEB_BASELINE_MISMATCH'
+function Get-PTVWebLocalSessionObservationCore {
+    param([Parameter(Mandatory = $true)][scriptblock]$RequestProvider)
+    $system = Read-GateLocalJson $RequestProvider '/System/Info/Public' $false
+    $user = Read-GateLocalJson $RequestProvider '/Users/Me' $true
+    $sessions = Read-GateLocalJson $RequestProvider '/Sessions' $true
+    Assert-Gate ($sessions -is [array]) 'SESSIONS_LIST_INVALID'
+    $captured = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+    return [ordered]@{
+        origin = 'http://127.0.0.1:8096'
+        environmentId = 'JF_DEVELOPMENT_125'
+        capturedAtUtc = $captured
+        system = $system
+        sessions = New-GateSessionInventory $user $sessions $captured
+    }
+}
 
+function Invoke-GateLoopbackCollection {
+    param(
+        [Security.SecureString]$AccessToken,
+        [string[]]$AllowedRoutes,
+        [scriptblock]$Collector
+    )
     $handler = [Net.Http.HttpClientHandler]::new()
     $handler.AllowAutoRedirect = $false
     $handler.UseProxy = $false
@@ -150,17 +184,21 @@ function Get-PTVWebLocalObservation {
     $secretPtr = [IntPtr]::Zero
     $token = $null
     try {
-        $secretPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($AccessToken)
-        $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretPtr)
+        try {
+            $secretPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($AccessToken)
+            $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretPtr)
+        }
+        catch {
+            Deny-Gate 'ADMIN_TOKEN_UNAVAILABLE'
+        }
         Assert-Gate (-not [string]::IsNullOrWhiteSpace($token)) 'ADMIN_TOKEN_UNAVAILABLE'
-        $allowedRoutes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-        foreach ($route in @('/System/Info/Public', '/Users/Me', '/Ptv/v1/status?full=false',
-            '/Sessions', '/web/index.html')) {
-            $null = $allowedRoutes.Add($route)
+        $routes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($route in $AllowedRoutes) {
+            $null = $routes.Add($route)
         }
         $requestProvider = {
             param($route, $authenticated)
-            if (-not $allowedRoutes.Contains($route)) {
+            if (-not $routes.Contains($route)) {
                 throw 'Local route unapproved.'
             }
             $uri = [Uri]::new('http://127.0.0.1:8096' + $route)
@@ -168,7 +206,7 @@ function Get-PTVWebLocalObservation {
             $request.Headers.CacheControl = [Net.Http.Headers.CacheControlHeaderValue]::new()
             $request.Headers.CacheControl.NoCache = $true
             if ($authenticated) {
-                $null = $request.Headers.TryAddWithoutValidation('X-Emby-Token', $token)
+                $request.Headers.Authorization = New-GateAuthorizationHeader $token
             }
             try {
                 $response = $client.SendAsync($request).GetAwaiter().GetResult()
@@ -187,10 +225,12 @@ function Get-PTVWebLocalObservation {
                 $request.Dispose()
             }
         }.GetNewClosure()
-        return Get-PTVWebLocalObservationCore -RequestProvider $requestProvider -BaselineWebVersion $BaselineWebVersion -BetaIsolationEvidence $BetaIsolationEvidence -ConflictingDeployment $ConflictingDeployment
-    }
-    catch {
-        Deny-Gate 'LOCAL_OBSERVATION_FAILED'
+        try {
+            return & $Collector $requestProvider
+        }
+        catch {
+            Deny-Gate 'LOCAL_OBSERVATION_FAILED'
+        }
     }
     finally {
         $token = $null
@@ -200,6 +240,132 @@ function Get-PTVWebLocalObservation {
         $client.Dispose()
         $handler.Dispose()
     }
+}
+
+function Get-PTVWebLocalObservation {
+    <#
+      Collects a fresh direct-loopback HTTP observation. The Beta-route
+      isolation proof and deployment-lock state must be supplied independently;
+      this function does not infer either from zero active streams.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][Security.SecureString]$AccessToken,
+        [Parameter(Mandatory = $true)][string]$BaselineWebVersion,
+        [Parameter(Mandatory = $true)]$BetaIsolationEvidence,
+        [Parameter(Mandatory = $true)][bool]$ConflictingDeployment
+    )
+    Assert-Gate ($null -ne $BetaIsolationEvidence) 'BETA_ISOLATION_UNVERIFIED'
+    Assert-Gate ($BaselineWebVersion -cmatch '^\d+\.\d+\.\d+$') 'WEB_BASELINE_VERSION_INVALID'
+    $collector = {
+        param($provider)
+        Get-PTVWebLocalObservationCore -RequestProvider $provider -BaselineWebVersion $BaselineWebVersion `
+            -BetaIsolationEvidence $BetaIsolationEvidence -ConflictingDeployment $ConflictingDeployment
+    }.GetNewClosure()
+    return Invoke-GateLoopbackCollection -AccessToken $AccessToken `
+        -AllowedRoutes @('/System/Info/Public', '/Users/Me', '/Ptv/v1/status?full=false', '/Sessions', '/web/index.html') `
+        -Collector $collector
+}
+
+function Get-PTVWebLocalSessionObservation {
+    <# Fresh loopback identity and unfiltered session evidence for recovery. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][Security.SecureString]$AccessToken)
+    $collector = {
+        param($provider)
+        Get-PTVWebLocalSessionObservationCore -RequestProvider $provider
+    }
+    return Invoke-GateLoopbackCollection -AccessToken $AccessToken `
+        -AllowedRoutes @('/System/Info/Public', '/Users/Me', '/Sessions') -Collector $collector
+}
+
+function Assert-PTVWebSessionSafetyCore {
+    param(
+        $Observation,
+        [string]$ExpectedServerId,
+        [Collections.Generic.HashSet[string]]$ApprovedMaintenanceIds,
+        [DateTimeOffset]$NowUtc
+    )
+    Assert-Gate ($null -ne $Observation -and $Observation -isnot [array]) 'OBSERVATION_INVALID'
+    Assert-Gate ((Get-GateField $Observation 'origin') -ceq 'http://127.0.0.1:8096') 'DIRECT_LOCAL_ORIGIN_REQUIRED'
+    Assert-Gate ((Get-GateField $Observation 'environmentId') -ceq 'JF_DEVELOPMENT_125') 'OBSERVED_TARGET_INVALID'
+    $null = Assert-GateFreshness (Get-GateField $Observation 'capturedAtUtc') $NowUtc 30 'OBSERVATION_STALE'
+    $system = Get-GateField $Observation 'system'
+    Assert-Gate ((Get-GateField $system 'Id') -ceq $ExpectedServerId -and
+        (Get-GateField $system 'ServerName') -ceq 'PTV Testing' -and
+        (Get-GateField $system 'Version') -ceq '12.2.0') 'SERVER_IDENTITY_MISMATCH'
+
+    $sessions = Get-GateField $Observation 'sessions'
+    Assert-Gate ((Get-GateField $sessions 'authenticated') -is [bool] -and
+        (Get-GateField $sessions 'authenticated') -eq $true -and
+        (Get-GateField $sessions 'administrator') -is [bool] -and
+        (Get-GateField $sessions 'administrator') -eq $true) 'SESSIONS_NOT_ADMIN_AUTHENTICATED'
+    $requesterUserId = Get-GateField $sessions 'requesterUserId'
+    Assert-Gate ($requesterUserId -is [string] -and $ApprovedMaintenanceIds.Contains($requesterUserId)) 'SESSION_REQUESTER_UNAPPROVED'
+    $null = Assert-GateFreshness (Get-GateField $sessions 'capturedAtUtc') $NowUtc 30 'SESSIONS_STALE'
+    Assert-Gate ((Get-GateField $sessions 'recentActivityWindowSeconds') -eq 960) 'SESSION_WINDOW_UNVERIFIED'
+    Assert-Gate ((Get-GateField $sessions 'sourceRoute') -ceq '/Sessions' -and
+        (Get-GateField $sessions 'inventoryComplete') -is [bool] -and
+        (Get-GateField $sessions 'inventoryComplete') -eq $true -and
+        ((Get-GateField $sessions 'pageCount') -is [int] -or
+            (Get-GateField $sessions 'pageCount') -is [long]) -and
+        (Get-GateField $sessions 'pageCount') -eq 1) 'SESSION_INVENTORY_INCOMPLETE'
+    $items = Get-GateField $sessions 'items'
+    Assert-Gate ($items -is [array]) 'SESSIONS_LIST_INVALID'
+    foreach ($session in $items) {
+        $userId = Get-GateField $session 'UserId'
+        $active = Get-GateField $session 'IsActive'
+        Assert-Gate ($userId -is [string] -and -not [string]::IsNullOrWhiteSpace($userId)) 'SESSION_IDENTITY_UNCERTAIN'
+        if ($null -ne $active) {
+            Assert-Gate ($active -is [bool]) 'SESSION_ACTIVITY_UNCERTAIN'
+        }
+        $lastActivity = Get-GateTime (Get-GateField $session 'LastActivityDate') 'SESSION_ACTIVITY_UNCERTAIN'
+        Assert-Gate ($lastActivity -le $NowUtc) 'SESSION_ACTIVITY_UNCERTAIN'
+        foreach ($field in @('NowPlayingItem', 'PlayState', 'TranscodingInfo')) {
+            Assert-Gate (Test-GateFieldPresent $session $field) 'PLAYBACK_STATE_UNCERTAIN'
+        }
+        Assert-Gate ($null -eq (Get-GateField $session 'NowPlayingItem') -and
+            $null -eq (Get-GateField $session 'PlayState') -and
+            $null -eq (Get-GateField $session 'TranscodingInfo')) 'ACTIVE_PLAYBACK_PRESENT'
+        $recent = ($NowUtc - $lastActivity).TotalSeconds -le 960
+        if ($recent -or $active) {
+            Assert-Gate ($ApprovedMaintenanceIds.Contains($userId)) 'NON_MAINTENANCE_USER_ACTIVE'
+        }
+    }
+    return [pscustomobject]@{
+        Passed = $true
+        EnvironmentId = 'JF_DEVELOPMENT_125'
+        CheckedAtUtc = $NowUtc.ToUniversalTime().ToString('o')
+        SessionCapturedAtUtc = [string](Get-GateField $sessions 'capturedAtUtc')
+        ActivePlaybackCount = 0
+        SessionsChecked = $items.Count
+    }
+}
+
+function Test-PTVWebSessionSafety {
+    <# Fresh session-only gate for protected recovery of a possibly mixed Web tree. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$ObservationProvider,
+        [Parameter(Mandatory = $true)][string]$ExpectedServerId,
+        [Parameter(Mandatory = $true)][string[]]$MaintenanceUserIds,
+        [DateTimeOffset]$NowUtc = [DateTimeOffset]::UtcNow
+    )
+    Assert-Gate ($ExpectedServerId -cmatch '^[0-9a-f]{32}$') 'EXPECTED_SERVER_ID_INVALID'
+    Assert-Gate ($MaintenanceUserIds.Count -gt 0) 'MAINTENANCE_USERS_MISSING'
+    $approvedIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in $MaintenanceUserIds) {
+        Assert-Gate ($id -is [string] -and $id -match '^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$') 'MAINTENANCE_USER_INVALID'
+        Assert-Gate ($approvedIds.Add($id)) 'MAINTENANCE_USER_DUPLICATE'
+    }
+    try {
+        $observation = & $ObservationProvider
+    }
+    catch {
+        Deny-Gate 'LIVE_PROBE_FAILED'
+    }
+    if (-not $PSBoundParameters.ContainsKey('NowUtc')) { $NowUtc = [DateTimeOffset]::UtcNow }
+    return Assert-PTVWebSessionSafetyCore -Observation $observation -ExpectedServerId $ExpectedServerId -ApprovedMaintenanceIds $approvedIds -NowUtc $NowUtc
 }
 
 function Test-PTVWebPrepublicationGate {
@@ -221,11 +387,15 @@ function Test-PTVWebPrepublicationGate {
         [Parameter(Mandatory = $true)]$Approval,
         [Parameter(Mandatory = $true)][string]$ExpectedServerId,
         [Parameter(Mandatory = $true)][string]$ExpectedBaselineIndexSha256,
+        [string]$ExpectedBaselineWebVersion = '0.5.74',
+        [string]$ExpectedPluginVersion = '0.5.22.0',
         [DateTimeOffset]$NowUtc = [DateTimeOffset]::UtcNow
     )
 
     Assert-Gate ($ExpectedServerId -cmatch '^[0-9a-f]{32}$') 'EXPECTED_SERVER_ID_INVALID'
     Assert-Gate ($ExpectedBaselineIndexSha256 -cmatch '^[0-9a-f]{64}$') 'EXPECTED_INDEX_HASH_INVALID'
+    Assert-Gate ($ExpectedBaselineWebVersion -cmatch '^\d+\.\d+\.\d+$') 'EXPECTED_WEB_VERSION_INVALID'
+    Assert-Gate ($ExpectedPluginVersion -cmatch '^\d+\.\d+\.\d+\.\d+$') 'EXPECTED_PLUGIN_VERSION_INVALID'
 
     $taskId = Get-GateField $Approval 'taskId'
     Assert-Gate ((Get-GateField $Approval 'schemaVersion') -eq 1) 'APPROVAL_SCHEMA_INVALID'
@@ -287,9 +457,9 @@ function Test-PTVWebPrepublicationGate {
     $plugin = Get-GateField $observation 'plugin'
     Assert-Gate ((Get-GateField $plugin 'ok') -is [bool] -and
         (Get-GateField $plugin 'ok') -eq $true -and
-        (Get-GateField $plugin 'pluginVersion') -ceq '0.5.22.0') 'PLUGIN_BASELINE_MISMATCH'
+        (Get-GateField $plugin 'pluginVersion') -ceq $ExpectedPluginVersion) 'PLUGIN_BASELINE_MISMATCH'
     $web = Get-GateField $observation 'web'
-    Assert-Gate ((Get-GateField $web 'version') -ceq '0.5.74' -and
+    Assert-Gate ((Get-GateField $web 'version') -ceq $ExpectedBaselineWebVersion -and
         (Get-GateField $web 'indexSha256') -ceq $ExpectedBaselineIndexSha256) 'WEB_BASELINE_MISMATCH'
 
     $beta = Get-GateField $observation 'betaIsolation'
@@ -300,46 +470,8 @@ function Test-PTVWebPrepublicationGate {
     $betaTime = Assert-GateFreshness (Get-GateField $beta 'checkedAtUtc') $NowUtc 300 'BETA_PROOF_STALE'
     Assert-Gate ($betaTime -eq $approvedBetaTime) 'BETA_PROOF_UNBOUND'
 
-    $sessions = Get-GateField $observation 'sessions'
-    Assert-Gate ((Get-GateField $sessions 'authenticated') -is [bool] -and
-        (Get-GateField $sessions 'authenticated') -eq $true -and
-        (Get-GateField $sessions 'administrator') -is [bool] -and
-        (Get-GateField $sessions 'administrator') -eq $true) 'SESSIONS_NOT_ADMIN_AUTHENTICATED'
-    $requesterUserId = Get-GateField $sessions 'requesterUserId'
-    Assert-Gate ($requesterUserId -is [string] -and $approvedMaintenanceIds.Contains($requesterUserId)) 'SESSION_REQUESTER_UNAPPROVED'
-    $null = Assert-GateFreshness (Get-GateField $sessions 'capturedAtUtc') $NowUtc 30 'SESSIONS_STALE'
-    Assert-Gate ((Get-GateField $sessions 'recentActivityWindowSeconds') -eq 960) 'SESSION_WINDOW_UNVERIFIED'
-    $items = Get-GateField $sessions 'items'
-    Assert-Gate ($items -is [array]) 'SESSIONS_LIST_INVALID'
-    foreach ($session in $items) {
-        $userId = Get-GateField $session 'UserId'
-        $active = Get-GateField $session 'IsActive'
-        Assert-Gate ($userId -is [string] -and -not [string]::IsNullOrWhiteSpace($userId)) 'SESSION_IDENTITY_UNCERTAIN'
-        # Jellyfin's SessionInfo declares IsActive optional. Use its true
-        # value when present, but derive recent activity from the required
-        # LastActivityDate rather than rejecting a valid omitted field.
-        if ($null -ne $active) {
-            Assert-Gate ($active -is [bool]) 'SESSION_ACTIVITY_UNCERTAIN'
-        }
-        $lastActivity = Get-GateTime (Get-GateField $session 'LastActivityDate') 'SESSION_ACTIVITY_UNCERTAIN'
-        Assert-Gate ($lastActivity -le $NowUtc) 'SESSION_ACTIVITY_UNCERTAIN'
-        # A paused stream still affects a user and must block publication.
-        Assert-Gate ($null -eq (Get-GateField $session 'NowPlayingItem') -and
-            $null -eq (Get-GateField $session 'PlayState') -and
-            $null -eq (Get-GateField $session 'TranscodingInfo')) 'ACTIVE_PLAYBACK_PRESENT'
-        $recent = ($NowUtc - $lastActivity).TotalSeconds -le 960
-        if ($recent -or $active) {
-            Assert-Gate ($approvedMaintenanceIds.Contains($userId)) 'NON_MAINTENANCE_USER_ACTIVE'
-        }
-    }
-
-    return [pscustomobject]@{
-        Passed = $true
-        EnvironmentId = 'JF_DEVELOPMENT_125'
-        CheckedAtUtc = $NowUtc.ToUniversalTime().ToString('o')
-        ActivePlaybackCount = 0
-        SessionsChecked = $items.Count
-    }
+    return Assert-PTVWebSessionSafetyCore -Observation $observation -ExpectedServerId $ExpectedServerId `
+        -ApprovedMaintenanceIds $approvedMaintenanceIds -NowUtc $NowUtc
 }
 
-Export-ModuleMember -Function Test-PTVWebPrepublicationGate, Get-PTVWebLocalObservation
+Export-ModuleMember -Function Test-PTVWebPrepublicationGate, Test-PTVWebSessionSafety, Get-PTVWebLocalObservation, Get-PTVWebLocalSessionObservation

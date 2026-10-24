@@ -37,6 +37,16 @@ test('Plugin mutation requires a graceful shutdown credential before live checks
     assert.doesNotMatch(result.stderr + result.stdout, /Protected development preflight/u);
 });
 
+test('standing development installer refuses Web publication before any live operation', () => {
+    const result = spawnSync(pwsh, ['-NoProfile', '-File', script,
+        '-EnvironmentId', 'JF_DEVELOPMENT_125',
+        '-WebArtifactRoot', 'missing-web', '-WebManifest', 'missing-manifest'],
+    { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr + result.stdout, /protected Web entrypoint/u);
+    assert.doesNotMatch(result.stderr + result.stdout, /Protected development preflight/u);
+});
+
 test('authenticated local requests use MediaBrowser authorization without the legacy token header', () => {
     assert.ok(pwsh, 'PowerShell 7 is required');
     const harness = `
