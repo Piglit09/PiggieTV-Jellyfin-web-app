@@ -84,3 +84,37 @@ limits. `retentionTrimmed` describes expected ring-buffer eviction;
 
 Graph relationships contain only categories and relative regions. Input
 relationships use locally generated diagnostic input IDs and safe enums.
+
+## Web 0.5.78 local diagnostic extensions
+
+These additive fields leave the Core `1.0`, diagnostic schema `1`, and privacy
+schema `1` versions unchanged. Older exports may omit
+`slowRequestObservation`; readers treat that as unavailable evidence.
+
+- `cache` describes the **Web Featured cache**. `countsObserved` and
+  `countsObservedAt` distinguish an observed empty projection from missing
+  counts. `observedAt` and `observationAgeMs` describe the passive snapshot;
+  `ageMs` describes the cached document. Read and write attempts/outcomes are
+  separate. `lastReadFailureAt` and `lastReadFailureCategory` retain dated
+  history after a later successful read. `fallbackAvailable` reports retained
+  Web memory during a failed or rejected read; it does not prove current Plugin
+  storage or permission convergence. A Plugin GET cannot establish a Web write.
+  A Web write is verified only after readback matches stable entry metadata and
+  the requested refresh interval when one was written.
+- `recommendations` describes the current owned generation. `terminalOutcome`
+  is `success`, `partial`, `failed`, or `cancelled`; a progress event cannot
+  complete it. `runDurationMs` and `renderedItemCount` remain `null` when not
+  observed. Provider, taste-signal, candidate, generated-row/item, fallback,
+  and rejection counters belong to that generation. Identity-duplicate and
+  diversity-cap counters count **row selection rejection attempts**, so one
+  candidate may be counted more than once. Dated failure and resolution fields
+  are historical observations scoped to the current identity.
+- `slowRequestObservation`, when present, explains the unchanged
+  `SLOW_API_REQUESTS` decision using a retained session request time, duration,
+  family, trigger, eligible/retained/trimmed counts, and scope. It does not
+  assert current latency. No URL, query, response body, or item identity enters
+  the summary.
+- Route `criticalWorkCoverage` records whether an owner published critical-work
+  lifecycle data. `departureReason: superseded-by-navigation` distinguishes
+  leaving a route from a failed critical operation. It is not a route
+  settlement or evidence of completed work.

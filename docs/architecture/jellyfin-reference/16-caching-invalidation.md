@@ -102,3 +102,20 @@ Thus mutation acknowledgment, authoritative readback, relationship refresh, and 
 - Treat item data, relationships, image bytes/tags, queue, and diagnostics as distinct cache domains.
 
 These are `INFERRED` check points grounded in the stock mechanisms above.
+
+## PTV Web 0.5.78 local Featured diagnostic observation
+
+`[VERIFIED_FROM_SOURCE]` `featuredContentCache` remains the sole Web Featured
+cache owner. Its passive status reports read/adoption, write/readback, observed
+counts, fallback memory, freshness, and dated failure history separately. A
+per-user Plugin GET projection does not prove a Web write or authorize a
+cross-user readback comparison; verified write readback compares stable cache
+metadata and the requested refresh interval when present. Passive diagnostics
+cannot establish an identity owner, fetch a
+document, or persist one. `webDiagnosticPlatform` samples this status before
+export and on a bounded visible cadence. `[VERIFIED_BY_TEST]` The local
+`featuredContentCacheDiagnostics.test.ts` and
+`webDiagnosticPlatform.test.ts` cover absent versus observed-empty counts,
+recovery, overlapping writes, identity change, no-network export, low-power
+sampling, and disposal. Plugin storage and same-session permission convergence
+remain separate server-boundary questions.

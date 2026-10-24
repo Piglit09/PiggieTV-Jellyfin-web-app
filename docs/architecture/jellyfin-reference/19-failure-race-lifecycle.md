@@ -135,3 +135,18 @@ These are `INFERRED` engineering controls from the stock failure model.
 - `[VERIFIED_FROM_SOURCE]` Up Next carries current player, current item and queued-item identities across asynchronous next-item reads. Prompt advance and natural end share the active playback-generation claim. A stale item, destroyed dialog, or changed queue cannot adopt the old next result. A changed queue may reoffer its replacement; an explicit playback request retires pending autoplay even before the new item starts. `src/components/upnextdialog/upnextdialog.js`; `src/controllers/playback/video/index.js`; `src/components/playback/playbackmanager.js`.
 - `[VERIFIED_FROM_SOURCE]` Search retry carries exact settled query/filter/server/user and active request/scope; abort or scope change suppresses late adoption. Update fallback does not convert an unactivated worker into a reload; failed activation is visible. `src/ptv/pages/search/NativeSearchPage.tsx`; `src/ptv/pages/search/searchGroupRetryState.ts`; `src/ptv/services/updateService.ts`.
 - `[UNKNOWN]` Production Search failure origin, deployed worker/cache convergence, and Safari's native/fullscreen transition behavior require separate physical/environmental evidence.
+
+## PTV Web 0.5.78 local diagnostic lifecycle boundary
+
+`[VERIFIED_FROM_SOURCE]` The recommendation engine owns a generation from start
+through one success, partial, failed, or cancelled terminal event. The
+collector accepts terminal metrics only for the matching identity/generation;
+logout and identity switch retire prior work. Rendered item count and duration
+remain unavailable until actually observed. The route diagnostic store now
+records whether critical work was instrumented and labels navigation departure
+as supersession, while rejecting late settlement for a departed route.
+`[VERIFIED_BY_TEST]` Recommendation generation, logout, diagnostic store, and
+route lifecycle tests cover stale completions, recovery, Back/Forward and
+long-lived uninstrumented routes. These are observer lifetimes; routeController
+and the browser URL remain the route authorities. Hosted/physical convergence
+remains `UNKNOWN` for this local candidate.

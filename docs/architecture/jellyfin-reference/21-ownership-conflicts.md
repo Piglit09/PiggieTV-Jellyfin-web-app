@@ -219,3 +219,19 @@ Independent review exposed a second PTV mutation entry into the same manual save
 Mounted `PTVShell` owns CSS header clearance and viewport presentation; URL and `routeController` still own route identity. A Fold-like width change may select tablet geometry while the mobile client kind keeps the same Home request and image budget. Up Next captures its visible input while stock `PlaybackManager` alone advances the queue and reports the session. Search's existing request owner retries only failed groups under current user, route, query and filter identity; successful groups remain. `UpdateService` alone observes verified worker candidates and does not turn failed activation into asset convergence. `VERIFIED_FROM_SOURCE` — Stage 4 shell, client profile, Up Next, PlaybackManager, Search and update source.
 
 Route geometry may still obscure a downstream surface that ignores clearance. Native Safari fullscreen is browser-owned. Search HTTP success does not prove each group rendered; worker activation does not prove a coherent deployed asset set. These require separate physical and hosted proof. The Stage 4 integration does not retire C-15 through C-18 or close the Controlled Home and Reading limitations.
+
+## Web 0.5.78 Phase 1 diagnostic ownership — local candidate
+
+`[VERIFIED_FROM_SOURCE]` The diagnostic store is an `OBSERVER`. Web Featured
+status remains owned by `featuredContentCache`; Plugin Featured authorization
+and per-user projection remain server-owned. Recommendation generation and row
+selection remain engine/row-owner work; the collector accepts only its
+identity/generation-owned terminal record. The browser URL and routeController
+remain route authorities; `departureReason` and `criticalWorkCoverage` are
+interpretive diagnostic fields, not a replacement route owner. Request warning
+evidence derives from the existing bounded request ledger and adds no
+transport. `[VERIFIED_BY_TEST]` Local cache, recommendation, route, and store
+tests prove passive sampling, identity retirement, stale completion rejection,
+and dated slow-request classification. No new duplicated owner or conflict
+classification is introduced. Deployed recovery and permission convergence
+remain `UNKNOWN` for this candidate.

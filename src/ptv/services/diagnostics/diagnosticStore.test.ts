@@ -235,6 +235,7 @@ describe('PTV diagnostic store', () => {
 
             expect(store.getSnapshot().routes[0]).toMatchObject({
                 criticalState,
+                criticalWorkCoverage: 'observed',
                 routeGeneration: 3
             });
         }
@@ -309,6 +310,148 @@ describe('PTV diagnostic store', () => {
         expect(snapshot.health).toMatchObject({
             reason: 'API latency, request concurrency, or image lifecycle churn exceeded diagnostic health thresholds.',
             status: 'degraded'
+        });
+    });
+
+    it('retains the time and scope of a 10,370 ms request observed two hours earlier', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-24T08:47:00.000Z'));
+        const store = createPtvDiagnosticStore();
+        const requestId = store.beginRequest({ endpoint: '/Items?api_key=private', route: '#/movies?id=private' });
+
+        vi.advanceTimersByTime(10_370);
+        store.completeRequest(requestId, { status: 200, success: true });
+        const observedAt = store.getSnapshot().requests.at(-1)?.endedAt;
+        vi.advanceTimersByTime(2 * 60 * 60_000);
+        const snapshot = store.getSnapshot();
+        const exported = store.createExport();
+
+        expect(snapshot.warnings).toContain(PTV_SLOW_API_REQUESTS_WARNING);
+        expect(snapshot.health.status).toBe('degraded');
+        expect(snapshot.slowRequestObservation).toMatchObject({
+            lastObservedAt: observedAt,
+            scope: 'retained-session',
+            requestFamily: 'Items list',
+            durationMs: 10_370,
+            trigger: 'single-request',
+            eligibleSampleCount: 1,
+            retainedRequestCount: 1
+        });
+        expect(exported.slowRequestObservation).toEqual(snapshot.slowRequestObservation);
+        expect(JSON.stringify(exported)).not.toMatch(/api_key=private|movies\?id=private/);
+    });
+
+    it('updates the warning observation to a newly completed slow request', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-24T08:47:00.000Z'));
+        const store = createPtvDiagnosticStore();
+        const first = store.beginRequest({ endpoint: '/Items', route: '#/movies' });
+
+        vi.advanceTimersByTime(10_370);
+        store.completeRequest(first, { status: 200, success: true });
+        vi.advanceTimersByTime(2 * 60 * 60_000);
+        const next = store.beginRequest({ endpoint: '/Shows/private/Episodes', route: '#/shows' });
+
+        vi.advanceTimersByTime(11_000);
+        store.completeRequest(next, { status: 200, success: true });
+
+        expect(store.getSnapshot().slowRequestObservation).toMatchObject({
+            lastObservedAt: store.getSnapshot().requests.at(-1)?.endedAt,
+            requestFamily: 'Episodes',
+            durationMs: 11_000,
+            eligibleSampleCount: 2
+        });
+    });
+
+    it('describes a p95-only slow warning without assigning it to one request family', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-24T08:47:00.000Z'));
+        const store = createPtvDiagnosticStore();
+
+        for (let index = 0; index < PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.slowApiP95MinimumSamples; index += 1) {
+            const requestId = store.beginRequest({
+                endpoint: index % 2 ? '/Items' : '/Shows/private/Episodes',
+                route: '#/movies'
+            });
+
+            vi.advanceTimersByTime(PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.slowApiP95Ms + 100);
+            store.completeRequest(requestId, { status: 200, success: true });
+        }
+
+        expect(store.getSnapshot().slowRequestObservation).toMatchObject({
+            trigger: 'p95',
+            requestFamily: 'multiple-families',
+            durationMs: PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.slowApiP95Ms + 100,
+            eligibleSampleCount: PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.slowApiP95MinimumSamples
+        });
+    });
+
+    it('bounds retained slow-request evidence and reports the trimmed request coverage', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-24T08:47:00.000Z'));
+        const store = createPtvDiagnosticStore();
+
+        for (let index = 0; index < PTV_DIAGNOSTIC_RETENTION_LIMITS.requests + 5; index += 1) {
+            const requestId = store.beginRequest({ endpoint: '/Items', route: '#/movies' });
+
+            vi.advanceTimersByTime(10_370);
+            store.completeRequest(requestId, { status: 200, success: true });
+        }
+
+        const snapshot = store.getSnapshot();
+
+        expect(snapshot.requests).toHaveLength(PTV_DIAGNOSTIC_RETENTION_LIMITS.requests);
+        expect(snapshot.droppedEvents.byStream.requests).toBe(5);
+        expect(snapshot.slowRequestObservation).toMatchObject({
+            eligibleSampleCount: PTV_DIAGNOSTIC_RETENTION_LIMITS.requests,
+            retainedRequestCount: PTV_DIAGNOSTIC_RETENTION_LIMITS.requests,
+            trimmedRequestCount: 5,
+            lastObservedAt: snapshot.requests.at(-1)?.endedAt
+        });
+    });
+
+    it('marks uninstrumented routes as superseded without calling their critical work failed', () => {
+        const store = createPtvDiagnosticStore();
+        const settings = store.startRoute('#/settings');
+
+        expect(store.getSnapshot().routes.at(-1)).toMatchObject({
+            status: 'active',
+            criticalState: 'undeclared',
+            criticalWorkCoverage: 'not-observed',
+            departureReason: null
+        });
+
+        store.startRoute('#/collections');
+        const routes = store.getSnapshot().routes;
+
+        expect(routes[0]).toMatchObject({
+            routeSessionId: settings,
+            status: 'abandoned',
+            criticalState: 'undeclared',
+            criticalWorkCoverage: 'not-observed',
+            departureReason: 'superseded-by-navigation'
+        });
+        expect(routes[1]).toMatchObject({
+            status: 'active',
+            criticalWorkCoverage: 'not-observed'
+        });
+    });
+
+    it('keeps an observed critical outcome and ignores a late settled phase after navigation', () => {
+        const store = createPtvDiagnosticStore();
+        const reading = store.startRoute('#/reading/books', 7);
+
+        store.markRouteCriticalState(reading, 'pending', 7);
+        store.markRouteCriticalState(reading, 'success', 7);
+        store.startRoute('#/home', 8);
+        store.markRoutePhase(reading, 'settled');
+
+        expect(store.getSnapshot().routes[0]).toMatchObject({
+            status: 'abandoned',
+            criticalState: 'success',
+            criticalWorkCoverage: 'observed',
+            departureReason: 'superseded-by-navigation',
+            settledAt: null
         });
     });
 

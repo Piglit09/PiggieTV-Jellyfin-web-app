@@ -27,7 +27,8 @@ import {
     type PtvRouteCriticalState,
     type PtvRouteDiagnostic,
     type PtvServerDiagnostic,
-    type PtvShelfDiagnostic
+    type PtvShelfDiagnostic,
+    type PtvSlowRequestObservation
 } from '../../core';
 import { sanitizePtvDebugExport } from '../../modules/dashboard/debugExportSanitizer';
 
@@ -65,6 +66,7 @@ const PTV_SEVERE_FRAME_JANK_MAX_SPAN_MS = 8_000;
 const PTV_SEVERE_FRAME_JANK_MAX_FPS = 15;
 const PTV_SEVERE_FRAME_JANK_MIN_JANK_PERCENTAGE = 80;
 const PTV_SEVERE_FRAME_JANK_MIN_FRAME_COUNT = 3;
+const PTV_SLOW_REQUEST_OBSERVATION_MAX_DURATION_MS = 24 * 60 * 60_000;
 
 const INITIALIZATION_ORDER = [
     'environment',
@@ -140,11 +142,23 @@ function createDefaultContext(now: string): DiagnosticContext {
         },
         cache: {
             ageMs: null,
+            cacheLayer: 'web-featured-content',
+            countsObserved: false,
+            countsObservedAt: null,
+            fallbackAvailable: false,
             health: createPtvDiagnosticHealth('unknown', 'Cache summary has not been observed.', { lastUpdated: now }),
             itemCount: 0,
             lastErrorCategory: 'none',
+            lastReadAttemptAt: null,
+            lastReadFailureAt: null,
+            lastReadFailureCategory: 'none',
+            lastReadOutcome: 'not-attempted',
             lastReadStatus: 'unknown',
+            lastWriteAttemptAt: null,
+            lastWriteOutcome: 'not-attempted',
             lastWriteStatus: 'unknown',
+            observationAgeMs: null,
+            observedAt: null,
             owner: 'featured-content',
             sectionCount: 0,
             state: 'unknown',
@@ -227,15 +241,28 @@ function createDefaultContext(now: string): DiagnosticContext {
         recommendations: {
             active: false,
             cacheState: 'unknown',
+            candidateCount: 0,
             configuredRows: 0,
+            diversityCapRejectionCount: 0,
             duplicateSuppressionCount: 0,
+            fallbackUsed: false,
+            feedbackRejectionCount: 0,
+            generatedItemCount: 0,
             generatedRows: 0,
             health: createPtvDiagnosticHealth('unknown', 'Recommendation summary has not been observed.', { lastUpdated: now }),
+            identityDuplicateRejectionCount: 0,
             itemCount: 0,
             lastErrorCategory: 'none',
+            lastFailureAt: null,
+            lastFailureCategory: 'none',
+            lastFailureResolvedAt: null,
             lastGenerationAt: null,
+            providerCount: 0,
+            renderedItemCount: null,
             runDurationMs: null,
-            sourceCount: 0
+            sourceCount: 0,
+            tasteSignalCount: 0,
+            terminalOutcome: null
         },
         server: {
             authenticatedSessionPresent: false,
@@ -391,6 +418,39 @@ export function hasPtvSlowSuccessfulApiRequests(requests: readonly PtvRequestDia
         );
 }
 
+function getPtvSlowRequestObservation(
+    requests: readonly PtvRequestDiagnostic[],
+    trimmedRequestCount: number
+): PtvSlowRequestObservation | null {
+    if (!hasPtvSlowSuccessfulApiRequests(requests)) return null;
+
+    const eligible = requests.filter(request => (
+        request.success && !request.cancellation && !request.coordinatorHit
+    ));
+    const individuallySlow = eligible.filter(request => (
+        request.durationMs >= PTV_DIAGNOSTIC_HEALTH_THRESHOLDS.slowApiRequestMs
+    ));
+    const trigger = individuallySlow.length > 0 ? 'single-request' : 'p95';
+    const latest = (trigger === 'single-request' ? individuallySlow : eligible).at(-1);
+
+    if (!latest) return null;
+    const duration = trigger === 'single-request' ? latest.durationMs :
+        getPtvDiagnosticPercentile(eligible.map(request => request.durationMs), 0.95);
+    const requestFamily = trigger === 'p95' && new Set(eligible.map(request => request.requestFamily)).size > 1 ?
+        'multiple-families' : latest.requestFamily;
+
+    return {
+        durationMs: Math.min(PTV_SLOW_REQUEST_OBSERVATION_MAX_DURATION_MS, Math.max(0, Number(duration.toFixed(1)))),
+        eligibleSampleCount: eligible.length,
+        lastObservedAt: latest.endedAt,
+        requestFamily,
+        retainedRequestCount: requests.length,
+        scope: 'retained-session',
+        trigger,
+        trimmedRequestCount
+    };
+}
+
 export function hasPtvHighApiConcurrency(
     requests: readonly PtvRequestDiagnostic[],
     activeConcurrency: number
@@ -528,6 +588,7 @@ export function createPtvDiagnosticStore() {
     let eventSequence = 0;
     let peakConcurrency = 0;
     let pendingFocusRestorationStartedAt: number | null = null;
+    let cacheSummaryRefresher: (() => void) | null = null;
     let lastUiRenderDurationMs: number | null = null;
     let sessionStartedAt = createdAt;
     let diagnosticSessionId = `diagnostic-1-${hashSafe(createdAt)}`;
@@ -587,10 +648,17 @@ export function createPtvDiagnosticStore() {
             + playbackSessions.length * 1_300
             + shelves.length * 150
             + snapshotWarnings.join('').length * 2;
+        const cacheObservedAtMs = context.cache.observedAt ? Date.parse(context.cache.observedAt) : NaN;
+        const generatedAtMs = Date.parse(generatedAt);
+        const observationAgeMs = Number.isFinite(cacheObservedAtMs) && Number.isFinite(generatedAtMs) ?
+            Math.max(0, generatedAtMs - cacheObservedAtMs) : null;
 
         return {
             build: context.build,
-            cache: context.cache,
+            cache: {
+                ...context.cache,
+                observationAgeMs
+            },
             collectorCapabilities: { ...context.collectorCapabilities },
             contractVersion: PTV_CORE_CONTRACT_VERSION,
             core: context.core,
@@ -639,6 +707,7 @@ export function createPtvDiagnosticStore() {
                 startedAt: sessionStartedAt
             },
             shelves: [...shelves],
+            slowRequestObservation: getPtvSlowRequestObservation(requests, dropped.requests || 0),
             warnings: snapshotWarnings
         };
     }
@@ -732,6 +801,7 @@ export function createPtvDiagnosticStore() {
                 routes[routes.length - 1] = {
                     ...previous,
                     cleanupCompletedAt: now,
+                    departureReason: previous.status === 'active' ? 'superseded-by-navigation' : previous.departureReason,
                     status: previous.status === 'active' ? 'abandoned' : previous.status
                 };
             }
@@ -743,6 +813,8 @@ export function createPtvDiagnosticStore() {
                 criticalCompletedAt: null,
                 criticalStartedAt: null,
                 criticalState: 'undeclared',
+                criticalWorkCoverage: 'not-observed',
+                departureReason: null,
                 firstContentAt: null,
                 firstDirectionalMovementAt: null,
                 firstFocusableAt: null,
@@ -811,6 +883,7 @@ export function createPtvDiagnosticStore() {
                 criticalCompletedAt: criticalState === 'pending' ? null : occurredAt,
                 criticalStartedAt: route.criticalStartedAt || occurredAt,
                 criticalState,
+                criticalWorkCoverage: 'observed',
                 routeGeneration: route.routeGeneration ?? routeGeneration
             };
             count('route-critical-state');
@@ -827,6 +900,7 @@ export function createPtvDiagnosticStore() {
             if (index < 0) return;
 
             const route = routes[index];
+            if (phase === 'settled' && route.status !== 'active') return;
             const occurredAt = timestamp();
             const elapsedMs = Math.max(0, Date.parse(occurredAt) - Date.parse(route.requestedAt));
             const imagesPending = Math.max(
@@ -1040,6 +1114,7 @@ export function createPtvDiagnosticStore() {
         },
         getSnapshot,
         createExport(options: { generatedAt?: string } = {}) {
+            cacheSummaryRefresher?.();
             const generatedAt = options.generatedAt || timestamp();
             const snapshot = {
                 ...getSnapshot(generatedAt),
@@ -1072,6 +1147,9 @@ export function createPtvDiagnosticStore() {
                 },
                 privacyClassification: 'share-safe'
             } as unknown as PtvDiagnosticExport;
+        },
+        setCacheSummaryRefresher(refresher: (() => void) | null) {
+            cacheSummaryRefresher = refresher;
         },
         resetSession() {
             activeRequests.clear();

@@ -2764,6 +2764,14 @@
             "symbol": "failed recommendation generation remained degraded; complete-success recovery unobserved",
             "lines": "115-119",
             "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.78 local candidate, 2026-10-24",
+            "file": "src/ptv/services/diagnostics/recommendationGenerationDiagnostics.test.ts; src/ptv/modules/recommendations/engine/recommendationEngine.feedback.test.ts; src/ptv/services/diagnostics/webDiagnosticPlatform.test.ts",
+            "symbol": "identity-owned terminal generation outcome, current counters, nullable timing and dated failure recovery",
+            "lines": "focused tests and producer/collector generation symbols",
+            "status": "VERIFIED_BY_TEST"
           }
         ],
         "chapterRefs": [
@@ -3205,6 +3213,7 @@
         "status": "OPEN",
         "mustIsolate": false,
         "objective": "DIAG-02 through DIAG-04 retain their deployed Web 0.5.56 evidence. DIAG-01 production remains FAIL/HOLD, while its Web 0.5.57 URL-authoritative local release candidate passes focused, full PTV, full repository, static, version/provenance, diff, and production-build gates. The Music lint delta is cleared by a type-only Promise<null | void> return annotation with both void call sites and runtime behavior preserved. Keep the operational gate HOLD because Web 0.5.57 is not deployed and physical validation is pending. Also keep this backlog item open because DIAG-03 complete-success recovery and the DIAG-04 seven-request threshold were not physically exercised, and DIAG-05 route-scoped image terminal/disposed accounting remains open.",
+        "localPhase1Candidate": "Web 0.5.78 local diagnostic observer changes on 2026-10-24: Featured read/write/count/fallback observation, identity-owned recommendation terminal generation, timestamped retained slow-request evidence, and route supersession/critical-work coverage. Local deterministic tests pass; no deployment or hosted/physical acceptance. Preserve DIAG-01 operational HOLD, DIAG-03 recovery UNKNOWN, DIAG-04 physical threshold UNKNOWN, and DIAG-05 OPEN.",
         "completionEvidenceRequired": [
           "One route session per logical navigation (Web 0.5.57 URL-authoritative implementation and local release gates PASS; production 0.5.56 FAIL/HOLD; deployment and physical validation pending)",
           "Route-owned terminal readiness (local and observed production PASS)",

@@ -102,6 +102,10 @@ type FeaturedCacheAdoptionResult =
     | 'preserved-memory'
     | 'rejected';
 
+type FeaturedCacheReadOutcome = 'not-attempted' | 'in-progress' | 'empty' | 'adopted' | 'rejected' | 'failed';
+type FeaturedCacheWriteOutcome = 'not-attempted' | 'in-progress' | 'verified' | 'unverified' | 'failed';
+type FeaturedCacheFailureCategory = 'none' | 'transport' | 'authentication' | 'timeout' | 'parse' | 'semantic' | 'unknown';
+
 let inflightFeaturedContent: Promise<FeaturedPayload> | null = null;
 let inflightServerRead: Promise<FeaturedCacheEntry | null> | null = null;
 let inflightPluginStatus: Promise<PtvPluginStatusForCache | null> | null = null;
@@ -113,6 +117,14 @@ let memoryCacheSettings: FeaturedCacheSettings = {};
 let lastCacheStorage: 'memory' | 'plugin-file' | null = null;
 let lastCacheWriteError: string | null = null;
 let lastCacheReadError: string | null = null;
+let lastCacheReadAttemptAt: number | null = null;
+let lastCacheReadOutcome: FeaturedCacheReadOutcome = 'not-attempted';
+let lastCacheReadFailureAt: number | null = null;
+let lastCacheReadFailureCategory: FeaturedCacheFailureCategory = 'none';
+let lastCacheWriteAttemptAt: number | null = null;
+let lastCacheWriteOutcome: FeaturedCacheWriteOutcome = 'not-attempted';
+let latestCacheWriteAttemptId = 0;
+let lastCacheCountsObservedAt: number | null = null;
 let lastRefreshDurationMs: number | null = null;
 let lastRefreshError: string | null = null;
 let lastServerCacheAdoptionResult: FeaturedCacheAdoptionResult = 'none';
@@ -176,6 +188,13 @@ function resetFeaturedCacheIdentityState() {
     lastCacheStorage = null;
     lastCacheWriteError = null;
     lastCacheReadError = null;
+    lastCacheReadAttemptAt = null;
+    lastCacheReadOutcome = 'not-attempted';
+    lastCacheReadFailureAt = null;
+    lastCacheReadFailureCategory = 'none';
+    lastCacheWriteAttemptAt = null;
+    lastCacheWriteOutcome = 'not-attempted';
+    lastCacheCountsObservedAt = null;
     lastRefreshDurationMs = null;
     lastRefreshError = null;
     lastServerCacheAdoptionResult = 'none';
@@ -813,6 +832,24 @@ function getErrorMessage(err: unknown) {
     return err instanceof Error ? err.message : 'Unable to store featured cache.';
 }
 
+function classifyFeaturedCacheReadFailure(error: unknown): FeaturedCacheFailureCategory {
+    const record = isRecord(error) ? error : {};
+    const status = Number(record.status ?? record.statusCode);
+    const code = typeof record.code === 'string' ? record.code : '';
+    const name = error instanceof Error ? error.name : '';
+    const message = getErrorMessage(error);
+
+    if (status === 401 || status === 403 || /auth|unauthori|forbidden/i.test(`${code} ${name} ${message}`)) return 'authentication';
+    if (/timeout|timed.out|abort/i.test(`${code} ${name} ${message}`)) return 'timeout';
+    if (status >= 400 || /network|fetch|connect|unavailable/i.test(`${code} ${name} ${message}`)) return 'transport';
+    return 'unknown';
+}
+
+function classifyFeaturedCacheRejection(reason: string): FeaturedCacheFailureCategory {
+    return /not.object|missing.payload|missing.created|missing.expires|missing.featured.content|empty.object|missing.cache.document/i.test(reason) ?
+        'parse' : 'semantic';
+}
+
 function createPluginTimeoutError(message: string) {
     return Object.assign(new Error(message), {
         code: 'PTV_PLUGIN_TIMEOUT'
@@ -1154,11 +1191,15 @@ function readPluginDocument(owner: FeaturedCacheIdentityOwner, skipDiagnosticSta
             observeConfiguredRowAuthority(readConfiguredPresentationAuthority(entry?.payload));
             const normalizedTopLevelKeys = getTopLevelKeys(normalizedDocument);
             const rejectionReason = entry ? null : explainServerDocumentRejection(document);
+            const rawDocumentSource = isRecord(document) ? getServerDocumentSource(document) : null;
+            const rawFeaturedContent = rawDocumentSource ?
+                getRecordField(rawDocumentSource, 'featuredContent', 'FeaturedContent') : undefined;
 
             lastServerCacheRawByteSize = rawResponseByteSize;
             lastServerCacheRawTopLevelKeys = rawTopLevelKeys;
             lastServerCacheNormalizedTopLevelKeys = normalizedTopLevelKeys;
             lastServerCacheRejectionReason = rejectionReason;
+            lastServerCacheDetectedVersion = getCacheEntryVersion(rawFeaturedContent);
 
             recordPtvEvent('cache', 'featured-cache-document-read', {
                 cacheVersion: entry?.version ?? null,
@@ -1253,6 +1294,37 @@ function noteServerReadSuccess(hasCache: boolean) {
     recordPtvPluginApiRetryState(serverReadRetryCount, serverReadRetryBackoffMs);
 }
 
+function getCacheDocumentRejectionReason(
+    nextEntry: FeaturedCacheEntry | null,
+    previousEntry: FeaturedCacheEntry | null,
+    document: unknown,
+    source: string
+) {
+    const replacementReason = getServerCacheReplacementRejection(nextEntry, previousEntry);
+    if (replacementReason || nextEntry) return replacementReason;
+    if (source === 'server-read' && lastServerCacheRejectionReason) return lastServerCacheRejectionReason;
+    return explainServerDocumentRejection(document);
+}
+
+function recordCacheReadOutcome(source: string, rejectionReason: string | null) {
+    if (source === 'server-read') {
+        if (lastServerCacheAdoptionResult === 'adopted' || lastServerCacheAdoptionResult === 'empty') {
+            lastCacheReadError = null;
+            lastCacheReadOutcome = lastServerCacheAdoptionResult;
+            lastCacheCountsObservedAt = Date.now();
+        } else {
+            lastCacheReadOutcome = 'rejected';
+            lastCacheReadFailureAt = Date.now();
+            lastCacheReadFailureCategory = classifyFeaturedCacheRejection(rejectionReason || 'unknown');
+        }
+    } else if (lastServerCacheAdoptionResult === 'adopted' || lastServerCacheAdoptionResult === 'empty') {
+        lastCacheReadAttemptAt = Date.now();
+        lastCacheReadOutcome = lastServerCacheAdoptionResult;
+        lastCacheReadError = null;
+        lastCacheCountsObservedAt = Date.now();
+    }
+}
+
 function applyServerCacheDocument(
     owner: FeaturedCacheIdentityOwner,
     document: unknown,
@@ -1270,8 +1342,7 @@ function applyServerCacheDocument(
     // not silently preserve CURRENT merely because their old content survives.
     observeConfiguredRowAuthority(readConfiguredPresentationAuthority(nextEntry?.payload));
     const nextPayloadSummary = nextEntry ? summarizeFeaturedContentPayload(nextEntry.payload) : null;
-    const rejectionReason = getServerCacheReplacementRejection(nextEntry, previousEntry)
-        || (nextEntry ? null : explainServerDocumentRejection(document));
+    const rejectionReason = getCacheDocumentRejectionReason(nextEntry, previousEntry, document, source);
 
     memoryCacheSettings = parseCacheSettings(normalizedDocument.featuredContentSettings);
     lastServerCacheRawByteSize = getSerializedByteSize(document);
@@ -1279,13 +1350,14 @@ function applyServerCacheDocument(
     lastServerCacheNormalizedTopLevelKeys = getTopLevelKeys(normalizedDocument);
     lastServerCacheRejectionReason = rejectionReason;
     lastServerCacheRenderSource = source;
-    lastServerCacheDetectedVersion = detectedVersion;
+    if (source !== 'server-read' || lastServerCacheDetectedVersion === null) {
+        lastServerCacheDetectedVersion = detectedVersion;
+    }
     lastServerCachePayloadSummary = nextPayloadSummary;
 
     if (nextEntry && !rejectionReason) {
         memoryCacheEntry = nextEntry;
         lastCacheStorage = getSuccessfulServerStorage();
-        lastCacheReadError = null;
         lastServerCacheAdoptionResult = 'adopted';
     } else if (previousEntry) {
         memoryCacheEntry = previousEntry;
@@ -1295,11 +1367,12 @@ function applyServerCacheDocument(
     } else {
         memoryCacheEntry = null;
         lastCacheStorage = null;
-        lastCacheReadError = rejectionReason && rejectionReason !== 'empty-featured-content' ? rejectionReason : null;
-        lastServerCacheAdoptionResult = rejectionReason === 'empty-featured-content' ? 'empty' : 'rejected';
+        const emptyDocument = rejectionReason === 'empty-featured-content';
+        lastCacheReadError = rejectionReason && !emptyDocument ? rejectionReason : null;
+        lastServerCacheAdoptionResult = emptyDocument ? 'empty' : 'rejected';
     }
 
-    lastCacheWriteError = null;
+    recordCacheReadOutcome(source, rejectionReason);
     noteServerReadSuccess(Boolean(memoryCacheEntry));
 
     debugLog('applied server cache document', {
@@ -1350,6 +1423,9 @@ function noteServerReadFailure() {
 
 function writeServerDocument(owner: FeaturedCacheIdentityOwner, nextDocument: FeaturedServerCacheDocument) {
     assertFeaturedCacheOwnerCurrent(owner);
+    const attemptId = ++latestCacheWriteAttemptId;
+    lastCacheWriteAttemptAt = Date.now();
+    lastCacheWriteOutcome = 'in-progress';
     const normalizedDocument: FeaturedServerCacheDocument = {
         ...nextDocument,
         featuredContent: nextDocument.featuredContent ? {
@@ -1375,6 +1451,30 @@ function writeServerDocument(owner: FeaturedCacheIdentityOwner, nextDocument: Fe
             assertFeaturedCacheOwnerCurrent(owner);
             const normalizedReadback = normalizeServerDocument(readbackDocument);
             const readbackSummary = getDocumentPayloadSummary(normalizedReadback);
+            const requestedEntry = normalizedDocument.featuredContent;
+            const readbackEntry = normalizedReadback.featuredContent;
+            const requestedTtlMs = normalizedDocument.featuredContentSettings?.ttlMs;
+            const settingsVerified = requestedTtlMs === undefined
+                || normalizedReadback.featuredContentSettings?.ttlMs === requestedTtlMs;
+            const entryVerified = requestedEntry ?
+                Boolean(readbackEntry
+                    && readbackEntry.version === requestedEntry.version
+                    && readbackEntry.createdAt === requestedEntry.createdAt
+                    // GET projects the shared entry for the current user, so its rows and counts can differ.
+                    && readbackEntry.expiresAt === requestedEntry.expiresAt) :
+                !readbackEntry;
+            const verified = settingsVerified && entryVerified;
+
+            if (attemptId === latestCacheWriteAttemptId) {
+                lastCacheWriteOutcome = verified ? 'verified' : 'unverified';
+                lastCacheWriteError = verified ? null : 'Featured cache write readback did not match the requested document.';
+                if (verified) {
+                    lastCacheReadAttemptAt = Date.now();
+                    lastCacheReadOutcome = readbackEntry ? 'adopted' : 'empty';
+                    lastCacheReadError = null;
+                    lastCacheCountsObservedAt = Date.now();
+                }
+            }
 
             recordPtvEvent('cache', 'featured-cache-write-success', {
                 ...readbackSummary,
@@ -1391,6 +1491,10 @@ function writeServerDocument(owner: FeaturedCacheIdentityOwner, nextDocument: Fe
             return normalizedReadback;
         })
         .catch((err: unknown) => {
+            if (isFeaturedCacheOwnerCurrent(owner) && attemptId === latestCacheWriteAttemptId) {
+                lastCacheWriteOutcome = 'failed';
+                lastCacheWriteError = getErrorMessage(err);
+            }
             recordPtvEvent('cache', 'featured-cache-write-failure', {
                 ...writeSummary,
                 error: getErrorMessage(err),
@@ -1429,10 +1533,15 @@ function readServerCacheEntry(owner: FeaturedCacheIdentityOwner) {
         return resolveForFeaturedCacheOwner(owner, memoryCacheEntry);
     }
 
+    lastCacheReadAttemptAt = Date.now();
+    lastCacheReadOutcome = 'in-progress';
     const serverRead = timePtvAsync('cache', 'read-server-cache', () => readServerDocument(owner))
         .then(document => {
             assertFeaturedCacheOwnerCurrent(owner);
             if (isHomeLibraryAuthorityRetired() || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) {
+                if (inflightServerRead === serverRead && lastCacheReadOutcome === 'in-progress') {
+                    lastCacheReadOutcome = 'not-attempted';
+                }
                 return parseCacheEntryValue(normalizeServerDocument(document, true).featuredContent, true);
             }
             return applyServerCacheDocument(owner, document, 'server-read');
@@ -1440,8 +1549,10 @@ function readServerCacheEntry(owner: FeaturedCacheIdentityOwner) {
         .catch((err: unknown) => {
             if (!isFeaturedCacheOwnerCurrent(owner)) throw createRetiredFeaturedCacheOwnerError();
 
-            lastCacheWriteError = null;
             lastCacheReadError = getErrorMessage(err);
+            lastCacheReadOutcome = 'failed';
+            lastCacheReadFailureAt = Date.now();
+            lastCacheReadFailureCategory = classifyFeaturedCacheReadFailure(err);
             noteServerReadFailure();
             recordPtvEvent('cache', 'error', {
                 error: getErrorMessage(err),
@@ -1609,19 +1720,16 @@ export function setFeaturedContentCacheTtlMs(ttlMs: number, options: { persist?:
             .then(() => {
                 if (!isFeaturedCacheOwnerCurrent(owner)) return;
                 lastCacheStorage = memoryCacheEntry ? getSuccessfulServerStorage() : lastCacheStorage;
-                lastCacheWriteError = null;
                 debugLog('updated server refresh interval', { ttlMs: normalizedTtlMs });
                 dispatchCacheUpdated();
             })
             .catch((err: unknown) => {
                 if (!isFeaturedCacheOwnerCurrent(owner)) return;
-                lastCacheWriteError = getErrorMessage(err);
                 lastCacheStorage = memoryCacheEntry ? 'memory' : lastCacheStorage;
                 debugLog('failed to store server refresh interval', err);
                 dispatchCacheUpdated();
             });
     } else {
-        lastCacheWriteError = null;
         debugLog('updated local refresh interval from plugin settings', { ttlMs: normalizedTtlMs });
     }
 
@@ -1682,7 +1790,6 @@ function writeCacheEntry(owner: FeaturedCacheIdentityOwner, payload: FeaturedPay
                 return entry;
             }
             lastCacheStorage = getSuccessfulServerStorage();
-            lastCacheWriteError = null;
             debugLog('stored fresh payload on server', {
                 heroItems: entry.payload.heroItems.length,
                 itemCount: getPayloadItemCount(entry.payload),
@@ -1714,7 +1821,6 @@ function writeCacheEntry(owner: FeaturedCacheIdentityOwner, payload: FeaturedPay
             }
 
             lastCacheStorage = 'memory';
-            lastCacheWriteError = getErrorMessage(err);
             recordPtvEvent('cache', 'error', {
                 error: getErrorMessage(err),
                 operation: 'write'
@@ -1947,19 +2053,73 @@ export function invalidateFeaturedContentMemoryCache(reason = 'manual') {
     dispatchCacheUpdated();
 }
 
-export function getFeaturedContentCacheStatus(options: { prime?: boolean } = {}) {
+function getUnobservedFeaturedContentCacheStatus(): ReturnType<typeof getCurrentFeaturedContentCacheStatus> {
+    return {
+        createdAt: null,
+        expiresAt: null,
+        countsObserved: false,
+        countsObservedAt: null,
+        fallbackAvailable: false,
+        lastReadAttemptAt: null,
+        lastReadFailureAt: null,
+        lastReadFailureCategory: 'none' as const,
+        lastReadOutcome: 'not-attempted',
+        lastWriteAttemptAt: null,
+        lastWriteOutcome: 'not-attempted',
+        adoptionResult: 'none' as const,
+        completeness: 'empty' as const,
+        cacheVersion: null,
+        configuredRowCount: 0,
+        fallbackRowCount: 0,
+        emptySectionCount: 0,
+        heroCount: 0,
+        isStored: false,
+        isFresh: false,
+        itemCount: 0,
+        observedStorage: 'none' as const,
+        payloadClassification: 'empty' as const,
+        populatedSectionCount: 0,
+        recommendationRowCount: 0,
+        sectionCount: 0,
+        semanticUsable: false,
+        skippedRows: [],
+        storage: 'none' as const,
+        totalRenderedRowCount: 0,
+        lastRawResponseByteSize: null,
+        lastRawTopLevelKeys: [],
+        lastNormalizedTopLevelKeys: [],
+        lastRejectionReason: null,
+        detectedCacheVersion: null,
+        supportedCacheVersions: SUPPORTED_FEATURED_CACHE_VERSIONS,
+        renderSource: 'none' as const,
+        readError: null,
+        readInProgress: false,
+        writeError: null,
+        lastRefreshDurationMs: null,
+        lastRefreshError: null,
+        retryBackoffMs: 0,
+        retryCount: 0,
+        retainedIdentityCount: 0,
+        ttlMs: DEFAULT_FEATURED_CACHE_TTL_MS
+    };
+}
+
+function getCurrentFeaturedContentCacheStatus(options: { prime?: boolean } = {}) {
     let hasIdentity = true;
 
-    try {
-        requireCurrentFeaturedCacheOwner();
-    } catch {
-        hasIdentity = false;
+    if (options.prime !== false) {
+        try {
+            requireCurrentFeaturedCacheOwner();
+        } catch {
+            hasIdentity = false;
+        }
     }
 
     const cached = memoryCacheEntry;
     const now = Date.now();
     const rowSourceSummary = getPayloadRowSourceSummary(cached?.payload);
     const semanticSummary = cached ? summarizeFeaturedContentPayload(cached.payload) : lastServerCachePayloadSummary;
+    const countsObservedAt = cached ? Math.max(cached.createdAt, lastCacheCountsObservedAt ?? 0) : lastCacheCountsObservedAt;
 
     if (hasIdentity && options.prime !== false && !cached && !inflightServerRead && canReadServerCacheNow()) {
         void primeFeaturedContentCacheStatus();
@@ -1968,6 +2128,16 @@ export function getFeaturedContentCacheStatus(options: { prime?: boolean } = {})
     return {
         createdAt: cached?.createdAt || null,
         expiresAt: cached?.expiresAt || null,
+        countsObserved: Boolean(cached || (lastCacheReadOutcome === 'empty' && countsObservedAt !== null)),
+        countsObservedAt,
+        fallbackAvailable: Boolean(cached && (lastCacheReadOutcome === 'failed'
+            || lastCacheReadOutcome === 'rejected')),
+        lastReadAttemptAt: lastCacheReadAttemptAt,
+        lastReadFailureAt: lastCacheReadFailureAt,
+        lastReadFailureCategory: lastCacheReadFailureCategory,
+        lastReadOutcome: lastCacheReadOutcome,
+        lastWriteAttemptAt: lastCacheWriteAttemptAt,
+        lastWriteOutcome: lastCacheWriteOutcome,
         adoptionResult: lastServerCacheAdoptionResult,
         completeness: semanticSummary?.completeness || 'empty',
         cacheVersion: cached?.version ?? null,
@@ -2004,6 +2174,19 @@ export function getFeaturedContentCacheStatus(options: { prime?: boolean } = {})
         retainedIdentityCount: activeFeaturedCacheIdentityKey ? 1 : 0,
         ttlMs: getFeaturedContentCacheTtlMs()
     };
+}
+
+export function getFeaturedContentCacheStatus(options: { prime?: boolean } = {}):
+ReturnType<typeof getCurrentFeaturedContentCacheStatus> {
+    // The collector's passive snapshot must not install or retire a cache owner.
+    if (options.prime === false) {
+        const currentIdentityKey = readCurrentFeaturedCacheIdentityKey();
+        if (!currentIdentityKey || currentIdentityKey !== activeFeaturedCacheIdentityKey) {
+            return getUnobservedFeaturedContentCacheStatus();
+        }
+    }
+
+    return getCurrentFeaturedContentCacheStatus(options);
 }
 
 function forceRefreshFeaturedContentCacheUnchecked(fetcher?: () => Promise<FeaturedPayload>) {
@@ -2289,4 +2472,5 @@ subscribeHomeLibraryAuthority(() => {
     lastPluginStatus = null;
     lastPluginStatusReadAt = 0;
     nextServerReadAllowedAt = 0;
+    if (lastCacheReadOutcome === 'in-progress') lastCacheReadOutcome = 'not-attempted';
 });

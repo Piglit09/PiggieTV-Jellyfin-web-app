@@ -285,6 +285,10 @@ export function filterAndDedupePtvRecommendationRows(
     rows: PtvRecommendationRow[],
     feedback: PtvRecommendationFeedbackState = EMPTY_PTV_RECOMMENDATION_FEEDBACK,
     options: {
+        diagnosticCounts?: {
+            feedbackRejectionCount: number;
+            identityDuplicateRejectionCount: number;
+        };
         nearbyRowWindow?: number;
     } = {}
 ) {
@@ -297,10 +301,14 @@ export function filterAndDedupePtvRecommendationRows(
         const items = row.items.filter(score => {
             const itemId = getFeedbackItemId(score.item);
 
-            if (
-                shouldExcludePtvRecommendationItem(score.item, feedback)
-                || (itemId && nearbyIds.has(itemId))
-            ) {
+            if (shouldExcludePtvRecommendationItem(score.item, feedback)) {
+                options.diagnosticCounts && (options.diagnosticCounts.feedbackRejectionCount += 1);
+                removedCount += 1;
+                return false;
+            }
+
+            if (itemId && nearbyIds.has(itemId)) {
+                options.diagnosticCounts && (options.diagnosticCounts.identityDuplicateRejectionCount += 1);
                 removedCount += 1;
                 return false;
             }

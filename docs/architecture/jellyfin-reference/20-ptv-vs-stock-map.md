@@ -222,6 +222,24 @@ The Jellyfin user policy/library manager remains authoritative on the next serve
 
 These changes add **zero network requests**: Reading classifies existing results, route owners emit local observability, recommendation generation annotates existing events, concurrency derives from the existing request begin/complete ledger, and the DIAG-01 candidate corrects only Request route authority. The 0.5.56 production acceptance is documented in `C:/Users/Piggie/Documents/PTV_WEB_0.5.56_PRODUCTION_DEPLOYMENT_ACCEPTANCE_REPORT.md`. DIAG-01 implementation and local release gates pass, and Web was bumped once to 0.5.57 after a type-only Music return annotation cleared the lint delta without changing runtime behavior. No deployment occurred, physical validation remains pending, and production DIAG-01 therefore remains `FAIL/HOLD`. DIAG-05 and IMG-01 remain open, so STAB-02 and STAB-03 remain open.
 
+### Web 0.5.78 diagnostic reliability Phase 1 — local candidate, 2026-10-24
+
+`[VERIFIED_FROM_SOURCE]` The established Web Featured cache, recommendation
+engine, and route/request collectors retain their ownership. Task 1 separates
+Featured read/adoption, verified Web write, observed counts, fallback memory,
+and dated failure/recovery while keeping passive status free of network and
+storage side effects. Task 2 publishes one identity-owned recommendation
+terminal generation with current counters and nullable duration/rendered count;
+the ranking and row policy do not change. Task 3 preserves the existing
+slow-request health thresholds but dates their retained-session evidence, and
+labels route supersession and critical-work coverage without claiming that an
+uninstrumented route failed. No Plugin API, Jellyfin authority, request
+transport, or cache document format changes. Local deterministic suites are
+`VERIFIED_BY_TEST`; hosted/physical acceptance remains `UNKNOWN`. The 0.5.56
+production and 0.5.57 candidate claims above remain historical evidence;
+DIAG-01, DIAG-03 recovery, DIAG-04 threshold, DIAG-05, and STAB-02 keep their
+operational statuses until separately proven on the deployed build.
+
 ## Contracts PTV currently preserves correctly
 
 - **One session authority:** PTV uses stock `ServerConnections`/ApiClient and delegates actual logout. `VERIFIED_FROM_SOURCE` — `src/ptv/api/client.ts`, lines 74-104; `jellyfinLogoutAction.ts`, lines 29-61.

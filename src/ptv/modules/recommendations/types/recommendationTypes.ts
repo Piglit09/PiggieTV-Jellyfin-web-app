@@ -301,6 +301,7 @@ export type PtvRecommendationEngineResult = {
 
 export type PtvRecommendationDataBundle = {
     candidates: PtvRecommendationInputItem[];
+    prerequisiteFallbackUsed?: boolean;
     profileSignals: PtvRecommendationInputItem[];
     serverId: string;
     sourceFailures: PtvRecommendationSourceFailure[];

@@ -149,6 +149,7 @@ describe('recommendation feedback', () => {
     });
 
     it('removes hidden and repeated items from nearby rows with stable surviving order', () => {
+        const diagnosticCounts = { feedbackRejectionCount: 0, identityDuplicateRejectionCount: 0 };
         const feedback = applyPtvRecommendationFeedback(resetPtvRecommendationFeedback(), {
             action: 'hide-from-home',
             itemId: 'hidden',
@@ -160,6 +161,7 @@ describe('recommendation feedback', () => {
             row('row-3', item('a'), item('e')),
             row('row-4', item('a'), item('f'))
         ], feedback, {
+            diagnosticCounts,
             nearbyRowWindow: 2
         });
 
@@ -169,6 +171,10 @@ describe('recommendation feedback', () => {
             ['e'],
             ['a', 'f']
         ]);
+        expect(diagnosticCounts).toEqual({
+            feedbackRejectionCount: 1,
+            identityDuplicateRejectionCount: 2
+        });
     });
 
     it('removes feedback items from hero candidates without changing relative order', () => {

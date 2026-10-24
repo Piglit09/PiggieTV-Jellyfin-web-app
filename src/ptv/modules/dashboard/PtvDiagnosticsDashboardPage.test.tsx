@@ -148,6 +148,18 @@ describe('PTV diagnostics dashboard', () => {
         root = createRoot(container);
     });
 
+    it('does not present unobserved overview cache and recommendation counts as zero', () => {
+        flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
+        const cards = Array.from(container.querySelectorAll('.ptv-diagnostics-metric-card'));
+        const cacheCard = cards.find(card => card.textContent?.includes('Cache health'));
+        const recommendationCard = cards.find(card => card.textContent?.includes('Recommendations'));
+
+        expect(cacheCard?.textContent).toContain('Not observed');
+        expect(cacheCard?.textContent).not.toContain('0 items');
+        expect(recommendationCard?.textContent).toContain('Not observed');
+        expect(recommendationCard?.textContent).not.toContain('0 generated rows');
+    });
+
     it('resets retained history from the export section', () => {
         const store = getPtvDiagnosticStore();
 
@@ -217,6 +229,78 @@ describe('PTV diagnostics dashboard', () => {
         expect(container.textContent).toContain('never emits keys or moves focus');
         expect(container.textContent).toContain('Safe focus graph inspector');
         expect(container.textContent).toContain('Input Timeline');
+    });
+
+    it('shows a populated cache as fresh even when its last read was empty', () => {
+        const store = getPtvDiagnosticStore();
+        store.updateContext({
+            cache: {
+                ...store.getSnapshot().cache,
+                countsObserved: true,
+                itemCount: 3,
+                lastReadOutcome: 'empty',
+                sectionCount: 1,
+                state: 'fresh'
+            }
+        });
+        flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
+        const cacheButton = Array.from(container.querySelectorAll('button'))
+            .find(button => button.textContent === 'Cache & Recommendations');
+        flushSync(() => cacheButton?.click());
+
+        const cacheCard = Array.from(container.querySelectorAll('.ptv-diagnostics-metric-card'))
+            .find(card => card.textContent?.includes('Cache state'));
+        expect(cacheCard?.querySelector('.ptv-diagnostics-metric-value')?.textContent).toBe('fresh');
+    });
+
+    it('shows recommendation quantities as not observed until an engine generation finishes', () => {
+        flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
+        const cacheButton = Array.from(container.querySelectorAll('button'))
+            .find(button => button.textContent === 'Cache & Recommendations');
+        flushSync(() => cacheButton?.click());
+        const cardValue = (title: string) => Array.from(container.querySelectorAll('.ptv-diagnostics-metric-card'))
+            .find(card => card.textContent?.includes(title))
+            ?.querySelector('.ptv-diagnostics-metric-value')?.textContent;
+
+        expect(cardValue('Generated rows')).toBe('Not observed');
+        expect(cardValue('Recommendation providers')).toBe('Not observed');
+        expect(cardValue('Rendered items')).toBe('Not observed');
+    });
+
+    it('presents provider, candidate, generated, rendered, and rejection counts separately', () => {
+        const store = getPtvDiagnosticStore();
+        store.updateContext({
+            recommendations: {
+                ...store.getSnapshot().recommendations,
+                candidateCount: 8,
+                diversityCapRejectionCount: 2,
+                feedbackRejectionCount: 3,
+                generatedItemCount: 5,
+                generatedRows: 2,
+                identityDuplicateRejectionCount: 1,
+                lastGenerationAt: '2026-10-24T10:40:00.000Z',
+                providerCount: 4,
+                renderedItemCount: null,
+                tasteSignalCount: 7,
+                terminalOutcome: 'partial'
+            }
+        });
+        flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
+        const cacheButton = Array.from(container.querySelectorAll('button'))
+            .find(button => button.textContent === 'Cache & Recommendations');
+        flushSync(() => cacheButton?.click());
+        const card = (title: string) => Array.from(container.querySelectorAll('.ptv-diagnostics-metric-card'))
+            .find(element => element.textContent?.includes(title));
+
+        expect(card('Recommendation providers')?.textContent).toContain('4');
+        expect(card('Recommendation providers')?.textContent).toContain('7 taste signals');
+        expect(card('Recommendation candidates')?.textContent).toContain('8');
+        expect(card('Generated rows')?.textContent).toContain('2');
+        expect(card('Generated rows')?.textContent).toContain('5 generated items');
+        expect(card('Rendered items')?.textContent).toContain('Not observed');
+        expect(card('Recommendation rejection attempts')?.textContent).toContain('1 identity duplicates');
+        expect(card('Recommendation rejection attempts')?.textContent).toContain('2 diversity caps');
+        expect(card('Recommendation rejection attempts')?.textContent).toContain('3 feedback/completed');
     });
 
     it('renders the latest privacy-safe playback aggregates without exposing its opaque key', () => {
@@ -299,5 +383,36 @@ describe('PTV diagnostics dashboard', () => {
 
         expect(container.textContent).toContain('SEVERE_FRAME_JANK');
         expect(container.textContent).toContain('sustained severe rendering degradation');
+    });
+
+    it('dates a retained slow request without implying latency is still current', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-24T08:47:00.000Z'));
+        const store = getPtvDiagnosticStore();
+        const requestId = store.beginRequest({ endpoint: '/Items', route: '#/movies' });
+
+        vi.advanceTimersByTime(10_370);
+        store.completeRequest(requestId, { status: 200, success: true });
+        vi.advanceTimersByTime(2 * 60 * 60_000);
+        flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
+
+        expect(container.textContent).toContain('SLOW_API_REQUESTS');
+        expect(container.textContent).toContain('2026-10-24T08:47:10.370Z');
+        expect(container.textContent).toContain('retained session observation');
+        expect(container.textContent).toContain('does not establish current latency');
+    });
+
+    it('labels superseded uninstrumented navigation without claiming a critical failure', () => {
+        const store = getPtvDiagnosticStore();
+
+        store.startRoute('#/settings');
+        store.startRoute('#/collections');
+        flushSync(() => root.render(<PtvDiagnosticsDashboardPage />));
+        const routesButton = Array.from(container.querySelectorAll('button'))
+            .find(button => button.textContent === 'Routes');
+
+        flushSync(() => routesButton?.click());
+        expect(container.textContent).toContain('superseded by navigation');
+        expect(container.textContent).toContain('critical work not instrumented');
     });
 });

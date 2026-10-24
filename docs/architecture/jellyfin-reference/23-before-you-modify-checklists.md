@@ -451,3 +451,26 @@ These are requirements, not completion assertions. The isolated repair report re
 - [ ] Test Search partial success, per-group and aggregate failed-only retry, scope/abort retirement and no broad library fallback. Capture failing hosted endpoints before attributing the intermittent production issue.
 - [ ] Test update generation across two local builds, activation/storage failure, unchanged generation and old-bundle recovery. The local worker fixture does not prove deployed proxy/cache coherence.
 - [ ] Re-run Stage 2 Controlled Home and Stage 3 Reading safety regressions, full Web/Plugin suites, contract, typecheck, lint/style baseline, version and build gates. Keep physical/hosted `UNKNOWN` until separately authorized proof exists.
+
+## Web 0.5.78 Phase 1 diagnostic local acceptance boundary
+
+- [x] Record the approved Web repo/branch/HEAD/one-bump version and a clean
+  starting tree; keep the project mirror read-only.
+- [x] Prove passive Featured status cannot fetch, persist, install another
+  identity owner, or turn missing counts into observed zero. Separate Plugin
+  read, Web verified write, retained fallback, and historical failure.
+- [x] Prove recommendation progress cannot be terminal; one current
+  identity/generation owns outcome, counters, duration and recovery. Preserve
+  ranking, row policy and unknown rendered count.
+- [x] Preserve request health thresholds while dating retained-session
+  evidence. Label navigation supersession and absent critical instrumentation;
+  do not force route settlement.
+- [x] Run the affected cache/recommendation/route/dashboard suites,
+  Home/Collections/Reading boundary suites, contract, TypeScript, style,
+  privacy, and changed-file lint checks locally. Full-suite/build/browser
+  results belong in the implementation report once complete.
+- [ ] Obtain a separately authorized deployment and hosted/physical acceptance
+  on the exact build. `.50` production contact and `.125` installation or
+  service changes remain on hold. DIAG-03 complete-success recovery, DIAG-04
+  threshold, DIAG-05 image accounting, and `.125` Featured root cause remain
+  operationally unproven.

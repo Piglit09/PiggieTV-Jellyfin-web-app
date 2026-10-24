@@ -273,3 +273,17 @@ Archive-host lifecycle proof includes the queued-cancellation race: the semaphor
 The changed Web surfaces are shell/Browse/Details geometry, Details relationship copy, Up Next/PlaybackManager input and advancement, Search failed-group recovery, and update-generation acknowledgment. Required local proof includes live viewport resize without Home data/image identity change; prompt click/touch and natural-end race; five fixture episode transitions; failed-group retry with successful groups retained and scope-change retirement; activation/storage failure without a reload loop; and relationship labels derived from explicit metadata. Compact inline player controls require safe-area bounds and at least 44 px touch targets. Shared Details fixtures cover Movie, Series, Season, Book, Anime and Cartoons across viewport changes. No Plugin API, server, media, Reading mutation or Controlled Home authority change is in this diff.
 
 Real iPad/Fold browser behavior, five full-duration Safari handoffs, hosted Search failure attribution, populated Home membership, Reading Apply/readback and deployed old/new asset generations remain separate acceptance gates. Fixture results do not close these gates.
+
+## Web 0.5.78 Phase 1 diagnostic actual-diff impact
+
+| Changed boundary | Existing owner and downstream effect | Local proof and remaining gate |
+|---|---|---|
+| Featured cache status and passive collector | `featuredContentCache` owns one server/user Web state; diagnostics and dashboard consume its read/write/count/fallback evidence. Export/cadence sampling adds no Plugin GET, cache write, or authority claim. | `[VERIFIED_BY_TEST]` Missing versus observed empty, recovered read, write readback, overlap, identity retirement, low-power/hidden/disposed sampling, and export privacy. Exact `.125` read/adoption cause and hosted behavior remain `UNKNOWN`. |
+| Recommendation terminal generation | The recommendation engine owns run identity and ranking. Diagnostic events carry terminal outcome and current-generation counters; rendering stays a separate owner. | `[VERIFIED_BY_TEST]` Success/partial/failed/cancelled, missing timing, stale completion, logout/switch, and recovery. No ranking/row policy change; physical complete-success recovery remains `UNKNOWN`. |
+| Historical slow request and route labels | Existing request ledger/thresholds and routeController lifecycle remain authoritative. The dashboard exposes retained request time/scope, critical-work coverage, and navigation supersession. | `[VERIFIED_BY_TEST]` Old 10,370 ms success, mixed-family p95, retained/trimmed counts, Back/Forward, long-lived uninstrumented route, and late settle rejection. Production `.50` latency cause and physical route behavior remain `UNKNOWN`. |
+
+The diff touches Web diagnostic contracts, Featured cache status, recommendation
+event producers/collector, dashboard presentation, tests, documentation and one
+Web version bump. Plugin, transport coordination, Jellyfin schema, image and
+playback owners are unchanged. Local proof is not a deployment claim; DIAG-05
+and STAB-02 remain open.

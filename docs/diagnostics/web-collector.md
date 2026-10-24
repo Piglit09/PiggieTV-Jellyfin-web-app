@@ -43,6 +43,12 @@ without navigating or rewriting hashes. It records:
 
 Route values are normalized to privacy-safe families before storage.
 
+The Web 0.5.78 local candidate also records whether critical work was ever
+declared. A route with no declaration remains `not-observed`. Navigating away
+marks its departure as `superseded-by-navigation`; a late settle event cannot
+turn the departed route into a settled route. This label does not infer a
+critical-work failure or add a timer to force settlement.
+
 ## Focus and input boundary
 
 The collector subscribes to the existing TV focus-manager snapshot and
@@ -82,6 +88,20 @@ events refresh the summary.
 
 Recommendation events update a passive run summary. The collector does not call
 generation APIs, read taste/preferences, or alter caching.
+
+In the Web 0.5.78 local candidate, passive cache snapshots run before export
+and on a bounded cadence while visible and enabled. The cadence stops on
+disposal and avoids low-power/hidden sampling. It makes no Plugin request or
+cache write. Web Featured read/adoption and verified Web write outcomes remain
+separate; missing counts stay unobserved. The recommendation engine publishes
+one identity- and generation-owned terminal record with nullable duration,
+current-generation counters, and dated prior failure/recovery. Progress events
+cannot declare success, and a missing rendered-row observation stays unknown.
+
+The unchanged slow-request thresholds derive from retained successful physical
+request observations. The export includes a bounded timestamped summary when
+`SLOW_API_REQUESTS` is present, so an old request cannot be mistaken for a
+current slowdown. Ring-buffer trimming is disclosed with the sample counts.
 
 ## Plugin and server
 
