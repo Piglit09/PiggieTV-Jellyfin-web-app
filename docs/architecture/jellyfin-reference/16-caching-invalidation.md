@@ -119,3 +119,9 @@ export and on a bounded visible cadence. `[VERIFIED_BY_TEST]` The local
 recovery, overlapping writes, identity change, no-network export, low-power
 sampling, and disposal. Plugin storage and same-session permission convergence
 remain separate server-boundary questions.
+
+## Phase 2G local notification scope and navigation freshness
+
+`[VERIFIED_FROM_SOURCE]` `notificationService` no longer hydrates the legacy identity-agnostic `ptv:notifications:v1` localStorage record. It leaves those bytes untouched for recovery and writes new notices under `ptv:notifications:v2:` plus an encoded canonical authenticated Jellyfin server/user identity. A missing or conflicting identity produces an empty snapshot and prevents new notice persistence. Switching identity loads only that identity's retained records, resets deduplication state, and clears in-memory retry handlers. Snapshots and subscriptions can require an exact identity; the shell binds its badge/panel snapshot to the currently verified navigation identity and renders an empty snapshot when that identity is absent or has changed. `src/ptv/services/notificationService.ts`; `src/ptv/shell/PTVShell.tsx`.
+
+`[VERIFIED_FROM_SOURCE]` The separate `usePtvNavigationAccess` projection is per mounted header/sidebar consumer, not a new persistent or shared cache. It retains a last proven projection during a same-identity background refresh and replaces or withdraws it when the refresh settles. An identity mismatch withdraws it immediately, and retired reads are aborted and denied late adoption. Focus, visibility, storage, bounded periodic and aged route events trigger revalidation. An external policy change can precede the next refresh; immediate client convergence remains `[UNKNOWN]`. User-scoped HTTP authorization continues to belong to Jellyfin, not this client projection. `src/ptv/shell/usePtvNavigationAccess.ts`; `src/ptv/shell/navigationAccess.ts`.

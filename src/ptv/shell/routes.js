@@ -1,6 +1,6 @@
 import { getRegisteredRouteEntries } from '../core/lifecycle';
 import { PTV_ROUTES } from '../core/config';
-import { getPtvNavigationSections } from './navigation';
+import { getPtvRouteNavigationSections } from './navigation';
 import {
     getPtvAuthenticationRouteKind,
     isPtvLoginRoute
@@ -327,7 +327,7 @@ export function getPtvRouteClassNames() {
 }
 
 function findNavigationItem(route) {
-    const sections = getPtvNavigationSections();
+    const sections = getPtvRouteNavigationSections();
 
     for (const section of sections) {
         const item = section.items.find(entry => entry.id === route.navigationItemId);

@@ -112,6 +112,26 @@ body.ptv-native-shell-mounted .appFooter {
     scroll-padding-top: calc(var(--ptv-shell-header-clearance, 102px) + 0.75rem);
 }
 
+.ptv-shell-access-state {
+    background: var(--ptv-glass-panel-bg);
+    border: 1px solid var(--ptv-glass-border);
+    border-radius: 20px;
+    box-shadow: var(--ptv-glass-shadow);
+    color: rgb(255 255 255 / 90%);
+    margin: max(1rem, var(--ptv-shell-header-clearance, 102px)) auto 2rem;
+    max-width: min(42rem, calc(100% - 2rem));
+    min-height: 0;
+    padding: clamp(1rem, 3vw, 2rem);
+    text-align: center;
+}
+
+.ptv-shell-access-state a {
+    color: #dfc1ff;
+    display: inline-block;
+    font-weight: 700;
+    margin-top: 0.5rem;
+}
+
 .ptv-shell-backdrop {
     position: fixed;
     inset: 0;

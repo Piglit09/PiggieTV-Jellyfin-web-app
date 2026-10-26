@@ -834,7 +834,7 @@ export default function CollectionsPage() {
             backDropType='none'
             className={`mainAnimatedPage ptv-collections-page ptv-collections-density-${preferences.density}`}
         >
-            <PTVShell>
+            <PTVShell section='collections'>
                 <div className='ptv-collections' data-ptv-collections-view={route.view}>
                     {route.view !== 'details' ? (
                         <header className='ptv-collections-masthead'>

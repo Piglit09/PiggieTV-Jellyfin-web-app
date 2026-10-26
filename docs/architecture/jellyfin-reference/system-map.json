@@ -309,7 +309,10 @@
         "initialize PTV runtime modules",
         "classify and coordinate native/enhanced/fallback routes from canonical browser URL state rather than presentation state",
         "publish route generation state",
-        "own immutable PTV route-family lifetimes and terminal retirement"
+        "own immutable PTV route-family lifetimes and terminal retirement",
+        "project current-user navigation visibility without replacing Jellyfin authorization",
+        "withhold direct browse and Reading page presentation when the requested view or subtype lacks returned user-view evidence",
+        "bind notification presentation to the current verified server/user identity"
       ],
       "systemRefs": [
         "applicationStartup",
@@ -1065,6 +1068,37 @@
         "status": "VERIFIED_FROM_SOURCE_AND_FOCUSED_TESTS_NOT_DEPLOYED"
       }
     },
+    "navigationAccess": {
+      "authoritativeOwner": "Jellyfin authenticated current user, policy and user-scoped User Views; Jellyfin item APIs remain the response authorization boundary",
+      "derivedOwner": "each mounted usePtvNavigationAccess instance owns a current server/user/revision projection; no shared navigation cache",
+      "viewOwners": ["PTVShell header, Details navigation and direct media-page presentation", "PTV Sidebar", "CollectionsPage selects the collections shell section"],
+      "identity": ["current authenticated Jellyfin server ID", "current user ID", "exact returned User View IDs and CollectionType", "read revision"],
+      "rule": "Fail closed before initial proof and after missing, conflicting or failed identity/read evidence. A same-identity background refresh retains the last proven projection until success replaces it or failure withdraws it. Display names only classify already returned views; neither Web filtering nor hidden direct links authorize API responses. Preserve distinct accessible libraries, expose administrator links only from matching current-user Policy.IsAdministrator === true, and show Live TV/Guide only from matching current-user Policy.EnableLiveTvAccess === true. Direct browse topParentId presentation requires a returned view ID or a legacy alias with a returned kind/name match; Reading subroutes require a returned view of the corresponding kind; CollectionsPage uses the collections shell section for direct-route presentation. Sidebar Calendar uses existing ARR availability only after ready navigation proof; Request remains independent. Static route classification remains separate from filtered visible links.",
+      "retirement": ["abort prior read on identity/revision change", "reject late response after current identity mismatch", "withdraw immediately on identity change and after failed revalidation", "close header transient menus on identity/status/access change", "close open sidebar on identity/status or same-identity visible-navigation change", "refresh on focus, visibility, storage, bounded periodic check and aged route change"],
+      "nonGuarantee": "External in-session permission changes may precede the next client refresh; no atomic policy subscription or hosted/physical acceptance is established by local source alone.",
+      "chapterRefs": ["03-routing-navigation-lifecycle.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md"],
+      "localEvidence": {
+        "baseCommit": "70283b34ffa904c030cf82821e5d561643a21b82",
+        "version": "Phase 2G local source change from Web 0.5.80 baseline; Plugin unchanged",
+        "files": ["src/ptv/shell/navigationAccess.ts", "src/ptv/shell/usePtvNavigationAccess.ts", "src/ptv/shell/navigation.ts", "src/ptv/shell/routes.js", "src/ptv/shell/PTVShell.tsx", "src/ptv/modules/sidebar/Sidebar.tsx", "src/ptv/modules/collections/CollectionsPage.tsx"],
+        "status": "VERIFIED_FROM_SOURCE_HOSTED_AND_PHYSICAL_PENDING"
+      }
+    },
+    "notificationInbox": {
+      "authoritativeOwner": "PTV notificationService browser-local notice and retry-handler state; Jellyfin remains authority for any underlying user data or API payload",
+      "cacheOwner": "localStorage ptv:notifications:v2:<encoded canonical server/user identity> plus one active in-memory list",
+      "viewOwner": "PTVShell notification badge and panel snapshot for the current verified navigation identity",
+      "legacyRule": "Preserve identity-agnostic ptv:notifications:v1 bytes for recovery, but never hydrate them into an authenticated account.",
+      "retirement": ["missing or conflicting identity exposes no notices and forbids new persistence", "identity change loads only that identity's saved v2 list", "identity change resets deduplication and clears in-memory retry handlers", "subscribers requesting an older identity receive an empty snapshot"],
+      "nonGuarantee": "Browser-local notice isolation does not authorize a Jellyfin or Plugin response and is not hosted cross-account acceptance proof.",
+      "chapterRefs": ["16-caching-invalidation.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md"],
+      "localEvidence": {
+        "baseCommit": "70283b34ffa904c030cf82821e5d561643a21b82",
+        "version": "Phase 2G local source change from Web 0.5.80 baseline",
+        "files": ["src/ptv/services/notificationService.ts", "src/ptv/shell/PTVShell.tsx"],
+        "status": "VERIFIED_FROM_SOURCE_HOSTED_AND_PHYSICAL_PENDING"
+      }
+    },
     "configuredHomePresentation": {
       "authoritativeOwner": "PTV Plugin configuration issuer and trusted generated store binding, observed through an explicit final protected status read",
       "recoveryOwner": "PtvFeaturedContentRefreshService existing semaphore and hosted scheduler; missing current generation/document binding triggers normal regeneration independently of content TTL, with a bounded missing-trust retry and replaceable schedule wakeup",
@@ -1390,6 +1424,15 @@
         "evidenceRefs": [
           "$.systems.permissionsAndLibraryAccess.evidence[0]",
           "$.systems.libraryAndItemProjection.evidence[0]"
+        ]
+      },
+      {
+        "from": "permissionsAndLibraryAccess",
+        "to": "routingAndViewLifecycle",
+        "reason": "PTV header and sidebar derive visible media links from current authenticated User Views and policy while the hash router remains URL authority; the client projection does not authorize server responses.",
+        "evidenceRefs": [
+          "$.systems.permissionsAndLibraryAccess.evidence[0]",
+          "$.ptvOverrides.routing.evidence[2]"
         ]
       },
       {
@@ -1902,6 +1945,8 @@
       "rule": "Do not expose a server-wide payload and rely on later Web filtering; after server-side projection, preserve the same immutable server+user security identity through every Web response cache, coalesced request, in-flight owner, dashboard/readback hydrator and publication generation. An authenticated per-user response must not fall through to another server root.",
       "affected": [
         "permissionsAndLibraryAccess",
+        "PTV header and sidebar navigation",
+        "PTV browser-local notification inbox",
         "home",
         "search",
         "PTV Plugin endpoints and caches"
@@ -3521,6 +3566,7 @@
       "ptvChange": "PTV maps stable routes to native PTV pages from canonical browser URL/hash state and uses routeController as the immutable route-family lifetime/generation/AbortSignal owner while keeping hash-router compatibility. Transient presentation classes are not route identity authority.",
       "localStage4Presentation": "Mounted PTVShell measures the header and publishes a CSS-only clearance consumed by shell, Browse and cinematic Details. clientProfile selects non-TV layout classes from measured viewport posture before user-agent fallback while preserving client-kind performance budget. Neither presentation decision changes route identity or request authority.",
       "localPhase7Navigation": "PTVShell owns the same Movies/Shows dropdowns on ordinary and Details routes. Details item section supplies active-group presentation only when its hash has no primary section; canonical hash remains route authority. Fine-pointer hover shares the click/keyboard/touch menu owner and bounded portal-exit cleanup. Local tests pass; hosted and physical acceptance remain pending.",
+      "localPhase2GNavigationAccess": "PTVShell and Sidebar project only the current authenticated user's returned User View IDs and CollectionType into media links, retaining multiple accessible libraries. A matching current-user policy controls admin presentation. Missing/failed/changed identity withdraws links and retires open menus; same-identity background refresh retains proven presentation until a result replaces or invalidates it. Direct browse topParentId and Reading subtype page presentation require matching returned view evidence; supported legacy aliases also require a returned kind/name match. Sidebar Calendar uses existing ARR availability only after ready proof while Request remains independent. Focus, visibility, storage, periodic and aged route checks refresh proof. Static route classification remains separate from filtered visible links. The projection does not replace Jellyfin response authorization or URL route authority. Hosted and physical acceptance remain pending.",
       "risk": "HIGH",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
@@ -3542,6 +3588,13 @@
           "file": "src/ptv/shell/routeController.ts",
           "symbol": "route ownership/generation/lifetime and observers",
           "lines": "51-134,217-290,581-670,727-780",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "Phase 2G local source change from Web 0.5.80 baseline",
+          "file": "src/ptv/shell/navigationAccess.ts; src/ptv/shell/usePtvNavigationAccess.ts; src/ptv/shell/PTVShell.tsx; src/ptv/shell/navigation.ts; src/ptv/shell/routes.js; src/ptv/modules/sidebar/Sidebar.tsx",
+          "symbol": "current-user User Views and policy projection, direct-route view evidence, Calendar availability, identity retirement, static route classification and filtered header/sidebar navigation",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]

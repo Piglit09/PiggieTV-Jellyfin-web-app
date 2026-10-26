@@ -3,6 +3,7 @@ import { getRegisteredNavigationSections } from '../core/lifecycle';
 import { PTV_ROUTES } from '../core/config';
 import { getPtvAdminDestination } from '../modules/settings/admin/adminNavigation';
 import { isPtvPlatformNavigationEntryAvailable } from '../core/platformFeatures';
+import type { PtvNavigationAccess } from './navigationAccess';
 
 export type PtvNavigationPermission = 'admin' | 'authenticated' | 'guest';
 export type PtvNavigationAction = 'logout';
@@ -143,12 +144,73 @@ function mergeNavigationSections(
     return Array.from(sectionMap.values());
 }
 
-export function getPtvNavigationSections() {
+function getAccessibleMediaItems(access: PtvNavigationAccess | null): PtvNavigationItem[] {
+    if (!access) return [];
+
+    const movieItems: PtvNavigationItem[] = access.movies.map(view => ({
+        href: `#/movies?topParentId=${encodeURIComponent(view.id)}`,
+        icon: view.kind === 'animeMovies' ? 'animeMovies' : 'movies',
+        id: `movie-library-${view.id}`,
+        label: view.name
+    }));
+    const showItems: PtvNavigationItem[] = access.shows.map(view => ({
+        href: `#/tv?topParentId=${encodeURIComponent(view.id)}`,
+        icon: getPtvSidebarShowIcon(view.kind),
+        id: `show-library-${view.id}`,
+        label: view.name
+    }));
+    const readingItems: PtvNavigationItem[] = access.reading.length ? [{
+        href: PTV_ROUTES.reading,
+        icon: 'books',
+        id: 'reading-library',
+        label: 'PTV Reading'
+    }] : [];
+
+    return [
+        ...movieItems,
+        ...showItems,
+        ...(access.music.length ? [{ id: 'music', label: 'Music', href: PTV_ROUTES.music, icon: 'music' as const }] : []),
+        ...readingItems,
+        ...(access.collections ? [{ id: 'collections', label: 'Collections', href: PTV_ROUTES.collections, icon: 'collections' as const }] : []),
+        ...(access.liveTv ? (PTV_NAVIGATION_SECTIONS.find(section => section.id === 'media')?.items
+            .filter(item => ['livetv', 'guide'].includes(item.id)) || []) : []),
+        ...(access.music.length ? [{ id: 'playlists', label: 'Playlists', href: '#/playlists', icon: 'playlists' as const }] : [])
+    ];
+}
+
+function getPtvSidebarShowIcon(kind: 'anime' | 'cartoons' | 'shows'): PtvIconName {
+    if (kind === 'anime') return 'anime';
+    if (kind === 'cartoons') return 'cartoons';
+    return 'shows';
+}
+
+function getPtvSectionItems(section: PtvNavigationSection, access: PtvNavigationAccess | null) {
+    if (section.id === 'admin' && !access?.isAdmin) return [];
+    if (section.id === 'media') return getAccessibleMediaItems(access);
+    return section.items;
+}
+
+// Route classification describes registered destinations, regardless of the
+// currently signed-in user's visible navigation projection.
+export function getPtvRouteNavigationSections() {
     return mergeNavigationSections(
         PTV_NAVIGATION_SECTIONS,
         getRegisteredNavigationSections() as PtvNavigationSection[]
     ).map(section => ({
         ...section,
         items: section.items.filter(item => isPtvPlatformNavigationEntryAvailable(item))
+    })).filter(section => section.items.length > 0);
+}
+
+export function getPtvNavigationSections(
+    access: PtvNavigationAccess | null = null,
+    { calendarAvailable = false }: Readonly<{ calendarAvailable?: boolean }> = {}
+) {
+    return getPtvRouteNavigationSections().map(section => ({
+        ...section,
+        items: getPtvSectionItems(section, access)
+            .filter(item => item.permission !== 'admin' || access?.isAdmin === true)
+            .filter(item => item.id !== 'calendar' || calendarAvailable)
+            .filter(item => isPtvPlatformNavigationEntryAvailable(item))
     })).filter(section => section.items.length > 0);
 }
