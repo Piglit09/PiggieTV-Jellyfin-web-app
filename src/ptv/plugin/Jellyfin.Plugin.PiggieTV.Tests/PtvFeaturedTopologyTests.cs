@@ -5,6 +5,7 @@ using Jellyfin.Plugin.PiggieTV.Services;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
+using Microsoft.Extensions.Logging;
 using System.Reflection;
 using Xunit;
 
@@ -122,7 +123,9 @@ public sealed partial class PtvConfiguredRowAssociationTests
     {
         using var fixture = new Fixture();
         var libraries = OwnedLibraries(fixture);
-        using var refresh = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
+        using var writeFailure = new CacheWriteFailure(fixture.Paths.PluginConfigurationsPath);
+        var store = new PtvFeaturedContentStore(fixture.Paths, writeFailure, fixture.Authority);
+        using var refresh = CreateRefresh(store, fixture.Authority, libraries, CompletedEnrichment());
         await refresh.RefreshAsync(CancellationToken.None);
         fixture.Ledger.State.Sequence = 2;
         fixture.Ledger.State.Epoch = new string('B', 64);
@@ -131,9 +134,9 @@ public sealed partial class PtvConfiguredRowAssociationTests
         {
             Generation = 1, CollectionFolderId = "66666666666666666666666666666666"
         };
-        var cachePath = Path.Combine(fixture.Paths.PluginConfigurationsPath, "PiggieTV", "featured-content-cache.json");
-        using var lockedCache = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        writeFailure.Arm();
         var failed = await refresh.RefreshAsync(CancellationToken.None);
+        writeFailure.AssertRestored();
         Assert.Equal("PTV_FEATURED_CACHE_WRITE_FAILED", failed.CacheWriteError);
         var callsBeforePreview = ((LibraryProxy)(object)libraries).ScopedQueryCalls;
 
@@ -351,7 +354,9 @@ public sealed partial class PtvConfiguredRowAssociationTests
         var globalItem = NewMovie("global", 3);
         proxy.Root = new AggregateFolder { Children = [globalItem] };
         proxy.Allowed.Add(globalItem.Id);
-        using var refresh = CreateRefresh(fixture.Store, fixture.Authority, libraries, CompletedEnrichment());
+        using var writeFailure = new CacheWriteFailure(fixture.Paths.PluginConfigurationsPath);
+        var store = new PtvFeaturedContentStore(fixture.Paths, writeFailure, fixture.Authority);
+        using var refresh = CreateRefresh(store, fixture.Authority, libraries, CompletedEnrichment());
         var initial = await refresh.RefreshAsync(CancellationToken.None);
         Assert.Equal(2, Sections(initial.Document).Count);
         var beforeProof = fixture.Authority.CaptureCurrentPresentationProof(UserId, true)!.Authority.ToJsonString();
@@ -370,11 +375,11 @@ public sealed partial class PtvConfiguredRowAssociationTests
         proxy.ScopedItems[newId] = [newMovie];
         proxy.Allowed.Add(newId); proxy.Allowed.Add(newMovie.Id); proxy.CurrentCollections.Add(newId);
         fixture.Authority.RetireLibraryPresentation();
-        var cachePath = Path.Combine(fixture.Paths.PluginConfigurationsPath, "PiggieTV", "featured-content-cache.json");
-        using var lockedCache = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        writeFailure.Arm();
 
         var failed = await refresh.RefreshAsync(CancellationToken.None);
 
+        writeFailure.AssertRestored();
         Assert.Equal("PTV_FEATURED_CACHE_WRITE_FAILED", failed.CacheWriteError);
         Assert.Equal("global", Assert.Single(Sections(failed.Document))!["sourceRuleId"]!.GetValue<string>());
         var proof = fixture.Authority.CaptureCurrentPresentationProof(UserId, true)!;
@@ -632,7 +637,8 @@ public sealed partial class PtvConfiguredRowAssociationTests
         var ledger = new PtvHomeTopologyLedger(Path.Combine(fixture.Paths.PluginConfigurationsPath, "PiggieTV"), "server-a",
             () => initialized, () => initialized = true);
         var authority = new PtvConfiguredRowAssociationService("server-a", () => fixture.Configuration, ledger);
-        var store = new PtvFeaturedContentStore(fixture.Paths, Microsoft.Extensions.Logging.Abstractions.NullLogger<PtvFeaturedContentStore>.Instance, authority);
+        using var writeFailure = new CacheWriteFailure(fixture.Paths.PluginConfigurationsPath);
+        var store = new PtvFeaturedContentStore(fixture.Paths, writeFailure, authority);
         using var refresh = CreateRefresh(store, authority, libraries, CompletedEnrichment());
         var initial = await refresh.RefreshAsync(CancellationToken.None);
         Assert.Equal(2, Sections(initial.Document).Count);
@@ -652,9 +658,9 @@ public sealed partial class PtvConfiguredRowAssociationTests
         Assert.Equal(begun.Epoch, (await ledger.ReadAsync()).Epoch);
         authority.RetireLibraryPresentation();
 
-        var cachePath = Path.Combine(fixture.Paths.PluginConfigurationsPath, "PiggieTV", "featured-content-cache.json");
-        using var lockedCache = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        writeFailure.Arm();
         var retained = await refresh.RefreshIfNeededAsync(CancellationToken.None);
+        writeFailure.AssertRestored();
         Assert.Equal("PTV_FEATURED_CACHE_WRITE_FAILED", retained.CacheWriteError);
         Assert.Equal("global", Assert.Single(Sections(retained.Document))!["sourceRuleId"]!.GetValue<string>());
         Assert.Single(Payload(retained.Document)["sectionItems"]!.AsObject());
@@ -975,6 +981,92 @@ public sealed partial class PtvConfiguredRowAssociationTests
         Assert.Empty(payload["sections"]!.AsArray());
         Assert.Empty(payload["sectionItems"]!.AsObject());
         Assert.Empty(payload["heroItems"]!.AsArray());
+    }
+
+    private sealed class CacheWriteFailure : ILogger<PtvFeaturedContentStore>, IDisposable
+    {
+        // The store has no explicit event IDs. Match its structured templates rather
+        // than formatted messages, and leave every other log event untouched.
+        private const string WriteStarting = "PiggieTV featured-content cache write starting. Category=store; DirectoryExists={DirectoryExists}; FileExists={FileExists}; Writable={Writable}; PayloadBytes={PayloadBytes}; MaxPayloadBytes={MaxPayloadBytes}; HeroCount={HeroCount}; SectionCount={SectionCount}; ItemCount={ItemCount}; IncomingHeroCount={IncomingHeroCount}; IncomingSectionCount={IncomingSectionCount}; IncomingItemCount={IncomingItemCount}.";
+        private const string WriteFailed = "PiggieTV featured-content cache write failed. Category=store; PayloadBytes={PayloadBytes}; MaxPayloadBytes={MaxPayloadBytes}; HeroCount={HeroCount}; SectionCount={SectionCount}; ItemCount={ItemCount}; DirectoryExists={DirectoryExists}; FileExists={FileExists}.";
+        private const string Obstacle = "PTV test-only cache staging obstacle";
+        private readonly string _directory;
+        private readonly string _savedDirectory;
+        private readonly string _cachePath;
+        private byte[]? _originalBytes;
+        private int _barrierCount;
+        private bool _startedWritable;
+        private bool _failureObservedObstacle;
+        private bool _restoredOnError;
+
+        public CacheWriteFailure(string pluginConfigurationsPath)
+        {
+            _directory = Path.Combine(pluginConfigurationsPath, "PiggieTV");
+            _savedDirectory = _directory + ".write-failure-" + Guid.NewGuid().ToString("N");
+            _cachePath = Path.Combine(_directory, "featured-content-cache.json");
+        }
+
+        public void Arm()
+        {
+            Assert.Null(_originalBytes);
+            _originalBytes = File.ReadAllBytes(_cachePath);
+        }
+
+        public void AssertRestored()
+        {
+            Assert.NotNull(_originalBytes);
+            Assert.Equal(1, _barrierCount);
+            Assert.True(_startedWritable);
+            Assert.True(_failureObservedObstacle);
+            Assert.True(_restoredOnError);
+            Assert.True(Directory.Exists(_directory));
+            Assert.False(Directory.Exists(_savedDirectory));
+            Assert.Equal(_originalBytes, File.ReadAllBytes(_cachePath));
+        }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (_originalBytes is null || eventId.Id != 0
+                || state is not IEnumerable<KeyValuePair<string, object?>> fields) return;
+            var values = fields.ToDictionary(pair => pair.Key, pair => pair.Value);
+            if (!values.TryGetValue("{OriginalFormat}", out var template)) return;
+
+            if (_barrierCount == 0 && logLevel == LogLevel.Information && Equals(template, WriteStarting))
+            {
+                _startedWritable = values.TryGetValue("Writable", out var writable) && Equals(writable, true)
+                    && Directory.Exists(_directory) && File.Exists(_cachePath);
+                // The read and write probe have closed their handles. A regular file
+                // at the directory path now makes the real staging FileStream fail
+                // on Linux and Windows, independently of privileges or rename locks.
+                Directory.Move(_directory, _savedDirectory);
+                File.WriteAllText(_directory, Obstacle);
+                _barrierCount++;
+            }
+            else if (_barrierCount == 1 && !_restoredOnError
+                && logLevel == LogLevel.Error && Equals(template, WriteFailed))
+            {
+                _failureObservedObstacle = File.Exists(_directory) && !Directory.Exists(_directory)
+                    && File.ReadAllText(_directory) == Obstacle;
+                // Restore synchronously before refresh catches the real I/O error
+                // and GetStatus rereads the retained cache and its publication proof.
+                Restore();
+                _restoredOnError = true;
+            }
+        }
+
+        private void Restore()
+        {
+            if (!Directory.Exists(_savedDirectory)) return;
+            if (File.Exists(_directory)) File.Delete(_directory);
+            Directory.Move(_savedDirectory, _directory);
+        }
+
+        // A failed assertion or unexpected store path must also restore the fixture.
+        public void Dispose() => Restore();
     }
 
 }
