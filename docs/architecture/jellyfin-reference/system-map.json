@@ -1043,15 +1043,46 @@
   },
   "owners": {
     "buildArtifactAndDeploymentGovernance": {
-      "authoritativeOwner": "Approved PTV Web Git checkout for source and build identity; independently protected operator policy for deployment approval",
+      "authoritativeOwner": "Approved Windows PTV Web local Git checkout and separately approved Linux cloud edit/build checkout for source identity; independently protected operator policy for deployment approval",
       "derivedOwners": ["workspace preflight", "whole-artifact SHA-256 manifest", "Web and Plugin package entrypoints", "registered deployment wrappers", "exact-tree Web publication transaction", "standing .125 development deployment guard", "fresh local server identity and active-session warning"],
-      "identity": ["resolved source root and Git common directory", "origin remote", "full artifact source commit and committed tree", "Web and Plugin version authorities", "complete archive and file-manifest hashes", "registered target and independently protected operator policy", "verified Web rollback reference for release workflows"],
+      "identity": ["resolved source root and Git common directory", "origin remote", "complete effective origin push destination set for cloud development", "cloud bugfix branch and pinned baseline ancestry", "full artifact source commit and committed tree", "Web and Plugin version authorities", "complete archive and file-manifest hashes", "registered target and independently protected operator policy", "verified Web rollback reference for release workflows"],
       "rule": "Supported build and package entrypoints fail closed for an unapproved root or source identity. Release packages require clean committed source. Frozen artifact verification binds a reachable source commit, committed versions and complete file hashes. The legacy release wrapper retains exact-ref approval and rollback gates. The separate development guard allows repeated test-only Web and Plugin installations on the registered .125 server after independently protected standing policy provisioning; it requires exact source, artifact, server and path identity, warns about active Beta users, and never authorizes data or production changes. Web publication retires only known obsolete assets before writing index last. Plugin replacement requires a graceful stop and verified relaunch of the pinned development instance. Production .50 remains denied during development testing.",
       "nonGuarantee": "Repository scripts do not prevent arbitrary manual filesystem writes or replace independently controlled operating-system permissions. In-place per-file Web publication is rollback-capable but not a single atomic directory switch. Local fixture tests do not prove hosted cache behavior, old-tab convergence, or physical acceptance.",
       "chapterRefs": ["18-build-service-worker-assets.md", "23-before-you-modify-checklists.md"],
       "localEvidence": {
         "baseCommit": "a8928478c7a28093f72431bf01271d878dee928d",
         "status": "PHASE6_GOVERNANCE_LOCAL_ONLY_NOT_DEPLOYED"
+      },
+      "cloudDevelopment": {
+        "sourceRoot": "/workspace/PiggieTV-Jellyfin-web-app",
+        "gitCommonDirectory": "/workspace/PiggieTV-Jellyfin-web-app/.git",
+        "gitDirectoryRule": "A real standalone .git directory at the resolved source root; no linked worktree or symlink substitution",
+        "expectedRemote": "https://github.com/Piglit09/PiggieTV-Jellyfin-web-app.git",
+        "branchPrefix": "codex/bugfix/",
+        "baseCommit": "db38180035a9e413510414bd8b75940806952b7f",
+        "allowedModes": ["edit", "build"],
+        "pushDestinationRule": "Preserve the existing origin identity check and separately require every effective origin push URL to match the approved HTTPS repository, with existing optional .git suffix normalization. Include Git rewrites and fetch-as-push fallback. Reject empty or malformed destination sets; an approved first URL does not authorize additional foreign URLs.",
+        "ciAndDeploymentBoundary": "At the cloud root reject package, deploy and deploy-development before CI exception handling; reject --ci-ref for cloud edit/build. Genuine exact-ref CI elsewhere and protected Windows deployment authority retain their existing separate paths. No cloud merge, release, deployment or server access is granted.",
+        "trustBoundary": "Cloud policy and guard code are task-writable, not independently protected credentials or a signed grant. Supported-entrypoint checks cannot prevent arbitrary manual writes or a modified guard. GitHub permissions and human review remain separate boundaries; checked-in revocation alone cannot revoke credentials or old checkout contents.",
+        "requiredProof": ["resolved root/common directory and standalone Git directory", "existing origin identity and complete effective push destination set", "named bugfix branch, full HEAD and pinned baseline ancestry", "actual Linux edit/build preflight success", "disposable Git regressions for multiple destinations, fallback, rewrites and malformed entries", "cloud package/deploy/CI denial and unchanged Windows/genuine CI behavior"],
+        "evidence": [
+          {
+            "status": "VERIFIED_FROM_SOURCE",
+            "file": "scripts/ptv-workspace-preflight.mjs",
+            "symbol": "pinnedAuthority.cloudDevelopment / validateCloudDevelopment / sourceReferenceForMode",
+            "procedure": "docs/operations/ptv-cloud-development.md"
+          },
+          {
+            "status": "VERIFIED_BY_TEST",
+            "environment": "actual Linux Codex checkout, 2026-10-27",
+            "sourceCommit": "8ac3dcc713cde18e94114022beede6ad820a57ce",
+            "branch": "codex/bugfix/cloud-origin-destinations",
+            "commands": ["node scripts/ptv-workspace-preflight.mjs edit", "node scripts/ptv-workspace-preflight.mjs build"],
+            "result": "PASS with cloud-development authority on the unchanged merged guard before the complete push-set correction; source identity acceptance only",
+            "finalCorrectionEvidence": "docs/superpowers/plans/2026-10-27-cloud-origin-destinations.md"
+          }
+        ],
+        "validationLimit": "Earlier Windows fixtures simulate Linux by injecting runtimePlatform; distinguish those results from actual Linux checkout preflights. Neither proves hosted cache/session convergence, physical acceptance or deployment authorization. Preserve historical Phase 6 localEvidence separately."
       }
     },
     "browseLibraryPresentation": {

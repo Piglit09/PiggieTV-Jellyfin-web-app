@@ -226,6 +226,108 @@ test('cloud development rejects a different effective origin push URL', () => {
     assert.throws(() => check(f, 'edit', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
 });
 
+test('cloud development accepts one explicitly approved origin push destination', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', 'remote.origin.pushurl', remote);
+    for (const mode of ['edit', 'build']) {
+        assert.equal(check(f, mode, { runtimePlatform: 'linux' }).authority, 'cloud-development');
+    }
+});
+
+for (const mode of ['edit', 'build']) {
+    test(`cloud development ${mode} rejects an unapproved second origin push destination`, () => {
+        const f = cloudFixture();
+        git(f.root, 'config', '--add', 'remote.origin.pushurl', remote);
+        git(f.root, 'config', '--add', 'remote.origin.pushurl', 'https://example.invalid/other.git');
+        assert.throws(() => check(f, mode, { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+    });
+}
+
+test('cloud development accepts multiple equivalent approved origin push destinations', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', remote);
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', remote.slice(0, -4));
+    assert.equal(check(f, 'build', { runtimePlatform: 'linux' }).authority, 'cloud-development');
+});
+
+test('cloud development checks every fallback origin URL used for pushing', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', '--add', 'remote.origin.url', 'https://example.invalid/other.git');
+    git(f.root, 'config', '--add', 'remote.origin.url', remote);
+    assert.throws(() => check(f, 'build', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+});
+
+test('cloud development accepts multiple approved fallback origin URLs', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', '--add', 'remote.origin.url', remote.slice(0, -4));
+    assert.equal(check(f, 'build', { runtimePlatform: 'linux' }).authority, 'cloud-development');
+});
+
+for (const [description, destination] of [
+    ['empty', ''],
+    ['whitespace-only', ' \t '],
+    ['malformed', 'not-a-url'],
+    ['multiline', `${remote}\n${remote}`],
+    ['tab-containing', remote.replace('github', 'git\thub')]
+]) {
+    test(`cloud development rejects a ${description} additional origin push destination`, () => {
+        const f = cloudFixture();
+        git(f.root, 'config', '--add', 'remote.origin.pushurl', remote);
+        git(f.root, 'config', '--add', 'remote.origin.pushurl', destination);
+        assert.throws(() => check(f, 'edit', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+    });
+}
+
+test('cloud development rejects an empty origin push URL before an approved one', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', '');
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', remote);
+    assert.throws(() => check(f, 'edit', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+});
+
+test('cloud development rejects a sole empty origin push URL even when Git falls back', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', 'remote.origin.pushurl', '');
+    assert.throws(() => check(f, 'edit', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+});
+
+test('cloud development rejects an unapproved second destination expanded by insteadOf', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', remote);
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', 'ptv-other:repository');
+    git(f.root, 'config', 'url.https://example.invalid/.insteadOf', 'ptv-other:');
+    assert.throws(() => check(f, 'build', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+});
+
+test('cloud development accepts an approved destination expanded by insteadOf', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', remote);
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', 'ptv-approved:PiggieTV-Jellyfin-web-app.git');
+    git(f.root, 'config', 'url.https://github.com/Piglit09/.insteadOf', 'ptv-approved:');
+    assert.equal(check(f, 'build', { runtimePlatform: 'linux' }).authority, 'cloud-development');
+});
+
+test('cloud development rejects an unapproved destination expanded by pushInsteadOf', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', 'url.https://example.invalid/.pushInsteadOf', 'https://github.com/');
+    assert.throws(() => check(f, 'build', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+});
+
+test('cloud development accepts an approved pushInsteadOf subset of fallback origin URLs', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', '--add', 'remote.origin.url', remote.slice(0, -4));
+    git(f.root, 'config', `url.${remote}.pushInsteadOf`, remote);
+    assert.equal(check(f, 'build', { runtimePlatform: 'linux' }).authority, 'cloud-development');
+});
+
+test('cloud development rejects a rewritten destination containing control characters', () => {
+    const f = cloudFixture();
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', remote);
+    git(f.root, 'config', '--add', 'remote.origin.pushurl', 'ptv-multiline:');
+    git(f.root, 'config', `url.${remote.replace('github', 'git\thub')}.insteadOf`, 'ptv-multiline:');
+    assert.throws(() => check(f, 'build', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+});
+
 test('cloud development rejects wrong branch, detached HEAD and unrelated or unavailable baseline', () => {
     const f = cloudFixture();
     git(f.root, 'switch', '-q', '-c', 'feature/unapproved');

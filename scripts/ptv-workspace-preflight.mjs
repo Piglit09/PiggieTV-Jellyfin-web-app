@@ -173,16 +173,20 @@ function existingRealPath(value, label) {
     }
 }
 
-function git(cwd, ...args) {
+function gitOutput(cwd, ...args) {
     try {
         return execFileSync(gitExecutable, [...safeGitOptions, '-C', cwd, ...args], {
             encoding: 'utf8',
             env: safeGitEnvironment(),
             stdio: ['ignore', 'pipe', 'pipe']
-        }).trim();
+        });
     } catch {
         deny(`Git identity check failed: ${args.join(' ')}`);
     }
+}
+
+function git(cwd, ...args) {
+    return gitOutput(cwd, ...args).trim();
 }
 
 function inspectGit(cwd) {
@@ -797,7 +801,20 @@ function validateCloudDevelopment(identity, cloud) {
         deny('Cloud development requires the approved standalone Git directory');
     }
     if (!sameRemote(identity.remote, cloud.expectedRemote)) deny('Unexpected cloud Git remote');
-    if (!sameRemote(git(identity.root, 'remote', 'get-url', '--push', 'origin'), cloud.expectedRemote)) {
+    // NUL-delimited config preserves malformed URL values that Git can omit or split in its effective output.
+    const originEntries = gitOutput(identity.root, 'config', '--null', '--get-regexp',
+        '^remote\\.origin\\.(url|pushurl)$').split('\0');
+    const pushEntries = originEntries.filter(entry => entry.startsWith('remote.origin.pushurl\n'));
+    const configuredUrls = (pushEntries.length ? pushEntries :
+        originEntries.filter(entry => entry.startsWith('remote.origin.url\n')))
+        .map(entry => entry.slice(entry.indexOf('\n') + 1));
+    const wellFormed = value => Boolean(value) && !/[\s\p{Cc}]/u.test(value);
+    // Let Git select fallback URLs and apply insteadOf/pushInsteadOf; preserve blank output records.
+    const effectiveUrls = gitOutput(identity.root, 'remote', 'get-url', '--push', '--all', 'origin')
+        .replace(/\n$/u, '').split('\n')
+        .map(value => process.platform === 'win32' ? value.replace(/\r$/u, '') : value);
+    if (!configuredUrls.length || configuredUrls.some(value => !wellFormed(value))
+        || effectiveUrls.some(value => !wellFormed(value) || !sameRemote(value, cloud.expectedRemote))) {
         deny('Unexpected cloud Git push remote');
     }
     const branch = identity.branch.startsWith(cloud.branchPrefix) ?
