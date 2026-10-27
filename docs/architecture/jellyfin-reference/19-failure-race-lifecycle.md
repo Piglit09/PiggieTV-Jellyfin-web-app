@@ -116,6 +116,12 @@ The stock non-guarantee above remains true globally. The current PTV worktree cl
 
 The first three are `INFERRED` from the source-separated owners; the last three are `VERIFIED_FROM_SOURCE` by the controller/image/player citations above.
 
+## Issue #53 automatic theme retirement
+
+`[VERIFIED_FROM_SOURCE]` The automatic-theme route key includes server, authenticated user and item. Theme lookup completion and the existing playback-start guard recheck the captured authenticated user; sign-in/out retires the route and owned automatic source. Connection listeners bind lazily on first `viewshow`, avoiding an eager connection-barrel read during bootstrap. Manual playback/queue intent relinquishes automatic ownership before route cleanup, including same-ID playback. NativeHome no longer retains a Details theme. `src/components/themeMediaPlayer.js`; `src/components/playback/playbackmanager.js`; `src/ptv/pages/home/NativeHome.tsx`.
+
+`[VERIFIED_BY_TEST]` Focused regressions reject a late prior-user response, reload a same-server/item route for the new user, retire pending automatic starts on Home, and preserve an adopted queue while rejecting an unrelated deferred automatic replacement. This adds no universal route or identity manager: retirement still consumes established view and authentication events. An external identity change that emits none of those events is not an immediate-stop guarantee; captured-identity checks still prevent late adoption. Hosted and physical acceptance remain `[UNKNOWN]`.
+
 ## Review checklist for lifecycle changes
 
 - Name the one authoritative owner and every derived/cache/view owner.

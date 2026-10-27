@@ -3685,7 +3685,6 @@ function NativeHome() {
             className='ptv-native-home-page'
             isBackButtonEnabled={false}
             isMenuButtonEnabled
-            isThemeMediaSupported
             shouldAutoFocus={false}
         >
             <main

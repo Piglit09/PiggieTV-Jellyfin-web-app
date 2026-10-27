@@ -3704,6 +3704,7 @@
       "ptvChange": "PTV observes stock Details rendering, reconciles item/readback state, and applies route-generation-aware enhancements. Cinematic enrichment retains unchanged keyed shelves and artwork nodes, loads artwork only for changed shelves, and retires progressive timers before reconciliation or owner teardown. A hidden empty skeleton may adopt a late exact result only under its current owner.",
       "localStage4Presentation": "Responsive Details offsets consume PTVShell clearance. Generic related-title copy remains generic; franchise/collection wording requires explicit shared metadata, and repeated Cast people without distinct related-title value are omitted from the entity rail.",
       "localPhase2Fixture": "The shared Details browser matrix defines Movie, Series, Season, Book, Anime and Cartoons at live-resized 360-1440 CSS px; it is not physical or complete authenticated item proof.",
+      "localIssue53ThemeLifecycle": "themeMediaPlayer retains automatic theme ownership under server/user/item and playback generations. NativeHome withdraws theme retention. Accepted manual play, queue addition and explicit selection relinquish automatic ownership; PlaybackManager clones only adopted queue-entry options to remove automatic guards while leaving captured pending automatic starts cancellable. Authentication events retire owned themes and late reads/starts recheck their captured user. HtmlAudioPlayer's existing fade owner settles cancellation, restores gain/events and fences retirement to its source generation. The global dock remains derived. Local rendered/real-manager/HTML-audio fixture proof does not establish hosted or physical acceptance.",
       "risk": "HIGH",
       "conflictClass": "INTENTIONAL_WRAPPER",
       "chapterRefs": [
@@ -3726,6 +3727,14 @@
           "file": "src/ptv/modules/details/detailsCinematicExperience.ts",
           "symbol": "cinematic enrichment keyed shelf reconciliation and retirement",
           "lines": "45-91, 248-286, 375-410, 467-647",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web Issue #53 local candidate",
+          "version": "0.5.82",
+          "file": "src/components/themeMediaPlayer.js; src/components/playback/playbackmanager.js; src/plugins/htmlAudioPlayer/plugin.js; src/ptv/pages/home/NativeHome.tsx",
+          "symbol": "theme route retirement, accepted playbackrequest and carried queue adoption",
+          "lines": "named symbols",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]
