@@ -28,7 +28,15 @@ const pinnedAuthority = Object.freeze({
     expectedRemote: 'https://github.com/Piglit09/PiggieTV-Jellyfin-web-app.git',
     artifactRoot: 'C:\\Users\\Piggie\\Documents\\GitHub\\_PTV-Artifacts',
     environmentRegistry: 'docs/operations/ptv-environments.json',
-    ciRepository: 'Piglit09/PiggieTV-Jellyfin-web-app'
+    ciRepository: 'Piglit09/PiggieTV-Jellyfin-web-app',
+    cloudDevelopment: Object.freeze({
+        sourceRoot: '/workspace/PiggieTV-Jellyfin-web-app',
+        gitCommonDirectory: '/workspace/PiggieTV-Jellyfin-web-app/.git',
+        expectedRemote: 'https://github.com/Piglit09/PiggieTV-Jellyfin-web-app.git',
+        baseCommit: 'db38180035a9e413510414bd8b75940806952b7f',
+        branchPrefix: 'codex/bugfix/',
+        allowedModes: Object.freeze(['edit', 'build'])
+    })
 });
 const allowedModes = new Set(['audit', 'edit', 'build', 'package', 'deploy', 'deploy-development']);
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -104,7 +112,37 @@ function policyMatchesAuthority(policy, authority) {
         && policy.ci?.repository === authority.ciRepository
         && policy.operatorPolicy?.kind === 'windows-registry'
         && policy.operatorPolicy.key === operatorRegistryKey
-        && policy.operatorPolicy.value === operatorRegistryValue;
+        && policy.operatorPolicy.value === operatorRegistryValue
+        && cloudPolicyMatchesAuthority(policy.cloudDevelopment, authority.cloudDevelopment);
+}
+
+function cloudPolicyMatchesAuthority(policyCloud, approvedCloud) {
+    if (!approvedCloud) return policyCloud === undefined;
+    return Boolean(policyCloud)
+        && samePath(policyCloud.sourceRoot, approvedCloud.sourceRoot)
+        && samePath(policyCloud.gitCommonDirectory, approvedCloud.gitCommonDirectory)
+        && sameRemote(policyCloud.expectedRemote, approvedCloud.expectedRemote)
+        && validFullSha(policyCloud.baseCommit) && policyCloud.baseCommit === approvedCloud.baseCommit
+        && policyCloud.branchPrefix === approvedCloud.branchPrefix
+        && Array.isArray(policyCloud.allowedModes)
+        && policyCloud.allowedModes.length === 2
+        && policyCloud.allowedModes[0] === 'edit' && policyCloud.allowedModes[1] === 'build';
+}
+
+function validateCloudPolicy(policyCloud, approvedCloud) {
+    if (!approvedCloud) {
+        if (policyCloud !== undefined) deny('Unrecognized cloud development policy');
+        return;
+    }
+    if (!samePath(policyCloud?.sourceRoot, approvedCloud.sourceRoot)) deny('Pinned cloud source root does not match workspace policy');
+    if (!samePath(policyCloud.gitCommonDirectory, approvedCloud.gitCommonDirectory)) deny('Pinned cloud Git common directory does not match workspace policy');
+    if (!sameRemote(policyCloud.expectedRemote, approvedCloud.expectedRemote)) deny('Pinned cloud remote does not match workspace policy');
+    if (!validFullSha(policyCloud.baseCommit) || policyCloud.baseCommit !== approvedCloud.baseCommit) {
+        deny('Pinned cloud baseline does not match workspace policy');
+    }
+    if (!cloudPolicyMatchesAuthority(policyCloud, approvedCloud)) {
+        deny('Pinned cloud development permissions do not match workspace policy');
+    }
 }
 
 function validatePolicy(policy, authority) {
@@ -117,6 +155,7 @@ function validatePolicy(policy, authority) {
     if (policy.ci?.repository !== authority.ciRepository) deny('Pinned CI repository does not match workspace policy');
     if (policy.operatorPolicy?.kind !== 'windows-registry' || policy.operatorPolicy.key !== operatorRegistryKey
         || policy.operatorPolicy.value !== operatorRegistryValue) deny('Pinned operator policy does not match workspace policy');
+    validateCloudPolicy(policy.cloudDevelopment, authority.cloudDevelopment);
 }
 
 function insidePath(candidate, parent) {
@@ -746,6 +785,36 @@ function validateSourceLocation(identity, policy, ciRef) {
     if (!samePath(identity.commonDir, policy.gitCommonDirectory)) deny('Unexpected Git common directory');
 }
 
+function validateCloudDevelopment(identity, cloud) {
+    if (!samePath(existingRealPath(cloud.sourceRoot, 'Approved cloud source root'), cloud.sourceRoot)) {
+        deny('Approved cloud source root is a symlink');
+    }
+    if (!samePath(identity.root, cloud.sourceRoot)) deny('Working directory is not inside the approved cloud source root');
+    if (!samePath(identity.commonDir, cloud.gitCommonDirectory)) deny('Unexpected cloud Git common directory');
+    const dotGit = path.join(identity.root, '.git');
+    if (!fs.existsSync(dotGit) || !fs.lstatSync(dotGit).isDirectory()
+        || !samePath(existingRealPath(dotGit, 'Cloud Git directory'), cloud.gitCommonDirectory)) {
+        deny('Cloud development requires the approved standalone Git directory');
+    }
+    if (!sameRemote(identity.remote, cloud.expectedRemote)) deny('Unexpected cloud Git remote');
+    if (!sameRemote(git(identity.root, 'remote', 'get-url', '--push', 'origin'), cloud.expectedRemote)) {
+        deny('Unexpected cloud Git push remote');
+    }
+    const branch = identity.branch.startsWith(cloud.branchPrefix) ?
+        identity.branch.slice(cloud.branchPrefix.length) : '';
+    if (!/^[a-z0-9][a-z0-9._-]*$/u.test(branch)) deny('Cloud development requires an approved bugfix branch');
+    try {
+        if (git(identity.root, 'cat-file', '-t', cloud.baseCommit) !== 'commit') deny('Cloud baseline is not a commit');
+    } catch {
+        deny('Cloud baseline commit is unavailable');
+    }
+    try {
+        git(identity.root, 'merge-base', '--is-ancestor', cloud.baseCommit, identity.head);
+    } catch {
+        deny('Cloud HEAD does not descend from the approved baseline');
+    }
+}
+
 function validateSourceProvenance({ identity, policy, ciRef, ciContext, runtimePlatform, env }) {
     if (!sameRemote(identity.remote, policy.expectedRemote)) deny('Unexpected Git remote');
     if (!validFullSha(identity.head)) deny('Git HEAD is not a full commit');
@@ -753,6 +822,22 @@ function validateSourceProvenance({ identity, policy, ciRef, ciContext, runtimeP
     if (env.PTV_COMMIT_SHA && (env.PTV_COMMIT_SHA !== identity.head || !validFullSha(env.PTV_COMMIT_SHA))) {
         deny('Forged or stale PTV_COMMIT_SHA does not match Git commit');
     }
+}
+
+function sourceReferenceForMode({ mode, flags, identity, policy, authority, ciContext, runtimePlatform }) {
+    const cloudDevelopment = runtimePlatform === 'linux' && authority.cloudDevelopment
+        && samePath(identity.root, authority.cloudDevelopment.sourceRoot);
+    if (cloudDevelopment) {
+        if (!authority.cloudDevelopment.allowedModes.includes(mode)) {
+            deny('Cloud development is edit/build-only; package and deployment are denied');
+        }
+        if (flags.ciRef) deny('Cloud development cannot use the CI exact-ref exception');
+        validateCloudDevelopment(identity, policy.cloudDevelopment);
+        return { ciRef: null, cloudDevelopment: true };
+    }
+    const ciRef = ciReference(mode, flags, identity, ciContext, runtimePlatform);
+    validateSourceLocation(identity, policy, ciRef);
+    return { ciRef, cloudDevelopment: false };
 }
 
 export function evaluatePreflight({
@@ -788,8 +873,8 @@ export function evaluatePreflight({
         deny('Frozen artifact options are deployment-only');
     }
     validatePolicy(policy, authority);
-    const ciRef = ciReference(mode, flags, identity, ciContext, runtimePlatform);
-    validateSourceLocation(identity, policy, ciRef);
+    const { ciRef, cloudDevelopment } = sourceReferenceForMode({ mode, flags, identity, policy,
+        authority, ciContext, runtimePlatform });
     validateSourceProvenance({ identity, policy, ciRef, ciContext, runtimePlatform, env });
     const versions = sourceVersions(identity.root, policy);
     if ((mode === 'package' || mode === 'deploy' || mode === 'deploy-development') && identity.dirty) {
@@ -805,7 +890,7 @@ export function evaluatePreflight({
         const deployment = validateDeployment({ flags, identity, policy, registry, operatorPolicy, versions, protectedApprovalProbe });
         return { ...base, versions, authority: 'approved', ...deployment };
     }
-    return { ...base, versions, authority: 'approved' };
+    return { ...base, versions, authority: cloudDevelopment ? 'cloud-development' : 'approved' };
 }
 
 function parseArgs(argv) {
