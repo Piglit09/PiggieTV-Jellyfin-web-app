@@ -2340,6 +2340,9 @@ export class PlaybackManager {
         self.play = async function (options) {
             const playbackRequest = beginPlaybackRequest(self, options);
             if (!playbackRequest) return;
+            // Observers must yield to accepted user intent before its asynchronous
+            // lookup/start can reuse the current player, even for the same item.
+            Events.trigger(self, 'playbackrequest', [options]);
             // A new explicit request supersedes the ended item's pending autoplay lookup.
             playbackGeneration += 1;
 
@@ -3403,6 +3406,20 @@ export class PlaybackManager {
             };
         };
 
+        function adoptUserPlaybackQueue() {
+            for (const item of self._playQueueManager.getPlaylist()) {
+                if (!isGuardedPlaybackStart(item.playOptions)) continue;
+
+                // Only future starts of entries actually carried in this queue
+                // become intentional playback. Keep any in-flight automatic
+                // start's captured options guarded so it can still be retired.
+                const options = { ...item.playOptions, playbackStartIsGuarded: false };
+                delete options.playbackStartGuard;
+                delete options.playbackRequestGuard;
+                item.playOptions = options;
+            }
+        }
+
         self.setCurrentPlaylistItem = function (playlistItemId, player) {
             player = player || self._currentPlayer;
             if (player && !enableLocalPlaylistManagement(player)) {
@@ -3412,7 +3429,9 @@ export class PlaybackManager {
             const newItem = self.getItemFromPlaylistItemId(playlistItemId);
 
             if (newItem.Item) {
+                adoptUserPlaybackQueue();
                 const newItemPlayOptions = newItem.Item.playOptions || getDefaultPlayOptions();
+                Events.trigger(self, 'playbackrequest', [newItemPlayOptions]);
 
                 playInternal(newItem.Item, newItemPlayOptions, function () {
                     setPlaylistState(newItem.Item.PlaylistItemId, newItem.Index);
@@ -3629,6 +3648,10 @@ export class PlaybackManager {
             } else {
                 self._playQueueManager.queue(items);
             }
+            // Adding a user-selected item adopts the current queue. Route-scoped
+            // background playback must no longer retire that intentional queue.
+            adoptUserPlaybackQueue();
+            Events.trigger(self, 'playbackrequest', [{ items }]);
             Events.trigger(player, 'playlistitemadd');
         }
 

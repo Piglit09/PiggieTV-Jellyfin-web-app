@@ -15,25 +15,34 @@ function getDefaultProfile() {
 }
 
 let fadeTimeout;
+let cancelFade;
 function fade(instance, elem, startingVolume) {
     instance._isFadingOut = true;
 
-    // Need to record the starting volume on each pass rather than querying elem.volume
-    // This is due to iOS safari not allowing volume changes and always returning the system volume value
-    const newVolume = Math.max(0, startingVolume - 0.15);
-    console.debug('fading volume to ' + newVolume);
-    elem.volume = newVolume;
+    return new Promise(resolve => {
+        cancelFade = () => {
+            instance._isFadingOut = false;
+            elem.volume = startingVolume;
+            resolve(false);
+        };
 
-    if (newVolume <= 0) {
-        instance._isFadingOut = false;
-        return Promise.resolve();
-    }
+        function step(volume) {
+            // Keep a local volume because Safari may return the system volume.
+            const newVolume = Math.max(0, volume - 0.15);
+            console.debug('fading volume to ' + newVolume);
+            elem.volume = newVolume;
 
-    return new Promise(function (resolve, reject) {
-        cancelFadeTimeout();
-        fadeTimeout = setTimeout(function () {
-            fade(instance, elem, newVolume).then(resolve, reject);
-        }, 100);
+            if (newVolume <= 0) {
+                fadeTimeout = null;
+                cancelFade = null;
+                instance._isFadingOut = false;
+                resolve(true);
+            } else {
+                fadeTimeout = setTimeout(() => step(newVolume), 100);
+            }
+        }
+
+        step(startingVolume);
     });
 }
 
@@ -43,6 +52,9 @@ function cancelFadeTimeout() {
         clearTimeout(timeout);
         fadeTimeout = null;
     }
+    const cancel = cancelFade;
+    cancelFade = null;
+    cancel?.();
 }
 
 function supportsFade() {
@@ -91,6 +103,7 @@ function enableHlsPlayer(url, item, mediaSource, mediaType) {
 class HtmlAudioPlayer {
     constructor() {
         const self = this;
+        let sourceGeneration = 0;
 
         self.name = 'Html Audio Player';
         self.type = PluginType.MediaPlayer;
@@ -100,6 +113,8 @@ class HtmlAudioPlayer {
         self.priority = 1;
 
         self.play = function (options) {
+            sourceGeneration += 1;
+            cancelFadeTimeout();
             self._started = false;
             self._timeUpdated = false;
             self._currentTime = null;
@@ -229,6 +244,7 @@ class HtmlAudioPlayer {
 
             const elem = self._mediaElement;
             const src = self._currentSrc;
+            const generation = sourceGeneration;
 
             if (elem && src) {
                 if (!destroyPlayer || !supportsFade()) {
@@ -244,7 +260,8 @@ class HtmlAudioPlayer {
 
                 const originalVolume = elem.volume;
 
-                return fade(self, elem, elem.volume).then(function () {
+                return fade(self, elem, elem.volume).then(function (completed) {
+                    if (!completed || generation !== sourceGeneration) return;
                     elem.pause();
                     elem.volume = originalVolume;
 

@@ -12,9 +12,11 @@ import { toApi } from 'utils/jellyfin-apiclient/compat';
 import { queryClient } from 'utils/query/queryClient';
 
 import { playbackManager } from './playback/playbackmanager';
+import { isGuardedPlaybackStart } from './playback/playbackStartGuard';
 
 let availableThemeItems = [];
 let availableThemeOwnerId = null;
+let availableThemeIdentity = null;
 let currentOwnerId = null;
 let currentThemeIds = [];
 let pendingOwnerId = null;
@@ -25,7 +27,17 @@ let themeLoadGeneration = 0;
 let themePlaybackSuppressed = false;
 let activeThemeRouteKey = null;
 let loadedThemeRouteKey = null;
+let identityEventsBound = false;
 const themePlaybackAttempts = new Map();
+
+function isCurrentThemeIdentity(identity) {
+    try {
+        return Boolean(identity?.userId
+            && ServerConnections.getApiClient(identity.serverId)?.getCurrentUserId() === identity.userId);
+    } catch {
+        return false;
+    }
+}
 
 function getCurrentThemePlayback() {
     const player = playbackManager.getCurrentPlayer?.();
@@ -183,8 +195,7 @@ function playThemeMedia(items, ownerId) {
             return i.Id;
         });
         const playback = getCurrentThemePlayback();
-        const currentItemIsTheme = isThemeItem(playback.item)
-            || Boolean(playback.item?.Id && requestedThemeIds.includes(playback.item.Id));
+        const currentItemIsTheme = isThemeItem(playback.item);
 
         // Leave user-selected media alone. A browser-blocked theme attempt has
         // a source but remains paused, so it must still be eligible for retry.
@@ -208,7 +219,8 @@ function playThemeMedia(items, ownerId) {
 
         const generation = playbackGeneration;
         const attempt = {
-            ids: requestedThemeIds
+            ids: requestedThemeIds,
+            identity: availableThemeIdentity
         };
 
         activePlaybackGeneration = generation;
@@ -230,6 +242,7 @@ function playThemeMedia(items, ownerId) {
             playbackStartGuard: () => generation === playbackGeneration
                 && activePlaybackGeneration === generation
                 && !themePlaybackSuppressed
+                && isCurrentThemeIdentity(attempt.identity)
         }, ownerId, generation);
     } else {
         stopIfPlaying();
@@ -266,6 +279,7 @@ function stopIfPlaying() {
 function beginThemeRouteLoad() {
     availableThemeItems = [];
     availableThemeOwnerId = null;
+    availableThemeIdentity = null;
     playbackGeneration += 1;
     activePlaybackGeneration = null;
     activeThemeIds = [];
@@ -276,6 +290,7 @@ function beginThemeRouteLoad() {
 function clearAvailableThemeMedia() {
     availableThemeItems = [];
     availableThemeOwnerId = null;
+    availableThemeIdentity = null;
     stopIfPlaying();
 }
 
@@ -301,18 +316,18 @@ const excludeTypes = [
     ItemKind.SeriesTimer
 ];
 
-async function loadThemeMedia(serverId, itemId, generation, routeKey) {
+async function loadThemeMedia(serverId, itemId, userId, generation, routeKey) {
     try {
         const apiClient = ServerConnections.getApiClient(serverId);
         const api = toApi(apiClient);
-        const userId = apiClient.getCurrentUserId();
+        const identity = { serverId, userId };
         const item = await queryClient.fetchQuery(getItemQuery(
             api,
             itemId,
             userId
         ));
 
-        if (generation !== themeLoadGeneration) return;
+        if (generation !== themeLoadGeneration || !isCurrentThemeIdentity(identity)) return;
 
         if (item.CollectionType) {
             loadedThemeRouteKey = routeKey;
@@ -333,7 +348,7 @@ async function loadThemeMedia(serverId, itemId, generation, routeKey) {
             sortBy: [ItemSortBy.Random]
         });
 
-        if (generation !== themeLoadGeneration) return;
+        if (generation !== themeLoadGeneration || !isCurrentThemeIdentity(identity)) return;
 
         const result = userSettings.enableThemeVideos() && themeMedia.ThemeVideosResult?.Items?.length ?
             themeMedia.ThemeVideosResult :
@@ -341,6 +356,7 @@ async function loadThemeMedia(serverId, itemId, generation, routeKey) {
 
         availableThemeItems = result?.Items || [];
         availableThemeOwnerId = result?.OwnerId || null;
+        availableThemeIdentity = identity;
         loadedThemeRouteKey = routeKey;
         playAvailableThemeMedia();
     } catch (err) {
@@ -354,10 +370,22 @@ async function loadThemeMedia(serverId, itemId, generation, routeKey) {
 }
 
 document.addEventListener('viewshow', e => {
+    // ServerConnections participates in the bootstrap import graph. Bind only
+    // after the application begins showing views, before themes can be owned.
+    if (!identityEventsBound) {
+        Events.on(ServerConnections, 'localusersignedin', retireThemeRoute);
+        Events.on(ServerConnections, 'localusersignedout', retireThemeRoute);
+        identityEventsBound = true;
+    }
     const { serverId, id } = e.detail?.params || {};
 
     if (serverId && id) {
-        const routeKey = `${serverId}:${id}`;
+        const userId = ServerConnections.getApiClient(serverId)?.getCurrentUserId();
+        if (!userId) {
+            retireThemeRoute();
+            return;
+        }
+        const routeKey = JSON.stringify([serverId, userId, id]);
         themePlaybackSuppressed = false;
 
         if (routeKey === activeThemeRouteKey) {
@@ -371,7 +399,7 @@ document.addEventListener('viewshow', e => {
         activeThemeRouteKey = routeKey;
         loadedThemeRouteKey = null;
         beginThemeRouteLoad();
-        void loadThemeMedia(serverId, id, generation, routeKey);
+        void loadThemeMedia(serverId, id, userId, generation, routeKey);
         return;
     }
 
@@ -387,6 +415,29 @@ document.addEventListener('viewshow', e => {
         clearAvailableThemeMedia();
     }
 }, true);
+
+function relinquishThemePlayback() {
+    themePlaybackSuppressed = true;
+    playbackGeneration += 1;
+    activePlaybackGeneration = null;
+    activeThemeIds = [];
+    currentOwnerId = null;
+    currentThemeIds = [];
+    pendingOwnerId = null;
+    themePlaybackAttempts.clear();
+}
+
+function retireThemeRoute() {
+    themeLoadGeneration += 1;
+    themePlaybackSuppressed = true;
+    activeThemeRouteKey = null;
+    loadedThemeRouteKey = null;
+    clearAvailableThemeMedia();
+}
+
+Events.on(playbackManager, 'playbackrequest', (_event, options) => {
+    if (!isGuardedPlaybackStart(options)) relinquishThemePlayback();
+});
 
 Events.on(playbackManager, 'playbackstart', (_e, player) => {
     const item = playbackManager.currentItem(player);
@@ -409,13 +460,7 @@ Events.on(playbackManager, 'playbackstart', (_e, player) => {
         return;
     } else {
         // User played something manually.
-        themePlaybackSuppressed = true;
-        playbackGeneration += 1;
-        activePlaybackGeneration = null;
-        activeThemeIds = [];
-        currentOwnerId = null;
-        currentThemeIds = [];
-        pendingOwnerId = null;
+        relinquishThemePlayback();
     }
 });
 
