@@ -75,6 +75,21 @@ function check(f, mode, extra = {}) {
         protectedApprovalProbe: () => true, ...extra });
 }
 
+function cloudFixture() {
+    const f = fixture();
+    const cloudDevelopment = {
+        sourceRoot: f.root,
+        gitCommonDirectory: path.join(f.root, '.git'),
+        expectedRemote: remote,
+        baseCommit: f.head,
+        branchPrefix: 'codex/bugfix/',
+        allowedModes: ['edit', 'build']
+    };
+    git(f.root, 'switch', '-q', '-c', 'codex/bugfix/fixture');
+    git(f.root, 'commit', '--allow-empty', '-qm', 'bugfix fixture');
+    return { ...f, policy: { ...f.policy, cloudDevelopment }, authority: { ...f.authority, cloudDevelopment } };
+}
+
 function frozenFixture() {
     const f = fixture();
     const artifactRoot = path.join(f.base, 'frozen-artifact');
@@ -160,6 +175,104 @@ test('accepts approved root and nested directory without changing source', () =>
     assert.equal(rootResult.head, f.head);
     assert.equal(nestedResult.sourceRoot, fs.realpathSync.native(f.root));
     assert.equal(git(f.root, 'status', '--porcelain=v1'), before);
+});
+
+test('cloud development allows edit and build only at the pinned root on a descendant bugfix branch', () => {
+    const f = cloudFixture();
+    fs.writeFileSync(path.join(f.root, 'in-progress.txt'), 'fixture work\n');
+    const before = git(f.root, 'status', '--porcelain=v1');
+    const head = git(f.root, 'rev-parse', 'HEAD');
+    assert.equal(check(f, 'edit', { runtimePlatform: 'linux' }).authority, 'cloud-development');
+    assert.equal(check(f, 'build', { runtimePlatform: 'linux', cwd: path.join(f.root, 'src', 'ptv') }).head, head);
+    assert.equal(git(f.root, 'status', '--porcelain=v1'), before);
+});
+
+test('cloud development rejects wrong root, linked worktree, policy, common directory and remote', () => {
+    const f = cloudFixture();
+    const other = path.join(f.base, 'other');
+    git(f.root, 'worktree', 'add', '-q', '-b', 'codex/bugfix/other', other);
+    assert.throws(() => check(f, 'edit', { cwd: other, runtimePlatform: 'linux' }), /approved source root|cloud development/i);
+    assert.throws(() => check({ ...f, policy: { ...f.policy, cloudDevelopment: {
+        ...f.policy.cloudDevelopment, sourceRoot: other
+    } } }, 'edit', { runtimePlatform: 'linux' }), /pinned.*cloud.*source root/i);
+    assert.throws(() => check({ ...f, policy: { ...f.policy, cloudDevelopment: {
+        ...f.policy.cloudDevelopment, gitCommonDirectory: other
+    } } }, 'edit', { runtimePlatform: 'linux' }), /pinned.*cloud.*common directory/i);
+    assert.throws(() => check({ ...f, policy: { ...f.policy, cloudDevelopment: {
+        ...f.policy.cloudDevelopment, allowedModes: ['edit', 'build', 'package']
+    } } }, 'edit', { runtimePlatform: 'linux' }), /pinned.*cloud.*permissions/i);
+    assert.throws(() => check({ ...f, policy: { ...f.policy, cloudDevelopment: {
+        ...f.policy.cloudDevelopment, baseCommit: '0'.repeat(40)
+    } } }, 'edit', { runtimePlatform: 'linux' }), /pinned.*cloud.*baseline/i);
+    git(f.root, 'remote', 'set-url', 'origin', 'https://example.invalid/other.git');
+    assert.throws(() => check(f, 'edit', { runtimePlatform: 'linux' }), /remote/i);
+});
+
+test('cloud development rejects a linked Git file even when its common directory is allowlisted', () => {
+    const f = cloudFixture();
+    const linked = path.join(f.base, 'linked-cloud');
+    git(f.root, 'worktree', 'add', '-q', '-b', 'codex/bugfix/linked', linked);
+    const cloudDevelopment = { ...f.policy.cloudDevelopment,
+        sourceRoot: linked, gitCommonDirectory: path.join(f.root, '.git') };
+    const linkedFixture = { ...f, policy: { ...f.policy, cloudDevelopment },
+        authority: { ...f.authority, cloudDevelopment } };
+    assert.throws(() => check(linkedFixture, 'edit', { cwd: linked, runtimePlatform: 'linux' }),
+        /standalone Git directory/i);
+});
+
+test('cloud development rejects a different effective origin push URL', () => {
+    const f = cloudFixture();
+    git(f.root, 'remote', 'set-url', '--push', 'origin', 'https://example.invalid/other.git');
+    assert.throws(() => check(f, 'edit', { runtimePlatform: 'linux' }), /cloud.*push remote/i);
+});
+
+test('cloud development rejects wrong branch, detached HEAD and unrelated or unavailable baseline', () => {
+    const f = cloudFixture();
+    git(f.root, 'switch', '-q', '-c', 'feature/unapproved');
+    assert.throws(() => check(f, 'edit', { runtimePlatform: 'linux' }), /cloud.*branch/i);
+    const head = git(f.root, 'rev-parse', 'HEAD');
+    assert.throws(() => check(f, 'build', { runtimePlatform: 'linux',
+        ciContext: { actions: true, repository: 'Piglit09/PiggieTV-Jellyfin-web-app', workspace: f.root, sha: head }
+    }), /cloud.*branch/i);
+    git(f.root, 'switch', '-q', 'codex/bugfix/fixture');
+    git(f.root, 'checkout', '-q', '--detach');
+    assert.throws(() => check(f, 'edit', { runtimePlatform: 'linux' }), /cloud.*branch/i);
+    git(f.root, 'switch', '-q', 'codex/bugfix/fixture');
+    const unrelated = git(f.root, 'commit-tree', 'HEAD^{tree}', '-m', 'unrelated root');
+    assert.throws(() => check({ ...f, policy: { ...f.policy, cloudDevelopment: {
+        ...f.policy.cloudDevelopment, baseCommit: unrelated
+    } }, authority: { ...f.authority, cloudDevelopment: {
+        ...f.authority.cloudDevelopment, baseCommit: unrelated
+    } } }, 'edit', { runtimePlatform: 'linux' }), /cloud.*ancestor|cloud.*baseline/i);
+    assert.throws(() => check({ ...f, policy: { ...f.policy, cloudDevelopment: {
+        ...f.policy.cloudDevelopment, baseCommit: '0'.repeat(40)
+    } }, authority: { ...f.authority, cloudDevelopment: {
+        ...f.authority.cloudDevelopment, baseCommit: '0'.repeat(40)
+    } } }, 'edit', { runtimePlatform: 'linux' }), /cloud.*baseline/i);
+});
+
+test('cloud development cannot be used for package or deployment, including CI-looking inputs', () => {
+    const f = cloudFixture();
+    const head = git(f.root, 'rev-parse', 'HEAD');
+    const ci = { actions: true, repository: 'Piglit09/PiggieTV-Jellyfin-web-app', workspace: f.root, sha: head };
+    for (const mode of ['package', 'deploy', 'deploy-development']) {
+        assert.throws(() => check(f, mode, { runtimePlatform: 'linux' }), /cloud development.*edit\/build/i);
+        assert.throws(() => check(f, mode, { runtimePlatform: 'linux', ciContext: ci }),
+            /cloud development.*edit\/build/i);
+        assert.throws(() => check(f, mode, { runtimePlatform: 'linux', flags: { ciRef: head }, ciContext: ci }),
+            /cloud development.*edit\/build/i);
+    }
+    assert.throws(() => check(f, 'build', { runtimePlatform: 'linux', flags: { ciRef: head }, ciContext: ci }),
+        /cloud development.*CI/i);
+});
+
+test('cloud policy preserves genuine exact-ref CI outside the cloud development root', () => {
+    const f = cloudFixture();
+    const ciRoot = path.join(f.base, 'ci-checkout');
+    git(f.root, 'worktree', 'add', '-q', '--detach', ciRoot, f.head);
+    const ci = { actions: true, repository: 'Piglit09/PiggieTV-Jellyfin-web-app', workspace: ciRoot, sha: f.head };
+    assert.equal(check(f, 'build', { cwd: ciRoot, runtimePlatform: 'linux', ciContext: ci }).head, f.head);
+    assert.equal(check(f, 'package', { cwd: ciRoot, runtimePlatform: 'linux', ciContext: ci }).head, f.head);
 });
 
 test('rejects wrong root and linked worktree for mutation but allows historical audit', () => {

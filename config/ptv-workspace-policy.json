@@ -23,6 +23,14 @@
     "buildOnly": true,
     "requiresExactRef": true
   },
+  "cloudDevelopment": {
+    "sourceRoot": "/workspace/PiggieTV-Jellyfin-web-app",
+    "gitCommonDirectory": "/workspace/PiggieTV-Jellyfin-web-app/.git",
+    "expectedRemote": "https://github.com/Piglit09/PiggieTV-Jellyfin-web-app.git",
+    "baseCommit": "db38180035a9e413510414bd8b75940806952b7f",
+    "branchPrefix": "codex/bugfix/",
+    "allowedModes": ["edit", "build"]
+  },
   "operatorPolicy": {
     "kind": "windows-registry",
     "key": "HKLM\\SOFTWARE\\PiggieTV\\WorkspaceAuthority",
