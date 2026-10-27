@@ -111,6 +111,27 @@ test('cleanliness accepts only Git-authorized CRLF normalization', () => withFix
     assert.equal(sourceTreeDirty(data.sourceRoot), true);
 }));
 
+test('cleanliness rejects unrelated untracked files and a clean nested contract checkout', () => withFixture(data => {
+    assert.equal(sourceTreeDirty(data.sourceRoot), false);
+    const unrelated = path.join(data.sourceRoot, 'untracked.txt');
+    fs.writeFileSync(unrelated, 'untracked fixture');
+    assert.equal(sourceTreeDirty(data.sourceRoot), true);
+    fs.unlinkSync(unrelated);
+    assert.equal(sourceTreeDirty(data.sourceRoot), false);
+
+    const checkout = path.join(data.sourceRoot, '.contract-repositories', 'mobile');
+    fs.mkdirSync(checkout, { recursive: true });
+    const git = (...args) => execFileSync(pinnedGit, [ '-c', 'core.hooksPath=/dev/null', ...args ], {
+        cwd: checkout, encoding: 'utf8', stdio: [ 'ignore', 'pipe', 'ignore' ]
+    }).trim();
+    git('init', '-q');
+    fs.writeFileSync(path.join(checkout, 'contract.json'), '{"fixture":true}\n');
+    git('add', 'contract.json');
+    git('-c', 'user.name=PTV fixture', '-c', 'user.email=ptv-fixture@example.invalid', 'commit', '-qm', 'nested fixture');
+    assert.equal(git('status', '--porcelain=v1'), '');
+    assert.equal(sourceTreeDirty(data.sourceRoot), true);
+}));
+
 test('cleanliness rejects a tracked symlink or reparse path', context => withFixture(data => {
     const tracked = path.join(data.sourceRoot, 'src/ptv/plugin/Jellyfin.Plugin.PiggieTV');
     const outside = path.join(data.base, 'outside-directory');
@@ -211,9 +232,14 @@ test('post-transformation bytes need their own final manifest', () => withFixtur
 
 test('rejects symlinked package entries and path traversal in a forged manifest', () => withFixture(data => {
     const link = path.join(data.artifactRoot, 'linked');
-    fs.symlinkSync(path.join(data.artifactRoot, 'assets'), link, 'junction');
+    const target = path.join(data.artifactRoot, 'assets');
+    fs.symlinkSync(target, link, 'junction');
+    assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
     assert.throws(() => buildManifest(options(data)), /symlink|reparse/u);
-    fs.rmdirSync(link);
+    fs.unlinkSync(link);
+    assert.throws(() => fs.lstatSync(link), { code: 'ENOENT' });
+    assert.equal(fs.lstatSync(target).isDirectory(), true);
+    assert.equal(fs.readFileSync(path.join(target, 'logo.svg'), 'utf8'), '<svg/>');
     const manifest = buildManifest(options(data));
     manifest.files[0].path = '../outside';
     manifest.manifestDigest = canonicalDigest(manifest);

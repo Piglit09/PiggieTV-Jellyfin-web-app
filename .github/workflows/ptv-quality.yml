@@ -33,6 +33,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --no-audit
 
+      - name: Artifact provenance and package-integrity tests
+        run: node --test scripts/ptv-build-provenance.test.cjs scripts/ptv-artifact-manifest.test.mjs scripts/ptv-plugin-package.test.mjs
+
       - name: Checkout Android mobile contracts
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -57,9 +60,6 @@ jobs:
 
       - name: Focused PiggieTV tests
         run: npm run test:ptv -- --run
-
-      - name: Artifact provenance and package-integrity tests
-        run: node --test scripts/ptv-build-provenance.test.cjs scripts/ptv-artifact-manifest.test.mjs scripts/ptv-plugin-package.test.mjs
 
       - name: Full Vitest suite
         run: npm test -- --run
