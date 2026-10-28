@@ -177,7 +177,7 @@
     "repository:report": "node scripts/ptv-repository-size-report.mjs",
     "secret:scan": "node --test scripts/ptv-secret-scan-rules.test.mjs && node scripts/ptv-secret-scan.mjs",
     "test": "vitest --watch=false --config vite.config.ts",
-    "test:ptv": "vitest --watch=false --config vite.config.ts src/ptv",
+    "test:ptv": "vitest --watch=false --config vite.config.ts --maxWorkers=4 src/ptv",
     "test:ptv:production-bootstrap": "node scripts/ptv-production-bootstrap-smoke.cjs",
     "test:e2e": "npm run test:e2e:build && playwright test",
     "test:e2e:cross-browser": "npm run test:e2e:build && playwright test --config=playwright.cross-browser.config.ts",
