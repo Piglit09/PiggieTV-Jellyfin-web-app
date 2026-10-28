@@ -820,6 +820,29 @@ public sealed partial class PtvConfiguredRowAssociationTests
     }
 
     [Fact]
+    public async Task FailedStoreReplacementCallbackRetainsPriorBindingAndDoesNotBindAttemptedDocument()
+    {
+        using var fixture = new Fixture();
+        var retained = await fixture.Generate();
+        var priorProof = fixture.Authority.CaptureCurrentPresentationProof(UserId, true)!;
+        var priorAuthority = priorProof.Authority.ToJsonString();
+        var priorBindings = priorProof.Bindings!.ToJsonString();
+        var attempted = Document(("replacement", "rule-a"));
+        var generation = fixture.Authority.CaptureGeneration()!;
+
+        Assert.Throws<IOException>(() => fixture.Authority.CommitStoreReplacement(
+            () => throw new IOException("Replacement callback failed before publication."), generation, attempted));
+
+        Assert.NotNull(fixture.Authority.CaptureProjection(retained, UserId));
+        Assert.Null(fixture.Authority.CaptureProjection(attempted, UserId));
+        var after = fixture.Authority.CaptureCurrentPresentationProof(UserId, true)!;
+        Assert.Equal(priorAuthority, after.Authority.ToJsonString());
+        Assert.Equal(priorBindings, after.Bindings!.ToJsonString());
+        Assert.Equal(retained.FeaturedContent!.ToJsonString(),
+            (await fixture.Store.ReadAsync(CancellationToken.None)).FeaturedContent!.ToJsonString());
+    }
+
+    [Fact]
     public async Task DisabledDeletedAndNormalizationCollidingRulesAreNotIssued()
     {
         using var fixture = new Fixture();
