@@ -20,6 +20,21 @@ Jellyfin owns virtual-folder creation, identifiers, configured paths, and scans.
 
 The reference widths are 390x844 phone, 1024x1366 tablet, 2560x1271 desktop, and 1920x1080 TV. Responsive changes must preserve focus, keyboard/touch/remote access, action visibility, independent page scrolling where owned, and no horizontal overflow.
 
+## Historical R3 Deferred Record
+
+These reports were recorded against Web 0.5.60 / Plugin 0.5.19.0. They are retained as historical evidence, not as a statement of current defect status. Check current GitHub issues and acceptance evidence before treating an item as open.
+
+- **Library scope bleed — reported defect.** Library-specific recommendation rows were reported to include content from other libraries. The R3 follow-up called for investigating library-ID scoping versus media-type-only scoping.
+- **Image churn and performance — reported investigation.** R3 diagnostics recorded thousands of image lifecycle events and long-tail Items requests of approximately 4–10 seconds. The cause was not established in that record.
+- **Recommendation generation — reported defect.** A degraded generation state was observed. The R3 record did not establish a causal relationship to library scope bleed.
+- **Player flyout lifecycle — reported defect.** Audio and Subtitles flyouts were reported to outlive auto-hidden playback controls.
+- **Player volume persistence — reported defect.** Episode autoplay was reported to reset the user’s volume instead of preserving it.
+- **Player presentation — deferred UX work at R3.** The intended top header/back button, series or movie identity treatment, and the episode label `SxxExx · Episode Title` were deferred.
+- **Media topology and Anime discovery — deferred infrastructure audit at R3.** The VM115, DAS, Servarr, Jellyfin, and PTV path relationships called for a read-only audit before any filesystem or library mutation.
+- **PTV Reading migration — deferred project at R3.** Calibre/Caliweb Books, Comics, and Manga were to be inventoried and migrated before CT108 retirement.
+- **Premium UI 2.0 — deferred project at R3.** The proposed purple glass system and native-client implementations were recorded as later work.
+- **PTV Games — deferred project at R3.** The proposal was to start with romM or another specialized backend.
+
 ## Non-Guarantees
 
 HTTP success does not universally prove mutation, cache, image, indexing, playback, or UI convergence. PTV must not infer missing projection fields as deletion, use Web filtering as an authorization boundary, or add broad retries/timeouts to hide an unresolved owner.

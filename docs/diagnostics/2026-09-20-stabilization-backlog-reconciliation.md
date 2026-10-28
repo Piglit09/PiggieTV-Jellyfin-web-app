@@ -17,3 +17,20 @@ The focused Web run passed 10 test files and 80 tests. The focused Plugin run us
 | Settings save/warning | ALREADY_IMPLEMENTED | `useAdminLibraryDisplay.test.tsx` and `AdminLibraryDisplayUi.test.tsx` passed in the focused Web run. Named cases cover single-flight save, read cancellation, direct cache publication, retained data after failure, stale-read suppression, dirty/reset state, unload warning, conflict handling, and uncertain successful writes. | No code change. |
 | Reading Identify | ALREADY_IMPLEMENTED | `AdminReadingIdentifyWorkflow.test.tsx` passed in the focused Web run. Named cases cover structured fields, lazy provider status, punctuation-tolerant provider identity, ranked partial-provider results, explicit apply confirmation, bounded plain text, unsafe URL rejection, and phone-stacking classes. | No code change. |
 | Chip overflow | NOT_REPRODUCED | No chip crossed its viewport or hid an action at 390x844 in the bounded inspection. | No code change; keep as a separately reproducible UI issue if new evidence appears. |
+
+## Post-R3 Deferred Follow-up
+
+The following issues were recorded during R3 release validation and were outside that release's scope. The classifications below describe the Web 0.5.60 / Plugin 0.5.19.0 snapshot; later source work or acceptance may have changed their status. Consult current GitHub issues and acceptance evidence for current status. No item below was treated as a production-acceptance blocker for R3.
+
+| Item | Classification | Evidence | Follow-up |
+| --- | --- | --- | --- |
+| Library scope bleed | OPEN DEFECT | A library-specific recommendation row can contain items from another library; `Recommended Cartoons` was observed with general Shows content. | Reproduce and trace library-ID scoping versus media-type-only scoping. |
+| Extreme image churn / performance | OPEN PERFORMANCE ISSUE | Diagnostics recorded thousands of image lifecycle events and long-tail Items requests of approximately 4–10 seconds. | Investigate the image lifecycle and long-tail Items request behavior separately. |
+| Recommendation generation degraded | OPEN DEFECT | Recommendation generation was observed in a degraded state; its relationship to library scope bleed is unknown. | Diagnose independently, then correlate with scope bleed only if evidence supports it. |
+| Player flyout lifecycle | OPEN DEFECT | Audio and Subtitles menus can remain visible after playback controls auto-hide. | Align flyout dismissal with the playback-controls lifecycle. |
+| Player volume persistence | OPEN DEFECT | User volume was observed to reset during episode autoplay, from 100% to 50% on the next episode. | Preserve the active user volume across autoplay transitions. |
+| Player top header / episode label | DEFERRED UX WORK | Playback lacks the intended top header/back button. Series playback should show series logo/title; movie playback should show movie logo/title. Episode controls should show `SxxExx · Episode Title` without repeating series identity. | Design and verify the header and episode-label contract across playback types and input modes. |
+| Media topology / Anime discovery | DEFERRED INFRASTRUCTURE AUDIT | VM115, DAS, and Servarr directory layouts are inconsistent; some Anime present in Sonarr is not visible in PTV/Jellyfin. | Perform a separate read-only topology audit before any move, rename, mount, or library change. |
+| Calibre/Caliweb → PTV Reading migration | DEFERRED PROJECT | Books, Comics, and Manga are not yet inventoried and migrated into PTV Reading. | Inventory and migrate content, prove PTV authoritative, then retire CT108 separately. |
+| Premium UI 2.0 | DEFERRED PROJECT | A post-stability visual system is desired: PTV-purple translucent/reactive glass, stronger depth/refraction/highlights, shared semantic glass levels, and native-client-appropriate performance. | Treat as a separately designed and performance-qualified facelift. |
+| PTV Games | DEFERRED PROJECT | Games integration is a long-term product goal. | Start with romM or another specialized backend rather than immediately rebuilding the game backend. |
