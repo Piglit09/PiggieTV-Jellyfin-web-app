@@ -681,7 +681,7 @@ test('production role remains denied even if a task-writable registry entry is e
 test('CI exact ref exception requires clean source and matching GitHub Actions identity', () => {
     const f = fixture();
     const ci = { actions: true, repository: 'Piglit09/PiggieTV-Jellyfin-web-app', workspace: f.root, sha: f.head };
-    assert.throws(() => check(f, 'build', { flags: { ciRef: f.head }, ciContext: ci }), /CI.*runner platform/i);
+    assert.throws(() => check(f, 'build', { flags: { ciRef: f.head }, ciContext: ci, runtimePlatform: 'win32' }), /CI.*runner platform/i);
     assert.equal(check(f, 'build', { flags: { ciRef: f.head }, ciContext: ci, runtimePlatform: 'linux' }).head, f.head);
     assert.throws(() => check(f, 'build', { flags: { ciRef: '0'.repeat(40) }, ciContext: ci, runtimePlatform: 'linux' }), /CI.*commit/i);
     assert.throws(() => check(f, 'build', { flags: { ciRef: f.head }, ciContext: { ...ci, repository: 'other/repo' }, runtimePlatform: 'linux' }), /CI.*repository/i);
@@ -691,7 +691,7 @@ test('CI exact ref exception requires clean source and matching GitHub Actions i
     assert.equal(check(f, 'package', { cwd: other, flags: { ciRef: f.head }, ciContext: { ...ci, workspace: other }, runtimePlatform: 'linux' }).head, f.head);
     assert.equal(check(f, 'build', { cwd: other, ciContext: { ...ci, workspace: other }, runtimePlatform: 'linux' }).head, f.head);
     assert.equal(check(f, 'package', { cwd: other, ciContext: { ...ci, workspace: other }, runtimePlatform: 'linux' }).head, f.head);
-    assert.throws(() => check(f, 'build', { cwd: other, ciContext: { ...ci, workspace: other } }), /approved source root/i);
+    assert.throws(() => check(f, 'build', { cwd: other, ciContext: { ...ci, workspace: other }, runtimePlatform: 'win32' }), /approved source root/i);
     assert.throws(() => check(f, 'deploy', { cwd: other, flags: { ciRef: f.head }, ciContext: { ...ci, workspace: other }, runtimePlatform: 'linux' }), /approved source root|CI.*only/i);
     const pullRequestCi = { ...ci, workspace: other, sha: '0'.repeat(40), eventName: 'pull_request', eventHeadSha: f.head };
     assert.equal(check(f, 'package', { cwd: other, flags: { ciRef: f.head }, ciContext: pullRequestCi, runtimePlatform: 'linux' }).head, f.head);
