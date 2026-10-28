@@ -1,11 +1,21 @@
 /* eslint-disable sonarjs/pseudo-random */
+import { getPtvApiClient } from '../../api/client';
+import { getPtvAuthenticatedDisplayIdentityKey } from '../../services/displayIdentity';
 import type { ReaderBookmark, ReaderProgressState } from './readerModels';
 
-const PROGRESS_PREFIX = 'ptv.reader.progress.';
-const BOOKMARK_PREFIX = 'ptv.reader.bookmarks.';
+const PROGRESS_PREFIX = 'ptv.reader.progress.v2.';
+const BOOKMARK_PREFIX = 'ptv.reader.bookmarks.v2.';
 
 function safeKey(value: string) {
     return encodeURIComponent(value || 'unknown');
+}
+
+function getScopedKey(prefix: string, stableId: string, serverId?: string): string | null {
+    if (!stableId.trim()) return null;
+
+    const identity = getPtvAuthenticatedDisplayIdentityKey(getPtvApiClient(serverId));
+
+    return identity ? `${prefix}${identity}.${safeKey(stableId)}` : null;
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -25,34 +35,43 @@ function writeJson(key: string, value: unknown) {
     }
 }
 
-export function loadReaderProgress(stableId: string): ReaderProgressState | null {
-    return readJson<ReaderProgressState | null>(`${PROGRESS_PREFIX}${safeKey(stableId)}`, null);
+export function loadReaderProgress(stableId: string, serverId?: string): ReaderProgressState | null {
+    const key = getScopedKey(PROGRESS_PREFIX, stableId, serverId);
+
+    return key ? readJson<ReaderProgressState | null>(key, null) : null;
 }
 
-export function saveReaderProgress(progress: ReaderProgressState) {
-    writeJson(`${PROGRESS_PREFIX}${safeKey(progress.stableId)}`, {
+export function saveReaderProgress(progress: ReaderProgressState, serverId?: string) {
+    const key = getScopedKey(PROGRESS_PREFIX, progress.stableId, serverId);
+
+    if (!key) return;
+    writeJson(key, {
         ...progress,
         updatedAt: Date.now()
     });
 }
 
-export function loadReaderBookmarks(stableId: string): ReaderBookmark[] {
-    return readJson<ReaderBookmark[]>(`${BOOKMARK_PREFIX}${safeKey(stableId)}`, []);
+export function loadReaderBookmarks(stableId: string, serverId?: string): ReaderBookmark[] {
+    const key = getScopedKey(BOOKMARK_PREFIX, stableId, serverId);
+
+    return key ? readJson<ReaderBookmark[]>(key, []) : [];
 }
 
-export function saveReaderBookmarks(stableId: string, bookmarks: ReaderBookmark[]) {
-    writeJson(`${BOOKMARK_PREFIX}${safeKey(stableId)}`, bookmarks);
+export function saveReaderBookmarks(stableId: string, bookmarks: ReaderBookmark[], serverId?: string) {
+    const key = getScopedKey(BOOKMARK_PREFIX, stableId, serverId);
+
+    if (key) writeJson(key, bookmarks);
 }
 
-export function addReaderBookmark(bookmark: Omit<ReaderBookmark, 'id' | 'createdAt'>): ReaderBookmark[] {
-    const bookmarks = loadReaderBookmarks(bookmark.stableId);
+export function addReaderBookmark(bookmark: Omit<ReaderBookmark, 'id' | 'createdAt'>, serverId?: string): ReaderBookmark[] {
+    const bookmarks = loadReaderBookmarks(bookmark.stableId, serverId);
     const nextBookmark: ReaderBookmark = {
         ...bookmark,
         id: `${Date.now()}-${Math.round(Math.random() * 100000)}`,
         createdAt: Date.now()
     };
     const next = [nextBookmark, ...bookmarks].slice(0, 100);
-    saveReaderBookmarks(bookmark.stableId, next);
+    saveReaderBookmarks(bookmark.stableId, next, serverId);
     return next;
 }
 

@@ -62,6 +62,42 @@ export function isPtvWebpackDevServerOrigin(
         );
 }
 
+/** A Jellyfin-hosted Web page owns its server root, including any BaseUrl prefix. */
+export function getPtvHostedServerRoot(pageUrl = window.location.href) {
+    try {
+        // URL is already required by the Jellyfin browser runtime.
+        // eslint-disable-next-line compat/compat
+        const url = new URL(pageUrl);
+        if (
+            (url.protocol !== 'http:' && url.protocol !== 'https:')
+            || isPtvWebpackDevServerOrigin(url.hostname, url.port)
+            || (typeof __WEBPACK_SERVE__ !== 'undefined' && __WEBPACK_SERVE__)
+        ) {
+            return '';
+        }
+
+        const webPath = /^(.*?)\/web(?:\/|$)/i.exec(url.pathname);
+        return webPath ? `${url.origin}${webPath[1]}` : '';
+    } catch {
+        return '';
+    }
+}
+
+export function isPtvHostedServerAddress(address: string | null | undefined, hostedRoot: string) {
+    if (!hostedRoot || !address) return false;
+
+    try {
+        // URL is already required by the Jellyfin browser runtime.
+        // eslint-disable-next-line compat/compat
+        const url = new URL(address);
+        const path = trimTrailingSlashes(url.pathname);
+        return !url.search && !url.hash
+            && `${url.origin}${path === '/' ? '' : path}` === hostedRoot;
+    } catch {
+        return false;
+    }
+}
+
 function trimTrailingSlashes(value: string) {
     let nextValue = value;
 

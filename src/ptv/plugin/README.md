@@ -140,6 +140,8 @@ Use a dedicated OpenAI project/key with restricted permissions and spend alerts 
 
 Build:
 
+The current Plugin release requires the .NET 10 SDK and targets Jellyfin Server 12.2 or newer (`targetAbi` is a minimum, not proof of runtime compatibility with later releases). A 12.0 server must keep its prior Plugin until the Server and Plugin can be upgraded together.
+
 ```powershell
 dotnet publish src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj --configuration Release --output src/ptv/plugin/bin
 ```
@@ -173,3 +175,21 @@ Architecture docs:
 - [Plugin responsibilities](../docs/plugin-responsibilities.md)
 - [Remote client diagnostics](../docs/remote-diagnostics.md)
 - [Media issue reports](../docs/media-reports.md)
+
+## Bounded comic identity helper package
+
+Reading search and administrator preflight are exposed by `POST /Ptv/v1/reading/metadata/search` and `POST /Ptv/v1/reading/metadata/reassess`. Reassessment validates the signed candidate without fetching providers again and sends only typed identity evidence to Web. Explicit PTV Reading Identify Apply in Metadata Manager/Quality is guarded; exact Refresh and stock Jellyfin writers are separate.
+
+Build an installable package from a clean committed checkout with .NET 10 on PATH:
+
+```powershell
+node scripts/ptv-plugin-package.mjs
+```
+
+The script publishes fresh self-contained `linux-x64` and `win-x64` helpers alongside the exact five Plugin root files above, under `helpers/linux-x64` and `helpers/win-x64`. Copy the complete payload. Only `Jellyfin.Plugin.PiggieTV.dll` is listed in `meta.json` assemblies; the helper runs as an external executable and must never be registered as a Jellyfin plugin assembly. The helper includes its own .NET 10 runtime and SharpCompress 0.50.4. Missing dependencies fail closed.
+
+Generated files stay ignored under `src/ptv/plugin/bin/packages/<source-commit>/`. `PiggieTV.tar` has sorted paths, fixed timestamps/owners and Linux apphost mode 0755, independent of the build host's file modes. Its adjacent `package-manifest.json` records source commit, release version, each file's size/mode/SHA-256, archive SHA-256 and required resource-bound setup. Re-composing the same published bytes yields identical tar bytes. This is deterministic composition, not a promise of byte-identical outputs across different SDK/runtime versions. Preserve the manifest outside the installed five-file root. Verify transfer by archive SHA-256 and extract with a tar implementation that preserves permissions; check the Linux apphost remains executable. Do not use a ZIP copy that loses executable permissions.
+
+On Windows x64 the Plugin creates the helper suspended, assigns a hard 512 MiB process/job memory limit and kill-on-close job, verifies assignment/limits, then resumes it. On Linux x64 the service administrator must supply `PTV_COMICINFO_CGROUP_ROOT` in the Jellyfin process environment. This is trusted server-only service configuration, never a Web/API setting. It must name a writable delegated cgroup v2 directory below `/sys/fs/cgroup/`, without symlink redirection, with `memory` already enabled in `cgroup.subtree_control`. Provision systemd `Delegate=memory` (or an equivalent verified delegation), move the launcher/Jellyfin process into a child before enabling `+memory` on the now-empty delegated parent, and pass that parent as the root. Merely setting the environment variable is insufficient. Each helper receives a private child with `memory.max=536870912`, `memory.swap.max=0`, `memory.oom.group=1`, writable `cgroup.kill`, and verified process membership before any archive path is sent. The Plugin does not create system-wide delegation or elevate itself.
+
+Missing helper, unsupported architecture, missing delegation or failed hard-limit setup keeps identity `unverified`; no unbounded decoding fallback exists. Both formats use a five-second whole-operation deadline, bounded IPC and at most two helpers per server process. Timeout/cancellation kills and reaps the process tree. Service-specific Windows/Linux Jellyfin 12.2 acceptance is required before claiming supported CBR inspection on that installation; unit tests or a package hash alone do not establish it.

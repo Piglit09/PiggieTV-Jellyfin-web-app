@@ -1,5 +1,7 @@
 import { recordPtvEvent } from '../core/observability';
 import { redactPtvCoreText, sanitizePtvCoreMetadata } from '../core/diagnostics/redaction';
+import { getCurrentPtvApiClient } from '../api/client';
+import { getPtvAuthenticatedDisplayIdentityKey } from './displayIdentity';
 
 export type PtvNotificationSeverity = 'info' | 'success' | 'warning' | 'error';
 export type PtvNotificationSource = 'jellyfin' | 'ptv' | 'request' | 'music' | 'reading' | 'playback';
@@ -47,15 +49,42 @@ export type PtvNotificationSnapshot = {
     unreadCount: number;
 };
 
-const PTV_NOTIFICATION_STORAGE_KEY = 'ptv:notifications:v1';
+// The v1 key has no account identity. Preserve it for recovery, but never
+// hydrate it into an authenticated account's notification panel.
+const PTV_NOTIFICATION_STORAGE_PREFIX = 'ptv:notifications:v2:';
 const PTV_NOTIFICATION_MAX_ITEMS = 50;
 const PTV_NOTIFICATION_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
+let activeIdentityKey = '';
 let duplicateSuppressionCount = 0;
 let lastNotificationSource: PtvNotificationSource | 'none' = 'none';
-let notifications: PtvNotification[] = loadPtvNotifications();
-const subscribers = new Set<(snapshot: PtvNotificationSnapshot) => void>();
+let notifications: PtvNotification[] = [];
+const subscribers = new Set<{
+    identityKey: string;
+    subscriber: (snapshot: PtvNotificationSnapshot) => void;
+}>();
 const retryHandlers = new Map<string, () => void | Promise<void>>();
+
+function getCurrentIdentityKey() {
+    return getPtvAuthenticatedDisplayIdentityKey(getCurrentPtvApiClient()) || '';
+}
+
+function getStorageKey(identityKey: string) {
+    return `${PTV_NOTIFICATION_STORAGE_PREFIX}${encodeURIComponent(identityKey)}`;
+}
+
+function syncNotificationIdentity() {
+    const identityKey = getCurrentIdentityKey();
+    if (identityKey !== activeIdentityKey) {
+        activeIdentityKey = identityKey;
+        notifications = identityKey ? loadPtvNotifications(identityKey) : [];
+        duplicateSuppressionCount = 0;
+        lastNotificationSource = 'none';
+        retryHandlers.clear();
+    }
+
+    return identityKey;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -128,9 +157,9 @@ function normalizeStoredNotification(value: unknown): PtvNotification | null {
     };
 }
 
-function loadPtvNotifications() {
+function loadPtvNotifications(identityKey: string) {
     try {
-        const raw = window.localStorage?.getItem(PTV_NOTIFICATION_STORAGE_KEY);
+        const raw = window.localStorage?.getItem(getStorageKey(identityKey));
         if (!raw) return [];
 
         const parsed = JSON.parse(raw);
@@ -146,9 +175,11 @@ function loadPtvNotifications() {
 }
 
 function savePtvNotifications() {
+    if (!activeIdentityKey) return;
+
     try {
         window.localStorage?.setItem(
-            PTV_NOTIFICATION_STORAGE_KEY,
+            getStorageKey(activeIdentityKey),
             JSON.stringify(notifications.slice(0, PTV_NOTIFICATION_MAX_ITEMS))
         );
     } catch {
@@ -185,12 +216,15 @@ function getRetryKey(input: PtvNotificationInput, dedupeKey: string) {
     return redactPtvCoreText(input.retryKey || dedupeKey, 500);
 }
 
-function getSnapshot(): PtvNotificationSnapshot {
-    const visibleNotifications = notifications.slice(0, PTV_NOTIFICATION_MAX_ITEMS);
+function getSnapshot(requestedIdentityKey?: string): PtvNotificationSnapshot {
+    const identityKey = syncNotificationIdentity();
+    const isCurrent = Boolean(identityKey
+        && (requestedIdentityKey === undefined || requestedIdentityKey === identityKey));
+    const visibleNotifications = isCurrent ? notifications.slice(0, PTV_NOTIFICATION_MAX_ITEMS) : [];
 
     return {
-        duplicateSuppressionCount,
-        lastNotificationSource,
+        duplicateSuppressionCount: isCurrent ? duplicateSuppressionCount : 0,
+        lastNotificationSource: isCurrent ? lastNotificationSource : 'none',
         notifications: visibleNotifications,
         subscriberCount: subscribers.size,
         totalCount: visibleNotifications.length,
@@ -199,27 +233,31 @@ function getSnapshot(): PtvNotificationSnapshot {
 }
 
 function notifySubscribers() {
-    const snapshot = getSnapshot();
-
-    subscribers.forEach(subscriber => {
-        subscriber(snapshot);
+    subscribers.forEach(subscription => {
+        subscription.subscriber(getSnapshot(subscription.identityKey));
     });
 }
 
-export function getPtvNotificationSnapshot() {
-    return getSnapshot();
+export function getPtvNotificationSnapshot(identityKey?: string) {
+    return getSnapshot(identityKey);
 }
 
-export function subscribePtvNotifications(subscriber: (snapshot: PtvNotificationSnapshot) => void) {
-    subscribers.add(subscriber);
-    subscriber(getSnapshot());
+export function subscribePtvNotifications(
+    subscriber: (snapshot: PtvNotificationSnapshot) => void,
+    identityKey = getCurrentIdentityKey()
+) {
+    const subscription = { identityKey, subscriber };
+    subscribers.add(subscription);
+    subscriber(getSnapshot(identityKey));
 
     return () => {
-        subscribers.delete(subscriber);
+        subscribers.delete(subscription);
     };
 }
 
 export function addPtvNotification(input: PtvNotificationInput) {
+    if (!syncNotificationIdentity()) return null;
+
     const createdAt = Date.now();
     const dedupeKey = getDedupeKey(input);
     const retryKey = getRetryKey(input, dedupeKey);
@@ -290,6 +328,8 @@ export function addPtvNotification(input: PtvNotificationInput) {
 }
 
 export function markAllPtvNotificationsRead() {
+    if (!syncNotificationIdentity()) return;
+
     notifications = notifications.map(notification => ({
         ...notification,
         read: true
@@ -299,6 +339,8 @@ export function markAllPtvNotificationsRead() {
 }
 
 export function markPtvNotificationRead(id: string) {
+    if (!syncNotificationIdentity()) return;
+
     notifications = notifications.map(notification => notification.id === id ? {
         ...notification,
         read: true
@@ -308,28 +350,39 @@ export function markPtvNotificationRead(id: string) {
 }
 
 export function clearDismissiblePtvNotifications() {
+    if (!syncNotificationIdentity()) return;
+
     notifications = notifications.filter(notification => !notification.dismissible);
     savePtvNotifications();
     notifySubscribers();
 }
 
 export function dismissPtvNotification(id: string) {
+    if (!syncNotificationIdentity()) return;
+
     notifications = notifications.filter(notification => notification.id !== id || !notification.dismissible);
     savePtvNotifications();
     notifySubscribers();
 }
 
-export function hasPtvNotificationRetryHandler(notification: Pick<PtvNotification, 'retryKey'>) {
-    return Boolean(notification.retryKey && retryHandlers.has(notification.retryKey));
+export function hasPtvNotificationRetryHandler(notification: Pick<PtvNotification, 'id' | 'retryKey'>) {
+    if (!syncNotificationIdentity()) return false;
+
+    return Boolean(notification.retryKey
+        && retryHandlers.has(notification.retryKey)
+        && notifications.some(current => current.id === notification.id && current.retryKey === notification.retryKey));
 }
 
 export async function runPtvNotificationRetry(notification: Pick<PtvNotification, 'id' | 'retryKey'>) {
+    const identityKey = syncNotificationIdentity();
+    if (!identityKey || !hasPtvNotificationRetryHandler(notification)) return false;
+
     const retryHandler = notification.retryKey ? retryHandlers.get(notification.retryKey) : null;
 
     if (!retryHandler) return false;
 
     await retryHandler();
-    markPtvNotificationRead(notification.id);
+    if (getCurrentIdentityKey() === identityKey) markPtvNotificationRead(notification.id);
 
     return true;
 }

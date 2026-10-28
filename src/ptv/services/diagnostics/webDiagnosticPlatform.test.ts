@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getFeaturedContentCacheStatus } from '../../modules/cache/featuredContentCache';
+
+vi.mock('lib/jellyfin-apiclient', () => ({ ServerConnections: {} }));
 
 vi.mock('../../api/client', () => ({
     getCurrentPtvApiClient: vi.fn(() => null),
@@ -24,6 +27,8 @@ vi.mock('../../modules/cache/featuredContentCache', () => ({
         isFresh: false,
         isStored: false,
         itemCount: 0,
+        lastReadOutcome: 'not-attempted',
+        lastWriteOutcome: 'not-attempted',
         lastRefreshError: null,
         readError: null,
         readInProgress: false,
@@ -42,15 +47,18 @@ import {
     createPtvImageRemountGuard,
     createPtvImageLifecycleTracker,
     disposePtvWebDiagnosticPlatformForTests,
+    getPtvDiagnosticCacheSamplingIntervalMs,
     getPtvDiagnosticNavigationIdentity,
     initializePtvWebDiagnosticPlatform,
     isPtvDiagnosticFocusVisible,
     isPtvDiagnosticRouteContentReady,
     isPtvDiagnosticsRouteFamily,
     normalizePtvPlaybackSessionSnapshot,
-    PTV_PLAYBACK_SESSION_SNAPSHOT_EVENT
+    PTV_PLAYBACK_SESSION_SNAPSHOT_EVENT,
+    refreshPtvDiagnosticCacheSummary
 } from './webDiagnosticPlatform';
 import {
+    createPtvDiagnosticStore,
     getPtvDiagnosticStore,
     resetPtvDiagnosticStoreForTests
 } from './diagnosticStore';
@@ -63,6 +71,154 @@ afterEach(() => {
 });
 
 describe('web diagnostic platform privacy classification', () => {
+    it('refreshes a 12-hour cache age before export without fetching or writing cache data', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-24T00:00:00.000Z'));
+        const initial = getFeaturedContentCacheStatus({ prime: false });
+        const cacheStatus = vi.mocked(getFeaturedContentCacheStatus);
+        const createdAt = Date.now();
+        const ttlMs = 12 * 60 * 60 * 1000;
+        cacheStatus.mockImplementation(() => ({
+            ...initial,
+            createdAt,
+            isFresh: Date.now() < createdAt + ttlMs,
+            itemCount: 3,
+            sectionCount: 1,
+            storage: 'plugin-file',
+            ttlMs
+        }));
+
+        initializePtvWebDiagnosticPlatform();
+        expect(getPtvDiagnosticStore().getSnapshot().cache.state).toBe('fresh');
+        vi.setSystemTime(createdAt + ttlMs + 1);
+        const exported = getPtvDiagnosticStore().createExport();
+
+        expect(exported.cache).toMatchObject({
+            ageMs: ttlMs + 1,
+            itemCount: 3,
+            state: 'stale'
+        });
+        expect(cacheStatus).toHaveBeenLastCalledWith({ prime: false });
+        cacheStatus.mockReset();
+    });
+
+    it('expires an observed empty cache result after its TTL', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-24T00:00:00.000Z'));
+        const observedAt = Date.now();
+        const ttlMs = 12 * 60 * 60 * 1000;
+        const cacheStatus = vi.mocked(getFeaturedContentCacheStatus);
+        const initial = getFeaturedContentCacheStatus({ prime: false });
+        cacheStatus.mockImplementation(() => ({
+            ...initial,
+            countsObserved: true,
+            countsObservedAt: observedAt,
+            createdAt: null,
+            itemCount: 0,
+            lastReadOutcome: 'empty',
+            sectionCount: 0,
+            ttlMs
+        }));
+
+        initializePtvWebDiagnosticPlatform();
+        expect(getPtvDiagnosticStore().getSnapshot().cache.health.status).toBe('healthy');
+
+        vi.setSystemTime(observedAt + ttlMs + 1);
+        const expired = getPtvDiagnosticStore().createExport().cache;
+        expect(expired).toMatchObject({
+            countsObserved: true,
+            countsObservedAt: new Date(observedAt).toISOString(),
+            lastReadOutcome: 'empty',
+            state: 'stale',
+            health: { status: 'degraded' }
+        });
+        expect(cacheStatus).toHaveBeenLastCalledWith({ prime: false });
+        cacheStatus.mockReset();
+    });
+
+    it('refreshes the cache summary explicitly without hydrating the Plugin', () => {
+        const cacheStatus = vi.mocked(getFeaturedContentCacheStatus);
+        const before = cacheStatus.mock.calls.length;
+        refreshPtvDiagnosticCacheSummary();
+        expect(cacheStatus.mock.calls.length).toBeGreaterThan(before);
+        expect(cacheStatus).toHaveBeenLastCalledWith({ prime: false });
+    });
+
+    it('samples cache state on one bounded timer and stops after collector disposal', () => {
+        expect(getPtvDiagnosticCacheSamplingIntervalMs(false)).toBe(60_000);
+        expect(getPtvDiagnosticCacheSamplingIntervalMs(true)).toBe(5 * 60_000);
+        vi.useFakeTimers();
+        const cacheStatus = vi.mocked(getFeaturedContentCacheStatus);
+        const before = cacheStatus.mock.calls.length;
+        initializePtvWebDiagnosticPlatform();
+        initializePtvWebDiagnosticPlatform();
+        const afterInitialization = cacheStatus.mock.calls.length;
+        expect(afterInitialization - before).toBe(1);
+
+        vi.advanceTimersByTime(5 * 60_000);
+        const sampled = cacheStatus.mock.calls.length - afterInitialization;
+        expect(sampled).toBeGreaterThanOrEqual(1);
+        expect(sampled).toBeLessThanOrEqual(5);
+        disposePtvWebDiagnosticPlatformForTests();
+        const beforeDisposalAdvance = cacheStatus.mock.calls.length;
+        vi.advanceTimersByTime(5 * 60_000);
+        expect(cacheStatus.mock.calls.length).toBe(beforeDisposalAdvance);
+    });
+
+    it('scopes the export cache refresher to its owning diagnostic store', () => {
+        const singleton = getPtvDiagnosticStore();
+        const separate = createPtvDiagnosticStore();
+        const refresher = vi.fn();
+        singleton.setCacheSummaryRefresher(refresher);
+
+        expect(separate.createExport().cache).toMatchObject({
+            countsObserved: false,
+            observationAgeMs: null,
+            observedAt: null
+        });
+        expect(refresher).not.toHaveBeenCalled();
+        singleton.createExport();
+        expect(refresher).toHaveBeenCalledOnce();
+        singleton.setCacheSummaryRefresher(null);
+    });
+
+    it('exports only safe read failure categories and recovers current health after a valid replacement', () => {
+        const cacheStatus = vi.mocked(getFeaturedContentCacheStatus);
+        const initial = getFeaturedContentCacheStatus({ prime: false });
+        const privateHost = [ '192', '168', '1', '5' ].join('.');
+        const privateError = `Private host ${privateHost} and title SECRET_MOVIE timed out`;
+        cacheStatus.mockImplementation(() => ({
+            ...initial,
+            countsObserved: false,
+            lastReadFailureCategory: 'timeout',
+            lastReadOutcome: 'failed',
+            readError: privateError
+        }));
+        refreshPtvDiagnosticCacheSummary();
+        const failed = getPtvDiagnosticStore().createExport();
+        expect(failed.cache).toMatchObject({
+            lastReadFailureCategory: 'timeout',
+            lastReadOutcome: 'failed'
+        });
+        expect(JSON.stringify(failed.cache)).not.toContain(privateHost);
+        expect(JSON.stringify(failed.cache)).not.toContain('SECRET_MOVIE');
+
+        cacheStatus.mockImplementation(() => ({
+            ...initial,
+            countsObserved: true,
+            createdAt: Date.now(),
+            isFresh: true,
+            lastReadFailureCategory: 'timeout',
+            lastReadOutcome: 'adopted',
+            readError: null
+        }));
+        refreshPtvDiagnosticCacheSummary();
+        expect(getPtvDiagnosticStore().getSnapshot().cache).toMatchObject({
+            health: { status: 'healthy' },
+            lastReadFailureCategory: 'timeout',
+            lastReadOutcome: 'adopted'
+        });
+    });
     it('classifies focus from safe semantics without returning labels or media IDs', () => {
         const card = document.createElement('article');
         const button = document.createElement('button');

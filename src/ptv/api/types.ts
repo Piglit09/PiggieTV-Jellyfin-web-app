@@ -85,6 +85,7 @@ export type PtvItemsResult<TItem = PtvItem> = {
 };
 
 export type PtvUserPolicy = Record<string, unknown> & {
+    EnableLiveTvAccess?: boolean;
     IsAdministrator?: boolean;
 };
 

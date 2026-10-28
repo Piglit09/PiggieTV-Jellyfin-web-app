@@ -36,4 +36,7 @@ public interface IPtvFeaturedContentRefreshService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The cache store status after the attempt.</returns>
     Task<PtvFeaturedContentStoreStatus> RefreshAsync(CancellationToken cancellationToken);
+
+    /// <summary>Checks exact owned candidate membership privately before a transition release or rebind.</summary>
+    Task<bool> StageTransitionCandidatesAsync(string epoch, IReadOnlyDictionary<string, string> selectedBindings, CancellationToken cancellationToken);
 }

@@ -4,6 +4,7 @@ import {
     beginConfiguredRowVerification,
     getConfiguredRowFreshnessSnapshot,
     getConfiguredRowProofAuthority,
+    getVerifiedHomeTransitionBinding,
     isConfiguredRowPresentationCurrent,
     isConfiguredSectionVerified,
     observeConfiguredRowAuthority,
@@ -263,6 +264,52 @@ describe('configured-row CURRENT state machine', () => {
         expect(getConfiguredRowProofAuthority(proof!)).toBe(`${scopeA}.${generationA}`);
         expect(JSON.stringify(proof)).not.toContain('server-a');
         expect(JSON.stringify(proof)).not.toContain('user-a');
+    });
+
+    it('keeps an explicit rebound library attestation private to the fresh final status proof and exact section pair', async () => {
+        const attested = { rule: ruleA, section: sectionA, libraryId: 'b'.repeat(32),
+            topologyEpoch: 'f'.repeat(64), bindingGeneration: 2, explicitRebind: true };
+        const proof = await verifyConfiguredRowFreshness({
+            verification: beginConfiguredRowVerification(identityA), settings: settings(), featured: featured(),
+            readAuthority: async () => status(authority(), [attested])
+        });
+        expect(proof).not.toBeNull();
+        expect(getVerifiedHomeTransitionBinding(configuredSection(), proof)).toEqual({
+            libraryId: attested.libraryId, topologyEpoch: attested.topologyEpoch,
+            bindingGeneration: attested.bindingGeneration, explicitRebind: true
+        });
+        expect(getVerifiedHomeTransitionBinding(configuredSection(authority(), ruleB), proof)).toBeNull();
+        expect(JSON.stringify(proof)).not.toContain(attested.libraryId);
+        retireConfiguredRowFreshness('transition-changed');
+        expect(getVerifiedHomeTransitionBinding(configuredSection(), proof)).toBeNull();
+    });
+
+    it('keeps a Plugin-verified seeded unpinned binding distinct from an explicit rebind', async () => {
+        const seeded = { rule: ruleA, section: sectionA, libraryId: 'b'.repeat(32),
+            topologyEpoch: 'f'.repeat(64), bindingGeneration: 1, explicitRebind: false };
+        const proof = await verifyConfiguredRowFreshness({
+            verification: beginConfiguredRowVerification(identityA), settings: settings(), featured: featured(),
+            readAuthority: async () => status(authority(), [seeded])
+        });
+        expect(proof).not.toBeNull();
+        expect(getVerifiedHomeTransitionBinding(configuredSection(), proof)).toMatchObject({
+            libraryId: seeded.libraryId, bindingGeneration: 1, explicitRebind: false
+        });
+    });
+
+    it.each([
+        { rule: ruleA, section: sectionA, libraryId: 'b'.repeat(32) },
+        { rule: ruleA, section: sectionA, libraryId: 'b'.repeat(32), topologyEpoch: 'f'.repeat(64), bindingGeneration: 2, explicitRebind: 'false' },
+        { rule: ruleA, section: sectionA, libraryId: '0'.repeat(32), topologyEpoch: 'f'.repeat(64), bindingGeneration: 2, explicitRebind: true },
+        { rule: ruleA, section: sectionA, libraryId: 'b'.repeat(32), topologyEpoch: 'short', bindingGeneration: 2, explicitRebind: true },
+        { rule: ruleA, section: sectionA, libraryId: 'b'.repeat(32), topologyEpoch: 'f'.repeat(64), bindingGeneration: 0, explicitRebind: true },
+        { rule: ruleA, section: sectionA, libraryId: 'b'.repeat(32), topologyEpoch: 'f'.repeat(64), bindingGeneration: 2, explicitRebind: true, LibraryId: 'b'.repeat(32) }
+    ])('rejects malformed explicit rebound final-status attestation %#', async binding => {
+        const proof = await verifyConfiguredRowFreshness({
+            verification: beginConfiguredRowVerification(identityA), settings: settings(), featured: featured(),
+            readAuthority: async () => status(authority(), [binding])
+        });
+        expect(proof).toBeNull();
     });
 
     it('ordinary observations can retire but cannot promote UNKNOWN to CURRENT', () => {

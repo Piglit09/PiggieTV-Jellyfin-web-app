@@ -1,0 +1,239 @@
+[
+  {
+    "id": "invalid-guide-window",
+    "operation": "guide",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-19T21:00:00Z" },
+    "status": 400,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "INVALID_REQUEST" } }
+  },
+  {
+    "id": "unsupported-contract",
+    "operation": "resolve",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "2.0" },
+    "status": 400,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "UNSUPPORTED_CONTRACT" } }
+  },
+  {
+    "id": "anonymous",
+    "operation": "list",
+    "principal": "anonymous",
+    "status": 401,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "UNAUTHENTICATED" } }
+  },
+  {
+    "id": "api-key-without-user",
+    "operation": "list",
+    "principal": "apiKeyOnly",
+    "status": 401,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PRINCIPAL_UNAVAILABLE" } }
+  },
+  {
+    "id": "missing-current-user",
+    "operation": "list",
+    "principal": "missingUser",
+    "status": 401,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PRINCIPAL_UNAVAILABLE" } }
+  },
+  {
+    "id": "ambiguous-current-user",
+    "operation": "list",
+    "principal": "ambiguousUser",
+    "status": 401,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PRINCIPAL_UNAVAILABLE" } }
+  },
+  {
+    "id": "deleted-current-user",
+    "operation": "list",
+    "principal": "deletedUser",
+    "status": 401,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PRINCIPAL_UNAVAILABLE" } }
+  },
+  {
+    "id": "disabled-current-user",
+    "operation": "list",
+    "principal": "disabledUser",
+    "status": 401,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PRINCIPAL_UNAVAILABLE" } }
+  },
+  {
+    "id": "admin-required",
+    "operation": "admin-list",
+    "principal": "user",
+    "pathParams": { "resource": "definitions" },
+    "status": 403,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "ADMIN_REQUIRED" } }
+  },
+  {
+    "id": "channel-not-found-or-unauthorized",
+    "operation": "guide",
+    "principal": "restrictedUser",
+    "pathParams": { "channelId": "ch-hidden" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-18T22:00:00Z" },
+    "status": 404,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "CHANNEL_NOT_FOUND" } }
+  },
+  {
+    "id": "stale-guide-program",
+    "operation": "resolve",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "1.0", "expectedProgramId": "pg-old", "expectedEntryRevision": "entry-old" },
+    "status": 409,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PROGRAM_CHANGED" } }
+  },
+  {
+    "id": "stale-guide-cursor",
+    "operation": "guide",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-18T23:00:00Z", "cursor": "stale-cursor" },
+    "status": 409,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PROGRAM_CHANGED" } }
+  },
+  {
+    "id": "cross-user-guide-cursor",
+    "operation": "guide",
+    "principal": "restrictedUser",
+    "pathParams": { "channelId": "ch-cinema" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-18T23:00:00Z", "cursor": "other-user-cursor" },
+    "status": 409,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PROGRAM_CHANGED" } }
+  },
+  {
+    "id": "unavailable-current-item",
+    "operation": "resolve",
+    "principal": "restrictedUser",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "1.0" },
+    "status": 409,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PROGRAM_UNAVAILABLE" } }
+  },
+  {
+    "id": "gap-current-entry",
+    "operation": "resolve",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "1.0" },
+    "status": 409,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T22:45:00Z", "error": { "code": "PROGRAM_UNAVAILABLE" } }
+  },
+  {
+    "id": "near-boundary-rollover",
+    "operation": "resolve",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "1.0" },
+    "status": 409,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T21:59:55Z", "error": { "code": "PROGRAM_ROLLOVER", "retryAtUtc": "2026-10-18T22:00:00Z" } }
+  },
+  {
+    "id": "admin-edit-during-recovery",
+    "operation": "admin-update",
+    "principal": "administrator",
+    "pathParams": { "resource": "definitions", "id": "ch-cinema" },
+    "requestHeaders": { "If-Match": "\"def-1\"" },
+    "request": { "contractVersion": "1.0", "resourceType": "definition", "resource": { "name": "PTV Cinema", "timeZone": "America/Chicago", "enabled": true, "blockAssignments": [{ "blockId": "block-1" }] } },
+    "status": 409,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "TIMELINE_RECOVERING" } }
+  },
+  {
+    "id": "stale-admin-etag",
+    "operation": "admin-update",
+    "principal": "administrator",
+    "pathParams": { "resource": "definitions", "id": "ch-cinema" },
+    "requestHeaders": { "If-Match": "\"def-old\"" },
+    "request": { "contractVersion": "1.0", "resourceType": "definition", "resource": { "name": "PTV Cinema", "timeZone": "America/Chicago", "enabled": true, "blockAssignments": [{ "blockId": "block-1" }] } },
+    "status": 412,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "REVISION_CONFLICT" } }
+  },
+  {
+    "id": "missing-admin-etag",
+    "operation": "admin-update",
+    "principal": "administrator",
+    "pathParams": { "resource": "definitions", "id": "ch-cinema" },
+    "request": { "contractVersion": "1.0", "resourceType": "definition", "resource": { "name": "PTV Cinema", "timeZone": "America/Chicago", "enabled": true, "blockAssignments": [{ "blockId": "block-1" }] } },
+    "status": 428,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "PRECONDITION_REQUIRED" } }
+  },
+  {
+    "id": "invalid-block-selection-mode",
+    "operation": "admin-create",
+    "principal": "administrator",
+    "pathParams": { "resource": "blocks" },
+    "request": { "contractVersion": "1.0", "resourceType": "block", "resource": { "daysOfWeek": ["sunday"], "localStart": "20:00:00", "windowDurationMs": 7200000, "collectionId": "collection-tv", "selectionMode": "seededShuffle" } },
+    "fixtureContext": { "collectionId": "collection-tv", "mediaType": "episode", "invalidReason": "MODE_MEDIA_TYPE_MISMATCH" },
+    "status": 422,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "INVALID_DEFINITION" } }
+  },
+  {
+    "id": "missing-admin-collection",
+    "operation": "admin-read",
+    "principal": "administrator",
+    "pathParams": { "resource": "collections", "id": "collection-missing" },
+    "status": 404,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "RESOURCE_NOT_FOUND" } }
+  },
+  {
+    "id": "channels-disabled",
+    "operation": "list",
+    "principal": "user",
+    "status": 503,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "CHANNELS_DISABLED" } }
+  },
+  {
+    "id": "horizon-expired",
+    "operation": "guide",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-18T22:00:00Z" },
+    "status": 503,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "HORIZON_EXPIRED" } }
+  },
+  {
+    "id": "horizon-expired-on-resolve",
+    "operation": "resolve",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "1.0" },
+    "status": 503,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "HORIZON_EXPIRED" } }
+  },
+  {
+    "id": "timeline-unavailable",
+    "operation": "resolve",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "1.0" },
+    "status": 503,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": { "contractVersion": "1.0", "serverTimeUtc": "2026-10-18T20:30:00Z", "error": { "code": "TIMELINE_UNAVAILABLE" } }
+  }
+]

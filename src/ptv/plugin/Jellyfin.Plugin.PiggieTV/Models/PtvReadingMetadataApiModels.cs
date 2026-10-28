@@ -3,6 +3,8 @@ namespace Jellyfin.Plugin.PiggieTV.Models;
 /// <summary>Administrator-supplied overrides for one bounded Reading identification search.</summary>
 public sealed class PtvReadingMetadataSearchRequest
 {
+    public string? SearchGeneration { get; set; }
+
     public string ItemId { get; set; } = string.Empty;
 
     public string? Title { get; set; }
@@ -72,6 +74,11 @@ public sealed class PtvReadingLocalMetadataSummary
 /// <summary>Provider-neutral, independently settled Reading identification response.</summary>
 public sealed class PtvReadingMetadataSearchResponse
 {
+    public string SearchGeneration { get; set; } = string.Empty;
+
+    /// <summary>Separate bounded archive and source identities, before query merging.</summary>
+    public PtvReadingIdentitySources IdentitySources { get; init; } = new();
+
     public required PtvStructuredMetadataQuery Query { get; init; }
 
     public PtvReadingLocalMetadataSummary LocalMetadata { get; init; } = new();
@@ -91,4 +98,12 @@ public sealed class PtvReadingMetadataServiceException : Exception
     }
 
     public string Code { get; }
+}
+
+/// <summary>Read-only fresh identity assessment request; item paths and administrator IDs are server-owned.</summary>
+public sealed class PtvReadingIdentityReassessRequest
+{
+    public string ItemId { get; set; } = string.Empty;
+    public string CandidateContext { get; set; } = string.Empty;
+    public string? DisplayedRevision { get; set; }
 }

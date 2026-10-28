@@ -7,6 +7,7 @@ import events from 'utils/events';
 import { ajax } from 'utils/fetch';
 import { equalsIgnoreCase } from 'utils/string';
 import { ptvSafeConsole } from 'ptv/core/safeConsole';
+import { getPtvHostedServerRoot, isPtvHostedServerAddress } from 'ptv/core/urlOrigins';
 
 import { ConnectionMode } from './connectionMode';
 import { ConnectionState } from './connectionState';
@@ -59,7 +60,20 @@ export default class ConnectionManager {
         ptvSafeConsole.log('Begin ConnectionManager constructor');
 
         const self = this;
+        const hostedRoot = getPtvHostedServerRoot();
+        const isAllowedAddress = address => !hostedRoot || isPtvHostedServerAddress(address, hostedRoot);
+        const isAllowedServer = server => !hostedRoot || [
+            server.ManualAddress,
+            server.LocalAddress,
+            server.RemoteAddress
+        ].some(isAllowedAddress);
+        const getAllowedServerAddress = server => {
+            const preferred = getServerAddress(server, server.LastConnectionMode);
+            if (!hostedRoot || isAllowedAddress(preferred)) return preferred;
+            return [server.ManualAddress, server.LocalAddress, server.RemoteAddress].find(isAllowedAddress) || '';
+        };
         this._apiClients = [];
+        this._hostedServerRoot = hostedRoot;
 
         // Set the minimum version to match the SDK
         self._minServerVersion = MINIMUM_VERSION;
@@ -79,11 +93,11 @@ export default class ConnectionManager {
         self.getServerInfo = (id) => {
             const servers = credentialProvider.credentials().Servers;
 
-            return servers.filter((s) => s.Id === id)[0];
+            return servers.filter((s) => s.Id === id && isAllowedServer(s))[0];
         };
 
         self.getLastUsedServer = () => {
-            const servers = credentialProvider.credentials().Servers;
+            const servers = credentialProvider.credentials().Servers.filter(isAllowedServer);
 
             servers.sort(sortByAccess);
 
@@ -95,6 +109,9 @@ export default class ConnectionManager {
         };
 
         self.addApiClient = (apiClient) => {
+            if (!isAllowedAddress(apiClient.serverAddress())) {
+                throw new Error('ApiClient address does not match the hosted Jellyfin server');
+            }
             self._apiClients.push(apiClient);
 
             const existingServers = credentialProvider
@@ -121,7 +138,12 @@ export default class ConnectionManager {
 
             if (!existingServers.length) {
                 const credentials = credentialProvider.credentials();
-                credentials.Servers = [existingServer];
+                // A hosted page must not delete credentials saved for other Jellyfin origins.
+                if (hostedRoot) {
+                    credentials.Servers.push(existingServer);
+                } else {
+                    credentials.Servers = [existingServer];
+                }
                 credentialProvider.credentials(credentials);
             }
 
@@ -137,6 +159,12 @@ export default class ConnectionManager {
         };
 
         self._getOrAddApiClient = (server, serverUrl) => {
+            if (hostedRoot && !isAllowedAddress(serverUrl)) {
+                serverUrl = getAllowedServerAddress(server);
+            }
+            if (hostedRoot && !isAllowedAddress(serverUrl)) {
+                throw new Error('Saved server has no address for the hosted Jellyfin server');
+            }
             let apiClient = self.getApiClient(server.Id);
 
             if (!apiClient) {
@@ -159,7 +187,7 @@ export default class ConnectionManager {
 
         self.getOrCreateApiClient = (serverId) => {
             const credentials = credentialProvider.credentials();
-            const servers = credentials.Servers.filter((s) => equalsIgnoreCase(s.Id, serverId));
+            const servers = credentials.Servers.filter((s) => equalsIgnoreCase(s.Id, serverId) && isAllowedServer(s));
 
             if (!servers.length) {
                 throw new Error(`Server not found: ${serverId}`);
@@ -167,7 +195,7 @@ export default class ConnectionManager {
 
             const server = servers[0];
 
-            return self._getOrAddApiClient(server, getServerAddress(server, server.LastConnectionMode));
+            return self._getOrAddApiClient(server, getAllowedServerAddress(server));
         };
 
         function onAuthenticated(apiClient, result, options, saveCredentials) {
@@ -365,7 +393,7 @@ export default class ConnectionManager {
         self.getSavedServers = () => {
             const credentials = credentialProvider.credentials();
 
-            const servers = credentials.Servers.slice(0);
+            const servers = credentials.Servers.filter(isAllowedServer);
 
             servers.sort(sortByAccess);
 
@@ -388,7 +416,7 @@ export default class ConnectionManager {
                 credentials.Servers = servers;
                 credentialProvider.credentials(credentials);
 
-                return servers;
+                return servers.filter(isAllowedServer);
             });
         };
 
@@ -500,6 +528,7 @@ export default class ConnectionManager {
                 !serverInfo.manualAddressOnly
                 && serverInfo.LocalAddress
                 && addressesStrings.indexOf(serverInfo.LocalAddress) === -1
+                && isAllowedAddress(serverInfo.LocalAddress)
             ) {
                 addresses.push({
                     url: serverInfo.LocalAddress,
@@ -508,7 +537,7 @@ export default class ConnectionManager {
                 });
                 addressesStrings.push(addresses[addresses.length - 1].url);
             }
-            if (serverInfo.ManualAddress && addressesStrings.indexOf(serverInfo.ManualAddress) === -1) {
+            if (serverInfo.ManualAddress && addressesStrings.indexOf(serverInfo.ManualAddress) === -1 && isAllowedAddress(serverInfo.ManualAddress)) {
                 addresses.push({
                     url: serverInfo.ManualAddress,
                     mode: ConnectionMode.Manual,
@@ -520,6 +549,7 @@ export default class ConnectionManager {
                 !serverInfo.manualAddressOnly
                 && serverInfo.RemoteAddress
                 && addressesStrings.indexOf(serverInfo.RemoteAddress) === -1
+                && isAllowedAddress(serverInfo.RemoteAddress)
             ) {
                 addresses.push({
                     url: serverInfo.RemoteAddress,
@@ -530,6 +560,8 @@ export default class ConnectionManager {
             }
 
             ptvSafeConsole.info('[ConnectionManager] tryReconnect addresses', addressesStrings);
+
+            if (!addresses.length) return Promise.reject(new Error('No permitted server address'));
 
             return new Promise((resolve, reject) => {
                 const state = {};
@@ -789,7 +821,8 @@ export default class ConnectionManager {
             const serverInfo = a.serverInfo();
 
             // We have to keep this hack in here because of the addApiClient method
-            return !serverInfo || serverInfo.Id === item;
+            return (!serverInfo || serverInfo.Id === item)
+                && (!this._hostedServerRoot || isPtvHostedServerAddress(a.serverAddress(), this._hostedServerRoot));
         })[0];
     }
 

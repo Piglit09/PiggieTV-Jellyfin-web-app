@@ -7,6 +7,7 @@ import {
     executePtvVideoSeekKey,
     getPtvVideoSeekAction,
     hidePtvVideoControls,
+    isPtvVideoControlsInteractionActive,
     isPtvVideoPlayerControlFocused,
     reconcilePtvVideoControlSurface,
     registerPtvVideoControlsVisibilityHandler,
@@ -240,6 +241,45 @@ describe('video input ownership', () => {
         secondPage.remove();
     });
 
+    it('preserves only the owned enhanced header during video reconciliation and removes it on teardown', () => {
+        const videoPage = document.createElement('section');
+        const chromeRoot = document.createElement('div');
+        chromeRoot.className = 'ptv-player-chrome-root';
+        const header = document.createElement('div');
+        header.className = 'ptv-player-topbar';
+        header.dataset.ptvEnhanced = 'true';
+        const obsolete = document.createElement('div');
+        obsolete.className = 'ptv-player-topbar';
+        chromeRoot.append(header, obsolete);
+        const unowned = header.cloneNode(true) as HTMLElement;
+        document.body.append(videoPage, chromeRoot, unowned);
+
+        reconcilePtvVideoControlSurface(videoPage);
+        expect(header.isConnected).toBe(true);
+        expect(obsolete.isConnected).toBe(false);
+        expect(unowned.isConnected).toBe(false);
+        reconcilePtvVideoControlSurface(null);
+        expect(header.isConnected).toBe(false);
+        videoPage.remove();
+        chromeRoot.remove();
+    });
+
+    it('recognizes focused enhanced player-header controls only while visible', () => {
+        const root = document.createElement('div');
+        root.className = 'ptv-player-chrome-root';
+        const header = document.createElement('div');
+        header.className = 'ptv-player-topbar';
+        header.dataset.ptvEnhanced = 'true';
+        const button = document.createElement('button');
+        header.append(button);
+        root.append(header);
+        document.body.append(root);
+        expect(isPtvVideoPlayerControlFocused(button)).toBe(true);
+        header.hidden = true;
+        expect(isPtvVideoPlayerControlFocused(button)).toBe(false);
+        root.remove();
+    });
+
     it('routes visibility requests to one native video-controller owner', () => {
         const first = vi.fn();
         const competitor = vi.fn();
@@ -255,6 +295,19 @@ describe('video input ownership', () => {
         expect(competitorLease.release()).toBe(false);
         expect(lease.release()).toBe(true);
         expect(requestPtvVideoControlsVisibility(true)).toBe(false);
+    });
+
+    it('exposes only the active controller interaction and ignores a stale release', () => {
+        let firstHeld = true;
+        const first = registerPtvVideoControlsVisibilityHandler('jellyfin-video-controller', vi.fn(), () => firstHeld);
+        expect(isPtvVideoControlsInteractionActive()).toBe(true);
+        firstHeld = false;
+        expect(isPtvVideoControlsInteractionActive()).toBe(false);
+        const replacement = registerPtvVideoControlsVisibilityHandler('jellyfin-video-controller', vi.fn(), () => true);
+        expect(first.release()).toBe(false);
+        expect(isPtvVideoControlsInteractionActive()).toBe(true);
+        expect(replacement.release()).toBe(true);
+        expect(isPtvVideoControlsInteractionActive()).toBe(false);
     });
 
     it('hides through the native owner and only uses the presentation fallback when no owner exists', () => {

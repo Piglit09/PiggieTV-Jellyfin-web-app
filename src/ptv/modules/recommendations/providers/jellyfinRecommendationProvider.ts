@@ -1072,8 +1072,10 @@ export async function getPtvRecommendationDataBundle(options: {
     let readingHome: PtvRecommendationItem[] = [];
     let sourceFailures: PtvRecommendationSourceFailure[] = [];
     let sourceTimings: PtvRecommendationSourceTiming[] = [];
+    let prerequisiteFallbackUsed = false;
     const musicLibrary = await rejectOnRecommendationAbort(
         getPtvMusicLibrary().catch(error => {
+            prerequisiteFallbackUsed = true;
             logPtvRecommendationFailure('Music library prerequisite', error, {
                 generationId: options.diagnosticGenerationId,
                 serverId,
@@ -1228,6 +1230,7 @@ export async function getPtvRecommendationDataBundle(options: {
 
     return {
         candidates,
+        prerequisiteFallbackUsed,
         profileSignals,
         serverId,
         sourceFailures,

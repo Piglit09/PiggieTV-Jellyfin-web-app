@@ -23,6 +23,7 @@ export type PtvBrowseResolvedScope = Readonly<{
     error: string;
     libraryIds: string[];
     libraryNames: string[];
+    projectedLibraryIds?: string[];
     status: PtvBrowseScopeStatus;
 }>;
 
@@ -150,7 +151,7 @@ export function getPtvFocusedBrowseCacheKey(
     const identityKey = getPtvDisplayIdentityKey(getPtvServerId(), getPtvCurrentUserId())
         || 'identity-pending';
 
-    return `${identityKey}|${getPtvFocusedBrowseLoaderKey(route, scope, metadataId)}`;
+    return `library-scope-v2|${identityKey}|${getPtvFocusedBrowseLoaderKey(route, scope, metadataId)}`;
 }
 
 function trimFocusedPageCache() {
@@ -305,6 +306,8 @@ export async function resolvePtvBrowseScope(
             error: '',
             libraryIds,
             libraryNames: matches.map(library => getBrowseText(library.Name)).filter(Boolean),
+            projectedLibraryIds: matches.filter(library => library.Type === 'UserView')
+                .map(library => getBrowseText(library.Id)).filter(Boolean),
             status: 'resolved'
         };
     } catch (error) {
@@ -325,25 +328,149 @@ export async function resolvePtvBrowseScope(
     }
 }
 
+export function assertPtvBrowseScope(scope: PtvBrowseResolvedScope) {
+    if (scope.status === 'error' || (scope.status === 'resolved' && !scope.libraryIds.some(id => id.trim()))) {
+        throw new Error(scope.error || 'The selected library is unavailable.');
+    }
+}
+
 export function applyPtvBrowseScope(query: PtvItemQuery, scope: PtvBrowseResolvedScope): PtvItemQuery {
-    if (scope.status !== 'resolved' || !scope.libraryIds.length) return { ...query };
-    if (query.ParentId) {
-        return {
-            ...query,
-            AncestorIds: scope.libraryIds.join(',')
-        };
+    assertPtvBrowseScope(scope);
+    const scoped = { ...query };
+    // AncestorIds is not an Items HTTP parameter. Multi-root and nested-parent
+    // enforcement belongs to the scoped reader below, never a global query.
+    delete scoped.AncestorIds;
+    if (scope.status === 'resolved' && scope.libraryIds.length === 1 && !scoped.ParentId) {
+        scoped.ParentId = scope.libraryIds[0];
+    }
+    return scoped;
+}
+
+async function verifyProjectedSeriesParent(
+    parentId: string,
+    roots: string[],
+    read: (query: PtvItemQuery) => Promise<PtvItemsResult<PtvItem>>,
+    assertCurrent: () => void
+) {
+    // Grouped UserViews are projections, not physical ancestors. Their ordinary
+    // root listing can prove Series membership; never broaden other parent types.
+    for (const root of roots) {
+        let start = 0;
+        while (true) {
+            assertCurrent();
+            const result = await read({ ParentId: root, IncludeItemTypes: 'Series', Recursive: true,
+                Limit: PTV_BROWSE_TRENDING_POOL_LIMIT, StartIndex: start, EnableImages: false,
+                EnableTotalRecordCount: true, SortBy: 'SortName', SortOrder: 'Ascending' });
+            assertCurrent();
+            const items = result.Items || [];
+            if (items.some(item => item.Id === parentId && item.Type === 'Series')) return true;
+            start += items.length;
+            if (items.length < PTV_BROWSE_TRENDING_POOL_LIMIT
+                || typeof result.TotalRecordCount === 'number' && start >= result.TotalRecordCount) break;
+        }
+    }
+    return false;
+}
+
+function mergeScopedRootItems(results: PtvItemsResult<PtvItem>[], interleave: boolean) {
+    const byId = new Map<string, PtvItem>();
+    const append = (item: PtvItem) => {
+        if (item.Id && !byId.has(item.Id)) byId.set(item.Id, item);
+    };
+    if (interleave) {
+        const length = Math.max(...results.map(result => result.Items?.length || 0));
+        for (let index = 0; index < length; index++) {
+            results.forEach(result => {
+                const item = result.Items?.[index];
+                if (item) append(item);
+            });
+        }
+    } else {
+        results.forEach(result => {
+            (result.Items || []).forEach(append);
+        });
+    }
+    return [...byId.values()];
+}
+
+async function verifyBrowseNestedParent(
+    parentId: string,
+    scope: PtvBrowseResolvedScope,
+    options: NonNullable<Parameters<typeof getPtvItems>[1]>,
+    read: (query: PtvItemQuery) => Promise<PtvItemsResult<PtvItem>>,
+    assertCurrent: () => void,
+    canProveProjectedSeries: boolean
+) {
+    const ancestors = await requestPtvJson<PtvItem[]>(`Items/${encodeURIComponent(parentId)}/Ancestors`, {
+        ...options, params: { userId: options.userId }
+    });
+    assertCurrent();
+    if (Array.isArray(ancestors) && ancestors.some(item => item.Id && scope.libraryIds.includes(item.Id))) return;
+    const projectedRoots = (scope.projectedLibraryIds || []).filter(root => scope.libraryIds.includes(root));
+    if (canProveProjectedSeries && await verifyProjectedSeriesParent(parentId, projectedRoots, read, assertCurrent)) return;
+    throw new Error('The selected parent is outside the selected library.');
+}
+
+/** One ordinary user-aware ParentId read per root; no explicit-Ids shortcut. */
+export async function getPtvBrowseScopedItems(
+    query: PtvItemQuery,
+    scope: PtvBrowseResolvedScope,
+    signal?: AbortSignal,
+    resume = false
+): Promise<PtvItemsResult<PtvItem>> {
+    assertPtvBrowseScope(scope);
+    const identity = getScopeDiscoveryIdentity();
+    const assertCurrent = () => {
+        if (signal?.aborted || !isPtvBrowseScopeIdentityCurrent(identity.key)) throw createBrowseScopeAbortError();
+    };
+    assertCurrent();
+    const scoped = applyPtvBrowseScope(query, scope);
+    const options = { serverId: identity.serverId || null, userId: identity.userId || null, signal };
+    const read = (params: PtvItemQuery) => resume ? getPtvResumeItems<PtvItem>(params, options) : getPtvItems<PtvItem>(params, options);
+    if (scope.status === 'unscoped') return read(scoped);
+    if (scoped.Ids) throw new Error('Explicit item IDs cannot establish library membership.');
+
+    const roots = [...new Set(scope.libraryIds.filter(id => id.trim()))];
+    if (scoped.ParentId && !roots.includes(scoped.ParentId)) {
+        await verifyBrowseNestedParent(scoped.ParentId, scope, options, read, assertCurrent, scoped.IncludeItemTypes === 'Season' && !resume);
+        assertCurrent();
+        const result = await read(scoped);
+        assertCurrent();
+        return result;
     }
 
-    if (scope.libraryIds.length === 1) {
-        return {
-            ...query,
-            ParentId: scope.libraryIds[0]
-        };
+    const start = Math.max(0, Number(scoped.StartIndex || 0));
+    const limit = Math.max(0, Number(scoped.Limit || 0));
+    const results: PtvItemsResult<PtvItem>[] = [];
+    // Serial fanout keeps the existing row-worker concurrency ceiling intact.
+    for (const root of roots) {
+        assertCurrent();
+        results.push(await read({ ...scoped, ParentId: root,
+            ...(roots.length > 1 ? { StartIndex: 0, ...(limit ? { Limit: start + limit } : {}) } : {}) }));
     }
-
+    assertCurrent();
+    if (results.length === 1) return results[0];
+    const items = mergeScopedRootItems(results, String(scoped.SortBy || '').split(',').includes('Random'));
+    const sortFields = String(scoped.SortBy || 'SortName').split(',').filter(field => field !== 'Random');
+    const sortValue = (item: PtvItem, field: string) => {
+        if (field === 'DatePlayed') return item.UserData?.LastPlayedDate;
+        if (field === 'SortName') return item.SortName || item.Name;
+        return item[field];
+    };
+    if (sortFields.length) {
+        items.sort((left, right) => {
+            for (const field of sortFields) {
+                const a = sortValue(left, field);
+                const b = sortValue(right, field);
+                const order = typeof a === 'number' && typeof b === 'number' ? a - b : String(a || '').localeCompare(String(b || ''));
+                if (order) return scoped.SortOrder === 'Descending' ? -order : order;
+            }
+            return String(left.Id).localeCompare(String(right.Id));
+        });
+    }
     return {
-        ...query,
-        AncestorIds: scope.libraryIds.join(',')
+        Items: limit ? items.slice(start, start + limit) : items.slice(start),
+        TotalRecordCount: Math.max(items.length, results.reduce((total, result) => total + (result.TotalRecordCount ?? result.Items?.length ?? 0), 0))
     };
 }
 
@@ -460,6 +587,7 @@ export async function loadPtvBrowseDirectory(
     type: 'genre' | 'studio',
     signal?: AbortSignal
 ): Promise<PtvBrowseDirectoryEntry[]> {
+    assertPtvBrowseScope(scope);
     if (signal?.aborted) throw createBrowseDirectoryAbortError();
 
     const identity = getScopeDiscoveryIdentity();
@@ -565,16 +693,14 @@ async function loadTrendingPool(
     if (cached && cached.expiresAt > Date.now()) return cached.items;
 
     const baseQuery = buildPtvFocusedBrowseQuery({ ...route, page: 0 }, scope);
-    const result = await getPtvItems<PtvItem>({
+    const result = await getPtvBrowseScopedItems({
         ...baseQuery,
         Fields: `${baseQuery.Fields},CommunityRating,CriticRating`,
         Limit: PTV_BROWSE_TRENDING_POOL_LIMIT,
         SortBy: 'DatePlayed,DateCreated',
         SortOrder: 'Descending',
         StartIndex: 0
-    }, {
-        signal
-    });
+    }, scope, signal);
     const ranked = rankPtvBrowseTrendingItems(normalizePtvLibraryItems(result.Items || []).items);
 
     if (identityKey) {
@@ -610,9 +736,7 @@ async function fetchPtvFocusedBrowsePage(
     }
 
     const query = buildPtvFocusedBrowseQuery(route, scope, metadataId);
-    const result = route.view === 'continue' ?
-        await getPtvResumeItems<PtvItem>(query, { signal }) :
-        await getPtvItems<PtvItem>(query, { signal });
+    const result = await getPtvBrowseScopedItems(query, scope, signal, route.view === 'continue');
 
     const normalized = normalizePtvLibraryItems(result.Items || []);
 
@@ -628,6 +752,7 @@ export async function loadPtvFocusedBrowsePage(
     metadataId = '',
     signal?: AbortSignal
 ): Promise<PtvFocusedBrowseResult> {
+    assertPtvBrowseScope(scope);
     const identityKey = getPtvDisplayIdentityKey(getPtvServerId(), getPtvCurrentUserId());
     const cacheKey = getPtvFocusedBrowseCacheKey(route, scope, metadataId);
     const cached = identityKey ? focusedPageCache.get(cacheKey) : undefined;

@@ -10,7 +10,8 @@ const themePlayerMocks = vi.hoisted(() => {
         resolvePendingStop: null as (() => void) | null,
         paused: true,
         skipNextPlayCommit: false,
-        songsEnabled: false
+        songsEnabled: false,
+        userId: 'user-a'
     };
     const player = {
         paused: vi.fn(() => state.paused)
@@ -134,7 +135,7 @@ vi.mock('hooks/useItem', () => ({
 vi.mock('lib/jellyfin-apiclient', () => ({
     ServerConnections: {
         getApiClient: vi.fn(() => ({
-            getCurrentUserId: () => 'user-a'
+            getCurrentUserId: () => themePlayerMocks.state.userId
         }))
     }
 }));
@@ -200,12 +201,12 @@ async function settlePromises() {
     await Promise.resolve();
 }
 
-function showThemePage(itemId = 'item-a') {
+function showThemePage(itemId = 'item-a', serverId = 'server-a') {
     document.dispatchEvent(new CustomEvent('viewshow', {
         detail: {
             params: {
                 id: itemId,
-                serverId: 'server-a'
+                serverId
             }
         }
     }));
@@ -217,6 +218,7 @@ function getCurrentItemId() {
 
 describe('theme media preference playback', () => {
     beforeEach(() => {
+        document.dispatchEvent(new CustomEvent('viewshow', { detail: { options: {} } }));
         vi.clearAllMocks();
         themePlayerMocks.state.currentItem = null;
         themePlayerMocks.state.deferNextPlay = false;
@@ -227,6 +229,7 @@ describe('theme media preference playback', () => {
         themePlayerMocks.state.resolvePendingStop = null;
         themePlayerMocks.state.skipNextPlayCommit = false;
         themePlayerMocks.state.songsEnabled = false;
+        themePlayerMocks.state.userId = 'user-a';
         themePlayerMocks.queryItem.mockImplementation(async ({ itemId }: { itemId: string }) => ({
             Id: itemId,
             Type: 'Series'
@@ -242,6 +245,43 @@ describe('theme media preference playback', () => {
                 }
             }
         });
+    });
+
+    it('loads a fresh theme owner when the user changes on the same server and item', async () => {
+        themePlayerMocks.state.songsEnabled = true;
+        themePlayerMocks.state.paused = false;
+        showThemePage('shared-series');
+        await settlePromises();
+        expect(getCurrentItemId()).toBe('song-a');
+
+        themePlayerMocks.state.userId = 'user-b';
+        themePlayerMocks.getThemeMedia.mockResolvedValueOnce({ data: { ThemeSongsResult: {
+            Items: [{ Id: 'song-user-b', MediaType: 'Audio' }], OwnerId: 'owner-user-b'
+        } } });
+        showThemePage('shared-series');
+        await settlePromises();
+
+        expect(themePlayerMocks.getThemeMedia).toHaveBeenCalledTimes(2);
+        expect(themePlayerMocks.getThemeMedia.mock.calls.at(-1)?.[0].userId).toBe('user-b');
+        expect(getCurrentItemId()).toBe('song-user-b');
+    });
+
+    it('rejects a theme lookup whose authenticated user retired before its result', async () => {
+        let resolveTheme!: (value: unknown) => void;
+        themePlayerMocks.getThemeMedia.mockReturnValueOnce(new Promise(resolve => {
+            resolveTheme = resolve;
+        }));
+        themePlayerMocks.state.songsEnabled = true;
+        showThemePage('series-retired-user');
+        await settlePromises();
+        themePlayerMocks.state.userId = '';
+
+        resolveTheme({ data: { ThemeSongsResult: {
+            Items: [{ Id: 'retired-user-song', MediaType: 'Audio' }], OwnerId: 'old-user'
+        } } });
+        await settlePromises();
+
+        expect(themePlayerMocks.playbackManager.play).not.toHaveBeenCalled();
     });
 
     it('keeps preference, autoplay, cancellation, and route races under one playback owner', async () => {

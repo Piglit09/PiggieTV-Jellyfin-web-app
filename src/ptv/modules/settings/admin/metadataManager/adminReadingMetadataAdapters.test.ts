@@ -6,9 +6,11 @@ import {
     createAdminMetadataFormFromReadingCandidate,
     findAdminStoredReadingProviderIdentity,
     normalizeAdminReadingMetadataProviders,
+    normalizeAdminReadingIdentityAssessment,
     normalizeAdminReadingMetadataSearchResponse,
     toAdminMetadataIdentifyResult
 } from './adminReadingMetadataAdapters';
+import pluginSearchFixture from './fixtures/plugin-reading-search.json';
 import type { AdminMetadataForm } from './adminMetadataManagerModel';
 import type { AdminReadingMetadataCandidate } from './adminReadingMetadataModel';
 
@@ -87,7 +89,138 @@ function readingCandidate(
     };
 }
 
+function identityRecord(source: string, overrides: Record<string, unknown> = {}) {
+    return {
+        Source: source, HasRedactedIdentity: false, RunEvidenceKind: 'Unknown', ProviderIds: [],
+        SeriesTitle: null, IssueNumber: null, VolumeOrRunLabel: null,
+        IssuePublicationYear: null, IssuePublicationDate: null, ...overrides
+    };
+}
+
+function completeAssessment() {
+    return {
+        ItemId: 'item-a', Provider: 'gcd', ProviderId: '123', SearchGeneration: 'search-1',
+        ArchiveRevision: 'revision-1', AssessmentDigest: 'digest-1', RevisionChanged: false,
+        Sources: {
+            ArchiveState: 'inspected', ArchiveReasonCode: null,
+            FileName: identityRecord('FileName'), ImmediateFolder: identityRecord('ImmediateFolder'),
+            ComicInfo: identityRecord('ComicInfo', { SeriesTitle: 'Embedded series' }),
+            CurrentItem: identityRecord('CurrentItem')
+        },
+        Candidate: identityRecord('Provider', { SeriesTitle: 'Provider series' }), Findings: [],
+        RequiresConflictAcknowledgment: false, RequiresUnverifiedAcknowledgment: false
+    };
+}
+
 describe('Reading metadata response adapters', () => {
+    it('preserves a signed context through the Plugin 16 KiB token limit without truncation', () => {
+        const accepted = 'a'.repeat(16 * 1024);
+        const rejected = `${accepted}a`;
+        const normalize = (context: string) => normalizeAdminReadingMetadataSearchResponse({
+            Candidates: [{ Provider: 'gcd', ProviderId: '123', Title: 'Fixture', AssessmentContext: context }]
+        }).candidates[0].assessmentContext;
+        expect(normalize(accepted)).toBe(accepted);
+        expect(normalize(rejected)).toBeNull();
+        expect(normalize('signed-context')).toBe('signed-context');
+    });
+
+    it.each([
+        ['primitive candidate', { Candidate: 'provider' }],
+        ['missing findings', { Findings: undefined }],
+        ['missing sources', { Sources: undefined }],
+        ['missing revision change flag', { RevisionChanged: undefined }]
+    ])('rejects incomplete reassessment: %s', (_label, override) => {
+        const complete = { ...completeAssessment(), ...override };
+        expect(() => normalizeAdminReadingIdentityAssessment(complete)).toThrow('invalid response');
+    });
+
+    it.each([ 'SeriesTitle', 'IssueNumber', 'VolumeOrRunLabel', 'IssuePublicationYear', 'IssuePublicationDate' ])(
+        'rejects omitted ComicInfo %s rather than erasing displayed evidence', field => {
+            const complete = completeAssessment();
+            const comicInfo = { ...complete.Sources.ComicInfo, [field]: undefined };
+            expect(() => normalizeAdminReadingIdentityAssessment({
+                ...complete, Sources: { ...complete.Sources, ComicInfo: comicInfo }
+            })).toThrow('invalid response');
+        }
+    );
+
+    it('rejects an omitted provider title', () => {
+        const complete = completeAssessment();
+        expect(() => normalizeAdminReadingIdentityAssessment({
+            ...complete, Candidate: { ...complete.Candidate, SeriesTitle: undefined }
+        })).toThrow('invalid response');
+    });
+
+    it('rejects an unverified archive without a reason', () => {
+        const complete = completeAssessment();
+        expect(() => normalizeAdminReadingIdentityAssessment({
+            ...complete, Sources: { ...complete.Sources, ArchiveState: 'unverified', ArchiveReasonCode: undefined }
+        })).toThrow('invalid response');
+    });
+
+    it('preserves source-labeled Reading identity, unknown GCD run evidence, and bounded findings', () => {
+        const response = normalizeAdminReadingMetadataSearchResponse({
+            SearchGeneration: 'search-1',
+            IdentitySources: {
+                ArchiveState: 'inspected', ArchiveReasonCode: null,
+                FileName: { Source: 'FileName', SeriesTitle: 'Fixture', IssueNumber: '9', RunEvidenceKind: 'Unknown' },
+                ImmediateFolder: { Source: 'ImmediateFolder', VolumeOrRunLabel: '2019', RunEvidenceKind: 'ExplicitRun' },
+                ComicInfo: { Source: 'ComicInfo', VolumeOrRunLabel: '2018', IssuePublicationYear: 2019, RunEvidenceKind: 'ExplicitRun' }
+            },
+            Query: {
+                Year: 2019, SeriesStartYear: 2018, IssuePublicationYear: 2019,
+                SeriesStartYearEvidence: 'local-metadata', IssuePublicationEvidence: 'local-metadata',
+                IdentityConflicts: [{ Field: 'run', PreferredSource: 'local-metadata', PreferredValue: '2018', ConflictingSource: 'folder', ConflictingValue: '2019' }]
+            },
+            Candidates: [{
+                Provider: 'gcd', ProviderId: '123', Title: 'Fixture #9', Year: 2019, StartYear: 2018,
+                RunEvidenceKind: 'Unknown', SeriesStartYearEvidence: 'unknown',
+                IssuePublicationYear: 2019, IssuePublicationEvidence: 'provider',
+                AssessmentContext: 'signed-context', ArchiveRevision: 'opaque-revision', AssessmentDigest: 'digest-1',
+                IdentityAssessment: {
+                    ItemId: 'item-a', Provider: 'gcd', ProviderId: '123', SearchGeneration: 'search-1',
+                    ArchiveRevision: 'opaque-revision', AssessmentDigest: 'digest-1',
+                    Sources: { ArchiveState: 'inspected', ArchiveReasonCode: null, FileName: identityRecord('FileName'),
+                        ImmediateFolder: identityRecord('ImmediateFolder'),
+                        ComicInfo: identityRecord('ComicInfo', { VolumeOrRunLabel: '2018' }),
+                        CurrentItem: identityRecord('CurrentItem') },
+                    Candidate: identityRecord('Provider', { IssuePublicationYear: 2019 }),
+                    RevisionChanged: false,
+                    Findings: [{ Code: 'RUN_CONFLICT', Field: 'run', LeftSource: 'ComicInfo', LeftValue: '2018', RightSource: 'ImmediateFolder', RightValue: '2019', IsConflict: true, IsMaterialUncertainty: false }],
+                    RequiresConflictAcknowledgment: true, RequiresUnverifiedAcknowledgment: true
+                }
+            }]
+        });
+        expect(response.searchGeneration).toBe('search-1');
+        expect(response.identitySources?.comicInfo).toMatchObject({ source: 'ComicInfo', volumeOrRunLabel: '2018', issuePublicationYear: 2019 });
+        expect(response.query.identityConflicts?.[0]).toMatchObject({ preferredSource: 'local-metadata', conflictingSource: 'folder' });
+        expect(response.candidates[0]).toMatchObject({
+            assessmentContext: 'signed-context', archiveRevision: 'opaque-revision', assessmentDigest: 'digest-1',
+            runEvidenceKind: 'Unknown', issuePublicationYear: 2019, issuePublicationEvidence: 'provider',
+            identityAssessment: { requiresConflictAcknowledgment: true, requiresUnverifiedAcknowledgment: true,
+                findings: [{ leftSource: 'ComicInfo', rightSource: 'ImmediateFolder', isConflict: true }] }
+        });
+        const oldPlugin = normalizeAdminReadingMetadataSearchResponse({ Candidates: [{ Provider: 'gcd', ProviderId: '123', Title: 'Fixture', Year: 2019, StartYear: 2018 }] });
+        expect(oldPlugin.candidates[0]).toMatchObject({ assessmentContext: null, issuePublicationYear: null, runEvidenceKind: 'Unknown' });
+    });
+
+    it('keeps typed archive-unverified reassessment and removes unsafe display values', () => {
+        const assessment = normalizeAdminReadingIdentityAssessment({
+            ItemId: 'item-a', Provider: 'gcd', ProviderId: '123', SearchGeneration: 'search-1',
+            ArchiveRevision: 'revision-2', RevisionChanged: true, AssessmentDigest: 'digest-2',
+            Sources: { ArchiveState: 'unverified', ArchiveReasonCode: 'HELPER_UNAVAILABLE',
+                FileName: identityRecord('FileName'), ImmediateFolder: identityRecord('ImmediateFolder'),
+                ComicInfo: identityRecord('ComicInfo', { HasRedactedIdentity: true, SeriesTitle: 'C:\\private\\book.cbz' }),
+                CurrentItem: identityRecord('CurrentItem') },
+            Candidate: identityRecord('Provider', { IssuePublicationYear: 2019 }),
+            Findings: [{ Code: 'IDENTITY_TEXT_REDACTED', Field: 'series', LeftSource: 'ComicInfo', LeftValue: 'https://private.example/book?token=secret', RightSource: 'Provider', RightValue: 'Safe'.repeat(200), IsConflict: false, IsMaterialUncertainty: true }],
+            RequiresConflictAcknowledgment: false, RequiresUnverifiedAcknowledgment: true
+        });
+        expect(assessment.sources.archiveReasonCode).toBe('HELPER_UNAVAILABLE');
+        expect(assessment.sources.comicInfo).toMatchObject({ hasRedactedIdentity: true, seriesTitle: null });
+        expect(assessment.findings[0]).toMatchObject({ code: 'IDENTITY_TEXT_REDACTED', leftValue: null, isMaterialUncertainty: true });
+        expect(assessment.findings[0].rightValue?.length).toBeLessThanOrEqual(256);
+    });
     it('normalizes production PascalCase DTOs without rewriting provider or locale map keys', () => {
         const providers = normalizeAdminReadingMetadataProviders({
             Providers: [{
@@ -432,5 +565,24 @@ describe('Reading metadata response adapters', () => {
         expect(findAdminStoredReadingProviderIdentity({ GCD: '2177121' }))
             .toEqual({ displayName: 'Grand Comics Database (GCD)', provider: 'gcd', providerId: '2177121' });
         expect(findAdminStoredReadingProviderIdentity({ Imdb: 'tt123' })).toBeNull();
+    });
+});
+
+describe('serialized Plugin producer contract', () => {
+    it('accepts ranked and per-provider assessments and preserves unchanged fresh review evidence', () => {
+        const search = normalizeAdminReadingMetadataSearchResponse(pluginSearchFixture.Search);
+        const fresh = normalizeAdminReadingIdentityAssessment(pluginSearchFixture.Reassessment);
+        expect(search.candidates).toHaveLength(1);
+        expect(search.providerResults).toHaveLength(1);
+        for (const candidate of [ ...search.candidates, ...search.providerResults.flatMap(result => result.candidates) ]) {
+            expect(candidate.identityAssessment).toEqual(fresh);
+            expect(candidate.identityAssessment?.itemId).toBe('11111111111111111111111111111111');
+            expect(candidate.identityAssessment?.provider).toBe(candidate.provider);
+            expect(candidate.identityAssessment?.providerId).toBe(candidate.providerId);
+            expect(candidate.identityAssessment?.searchGeneration).toBe(search.searchGeneration);
+            expect(candidate.identityAssessment?.archiveRevision).toBe(candidate.archiveRevision);
+            expect(candidate.identityAssessment?.assessmentDigest).toBe(candidate.assessmentDigest);
+        }
+        expect(fresh.revisionChanged).toBe(false);
     });
 });

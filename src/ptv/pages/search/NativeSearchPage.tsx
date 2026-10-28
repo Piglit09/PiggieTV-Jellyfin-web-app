@@ -59,11 +59,21 @@ import {
 } from './searchHintService';
 import {
     PTV_SEARCH_MAX_CONCURRENCY,
+    retryPtvFailedSearchGroups,
     searchPtvWithRecovery,
+    type PtvFailedGroupRetryResult,
     type PtvSearchGroupProgress
 } from './resilientSearchService';
 import { useNativeSearchCurrentUser } from './useNativeSearchCurrentUser';
 import { usePtvAuthenticatedIdentity } from '../../api/usePtvAuthenticatedIdentity';
+import {
+    canRetryPtvSearch,
+    getRetryablePtvSearchGroupIds,
+    mergePtvFailedGroupRetry,
+    restorePtvSearchRetryScope,
+    shouldRenderPtvSearchGroups
+} from './searchGroupRetryState';
+import { NativeSearchGroupRetryAction } from './NativeSearchGroupRetryAction';
 
 import './nativeSearch.scss';
 
@@ -135,6 +145,28 @@ function getEmptyGroupState(status: PtvSearchGroupStatus = 'idle'): PtvSearchGro
         requestUrl: '',
         status,
         timeoutReason: ''
+    };
+}
+
+function getRetriedGroupState(
+    items: PtvItem[],
+    status: PtvSearchGroupStatus,
+    durationMs = 0,
+    reason = '',
+    endpointPaths: readonly string[] = []
+): PtvSearchGroupState {
+    let error = '';
+
+    if (status === 'timeout') error = 'This result group timed out.';
+    if (status === 'error') error = 'This result group could not be loaded.';
+
+    return {
+        ...getEmptyGroupState(status),
+        durationMs,
+        endpointPath: endpointPaths.join(' + ') || 'Search retry',
+        error,
+        items,
+        timeoutReason: status === 'timeout' ? reason : ''
     };
 }
 
@@ -234,7 +266,10 @@ function getLoadingGroups() {
 function getSettledHintGroups(
     groupedHints: PtvGroupedSearchHints,
     durationMs: number,
-    failedGroupIds: readonly PtvSearchGroupId[] = []
+    failedGroupIds: readonly PtvSearchGroupId[] = [],
+    failedGroupStatuses: Partial<Record<PtvSearchGroupId, 'error' | 'timeout'>> = {},
+    failedGroupReasons: Partial<Record<PtvSearchGroupId, string>> = {},
+    endpointPaths: Partial<Record<PtvSearchGroupId, string[]>> = {}
 ) {
     const failedGroups = new Set(failedGroupIds);
 
@@ -246,15 +281,16 @@ function getSettledHintGroups(
         if (items.length) {
             status = 'success';
         } else if (failed) {
-            status = 'error';
+            status = failedGroupStatuses[group.id] || 'error';
         }
 
         groups[group.id] = {
             ...getEmptyGroupState(status),
             durationMs,
-            endpointPath: failedGroupIds.length ? 'Search/Hints + Users/{user}/Items' : 'Search/Hints',
+            endpointPath: ['Search/Hints', ...(endpointPaths[group.id] || [])].join(' + '),
             error: failed ? 'This result group could not be loaded.' : '',
-            items
+            items,
+            timeoutReason: failed && status === 'timeout' ? failedGroupReasons[group.id] || '' : ''
         };
         return groups;
     }, {} as Record<PtvSearchGroupId, PtvSearchGroupState>);
@@ -281,6 +317,45 @@ function getFailedHintGroups(
         };
         return groups;
     }, {} as Record<PtvSearchGroupId, PtvSearchGroupState>);
+}
+
+function preserveCompletedSearchGroups(
+    currentGroups: Record<PtvSearchGroupId, PtvSearchGroupState>,
+    failedGroups: Record<PtvSearchGroupId, PtvSearchGroupState>
+) {
+    return PTV_SEARCH_GROUPS.reduce<Record<PtvSearchGroupId, PtvSearchGroupState>>((merged, group) => {
+        const current = currentGroups[group.id];
+
+        merged[group.id] = current.status === 'success' || current.status === 'empty' ?
+            current : failedGroups[group.id];
+        return merged;
+    }, {} as Record<PtvSearchGroupId, PtvSearchGroupState>);
+}
+
+function mergeRetriedSearchGroups(
+    currentGroups: Record<PtvSearchGroupId, PtvSearchGroupState>,
+    result: PtvFailedGroupRetryResult,
+    durationMs: number
+) {
+    return mergePtvFailedGroupRetry<PtvSearchGroupId, PtvItem, PtvSearchGroupState>(
+        currentGroups, result, (groupId, items, status) => getRetriedGroupState(
+            items, status, durationMs, result.failedGroupReasons[groupId], result.endpointPaths[groupId]
+        )
+    );
+}
+
+function markRetriedSearchGroupsFailed(
+    currentGroups: Record<PtvSearchGroupId, PtvSearchGroupState>,
+    failedGroupIds: readonly PtvSearchGroupId[],
+    status: 'error' | 'timeout'
+) {
+    const failedGroupStatuses = Object.fromEntries(failedGroupIds.map(groupId => [groupId, status]));
+
+    return mergePtvFailedGroupRetry<PtvSearchGroupId, PtvItem, PtvSearchGroupState>(
+        currentGroups,
+        { groups: {}, failedGroupStatuses },
+        (_groupId, items, groupStatus) => getRetriedGroupState(items, groupStatus)
+    );
 }
 
 function getSearchItemTitle(item: PtvItem) {
@@ -584,10 +659,12 @@ function NativeSearchGroupContent({
 
 function NativeSearchGroup({
     config,
+    onRetry,
     state,
     user
 }: Readonly<{
     config: PtvSearchGroupConfig;
+    onRetry: (groupId: PtvSearchGroupId) => void;
     state: PtvSearchGroupState;
     user: PtvUser | null;
 }>) {
@@ -614,6 +691,12 @@ function NativeSearchGroup({
                 {timing}
             </header>
             <NativeSearchGroupContent config={config} state={state} user={user} />
+            <NativeSearchGroupRetryAction
+                groupId={config.id}
+                groupTitle={config.title}
+                onRetry={onRetry}
+                status={state.status}
+            />
         </section>
     );
 }
@@ -814,6 +897,7 @@ function NativeSearchResultFeedback({
 function NativeSearchGroups({
     filterLabel,
     groups,
+    onRetry,
     presentation,
     queryReady,
     user,
@@ -821,13 +905,14 @@ function NativeSearchGroups({
 }: Readonly<{
     filterLabel: string;
     groups: Record<PtvSearchGroupId, PtvSearchGroupState>;
+    onRetry: (groupId: PtvSearchGroupId) => void;
     presentation: PtvSearchPresentation;
     queryReady: boolean;
     user: PtvUser | null;
     visibleGroups: readonly PtvSearchGroupConfig[];
 }>) {
-    const showGroups = queryReady && !(presentation.isSettled && presentation.itemCount === 0);
-    const renderedGroups = presentation.isPending && presentation.itemCount === 0 ?
+    const showGroups = shouldRenderPtvSearchGroups(queryReady, presentation);
+    const renderedGroups = presentation.isPending && presentation.itemCount === 0 && presentation.failedGroupCount === 0 ?
         visibleGroups.slice(0, 1) :
         visibleGroups;
 
@@ -840,7 +925,7 @@ function NativeSearchGroups({
             aria-label={`${filterLabel} search results`}
         >
             {showGroups ? renderedGroups.map(group => (
-                <NativeSearchGroup key={group.id} config={group} state={groups[group.id]} user={user} />
+                <NativeSearchGroup key={group.id} config={group} onRetry={onRetry} state={groups[group.id]} user={user} />
             )) : null}
         </section>
     );
@@ -877,6 +962,8 @@ export default function NativeSearchPage() {
     const recentSearches = recentHistory.scope === searchHistoryScope ? recentHistory.items : [];
     const requestIdRef = useRef(0);
     const activeSearchAbortRef = useRef<AbortController | null>(null);
+    const currentScopeRef = useRef('');
+    const settledSearchKeyRef = useRef<string | null>(null);
     const invalidatedSearchDraftRef = useRef(false);
     const retryGateRef = useRef(createPtvRetryGate());
     const backdropUrl = useMemo(() => getSearchBackdrop(groups), [groups]);
@@ -894,6 +981,14 @@ export default function NativeSearchPage() {
         activeFilterConfig.label,
         searchPresentation
     );
+    const currentScope = [serverId, userId, activeFilter, debouncedQuery.trim(), inputQuery.trim(), routeQuery.trim(), routeFilter].join('\u0000');
+
+    currentScopeRef.current = currentScope;
+
+    useEffect(() => () => {
+        requestIdRef.current += 1;
+        activeSearchAbortRef.current?.abort();
+    }, []);
 
     useEffect(() => {
         invalidatedSearchDraftRef.current = false;
@@ -937,6 +1032,7 @@ export default function NativeSearchPage() {
         const query = debouncedQuery.trim();
 
         if (query.length < 2) {
+            settledSearchKeyRef.current = null;
             retryGateRef.current.release();
             setGroups(getInitialGroups('idle'));
             setCacheHit(false);
@@ -952,6 +1048,7 @@ export default function NativeSearchPage() {
         });
 
         if (cached) {
+            settledSearchKeyRef.current = cacheKey;
             retryGateRef.current.release();
             setGroups(getCachedSearchGroups(cached.groups));
             setCacheHit(true);
@@ -962,6 +1059,7 @@ export default function NativeSearchPage() {
         }
 
         if (identityStatus !== 'ready') {
+            settledSearchKeyRef.current = null;
             retryGateRef.current.release();
             setGroups(getInitialGroups('queued'));
             setCacheHit(false);
@@ -1032,8 +1130,12 @@ export default function NativeSearchPage() {
                 if (cancelled || requestIdRef.current !== requestId) return;
 
                 settled = true;
+                settledSearchKeyRef.current = cacheKey;
                 const durationMs = Number((performance.now() - startedAt).toFixed(1));
-                const nextGroups = getSettledHintGroups(result.groups, durationMs, result.failedGroupIds);
+                const nextGroups = getSettledHintGroups(
+                    result.groups, durationMs, result.failedGroupIds, result.failedGroupStatuses,
+                    result.failedGroupReasons, result.endpointPaths
+                );
                 const firstResultGroup = PTV_SEARCH_GROUPS.find(group => nextGroups[group.id].items.length);
                 const cacheable = isSearchCacheable(nextGroups)
                     && (result.primaryStatus === 'success' || Boolean(firstResultGroup));
@@ -1061,6 +1163,9 @@ export default function NativeSearchPage() {
                     hintCount: result.hintCount,
                     primaryStatus: result.primaryStatus,
                     recoveredGroupIds: result.recoveredGroupIds,
+                    failedGroupStatuses: result.failedGroupStatuses,
+                    failedGroupReasons: result.failedGroupReasons,
+                    endpointPaths: result.endpointPaths,
                     requestStartCount: result.requestCount,
                     totalRecordCount: result.totalRecordCount
                 });
@@ -1075,6 +1180,7 @@ export default function NativeSearchPage() {
                 if (cancelled || requestIdRef.current !== requestId) return;
 
                 settled = true;
+                settledSearchKeyRef.current = cacheKey;
                 const durationMs = Number((performance.now() - startedAt).toFixed(1));
                 const failure = getPtvSearchHintFailureKind(error, timedOut);
                 const failureKind = failure === 'timeout' ? 'timeout' : 'error';
@@ -1083,7 +1189,7 @@ export default function NativeSearchPage() {
                     'Search is temporarily unavailable. Try again.';
                 const nextGroups = getFailedHintGroups(durationMs, message, failureKind);
 
-                setGroups(nextGroups);
+                setGroups(currentGroups => preserveCompletedSearchGroups(currentGroups, nextGroups));
                 retryGateRef.current.release();
                 recordPtvEvent('api', 'ptv-search-hints-request-failed', {
                     durationMs,
@@ -1151,6 +1257,7 @@ export default function NativeSearchPage() {
         });
     }, [searchHistoryScope, serverId, userId]);
     const clearSearchQuery = useCallback(() => {
+        settledSearchKeyRef.current = null;
         requestIdRef.current += 1;
         activeSearchAbortRef.current?.abort();
         activeSearchAbortRef.current = null;
@@ -1161,15 +1268,84 @@ export default function NativeSearchPage() {
         setCacheHit(false);
         setSearchParams(buildPtvSearchParams('', activeFilter), { replace: true });
     }, [activeFilter, setSearchParams]);
-    const retrySearch = useCallback(() => {
+    const retrySearch = useCallback((targetGroupId?: PtvSearchGroupId) => {
         if (inputQuery.trim() !== debouncedQuery.trim()) return;
+        if (identityStatus !== 'ready' || debouncedQuery.trim().length < 2) return;
+        const retryKey = getSearchCacheKey(debouncedQuery, activeFilter, serverId, userId);
+
+        if (!retryKey || !canRetryPtvSearch(settledSearchKeyRef.current, retryKey)) return;
+        const failedGroupIds = getRetryablePtvSearchGroupIds(visibleSearchGroups.map(group => ({
+            id: group.id,
+            status: groups[group.id].status
+        })), targetGroupId);
+
+        if (!failedGroupIds.length) return;
         if (!retryGateRef.current.claim()) return;
-        setRetryGeneration(generation => generation + 1);
-    }, [debouncedQuery, inputQuery]);
+        const requestId = requestIdRef.current + 1;
+        const scope = currentScope;
+        const query = debouncedQuery.trim();
+        const startedAt = performance.now();
+        const abortController = createPtvAbortController();
+
+        requestIdRef.current = requestId;
+        settledSearchKeyRef.current = null;
+        activeSearchAbortRef.current?.abort();
+        activeSearchAbortRef.current = abortController;
+        setGroups(currentGroups => {
+            const nextGroups = { ...currentGroups };
+
+            failedGroupIds.forEach(groupId => {
+                nextGroups[groupId] = { ...currentGroups[groupId], status: 'loading' };
+            });
+            return nextGroups;
+        });
+
+        void retryPtvFailedSearchGroups({
+            failedGroupIds,
+            includeItemTypes: visibleSearchGroups.flatMap(group => group.includeItemTypes.split(',')),
+            perGroupLimit: PTV_SEARCH_RESULT_LIMIT,
+            query,
+            serverId,
+            signal: abortController.signal,
+            userId
+        }).then(result => {
+            if (!restorePtvSearchRetryScope(settledSearchKeyRef, requestIdRef, currentScopeRef, {
+                key: retryKey, requestId, scope, signalAborted: abortController.signal.aborted
+            })) return;
+
+            const durationMs = Number((performance.now() - startedAt).toFixed(1));
+            setGroups(currentGroups => mergeRetriedSearchGroups(currentGroups, result, durationMs));
+            recordPtvEvent('api', 'ptv-search-failed-groups-retry-complete', {
+                failedGroupIds,
+                failureStatuses: result.failedGroupStatuses,
+                failureReasons: result.failedGroupReasons,
+                endpointPaths: result.endpointPaths,
+                requestStartCount: result.requestCount
+            });
+        }).catch(error => {
+            if (!restorePtvSearchRetryScope(settledSearchKeyRef, requestIdRef, currentScopeRef, {
+                key: retryKey, requestId, scope, signalAborted: abortController.signal.aborted
+            })) return;
+
+            const failure = getPtvSearchHintFailureKind(error);
+            const status = failure === 'timeout' ? 'timeout' : 'error';
+            setGroups(currentGroups => markRetriedSearchGroupsFailed(currentGroups, failedGroupIds, status));
+            recordPtvEvent('api', 'ptv-search-failed-groups-retry-failed', {
+                exceptionName: error instanceof Error ? error.name : 'UnknownError',
+                failedGroupIds,
+                status
+            });
+        }).finally(() => {
+            if (activeSearchAbortRef.current === abortController) activeSearchAbortRef.current = null;
+            if (requestIdRef.current === requestId) retryGateRef.current.release();
+        });
+    }, [activeFilter, currentScope, debouncedQuery, groups, identityStatus, inputQuery, serverId, userId, visibleSearchGroups]);
+    const retryAllSearch = useCallback(() => retrySearch(), [retrySearch]);
     const updateInputQuery = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
         const nextQuery = event.currentTarget.value;
 
         if (nextQuery.trim() !== debouncedQuery.trim()) {
+            settledSearchKeyRef.current = null;
             invalidatedSearchDraftRef.current = true;
             requestIdRef.current += 1;
             activeSearchAbortRef.current?.abort();
@@ -1250,13 +1426,14 @@ export default function NativeSearchPage() {
                     </section>
                     <NativeSearchResultFeedback
                         onClear={clearSearchQuery}
-                        onRetry={retrySearch}
+                        onRetry={retryAllSearch}
                         presentation={searchPresentation}
                         queryReady={queryReady}
                     />
                     <NativeSearchGroups
                         filterLabel={activeFilterConfig.label}
                         groups={groups}
+                        onRetry={retrySearch}
                         presentation={searchPresentation}
                         queryReady={queryReady}
                         user={user}

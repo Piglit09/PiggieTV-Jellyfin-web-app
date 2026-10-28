@@ -3,9 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const identityMocks = vi.hoisted(() => ({
     pluginClient: {
         clearFeaturedContentCacheDocument: vi.fn(async () => undefined),
-        getFeaturedContentCacheDocument: vi.fn(async () => ({ version: 1 })),
-        getStatus: vi.fn(async () => ({ featureFlags: { featuredContent: true }, ok: true })),
-        writeFeaturedContentCacheDocument: vi.fn(async () => undefined)
+        getFeaturedContentCacheDocument: vi.fn(async (): Promise<unknown> => ({ version: 1 })),
+        getStatus: vi.fn(async () => ({ featureFlags: { featuredContent: true }, ok: true,
+            currentHomeTopology: { version: 1, epoch: 'A'.repeat(64), held: false },
+            currentHomeUserAccess: { version: 1, userId: identityMocks.userId,
+                accessEpoch: 'B'.repeat(64), held: false, policyProven: true } })),
+        writeFeaturedContentCacheDocument: vi.fn(async (document?: unknown) => {
+            expect(document).toBeDefined();
+        })
     },
     serverId: 'server-a',
     userId: 'admin'
@@ -46,6 +51,7 @@ import Events from '../../../utils/events';
 
 function createPayload(label: string) {
     return {
+        scopeSchemaVersion: 2,
         heroItems: [{ Id: label, Name: label, Type: 'Movie' }],
         sections: [{ id: 'featured', title: 'Featured' }],
         sectionItems: {
@@ -78,6 +84,53 @@ describe('Featured cache authenticated identity ownership', () => {
         identityMocks.pluginClient.getFeaturedContentCacheDocument.mockResolvedValue({ version: 1 });
     });
 
+    it('retains only Plugin-response Hero epoch provenance and rejects a stale epoch on a remote first visit', async () => {
+        const cache = await loadCache();
+        const oldEpoch = 'C'.repeat(64);
+        const now = Date.now();
+        identityMocks.pluginClient.getFeaturedContentCacheDocument.mockResolvedValue({
+            version: 1,
+            featuredContent: {
+                version: cache.FEATURED_CACHE_VERSION,
+                createdAt: now,
+                expiresAt: now + 60_000,
+                payload: { ...createPayload('old-hero'), heroAccessEpoch: oldEpoch }
+            }
+        });
+
+        const candidates = await cache.getCachedFeaturedContentPayload({ homeVerificationCandidates: true });
+        expect(candidates?.heroAccessEpoch).toBe(oldEpoch);
+        const projected = await cache.getCachedFeaturedContentPayload();
+        expect(projected?.heroItems).toEqual([]);
+        expect(projected?.sections).toEqual([ expect.objectContaining({ id: 'featured' }) ]);
+        expect(cache.sanitizeFeaturedPayloadForSharedCache({ ...createPayload('shared'), heroAccessEpoch: oldEpoch }))
+            .not.toHaveProperty('heroAccessEpoch');
+    });
+
+    it('accepts Plugin-authorized Hero only when its epoch matches fresh current access', async () => {
+        const cache = await loadCache();
+        const now = Date.now();
+        identityMocks.pluginClient.getFeaturedContentCacheDocument.mockResolvedValue({
+            version: 1,
+            featuredContent: {
+                version: cache.FEATURED_CACHE_VERSION,
+                createdAt: now,
+                expiresAt: now + 60_000,
+                payload: { ...createPayload('current-hero'), heroAccessEpoch: 'B'.repeat(64) }
+            }
+        });
+
+        await expect(cache.getCachedFeaturedContentPayload()).resolves.toMatchObject({
+            heroItems: [ expect.objectContaining({ Id: 'current-hero' }) ],
+            heroAccessEpoch: 'B'.repeat(64)
+        });
+
+        cache.setFeaturedContentCacheTtlMs(60_000);
+        await vi.waitFor(() => expect(identityMocks.pluginClient.writeFeaturedContentCacheDocument).toHaveBeenCalled());
+        const written = identityMocks.pluginClient.writeFeaturedContentCacheDocument.mock.calls.at(-1)?.[0];
+        expect(JSON.stringify(written)).not.toContain('heroAccessEpoch');
+    });
+
     it('isolates administrator and restricted payloads in both directions', async () => {
         const cache = await loadCache();
         const adminPayload = await cache.getFeaturedContent(async () => createPayload('admin-only'));
@@ -85,14 +138,17 @@ describe('Featured cache authenticated identity ownership', () => {
         identityMocks.userId = 'restricted';
         const restrictedPayload = await cache.getFeaturedContent(async () => createPayload('restricted-only'));
 
-        expect(adminPayload.heroItems).toEqual([ expect.objectContaining({ Id: 'admin-only' }) ]);
-        expect(restrictedPayload.heroItems).toEqual([ expect.objectContaining({ Id: 'restricted-only' }) ]);
+        expect(adminPayload.heroItems).toEqual([]);
+        expect(restrictedPayload.heroItems).toEqual([]);
+        expect(adminPayload.sectionItems.featured).toEqual([ expect.objectContaining({ Id: 'admin-only-row' }) ]);
+        expect(restrictedPayload.sectionItems.featured).toEqual([ expect.objectContaining({ Id: 'restricted-only-row' }) ]);
         expect(JSON.stringify(restrictedPayload)).not.toContain('admin-only');
 
         identityMocks.userId = 'admin';
         const adminAgain = await cache.getFeaturedContent(async () => createPayload('admin-return'));
 
-        expect(adminAgain.heroItems).toEqual([ expect.objectContaining({ Id: 'admin-return' }) ]);
+        expect(adminAgain.heroItems).toEqual([]);
+        expect(adminAgain.sectionItems.featured).toEqual([ expect.objectContaining({ Id: 'admin-return-row' }) ]);
         expect(JSON.stringify(adminAgain)).not.toContain('restricted-only');
     });
 
@@ -124,13 +180,13 @@ describe('Featured cache authenticated identity ownership', () => {
         await vi.waitFor(() => expect(restrictedFetcher).toHaveBeenCalledOnce());
         restricted.resolve(createPayload('restricted-current'));
         await expect(restrictedRequest).resolves.toMatchObject({
-            heroItems: [ expect.objectContaining({ Id: 'restricted-current' }) ]
+            heroItems: [], sectionItems: { featured: [ expect.objectContaining({ Id: 'restricted-current-row' }) ] }
         });
 
         admin.resolve(createPayload('admin-late'));
         await expect(adminRequest).rejects.toMatchObject({ name: 'AbortError' });
         await expect(cache.getCachedFeaturedContentPayload()).resolves.toMatchObject({
-            heroItems: [ expect.objectContaining({ Id: 'restricted-current' }) ]
+            heroItems: [], sectionItems: { featured: [ expect.objectContaining({ Id: 'restricted-current-row' }) ] }
         });
     });
 

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/resolve-response.schema.json",
+  "title": "PTV Channels v1 successful join resolution",
+  "type": "object",
+  "required": ["contractVersion", "serverTimeUtc", "channelId", "timelineRevision", "programId", "entryRevision", "itemId", "startUtc", "endUtc", "positionMs", "remainingMs"],
+  "properties": {
+    "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+    "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "channelId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "timelineRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "programId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "entryRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "itemId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "startUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "endUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "positionMs": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/milliseconds" },
+    "remainingMs": { "type": "integer", "minimum": 1 }
+  },
+  "not": { "anyOf": [{ "required": ["playSessionId"] }, { "required": ["mediaSourceId"] }, { "required": ["streamUrl"] }] },
+  "additionalProperties": true
+}

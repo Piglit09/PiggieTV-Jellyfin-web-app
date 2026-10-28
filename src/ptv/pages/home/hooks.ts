@@ -1,3 +1,8 @@
+import { HomeOwnershipReadBudget } from './homeOwnershipReadBudget';
+import { acceptHomeLibraryAuthority, beginHomeLibraryVerification, getHomeLibraryAuthoritySnapshot,
+    isCurrentHomeUserAccessReady, isHomeUserAccessReadyForIdentity,
+    subscribeHomeLibraryAuthority, retireHomeLibraryAuthority, matchesHomeTopologyClaim,
+    matchesHomeUserAccessClaim, type CurrentHomeTopology } from './homeLibraryTransitionFreshness';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Events from '../../../utils/events';
 
@@ -23,15 +28,24 @@ import {
     type FeaturedPayload
 } from '../../modules/cache/featuredContentCache';
 import {
+    getFeaturedHeroItemsForAccessEpoch,
     getPtvFeaturedPayloadItemIds,
+    hasUnprovedOwnedFeaturedCache,
     reconcilePtvFeaturedPayloadForUser
 } from './featuredPayloadIdentity';
 import {
     createConfiguredRowAssociationResolver,
     type ConfiguredRowAssociationResult
 } from './configuredRowAssociation';
+import {
+    filterOwnedHomeRowInPluginOrder,
+    resolveHomeLibraryOwnershipClaim,
+    type HomeLibraryOwnershipClaim
+} from './homeLibraryOwnership';
+import { createHomeLibraryMembershipAuthority } from './homeLibraryMembership';
 import { summarizeFeaturedContentPayload } from '../../modules/cache/featuredContentSemantics';
 import { getPtvQualityTags } from '../../modules/cards/qualityTags';
+import { normalizePtvRowLibraryScope } from '../../modules/dashboard/rowBuilderImport';
 import type {
     PtvRecommendationScoreDistribution,
     PtvRecommendationSurfaceDebug
@@ -157,6 +171,14 @@ export type NativeHomeRow = {
     renderedButMissingFromRecommendationSettings?: boolean;
     renderedSource?: NativeHomeRenderedRowSource;
     moreUrl?: string;
+    homeOwnershipKind?: 'global' | 'library';
+    homeOwnershipClaimKey?: string;
+    homeOwnershipGeneration?: number;
+    homeOwnershipIdentityKey?: string | null;
+    homeOwnershipRevision?: number;
+    homeLibraryRevision?: number;
+    homeUserAccessEpoch?: string;
+    homeTopologyEpoch?: string;
     rowConfigHash?: string;
     rowType?: NativeHomeRowType;
     ruleId?: string;
@@ -182,6 +204,7 @@ export type NativeHomeState = {
     };
     error: string | null;
     heroItem: PtvItem | null;
+    heroAccessEpoch?: string | null;
     heroItems: PtvItem[];
     independentHeroItems?: PtvItem[];
     configuredHeroAuthorities?: Record<string, string>;
@@ -363,6 +386,7 @@ type PtvRowBuilderRule = {
     id?: string;
     includeSubgenres?: boolean;
     itemLimit?: number;
+    libraryScope?: unknown;
     mediaType?: string;
     name?: string;
     rowCount?: number;
@@ -991,13 +1015,20 @@ function normalizeFeaturedPayloadShape(value: unknown): FeaturedPayload | null {
         return null;
     }
 
+    const heroEpochKeys = Object.keys(value).filter(key => key.toLowerCase() === 'heroaccessepoch');
+    const heroAccessEpoch = heroEpochKeys.length === 1 && heroEpochKeys[0] === 'heroAccessEpoch'
+        && typeof value.heroAccessEpoch === 'string' && /^[a-fA-F0-9]{64}$/.test(value.heroAccessEpoch) ?
+        value.heroAccessEpoch : undefined;
+
     return {
         currentPresentationAuthority: readConfiguredPresentationAuthority(value) || undefined,
+        heroAccessEpoch,
         heroItems: Array.isArray(value.heroItems) ? value.heroItems : [],
         recommendationConfigHash: typeof value.recommendationConfigHash === 'string' && value.recommendationConfigHash.trim() ? value.recommendationConfigHash.trim() : undefined,
         rowConfigApplied: typeof value.rowConfigApplied === 'boolean' ? value.rowConfigApplied : undefined,
         rowConfigHash: typeof value.rowConfigHash === 'string' && value.rowConfigHash.trim() ? value.rowConfigHash.trim() : undefined,
         rowConfigVersion: typeof value.rowConfigVersion === 'number' ? value.rowConfigVersion : undefined,
+        scopeSchemaVersion: typeof value.scopeSchemaVersion === 'number' ? value.scopeSchemaVersion : undefined,
         rowDiagnostics: Array.isArray(value.rowDiagnostics) ? value.rowDiagnostics : [],
         sections,
         sectionItems
@@ -1015,8 +1046,13 @@ function extractFeaturedPayload(value: unknown): FeaturedPayload | null {
     if (payload) return payload;
 
     if (isRecord(value.featuredContent)) {
-        return normalizeFeaturedPayloadShape(value.featuredContent.payload)
-            || normalizeFeaturedPayloadShape(value.featuredContent);
+        const entry = value.featuredContent;
+        const featured = normalizeFeaturedPayloadShape(entry.payload)
+            || normalizeFeaturedPayloadShape(entry);
+        return featured ? {
+            ...featured,
+            homeFeaturedCacheVersion: [8, 9].includes(Number(entry.version)) ? Number(entry.version) : 0
+        } as FeaturedPayload : null;
     }
 
     return null;
@@ -1048,8 +1084,86 @@ function shouldRenderConfiguredRows(settings: PtvRowsEndpointSettings | null) {
     return shouldUseSavedRowRules(settings);
 }
 
+function serializePluginHashString(value: string) {
+    let serialized = '"';
+
+    for (let index = 0; index < value.length; index += 1) {
+        const code = value.charCodeAt(index);
+
+        switch (code) {
+            case 8:
+                serialized += '\\b';
+                break;
+            case 9:
+                serialized += '\\t';
+                break;
+            case 10:
+                serialized += '\\n';
+                break;
+            case 12:
+                serialized += '\\f';
+                break;
+            case 13:
+                serialized += '\\r';
+                break;
+            case 92:
+                serialized += '\\\\';
+                break;
+            default:
+                serialized += code < 32 || code > 126 || '"\'&+<>`'.includes(value[index]) ?
+                    `\\u${code.toString(16).toUpperCase().padStart(4, '0')}` :
+                    value[index];
+        }
+    }
+
+    return `${serialized}"`;
+}
+
+function serializePluginHashValue(value: unknown): string {
+    if (Array.isArray(value)) return `[${value.map(serializePluginHashValue).join(',')}]`;
+    if (isRecord(value)) {
+        // Plugin ToStableJson uses StringComparer.Ordinal, not locale collation.
+        // eslint-disable-next-line sonarjs/no-alphabetical-sort
+        return `{${Object.keys(value).sort()
+            .map(key => `${serializePluginHashString(key)}:${serializePluginHashValue(value[key])}`)
+            .join(',')}}`;
+    }
+    if (typeof value === 'string') return serializePluginHashString(value);
+    return JSON.stringify(value) ?? 'null';
+}
+
+function getPluginRowSettingsHash(value: unknown) {
+    const stableJson = serializePluginHashValue(value);
+    let hash = 5381;
+
+    for (let index = 0; index < stableJson.length; index += 1) {
+        hash = ((hash * 33) + stableJson.charCodeAt(index)) % 2147483647;
+    }
+
+    return String(hash);
+}
+
 export function getRowsEndpointSettingsHash(settings: PtvRowsEndpointSettings | null) {
     if (!settings || !Array.isArray(settings.rules)) return '';
+
+    if (settings.schemaVersion === 3) {
+        if (typeof settings.enabled !== 'boolean'
+            || typeof settings.defaultsInitialized !== 'boolean'
+            || typeof settings.showConfiguredRowsOnHome !== 'boolean'
+            || !Array.isArray(settings.categories)
+            || !settings.rules.every(isRecord)) return '';
+
+        // The Plugin hashes the persisted RowBuilderSettings DTO, not Home's
+        // normalized settings or response-only association metadata.
+        return getPluginRowSettingsHash({
+            schemaVersion: settings.schemaVersion,
+            enabled: settings.enabled,
+            defaultsInitialized: settings.defaultsInitialized,
+            showConfiguredRowsOnHome: settings.showConfiguredRowsOnHome,
+            rules: settings.rules,
+            categories: settings.categories
+        });
+    }
 
     const hashableSettings = {
         ...settings,
@@ -1535,6 +1649,9 @@ function expandNativeHomeStudioRow(
     studioMap: Map<string, string>,
     signal?: AbortSignal
 ): Promise<NativeHomeRow> {
+    // Scoped rows must keep the Plugin's order and the exact proven candidate
+    // set. The global studio expansion has no library membership proof.
+    if (row.homeOwnershipKind === 'library') return Promise.resolve(row);
     const target = getNativeHomeStudioRowTarget(row, studioMap);
 
     if (!target) return Promise.resolve(row);
@@ -1612,7 +1729,8 @@ function createNativeHomeFeaturedRowResults(
     rowSettings: PtvRowsEndpointSettings | null,
     userId: string,
     options: NativeRowFetchOptions,
-    configuredProof?: ConfiguredRowProof | null
+    configuredProof?: ConfiguredRowProof | null,
+    allowRestrictedOwnedEndpoint = false
 ) {
     const createResults = (studioMap: Map<string, string>) => ({
         cachedRowsResult: createRowsFromFeaturedPayload(featuredPayload, {
@@ -1625,7 +1743,8 @@ function createNativeHomeFeaturedRowResults(
             configuredProof,
             rowSettings,
             source: 'featured-endpoint',
-            studioMap
+            studioMap,
+            restrictedOwnedEndpoint: allowRestrictedOwnedEndpoint && !rowSettings
         }),
         studioMap
     });
@@ -1664,6 +1783,14 @@ function getMatchingRowRule(
 
 function hasUsableFeaturedPayload(payload: FeaturedPayload | null) {
     return Boolean(payload && summarizeFeaturedContentPayload(payload).usableForDisplay);
+}
+
+function canUseFeaturedCacheForHome(payload: FeaturedPayload | null,
+    rowSettings: PtvRowsEndpointSettings | null, configuredProof: ConfiguredRowProof | null,
+    hasUnprovedOwnedCache: boolean, topology: CurrentHomeTopology | null) {
+    return hasUsableFeaturedPayload(payload)
+        && isFeaturedPayloadCurrentForRows(payload, rowSettings, configuredProof)
+        && !(hasUnprovedOwnedCache && topology);
 }
 
 function mergeSkippedRows(...groups: NativeHomeSkippedRow[][]) {
@@ -2310,15 +2437,60 @@ function getNativeHomeDisplayIdentity(): NativeHomeDisplayIdentity {
     };
 }
 
+function getUnprovenOwnedHeroIds(
+    sourceRows: NativeHomeRow[],
+    retainedRows: NativeHomeRow[],
+    independentHeroItems: PtvItem[] = [],
+    includeUnclassifiedConfigured = false
+) {
+    const independentIds = new Set<string>();
+    independentHeroItems.forEach(item => {
+        if (item.Id) independentIds.add(item.Id);
+    });
+    retainedRows.forEach(row => {
+        row.items.forEach(item => {
+            if (item.Id) independentIds.add(item.Id);
+        });
+    });
+    const unprovenIds = new Set<string>();
+    sourceRows.forEach(row => {
+        if (row.homeOwnershipKind !== 'library'
+            && !(includeUnclassifiedConfigured && row.rowType === 'configured-rule' && row.homeOwnershipKind !== 'global')) return;
+        row.items.forEach(item => {
+            if (item.Id && !independentIds.has(item.Id)) unprovenIds.add(item.Id);
+        });
+    });
+    return unprovenIds;
+}
+
 export function retainCurrentNativeHomePresentation(state: NativeHomeState, identityKey?: string | null): NativeHomeState {
+    const freshness = getConfiguredRowFreshnessSnapshot();
+    const library = getHomeLibraryAuthoritySnapshot();
+    const isCurrentRow = (row: NativeHomeRow) => row.homeOwnershipKind === 'library'
+        && !row.configuredPresentationAuthority ?
+        row.source === 'featured-endpoint'
+            && row.homeOwnershipGeneration === nativeHomeRouteGeneration
+            && row.homeOwnershipIdentityKey === identityKey
+            && row.homeOwnershipRevision === freshness.revision :
+        isConfiguredRowPresentationCurrent(row, identityKey);
     const rows = state.rows.map(row => {
         // This exact live Jellyfin Resume owner has independent user authorization.
         // Retire its configured label/association without discarding playback progress.
-        if (row.source !== 'resume' || row.id !== 'resume' || isConfiguredRowPresentationCurrent(row, identityKey)) return row;
+        if (row.source !== 'resume' || row.id !== 'resume' || isCurrentRow(row)) return row;
         return { ...row, configuredPresentationAuthority: undefined, ruleId: undefined, sourceRuleId: undefined,
             rowType: 'fallback' as const, renderedSource: 'fallback' as const, sourceType: undefined,
             sourceGroupId: 'jellyfin-defaults', title: 'Continue Watching', subtitle: 'Pick up where you left off' };
-    }).filter(row => isConfiguredRowPresentationCurrent(row, identityKey));
+    }).filter(row => isCurrentRow(row)
+        && (row.source !== 'featured-cache' && row.source !== 'featured-endpoint'
+            || library.identityKey === identityKey && row.homeLibraryRevision === library.revision
+                && isHomeUserAccessReadyForIdentity({ currentHomeUserAccess: library.userAccess }, identityKey || null)
+                && row.homeUserAccessEpoch === library.userAccess?.accessEpoch)
+        && (row.homeOwnershipKind !== 'library' || row.homeOwnershipRevision === freshness.revision
+            && row.homeLibraryRevision === library.revision && row.homeOwnershipIdentityKey === identityKey
+            && row.homeOwnershipGeneration === nativeHomeRouteGeneration
+            && library.identityKey === identityKey && !!library.topology && !library.topology.held
+            && row.homeTopologyEpoch === library.topology.epoch));
+    const unprovenOwnedHeroIds = getUnprovenOwnedHeroIds(state.rows, rows, state.independentHeroItems || []);
     const independentIds = new Set((state.independentHeroItems || []).map(item => item.Id));
     rows.filter(row => !row.configuredPresentationAuthority).forEach(row => {
         row.items.forEach(item => {
@@ -2333,12 +2505,18 @@ export function retainCurrentNativeHomePresentation(state: NativeHomeState, iden
             });
         }
     });
-    const heroIsCurrent = (item: PtvItem) => !item.Id || independentIds.has(item.Id)
+    const heroIsCurrent = (item: PtvItem) => (!item.Id || !unprovenOwnedHeroIds.has(item.Id))
+        && (!item.Id || independentIds.has(item.Id)
         || !configuredHeroAuthorities[item.Id] || isConfiguredRowPresentationCurrent({
-        rowType: 'configured-rule', configuredPresentationAuthority: configuredHeroAuthorities[item.Id]
-    }, identityKey);
-    const heroItems = state.heroItems.filter(heroIsCurrent);
-    const heroItem = state.heroItem && heroIsCurrent(state.heroItem) ? state.heroItem : heroItems[0] || null;
+            rowType: 'configured-rule', configuredPresentationAuthority: configuredHeroAuthorities[item.Id]
+        }, identityKey));
+    const heroAuthorityCurrent = library.identityKey === identityKey && !!library.topology
+        && !library.topology.held && !!library.userAccess?.accessEpoch
+        && !library.userAccess.held && library.userAccess.policyProven
+        && state.heroAccessEpoch === library.userAccess.accessEpoch;
+    const heroItems = heroAuthorityCurrent ? state.heroItems.filter(heroIsCurrent) : [];
+    const heroItem = heroAuthorityCurrent && state.heroItem && heroIsCurrent(state.heroItem) ?
+        state.heroItem : heroItems[0] || null;
     const retainedHeroIds = new Set([...heroItems, ...(heroItem ? [heroItem] : [])].map(item => item.Id));
     Object.keys(configuredHeroAuthorities).forEach(id => {
         if (!retainedHeroIds.has(id) || independentIds.has(id)) delete configuredHeroAuthorities[id];
@@ -2366,7 +2544,25 @@ function rememberUsableNativeHomeState(
 
 function getLastUsableNativeHomeState(identity: NativeHomeDisplayIdentity) {
     const state = lastUsableNativeHomeStates.get(identity.serverId, identity.userId);
-    return state ? retainCurrentNativeHomePresentation(state, getPtvDisplayIdentityKey(identity.serverId, identity.userId)) : null;
+    if (!state) return null;
+    const current = retainCurrentNativeHomePresentation(state, getPtvDisplayIdentityKey(identity.serverId, identity.userId));
+    const rows = current.rows.filter(row => row.homeOwnershipKind !== 'library'
+        && (row.rowType !== 'configured-rule' || row.homeOwnershipKind === 'global'));
+    const unprovenHeroIds = getUnprovenOwnedHeroIds(state.rows, rows, current.independentHeroItems || [], true);
+    const heroItems = current.heroItems.filter(item => !item.Id || !unprovenHeroIds.has(item.Id));
+    const heroItem = current.heroItem && (!current.heroItem.Id || !unprovenHeroIds.has(current.heroItem.Id)) ?
+        current.heroItem : heroItems[0] || null;
+    return {
+        ...current,
+        heroItem,
+        heroItems,
+        independentHeroItems: current.independentHeroItems?.filter(item => !item.Id || !unprovenHeroIds.has(item.Id)),
+        rows
+    };
+}
+
+function shouldUseCachedHomeRowsWithoutFreshEndpoint(hasFeaturedCache: boolean, user: PtvUser) {
+    return hasFeaturedCache && isPtvAdminUser(user);
 }
 
 function getAdaptiveNativeHomeLayout(
@@ -2722,6 +2918,79 @@ function getFeaturedRecommendationCacheAcceptance(
     };
 }
 
+const HOME_SCOPE_ID = /^[0-9a-f]{32}$/;
+const HOME_ASSOCIATION_TOKEN = /^[0-9a-f]{64}$/;
+
+function getRestrictedHomeStructuralScope(mediaType: unknown) {
+    if (mediaType === 'movies') return { expectedCollectionType: 'movies' as const, structuralTypes: [ 'Movie' as const ] };
+    if (mediaType === 'music') return { expectedCollectionType: 'music' as const, structuralTypes: [ 'MusicAlbum' as const ] };
+    if (mediaType === 'shows' || mediaType === 'anime' || mediaType === 'cartoons') {
+        return { expectedCollectionType: 'tvshows' as const, structuralTypes: [ 'Series' as const ] };
+    }
+    return null;
+}
+
+function isLegacyUnscopedGlobalSection(
+    settings: PtvRowsEndpointSettings,
+    rule: PtvRowBuilderRule,
+    section: Record<string, unknown>,
+    payload: FeaturedPayload
+) {
+    const schemaVersion = settings.schemaVersion;
+    return typeof schemaVersion === 'number' && schemaVersion < 3
+        && payload.scopeSchemaVersion == null && (payload.rowConfigVersion == null || payload.rowConfigVersion < 3)
+        && !rule.libraryScope
+        && normalizePtvRowLibraryScope(rule as Record<string, unknown>, schemaVersion).mode === 'global'
+        && rule.sourceType !== 'library' && section.sourceType !== 'library'
+        && section.scopeType == null && section.libraryId == null
+        && section.bindingKey == null && section.resolvedScopeHash == null;
+}
+
+// Restricted users cannot read Row Builder settings. A current, authenticated
+// v9 Featured response supplies their section scope claim; fresh topology and membership
+// is still proved independently before this row can reach Home state.
+function resolveRestrictedFreshOwnedClaim(
+    payload: FeaturedPayload | null,
+    section: unknown,
+    sectionId: string,
+    topology: CurrentHomeTopology | null = null
+): HomeLibraryOwnershipClaim {
+    const source = isRecord(section) ? section : null;
+    const marker = isRecord(source?.configuredRowAssociation) ? source.configuredRowAssociation : null;
+    const authority = isRecord(payload?.currentPresentationAuthority) ? payload.currentPresentationAuthority : null;
+    const version = isRecord(payload) ? (payload as Record<string, unknown>).homeFeaturedCacheVersion : undefined;
+    const libraryId = source?.libraryId;
+    const mediaType = source?.mediaType;
+    const redactedProjection = source?.source === 'authorized'
+        && source.sourceRuleId == null && source.ruleId == null && source.rowConfigHash == null;
+    const fullProjection = typeof source?.source === 'string' && Boolean(source.source.trim())
+        && typeof source.sourceRuleId === 'string' && Boolean(source.sourceRuleId.trim())
+        && source.ruleId === source.sourceRuleId
+        && source.rowConfigHash === payload?.rowConfigHash;
+    const structural = getRestrictedHomeStructuralScope(mediaType);
+    if (version !== 9 || payload?.scopeSchemaVersion !== 2 || payload.rowConfigVersion !== 3
+        || !payload.rowConfigHash || !source || source.id !== sectionId
+        || source.rowType !== 'configured-rule' || (!redactedProjection && !fullProjection)
+        || typeof source.sourceType !== 'string' || !source.sourceType.trim()
+        || source.scopeType !== 'library' || typeof libraryId !== 'string' || !HOME_SCOPE_ID.test(libraryId)
+        || !structural || typeof source.resolvedScopeHash !== 'string'
+        || !/^\d+$/.test(source.resolvedScopeHash)
+        || source.rowConfigHash != null && source.rowConfigHash !== payload.rowConfigHash
+        || !authority || Object.keys(authority).length !== 3 || authority.version !== 1
+        || !HOME_ASSOCIATION_TOKEN.test(String(authority.scope))
+        || !HOME_ASSOCIATION_TOKEN.test(String(authority.generation))
+        || !marker || Object.keys(marker).length !== 4 || marker.version !== 1
+        || !HOME_ASSOCIATION_TOKEN.test(String(marker.scope))
+        || marker.scope !== authority.scope
+        || !HOME_ASSOCIATION_TOKEN.test(String(marker.rule))
+        || !HOME_ASSOCIATION_TOKEN.test(String(marker.section))) {
+        return { kind: 'rejected', reason: 'home-scope-unresolved' };
+    }
+    if (topology && !matchesHomeTopologyClaim(source, topology)) return { kind: 'rejected', reason: 'home-topology-unproven' };
+    return { kind: 'library', libraryId, ruleId: typeof source.sourceRuleId === 'string' ?
+        source.sourceRuleId : marker.rule as string, sectionId, ...structural };
+}
+
 export function createRowsFromFeaturedPayload(
     payload: FeaturedPayload | null,
     options: {
@@ -2729,6 +2998,7 @@ export function createRowsFromFeaturedPayload(
         rowSettings?: PtvRowsEndpointSettings | null;
         source?: Extract<NativeHomeRowSource, 'featured-cache' | 'featured-endpoint'>;
         studioMap?: Map<string, string> | null;
+        restrictedOwnedEndpoint?: boolean;
     } = {}
 ): NativeHomeFeaturedRowsResult {
     if (!payload?.sectionItems) {
@@ -2867,6 +3137,10 @@ export function createRowsFromFeaturedPayload(
         const ruleKey = toLookupKey(ruleId);
         const parentRuleKey = toLookupKey(parentRuleId);
         const enabledRule = getMatchingRowRule(enabledRules, ruleId);
+        const restrictedOwned = options.restrictedOwnedEndpoint === true
+            && options.source === 'featured-endpoint'
+            && !rowSettings
+            && resolveRestrictedFreshOwnedClaim(payload, section, sectionId).kind === 'library';
         const skipRow = (reason: string, skippedRuleId = ruleId || parentRuleId) => {
             const rowType = getSectionRowType(section);
             const rowItems = getFeaturedSectionItems(payload, entry);
@@ -2894,17 +3168,17 @@ export function createRowsFromFeaturedPayload(
             return accepted;
         }
 
-        if (rowType === 'configured-rule' && !configuredRowsEnabled) {
+        if (rowType === 'configured-rule' && !configuredRowsEnabled && !restrictedOwned) {
             skipRow('configured-row-home-output-disabled');
             return accepted;
         }
 
-        if (association?.kind === 'rejected') {
+        if (association?.kind === 'rejected' && !restrictedOwned) {
             skipRow(association.reason);
             return accepted;
         }
 
-        if (rowType === 'configured-rule' && (association?.kind !== 'matched'
+        if (rowType === 'configured-rule' && !restrictedOwned && (association?.kind !== 'matched'
             || !isConfiguredPayloadVerified(payload, options.configuredProof)
             || !isConfiguredSectionVerified(section, options.configuredProof))) {
             skipRow('configured-authority-unverified');
@@ -2940,7 +3214,7 @@ export function createRowsFromFeaturedPayload(
         }
 
         if (!canValidateConfiguredRows) {
-            if (rowType === 'configured-rule') {
+            if (rowType === 'configured-rule' && !restrictedOwned) {
                 skipRow('configured-row-requires-current-row-builder-settings');
                 return accepted;
             }
@@ -3617,7 +3891,8 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
         currentDisplayIdentity.serverId,
         currentDisplayIdentity.userId
     );
-    useSyncExternalStore(subscribeConfiguredRowFreshness, getConfiguredRowFreshnessSnapshot);
+    const librarySnapshot = useSyncExternalStore(subscribeHomeLibraryAuthority, getHomeLibraryAuthoritySnapshot);
+    const presentationSnapshot = useSyncExternalStore(subscribeConfiguredRowFreshness, getConfiguredRowFreshnessSnapshot);
     const [state, setStoredState] = useState<NativeHomeState>({
         debug: {
             home: getEmptyNativeHomeAdaptiveDebug(),
@@ -3643,6 +3918,9 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
     useEffect(() => {
         setStateIdentityKey(currentDisplayIdentityKey);
         const generation = ++nativeHomeRouteGeneration;
+        const libraryRevision = beginHomeLibraryVerification(currentDisplayIdentityKey);
+        const ownershipBudget = new HomeOwnershipReadBudget();
+        let currentHomeTopology: CurrentHomeTopology | null = null;
         const displayIdentity = getNativeHomeDisplayIdentity();
         const routeAbortController = createPtvAbortController();
         let configuredVerification = beginConfiguredRowVerification(currentDisplayIdentityKey);
@@ -3674,6 +3952,177 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 && generation === nativeHomeRouteGeneration
                 && currentIdentity.serverId === displayIdentity.serverId
                 && currentIdentity.userId === displayIdentity.userId;
+        };
+        const currentHeroAccessEpoch = () => {
+            const authority = getHomeLibraryAuthoritySnapshot();
+            return isRouteWorkCurrent() && currentHomeTopology && authority.revision === libraryRevision
+                && authority.identityKey === currentDisplayIdentityKey && authority.topology
+                && !authority.topology.held && authority.topology.epoch === currentHomeTopology.epoch
+                && isCurrentHomeUserAccessReady(authority.userAccess || null, displayIdentity.userId) ?
+                authority.userAccess?.accessEpoch || null : null;
+        };
+        const membershipAuthority = createHomeLibraryMembershipAuthority({
+            serverId: displayIdentity.serverId,
+            userId: displayIdentity.userId,
+            generation,
+            signal: routeAbortController.signal,
+            budget: ownershipBudget,
+            isCurrent: () => isRouteWorkCurrent() && getHomeLibraryAuthoritySnapshot().revision === libraryRevision
+        });
+        const unsubscribeLibrary = subscribeHomeLibraryAuthority(() => {
+            if (getHomeLibraryAuthoritySnapshot().revision !== libraryRevision) membershipAuthority.retire('library-transition');
+        });
+        const ownershipDiagnostics = new Set<string>();
+        const filterPreviousOwnedRows = (previousRows: NativeHomeRow[], incomingRows: NativeHomeRow[]) => {
+            const currentlyProven = new Map(incomingRows
+                .filter(row => row.homeOwnershipKind === 'library'
+                    && row.homeOwnershipGeneration === generation && row.items.length > 0
+                    && row.homeOwnershipClaimKey)
+                .map(row => [ row.id, row.homeOwnershipClaimKey ]));
+            return previousRows.filter(row => row.homeOwnershipKind !== 'library'
+                || Boolean(row.homeOwnershipClaimKey
+                    && currentlyProven.get(row.id) === row.homeOwnershipClaimKey));
+        };
+        const mergeVerifiedHomeRows = (previousRows: NativeHomeRow[], incomingRows: NativeHomeRow[]) =>
+            mergeSettledNativeHomeRows(filterPreviousOwnedRows(previousRows, incomingRows), incomingRows);
+        const gateFeaturedRows = async (
+            featured: FeaturedPayload | null,
+            settings: PtvRowsEndpointSettings | null,
+            candidate: NativeHomeFeaturedRowsResult,
+            source: 'featured-cache' | 'featured-endpoint',
+            allowRestrictedOwnedEndpoint = false,
+            configuredProof: ConfiguredRowProof | null = null
+        ): Promise<NativeHomeFeaturedRowsResult> => {
+            if (!featured || !candidate.rows.length) return candidate;
+            const featuredAuthority = getHomeLibraryAuthoritySnapshot();
+            if (featuredAuthority.revision !== libraryRevision
+                || featuredAuthority.identityKey !== currentDisplayIdentityKey
+                || !isCurrentHomeUserAccessReady(featuredAuthority.userAccess || null, displayIdentity.userId)) {
+                return { ...candidate, rows: [] };
+            }
+            const userAccessEpoch = featuredAuthority.userAccess!.accessEpoch!;
+            const sections = Array.isArray(featured.sections) ? featured.sections : [];
+            const featuredVersion = source === 'featured-cache' ?
+                Number((featured as FeaturedPayload & { homeFeaturedCacheVersion?: number }).homeFeaturedCacheVersion
+                    ?? getFeaturedContentCacheStatus().cacheVersion) :
+                Number((featured as FeaturedPayload & { homeFeaturedCacheVersion?: number }).homeFeaturedCacheVersion);
+            const associationResolver = createConfiguredRowAssociationResolver(settings, sections);
+            const skippedRows = [ ...candidate.skippedRows ];
+            const rejectRow = (row: NativeHomeRow, reason: string) => {
+                skippedRows.push({ id: row.id, itemCount: row.items.length, reason,
+                    rowType: row.rowType, ruleId: row.ruleId, sourceCacheSectionId: row.sourceCacheSectionId,
+                    title: row.title });
+                const key = `${row.id}:${reason}`;
+                if (!ownershipDiagnostics.has(key)) {
+                    ownershipDiagnostics.add(key);
+                    recordPtvEvent('row-fetch', reason, {
+                        ruleId: row.ruleId || null,
+                        sectionId: row.sourceCacheSectionId || null
+                    });
+                }
+                return null;
+            };
+            // Association, current scope, and user membership all belong to one adoption boundary.
+            // eslint-disable-next-line sonarjs/cognitive-complexity
+            const rows = await Promise.all(candidate.rows.map(async (row): Promise<NativeHomeRow | null> => {
+                const sectionId = row.sourceCacheSectionId || '';
+                let matchingSection: unknown = null;
+                let matchingSectionCount = 0;
+                for (const currentSection of sections) {
+                    if (getSectionId(currentSection) === sectionId) {
+                        matchingSection = currentSection;
+                        matchingSectionCount += 1;
+                    }
+                }
+                const section = matchingSectionCount === 1 ? matchingSection : null;
+                if (matchingSectionCount > 1) return rejectRow(row, 'home-poisoned-payload-rejected');
+                const sectionRecord = isRecord(section) ? section : null;
+                if (!sectionRecord) return rejectRow(row, 'home-poisoned-payload-rejected');
+                if (row.rowType !== 'configured-rule') {
+                    const scopedPayload = featuredVersion >= 8 || Number(featured.scopeSchemaVersion) >= 1;
+                    if (sectionRecord.scopeType === 'library' || sectionRecord.sourceType === 'library'
+                        || sectionRecord.libraryId != null || sectionRecord.bindingKey != null
+                        || sectionRecord.topologyEpoch != null || sectionRecord.bindingGeneration != null
+                        || sectionRecord.resolvedScopeHash != null || sectionRecord.configuredRowAssociation != null
+                        || sectionRecord.sourceRuleId != null || sectionRecord.ruleId != null
+                        || scopedPayload && row.rowType === 'fallback'
+                            && (![1, 2].includes(Number(featured.scopeSchemaVersion)) || sectionRecord.scopeType !== 'global')
+                        || scopedPayload && row.rowType === 'generated-recommendation'
+                            && sectionRecord.sourceType !== 'recommendation') {
+                        return rejectRow(row, 'home-poisoned-payload-rejected');
+                    }
+                    return { ...row, homeUserAccessEpoch: userAccessEpoch, homeLibraryRevision: libraryRevision };
+                }
+
+                let claim: HomeLibraryOwnershipClaim;
+                if (!settings) {
+                    claim = source === 'featured-endpoint' && allowRestrictedOwnedEndpoint ?
+                        resolveRestrictedFreshOwnedClaim(featured, section, sectionId, currentHomeTopology) :
+                        { kind: 'rejected', reason: 'home-scope-unresolved' };
+                } else {
+                    const rule = getMatchingRowRule(settings.rules || [], row.ruleId || '');
+                    if (!rule) return rejectRow(row, 'home-scope-unresolved');
+                    // Existing explicitly global rows from pre-scope settings retain
+                    // their ordinary Home behavior while current schema-3 claims use
+                    // the strict config/section association matcher.
+                    if (isLegacyUnscopedGlobalSection(settings, rule, sectionRecord, featured)) {
+                        claim = { kind: 'global', ruleId: rule.id || '', sectionId };
+                    } else {
+                        claim = resolveHomeLibraryOwnershipClaim({
+                            rule,
+                            section,
+                            sectionId,
+                            payload: featured,
+                            association: associationResolver.resolve(section),
+                            expectedRowConfigHash: getRowsEndpointSettingsHash(settings),
+                            currentHomeTopology,
+                            currentHomeUserAccess: getHomeLibraryAuthoritySnapshot().userAccess,
+                            currentHomeUserId: displayIdentity.userId,
+                            configuredProof,
+                            featuredCacheVersion: featuredVersion
+                        });
+                    }
+                }
+                if (claim.kind === 'rejected') return rejectRow(row, claim.reason);
+                if (claim.kind === 'global') {
+                    return { ...row, homeOwnershipKind: 'global' as const,
+                        homeUserAccessEpoch: userAccessEpoch, homeLibraryRevision: libraryRevision };
+                }
+                const currentAuthority = getHomeLibraryAuthoritySnapshot();
+                if (!currentHomeTopology || !matchesHomeTopologyClaim(sectionRecord, currentHomeTopology)
+                    || !matchesHomeUserAccessClaim(sectionRecord, currentAuthority.userAccess || null, displayIdentity.userId)
+                    || currentAuthority.revision !== libraryRevision) return rejectRow(row, 'home-topology-unproven');
+                const candidateIds: string[] = [];
+                for (const item of row.items) candidateIds.push(item.Id || '');
+                const proofRevision = getConfiguredRowFreshnessSnapshot().revision;
+                const proof = await membershipAuthority.prove(claim, candidateIds);
+                if (!isRouteWorkCurrent() || getHomeLibraryAuthoritySnapshot().revision !== libraryRevision
+                    || getConfiguredRowFreshnessSnapshot().revision !== proofRevision
+                    || proof.status === 'rejected') {
+                    return rejectRow(row, proof.reason || 'home-verification-route-retired');
+                }
+                const items = filterOwnedHomeRowInPluginOrder(claim, row.items, proof.provenIds);
+                if (!items.length) return rejectRow(row, 'home-membership-unresolved');
+                const sectionScopeHash = sectionRecord?.resolvedScopeHash;
+                const presentation = isRecord(featured.currentPresentationAuthority) ?
+                    featured.currentPresentationAuthority : null;
+                const claimKey = [ displayIdentity.serverId, displayIdentity.userId, claim.libraryId,
+                    claim.ruleId, claim.sectionId, featured.rowConfigHash, sectionScopeHash,
+                    featured.rowConfigVersion, featured.scopeSchemaVersion, source,
+                    presentation?.generation || generation ].join('|');
+                return { ...row, items, homeOwnershipKind: 'library' as const,
+                    homeOwnershipClaimKey: `${claimKey}|${currentHomeTopology.epoch}|${currentAuthority.userAccess?.accessEpoch}|${sectionRecord.bindingGeneration}`,
+                    homeLibraryRevision: libraryRevision,
+                    homeUserAccessEpoch: userAccessEpoch,
+                    homeTopologyEpoch: currentHomeTopology.epoch,
+                    homeOwnershipGeneration: generation,
+                    homeOwnershipIdentityKey: currentDisplayIdentityKey,
+                    homeOwnershipRevision: getConfiguredRowFreshnessSnapshot().revision };
+            }));
+            return {
+                rows: isRouteWorkCurrent() ? rows.filter((row): row is NativeHomeRow => Boolean(row)) : [],
+                skippedRows
+            };
         };
         const startedAt = performance.now();
         const recordTimeline = (
@@ -3937,7 +4386,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                                     insertNativeHomeRecommendationRows(mergedRows, existingRecommendationRows) :
                                     orderFocusedNativeHomeRows(mergedRows);
                                 const adaptiveSupplemental = getAdaptiveNativeHomeLayout(rowsWithRecommendations, user, performance.now());
-                                const adaptiveRows = mergeSettledNativeHomeRows(
+                                const adaptiveRows = mergeVerifiedHomeRows(
                                     previous.rows,
                                     adaptiveSupplemental.rows
                                 );
@@ -4018,11 +4467,11 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 return false;
             }
 
-            const cacheRowsResult = createRowsFromFeaturedPayload(featuredPayload, {
+            const cacheRowsResult = await gateFeaturedRows(featuredPayload, rowSettings, createRowsFromFeaturedPayload(featuredPayload, {
                 configuredProof: options.configuredProof,
                 rowSettings: cacheOnly ? null : rowSettings,
                 source: 'featured-cache'
-            });
+            }), 'featured-cache', false, options.configuredProof);
             const settingsRecommendationRows = cacheOnly ? [] : createUserSpecificRecommendationRows(rowSettings);
 
             if (!isRouteWorkCurrent() || renderedFromCache) return false;
@@ -4061,7 +4510,9 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 'native-home-because-watched-candidates'
             ]);
 
-            const preferredHeroItems = getItems(featuredPayload?.heroItems as PtvItem[] | undefined);
+            const heroAccessEpoch = currentHeroAccessEpoch();
+            const preferredHeroItems = getItems(getFeaturedHeroItemsForAccessEpoch(
+                featuredPayload, heroAccessEpoch) as PtvItem[]);
             const fallbackHeroItems = getUsableHeroItemsFromRows(adaptiveCacheRows);
             const heroItems = buildNativeHomeHeroItems(preferredHeroItems, fallbackHeroItems);
             const heroItem = heroItems[0] || firstUsableHeroItem(adaptiveCacheRows);
@@ -4133,6 +4584,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 },
                 error: null,
                 heroItem,
+                heroAccessEpoch,
                 heroItems,
                 independentHeroItems: preferredHeroItems,
                 isLoading: false,
@@ -4156,7 +4608,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
         });
         const featuredPayloadPromise = createNativeRowFetch(
             'native-home-featured-cache',
-            () => getCachedFeaturedContentPayload({ allowStale: true }),
+            () => getCachedFeaturedContentPayload({ allowStale: true, homeVerificationCandidates: true }),
             null,
             getFetchOptions(NATIVE_HOME_FEATURED_ADOPTION_TIMEOUT_MS)
         );
@@ -4198,13 +4650,19 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
             getFetchOptions(NATIVE_HOME_FEATURED_ADOPTION_TIMEOUT_MS)
         );
 
-        const verifyConfiguredInputs = (rowSettings: PtvRowsEndpointSettings | null, featuredPayload: FeaturedPayload | null) => {
+        const verifyConfiguredInputs = async (rowSettings: PtvRowsEndpointSettings | null, featuredPayload: FeaturedPayload | null, endpoint = false) => {
+            if (!featuredPayload || !rowSettings && !endpoint) return null;
             const verification = configuredVerification;
+            if (!isRouteWorkCurrent()
+                || !ownershipBudget.reserve(currentHomeTopology ? 'recheck' : 'status')) return null;
+            const status = await createNativeRowFetch('native-home-configured-authority', readNativeHomeConfiguredAuthority,
+                null, getFetchOptions(NATIVE_HOME_CRITICAL_FETCH_TIMEOUT_MS));
+            if (!isRouteWorkCurrent()) return null;
+            currentHomeTopology = acceptHomeLibraryAuthority(status, libraryRevision, currentDisplayIdentityKey);
             return verifyConfiguredRowFreshness({
                 verification, settings: rowSettings, featured: featuredPayload,
                 isCurrent: isRouteWorkCurrent,
-                readAuthority: () => createNativeRowFetch('native-home-configured-authority', readNativeHomeConfiguredAuthority,
-                    null, getFetchOptions(NATIVE_HOME_CRITICAL_FETCH_TIMEOUT_MS))
+                readAuthority: () => Promise.resolve(status)
             });
         };
         // Both input reads finish before this independent, non-coalesced final authority read starts.
@@ -4257,11 +4715,15 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 }
 
                 const userId = user.Id;
+                const restrictedUser = !isPtvAdminUser(user);
                 const { rowSettings, featuredPayload, configuredProof: cachedConfiguredProof } = await configuredInputsPromise;
                 let configuredProof = cachedConfiguredProof;
                 const savedRowRulesActive = shouldRenderConfiguredRows(rowSettings);
-                const hasFeaturedCache = hasUsableFeaturedPayload(featuredPayload)
-                    && isFeaturedPayloadCurrentForRows(featuredPayload, rowSettings, configuredProof);
+                const currentAccess = getHomeLibraryAuthoritySnapshot().userAccess || null;
+                const hasUnprovedOwnedCache = hasUnprovedOwnedFeaturedCache(
+                    featuredPayload, currentAccess, displayIdentity.userId);
+                const hasFeaturedCache = canUseFeaturedCacheForHome(featuredPayload, rowSettings,
+                    configuredProof, hasUnprovedOwnedCache, currentHomeTopology);
                 let featuredEndpointPayload: FeaturedPayload | null = null;
                 let resumeResult: { Items?: PtvItem[] } | PtvItem[];
                 let continueReadingResult: { Items?: PtvItem[] } | PtvItem[] = { Items: [] };
@@ -4271,7 +4733,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
 
                 recordFeaturedPayloadShape(featuredPayload);
 
-                if (hasFeaturedCache) {
+                if (shouldUseCachedHomeRowsWithoutFreshEndpoint(hasFeaturedCache, user)) {
                     skipFallbackFetches([
                         'native-home-featured-endpoint',
                         'native-home-hero-fallback',
@@ -4321,7 +4783,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                     );
                     if (isRouteWorkCurrent()) {
                         configuredVerification = beginConfiguredRowVerification(currentDisplayIdentityKey);
-                        configuredProof = await verifyConfiguredInputs(rowSettings, featuredEndpointPayload);
+                        configuredProof = await verifyConfiguredInputs(rowSettings, featuredEndpointPayload, true);
                     }
                 }
 
@@ -4352,26 +4814,34 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                     rowSettings,
                     userId,
                     getFetchOptions(NATIVE_HOME_SUPPLEMENTAL_FETCH_TIMEOUT_MS),
-                    configuredProof
+                    configuredProof,
+                    restrictedUser
                 );
-                const preferVerifiedEndpoint = isConfiguredPayloadVerified(featuredEndpointPayload, configuredProof)
+                const [verifiedCachedRowsResult, verifiedEndpointRowsResult] = await Promise.all([
+                    gateFeaturedRows(featuredPayload, rowSettings, cachedRowsResult, 'featured-cache', false, configuredProof),
+                    gateFeaturedRows(featuredEndpointPayload, rowSettings, endpointRowsResult, 'featured-endpoint', restrictedUser, configuredProof)
+                ]);
+                const preferVerifiedEndpoint = hasUnprovedOwnedCache
+                    && verifiedEndpointRowsResult.rows.some(row => row.homeOwnershipKind === 'library')
+                    || isConfiguredPayloadVerified(featuredEndpointPayload, configuredProof)
                     && !isConfiguredPayloadVerified(featuredPayload, configuredProof);
-                const preferredFeaturedRowsResult = !preferVerifiedEndpoint && cachedRowsResult.rows.length ?
-                    cachedRowsResult :
-                    endpointRowsResult;
+                const preferFreshRestrictedEndpoint = restrictedUser && !rowSettings
+                    && verifiedEndpointRowsResult.rows.some(row => row.homeOwnershipKind === 'library');
+                const preferredFeaturedRowsResult = !preferVerifiedEndpoint && !preferFreshRestrictedEndpoint
+                    && verifiedCachedRowsResult.rows.length ?
+                    verifiedCachedRowsResult :
+                    verifiedEndpointRowsResult;
                 const cachedRows = await expandNativeHomeStudioRows(
                     orderFocusedNativeHomeRows(preferredFeaturedRowsResult.rows),
                     userId,
                     studioMap,
                     routeAbortController.signal
                 );
-                const preferredHeroItems = getItems(
-                    (
-                        featuredPayload?.heroItems?.length ?
-                            featuredPayload.heroItems :
-                            featuredEndpointPayload?.heroItems
-                    ) as PtvItem[] | undefined
-                );
+                const featuredHeroAccessEpoch = currentHeroAccessEpoch();
+                const cachedHeroItems = getFeaturedHeroItemsForAccessEpoch(featuredPayload, featuredHeroAccessEpoch);
+                const endpointHeroItems = getFeaturedHeroItemsForAccessEpoch(
+                    featuredEndpointPayload, featuredHeroAccessEpoch);
+                const preferredHeroItems = getItems((cachedHeroItems.length ? cachedHeroItems : endpointHeroItems) as PtvItem[]);
                 const userRecommendationRows = await hydrateNativeHomeRecommendationItems(
                     createUserSpecificRecommendationRows(rowSettings),
                     {
@@ -4388,14 +4858,15 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 });
 
                 return {
-                    cacheUsedForHero: Boolean(featuredPayload?.heroItems?.length),
-                    cacheUsedForRows: cachedRowsResult.rows.length > 0,
+                    cacheUsedForHero: cachedHeroItems.length > 0,
+                    cacheUsedForRows: verifiedCachedRowsResult.rows.length > 0,
                     cachedRows,
                     cachedSectionCount: getFeaturedSectionCount(featuredPayload),
                     customConfiguredRowCount: getCustomConfiguredRowCount(rowSettings),
-                    featuredEndpointRows: endpointRowsResult.rows,
+                    featuredEndpointRows: verifiedEndpointRowsResult.rows,
                     featuredEndpointSectionCount: getFeaturedSectionCount(featuredEndpointPayload),
                     featuredHeroItems: preferredHeroItems,
+                    featuredHeroAccessEpoch,
                     heroItems: getItems(heroResult),
                     continueListeningItems: getItems(continueListeningResult),
                     continueReadingItems: getItems(continueReadingResult),
@@ -4443,7 +4914,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                         shouldLoadSupplementalRows: payload.shouldLoadSupplementalRows
                     });
                     setState(previous => {
-                        const settledRows = mergeSettledNativeHomeRows(
+                        const settledRows = mergeVerifiedHomeRows(
                             previous.rows,
                             adaptiveBackground.rows
                         );
@@ -4595,6 +5066,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                     },
                     error: null,
                     heroItem,
+                    heroAccessEpoch: payload.featuredHeroAccessEpoch,
                     heroItems,
                     independentHeroItems: preferredHeroItems,
                     isLoading: false,
@@ -4603,16 +5075,17 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 };
 
                 setState(previous => {
+                    const safePreviousRows = filterPreviousOwnedRows(previous.rows, nextState.rows);
                     const settledNextState = {
                         ...nextState,
                         configuredHeroAuthorities: previous.configuredHeroAuthorities,
                         independentHeroItems: nextState.heroItems.length ? nextState.independentHeroItems : previous.independentHeroItems,
                         heroItem: nextState.heroItem || previous.heroItem,
                         heroItems: nextState.heroItems.length ? nextState.heroItems : previous.heroItems,
-                        rows: mergeSettledNativeHomeRows(previous.rows, nextState.rows)
+                        rows: mergeSettledNativeHomeRows(safePreviousRows, nextState.rows)
                     };
                     const decision = decideNativeHomeModelReplacement({
-                        current: previous,
+                        current: { ...previous, rows: safePreviousRows },
                         currentGeneration: generation,
                         incoming: settledNextState,
                         incomingGeneration: generation
@@ -4629,6 +5102,7 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                             ...previous,
                             error: null,
                             isLoading: false,
+                            rows: safePreviousRows,
                             user: payload.user
                         };
                     }
@@ -4722,6 +5196,9 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
                 retireConfiguredRowFreshness('home-route-retired');
             }
             unsubscribeConfiguredPresentation();
+            unsubscribeLibrary();
+            membershipAuthority.retire('home-route-retired');
+            if (getHomeLibraryAuthoritySnapshot().revision === libraryRevision) retireHomeLibraryAuthority('home-route-retired', { broadcast: false });
             routeAbortController.abort();
             deferredFrameIds.forEach(frameId => {
                 window.cancelAnimationFrame(frameId);
@@ -4736,8 +5213,11 @@ export function useNativeHomeData(): NativeHomeState & { identityKey: string | n
         };
     }, [currentDisplayIdentityKey, setState]);
 
+    const currentPresentation = useMemo(() => retainCurrentNativeHomePresentation(state, currentDisplayIdentityKey),
+        [state, currentDisplayIdentityKey, presentationSnapshot, librarySnapshot]);
+
     return {
-        ...retainCurrentNativeHomePresentation(state, currentDisplayIdentityKey),
+        ...currentPresentation,
         identityKey: stateIdentityKey
     };
 }

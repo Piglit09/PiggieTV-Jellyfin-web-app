@@ -1,0 +1,566 @@
+{
+  "Search": {
+    "SearchGeneration": "fixture-generation",
+    "IdentitySources": {
+      "ArchiveState": "inspected",
+      "ArchiveReasonCode": null,
+      "FileName": {
+        "HasRedactedIdentity": false,
+        "SeriesTitle": "Orbit",
+        "IssueNumber": "9",
+        "VolumeOrRunLabel": null,
+        "IssuePublicationYear": 2019,
+        "IssuePublicationDate": null,
+        "RunEvidenceKind": "Unknown",
+        "Source": "FileName",
+        "ProviderIds": []
+      },
+      "ImmediateFolder": {
+        "HasRedactedIdentity": false,
+        "SeriesTitle": "Orbit",
+        "IssueNumber": null,
+        "VolumeOrRunLabel": "2018",
+        "IssuePublicationYear": null,
+        "IssuePublicationDate": null,
+        "RunEvidenceKind": "ExplicitRun",
+        "Source": "ImmediateFolder",
+        "ProviderIds": []
+      },
+      "ComicInfo": {
+        "HasRedactedIdentity": false,
+        "SeriesTitle": "Orbit",
+        "IssueNumber": "9",
+        "VolumeOrRunLabel": null,
+        "IssuePublicationYear": null,
+        "IssuePublicationDate": null,
+        "RunEvidenceKind": "Unknown",
+        "Source": "ComicInfo",
+        "ProviderIds": []
+      },
+      "CurrentItem": {
+        "HasRedactedIdentity": false,
+        "SeriesTitle": "Orbit",
+        "IssueNumber": null,
+        "VolumeOrRunLabel": null,
+        "IssuePublicationYear": null,
+        "IssuePublicationDate": null,
+        "RunEvidenceKind": "Unknown",
+        "Source": "CurrentItem",
+        "ProviderIds": []
+      }
+    },
+    "Query": {
+      "RawTitle": "Orbit #9 (2019)",
+      "RawFileName": "Orbit #9 (2019).cbz",
+      "CleanedTitle": "Orbit",
+      "SeriesTitle": "Orbit",
+      "SeriesTitleEvidence": "filename",
+      "IssueNumber": "9",
+      "IssueNumberEvidence": "filename",
+      "VolumeNumber": null,
+      "ChapterNumber": null,
+      "Year": 2019,
+      "SeriesStartYear": 2019,
+      "IssuePublicationYear": null,
+      "IssuePublicationDate": null,
+      "IssuePublicationEvidence": "unknown",
+      "SeriesStartYearEvidence": "filename",
+      "FolderCorroboratesSeriesTitle": true,
+      "FolderCorroboratesSeriesStartYear": false,
+      "IdentityConflicts": [
+        {
+          "Field": "seriesStartYear",
+          "PreferredSource": "filename",
+          "PreferredValue": "2019",
+          "ConflictingSource": "folder",
+          "ConflictingValue": "2018"
+        }
+      ],
+      "Author": null,
+      "Isbn": null,
+      "OriginalLanguage": null,
+      "MediaClass": "comic",
+      "EditionKind": "standard",
+      "EditionKindEvidence": "unknown",
+      "ProviderId": null,
+      "ExistingProviderIds": {},
+      "AlternateTitles": [
+        "Orbit"
+      ],
+      "IgnoredFilenameTokens": [
+        "2019"
+      ],
+      "Classification": {
+        "MediaClass": "comic",
+        "Confidence": 0.9,
+        "Reasons": [
+          "An issue or western-comic edition marker was detected."
+        ]
+      }
+    },
+    "LocalMetadata": {
+      "State": "not-found",
+      "Sources": [],
+      "Warnings": []
+    },
+    "ProviderResults": [
+      {
+        "Provider": "gcd",
+        "State": "unknown",
+        "Candidates": [
+          {
+            "AssessmentContext": "fixture-AssessmentContext",
+            "ArchiveRevision": "fixture-ArchiveRevision",
+            "AssessmentDigest": "4DDD232C4F851AB130EC3534C025EE0D4089A53C8F3D185E463FED9B27F711D6",
+            "HasRedactedIdentity": false,
+            "RunEvidenceKind": "Unknown",
+            "IdentityProviderIds": [
+              {
+                "Namespace": "GCD",
+                "Scope": "Issue",
+                "Value": "123"
+              }
+            ],
+            "IdentityAssessment": {
+              "ItemId": "11111111111111111111111111111111",
+              "Provider": "gcd",
+              "ProviderId": "123",
+              "SearchGeneration": "fixture-generation",
+              "ArchiveRevision": "fixture-ArchiveRevision",
+              "RevisionChanged": false,
+              "Sources": {
+                "ArchiveState": "inspected",
+                "ArchiveReasonCode": null,
+                "FileName": {
+                  "HasRedactedIdentity": false,
+                  "SeriesTitle": "Orbit",
+                  "IssueNumber": "9",
+                  "VolumeOrRunLabel": null,
+                  "IssuePublicationYear": 2019,
+                  "IssuePublicationDate": null,
+                  "RunEvidenceKind": "Unknown",
+                  "Source": "FileName",
+                  "ProviderIds": []
+                },
+                "ImmediateFolder": {
+                  "HasRedactedIdentity": false,
+                  "SeriesTitle": "Orbit",
+                  "IssueNumber": null,
+                  "VolumeOrRunLabel": "2018",
+                  "IssuePublicationYear": null,
+                  "IssuePublicationDate": null,
+                  "RunEvidenceKind": "ExplicitRun",
+                  "Source": "ImmediateFolder",
+                  "ProviderIds": []
+                },
+                "ComicInfo": {
+                  "HasRedactedIdentity": false,
+                  "SeriesTitle": "Orbit",
+                  "IssueNumber": "9",
+                  "VolumeOrRunLabel": null,
+                  "IssuePublicationYear": null,
+                  "IssuePublicationDate": null,
+                  "RunEvidenceKind": "Unknown",
+                  "Source": "ComicInfo",
+                  "ProviderIds": []
+                },
+                "CurrentItem": {
+                  "HasRedactedIdentity": false,
+                  "SeriesTitle": "Orbit",
+                  "IssueNumber": null,
+                  "VolumeOrRunLabel": null,
+                  "IssuePublicationYear": null,
+                  "IssuePublicationDate": null,
+                  "RunEvidenceKind": "Unknown",
+                  "Source": "CurrentItem",
+                  "ProviderIds": []
+                }
+              },
+              "Candidate": {
+                "HasRedactedIdentity": false,
+                "SeriesTitle": "Orbit",
+                "IssueNumber": "9",
+                "VolumeOrRunLabel": null,
+                "IssuePublicationYear": null,
+                "IssuePublicationDate": null,
+                "RunEvidenceKind": "Unknown",
+                "Source": "Provider",
+                "ProviderIds": [
+                  {
+                    "Namespace": "GCD",
+                    "Scope": "Issue",
+                    "Value": "123"
+                  }
+                ]
+              },
+              "Findings": [
+                {
+                  "Code": "PROVIDER_ID_UNDETERMINED",
+                  "Field": "GCD",
+                  "LeftSource": "CurrentItem",
+                  "LeftValue": null,
+                  "RightSource": "Provider",
+                  "RightValue": "123",
+                  "IsConflict": false,
+                  "IsMaterialUncertainty": false
+                }
+              ],
+              "RequiresConflictAcknowledgment": false,
+              "RequiresUnverifiedAcknowledgment": false,
+              "AssessmentDigest": "4DDD232C4F851AB130EC3534C025EE0D4089A53C8F3D185E463FED9B27F711D6"
+            },
+            "Provider": "gcd",
+            "ProviderId": "123",
+            "MediaClass": "unknown",
+            "Title": "Orbit",
+            "AlternateTitles": [],
+            "LocalizedTitles": {},
+            "SeriesTitle": "Orbit",
+            "SeriesTitleEvidence": "provider",
+            "IssueNumber": "9",
+            "IssueNumberEvidence": "provider",
+            "EditionKind": "standard",
+            "EditionKindEvidence": "unknown",
+            "VolumeNumber": null,
+            "ChapterNumber": null,
+            "Year": null,
+            "StartYear": null,
+            "SeriesStartYearEvidence": "unknown",
+            "EndYear": null,
+            "IssuePublicationYear": null,
+            "IssuePublicationDate": null,
+            "IssuePublicationEvidence": "unknown",
+            "VolumeId": null,
+            "Description": null,
+            "Authors": [],
+            "Artists": [],
+            "Genres": [],
+            "Tags": [],
+            "Publisher": null,
+            "CountryOfOrigin": null,
+            "Language": null,
+            "Status": null,
+            "TotalVolumes": null,
+            "TotalChapters": null,
+            "Isbn10": null,
+            "Isbn13": null,
+            "CoverUrl": null,
+            "BannerUrl": null,
+            "ExternalIds": {},
+            "SourceUrl": null,
+            "Score": 63,
+            "ScoreReasons": [
+              {
+                "Code": "EXACT_TITLE",
+                "Impact": 40,
+                "IsPositive": true,
+                "Message": "The normalized series title matches exactly.",
+                "Evidence": "Orbit"
+              },
+              {
+                "Code": "FOLDER_SERIES_CORROBORATION",
+                "Impact": 4,
+                "IsPositive": true,
+                "Message": "The folder corroborates the parsed series title.",
+                "Evidence": "Orbit"
+              },
+              {
+                "Code": "LOCAL_IDENTITY_CONFLICT",
+                "Impact": -20,
+                "IsPositive": false,
+                "Message": "The filename and folder disagree about the parsed series run year.",
+                "Evidence": "seriesStartYear"
+              },
+              {
+                "Code": "ISSUE_MATCH",
+                "Impact": 45,
+                "IsPositive": true,
+                "Message": "The issue number matches.",
+                "Evidence": "9"
+              },
+              {
+                "Code": "SERIES_RUN_YEAR_MISSING",
+                "Impact": -6,
+                "IsPositive": false,
+                "Message": "The provider did not identify the comic series run year.",
+                "Evidence": "2019"
+              }
+            ]
+          }
+        ],
+        "Failure": null,
+        "DurationMilliseconds": 0,
+        "CacheHit": true
+      }
+    ],
+    "Candidates": [
+      {
+        "AssessmentContext": "fixture-AssessmentContext",
+        "ArchiveRevision": "fixture-ArchiveRevision",
+        "AssessmentDigest": "4DDD232C4F851AB130EC3534C025EE0D4089A53C8F3D185E463FED9B27F711D6",
+        "HasRedactedIdentity": false,
+        "RunEvidenceKind": "Unknown",
+        "IdentityProviderIds": [
+          {
+            "Namespace": "GCD",
+            "Scope": "Issue",
+            "Value": "123"
+          }
+        ],
+        "IdentityAssessment": {
+          "ItemId": "11111111111111111111111111111111",
+          "Provider": "gcd",
+          "ProviderId": "123",
+          "SearchGeneration": "fixture-generation",
+          "ArchiveRevision": "fixture-ArchiveRevision",
+          "RevisionChanged": false,
+          "Sources": {
+            "ArchiveState": "inspected",
+            "ArchiveReasonCode": null,
+            "FileName": {
+              "HasRedactedIdentity": false,
+              "SeriesTitle": "Orbit",
+              "IssueNumber": "9",
+              "VolumeOrRunLabel": null,
+              "IssuePublicationYear": 2019,
+              "IssuePublicationDate": null,
+              "RunEvidenceKind": "Unknown",
+              "Source": "FileName",
+              "ProviderIds": []
+            },
+            "ImmediateFolder": {
+              "HasRedactedIdentity": false,
+              "SeriesTitle": "Orbit",
+              "IssueNumber": null,
+              "VolumeOrRunLabel": "2018",
+              "IssuePublicationYear": null,
+              "IssuePublicationDate": null,
+              "RunEvidenceKind": "ExplicitRun",
+              "Source": "ImmediateFolder",
+              "ProviderIds": []
+            },
+            "ComicInfo": {
+              "HasRedactedIdentity": false,
+              "SeriesTitle": "Orbit",
+              "IssueNumber": "9",
+              "VolumeOrRunLabel": null,
+              "IssuePublicationYear": null,
+              "IssuePublicationDate": null,
+              "RunEvidenceKind": "Unknown",
+              "Source": "ComicInfo",
+              "ProviderIds": []
+            },
+            "CurrentItem": {
+              "HasRedactedIdentity": false,
+              "SeriesTitle": "Orbit",
+              "IssueNumber": null,
+              "VolumeOrRunLabel": null,
+              "IssuePublicationYear": null,
+              "IssuePublicationDate": null,
+              "RunEvidenceKind": "Unknown",
+              "Source": "CurrentItem",
+              "ProviderIds": []
+            }
+          },
+          "Candidate": {
+            "HasRedactedIdentity": false,
+            "SeriesTitle": "Orbit",
+            "IssueNumber": "9",
+            "VolumeOrRunLabel": null,
+            "IssuePublicationYear": null,
+            "IssuePublicationDate": null,
+            "RunEvidenceKind": "Unknown",
+            "Source": "Provider",
+            "ProviderIds": [
+              {
+                "Namespace": "GCD",
+                "Scope": "Issue",
+                "Value": "123"
+              }
+            ]
+          },
+          "Findings": [
+            {
+              "Code": "PROVIDER_ID_UNDETERMINED",
+              "Field": "GCD",
+              "LeftSource": "CurrentItem",
+              "LeftValue": null,
+              "RightSource": "Provider",
+              "RightValue": "123",
+              "IsConflict": false,
+              "IsMaterialUncertainty": false
+            }
+          ],
+          "RequiresConflictAcknowledgment": false,
+          "RequiresUnverifiedAcknowledgment": false,
+          "AssessmentDigest": "4DDD232C4F851AB130EC3534C025EE0D4089A53C8F3D185E463FED9B27F711D6"
+        },
+        "Provider": "gcd",
+        "ProviderId": "123",
+        "MediaClass": "unknown",
+        "Title": "Orbit",
+        "AlternateTitles": [],
+        "LocalizedTitles": {},
+        "SeriesTitle": "Orbit",
+        "SeriesTitleEvidence": "provider",
+        "IssueNumber": "9",
+        "IssueNumberEvidence": "provider",
+        "EditionKind": "standard",
+        "EditionKindEvidence": "unknown",
+        "VolumeNumber": null,
+        "ChapterNumber": null,
+        "Year": null,
+        "StartYear": null,
+        "SeriesStartYearEvidence": "unknown",
+        "EndYear": null,
+        "IssuePublicationYear": null,
+        "IssuePublicationDate": null,
+        "IssuePublicationEvidence": "unknown",
+        "VolumeId": null,
+        "Description": null,
+        "Authors": [],
+        "Artists": [],
+        "Genres": [],
+        "Tags": [],
+        "Publisher": null,
+        "CountryOfOrigin": null,
+        "Language": null,
+        "Status": null,
+        "TotalVolumes": null,
+        "TotalChapters": null,
+        "Isbn10": null,
+        "Isbn13": null,
+        "CoverUrl": null,
+        "BannerUrl": null,
+        "ExternalIds": {},
+        "SourceUrl": null,
+        "Score": 63,
+        "ScoreReasons": [
+          {
+            "Code": "EXACT_TITLE",
+            "Impact": 40,
+            "IsPositive": true,
+            "Message": "The normalized series title matches exactly.",
+            "Evidence": "Orbit"
+          },
+          {
+            "Code": "FOLDER_SERIES_CORROBORATION",
+            "Impact": 4,
+            "IsPositive": true,
+            "Message": "The folder corroborates the parsed series title.",
+            "Evidence": "Orbit"
+          },
+          {
+            "Code": "LOCAL_IDENTITY_CONFLICT",
+            "Impact": -20,
+            "IsPositive": false,
+            "Message": "The filename and folder disagree about the parsed series run year.",
+            "Evidence": "seriesStartYear"
+          },
+          {
+            "Code": "ISSUE_MATCH",
+            "Impact": 45,
+            "IsPositive": true,
+            "Message": "The issue number matches.",
+            "Evidence": "9"
+          },
+          {
+            "Code": "SERIES_RUN_YEAR_MISSING",
+            "Impact": -6,
+            "IsPositive": false,
+            "Message": "The provider did not identify the comic series run year.",
+            "Evidence": "2019"
+          }
+        ]
+      }
+    ]
+  },
+  "Reassessment": {
+    "ItemId": "11111111111111111111111111111111",
+    "Provider": "gcd",
+    "ProviderId": "123",
+    "SearchGeneration": "fixture-generation",
+    "ArchiveRevision": "fixture-ArchiveRevision",
+    "RevisionChanged": false,
+    "Sources": {
+      "ArchiveState": "inspected",
+      "ArchiveReasonCode": null,
+      "FileName": {
+        "HasRedactedIdentity": false,
+        "SeriesTitle": "Orbit",
+        "IssueNumber": "9",
+        "VolumeOrRunLabel": null,
+        "IssuePublicationYear": 2019,
+        "IssuePublicationDate": null,
+        "RunEvidenceKind": "Unknown",
+        "Source": "FileName",
+        "ProviderIds": []
+      },
+      "ImmediateFolder": {
+        "HasRedactedIdentity": false,
+        "SeriesTitle": "Orbit",
+        "IssueNumber": null,
+        "VolumeOrRunLabel": "2018",
+        "IssuePublicationYear": null,
+        "IssuePublicationDate": null,
+        "RunEvidenceKind": "ExplicitRun",
+        "Source": "ImmediateFolder",
+        "ProviderIds": []
+      },
+      "ComicInfo": {
+        "HasRedactedIdentity": false,
+        "SeriesTitle": "Orbit",
+        "IssueNumber": "9",
+        "VolumeOrRunLabel": null,
+        "IssuePublicationYear": null,
+        "IssuePublicationDate": null,
+        "RunEvidenceKind": "Unknown",
+        "Source": "ComicInfo",
+        "ProviderIds": []
+      },
+      "CurrentItem": {
+        "HasRedactedIdentity": false,
+        "SeriesTitle": "Orbit",
+        "IssueNumber": null,
+        "VolumeOrRunLabel": null,
+        "IssuePublicationYear": null,
+        "IssuePublicationDate": null,
+        "RunEvidenceKind": "Unknown",
+        "Source": "CurrentItem",
+        "ProviderIds": []
+      }
+    },
+    "Candidate": {
+      "HasRedactedIdentity": false,
+      "SeriesTitle": "Orbit",
+      "IssueNumber": "9",
+      "VolumeOrRunLabel": null,
+      "IssuePublicationYear": null,
+      "IssuePublicationDate": null,
+      "RunEvidenceKind": "Unknown",
+      "Source": "Provider",
+      "ProviderIds": [
+        {
+          "Namespace": "GCD",
+          "Scope": "Issue",
+          "Value": "123"
+        }
+      ]
+    },
+    "Findings": [
+      {
+        "Code": "PROVIDER_ID_UNDETERMINED",
+        "Field": "GCD",
+        "LeftSource": "CurrentItem",
+        "LeftValue": null,
+        "RightSource": "Provider",
+        "RightValue": "123",
+        "IsConflict": false,
+        "IsMaterialUncertainty": false
+      }
+    ],
+    "RequiresConflictAcknowledgment": false,
+    "RequiresUnverifiedAcknowledgment": false,
+    "AssessmentDigest": "4DDD232C4F851AB130EC3534C025EE0D4089A53C8F3D185E463FED9B27F711D6"
+  }
+}

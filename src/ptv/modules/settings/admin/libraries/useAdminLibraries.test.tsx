@@ -17,6 +17,7 @@ const hookMocks = vi.hoisted(() => ({
         }
     },
     loadAdminLibraries: vi.fn(),
+    loadAdminLibraryTransition: vi.fn(async () => ({ held: false, state: 'idle', affectedRuleIds: [] as string[] })),
     loadAdminLibraryOptionsInfo: vi.fn(),
     loadAdminLibraryTasks: vi.fn()
 }));
@@ -24,6 +25,7 @@ const hookMocks = vi.hoisted(() => ({
 vi.mock('./adminLibrariesService', () => ({
     AdminLibrariesServiceError: hookMocks.AdminLibrariesServiceError,
     loadAdminLibraries: hookMocks.loadAdminLibraries,
+    loadAdminLibraryTransition: hookMocks.loadAdminLibraryTransition,
     loadAdminLibraryOptionsInfo: hookMocks.loadAdminLibraryOptionsInfo,
     loadAdminLibraryTasks: hookMocks.loadAdminLibraryTasks,
     resolveAdminLibrary: (
@@ -269,6 +271,28 @@ describe('administrator libraries hooks', () => {
         expect(stateRef.current?.detail?.rawOptions).toBeNull();
         expect(stateRef.current?.providerLoading).toBe(false);
         expect(hookMocks.loadAdminLibraryOptionsInfo).not.toHaveBeenCalled();
+    });
+
+    it('restores pending operation and affected rules from the administrator endpoint on mount', async () => {
+        hookMocks.loadAdminLibraryTransition.mockResolvedValueOnce({ held: true, state: 'pending', affectedRuleIds: ['anime'] });
+        const stateRef: { current?: LibraryHookState } = {};
+        await act(async () => root.render(<QueryClientProvider client={queryClient}><DetailHarness stateRef={stateRef} /></QueryClientProvider>));
+        await flushQueries();
+        expect(stateRef.current?.transition).toMatchObject({ held: true, state: 'pending', affectedRuleIds: ['anime'] });
+        expect(hookMocks.loadAdminLibraryTransition).toHaveBeenCalledOnce();
+        await act(async () => stateRef.current?.refreshTransition());
+        expect(hookMocks.loadAdminLibraryTransition).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not cache an unresolved or different-identity mutation result', async () => {
+        const stateRef: { current?: LibraryHookState } = {};
+        await act(async () => root.render(<QueryClientProvider client={queryClient}><DetailHarness stateRef={stateRef} /></QueryClientProvider>));
+        await flushQueries();
+        const keys = getAdminLibrariesQueryKeys('server-a', 'library-a');
+        await act(async () => stateRef.current?.adoptLibrary(library({ ItemId: null, Name: 'Films' })));
+        expect(queryClient.getQueryData<VirtualFolderInfo>(keys.detail)?.Name).toBe('Movies');
+        await act(async () => stateRef.current?.adoptLibrary(library({ ItemId: 'different-id', Name: 'Films' })));
+        expect(queryClient.getQueryData<VirtualFolderInfo>(keys.detail)?.Name).toBe('Movies');
     });
 
     it('adopts a confirmed mutation into the exact detail and list caches', async () => {

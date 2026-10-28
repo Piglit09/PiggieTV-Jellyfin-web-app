@@ -12,6 +12,6 @@ export function shouldArmPlayerChromeHide({
     );
 }
 
-export function shouldDeferPlayerChromeHide({ controlFocused, isTv }) {
-    return Boolean(isTv && controlFocused);
+export function shouldDeferPlayerChromeHide({ controlFocused, isTv, interactionActive = false }) {
+    return Boolean(interactionActive || isTv && controlFocused);
 }

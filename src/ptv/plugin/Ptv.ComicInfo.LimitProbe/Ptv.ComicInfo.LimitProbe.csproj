@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Non-shipping executable: exercises the actual launchers on each OS. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseAppHost>true</UseAppHost>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Ptv.ComicInfo.Helper/HelperLifetime.cs" Link="HelperLifetime.cs" />
+    <Compile Include="../Jellyfin.Plugin.PiggieTV/Models/PtvComicInfoArchiveResult.cs" Link="Host/PtvComicInfoArchiveResult.cs" />
+    <Compile Include="../Jellyfin.Plugin.PiggieTV/Services/IPtvArchiveInspectionHost.cs" Link="Host/IPtvArchiveInspectionHost.cs" />
+    <Compile Include="../Jellyfin.Plugin.PiggieTV/Services/PtvArchiveInspectionHost.cs" Link="Host/PtvArchiveInspectionHost.cs" />
+    <Compile Include="../Jellyfin.Plugin.PiggieTV/Services/PtvWindowsJobRunner.cs" Link="Host/PtvWindowsJobRunner.cs" />
+    <Compile Include="../Jellyfin.Plugin.PiggieTV/Services/PtvLinuxCgroupRunner.cs" Link="Host/PtvLinuxCgroupRunner.cs" />
+  </ItemGroup>
+</Project>

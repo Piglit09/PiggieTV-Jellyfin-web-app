@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/guide-response.schema.json",
+  "title": "PTV Channels v1 paged guide response",
+  "type": "object",
+  "required": ["contractVersion", "serverTimeUtc", "channelId", "timelineRevision", "fromUtc", "toUtc", "entries"],
+  "properties": {
+    "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+    "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "channelId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "timelineRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "fromUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "toUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "entries": { "type": "array", "maxItems": 500, "items": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/entry.schema.json" } },
+    "nextCursor": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" }
+  },
+  "not": { "required": ["itemId"] },
+  "additionalProperties": true
+}

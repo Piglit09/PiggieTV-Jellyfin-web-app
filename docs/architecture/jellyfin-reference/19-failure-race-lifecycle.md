@@ -116,6 +116,12 @@ The stock non-guarantee above remains true globally. The current PTV worktree cl
 
 The first three are `INFERRED` from the source-separated owners; the last three are `VERIFIED_FROM_SOURCE` by the controller/image/player citations above.
 
+## Issue #53 automatic theme retirement
+
+`[VERIFIED_FROM_SOURCE]` The automatic-theme route key includes server, authenticated user and item. Theme lookup completion and the existing playback-start guard recheck the captured authenticated user; sign-in/out retires the route and owned automatic source. Connection listeners bind lazily on first `viewshow`, avoiding an eager connection-barrel read during bootstrap. Manual playback/queue intent relinquishes automatic ownership before route cleanup, including same-ID playback. NativeHome no longer retains a Details theme. `src/components/themeMediaPlayer.js`; `src/components/playback/playbackmanager.js`; `src/ptv/pages/home/NativeHome.tsx`.
+
+`[VERIFIED_BY_TEST]` Focused regressions reject a late prior-user response, reload a same-server/item route for the new user, retire pending automatic starts on Home, and preserve an adopted queue while rejecting an unrelated deferred automatic replacement. This adds no universal route or identity manager: retirement still consumes established view and authentication events. An external identity change that emits none of those events is not an immediate-stop guarantee; captured-identity checks still prevent late adoption. Hosted and physical acceptance remain `[UNKNOWN]`.
+
 ## Review checklist for lifecycle changes
 
 - Name the one authoritative owner and every derived/cache/view owner.
@@ -128,3 +134,25 @@ The first three are `INFERRED` from the source-separated owners; the last three 
 - Verify hard refresh, server restart, permission change, and cross-user transition.
 
 These are `INFERRED` engineering controls from the stock failure model.
+
+## Stage 4 PTV Web retirement boundaries — isolated integration candidate
+
+- `[VERIFIED_FROM_SOURCE]` Shell geometry observers retire on `PTVShell` unmount; the published clearance is presentation state, not a new route/data owner. `src/ptv/shell/PTVShell.tsx`.
+- `[VERIFIED_FROM_SOURCE]` Up Next carries current player, current item and queued-item identities across asynchronous next-item reads. Prompt advance and natural end share the active playback-generation claim. A stale item, destroyed dialog, or changed queue cannot adopt the old next result. A changed queue may reoffer its replacement; an explicit playback request retires pending autoplay even before the new item starts. `src/components/upnextdialog/upnextdialog.js`; `src/controllers/playback/video/index.js`; `src/components/playback/playbackmanager.js`.
+- `[VERIFIED_FROM_SOURCE]` Search retry carries exact settled query/filter/server/user and active request/scope; abort or scope change suppresses late adoption. Update fallback does not convert an unactivated worker into a reload; failed activation is visible. `src/ptv/pages/search/NativeSearchPage.tsx`; `src/ptv/pages/search/searchGroupRetryState.ts`; `src/ptv/services/updateService.ts`.
+- `[UNKNOWN]` Production Search failure origin, deployed worker/cache convergence, and Safari's native/fullscreen transition behavior require separate physical/environmental evidence.
+
+## PTV Web 0.5.78 local diagnostic lifecycle boundary
+
+`[VERIFIED_FROM_SOURCE]` The recommendation engine owns a generation from start
+through one success, partial, failed, or cancelled terminal event. The
+collector accepts terminal metrics only for the matching identity/generation;
+logout and identity switch retire prior work. Rendered item count and duration
+remain unavailable until actually observed. The route diagnostic store now
+records whether critical work was instrumented and labels navigation departure
+as supersession, while rejecting late settlement for a departed route.
+`[VERIFIED_BY_TEST]` Recommendation generation, logout, diagnostic store, and
+route lifecycle tests cover stale completions, recovery, Back/Forward and
+long-lived uninstrumented routes. These are observer lifetimes; routeController
+and the browser URL remain the route authorities. Hosted/physical convergence
+remains `UNKNOWN` for this local candidate.

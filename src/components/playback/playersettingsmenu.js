@@ -3,58 +3,53 @@ import { playbackManager } from '../playback/playbackmanager';
 import globalize from 'lib/globalize';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import qualityoptions from '../qualityOptions';
+import toast from '../toast/toast';
+import { getRemoteVideoQualityLimit } from './videoQualityNegotiation';
 
-function showQualityMenu(player, btn) {
-    const videoStream = playbackManager.currentMediaSource(player).MediaStreams.filter(function (stream) {
-        return stream.Type === 'Video';
-    })[0];
+function isOperationCurrent(operation) {
+    return !operation || operation.isCurrent();
+}
 
-    const videoCodec = videoStream ? videoStream.Codec : null;
-    const videoBitRate = videoStream ? videoStream.BitRate : null;
+function showQualityMenu(player, btn, operation, user) {
+    if (!isOperationCurrent(operation)) return Promise.resolve();
+    if (!player?.isLocalPlayer || typeof playbackManager.setVideoQualitySelection !== 'function'
+            || typeof playbackManager.getVideoQualitySelection !== 'function') return Promise.resolve();
 
-    const options = qualityoptions.getVideoQualityOptions({
-        currentMaxBitrate: playbackManager.getMaxStreamingBitrate(player),
-        isAutomaticBitrateEnabled: playbackManager.enableAutomaticBitrateDetection(player),
-        videoCodec,
-        videoBitRate,
-        enableAuto: true
+    const videoStream = playbackManager.currentMediaSource(player)?.MediaStreams?.find(stream => stream.Type === 'Video');
+    const currentSelection = playbackManager.getVideoQualitySelection(player);
+    const apiClient = ServerConnections.getApiClient(playbackManager.currentItem(player).ServerId);
+    const hardLimit = getRemoteVideoQualityLimit(user, apiClient.getSavedEndpointInfo());
+    const options = qualityoptions.getPlayerVideoQualityOptions({
+        videoWidth: videoStream?.Width,
+        videoHeight: videoStream?.Height,
+        videoBitRate: videoStream?.BitRate,
+        currentSelection,
+        ...(hardLimit ? { maxAllowedBitrate: hardLimit } : {})
     });
 
-    const menuItems = options.map(function (o) {
-        const opt = {
-            name: o.name,
-            id: o.bitrate,
-            asideText: o.secondaryText
-        };
-
-        if (o.selected) {
-            opt.selected = true;
-        }
-
-        return opt;
-    });
-
-    const selectedId = options.filter(function (o) {
-        return o.selected;
-    });
-
-    const selectedBitrate = selectedId.length ? selectedId[0].bitrate : null;
+    const menuItems = options.map(o => ({
+        name: o.name,
+        id: o.id,
+        secondaryText: o.secondaryText,
+        selected: o.selected
+    }));
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: btn
+        positionTo: btn,
+        signal: operation?.signal
     }).then(function (id) {
-        const bitrate = parseInt(id, 10);
-        if (bitrate !== selectedBitrate) {
-            playbackManager.setMaxStreamingBitrate({
-                enableAutomaticBitrateDetection: !bitrate,
-                maxBitrate: bitrate
-            }, player);
-        }
+        if (!isOperationCurrent(operation)) return;
+        if (!options.some(option => option.id === id) || id === currentSelection) return;
+        return Promise.resolve(playbackManager.setVideoQualitySelection(id, player)).catch(error => {
+            if (isOperationCurrent(operation)) toast(globalize.translate('PtvVideoQualitySwitchFailed'));
+            throw error;
+        });
     });
 }
 
-function showRepeatModeMenu(player, btn) {
+function showRepeatModeMenu(player, btn, operation) {
+    if (!isOperationCurrent(operation)) return Promise.resolve();
     const menuItems = [];
     const currentValue = playbackManager.getRepeatMode(player);
 
@@ -78,8 +73,10 @@ function showRepeatModeMenu(player, btn) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: btn
+        positionTo: btn,
+        signal: operation?.signal
     }).then(function (mode) {
+        if (!isOperationCurrent(operation)) return;
         if (mode) {
             playbackManager.setRepeatMode(mode, player);
         }
@@ -87,50 +84,23 @@ function showRepeatModeMenu(player, btn) {
 }
 
 function getQualitySecondaryText(player) {
-    const state = playbackManager.getPlayerState(player);
-
-    const videoStream = playbackManager.currentMediaSource(player).MediaStreams.filter(function (stream) {
-        return stream.Type === 'Video';
-    })[0];
-
-    const videoCodec = videoStream ? videoStream.Codec : null;
-    const videoBitRate = videoStream ? videoStream.BitRate : null;
-    const videoWidth = videoStream ? videoStream.Width : null;
-    const videoHeight = videoStream ? videoStream.Height : null;
-
-    const options = qualityoptions.getVideoQualityOptions({
-        currentMaxBitrate: playbackManager.getMaxStreamingBitrate(player),
-        isAutomaticBitrateEnabled: playbackManager.enableAutomaticBitrateDetection(player),
-        videoCodec,
-        videoBitRate,
-        videoWidth: videoWidth,
-        videoHeight: videoHeight,
-        enableAuto: true
+    const videoStream = playbackManager.currentMediaSource(player)?.MediaStreams?.find(stream => stream.Type === 'Video');
+    const currentSelection = playbackManager.getVideoQualitySelection(player);
+    const options = qualityoptions.getPlayerVideoQualityOptions({
+        videoWidth: videoStream?.Width,
+        videoHeight: videoStream?.Height,
+        videoBitRate: videoStream?.BitRate,
+        currentSelection
     });
-
-    let selectedOption = options.filter(function (o) {
-        return o.selected;
-    });
-
-    if (!selectedOption.length) {
-        return null;
+    const label = options.find(option => option.selected)?.name;
+    if (currentSelection === 'original' && playbackManager.getPlayerState(player)?.PlayState?.PlayMethod === 'Transcode') {
+        return `${label} · ${globalize.translate('Transcoding')}`;
     }
-
-    selectedOption = selectedOption[0];
-    let text = selectedOption.name;
-
-    if (selectedOption.autoText) {
-        if (state.PlayState && state.PlayState.PlayMethod !== 'Transcode') {
-            text += ' - Direct';
-        } else {
-            text += ' ' + selectedOption.autoText;
-        }
-    }
-
-    return text;
+    return label ?? null;
 }
 
-function showAspectRatioMenu(player, btn) {
+function showAspectRatioMenu(player, btn, operation) {
+    if (!isOperationCurrent(operation)) return Promise.resolve();
     // each has a name and id
     const currentId = playbackManager.getAspectRatio(player);
     const menuItems = playbackManager.getSupportedAspectRatios(player)
@@ -142,8 +112,10 @@ function showAspectRatioMenu(player, btn) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: btn
+        positionTo: btn,
+        signal: operation?.signal
     }).then(function (id) {
+        if (!isOperationCurrent(operation)) return;
         if (id) {
             playbackManager.setAspectRatio(id, player);
             return Promise.resolve();
@@ -153,7 +125,8 @@ function showAspectRatioMenu(player, btn) {
     });
 }
 
-function showPlaybackRateMenu(player, btn) {
+function showPlaybackRateMenu(player, btn, operation) {
+    if (!isOperationCurrent(operation)) return Promise.resolve();
     // each has a name and id
     const currentId = playbackManager.getPlaybackRate(player);
     const menuItems = playbackManager.getSupportedPlaybackRates(player).map(i => ({
@@ -164,8 +137,10 @@ function showPlaybackRateMenu(player, btn) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: btn
+        positionTo: btn,
+        signal: operation?.signal
     }).then(function (id) {
+        if (!isOperationCurrent(operation)) return;
         if (id) {
             playbackManager.setPlaybackRate(id, player);
             return Promise.resolve();
@@ -176,6 +151,7 @@ function showPlaybackRateMenu(player, btn) {
 }
 
 function showWithUser(options, player, user) {
+    if (!isOperationCurrent(options.operation)) return Promise.resolve();
     const supportedCommands = playbackManager.getSupportedCommands(player);
 
     const menuItems = [];
@@ -203,7 +179,11 @@ function showWithUser(options, player, user) {
         });
     }
 
-    if (options.quality && supportedCommands.includes('SetMaxStreamingBitrate')
+    if (options.quality && player?.isLocalPlayer
+            && typeof playbackManager.setVideoQualitySelection === 'function'
+            && typeof playbackManager.getVideoQualitySelection === 'function'
+            && typeof playbackManager.getVideoQualityConnectionBitrate === 'function'
+            && supportedCommands.includes('SetMaxStreamingBitrate')
             && user?.Policy?.EnableVideoPlaybackTranscoding) {
         const secondaryQualityText = getQualitySecondaryText(player);
 
@@ -242,13 +222,15 @@ function showWithUser(options, player, user) {
 
     return actionsheet.show({
         items: menuItems,
-        positionTo: options.positionTo
+        positionTo: options.positionTo,
+        signal: options.operation?.signal
     }).then(function (id) {
-        return handleSelectedOption(id, options, player);
+        return handleSelectedOption(id, options, player, user);
     });
 }
 
 export function show(options) {
+    if (!isOperationCurrent(options.operation)) return Promise.resolve();
     const player = options.player;
     const currentItem = playbackManager.currentItem(player);
 
@@ -262,24 +244,25 @@ export function show(options) {
     });
 }
 
-function handleSelectedOption(id, options, player) {
+function handleSelectedOption(id, options, player, user) {
+    if (!isOperationCurrent(options.operation)) return Promise.resolve();
     switch (id) {
         case 'quality':
-            return showQualityMenu(player, options.positionTo);
+            return showQualityMenu(player, options.positionTo, options.operation, user);
         case 'aspectratio':
-            return showAspectRatioMenu(player, options.positionTo);
+            return showAspectRatioMenu(player, options.positionTo, options.operation);
         case 'playbackrate':
-            return showPlaybackRateMenu(player, options.positionTo);
+            return showPlaybackRateMenu(player, options.positionTo, options.operation);
         case 'repeatmode':
-            return showRepeatModeMenu(player, options.positionTo);
+            return showRepeatModeMenu(player, options.positionTo, options.operation);
         case 'stats':
             if (options.onOption) {
-                options.onOption('stats');
+                return Promise.resolve(options.onOption('stats'));
             }
             return Promise.resolve();
         case 'suboffset':
             if (options.onOption) {
-                options.onOption('suboffset');
+                return Promise.resolve(options.onOption('suboffset'));
             }
             return Promise.resolve();
         default:

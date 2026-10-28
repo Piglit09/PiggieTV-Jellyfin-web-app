@@ -39,6 +39,7 @@ const pair = { rule: 'c'.repeat(64), section: 'd'.repeat(64) };
 
 function payload(proof: unknown = authority(), row = 'primary') {
     return {
+        scopeSchemaVersion: 2,
         currentPresentationAuthority: proof,
         heroItems: [ { Id: `${row}-hero`, Name: 'Hero', Type: 'Movie' } ],
         sections: [ { id: row, title: row, rowType: 'configured-rule', configuredRowAssociation: { version: 1, scope: authority().scope, ...pair } } ],
@@ -47,7 +48,7 @@ function payload(proof: unknown = authority(), row = 'primary') {
 }
 
 function document(value: ReturnType<typeof payload>) {
-    return { version: 1, featuredContent: { version: 7, createdAt: Date.now(), expiresAt: Date.now() + 60_000, payload: value } };
+    return { version: 1, featuredContent: { version: 9, createdAt: Date.now(), expiresAt: Date.now() + 60_000, payload: value } };
 }
 
 async function load() {
@@ -138,16 +139,28 @@ describe('Featured cache presentation-authority preservation and retirement', ()
         [ 'missing primary', null, authority(), false ],
         [ 'missing fallback', authority(), null, false ],
         [ 'both missing', null, null, false ]
-    ])('merges %s without inheriting proof across generations', async (_name, primaryProof, fallbackProof, retain) => {
+    ])('merges %s only when both payloads share one proven generation', async (_name, primaryProof, fallbackProof, retain) => {
         const { cache } = await load();
         const fallback = payload(fallbackProof, 'fallback');
         cacheMocks.client.getFeaturedContentCacheDocument.mockResolvedValue(document(fallback));
         const primary = payload(primaryProof);
         const result = await cache.forceRefreshFeaturedContentCache(async () => primary);
-        expect(result.currentPresentationAuthority).toEqual(retain ? primaryProof : undefined);
-        expect(result.sectionItems).toEqual({ ...fallback.sectionItems, ...primary.sectionItems });
+        expect(result.currentPresentationAuthority).toEqual(primaryProof || undefined);
+        expect(result.scopeSchemaVersion).toBe(2);
+        expect(result.sectionItems).toEqual(retain ? { ...fallback.sectionItems, ...primary.sectionItems } : primary.sectionItems);
+        expect((await cache.getCachedFeaturedContentPayload())?.sectionItems).toEqual(result.sectionItems);
         expect(primary.currentPresentationAuthority).toEqual(primaryProof);
         expect(fallback.currentPresentationAuthority).toEqual(fallbackProof);
+    });
+
+    it('does not stamp a populated response without scope schema proof as version 8', async () => {
+        const { cache } = await load();
+        const legacy = payload();
+        delete (legacy as Partial<typeof legacy>).scopeSchemaVersion;
+
+        await expect(cache.getFeaturedContent(async () => legacy)).rejects.toThrow(/scope schema/i);
+        expect(cacheMocks.client.writeFeaturedContentCacheDocument).not.toHaveBeenCalled();
+        await expect(cache.getCachedFeaturedContentPayload()).resolves.toBeNull();
     });
 
     it('retains valid primary proof when there is no fallback payload', async () => {
@@ -220,15 +233,15 @@ describe('Featured cache presentation-authority preservation and retirement', ()
         await vi.waitFor(() => expect(freshness.getConfiguredRowFreshnessSnapshot().status).toBe('STALE'));
     });
 
-    it('retires proof withheld by a mixed-generation refresh while preserving generic cached content', async () => {
+    it('retires prior CURRENT on a new generation without mixing in old cached rows', async () => {
         const loaded = await load();
         const { cache, freshness } = loaded;
         await establishCurrent(loaded);
         cacheMocks.client.getFeaturedContentCacheDocument.mockResolvedValue(document(payload()));
         const result = await cache.forceRefreshFeaturedContentCache(async () => payload(authority('e'), 'fresh'));
-        expect(result.currentPresentationAuthority).toBeUndefined();
+        expect(result.currentPresentationAuthority).toEqual(authority('e'));
         expect(result.sectionItems).toHaveProperty('fresh');
-        expect(result.sectionItems).toHaveProperty('primary');
+        expect(result.sectionItems).not.toHaveProperty('primary');
         expect(freshness.getConfiguredRowFreshnessSnapshot().status).toBe('STALE');
     });
 

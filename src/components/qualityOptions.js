@@ -1,4 +1,5 @@
 import globalize from '../lib/globalize';
+import { VIDEO_QUALITY_TIERS } from './playback/videoQualityNegotiation';
 
 export function getVideoQualityOptions(options) {
     const maxStreamingBitrate = options.currentMaxBitrate;
@@ -77,6 +78,53 @@ export function getVideoQualityOptions(options) {
     return qualityOptions;
 }
 
+const playerVideoTiers = [
+    { id: '4k', nameKey: 'PtvVideoQuality4K', helpKey: 'PtvVideoQualityUpTo2160p' },
+    { id: 'full-hd', nameKey: 'PtvVideoQualityFullHD', helpKey: 'PtvVideoQualityUpTo1080p' },
+    { id: 'hd', nameKey: 'PtvVideoQualityHD', helpKey: 'PtvVideoQualityUpTo720p' },
+    { id: 'sd', nameKey: 'PtvVideoQualitySD', helpKey: 'PtvVideoQualityUpTo480p' }
+].map(label => ({ ...label, ...VIDEO_QUALITY_TIERS[label.id] }));
+
+/** Player-only choices. Their dimensions are ceilings, not guaranteed output sizes. */
+export function getPlayerVideoQualityOptions(options = {}) {
+    const width = Number(options.videoWidth);
+    const height = Number(options.videoHeight);
+    const hasDimensions = Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0;
+    const longEdge = hasDimensions ? Math.max(width, height) : 0;
+    const shortEdge = hasDimensions ? Math.min(width, height) : 0;
+    const rawCap = Number(options.maxAllowedBitrate);
+    const cap = Number.isFinite(rawCap) && rawCap > 0 ? rawCap : null;
+    const capUnknown = Object.prototype.hasOwnProperty.call(options, 'maxAllowedBitrate') && cap === null;
+
+    const visibleTiers = hasDimensions && !capUnknown ? playerVideoTiers.filter(tier => {
+        const sourceCanUseTier = tier.id === '4k' ? longEdge >= 3000 || shortEdge >= 2160 :
+            longEdge >= tier.maxWidth || shortEdge >= tier.maxHeight || tier.id === 'sd';
+        return sourceCanUseTier && (cap === null || cap >= tier.bitrateProfiles.low);
+    }).map(tier => ({
+        ...tier,
+        name: globalize.translate(tier.nameKey),
+        secondaryText: globalize.translate(tier.helpKey),
+        bitrateProfiles: cap === null ? { ...tier.bitrateProfiles } : {
+            high: Math.min(tier.bitrateProfiles.high, cap),
+            medium: Math.min(tier.bitrateProfiles.medium, cap),
+            low: tier.bitrateProfiles.low
+        }
+    })) : [];
+
+    let selectedId = 'auto';
+    if (options.currentSelection === null) {
+        selectedId = null;
+    } else if ([ 'auto', 'original', ...visibleTiers.map(tier => tier.id) ].includes(options.currentSelection)) {
+        selectedId = options.currentSelection;
+    }
+
+    return [
+        { id: 'auto', name: globalize.translate('Auto'), secondaryText: globalize.translate('PtvVideoQualityRecommended') },
+        { id: 'original', name: globalize.translate('PtvVideoQualityOriginal'), secondaryText: globalize.translate('PtvVideoQualitySourceQuality') },
+        ...visibleTiers
+    ].map(option => ({ ...option, selected: option.id === selectedId }));
+}
+
 export function getAudioQualityOptions(options) {
     const maxStreamingBitrate = options.currentMaxBitrate;
 
@@ -127,5 +175,6 @@ export function getAudioQualityOptions(options) {
 
 export default {
     getVideoQualityOptions,
+    getPlayerVideoQualityOptions,
     getAudioQualityOptions
 };

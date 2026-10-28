@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/entry.schema.json",
+  "title": "PTV Channels v1 user-projected guide entry",
+  "oneOf": [
+    { "$ref": "#/$defs/playable" },
+    { "$ref": "#/$defs/unavailable" },
+    { "$ref": "#/$defs/gap" }
+  ],
+  "$defs": {
+    "base": {
+      "type": "object",
+      "required": ["programId", "entryRevision", "startUtc", "endUtc", "availability"],
+      "properties": {
+        "programId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "entryRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "startUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "endUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+        "availability": { "enum": ["playable", "unavailable", "gap"] }
+      },
+      "additionalProperties": true
+    },
+    "playable": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "properties": {
+            "availability": { "const": "playable" },
+            "title": { "type": "string", "minLength": 1 },
+            "seriesTitle": { "type": "string", "minLength": 1 },
+            "description": { "type": "string" }
+          },
+          "not": {
+            "anyOf": [
+              { "required": ["itemId"] },
+              { "required": ["artwork"] },
+              { "required": ["artworkUrl"] },
+              { "required": ["imageId"] },
+              { "required": ["imageUrl"] },
+              { "required": ["primaryImageUrl"] }
+            ]
+          }
+        }
+      ]
+    },
+    "unavailable": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "properties": { "availability": { "const": "unavailable" } }, "$ref": "#/$defs/redacted" }
+      ]
+    },
+    "gap": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "properties": { "availability": { "const": "gap" } }, "$ref": "#/$defs/redacted" }
+      ]
+    },
+    "redacted": {
+      "not": {
+        "anyOf": [
+          { "required": ["itemId"] },
+          { "required": ["title"] },
+          { "required": ["artwork"] },
+          { "required": ["artworkUrl"] },
+          { "required": ["imageId"] },
+          { "required": ["imageUrl"] },
+          { "required": ["primaryImageUrl"] },
+          { "required": ["series"] },
+          { "required": ["seriesId"] },
+          { "required": ["seriesName"] },
+          { "required": ["seriesOverview"] },
+          { "required": ["seriesTitle"] },
+          { "required": ["description"] }
+        ]
+      }
+    }
+  }
+}

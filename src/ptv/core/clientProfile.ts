@@ -284,16 +284,20 @@ function selectResponsiveLayout(
         return { layoutMode: 'tablet' as const, layoutModeReason: 'viewport-width<=1024', matchedMediaQuery: '(max-width: 1024px)' };
     }
 
+    if (pointerType === 'coarse' && viewportWidth > 0 && viewportWidth <= 1366 && viewportHeight <= 1024) {
+        return { layoutMode: 'tablet' as const, layoutModeReason: 'coarse-pointer-tablet-viewport', matchedMediaQuery: '(pointer: coarse) and (max-width: 1366px)' };
+    }
+
+    if (viewportWidth > 0) {
+        return { layoutMode: 'desktop' as const, layoutModeReason: 'desktop-viewport', matchedMediaQuery: '(min-width: 1025px)' };
+    }
+
     if (hasMobileUserAgent) {
         return { layoutMode: 'mobile' as const, layoutModeReason: 'mobile-user-agent', matchedMediaQuery: 'mobile-user-agent' };
     }
 
     if (hasTabletUserAgent) {
         return { layoutMode: 'tablet' as const, layoutModeReason: 'tablet-user-agent', matchedMediaQuery: 'tablet-user-agent' };
-    }
-
-    if (pointerType === 'coarse' && viewportWidth > 0 && viewportWidth <= 1366 && viewportHeight <= 1024) {
-        return { layoutMode: 'tablet' as const, layoutModeReason: 'coarse-pointer-tablet-viewport', matchedMediaQuery: '(pointer: coarse) and (max-width: 1366px)' };
     }
 
     return { layoutMode: 'desktop' as const, layoutModeReason: 'desktop-default', matchedMediaQuery: '(min-width: 1025px)' };

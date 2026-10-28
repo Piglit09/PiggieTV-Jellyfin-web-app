@@ -38,14 +38,22 @@ const SIGNATURE_MIXES = [
 ];
 
 export type PtvRecommendationRowsResult = {
+    diversityCapRejectionCount: number;
     duplicateItemsRemoved: number;
+    identityDuplicateRejectionCount: number;
     rowDiagnostics: PtvRecommendationRowDiagnostics[];
     rowOverlapPercentage: number;
     rows: PtvRecommendationRow[];
 };
 
+type SelectionDiagnosticCounts = {
+    diversityCapRejectionCount: number;
+    identityDuplicateRejectionCount: number;
+};
+
 type SelectionOptions = {
     blockedKeys?: Set<string>;
+    diagnosticCounts?: SelectionDiagnosticCounts;
     limit?: number;
     maxPerAlbum?: number;
     maxPerArtist?: number;
@@ -227,6 +235,32 @@ function recordSelectedScore(
     if (seriesKey) state.seriesCounts.set(seriesKey, countMapValue(state.seriesCounts, seriesKey) + 1);
 }
 
+type SelectionEvaluation =
+    | { reason: 'identity' | 'diversity' }
+    | { albumKey: string; artistKeys: string[]; key: string; reason: null; seriesKey: string };
+
+function evaluateSelectionCandidate(
+    item: PtvRecommendationScore,
+    state: SelectionState,
+    options: SelectionOptions
+): SelectionEvaluation {
+    const key = getScoreIdentity(item);
+
+    if (isKeyBlocked(key, state, options)) return { reason: 'identity' };
+    if (isMediaLimited(item, state, options)) return { reason: 'diversity' };
+    const artistKeys = getArtistKeys(item);
+
+    if (isArtistLimited(artistKeys, state, options)) return { reason: 'diversity' };
+    const seriesKey = getSeriesIdentity(item);
+
+    if (isSeriesLimited(seriesKey, state, options)) return { reason: 'diversity' };
+    const albumKey = getAlbumIdentity(item);
+
+    if (isAlbumLimited(albumKey, state, options)) return { reason: 'diversity' };
+
+    return { albumKey, artistKeys, key, reason: null, seriesKey };
+}
+
 function selectDiverseScores(items: PtvRecommendationScore[], options: SelectionOptions = {}): SelectionResult {
     const limit = options.limit || ROW_LIMIT;
     const sortedItems = options.sort ? items.slice().sort(options.sort) : items.slice();
@@ -237,40 +271,18 @@ function selectDiverseScores(items: PtvRecommendationScore[], options: Selection
     for (const item of sortedItems) {
         if (selected.length >= limit) break;
 
-        const key = getScoreIdentity(item);
+        const evaluation = evaluateSelectionCandidate(item, state, options);
 
-        if (isKeyBlocked(key, state, options)) {
+        if (evaluation.reason !== null) {
             duplicateItemsRemoved += 1;
+            if (options.diagnosticCounts) {
+                if (evaluation.reason === 'identity') options.diagnosticCounts.identityDuplicateRejectionCount += 1;
+                else options.diagnosticCounts.diversityCapRejectionCount += 1;
+            }
             continue;
         }
 
-        if (isMediaLimited(item, state, options)) {
-            duplicateItemsRemoved += 1;
-            continue;
-        }
-
-        const artistKeys = getArtistKeys(item);
-
-        if (isArtistLimited(artistKeys, state, options)) {
-            duplicateItemsRemoved += 1;
-            continue;
-        }
-
-        const seriesKey = getSeriesIdentity(item);
-
-        if (isSeriesLimited(seriesKey, state, options)) {
-            duplicateItemsRemoved += 1;
-            continue;
-        }
-
-        const albumKey = getAlbumIdentity(item);
-
-        if (isAlbumLimited(albumKey, state, options)) {
-            duplicateItemsRemoved += 1;
-            continue;
-        }
-
-        recordSelectedScore(item, key, albumKey, artistKeys, seriesKey, state);
+        recordSelectedScore(item, evaluation.key, evaluation.albumKey, evaluation.artistKeys, evaluation.seriesKey, state);
         selected.push(item);
     }
 
@@ -480,7 +492,8 @@ function hasStrongWatchedRelationship(
 
 function buildBecauseYouWatchedRows(
     scores: PtvRecommendationScore[],
-    historyItems: PtvRecommendationScore['item'][]
+    historyItems: PtvRecommendationScore['item'][],
+    diagnosticCounts: SelectionDiagnosticCounts
 ) {
     const rows: Array<{ duplicateItemsRemoved: number; row: PtvRecommendationRow }> = [];
     const blockedKeys = new Set<string>();
@@ -502,6 +515,7 @@ function buildBecauseYouWatchedRows(
         ));
         const selection = selectFilledDiverseScores(candidates, candidates, candidates, {
             blockedKeys,
+            diagnosticCounts,
             maxPerMediaType: MIXED_ROW_MEDIA_CAP,
             maxPerSeries: ROW_SERIES_CAP,
             sort: compareRecommended
@@ -559,13 +573,15 @@ function labelToId(label: string) {
 
 function getTermRow(
     scores: PtvRecommendationScore[],
-    signal: PtvTasteSignal
+    signal: PtvTasteSignal,
+    diagnosticCounts: SelectionDiagnosticCounts
 ): { duplicateItemsRemoved: number; row: PtvRecommendationRow | null } {
     const result = selectFilledDiverseScores(
         scores.filter(item => hasTerm(item, signal.label)),
         scores.filter(item => item.affinityScore >= 18),
         scores.filter(item => item.discoveryWeight >= 35),
         {
+            diagnosticCounts,
             maxPerArtist: ROW_ARTIST_CAP,
             maxPerMediaType: MIXED_ROW_MEDIA_CAP,
             maxPerSeries: ROW_SERIES_CAP,
@@ -591,10 +607,12 @@ function getMediaRow(
     title: string,
     explanation: string,
     scores: PtvRecommendationScore[],
-    mediaType: PtvRecommendationMediaType
+    mediaType: PtvRecommendationMediaType,
+    diagnosticCounts: SelectionDiagnosticCounts
 ): { duplicateItemsRemoved: number; row: PtvRecommendationRow | null } {
     const mediaScores = scores.filter(item => item.mediaType === mediaType);
     const result = selectFilledDiverseScores(mediaScores, mediaScores.filter(item => item.affinityScore >= 12), mediaScores.filter(item => item.discoveryWeight >= 35), {
+        diagnosticCounts,
         maxPerArtist: mediaType === 'music' ? ROW_ARTIST_CAP : undefined,
         maxPerSeries: ROW_SERIES_CAP,
         sort: mediaType === 'music' ? compareMusicAffinity : compareRecommended
@@ -613,6 +631,10 @@ export function buildPtvRecommendationRowsWithQuality(
 ): PtvRecommendationRowsResult {
     const rows: PtvRecommendationRow[] = [];
     let duplicateItemsRemoved = 0;
+    const diagnosticCounts: SelectionDiagnosticCounts = {
+        diversityCapRejectionCount: 0,
+        identityDuplicateRejectionCount: 0
+    };
 
     function pushSelection(row: PtvRecommendationRow | null, removedCount: number) {
         duplicateItemsRemoved += removedCount;
@@ -624,6 +646,7 @@ export function buildPtvRecommendationRowsWithQuality(
 
     const personalizedScores = scores.filter(hasUserRecommendationSignal);
     const recommended = selectFilledDiverseScores(personalizedScores, personalizedScores, personalizedScores, {
+        diagnosticCounts,
         maxPerArtist: ROW_ARTIST_CAP,
         maxPerMediaType: MADE_FOR_YOU_MEDIA_CAP,
         maxPerSeries: ROW_SERIES_CAP,
@@ -639,7 +662,7 @@ export function buildPtvRecommendationRowsWithQuality(
         recommended.diagnostics
     ), recommended.duplicateItemsRemoved);
 
-    const watchedSubjectRows = buildBecauseYouWatchedRows(scores, options.historyItems || []);
+    const watchedSubjectRows = buildBecauseYouWatchedRows(scores, options.historyItems || [], diagnosticCounts);
 
     if (watchedSubjectRows.length) {
         watchedSubjectRows.forEach(result => {
@@ -648,6 +671,7 @@ export function buildPtvRecommendationRowsWithQuality(
     } else {
         const watchedScores = scores.filter(isWatchedRecommendation);
         const watched = selectFilledDiverseScores(watchedScores, watchedScores, watchedScores, {
+            diagnosticCounts,
             maxPerMediaType: MIXED_ROW_MEDIA_CAP,
             maxPerSeries: ROW_SERIES_CAP,
             sort: compareWatched
@@ -664,6 +688,7 @@ export function buildPtvRecommendationRowsWithQuality(
     }
 
     const listened = selectFilledDiverseScores(scores.filter(isMusicRecommendation), scores.filter(item => item.mediaType === 'music'), scores.filter(item => item.mediaType === 'music' && item.discoveryWeight >= 35), {
+        diagnosticCounts,
         maxPerArtist: ROW_ARTIST_CAP,
         sort: compareMusicAffinity
     });
@@ -679,6 +704,7 @@ export function buildPtvRecommendationRowsWithQuality(
 
     const balancedRecommendationScores = buildBalancedRecommendationScores(scores);
     const discovery = selectFilledDiverseScores(balancedRecommendationScores, balancedRecommendationScores, balancedRecommendationScores, {
+        diagnosticCounts,
         maxPerArtist: ROW_ARTIST_CAP,
         maxPerMediaType: MIXED_ROW_MEDIA_CAP,
         maxPerSeries: ROW_SERIES_CAP,
@@ -696,6 +722,7 @@ export function buildPtvRecommendationRowsWithQuality(
 
     const rediscoverScores = scores.filter(isRediscoverRecommendation);
     const rediscover = selectFilledDiverseScores(rediscoverScores, rediscoverScores, rediscoverScores, {
+        diagnosticCounts,
         maxPerArtist: ROW_ARTIST_CAP,
         maxPerMediaType: MIXED_ROW_MEDIA_CAP,
         maxPerSeries: ROW_SERIES_CAP,
@@ -713,6 +740,7 @@ export function buildPtvRecommendationRowsWithQuality(
 
     const hiddenGemScores = scores.filter(isHiddenGemRecommendation);
     const hiddenGems = selectFilledDiverseScores(hiddenGemScores, hiddenGemScores, hiddenGemScores, {
+        diagnosticCounts,
         maxPerArtist: ROW_ARTIST_CAP,
         maxPerMediaType: MIXED_ROW_MEDIA_CAP,
         maxPerSeries: ROW_SERIES_CAP,
@@ -744,13 +772,13 @@ export function buildPtvRecommendationRowsWithQuality(
     ];
 
     mediaRows.forEach(([id, title, explanation, mediaType]) => {
-        const result = getMediaRow(id, title, explanation, personalizedScores, mediaType);
+        const result = getMediaRow(id, title, explanation, personalizedScores, mediaType, diagnosticCounts);
 
         pushSelection(result.row, result.duplicateItemsRemoved);
     });
 
     topSignals(profile.crossMediaTerms, 6).forEach(signal => {
-        const result = getTermRow(scores, signal);
+        const result = getTermRow(scores, signal, diagnosticCounts);
 
         pushSelection(result.row, result.duplicateItemsRemoved);
     });
@@ -762,6 +790,7 @@ export function buildPtvRecommendationRowsWithQuality(
             scores.filter(item => item.mediaType === 'music'),
             scores.filter(item => item.mediaType === 'music' && item.discoveryWeight >= 35),
             {
+                diagnosticCounts,
                 maxPerArtist: ROW_ARTIST_CAP,
                 sort: compareMusicAffinity
             }
@@ -778,7 +807,9 @@ export function buildPtvRecommendationRowsWithQuality(
     });
 
     return {
+        diversityCapRejectionCount: diagnosticCounts.diversityCapRejectionCount,
         duplicateItemsRemoved,
+        identityDuplicateRejectionCount: diagnosticCounts.identityDuplicateRejectionCount,
         rowDiagnostics: rows.map(row => row.diagnostics).filter((diagnostic): diagnostic is PtvRecommendationRowDiagnostics => Boolean(diagnostic)),
         rowOverlapPercentage: getAdjacentRowOverlapPercentage(rows),
         rows

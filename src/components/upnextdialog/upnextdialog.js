@@ -1,5 +1,6 @@
 import dom from '../../utils/dom';
 import { playbackManager } from '../playback/playbackmanager';
+import { sameQueuedItem } from '../playback/queueItemIdentity';
 import Events from '../../utils/events.ts';
 import mediaInfo from '../mediainfo/mediainfo';
 import layoutManager from '../layoutManager';
@@ -47,6 +48,14 @@ function getHtml() {
 
 function setNextVideoText() {
     const instance = this;
+
+    if (!instance.options || instance._retired || instance._advanceClaimed) return;
+    if (!instance.showStaticNextText && getTimeRemainingMs(instance) <= 0) {
+        // PlaybackManager owns advancement when the media reaches its end.
+        instance._advanceClaimed = true;
+        void instance.hide();
+        return;
+    }
 
     const elem = instance.options.parent;
 
@@ -101,20 +110,22 @@ function clearCountdownTextTimeout(instance) {
     }
 }
 
-async function onStartNowClick() {
-    const options = this.options;
-
-    if (options) {
-        const player = options.player;
-
-        await this.hide();
-
-        playbackManager.nextTrack(player);
+function advanceToNext() {
+    if (this._advanceClaimed || !this.options || this._retired) return;
+    this._advanceClaimed = true;
+    const player = this.options.player;
+    if (player?.isLocalPlayer && !player.getPlaylist
+        && !sameQueuedItem(this.options.queuedItem || this.options.nextItem, playbackManager.getNextItem?.()?.item)) {
+        void this.hide();
+        return;
     }
+    void this.hide();
+    playbackManager.nextTrack(player);
 }
 
 async function init(instance, options) {
     instance.showStaticNextText = await showStaticNextText(options.nextItem);
+    if (instance.options !== options || instance._retired) return;
 
     options.parent.innerHTML = getHtml();
 
@@ -125,7 +136,7 @@ async function init(instance, options) {
     fillItem.call(instance, options.nextItem);
 
     options.parent.querySelector('.btnHide').addEventListener('click', instance.hide.bind(instance));
-    options.parent.querySelector('.btnStartNow').addEventListener('click', onStartNowClick.bind(instance));
+    options.parent.querySelector('.btnStartNow').addEventListener('click', advanceToNext.bind(instance));
 }
 
 function clearHideAnimationEventListeners(instance, elem) {
@@ -150,6 +161,7 @@ function onHideAnimationComplete(e) {
 
 async function hideComingUpNext() {
     const instance = this;
+    instance._retired = true;
     clearCountdownTextTimeout(this);
 
     if (!instance.options) {
@@ -223,11 +235,14 @@ class UpNextDialog {
     constructor(options) {
         this.options = options;
         this.showStaticNextText = false; // default to showing countdown text
+        this._advanceClaimed = false;
+        this._retired = false;
 
         init(this, options);
     }
     show() {
         const elem = this.options.parent;
+        this._retired = false;
 
         clearHideAnimationEventListeners(this, elem);
 

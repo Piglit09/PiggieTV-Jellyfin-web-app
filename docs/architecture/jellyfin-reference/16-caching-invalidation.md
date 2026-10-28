@@ -65,6 +65,8 @@ Logout clears the whole QueryClient and resets cached views, which is the stock 
 
 Any new cache that survives logout or keys only by item ID must independently prove server/user isolation. `INFERRED` security guardrail from the verified boundary.
 
+Phase 7 local Reader progress and bookmark records use a versioned key containing one verified Jellyfin server/user identity and the item stable ID. Missing or conflicting identity disables local persistence; old item-only records remain untouched and are never assigned to the current signer. This is browser-local isolation, not Jellyfin `UserData` or cross-device synchronization. `[VERIFIED_BY_TEST]` `src/ptv/modules/reader/readerProgressStore.test.ts`.
+
 ## PTV coordinated-request lifetime extension
 
 This section describes the current PTV coordinator and does not change the stock cache contract.
@@ -100,3 +102,26 @@ Thus mutation acknowledgment, authoritative readback, relationship refresh, and 
 - Treat item data, relationships, image bytes/tags, queue, and diagnostics as distinct cache domains.
 
 These are `INFERRED` check points grounded in the stock mechanisms above.
+
+## PTV Web 0.5.78 local Featured diagnostic observation
+
+`[VERIFIED_FROM_SOURCE]` `featuredContentCache` remains the sole Web Featured
+cache owner. Its passive status reports read/adoption, write/readback, observed
+counts, fallback memory, freshness, and dated failure history separately. A
+per-user Plugin GET projection does not prove a Web write or authorize a
+cross-user readback comparison; verified write readback compares stable cache
+metadata and the requested refresh interval when present. Passive diagnostics
+cannot establish an identity owner, fetch a
+document, or persist one. `webDiagnosticPlatform` samples this status before
+export and on a bounded visible cadence. `[VERIFIED_BY_TEST]` The local
+`featuredContentCacheDiagnostics.test.ts` and
+`webDiagnosticPlatform.test.ts` cover absent versus observed-empty counts,
+recovery, overlapping writes, identity change, no-network export, low-power
+sampling, and disposal. Plugin storage and same-session permission convergence
+remain separate server-boundary questions.
+
+## Phase 2G local notification scope and navigation freshness
+
+`[VERIFIED_FROM_SOURCE]` `notificationService` no longer hydrates the legacy identity-agnostic `ptv:notifications:v1` localStorage record. It leaves those bytes untouched for recovery and writes new notices under `ptv:notifications:v2:` plus an encoded canonical authenticated Jellyfin server/user identity. A missing or conflicting identity produces an empty snapshot and prevents new notice persistence. Switching identity loads only that identity's retained records, resets deduplication state, and clears in-memory retry handlers. Snapshots and subscriptions can require an exact identity; the shell binds its badge/panel snapshot to the currently verified navigation identity and renders an empty snapshot when that identity is absent or has changed. `src/ptv/services/notificationService.ts`; `src/ptv/shell/PTVShell.tsx`.
+
+`[VERIFIED_FROM_SOURCE]` The separate `usePtvNavigationAccess` projection is per mounted header/sidebar consumer, not a new persistent or shared cache. It retains a last proven projection during a same-identity background refresh and replaces or withdraws it when the refresh settles. An identity mismatch withdraws it immediately, and retired reads are aborted and denied late adoption. Focus, visibility, storage, bounded periodic and aged route events trigger revalidation. An external policy change can precede the next refresh; immediate client convergence remains `[UNKNOWN]`. User-scoped HTTP authorization continues to belong to Jellyfin, not this client projection. `src/ptv/shell/usePtvNavigationAccess.ts`; `src/ptv/shell/navigationAccess.ts`.

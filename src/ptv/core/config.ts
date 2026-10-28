@@ -214,10 +214,10 @@ export const PTV_DEBUG = {
 } as const;
 
 export const PTV_CACHE = {
-    featuredContentKey: 'ptv:featured-content:v7',
+    featuredContentKey: 'ptv:featured-content:v8',
     featuredContentSettingsKey: 'ptv:featured-content:settings:v1',
     featuredContentTtlMs: 12 * 60 * 60 * 1000,
-    featuredContentVersion: 7,
+    featuredContentVersion: 9,
     maxFeaturedContentTtlMs: 7 * 24 * 60 * 60 * 1000,
     minFeaturedContentTtlMs: 60 * 60 * 1000
 } as const;
@@ -229,6 +229,8 @@ export const PTV_PLUGIN_API = {
         featuredContent: 'Ptv/v1/featured',
         featuredContentRefresh: 'Ptv/v1/featured/refresh',
         heroBatches: 'Ptv/v1/HeroBatches',
+        homeTransitions: 'Ptv/v1/home-transitions',
+        homeUserAccess: 'Ptv/v1/home-user-access',
         imageProxy: 'Ptv/v1/ImageProxy',
         accountProfile: 'Ptv/v1/account/profile',
         accountEmailVerification: 'Ptv/v1/account/email/verification',
@@ -241,6 +243,7 @@ export const PTV_PLUGIN_API = {
         googleBooksMetadataSearch: 'Ptv/v1/reading/metadata/googlebooks/search',
         readingMetadataProviders: 'Ptv/v1/reading/metadata/providers',
         readingMetadataSearch: 'Ptv/v1/reading/metadata/search',
+        readingMetadataReassess: 'Ptv/v1/reading/metadata/reassess',
         readingSeriesOverrides: 'Ptv/v1/reading/series-overrides',
         relationships: 'Ptv/v1/relationships',
         musicMetadataSearch: 'Ptv/v1/music/metadata/search',

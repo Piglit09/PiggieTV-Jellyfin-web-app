@@ -1,6 +1,6 @@
 const INCLUDED_EXTENSIONS = new Set([
-    '.cs', '.css', '.html', '.js', '.json', '.jsx', '.md', '.mjs', '.scss',
-    '.ts', '.tsx', '.yaml', '.yml'
+    '.cjs', '.cs', '.css', '.html', '.js', '.json', '.jsx', '.md', '.mjs',
+    '.py', '.scss', '.ts', '.tsx', '.yaml', '.yml'
 ]);
 
 export const SECRET_SCAN_RULES = Object.freeze([
@@ -14,7 +14,7 @@ export const SECRET_SCAN_RULES = Object.freeze([
     ],
     ['JWT', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/],
     ['authorization literal', /\bAuthorization\s*[:=]\s*["'](?:Basic|Bearer)\s+[^\s"']{12,}["']/i],
-    ['credential assignment', /\b(?:apiKey|password|secret|token)\s*[:=]\s*["'][^"'\s]{16,}["']/i]
+    ['credential assignment', /\b(?:apiKey|password|secret|token)\s*[:=]\s*["'](?!\.concat\()[^"'\s]{16,}["']/i]
 ]);
 
 export function findPotentialSecretLabels(content) {

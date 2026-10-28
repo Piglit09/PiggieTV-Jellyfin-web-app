@@ -6,6 +6,7 @@ import { TICKS_PER_MINUTE, TICKS_PER_SECOND } from 'constants/time';
 import { EventType } from 'constants/eventType';
 
 import { playbackManager } from '../../../components/playback/playbackmanager';
+import { matchesFetchedQueuedItem, sameQueuedItem } from '../../../components/playback/queueItemIdentity';
 import browser from '../../../scripts/browser';
 import dom from '../../../utils/dom';
 import inputManager from '../../../scripts/inputManager';
@@ -37,6 +38,10 @@ import { PluginType } from '../../../types/plugin.ts';
 import { getEpisodePlaybackTitle } from './videoDisplayTitle';
 import { createVideoFetchingDataState } from './fetchingDataState';
 import {
+    createVideoTransientMenuLifecycle,
+    isVideoTransientMenuCancellation
+} from './videoTransientMenuLifecycle';
+import {
     executePtvHiddenVideoDirectionalGestureKey,
     executePtvVideoSeekKey,
     isPtvVideoPlayerControlFocused,
@@ -55,6 +60,50 @@ export default function (view) {
     const fetchingDataState = createVideoFetchingDataState(visible => {
         view.querySelector('.osdMediaStatus')?.classList.toggle('hide', !visible);
     });
+    let transientMenuViewActive = false;
+    const transientMenuHeldKeys = new Set();
+    const transientMenus = createVideoTransientMenuLifecycle(() => {
+        const item = currentPlayer && playbackManager.currentItem(currentPlayer);
+        return {
+            player: currentPlayer,
+            itemId: item?.Id,
+            serverId: item?.ServerId,
+            view,
+            available: transientMenuViewActive && view.isConnected && currentVisibleMenu === 'osd'
+                && ptvVideoControlsVisibilityLease?.isActive()
+                && currentPlayer === playbackManager.getCurrentPlayer()
+                && !shouldHandleVideoControlsAsHidden()
+        };
+    });
+
+    function finishTransientMenu(operation, task) {
+        return task.catch(error => {
+            if (!isVideoTransientMenuCancellation(error)) console.error(error);
+        }).finally(() => {
+            // A retired chain cannot reset the timer owned by its replacement.
+            if (operation.finish()) {
+                transientMenuHeldKeys.clear();
+                resetIdle();
+            }
+        });
+    }
+
+    function retireTransientMenus() {
+        transientMenuHeldKeys.clear();
+        transientMenus.retire();
+    }
+
+    function isTransientMenuInteractionActive() {
+        return mouseIsDown || transientMenuHeldKeys.size > 0 && transientMenus.hasCurrent();
+    }
+
+    function retireTransientMenuView() {
+        transientMenuViewActive = false;
+        retireTransientMenus();
+        dom.removeEventListener(document, 'keyup', onTransientMenuKeyUp, { capture: true });
+        dom.removeEventListener(window, 'blur', onWindowBlur);
+        Events.off(playbackManager, 'playbackerror', retireTransientMenus);
+    }
     function getDisplayItem(item) {
         if (item.Type === 'TvChannel') {
             const apiClient = ServerConnections.getApiClient(item.ServerId);
@@ -250,7 +299,7 @@ export default function (view) {
     }
 
     function setTitle(item, parentName) {
-        const episodeTitle = getEpisodePlaybackTitle(item, parentName);
+        const episodeTitle = getEpisodePlaybackTitle(item);
         let itemName = episodeTitle || itemHelper.getDisplayName(item, {
             includeParentInfo: item.Type !== 'Program',
             includeIndexNumber: item.Type !== 'Program'
@@ -297,6 +346,7 @@ export default function (view) {
     }
 
     function hideOsd() {
+        retireTransientMenus();
         Events.trigger(document, EventType.SHOW_VIDEO_OSD, [ false ]);
         slideUpToHide(headerElement);
         hideMainOsdControls();
@@ -319,7 +369,7 @@ export default function (view) {
             registerPtvVideoControlsVisibilityHandler('jellyfin-video-controller', visible => {
                 if (visible) showOsd();
                 else hideOsd();
-            });
+            }, isTransientMenuInteractionActive, retireTransientMenus);
         resetPtvHiddenVideoDirectionalGestureForLease(ptvVideoControlsVisibilityLease);
     }
 
@@ -350,7 +400,7 @@ export default function (view) {
                 || headerElement.contains(activeElement)
             );
 
-            if (playerControlFocused) {
+            if (isTransientMenuInteractionActive() || playerControlFocused) {
                 startOsdHideTimer();
                 return;
             }
@@ -449,8 +499,8 @@ export default function (view) {
     // TODO: Move all idle-related code to `inputManager` or `idleManager` or `idleHelper` (per dialog thing) and listen event from there.
 
     function resetIdle() {
-        // Restart hide timer if OSD is currently visible and there is no opened dialog
-        if (currentVisibleMenu && !mouseIsDown && !getOpenedDialog()) {
+        // Owned transient menus share the OSD timer; unrelated dialogs keep stock idle behavior.
+        if (currentVisibleMenu && !isTransientMenuInteractionActive() && (!getOpenedDialog() || transientMenus.hasCurrent())) {
             startOsdHideTimer();
         } else {
             stopOsdHideTimer();
@@ -612,6 +662,7 @@ export default function (view) {
     }
 
     function onPlaybackStart(e, state) {
+        retireTransientMenus();
         console.debug('nowplaying event: ' + e.type);
         const player = this;
         onStateChanged.call(player, e, state);
@@ -620,6 +671,7 @@ export default function (view) {
     }
 
     function resetUpNextDialog() {
+        upNextGeneration += 1;
         comingUpNextDisplayed = false;
         const dlg = currentUpNextDialog;
 
@@ -627,9 +679,11 @@ export default function (view) {
             dlg.destroy();
             currentUpNextDialog = null;
         }
+        onUpNextHidden();
     }
 
     function onPlaybackStopped(e, state) {
+        retireTransientMenus();
         fetchingDataState.end(this);
         resetActivePtvHiddenVideoDirectionalGesture();
         currentRuntimeTicks = null;
@@ -695,6 +749,7 @@ export default function (view) {
     }
 
     function releaseCurrentPlayer() {
+        retireTransientMenus();
         resetActivePtvHiddenVideoDirectionalGesture();
         destroyStats();
         destroySubtitleSync();
@@ -771,16 +826,45 @@ export default function (view) {
         }
     }
 
+    let upNextGeneration = 0;
+
     function showComingUpNext(player) {
+        if (currentVisibleMenu || currentUpNextDialog) return;
+        const generation = ++upNextGeneration;
+        const playingItem = playbackManager.currentItem(player);
+        const playingIdentity = playingItem && {
+            Id: playingItem.Id,
+            ServerId: playingItem.ServerId,
+            PlaylistItemId: playingItem.PlaylistItemId
+        };
+        const queuedItem = player?.isLocalPlayer && !player.getPlaylist ? playbackManager.getNextItem()?.item : null;
+        const queuedIdentity = queuedItem && {
+            Id: queuedItem.Id,
+            ServerId: queuedItem.ServerId,
+            PlaylistItemId: queuedItem.PlaylistItemId
+        };
         import('../../../components/upnextdialog/upnextdialog').then(({ default: UpNextDialog }) => {
-            if (!(currentVisibleMenu || currentUpNextDialog)) {
+            if (generation === upNextGeneration && player === currentPlayer && !(currentVisibleMenu || currentUpNextDialog)) {
                 currentVisibleMenu = 'upnext';
                 comingUpNextDisplayed = true;
                 playbackManager.nextItem(player).then(function (nextItem) {
+                    if (generation !== upNextGeneration) return;
+                    const playingStillCurrent = player === currentPlayer && sameQueuedItem(playingIdentity, playbackManager.currentItem(player));
+                    const currentQueuedItem = queuedIdentity ? playbackManager.getNextItem()?.item : null;
+                    const queueChanged = queuedIdentity && !sameQueuedItem(queuedIdentity, currentQueuedItem);
+                    if (!playingStillCurrent || !nextItem || queueChanged
+                        || queuedIdentity && !matchesFetchedQueuedItem(queuedIdentity, nextItem)) {
+                        // A real replacement queue can be offered on the next progress update.
+                        // Keep contradictory fetches latched to avoid a retry storm.
+                        if (playingStillCurrent && queueChanged && currentQueuedItem?.Id) comingUpNextDisplayed = false;
+                        onUpNextHidden();
+                        return;
+                    }
                     currentUpNextDialog = new UpNextDialog({
                         parent: view.querySelector('.upNextContainer'),
                         player: player,
-                        nextItem: nextItem
+                        nextItem: nextItem,
+                        queuedItem: queuedIdentity
                     });
                     Events.on(currentUpNextDialog, 'hide', onUpNextHidden);
                 }, onUpNextHidden);
@@ -1046,39 +1130,40 @@ export default function (view) {
 
     function onSettingsButtonClick() {
         const btn = this;
+        const player = currentPlayer;
+        transientMenuHeldKeys.clear();
+        const operation = transientMenus.begin();
+        if (!operation.isCurrent()) return Promise.resolve();
 
-        import('../../../components/playback/playersettingsmenu').then((playerSettingsMenu) => {
-            const player = currentPlayer;
-
-            if (player) {
+        return finishTransientMenu(operation, import('../../../components/playback/playersettingsmenu').then((playerSettingsMenu) => {
+            if (operation.isCurrent()) {
                 const state = playbackManager.getPlayerState(player);
 
                 // show subtitle offset feature only if player and media support it
                 const showSubOffset = playbackManager.supportSubtitleOffset(player)
                         && playbackManager.canHandleOffsetOnCurrentSubtitle(player);
 
-                playerSettingsMenu.show({
+                const task = playerSettingsMenu.show({
                     mediaType: 'Video',
                     player: player,
                     positionTo: btn,
                     quality: state.MediaSource?.SupportsTranscoding,
                     stats: true,
                     suboffset: showSubOffset,
-                    onOption: onSettingsOption
-                }).finally(() => {
-                    resetIdle();
+                    operation,
+                    onOption: option => onSettingsOption(option, operation, player)
                 });
-
-                setTimeout(resetIdle, 0);
+                resetIdle();
+                return task;
             }
-        });
+        }));
     }
 
-    function onSettingsOption(selectedOption) {
+    function onSettingsOption(selectedOption, operation, player) {
+        if (!operation.isCurrent()) return;
         if (selectedOption === 'stats') {
-            toggleStats();
+            return toggleStats(operation, player);
         } else if (selectedOption === 'suboffset') {
-            const player = currentPlayer;
             if (player) {
                 playbackManager.enableShowingSubtitleOffset(player);
                 toggleSubtitleSync();
@@ -1086,9 +1171,10 @@ export default function (view) {
         }
     }
 
-    function toggleStats() {
-        import('../../../components/playerstats/playerstats').then(({ default: PlayerStats }) => {
-            const player = currentPlayer;
+    function toggleStats(operation, capturedPlayer) {
+        return import('../../../components/playerstats/playerstats').then(({ default: PlayerStats }) => {
+            if (operation && !operation.isCurrent()) return;
+            const player = capturedPlayer || currentPlayer;
 
             if (player) {
                 if (statsOverlay) {
@@ -1111,6 +1197,9 @@ export default function (view) {
 
     function showAudioTrackSelection() {
         const player = currentPlayer;
+        transientMenuHeldKeys.clear();
+        const operation = transientMenus.begin();
+        if (!operation.isCurrent()) return Promise.resolve();
         const audioTracks = playbackManager.audioTracks(player);
         const currentIndex = playbackManager.getAudioStreamIndex(player);
         const menuItems = audioTracks.map(function (stream) {
@@ -1127,27 +1216,28 @@ export default function (view) {
         });
         const positionTo = this;
 
-        import('../../../components/actionSheet/actionSheet').then(({ default: actionsheet }) => {
-            actionsheet.show({
+        return finishTransientMenu(operation, import('../../../components/actionSheet/actionSheet').then(({ default: actionsheet }) => {
+            if (!operation.isCurrent()) return;
+            const task = actionsheet.show({
                 items: menuItems,
                 title: globalize.translate('Audio'),
-                positionTo: positionTo
+                positionTo: positionTo,
+                signal: operation.signal
             }).then(function (id) {
+                if (!operation.isCurrent()) return;
                 const index = parseInt(id, 10);
 
                 if (index !== currentIndex) {
                     playbackManager.setAudioStreamIndex(index, player);
                 }
-            }).finally(() => {
-                resetIdle();
             });
-
-            setTimeout(resetIdle, 0);
-        });
+            resetIdle();
+            return task;
+        }));
     }
 
-    function showSecondarySubtitlesMenu(actionsheet, positionTo) {
-        const player = currentPlayer;
+    function showSecondarySubtitlesMenu(actionsheet, positionTo, operation, player) {
+        if (!operation.isCurrent()) return;
         if (!playbackManager.playerHasSecondarySubtitleSupport(player)) return;
         let currentIndex = playbackManager.getSecondarySubtitleStreamIndex(player);
         const streams = playbackManager.secondarySubtitleTracks(player);
@@ -1174,27 +1264,29 @@ export default function (view) {
             return opt;
         });
 
-        actionsheet.show({
+        const task = actionsheet.show({
             title: globalize.translate('SecondarySubtitles'),
             items: menuItems,
-            positionTo
+            positionTo,
+            signal: operation.signal
         }).then(function (id) {
+            if (!operation.isCurrent()) return;
             if (id) {
                 const index = parseInt(id, 10);
                 if (index !== currentIndex) {
                     playbackManager.setSecondarySubtitleStreamIndex(index, player);
                 }
             }
-        })
-            .finally(() => {
-                resetIdle();
-            });
-
-        setTimeout(resetIdle, 0);
+        });
+        resetIdle();
+        return task;
     }
 
     function showSubtitleTrackSelection() {
         const player = currentPlayer;
+        transientMenuHeldKeys.clear();
+        const operation = transientMenus.begin();
+        if (!operation.isCurrent()) return Promise.resolve();
         const streams = playbackManager.subtitleTracks(player);
         const secondaryStreams = playbackManager.secondarySubtitleTracks(player);
         let currentIndex = playbackManager.getSubtitleStreamIndex(player);
@@ -1244,18 +1336,19 @@ export default function (view) {
 
         const positionTo = this;
 
-        import('../../../components/actionSheet/actionSheet').then(({ default: actionsheet }) => {
-            actionsheet.show({
+        return finishTransientMenu(operation, import('../../../components/actionSheet/actionSheet').then(({ default: actionsheet }) => {
+            if (!operation.isCurrent()) return;
+            const task = actionsheet.show({
                 title: globalize.translate('Subtitles'),
                 items: menuItems,
-                positionTo: positionTo
+                positionTo: positionTo,
+                signal: operation.signal
             }).then(function (id) {
+                if (!operation.isCurrent()) return;
                 if (id === 'secondarysubtitle') {
-                    try {
-                        showSecondarySubtitlesMenu(actionsheet, positionTo);
-                    } catch (e) {
-                        console.error(e);
-                    }
+                    const childTask = showSecondarySubtitlesMenu(actionsheet, positionTo, operation, player);
+                    if (operation.isCurrent()) toggleSubtitleSync();
+                    return childTask;
                 } else {
                     const index = parseInt(id, 10);
 
@@ -1264,13 +1357,11 @@ export default function (view) {
                     }
                 }
 
-                toggleSubtitleSync();
-            }).finally(() => {
-                resetIdle();
+                if (operation.isCurrent()) toggleSubtitleSync();
             });
-
-            setTimeout(resetIdle, 0);
-        });
+            resetIdle();
+            return task;
+        }));
     }
 
     function toggleSubtitleSync(action) {
@@ -1307,6 +1398,8 @@ export default function (view) {
 
     function onKeyDown(e) {
         clickedElement = e.target;
+
+        if (e.target.closest?.('.upNextContainer:not(.hide):not(.upNextDialog-hidden)')) return;
 
         if (shouldYieldVideoKeyToPtvFocusOwner(e.defaultPrevented)) return;
 
@@ -1529,6 +1622,13 @@ export default function (view) {
     }
 
     function onKeyDownCapture(e) {
+        const key = keyboardnavigation.getKeyName(e);
+        if (!e.ctrlKey && !e.altKey && !e.metaKey
+            && e.target instanceof Element && e.target.closest('.actionSheet')
+            && transientMenus.hasCurrent()
+            && (keyboardnavigation.isNavigationKey(key) || ['Space', 'Enter', 'Tab'].indexOf(key) !== -1)) {
+            transientMenuHeldKeys.add(key);
+        }
         resetIdle();
 
         if (
@@ -1542,7 +1642,6 @@ export default function (view) {
             return;
         }
 
-        const key = keyboardnavigation.getKeyName(e);
         const seekHandled = executePtvHiddenVideoDirectionalGestureKey({
             controlsHidden: shouldHandleVideoControlsAsHidden(),
             key,
@@ -1557,6 +1656,10 @@ export default function (view) {
         e.preventDefault();
         showOsd(nowPlayingPositionSlider);
         e.stopImmediatePropagation();
+    }
+
+    function onTransientMenuKeyUp(e) {
+        if (transientMenuHeldKeys.delete(keyboardnavigation.getKeyName(e))) resetIdle();
     }
 
     function onWheel(e) {
@@ -1578,6 +1681,12 @@ export default function (view) {
     function onWindowMouseUp() {
         mouseIsDown = false;
         resetIdle();
+    }
+
+    function onWindowBlur() {
+        transientMenuHeldKeys.clear();
+        mouseIsDown = false;
+        if (ptvVideoControlsVisibilityLease?.isActive()) resetIdle();
     }
 
     function onWindowDragEnd() {
@@ -1796,8 +1905,10 @@ export default function (view) {
     });
     view.addEventListener('viewshow', function () {
         try {
+            transientMenuViewActive = true;
             bindPtvVideoControlsVisibilityHandler();
             Events.on(playbackManager, 'playerchange', onPlayerChange);
+            Events.on(playbackManager, 'playbackerror', retireTransientMenus);
             bindToPlayer(playbackManager.getCurrentPlayer());
             /* eslint-disable-next-line compat/compat */
             dom.addEventListener(document, window.PointerEvent ? 'pointermove' : 'mousemove', onPointerMove, {
@@ -1806,6 +1917,8 @@ export default function (view) {
             showOsd();
             inputManager.on(window, onInputCommand);
             document.addEventListener('keydown', onKeyDown);
+            dom.addEventListener(document, 'keyup', onTransientMenuKeyUp, { capture: true, passive: true });
+            dom.addEventListener(window, 'blur', onWindowBlur, { passive: true });
             dom.addEventListener(document, 'keydown', onKeyDownCapture, {
                 capture: true,
                 passive: false
@@ -1839,12 +1952,15 @@ export default function (view) {
                 dom.addEventListener(document, 'click', onClickCapture, { capture: true });
             }
         } catch {
+            retireTransientMenuView();
             releasePtvVideoControlsVisibilityHandler();
             setBackdropTransparency(TRANSPARENCY_LEVEL.None); // reset state set in viewbeforeshow
             appRouter.goHome();
         }
     });
     view.addEventListener('viewbeforehide', function () {
+        retireTransientMenuView();
+        mouseIsDown = false;
         releasePtvVideoControlsVisibilityHandler();
         if (statsOverlay) {
             statsOverlay.enabled(false);
@@ -1905,9 +2021,11 @@ export default function (view) {
     });
     view.querySelector('.btnVideoOsdSettings').addEventListener('click', onSettingsButtonClick);
     view.addEventListener('viewhide', function () {
+        retireTransientMenuView();
         headerElement.classList.remove('hide');
     });
     view.addEventListener('viewdestroy', function () {
+        retireTransientMenuView();
         fetchingDataState.release();
         releasePtvVideoControlsVisibilityHandler();
         if (self.touchHelper) {
@@ -1926,7 +2044,9 @@ export default function (view) {
     let lastPointerDown = 0;
     /* eslint-disable-next-line compat/compat */
     dom.addEventListener(view, window.PointerEvent ? 'pointerdown' : 'click', function (e) {
-        if (dom.parentWithClass(e.target, ['videoOsdBottom', 'upNextContainer'])) {
+        if (dom.parentWithClass(e.target, ['upNextContainer'])) return;
+
+        if (dom.parentWithClass(e.target, ['videoOsdBottom'])) {
             showOsd();
             return;
         }

@@ -23,6 +23,18 @@ type Preview = Readonly<{
 }>;
 const NO_CONFIGURED_HEROES: Readonly<Record<string, string>> = Object.freeze({});
 
+function isSamePreview(previous: Preview | null, next: Preview | null) {
+    if (previous === next) return true;
+    if (!previous || !next) return false;
+    return previous.identityKey === next.identityKey
+        && previous.item === next.item
+        && previous.proof === next.proof
+        && previous.row?.configuredPresentationAuthority === next.row?.configuredPresentationAuthority
+        && previous.row?.rowType === next.row?.rowType
+        && previous.row?.ruleId === next.row?.ruleId
+        && previous.row?.sourceRuleId === next.row?.sourceRuleId;
+}
+
 /** Fixed-size view state only. It never fetches, verifies, caches or authorizes an item. */
 export function useConfiguredHomePreview(
     identityKey: string | null,
@@ -55,17 +67,17 @@ export function useConfiguredHomePreview(
 
     const currentFocus = isPreviewCurrent(focused) ? focused : null;
     const setActiveBackdropItem = useCallback((item: PtvItem | null) => {
-        if (item?.Id && currentFocus?.proof && currentFocus.item.Id === item.Id) {
-            setActiveBackdropPreview(currentFocus);
-            return;
-        }
         const authority = item?.Id && configuredHeroAuthorities[item.Id];
-        setActiveBackdropPreview(item ? {
+        let next: Preview | null = item ? {
             identityKey,
             item,
             proof: authority ? snapshot : null,
             row: authority ? { configuredPresentationAuthority: authority } : null
-        } : null);
+        } : null;
+        if (item?.Id && currentFocus?.proof && currentFocus.item.Id === item.Id) next = currentFocus;
+        // Hero effects may repeat with an equivalent authority map. Do not create
+        // a render loop, or borrow fresh proof for an old callback/DTO.
+        setActiveBackdropPreview(previous => isSamePreview(previous, next) ? previous : next);
     }, [configuredHeroAuthorities, currentFocus, identityKey, snapshot]);
 
     // No key change on generic/current focus, only when a configured proof is retired.

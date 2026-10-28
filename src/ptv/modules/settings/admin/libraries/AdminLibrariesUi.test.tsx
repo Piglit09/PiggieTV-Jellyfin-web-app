@@ -35,7 +35,10 @@ const uiMocks = vi.hoisted(() => ({
     creationOptionsState: null as unknown as CreationOptionsStateMock,
     libraryState: null as unknown as LibraryStateMock,
     librariesState: null as unknown as LibrariesStateMock,
+    loadAdminLibraryTransition: vi.fn(),
     loadAdminLibraryDirectory: vi.fn(),
+    rebindAdminLibraryTransition: vi.fn(),
+    retryAdminLibraryTransitionGeneration: vi.fn(),
     removeAdminLibrary: vi.fn(),
     removeAdminLibraryPath: vi.fn(),
     renameAdminLibrary: vi.fn(),
@@ -65,7 +68,10 @@ vi.mock('./adminLibrariesService', () => ({
     AdminLibrariesServiceError: uiMocks.AdminLibrariesServiceError,
     addAdminLibraryPath: uiMocks.addAdminLibraryPath,
     createAdminLibrary: uiMocks.createAdminLibrary,
+    loadAdminLibraryTransition: uiMocks.loadAdminLibraryTransition,
     loadAdminLibraryDirectory: uiMocks.loadAdminLibraryDirectory,
+    rebindAdminLibraryTransition: uiMocks.rebindAdminLibraryTransition,
+    retryAdminLibraryTransitionGeneration: uiMocks.retryAdminLibraryTransitionGeneration,
     removeAdminLibrary: uiMocks.removeAdminLibrary,
     removeAdminLibraryPath: uiMocks.removeAdminLibraryPath,
     renameAdminLibrary: uiMocks.renameAdminLibrary,
@@ -220,6 +226,7 @@ function librariesState(overrides: Record<string, unknown> = {}) {
         libraries: [] as AdminLibrarySummary[],
         listError: false,
         refresh: vi.fn(async () => undefined),
+        refreshTransition: vi.fn(async () => undefined),
         scanStatusError: false,
         ...overrides
     };
@@ -251,6 +258,7 @@ function libraryState(overrides: Record<string, unknown> = {}) {
             }]
         } as LibraryOptionsResultDto,
         refetch: vi.fn(async () => undefined),
+        refreshTransition: vi.fn(async () => undefined),
         refetchProviders: vi.fn(async () => undefined),
         removeCachedDetail: vi.fn(),
         scanStatusError: false,
@@ -826,6 +834,124 @@ describe('PiggieTV administrator libraries UI', () => {
         await act(async () => buttonWithText(container, 'Retry defaults')?.click());
         expect(refetch).toHaveBeenCalledOnce();
         expect(uiMocks.createAdminLibrary).not.toHaveBeenCalled();
+    });
+
+    it('shows unresolved rename authority without adopting the old identity', async () => {
+        uiMocks.renameAdminLibrary.mockResolvedValueOnce(null);
+        await render(<PtvAdminLibraryDetail libraryId='library-a' />);
+        const general = sectionWithHeading(container, 'General')!;
+        await act(async () => changeInput(general.querySelector('input')!, 'Films'));
+        await act(async () => buttonWithText(general, 'Save name')?.click());
+        expect(uiMocks.renameAdminLibrary).toHaveBeenCalledOnce();
+        expect(uiMocks.libraryState.adoptLibrary).not.toHaveBeenCalled();
+        expect(container.textContent).toContain('Library authority is unresolved');
+    });
+
+    it('shows a pending transition on the library list after restart', async () => {
+        uiMocks.librariesState = { ...librariesState(), transition: { held: true, operationId: 'operation-a', affectedRuleIds: ['anime'] } } as LibrariesStateMock;
+        await render(<PtvAdminLibrariesPage />);
+        expect(container.textContent).toContain('Home library rows are held');
+        expect(container.textContent).toContain('operation-a');
+    });
+
+    it('shows a restored pending transition and affected rules', async () => {
+        uiMocks.libraryState = { ...libraryState(), transition: { operationId: 'operation-a', epoch: 'epoch-a', held: true, state: 'pending', affectedRuleIds: ['anime'] } } as LibraryStateMock;
+        await render(<PtvAdminLibraryDetail libraryId='library-a' />);
+        expect(container.textContent).toContain('Home library rows are held');
+        expect(container.textContent).toContain('operation-a');
+        expect(container.textContent).toContain('anime');
+    });
+
+    it('offers explicit affected-rule and current-folder selection from the libraries list after the old detail disappears', async () => {
+        const folderId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+        const diagnostic = {
+            operationId: 'operation-a', epoch: 'a'.repeat(64), held: true, state: 'pending',
+            affectedRuleIds: ['anime', 'movies'], authority: 'binding-required',
+            library: { ItemId: folderId, Name: 'Current Movies', CollectionType: 'movies', Locations: ['/local', '/das'] }
+        };
+        uiMocks.librariesState = librariesState({ libraries: [], transition: diagnostic });
+        uiMocks.rebindAdminLibraryTransition.mockResolvedValueOnce({
+            ...diagnostic, epoch: 'b'.repeat(64), held: false, state: 'complete',
+            authority: 'bound', affectedRuleIds: []
+        });
+        await render(<PtvAdminLibrariesPage />);
+
+        expect(container.textContent).toContain('Rebind Home rows');
+        expect(container.textContent).toContain(folderId);
+        expect(container.textContent).toContain('No libraries configured.');
+        const submit = buttonWithText(container, 'Confirm Home binding')!;
+        expect(submit.disabled).toBe(true);
+        const rules = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+            .filter(input => ['anime', 'movies'].includes(input.value));
+        const folder = container.querySelector<HTMLInputElement>(`input[type="radio"][value="${folderId}"]`)!;
+        expect(rules).toHaveLength(2);
+        expect(rules.every(input => !input.checked)).toBe(true);
+        expect(folder.checked).toBe(false);
+        await act(async () => { rules[0].click(); rules[1].click(); folder.click(); });
+        expect(submit.disabled).toBe(false);
+        await act(async () => { submit.click(); await Promise.resolve(); });
+        await flushAsync();
+        expect(uiMocks.rebindAdminLibraryTransition).toHaveBeenCalledWith(expect.anything(), diagnostic, [
+            { ruleId: 'anime', libraryId: folderId }, { ruleId: 'movies', libraryId: folderId }
+        ]);
+        expect(uiMocks.librariesState.refreshTransition).toHaveBeenCalledOnce();
+        expect(container.textContent).toContain('Home transition completed');
+    });
+
+    it('keeps the rebind entry visible when the old detail route is unavailable', async () => {
+        const diagnostic = {
+            operationId: 'operation-a', epoch: 'a'.repeat(64), held: true, state: 'pending',
+            affectedRuleIds: ['anime'], authority: 'unresolved', library: null
+        };
+        uiMocks.libraryState = libraryState({ detail: null, error: true, transition: diagnostic });
+        await render(<PtvAdminLibraryDetail libraryId='old-folder' />, '/settings/admin/libraries/old-folder');
+        expect(container.textContent).toContain('Library unavailable');
+        expect(container.textContent).toContain('Rebind Home rows');
+        expect(container.textContent).toContain('Current library identity is not verified');
+        expect(buttonWithText(container, 'Confirm Home binding')).toBeUndefined();
+    });
+
+    it('shows a completed operation that still needs rule binding on the libraries list', async () => {
+        const folderId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+        const current = {
+            operationId: 'operation-a', epoch: 'a'.repeat(64), held: false, state: 'complete',
+            affectedRuleIds: ['old-tombstone', 'fresh-rule'], authority: 'binding-required', writeAllowed: false,
+            library: { ItemId: folderId, Name: 'Current Anime' }
+        };
+        uiMocks.librariesState = librariesState({ transition: current });
+        uiMocks.rebindAdminLibraryTransition.mockResolvedValueOnce({
+            ...current, epoch: 'b'.repeat(64), authority: 'bound', affectedRuleIds: []
+        });
+        await render(<PtvAdminLibrariesPage />);
+        expect(container.textContent).toContain('Rebind Home rows');
+        expect(container.querySelector<HTMLInputElement>(`input[value="${folderId}"]`)?.checked).toBe(false);
+        const submit = buttonWithText(container, 'Confirm Home binding')!;
+        expect(submit.disabled).toBe(true);
+        const rules = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+            .filter(input => current.affectedRuleIds.includes(input.value));
+        expect(rules.map(rule => rule.value)).toEqual(['old-tombstone', 'fresh-rule']);
+        await act(async () => {
+            rules[0].click(); rules[1].click();
+            container.querySelector<HTMLInputElement>(`input[value="${folderId}"]`)?.click();
+        });
+        await act(async () => { submit.click(); await Promise.resolve(); });
+        expect(uiMocks.rebindAdminLibraryTransition).toHaveBeenCalledWith(expect.anything(), current, [
+            { ruleId: 'old-tombstone', libraryId: folderId },
+            { ruleId: 'fresh-rule', libraryId: folderId }
+        ]);
+    });
+
+    it('keeps generation retry reachable from the libraries list when no rule binding is pending', async () => {
+        const current = {
+            operationId: 'operation-a', epoch: 'a'.repeat(64), held: false, state: 'complete',
+            affectedRuleIds: [], authority: 'generation-pending', writeAllowed: false, library: null
+        };
+        uiMocks.librariesState = librariesState({ libraries: [], transition: current });
+        await render(<PtvAdminLibrariesPage />);
+        expect(container.textContent).toContain('No libraries configured.');
+        expect(container.textContent).toContain('Home generation is pending');
+        expect(buttonWithText(container, 'Retry Home generation')).toBeDefined();
+        expect(buttonWithText(container, 'Confirm Home binding')).toBeUndefined();
     });
 
     it('keeps general, folder, and behavior controls usable when provider context fails', async () => {

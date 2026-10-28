@@ -11,6 +11,10 @@ import {
 } from './adminReadingMetadataAdapters';
 import type { AdminReadingMetadataSearchRequest } from './adminReadingMetadataModel';
 import {
+    adminReadingAssessmentKey,
+    requireAdminReadingApproval,
+    reassessAdminReadingIdentity,
+    type AdminReadingApplyGuard,
     loadAdminReadingMetadataProviders,
     searchAdminReadingMetadata
 } from './adminReadingMetadataService';
@@ -76,6 +80,18 @@ export type UseAdminMetadataManagerInput = Readonly<{
     userId?: string;
     workspaceEnabled?: boolean;
 }>;
+
+function requireCurrentReadingReview(
+    guard: AdminReadingApplyGuard | undefined,
+    scopeMatches: boolean,
+    connection: ReturnType<typeof getCurrentPtvPluginApiClient>,
+    serverId: string | null,
+    userId: string
+) {
+    if (!scopeMatches || !guard?.isCurrent() || connection?.getCurrentServerId() !== serverId || connection?.getCurrentUserId() !== userId) {
+        throw new AdminMetadataManagerServiceError('conflict', 'The Reading review is no longer current. Search again.');
+    }
+}
 
 function normalizeText(value?: string) {
     return value?.trim() || '';
@@ -269,6 +285,15 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
     const searchTerm = normalizeText(input.searchTerm);
     const debouncedSearchTerm = useDebouncedText(searchTerm);
     const queryClient = useQueryClient();
+    const identityScope = JSON.stringify([serverKey, userId, itemId]);
+    const identityScopeRef = useRef<string | null>(identityScope);
+    identityScopeRef.current = identityScope;
+    useEffect(() => {
+        identityScopeRef.current = identityScope;
+        return () => {
+            identityScopeRef.current = null;
+        };
+    }, [ identityScope ]);
     const readingApi = useMemo(() => getCurrentPtvPluginApiClient(apiClient), [ apiClient ]);
     const keys = useMemo(
         () => getAdminMetadataManagerQueryKeys(serverKey || 'unresolved-server'),
@@ -329,6 +354,7 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
     });
     const mutationFlightRef = useRef<Readonly<{
         operation: AdminMetadataManagerMutation;
+        guardKey?: string;
         promise: Promise<unknown>;
     }> | null>(null);
     const [ activeMutation, setActiveMutation ] = useState<AdminMetadataManagerMutation | null>(null);
@@ -338,11 +364,12 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
 
     const runExclusive = useCallback(<T>(
         operation: AdminMetadataManagerMutation,
-        work: () => Promise<T>
+        work: () => Promise<T>,
+        guardKey?: string
     ): Promise<T> => {
         const active = mutationFlightRef.current;
         if (active) {
-            if (active.operation === operation) return active.promise as Promise<T>;
+            if (active.operation === operation && active.guardKey === guardKey) return active.promise as Promise<T>;
             return Promise.reject(new AdminMetadataManagerServiceError(
                 'invalid-input',
                 'Finish the current metadata action before starting another.'
@@ -359,7 +386,7 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
             if (mutationFlightRef.current?.promise === promise) mutationFlightRef.current = null;
             setActiveMutation(null);
         });
-        mutationFlightRef.current = { operation, promise };
+        mutationFlightRef.current = { operation, promise, guardKey };
         return promise;
     }, []);
 
@@ -391,8 +418,8 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
             });
             updateAuthoritativeItem(saved);
             return saved;
-        })
-    ), [ api, itemId, itemKey, queryClient, runExclusive, updateAuthoritativeItem, userId ]);
+        }, adminReadingAssessmentKey([identityScope, confirmedForm, desiredForm]))
+    ), [ api, identityScope, itemId, itemKey, queryClient, runExclusive, updateAuthoritativeItem, userId ]);
 
     const uploadArtwork = useCallback((artwork: Omit<UploadAdminMetadataArtworkInput, 'itemId'>) => (
         runExclusive('upload-artwork', async () => {
@@ -497,13 +524,27 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
         });
     }, [ itemId, keys, queryClient, readingApi, serverKey ]);
 
-    const applyIdentifyResult = useCallback((result: AdminMetadataIdentifyResult) => (
+    const applyIdentifyResult = useCallback((result: AdminMetadataIdentifyResult, guard?: AdminReadingApplyGuard) => (
         runExclusive('apply-identify', async () => {
             const currentApi = requireResource(api, 'Identify is unavailable.');
             await queryClient.cancelQueries({ exact: true, queryKey: itemKey });
             const currentBundle = itemQuery.data;
+            if (result.readingCandidate && (!currentBundle || !guard)) {
+                throw new AdminMetadataManagerServiceError('conflict', 'Review the current Reading match before applying.');
+            }
             const saved = result.readingCandidate && currentBundle ?
                 await saveAdminMetadataItem(currentApi, {
+                    guardKey: adminReadingAssessmentKey([identityScope, result, guard?.approval, currentBundle.form]),
+                    beforeUpdate: async fresh => {
+                        requireCurrentReadingReview(guard, Boolean(serverKey && userId && identityScopeRef.current === identityScope && fresh.item.id === itemId), readingApi, serverKey, userId);
+                        requireAdminReadingApproval(result.readingCandidate!, guard?.approval, itemId);
+                        const assessment = await reassessAdminReadingIdentity(requireResource(readingApi ?? undefined, 'Reading identity reassessment is unavailable.'), {
+                            itemId, candidateContext: guard!.approval.assessmentContext,
+                            displayedRevision: guard!.approval.archiveRevision
+                        });
+                        requireCurrentReadingReview(guard, Boolean(serverKey && userId && identityScopeRef.current === identityScope && fresh.item.id === itemId), readingApi, serverKey, userId);
+                        requireAdminReadingApproval(result.readingCandidate!, guard?.approval, itemId, assessment);
+                    },
                     confirmedForm: currentBundle.form,
                     desiredForm: createAdminMetadataFormFromReadingCandidate(
                         currentBundle.form,
@@ -520,8 +561,8 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
                 });
             updateAuthoritativeItem(saved);
             return saved;
-        })
-    ), [ api, itemId, itemKey, itemQuery.data, queryClient, runExclusive, updateAuthoritativeItem, userId ]);
+        }, adminReadingAssessmentKey([identityScope, result, guard?.approval, itemQuery.data?.form]))
+    ), [ api, identityScope, itemId, itemKey, itemQuery.data, queryClient, readingApi, runExclusive, serverKey, updateAuthoritativeItem, userId ]);
 
     const refreshItem = useCallback((mode: AdminMetadataRefreshMode, recursive = false) => (
         runExclusive('refresh', async () => {
@@ -529,44 +570,11 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
             const storedIdentity = mode === 'scan' && !recursive && currentBundle?.item.type === 'Book' ?
                 findAdminStoredReadingProviderIdentity(currentBundle.form.providerIds) :
                 null;
-            if (storedIdentity && currentBundle) {
-                const currentApi = requireResource(api, 'Metadata refresh is unavailable.');
-                const request: AdminReadingMetadataSearchRequest = {
-                    itemId,
-                    provider: storedIdentity.provider,
-                    providerId: storedIdentity.providerId
-                };
-                await Promise.all([
-                    queryClient.cancelQueries({ exact: true, queryKey: itemKey }),
-                    queryClient.cancelQueries({ exact: true, queryKey: keys.readingResults(request) })
-                ]);
-                const response = await queryClient.fetchQuery({
-                    queryFn: ({ signal }) => searchAdminReadingMetadata(readingApi, request, signal),
-                    queryKey: keys.readingResults(request),
-                    staleTime: 0
-                });
-                const candidate = response.candidates.find(value => (
-                    value.providerId.localeCompare(storedIdentity.providerId, undefined, { sensitivity: 'accent' }) === 0
-                ));
-                if (!candidate) {
-                    throw new AdminMetadataManagerServiceError(
-                        'item-unavailable',
-                        `${storedIdentity.displayName} could not verify the saved provider identity.`
-                    );
-                }
-                const saved = await saveAdminMetadataItem(currentApi, {
-                    confirmedForm: currentBundle.form,
-                    desiredForm: createAdminMetadataFormFromReadingCandidate(
-                        currentBundle.form,
-                        candidate,
-                        currentBundle.editor.editableFields,
-                        response.query
-                    ),
-                    itemId,
-                    userId: userId || undefined
-                });
-                updateAuthoritativeItem(saved);
-                return { kind: 'reading-exact', provider: storedIdentity.displayName } as const;
+            if (storedIdentity) {
+                throw new AdminMetadataManagerServiceError(
+                    'conflict',
+                    'Reading Scan requires a fresh identity review. Open Identify, review the match, and Apply it there.'
+                );
             }
 
             const client = requireResource(apiClient, 'Metadata refresh is unavailable.');
@@ -578,21 +586,15 @@ export function useAdminMetadataManager(input: UseAdminMetadataManagerInput) {
             return { kind: 'jellyfin' } as const;
         })
     ), [
-        api,
         apiClient,
         invalidateArtworkConsumers,
         itemId,
-        itemKey,
         itemQuery.data,
-        keys,
-        queryClient,
-        readingApi,
-        runExclusive,
-        updateAuthoritativeItem,
-        userId
+        runExclusive
     ]);
 
     return {
+        identityScope: { serverId: serverKey, userId },
         activeMutation,
         applyIdentifyResult,
         artwork: artworkQuery.data || null,

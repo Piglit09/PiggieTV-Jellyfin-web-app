@@ -97,8 +97,33 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 _logger.LogInformation("Advertising feature: remoteDiagnostics");
 
                 var presentationProof = await GetCurrentPresentationProofAsync().ConfigureAwait(false);
+                var userAccess = await GetCurrentHomeUserAccessAsync(cancellationToken).ConfigureAwait(false);
+                var associations = _serviceProvider.GetService<PtvConfiguredRowAssociationService>();
+                var topology = associations?.ReadTopology();
+                var finalTopology = associations?.ReadTopology();
+                if (topology?.Epoch != finalTopology?.Epoch || topology?.Sequence != finalTopology?.Sequence
+                    || PtvFeaturedTopology.Available(topology) != PtvFeaturedTopology.Available(finalTopology))
+                {
+                    // Begin may have retired owned bindings after the proof was captured.
+                    presentationProof = await GetCurrentPresentationProofAsync().ConfigureAwait(false);
+                    finalTopology = associations?.ReadTopology();
+                }
+                topology = finalTopology;
+                // A controlled user policy Begin can persist its hold while status is
+                // being assembled without changing the topology epoch. Re-read at the
+                // response boundary so an earlier ready observation cannot be emitted.
+                userAccess = await GetCurrentHomeUserAccessAsync(cancellationToken).ConfigureAwait(false);
                 var safeResponse = new
                 {
+                    currentHomeTopology = new { version = 1, epoch = topology?.Epoch ?? string.Empty, held = !PtvFeaturedTopology.Available(topology) },
+                    currentHomeUserAccess = userAccess is null ? null : new
+                    {
+                        version = userAccess.Version,
+                        userId = userAccess.UserId,
+                        accessEpoch = userAccess.AccessEpoch,
+                        held = userAccess.Held,
+                        policyProven = userAccess.PolicyProven
+                    },
                     currentPresentationAuthority = presentationProof?.Authority,
                     configuredPresentationBindings = presentationProof?.Bindings,
                     apiPath = $"/{PtvApiRoutes.Root}/{PtvApiRoutes.V1}",
@@ -380,6 +405,9 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             }
 
             var document = authorization.Document;
+            var initialAccess = await GetCurrentHomeUserAccessAsync(cancellationToken).ConfigureAwait(false);
+            if (initialAccess is not { Held: false, PolicyProven: true, AccessEpoch: not null })
+                PtvFeaturedTopology.WithholdUnprovenUserContent(document.FeaturedContent?["payload"] as JsonObject);
             var featuredStatus = PtvFeaturedContentStatus.FromDocument(document);
             var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(document).Length;
 
@@ -398,6 +426,16 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 serializedBytes);
 
             GetOptionalService<PtvConfiguredRowAssociationService>(PtvApiRoutes.V1Featured)?.FinalizeResponse(document);
+            // A controlled Begin may have persisted a user hold while the cache was
+            // being authorized. Reject that late owned result even with unchanged topology.
+            var finalAccess = await GetCurrentHomeUserAccessAsync(cancellationToken).ConfigureAwait(false);
+            if (initialAccess is not { Held: false, PolicyProven: true, AccessEpoch: not null }
+                || finalAccess is not { Held: false, PolicyProven: true, AccessEpoch: not null }
+                || initialAccess.AccessEpoch != finalAccess.AccessEpoch)
+                PtvFeaturedTopology.WithholdUnprovenUserContent(document.FeaturedContent?["payload"] as JsonObject);
+            else
+                PtvFeaturedTopology.BindUserAccessEpoch(document.FeaturedContent?["payload"] as JsonObject,
+                    finalAccess.AccessEpoch);
             return Ok(document);
         }
         catch (Exception)
@@ -1327,6 +1365,23 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> RequestSeerr([FromBody] JsonObject? body, CancellationToken cancellationToken)
     {
+        if (HttpContext is null || !TryGetAuthenticatedUserId(out var userId)
+            || GetOptionalService<IUserManager>("integrations/seerr/request")?.GetUserById(userId) is null)
+        {
+            return Unauthorized(Error("PTV_SEERR_REQUEST_AUTH_REQUIRED", "An authenticated Jellyfin user is required."));
+        }
+
+        if (!await CanWriteFeaturedContentSafeAsync("integrations/seerr/request").ConfigureAwait(false))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                Error("PTV_SEERR_REQUEST_FORBIDDEN", "Administrator permission is required to request media."));
+        }
+
+        if (!TryBuildSeerrRequestPayload(body, out var requestPayload))
+        {
+            return BadRequest(Error("PTV_SEERR_REQUEST_INVALID", "A valid media request is required."));
+        }
+
         var settings = GetNormalizedConfiguration().SeerrSettings;
 
         if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.InternalUrl) || string.IsNullOrWhiteSpace(settings.ApiKey))
@@ -1343,9 +1398,53 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             settings.InternalUrl,
             "/api/v1/request",
             settings.ApiKey,
-            body ?? new JsonObject(),
+            requestPayload,
             "Jellyseerr request",
             cancellationToken).ConfigureAwait(false));
+    }
+
+    private static bool TryBuildSeerrRequestPayload(JsonObject? body, out JsonObject requestPayload)
+    {
+        requestPayload = new JsonObject();
+        if (body is null || body.Any(field => field.Key is not ("mediaType" or "mediaId" or "seasons"))
+            || body["mediaType"] is not JsonValue typeValue
+            || !typeValue.TryGetValue<string>(out var mediaType)
+            || mediaType is not ("movie" or "tv")
+            || body["mediaId"] is not JsonValue idValue
+            || !idValue.TryGetValue<int>(out var mediaId)
+            || mediaId <= 0)
+        {
+            return false;
+        }
+
+        requestPayload["mediaType"] = mediaType;
+        requestPayload["mediaId"] = mediaId;
+        if (!body.ContainsKey("seasons"))
+        {
+            return true;
+        }
+
+        if (mediaType != "tv" || body["seasons"] is not JsonArray inputSeasons
+            || inputSeasons.Count is < 1 or > 100)
+        {
+            return false;
+        }
+
+        var seasons = new JsonArray();
+        var seen = new HashSet<int>();
+        foreach (var season in inputSeasons)
+        {
+            if (season is not JsonValue seasonValue || !seasonValue.TryGetValue<int>(out var seasonNumber)
+                || seasonNumber < 0 || !seen.Add(seasonNumber))
+            {
+                return false;
+            }
+
+            seasons.Add(seasonNumber);
+        }
+
+        requestPayload["seasons"] = seasons;
+        return true;
     }
 
     /// <summary>
@@ -1362,6 +1461,24 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         [FromQuery] int? limit,
         CancellationToken cancellationToken)
     {
+        if (HttpContext is null || !TryGetAuthenticatedUserId(out var authenticatedUserId)
+            || GetOptionalService<IUserManager>("integrations/seerr/requests")?.GetUserById(authenticatedUserId) is null)
+        {
+            return Unauthorized(Error("PTV_SEERR_REQUESTS_AUTH_REQUIRED", "An authenticated Jellyfin user is required."));
+        }
+
+        Response.Headers.CacheControl = "private, no-store";
+        if (!Guid.TryParse(userId?.Trim(), out var requestedUserId) || requestedUserId == Guid.Empty)
+        {
+            return BadRequest(Error("PTV_SEERR_REQUESTS_USER_INVALID", "A valid Jellyfin user id is required."));
+        }
+
+        if (requestedUserId != authenticatedUserId)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                Error("PTV_SEERR_REQUESTS_USER_MISMATCH", "The requested user does not match the authenticated Jellyfin user."));
+        }
+
         var settings = GetNormalizedConfiguration().SeerrSettings;
 
         if (!settings.Enabled || !settings.EnableRequestsPage || string.IsNullOrWhiteSpace(settings.InternalUrl) || string.IsNullOrWhiteSpace(settings.ApiKey))
@@ -1375,20 +1492,10 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             });
         }
 
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            return Ok(new
-            {
-                ok = false,
-                Items = Array.Empty<object>(),
-                error = "A Jellyfin user id is required for the requested media row."
-            });
-        }
-
         var itemLimit = Math.Clamp(limit ?? 24, 1, 100);
         var seerrUser = await FetchProxyJsonNodeAsync(
             settings.InternalUrl,
-            $"/api/v1/user/jellyfin/{Uri.EscapeDataString(userId.Trim())}",
+            $"/api/v1/user/jellyfin/{authenticatedUserId:N}",
             settings.ApiKey,
             "Jellyseerr user lookup",
             cancellationToken).ConfigureAwait(false);
@@ -1594,8 +1701,14 @@ public sealed class PtvStatusController : BaseJellyfinApiController
     /// </summary>
     /// <returns>Tag row definitions.</returns>
     [HttpGet("tags/rows")]
-    public ActionResult GetTagRows()
+    public async Task<ActionResult> GetTagRows()
     {
+        if (!await CanWriteFeaturedContentSafeAsync("tags/rows").ConfigureAwait(false))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                Error("PTV_TAG_ROWS_READ_FORBIDDEN", "Only Jellyfin administrators can read PiggieTV tag row settings."));
+        }
+
         var configuration = GetNormalizedConfiguration();
 
         return Ok(new
@@ -2419,7 +2532,7 @@ public sealed class PtvStatusController : BaseJellyfinApiController
 
     private static bool MatchesSeerrRequester(PtvSeerrRequestedMedia media, int seerrUserId)
     {
-        return media.RequestedByUserId is null || media.RequestedByUserId == seerrUserId;
+        return media.RequestedByUserId == seerrUserId;
     }
 
     private static bool MatchesRequestedMedia(BaseItem item, PtvSeerrRequestedMedia media)
@@ -2925,7 +3038,24 @@ public sealed class PtvStatusController : BaseJellyfinApiController
                 });
             }
 
-            var items = GetLibraryItems()
+            Guid? requestedLibraryId = null;
+            if (kind == "library")
+            {
+                if (!Guid.TryParse(libraryId, out var parsedLibraryId) || parsedLibraryId == Guid.Empty)
+                {
+                    return Ok(new
+                    {
+                        ok = false,
+                        kind,
+                        libraryId,
+                        error = "A valid library is required."
+                    });
+                }
+
+                requestedLibraryId = parsedLibraryId;
+            }
+
+            var items = GetLibraryItems(requestedLibraryId)
                 .Where(item => MatchesRandomKind(item, kind))
                 .Where(item => HasVisibleName(item))
                 .ToArray();
@@ -2965,11 +3095,32 @@ public sealed class PtvStatusController : BaseJellyfinApiController
         }
     }
 
-    private IReadOnlyList<BaseItem> GetLibraryItems()
+    private IReadOnlyList<BaseItem> GetLibraryItems(Guid? ancestorLibraryId = null)
     {
-        var libraryManager = GetRequiredService<ILibraryManager>("library");
+        if (HttpContext is null || !TryGetAuthenticatedUserId(out var userId))
+        {
+            throw new InvalidOperationException("Authenticated library scope unavailable.");
+        }
 
-        return libraryManager.RootFolder.GetRecursiveChildren().ToArray();
+        var users = GetRequiredService<IUserManager>("library");
+        var user = users.GetUserById(userId)
+            ?? throw new InvalidOperationException("Authenticated library scope unavailable.");
+        var libraryManager = GetRequiredService<ILibraryManager>("library");
+        var root = libraryManager.GetUserRootFolder();
+        if (root is null || root.Id == Guid.Empty)
+        {
+            throw new InvalidOperationException("Authenticated library scope unavailable.");
+        }
+
+        var query = new InternalItemsQuery(user)
+        {
+            ParentId = root.Id,
+            Recursive = true,
+            EnableTotalRecordCount = false
+        };
+        if (ancestorLibraryId is { } libraryId) query.AncestorIds = [libraryId];
+
+        return libraryManager.GetItemList(query).ToArray();
     }
 
     private static bool MatchesRandomKind(BaseItem item, string kind)
@@ -3078,6 +3229,31 @@ public sealed class PtvStatusController : BaseJellyfinApiController
             // Do not expose/log private configuration, identity, token or exception content here.
             _logger.LogWarning("PiggieTV presentation authority unavailable. Category=authority-uncertain.");
             return null;
+        }
+    }
+
+    private async Task<PtvHomeUserAccessView?> GetCurrentHomeUserAccessAsync(CancellationToken cancellationToken)
+    {
+        if (HttpContext is null || !TryGetAuthenticatedUserId(out var userId)) return null;
+        try
+        {
+            var users = GetOptionalService<IUserManager>(PtvApiRoutes.V1StatusLower);
+            var user = users?.GetUserById(userId);
+            if (user is null) return null;
+            var ledger = GetOptionalService<IPtvHomeUserAccessLedger>(PtvApiRoutes.V1StatusLower);
+            if (ledger is null) return new PtvHomeUserAccessView { UserId = userId.ToString("N") };
+            var topology = GetOptionalService<PtvConfiguredRowAssociationService>(PtvApiRoutes.V1StatusLower)?.ReadTopology();
+            var libraries = GetOptionalService<ILibraryManager>(PtvApiRoutes.V1StatusLower);
+            if (libraries is null) return new PtvHomeUserAccessView { UserId = userId.ToString("N") };
+            var currentLibraries = PtvHomeUserAccessController.ReadAccessibleLibraries(libraries, user);
+            return await ledger.ReadAsync(userId, PtvHomeUserAccessController.Access(user),
+                PtvHomeUserAccessController.UsableEpoch(topology), cancellationToken,
+                currentLibraries).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // Status remains available while owned Home proof fails closed.
+            return new PtvHomeUserAccessView { UserId = userId.ToString("N") };
         }
     }
 

@@ -12,6 +12,7 @@ import type {
     AdminMetadataIdentifyResult,
     AdminMetadataItemBundle
 } from './adminMetadataManagerModel';
+import { identityAssessment } from './adminReadingIdentityTestFixtures';
 import type {
     AdminReadingMetadataCandidate,
     AdminReadingMetadataSearchResponse
@@ -36,6 +37,9 @@ const serviceMocks = vi.hoisted(() => ({
 }));
 
 const readingServiceMocks = vi.hoisted(() => ({
+    currentUser: vi.fn(),
+    currentServer: vi.fn(),
+    reassess: vi.fn(),
     loadProviders: vi.fn(),
     search: vi.fn()
 }));
@@ -66,12 +70,16 @@ vi.mock('./adminMetadataManagerService', async () => {
 
 vi.mock('../../../../core/pluginApi', () => ({
     getCurrentPtvPluginApiClient: vi.fn(() => ({
+        getCurrentServerId: readingServiceMocks.currentServer,
+        getCurrentUserId: readingServiceMocks.currentUser,
         getReadingMetadataProviders: vi.fn(),
         searchReadingMetadata: vi.fn()
     }))
 }));
 
-vi.mock('./adminReadingMetadataService', () => ({
+vi.mock('./adminReadingMetadataService', async () => ({
+    ...await vi.importActual<typeof import('./adminReadingMetadataService')>('./adminReadingMetadataService'),
+    reassessAdminReadingIdentity: readingServiceMocks.reassess,
     loadAdminReadingMetadataProviders: readingServiceMocks.loadProviders,
     searchAdminReadingMetadata: readingServiceMocks.search
 }));
@@ -289,6 +297,8 @@ describe('useAdminMetadataManager', () => {
         serviceMocks.refreshItem.mockResolvedValue(undefined);
         serviceMocks.applyIdentify.mockResolvedValue(itemBundle());
         serviceMocks.saveItem.mockResolvedValue(itemBundle());
+        readingServiceMocks.currentUser.mockReturnValue('admin-a');
+        readingServiceMocks.currentServer.mockReturnValue('server-a');
         readingServiceMocks.loadProviders.mockResolvedValue({ providers: [] });
         readingServiceMocks.search.mockResolvedValue(readingResponse());
         queryClient = new QueryClient({
@@ -320,6 +330,109 @@ describe('useAdminMetadataManager', () => {
         ));
         await flushQueries();
     }
+
+    it.each(['archive', 'displayed value', 'denied', 'missing acknowledgment'])('blocks update after final reassessment: %s', async change => {
+        const assessment = identityAssessment({ itemId: 'item-a', provider: 'AniList', providerId: '30013', requiresConflictAcknowledgment: true,
+            findings: [{ code: 'ISSUE_CONFLICT', field: 'issueNumber', leftSource: 'ComicInfo', rightSource: 'Provider',
+                leftValue: '10', rightValue: '9', isConflict: true, isMaterialUncertainty: false }] });
+        const candidate = readingCandidate({ provider: 'AniList', providerId: '30013', assessmentContext: 'signed', assessmentDigest: 'digest-a', archiveRevision: 'revision-a', identityAssessment: assessment });
+        let fresh = assessment;
+        if (change === 'archive') fresh = { ...assessment, archiveRevision: 'revision-b' };
+        if (change === 'displayed value') fresh = { ...assessment, findings: [{ ...assessment.findings[0], leftValue: '11' }] };
+        if (change === 'missing acknowledgment') {
+            fresh = { ...assessment, requiresConflictAcknowledgment: true,
+                findings: [{ code: 'ISSUE_CONFLICT', field: 'issueNumber', leftSource: 'ComicInfo',
+                    rightSource: 'Provider', leftValue: '10', rightValue: '9', isConflict: true, isMaterialUncertainty: false }] };
+        }
+        const reviewedCandidate = change === 'missing acknowledgment' ? { ...candidate, identityAssessment: fresh } : candidate;
+        readingServiceMocks.reassess.mockResolvedValue(fresh);
+        if (change === 'denied') readingServiceMocks.reassess.mockRejectedValue(new Error('Apply blocked'));
+        const updateItem = vi.fn();
+        serviceMocks.saveItem.mockImplementation(async (_api, input) => {
+            await input.beforeUpdate?.(itemBundle());
+            updateItem();
+            return itemBundle();
+        });
+        await render({ itemId: 'item-a' });
+        await vi.waitFor(() => expect(latest?.itemBundle).not.toBeNull());
+        const result = { id: 'reading', name: candidate.title, imageUrl: null, overview: '', providerIds: {},
+            providerName: candidate.provider, readingCandidate: reviewedCandidate, source: null, year: null };
+        await act(async () => {
+            await expect(latest!.applyIdentifyResult(result, {
+                approval: { assessmentContext: 'signed', assessmentDigest: 'digest-a', archiveRevision: 'revision-a', searchGeneration: 'generation-a',
+                    acknowledgedConflictCodes: change === 'missing acknowledgment' ? [] : ['ISSUE_CONFLICT'], acknowledgedUnverifiedCodes: [] }, isCurrent: () => true
+            })).rejects.toThrow();
+        });
+        expect(updateItem).not.toHaveBeenCalled();
+        expect(readingServiceMocks.reassess).toHaveBeenCalledTimes(change === 'missing acknowledgment' ? 0 : 1);
+    });
+
+    it.each(['rendered user', 'connected user', 'connected server'])('allows acknowledged fresh identity and blocks scope changes during reassessment: %s', async scopeChange => {
+        const assessment = identityAssessment({ itemId: 'item-a', provider: 'AniList', providerId: '30013',
+            requiresConflictAcknowledgment: true, requiresUnverifiedAcknowledgment: true,
+            findings: [{ code: 'ISSUE_CONFLICT', field: 'issueNumber', leftSource: 'ComicInfo', rightSource: 'Provider',
+                leftValue: '10', rightValue: '9', isConflict: true, isMaterialUncertainty: true }] });
+        const candidate = readingCandidate({ provider: 'AniList', providerId: '30013', assessmentContext: 'signed',
+            archiveRevision: 'revision-a', assessmentDigest: 'digest-a', identityAssessment: assessment });
+        const result = { id: 'reading', name: candidate.title, imageUrl: null, overview: '', providerIds: {},
+            providerName: candidate.provider, readingCandidate: candidate, source: null, year: null };
+        const guard = { approval: { assessmentContext: 'signed', assessmentDigest: 'digest-a', archiveRevision: 'revision-a',
+            searchGeneration: 'generation-a', acknowledgedConflictCodes: ['ISSUE_CONFLICT'], acknowledgedUnverifiedCodes: ['ISSUE_CONFLICT'] }, isCurrent: () => true };
+        const updateItem = vi.fn();
+        serviceMocks.saveItem.mockImplementation(async (_api, input) => {
+            await input.beforeUpdate(itemBundle());
+            updateItem();
+            return itemBundle();
+        });
+        readingServiceMocks.reassess.mockResolvedValue(assessment);
+        await render({ itemId: 'item-a' });
+        await vi.waitFor(() => expect(latest?.itemBundle).not.toBeNull());
+        await act(async () => {
+            await latest!.applyIdentifyResult(result, guard);
+        });
+        expect(updateItem).toHaveBeenCalledOnce();
+        updateItem.mockClear();
+        let release!: (value: typeof assessment) => void;
+        readingServiceMocks.reassess.mockImplementation(() => new Promise(resolve => {
+            release = resolve;
+        }));
+        let pending!: Promise<unknown>;
+        await act(async () => {
+            pending = latest!.applyIdentifyResult(result, guard);
+        });
+        await vi.waitFor(() => expect(readingServiceMocks.reassess).toHaveBeenCalledTimes(2));
+        if (scopeChange === 'rendered user') await render({ itemId: 'item-a', userId: 'admin-b' });
+        if (scopeChange === 'connected user') readingServiceMocks.currentUser.mockReturnValue('admin-b');
+        if (scopeChange === 'connected server') readingServiceMocks.currentServer.mockReturnValue('server-b');
+        await act(async () => {
+            release(assessment);
+            await expect(pending).rejects.toMatchObject({ code: 'conflict' });
+        });
+        expect(updateItem).not.toHaveBeenCalled();
+    });
+
+    it('rejects incompatible concurrent forms before sharing a save flight', async () => {
+        let release!: (value: AdminMetadataItemBundle) => void;
+        serviceMocks.saveItem.mockImplementation(() => new Promise(resolve => {
+            release = resolve;
+        }));
+        await render({ itemId: 'item-a' });
+        const confirmed = metadataForm();
+        let first!: Promise<AdminMetadataItemBundle>;
+        await act(async () => {
+            first = latest!.saveMetadata({ ...confirmed, name: 'First' }, confirmed);
+        });
+        try {
+            const second = latest!.saveMetadata({ ...confirmed, name: 'Second' }, confirmed);
+            expect(second).not.toBe(first);
+            await expect(second).rejects.toThrow();
+        } finally {
+            await act(async () => {
+                release(itemBundle());
+                await first;
+            });
+        }
+    });
 
     it('isolates every source and response-shaping dimension by server', () => {
         const a = getAdminMetadataManagerQueryKeys('server-a');
@@ -603,7 +716,7 @@ describe('useAdminMetadataManager', () => {
             year: candidate.startYear
         };
         await act(async () => {
-            await latest!.applyIdentifyResult(result);
+            await latest!.applyIdentifyResult(result, { approval: {} as never, isCurrent: () => true });
         });
 
         expect(serviceMocks.applyIdentify).not.toHaveBeenCalled();
@@ -643,7 +756,7 @@ describe('useAdminMetadataManager', () => {
                 readingCandidate: candidate,
                 source: null,
                 year: candidate.year
-            })).rejects.toBe(conflict);
+            }, { approval: {} as never, isCurrent: () => true })).rejects.toBe(conflict);
         });
 
         expect(latest?.itemBundle?.form.name).toBe('Original title');
@@ -651,36 +764,49 @@ describe('useAdminMetadataManager', () => {
         expect(serviceMocks.applyIdentify).not.toHaveBeenCalled();
     });
 
-    it('refreshes a Book from its exact saved Reading provider ID before any fuzzy server refresh', async () => {
-        const confirmed = metadataForm({
-            name: 'Existing manga title',
-            providerIds: { AniList: '30013' }
-        });
-        const current = {
-            ...itemBundle('item-a', confirmed, 'tag-a', 'Book'),
-            editor: {
-                editableFields: [ 'name', 'productionYear', 'providerIds' ],
-                parentalRatings: [],
-                providerFields: []
-            }
-        } as AdminMetadataItemBundle;
-        const candidate = readingCandidate({
-            externalIds: { AniList: '30013' },
-            provider: 'anilist',
-            providerId: '30013'
-        });
-        const saved = itemBundle(
-            'item-a',
-            metadataForm({ name: candidate.title, providerIds: { AniList: '30013' } }),
-            'tag-a',
-            'Book'
-        );
-        serviceMocks.loadItem.mockResolvedValue(current);
-        serviceMocks.saveItem.mockResolvedValue(saved);
+    it('blocks nonrecursive Reading Scan with a stored provider ID before search or write', async () => {
+        const confirmed = metadataForm({ providerIds: { AniList: '30013' } });
+        serviceMocks.loadItem.mockResolvedValue(itemBundle('item-a', confirmed, 'tag-a', 'Book'));
         readingServiceMocks.search.mockResolvedValue({
             ...readingResponse(),
-            candidates: [ candidate ]
+            candidates: [ readingCandidate({ provider: 'anilist', providerId: '30013' }) ]
         });
+        await render({ itemId: 'item-a' });
+
+        await act(async () => {
+            await expect(latest!.refreshItem('scan', false)).rejects.toThrow(
+                'Open Identify, review the match, and Apply it there.'
+            );
+        });
+
+        expect(readingServiceMocks.search).not.toHaveBeenCalled();
+        expect(serviceMocks.saveItem).not.toHaveBeenCalled();
+        expect(serviceMocks.refreshItem).not.toHaveBeenCalled();
+    });
+
+    it('preserves explicit recursive Book Scan as a stock Jellyfin refresh', async () => {
+        serviceMocks.loadItem.mockResolvedValue(itemBundle(
+            'item-a', metadataForm({ providerIds: { AniList: '30013' } }), 'tag-a', 'Book'
+        ));
+        await render({ itemId: 'item-a' });
+
+        let result: Awaited<ReturnType<NonNullable<typeof latest>['refreshItem']>> | undefined;
+        await act(async () => {
+            result = await latest!.refreshItem('scan', true);
+        });
+
+        expect(readingServiceMocks.search).not.toHaveBeenCalled();
+        expect(serviceMocks.saveItem).not.toHaveBeenCalled();
+        expect(serviceMocks.refreshItem).toHaveBeenCalledWith(apiClient, expect.objectContaining({
+            itemId: 'item-a', options: expect.objectContaining({ recursive: true })
+        }));
+        expect(result).toEqual({ kind: 'jellyfin' });
+    });
+
+    it('retains stock Scan when a Book has no saved Reading provider ID', async () => {
+        serviceMocks.loadItem.mockResolvedValue(itemBundle(
+            'item-a', metadataForm({ providerIds: { Imdb: 'tt123' } }), 'tag-a', 'Book'
+        ));
         await render({ itemId: 'item-a' });
 
         let result: Awaited<ReturnType<NonNullable<typeof latest>['refreshItem']>> | undefined;
@@ -688,17 +814,15 @@ describe('useAdminMetadataManager', () => {
             result = await latest!.refreshItem('scan', false);
         });
 
-        expect(readingServiceMocks.search).toHaveBeenCalledWith(
-            expect.anything(),
-            { itemId: 'item-a', provider: 'anilist', providerId: '30013' },
-            expect.any(AbortSignal)
-        );
-        expect(serviceMocks.refreshItem).not.toHaveBeenCalled();
-        expect(serviceMocks.saveItem).toHaveBeenCalledOnce();
-        expect(result).toEqual({ kind: 'reading-exact', provider: 'AniList' });
+        expect(readingServiceMocks.search).not.toHaveBeenCalled();
+        expect(serviceMocks.saveItem).not.toHaveBeenCalled();
+        expect(serviceMocks.refreshItem).toHaveBeenCalledWith(apiClient, expect.objectContaining({
+            itemId: 'item-a', options: expect.objectContaining({ recursive: false })
+        }));
+        expect(result).toEqual({ kind: 'jellyfin' });
     });
 
-    it('fails closed when an exact Reading provider ID cannot be verified', async () => {
+    it('blocks Comic Vine Book Scan before any provider lookup or stock fallback', async () => {
         const current = itemBundle(
             'item-a',
             metadataForm({ providerIds: { ComicVine: '40014' } }),
@@ -706,15 +830,15 @@ describe('useAdminMetadataManager', () => {
             'Book'
         );
         serviceMocks.loadItem.mockResolvedValue(current);
-        readingServiceMocks.search.mockResolvedValue({ ...readingResponse(), candidates: [] });
         await render({ itemId: 'item-a' });
 
         await act(async () => {
             await expect(latest!.refreshItem('scan', false)).rejects.toThrow(
-                'Comic Vine could not verify the saved provider identity.'
+                'Open Identify, review the match, and Apply it there.'
             );
         });
 
+        expect(readingServiceMocks.search).not.toHaveBeenCalled();
         expect(serviceMocks.refreshItem).not.toHaveBeenCalled();
         expect(serviceMocks.saveItem).not.toHaveBeenCalled();
     });

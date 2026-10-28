@@ -1,5 +1,11 @@
 /* eslint-env serviceworker */
 
+import {
+    getPtvCompiledUpdateGeneration,
+    PTV_UPDATE_GENERATION_REQUEST,
+    PTV_UPDATE_GENERATION_RESPONSE
+} from './ptv/services/updateGeneration';
+
 function getApiClient(serverId) {
     return Promise.resolve(window.connectionManager.getApiClient(serverId));
 }
@@ -41,6 +47,15 @@ self.addEventListener('activate', () => self.clients.claim());
 
 /* eslint-disable-next-line no-restricted-globals -- self is valid in a serviceworker environment */
 self.addEventListener('message', event => {
+    /* eslint-disable-next-line no-restricted-globals -- self is valid in a serviceworker environment */
+    if (event.origin !== self.location.origin) return;
+    if (event.data?.type === PTV_UPDATE_GENERATION_REQUEST) {
+        event.ports?.[0]?.postMessage({
+            generation: getPtvCompiledUpdateGeneration(),
+            type: PTV_UPDATE_GENERATION_RESPONSE
+        });
+        return;
+    }
     if (event.data?.type === 'SKIP_WAITING') {
         /* eslint-disable-next-line no-restricted-globals -- self is valid in a serviceworker environment */
         event.waitUntil(self.skipWaiting());

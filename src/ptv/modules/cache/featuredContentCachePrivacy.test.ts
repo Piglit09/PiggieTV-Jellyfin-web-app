@@ -36,4 +36,24 @@ describe('shared featured cache privacy', () => {
         expect(JSON.stringify(payload)).not.toContain('RecommendationReason');
         expect(JSON.stringify(payload)).not.toContain('PtvHeroRecommendationLabel');
     });
+
+    it('never persists transient library membership proof alongside scope claims', () => {
+        const payload = sanitizeFeaturedPayloadForSharedCache({
+            scopeSchemaVersion: 2,
+            heroItems: [],
+            sections: [ {
+                id: 'owned', scopeType: 'library', libraryId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                resolvedScopeHash: '12345', topologyEpoch: 'A'.repeat(64), userAccessEpoch: 'B'.repeat(64),
+                bindingGeneration: 0, membershipProof: { valid: true },
+                provenItemIds: [ 'foreign-item' ]
+            } ],
+            sectionItems: { owned: [ { Id: 'item', Type: 'Movie' } ] }
+        } as FeaturedPayload);
+
+        expect(payload.scopeSchemaVersion).toBe(2);
+        expect(payload.sections?.[0]).toMatchObject({ scopeType: 'library', resolvedScopeHash: '12345' });
+        expect(JSON.stringify(payload)).not.toContain('membershipProof');
+        expect(JSON.stringify(payload)).not.toContain('provenItemIds');
+        expect(JSON.stringify(payload)).not.toContain('userAccessEpoch');
+    });
 });

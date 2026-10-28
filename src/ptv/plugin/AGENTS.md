@@ -1,5 +1,7 @@
 # PiggieTV Plugin Agent Instructions
 
+The repository authority, workspace preflight, artifact provenance, environment registry, and deployment restrictions in the root `AGENTS.md` also apply to the embedded Plugin. Plugin source edits and builds belong to the same approved PTV Web Git checkout; `src/ptv/plugin/bin` is build output, not a separate source authority.
+
 ## Canonical plugin release version
 
 - `Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj` and its `PtvPluginVersion` property are the only canonical PiggieTV Plugin release-version authority. The Jellyfin package target and ABI are compatibility values, not PiggieTV release numbers.

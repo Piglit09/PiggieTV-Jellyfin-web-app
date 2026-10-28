@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const dashboardMocks = vi.hoisted(() => ({
     logout: vi.fn<() => Promise<void>>(),
     switchUser: vi.fn<() => Promise<void>>(),
+    retireRecommendationDiagnosticScope: vi.fn(),
     retireMusicIdentity: vi.fn()
 }));
 
@@ -21,6 +22,10 @@ vi.mock('../api', () => ({
 
 vi.mock('../modules/recommendations/engine/recommendationEngine', () => ({
     invalidatePtvRecommendationCache: vi.fn()
+}));
+
+vi.mock('../modules/recommendations/diagnostics/recommendationDiagnosticScope', () => ({
+    retirePtvRecommendationDiagnosticScope: dashboardMocks.retireRecommendationDiagnosticScope
 }));
 
 vi.mock('../pages/home/hooks', () => ({
@@ -56,6 +61,7 @@ describe('PTV Jellyfin logout action adapter', () => {
     beforeEach(() => {
         dashboardMocks.logout.mockReset();
         dashboardMocks.switchUser.mockReset();
+        dashboardMocks.retireRecommendationDiagnosticScope.mockReset();
         dashboardMocks.retireMusicIdentity.mockReset();
     });
 
@@ -67,6 +73,20 @@ describe('PTV Jellyfin logout action adapter', () => {
         expect(dashboardMocks.logout).toHaveBeenCalledTimes(1);
         expect(dashboardMocks.retireMusicIdentity).toHaveBeenCalledWith('logout');
         expect(isJellyfinLogoutInFlight()).toBe(false);
+    });
+
+    it('retires recommendation diagnostics before asynchronous logout or user switching settles', async () => {
+        const pending = deferred<void>();
+        dashboardMocks.logout.mockReturnValue(pending.promise);
+        const logout = requestJellyfinLogout();
+        const retiredBeforeLogoutSettled = dashboardMocks.retireRecommendationDiagnosticScope.mock.calls.length;
+        pending.resolve();
+        await logout;
+
+        dashboardMocks.switchUser.mockResolvedValue(undefined);
+        await requestJellyfinUserSwitch();
+        expect(retiredBeforeLogoutSettled).toBe(1);
+        expect(dashboardMocks.retireRecommendationDiagnosticScope).toHaveBeenCalledTimes(2);
     });
 
     it('switches users through the same Jellyfin logout owner and preserves the current server destination', async () => {

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Jellyfin.Plugin.PiggieTV.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -10,6 +11,7 @@ namespace Jellyfin.Plugin.PiggieTV.Services;
 public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadataIdentificationService
 {
     private const int MaximumCandidates = 30;
+    private readonly PtvReadingCandidateContextCodec _contextCodec;
     private readonly ILibraryManager _libraryManager;
     private readonly IPtvReadingLocalMetadataInspector _localInspector;
     private readonly ILogger<PtvReadingMetadataIdentificationService> _logger;
@@ -23,8 +25,10 @@ public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadat
         IPtvReadingLocalMetadataInspector localInspector,
         PtvReadingMetadataParser parser,
         PtvReadingMetadataScorer scorer,
-        ILogger<PtvReadingMetadataIdentificationService> logger)
+        ILogger<PtvReadingMetadataIdentificationService> logger,
+        PtvReadingCandidateContextCodec contextCodec)
     {
+        _contextCodec = contextCodec;
         _libraryManager = libraryManager;
         _localInspector = localInspector;
         _providers = providers.OrderBy(provider => provider.Id, StringComparer.OrdinalIgnoreCase).ToArray();
@@ -74,10 +78,16 @@ public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadat
 
     public async Task<PtvReadingMetadataSearchResponse> SearchAsync(
         PtvReadingMetadataSearchRequest request,
+        Guid administratorId,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (administratorId == Guid.Empty) throw new PtvReadingMetadataServiceException("PTV_READING_USER_INVALID", "An authenticated administrator is required.");
+        var generation = request.SearchGeneration ?? Guid.NewGuid().ToString("N");
+        if (!PtvReadingCandidateContextCodec.ValidGeneration(generation))
+            throw new PtvReadingMetadataServiceException("PTV_READING_GENERATION_INVALID", "The search generation is invalid.");
         var item = GetItem(request.ItemId);
+        var before = ArchiveStat.Read(item.Path);
         var context = CreateContext(item, request);
         var query = _parser.Parse(context.FileName ?? item.Name, context);
         var localInspection = new PtvReadingLocalMetadataInspectionResult();
@@ -88,7 +98,26 @@ public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadat
             ApplyLocalEvidence(query, localInspection, request.MediaClass is not null);
         }
 
+        var after = ArchiveStat.Read(item.Path);
+        if (before != after) localInspection.ComicInfo = UnverifiedArchive("ARCHIVE_CHANGED_DURING_INSPECTION");
+        var revision = ArchiveRevision(before, after, localInspection);
         query = ApplyOverrides(query, request);
+        var identitySources = PtvReadingIdentityAssessor.CreateSources(context, localInspection, new()
+        {
+            SeriesTitle = (item as Book)?.SeriesName,
+            IssueNumber = item.IndexNumber?.ToString(CultureInfo.InvariantCulture),
+            VolumeOrRunLabel = item.ParentIndexNumber?.ToString(CultureInfo.InvariantCulture),
+            RunEvidenceKind = item.ParentIndexNumber is null ? PtvReadingRunEvidenceKind.Unknown : PtvReadingRunEvidenceKind.ExplicitVolume,
+            // Generic ProductionYear/PremiereDate have no proved issue-publication mapping here.
+            ProviderIds = PtvReadingIdentityAssessor.ExistingProviderIds(item.ProviderIds)
+        });
+        // Corroboration belongs to the exact values originally compared. Neither local
+        // query merging nor administrator overrides may transfer it to another series/run.
+        query.FolderCorroboratesSeriesTitle &=
+            PtvReadingMetadataParser.NormalizeTitle(query.SeriesTitle) == PtvReadingMetadataParser.NormalizeTitle(identitySources.FileName.SeriesTitle)
+            && PtvReadingMetadataParser.NormalizeTitle(query.SeriesTitle) == PtvReadingMetadataParser.NormalizeTitle(identitySources.ImmediateFolder.SeriesTitle);
+        query.FolderCorroboratesSeriesStartYear &= query.FolderCorroboratesSeriesTitle
+            && query.SeriesStartYear?.ToString(CultureInfo.InvariantCulture) == identitySources.ImmediateFolder.VolumeOrRunLabel;
         context.MediaClassOverride = query.MediaClass;
         var selectedProviders = SelectProviders(request.Provider, context);
         if (selectedProviders.Count == 0)
@@ -111,13 +140,16 @@ public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadat
             {
                 result.Candidate.Score = result.Match.Score;
                 result.Candidate.ScoreReasons = result.Match.Reasons;
-                return result.Candidate.ToBoundedTransportModel();
+                result.Candidate.IdentityAssessment = new PtvReadingIdentityAssessor().Assess(identitySources, result.Candidate);
+                return BindCandidate(result.Candidate, administratorId, item.Id, generation, revision);
             })
             .ToList();
 
         return new PtvReadingMetadataSearchResponse
         {
+            SearchGeneration = generation,
             Query = query,
+            IdentitySources = identitySources,
             LocalMetadata = new PtvReadingLocalMetadataSummary
             {
                 State = localInspection.State,
@@ -133,9 +165,102 @@ public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadat
                     .Take(8)
                     .ToList()
             },
-            ProviderResults = providerResults.Select(result => ToTransportResult(result, query)).ToList(),
+            ProviderResults = providerResults.Select(result => ToTransportResult(result, query, identitySources, administratorId, item.Id, generation, revision)).ToList(),
             Candidates = ranked
         };
+    }
+
+    /// <summary>Fresh read-only archive assessment. Never consults a provider or search cache.</summary>
+    public async Task<PtvReadingIdentityAssessment> ReassessAsync(PtvReadingIdentityReassessRequest request,
+        Guid administratorId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Guid.TryParse(request.ItemId, out var itemId) || itemId == Guid.Empty)
+            throw new PtvReadingMetadataServiceException("PTV_READING_ITEM_INVALID", "Choose a valid Reading item.");
+        if (request.DisplayedRevision is { Length: > 128 })
+            throw new PtvReadingMetadataServiceException("PTV_READING_REVISION_INVALID", "The displayed revision is invalid.");
+        var signed = _contextCodec.Validate(request.CandidateContext, administratorId, itemId, DateTimeOffset.UtcNow);
+        var item = GetItem(request.ItemId);
+        var context = CreateContext(item, new() { MediaClass = signed.Candidate.MediaClass });
+        var query = _parser.Parse(context.FileName ?? item.Name, context);
+        cancellationToken.ThrowIfCancellationRequested();
+        var before = ArchiveStat.Read(item.Path);
+        var inspection = new PtvReadingLocalMetadataInspectionResult();
+        if (!string.IsNullOrWhiteSpace(item.Path))
+        {
+            if (!before.Available) inspection.ComicInfo = UnverifiedArchive("LOCAL_SOURCE_UNAVAILABLE");
+            else inspection = await _localInspector.InspectForApplyAsync(item.Path, context, query, cancellationToken).ConfigureAwait(false);
+        }
+        var after = ArchiveStat.Read(item.Path);
+        if (before != after) inspection.ComicInfo = UnverifiedArchive("ARCHIVE_CHANGED_DURING_INSPECTION");
+        var sources = PtvReadingIdentityAssessor.CreateSources(context, inspection, new()
+        {
+            SeriesTitle = (item as Book)?.SeriesName,
+            IssueNumber = item.IndexNumber?.ToString(CultureInfo.InvariantCulture),
+            VolumeOrRunLabel = item.ParentIndexNumber?.ToString(CultureInfo.InvariantCulture),
+            RunEvidenceKind = item.ParentIndexNumber is null ? PtvReadingRunEvidenceKind.Unknown : PtvReadingRunEvidenceKind.ExplicitVolume,
+            ProviderIds = PtvReadingIdentityAssessor.ExistingProviderIds(item.ProviderIds)
+        });
+        var result = new PtvReadingIdentityAssessor().Assess(sources, signed.Candidate);
+        result.ItemId = item.Id.ToString("N");
+        result.Provider = signed.Candidate.Provider;
+        result.ProviderId = signed.Candidate.ProviderId;
+        result.SearchGeneration = signed.SearchGeneration;
+        result.ArchiveRevision = ArchiveRevision(before, after, inspection);
+        result.RevisionChanged = !string.Equals(request.DisplayedRevision, result.ArchiveRevision, StringComparison.Ordinal);
+        return result;
+    }
+
+    private PtvNormalizedMetadataCandidate BindCandidate(PtvNormalizedMetadataCandidate candidate, Guid administratorId,
+        Guid itemId, string generation, string revision)
+    {
+        // Transport projection may truncate display identifiers. Never sign a truncated identity.
+        string? token = null;
+        try { token = _contextCodec.Issue(administratorId, itemId, generation, candidate, DateTimeOffset.UtcNow); }
+        catch (PtvReadingMetadataServiceException) { /* Candidate remains visible but cannot enter guarded Apply. */ }
+        var bounded = candidate.ToBoundedTransportModel();
+        if (bounded.IdentityAssessment is { } assessment)
+        {
+            assessment.ItemId = itemId.ToString("N");
+            assessment.Provider = bounded.Provider;
+            assessment.ProviderId = bounded.ProviderId;
+            assessment.SearchGeneration = generation;
+            assessment.ArchiveRevision = revision;
+        }
+        bounded.AssessmentContext = token;
+        bounded.ArchiveRevision = revision;
+        bounded.AssessmentDigest = bounded.IdentityAssessment?.AssessmentDigest;
+        return bounded;
+    }
+
+    private string ArchiveRevision(ArchiveStat before, ArchiveStat after, PtvReadingLocalMetadataInspectionResult inspection)
+        => _contextCodec.Revision(new { Before = before, After = after, inspection.ComicInfo.State,
+            inspection.ComicInfo.ReasonCode, inspection.ComicInfo.ContentDigest,
+            // Includes parsed evidence even when an inspector cannot supply a byte digest.
+            inspection.ComicInfo.Metadata });
+
+    private static PtvComicInfoArchiveInspection UnverifiedArchive(string reason) => new()
+    { State = PtvComicInfoArchiveInspectionState.Unverified, ReasonCode = reason };
+
+    // Creation time is available file metadata, not a portable inode/file-ID promise.
+    // Revision is a stale-state detector; it never claims whole-archive integrity.
+    private sealed record ArchiveStat(string? CanonicalPath, bool Available, long Length, long ModifiedTicks, long CreatedTicks, string? FileIdentity = null)
+    {
+        public static ArchiveStat Read(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return new(null, false, 0, 0, 0);
+            string? canonical = null;
+            try
+            {
+                canonical = Path.GetFullPath(path);
+                if (OperatingSystem.IsWindows()) canonical = canonical.ToUpperInvariant();
+                var info = new FileInfo(path); info.Refresh();
+                return info.Exists ? new(canonical, true, info.Length, info.LastWriteTimeUtc.Ticks, info.CreationTimeUtc.Ticks, PtvReadingArchiveFileIdentity.Read(path))
+                    : new(canonical, false, 0, 0, 0);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            { return new(canonical, false, 0, 0, 0); }
+        }
     }
 
     private async Task<PtvReadingProviderSearchResult> SearchProviderAsync(
@@ -193,7 +318,8 @@ public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadat
 
     private PtvReadingProviderSearchResult ToTransportResult(
         PtvReadingProviderSearchResult source,
-        PtvStructuredMetadataQuery query)
+        PtvStructuredMetadataQuery query,
+        PtvReadingIdentitySources identitySources, Guid administratorId, Guid itemId, string generation, string revision)
     {
         var candidates = _scorer.Rank(query, source.Candidates)
             .Take(MaximumCandidates)
@@ -201,7 +327,8 @@ public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadat
             {
                 result.Candidate.Score = result.Match.Score;
                 result.Candidate.ScoreReasons = result.Match.Reasons;
-                return result.Candidate.ToBoundedTransportModel();
+                result.Candidate.IdentityAssessment = new PtvReadingIdentityAssessor().Assess(identitySources, result.Candidate);
+                return BindCandidate(result.Candidate, administratorId, itemId, generation, revision);
             })
             .ToList();
         return new PtvReadingProviderSearchResult
@@ -355,9 +482,9 @@ public sealed class PtvReadingMetadataIdentificationService : IPtvReadingMetadat
     {
         if (inspection.State != PtvReadingLocalInspectionState.Inspected) return;
         var local = inspection.Metadata;
-        query.CleanedTitle = CleanNullable(local.Title, PtvReadingMetadataLimits.MaximumTitleLength)
+        query.CleanedTitle = PtvReadingIdentityText.Bound(local.Title, PtvReadingMetadataLimits.MaximumTitleLength)
             ?? query.CleanedTitle;
-        var localSeriesTitle = CleanNullable(local.SeriesTitle, PtvReadingMetadataLimits.MaximumTitleLength);
+        var localSeriesTitle = PtvReadingIdentityText.Bound(local.SeriesTitle, PtvReadingMetadataLimits.MaximumTitleLength);
         if (localSeriesTitle is not null)
         {
             query.SeriesTitle = localSeriesTitle;

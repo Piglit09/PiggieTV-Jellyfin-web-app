@@ -28,9 +28,10 @@ import {
 } from '../services/notificationService';
 import { usePtvArrCalendarAvailability } from '../modules/calendar/arrCalendarAvailability';
 import { recordPtvRouteGenerationLifecycle } from './routeController';
-import { usePtvAdminDebugVisibility } from '../utils/usePtvAdminDebugVisibility';
 import PTVShellBackdrop from './PTVShellBackdrop';
 import PtvShellPrimaryDropdown from './PtvShellPrimaryDropdown';
+import { usePtvNavigationAccess } from './usePtvNavigationAccess';
+import type { PtvNavigationAccess } from './navigationAccess';
 
 import './ptvShell.scss';
 
@@ -137,21 +138,7 @@ const createEmptyPtvShellStatus = (): Omit<PtvShellDebugStatus, 'currentRoute' |
 });
 let shellStatus = createEmptyPtvShellStatus();
 
-const PTV_SHELL_MOVIE_LINKS: readonly PtvShellNavLink[] = [
-    { id: 'movies', label: 'Movies', href: PTV_ROUTES.movies, icon: 'movies' },
-    { id: 'anime-movies', label: 'AniMovies', href: PTV_ROUTES.animeMovies, icon: 'animeMovies' },
-    { id: 'collections', label: 'Collections', href: PTV_ROUTES.collections, icon: 'collections' }
-];
-
-const PTV_SHELL_SHOW_LINKS: readonly PtvShellNavLink[] = [
-    { id: 'shows', label: 'TV Shows', href: PTV_ROUTES.shows, icon: 'shows' },
-    { id: 'anime-shows', label: 'Anime', href: PTV_ROUTES.animeShows, icon: 'anime' },
-    { id: 'cartoons', label: 'Cartoons', href: PTV_ROUTES.cartoons, icon: 'cartoons' }
-];
-
 const PTV_SHELL_PRIMARY_LINKS: readonly PtvShellNavLink[] = [
-    { id: 'music', label: 'Music', href: PTV_ROUTES.music, icon: 'music' },
-    { id: 'reading', label: 'Reading', href: PTV_ROUTES.reading, icon: 'books' },
     { id: 'request', label: 'Request', href: PTV_ROUTES.request, icon: 'request' }
 ];
 
@@ -164,12 +151,15 @@ const PTV_SHELL_CALENDAR_LINK: PtvShellNavLink = {
 
 const PTV_SHELL_DETAILS_LINKS: readonly PtvShellNavLink[] = [
     { id: 'home', label: 'Home', href: PTV_ROUTES.home, icon: 'home' },
-    { id: 'movies', label: 'Movies', href: PTV_ROUTES.movies, icon: 'movies' },
-    { id: 'shows', label: 'Shows', href: PTV_ROUTES.shows, icon: 'shows' },
-    { id: 'music', label: 'Music', href: PTV_ROUTES.music, icon: 'music' },
-    { id: 'reading', label: 'Reading', href: PTV_ROUTES.reading, icon: 'books' },
     { id: 'search', label: 'Search', href: PTV_ROUTES.search, icon: 'search' }
 ];
+
+const PTV_SHELL_MUSIC_LINK: PtvShellNavLink =
+    { id: 'music', label: 'Music', href: PTV_ROUTES.music, icon: 'music' };
+const PTV_SHELL_READING_LINK: PtvShellNavLink =
+    { id: 'reading', label: 'Reading', href: PTV_ROUTES.reading, icon: 'books' };
+const PTV_SHELL_COLLECTIONS_LINK: PtvShellNavLink =
+    { id: 'collections', label: 'Collections', href: PTV_ROUTES.collections, icon: 'collections' };
 
 const PTV_SHELL_CONTEXT_LINKS: Record<PtvShellSection, readonly PtvShellNavLink[]> = {
     anime: [
@@ -379,25 +369,162 @@ function isTextInputTarget(target: EventTarget | null) {
     );
 }
 
-function getPtvShellNavGroups(section: PtvShellSection, hash: string): readonly PtvShellNavGroup[] {
-    const activeSection = getPtvShellPrimarySection(hash);
+function getPtvShellNavGroups(
+    section: PtvShellSection,
+    hash: string,
+    details: boolean,
+    access: PtvNavigationAccess | null
+): readonly PtvShellNavGroup[] {
+    if (!access) return [];
+    const routeSection = getPtvShellPrimarySection(hash);
+    const activeSection = details && routeSection === 'fallback' ? section : routeSection;
+    const movieLinks: PtvShellNavLink[] = access.movies.map(view => ({
+        href: `#/movies?topParentId=${encodeURIComponent(view.id)}`,
+        icon: view.kind === 'animeMovies' ? 'animeMovies' : 'movies',
+        id: `movie-view-${view.id}`,
+        label: view.name
+    }));
+    if (access.collections && movieLinks.length) {
+        movieLinks.push({ id: 'collections', label: 'Collections', href: PTV_ROUTES.collections, icon: 'collections' });
+    }
+    const showLinks: PtvShellNavLink[] = access.shows.map(view => ({
+        href: `#/tv?topParentId=${encodeURIComponent(view.id)}`,
+        icon: getPtvShellShowIcon(view.kind),
+        id: `show-view-${view.id}`,
+        label: view.name
+    }));
 
     return [
-        {
+        ...(access.movies.length ? [{
             active: activeSection === 'movies',
-            icon: 'movies',
+            icon: 'movies' as const,
             id: 'movies',
             label: 'Movies',
-            links: PTV_SHELL_MOVIE_LINKS
-        },
-        {
+            links: movieLinks
+        }] : []),
+        ...(access.shows.length ? [{
             active: activeSection === 'shows',
-            icon: 'shows',
+            icon: 'shows' as const,
             id: 'shows',
             label: 'Shows',
-            links: PTV_SHELL_SHOW_LINKS
-        }
+            links: showLinks
+        }] : [])
     ];
+}
+
+function getPtvShellShowIcon(kind: 'anime' | 'cartoons' | 'shows'): PtvIconName {
+    if (kind === 'anime') return 'anime';
+    if (kind === 'cartoons') return 'cartoons';
+    return 'shows';
+}
+
+function getPtvShellPrimaryLinks(
+    access: PtvNavigationAccess | null,
+    calendarAvailable: boolean,
+    navigationVariant: 'default' | 'details',
+    section: PtvShellSection
+) {
+    const accessLinks = [
+        ...(access?.music.length ? [PTV_SHELL_MUSIC_LINK] : []),
+        ...(access?.reading.length ? [PTV_SHELL_READING_LINK] : []),
+        ...(access?.collections && !access.movies.length ? [PTV_SHELL_COLLECTIONS_LINK] : [])
+    ];
+    const links = navigationVariant === 'details' ? [
+        PTV_SHELL_DETAILS_LINKS[0],
+        ...accessLinks,
+        PTV_SHELL_DETAILS_LINKS[1]
+    ] : [
+        ...accessLinks,
+        ...PTV_SHELL_PRIMARY_LINKS,
+        ...(calendarAvailable ? [PTV_SHELL_CALENDAR_LINK] : [])
+    ];
+
+    return links
+        .filter(link => isPtvPlatformNavigationEntryAvailable(link))
+        .map(link => navigationVariant === 'details' ? { ...link, active: link.id === section } : link);
+}
+
+const PTV_SHELL_LEGACY_VIEW_ALIASES: Record<string, Readonly<{ kind: string; names: readonly string[] }>> = {
+    anime: { kind: 'anime', names: ['anime', 'anime library'] },
+    animemovies: { kind: 'animeMovies', names: ['ani movies', 'anime movies', 'animemovies', 'animovies', 'animovies library'] },
+    cartoons: { kind: 'cartoons', names: ['cartoons', 'cartoons library'] },
+    movies: { kind: 'movies', names: ['movies', 'movies library'] },
+    shows: { kind: 'shows', names: ['shows', 'shows library', 'tv shows'] }
+};
+
+function hasPtvShellViewAccess(
+    views: ReadonlyArray<Readonly<{ id: string; kind: string; name: string }>>,
+    hash: string
+) {
+    const requested = getPtvQueryStringValue(parsePtvQueryString(hash.split('?')[1] || ''), 'topParentId')
+        .trim().toLowerCase();
+    if (!requested) return views.length > 0;
+    if (views.some(view => view.id.toLowerCase() === requested)) return true;
+
+    // Legacy aliases are presentation routes only. Match them to an actual
+    // user-visible view before showing page content; server APIs still decide.
+    const alias = PTV_SHELL_LEGACY_VIEW_ALIASES[requested];
+    return Boolean(alias && views.some(view => view.kind === alias.kind
+        && alias.names.includes(view.name.trim().toLowerCase())));
+}
+
+function isPtvShellSectionAvailable(section: PtvShellSection, access: PtvNavigationAccess | null, hash: string) {
+    if (['home', 'search', 'request', 'settings'].includes(section)) return true;
+    if (!access) return false;
+
+    switch (section) {
+        case 'anime': {
+            const path = getPtvShellHashPath(hash);
+            if (path.startsWith('#/movies')) return hasPtvShellViewAccess(
+                access.movies.filter(view => view.kind === 'animeMovies'), hash
+            );
+            if (path.startsWith('#/tv')) return hasPtvShellViewAccess(
+                access.shows.filter(view => view.kind === 'anime'), hash
+            );
+            return access.shows.some(view => view.kind === 'anime')
+                || access.movies.some(view => view.kind === 'animeMovies');
+        }
+        case 'cartoons': return hasPtvShellViewAccess(access.shows.filter(view => view.kind === 'cartoons'), hash);
+        case 'collections': return access.collections;
+        case 'dashboard': return access.isAdmin;
+        case 'movies': return hasPtvShellViewAccess(access.movies, hash);
+        case 'music': return access.music.length > 0;
+        case 'reading': {
+            const path = getPtvShellHashPath(hash);
+            let views = access.reading;
+            if (path.startsWith('#/reading/comics') || path.startsWith('#/comics')) {
+                views = views.filter(view => view.kind === 'comics');
+            } else if (path.startsWith('#/reading/manga') || path.startsWith('#/manga')) {
+                views = views.filter(view => view.kind === 'manga');
+            } else if (path.startsWith('#/reading/books') || path.startsWith('#/books')) {
+                views = views.filter(view => view.kind === 'books');
+            }
+            return hasPtvShellViewAccess(views, hash);
+        }
+        case 'shows': return hasPtvShellViewAccess(access.shows, hash);
+        default: return true;
+    }
+}
+
+function getPtvShellAvailableContextLinks(
+    links: readonly PtvShellNavLink[],
+    section: PtvShellSection,
+    access: PtvNavigationAccess | null,
+    hash: string
+) {
+    if (!isPtvShellSectionAvailable(section, access, hash)) return [];
+    return links.filter(link => {
+        if (section === 'anime' && link.id !== 'anime-movies' && link.id.startsWith('anime-')) {
+            return access?.shows.some(view => view.kind === 'anime');
+        }
+        if (link.id === 'reading-books') return access?.reading.some(view => view.kind === 'books');
+        if (link.id === 'reading-comics') return access?.reading.some(view => view.kind === 'comics');
+        if (link.id === 'reading-manga') return access?.reading.some(view => view.kind === 'manga');
+        if (link.id === 'movies-collections') return access?.collections;
+        if (link.id === 'collections-movies') return Boolean(access?.movies.length);
+        if (link.id === 'anime-movies') return access?.movies.some(view => view.kind === 'animeMovies');
+        return true;
+    });
 }
 
 function isPtvShellDirectLinkActive(link: Pick<PtvShellNavLink, 'active' | 'href' | 'label'>, hash: string) {
@@ -623,12 +750,22 @@ const EMPTY_NOTIFICATION_SNAPSHOT: PtvNotificationSnapshot = {
     unreadCount: 0
 };
 
-function usePtvNotificationSnapshot() {
-    const [snapshot, setSnapshot] = useState<PtvNotificationSnapshot>(() => getPtvNotificationSnapshot());
+function usePtvNotificationSnapshot(identityKey: string) {
+    const [scopedSnapshot, setScopedSnapshot] = useState(() => ({
+        identityKey,
+        snapshot: getPtvNotificationSnapshot(identityKey)
+    }));
 
-    useEffect(() => subscribePtvNotifications(setSnapshot), []);
+    useEffect(() => subscribePtvNotifications(
+        snapshot => setScopedSnapshot({ identityKey, snapshot }),
+        identityKey
+    ), [identityKey]);
 
-    return snapshot || EMPTY_NOTIFICATION_SNAPSHOT;
+    // Render the new identity's snapshot immediately. A subscription effect
+    // from the previous account must never leave its badge or text visible.
+    return scopedSnapshot.identityKey === identityKey ?
+        scopedSnapshot.snapshot :
+        getPtvNotificationSnapshot(identityKey) || EMPTY_NOTIFICATION_SNAPSHOT;
 }
 
 function formatPtvNotificationTime(notification: PtvNotification) {
@@ -783,17 +920,19 @@ function PtvShellNotificationPanel({
 }
 
 export function PtvShellActions({
+    identityKey,
     isAdmin,
     onPanelToggle,
     openPanel,
     searchExpanded
 }: Readonly<{
+    identityKey: string;
     isAdmin: boolean;
     onPanelToggle: (panel: PtvShellOpenPanel) => void;
     openPanel: PtvShellOpenPanel;
     searchExpanded: boolean;
 }>) {
-    const notificationSnapshot = usePtvNotificationSnapshot();
+    const notificationSnapshot = usePtvNotificationSnapshot(identityKey);
     const notificationsOpen = openPanel === 'notifications';
     const userOpen = openPanel === 'user';
     const profileHref = getPtvShellProfileHref();
@@ -933,7 +1072,8 @@ export default function PTVShell({
     showBackButton = false,
     title
 }: PTVShellProps) {
-    const { isAdmin } = usePtvAdminDebugVisibility();
+    const navigationAccess = usePtvNavigationAccess();
+    const access = navigationAccess.status === 'ready' ? navigationAccess.access : null;
     const headerRef = useRef<HTMLElement | null>(null);
     const headerRenderCountRef = useRef(0);
     const appLogoUrl = resolvePtvStaticAssetUrl(PTV_ASSETS.logos.bannerLight);
@@ -945,24 +1085,30 @@ export default function PTVShell({
     const [searchQuery, setSearchQuery] = useState(() => getPtvShellSearchRouteQuery() || readPtvShellSearchDraft());
     const arrCalendarAvailability = usePtvArrCalendarAvailability();
     const navGroups = useMemo(
-        () => navigationVariant === 'details' ? [] : getPtvShellNavGroups(section, hash),
-        [hash, navigationVariant, section]
+        () => getPtvShellNavGroups(section, hash, navigationVariant === 'details', access),
+        [access, hash, navigationVariant, section]
     );
     const primaryLinks = useMemo(
-        () => (navigationVariant === 'details' ?
-            PTV_SHELL_DETAILS_LINKS :
-            [
-                ...PTV_SHELL_PRIMARY_LINKS,
-                ...(arrCalendarAvailability.showEntry ? [PTV_SHELL_CALENDAR_LINK] : [])
-            ])
-            .filter(link => isPtvPlatformNavigationEntryAvailable(link))
-            .map(link => navigationVariant === 'details' ? { ...link, active: link.id === section } : link),
-        [arrCalendarAvailability.showEntry, navigationVariant, section]
+        () => getPtvShellPrimaryLinks(access, arrCalendarAvailability.showEntry, navigationVariant, section),
+        [access, arrCalendarAvailability.showEntry, navigationVariant, section]
     );
     const contextLinks = useMemo(
-        () => (contextualLinks || PTV_SHELL_CONTEXT_LINKS[section] || [])
+        () => getPtvShellAvailableContextLinks(contextualLinks || PTV_SHELL_CONTEXT_LINKS[section] || [], section, access, hash)
             .filter(link => link.href !== PTV_ROUTES.calendar || arrCalendarAvailability.showEntry),
-        [arrCalendarAvailability.showEntry, contextualLinks, section]
+        [access, arrCalendarAvailability.showEntry, contextualLinks, hash, section]
+    );
+    const sectionAvailable = isPtvShellSectionAvailable(section, access, hash);
+    const shellContent = sectionAvailable ? (
+        <div className='ptv-shell-main ptv-shell-page-content' data-ptv-layout-node='shell-main'>
+            {children}
+        </div>
+    ) : (
+        <div className='ptv-shell-main ptv-shell-page-content ptv-shell-access-state' data-ptv-layout-node='shell-main' role='status'>
+            <p>{navigationAccess.status === 'loading' ?
+                'Checking available libraries…' :
+                'This library is not available for this account.'}</p>
+            <a href={PTV_ROUTES.home}>Return to Home</a>
+        </div>
     );
     const activeSecondaryNav = contextLinks.find(link => link.active || isPtvShellHrefActive(link.href, hash))?.id || '';
     const closeHeaderTransientState = useCallback((options: { collapseSearch?: boolean } = {}) => {
@@ -970,6 +1116,9 @@ export default function PTVShell({
 
         if (options.collapseSearch !== false) setSearchExpanded(false);
     }, []);
+    useEffect(() => {
+        closeHeaderTransientState();
+    }, [closeHeaderTransientState, navigationAccess.identityKey, navigationAccess.status, access]);
     const handlePanelToggle = useCallback((panel: PtvShellOpenPanel) => {
         setSearchExpanded(false);
         setOpenPanel(currentPanel => (currentPanel === panel ? null : panel));
@@ -1069,6 +1218,44 @@ export default function PTVShell({
     }, [isSearchExpanded, openPanel, searchQuery]);
 
     useLayoutEffect(() => {
+        const header = headerRef.current;
+        if (!header) return undefined;
+
+        const publishClearance = () => {
+            document.documentElement.style.setProperty(
+                '--ptv-shell-header-clearance',
+                `${Math.max(0, header.getBoundingClientRect().bottom)}px`
+            );
+        };
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publishClearance);
+        const routeObserver = new MutationObserver(publishClearance);
+
+        publishClearance();
+        observer?.observe(header);
+        routeObserver.observe(document.documentElement, { attributeFilter: ['class'], attributes: true });
+        window.addEventListener('resize', publishClearance);
+        window.visualViewport?.addEventListener('resize', publishClearance);
+
+        return () => {
+            observer?.disconnect();
+            routeObserver.disconnect();
+            window.removeEventListener('resize', publishClearance);
+            window.visualViewport?.removeEventListener('resize', publishClearance);
+            const otherHeader = Array.from(document.querySelectorAll<HTMLElement>('.ptv-shell-header'))
+                .find(node => node !== header && node.isConnected);
+
+            if (otherHeader) {
+                document.documentElement.style.setProperty(
+                    '--ptv-shell-header-clearance',
+                    `${Math.max(0, otherHeader.getBoundingClientRect().bottom)}px`
+                );
+            } else {
+                document.documentElement.style.removeProperty('--ptv-shell-header-clearance');
+            }
+        };
+    }, []);
+
+    useLayoutEffect(() => {
         ensurePtvShellHeaderStatusBridge();
         shellMountedAt = performance.now();
         runPtvClientCacheMigration();
@@ -1114,7 +1301,8 @@ export default function PTVShell({
             data-ptv-route-mode='native'
             data-ptv-shell-section={section}
         >
-            {headerOnly ? null : <PTVShellBackdrop key={backdropPresentationKey} source={backdropSource || section} url={backdropUrl} />}
+            {headerOnly || !sectionAvailable ? null :
+                <PTVShellBackdrop key={backdropPresentationKey} source={backdropSource || section} url={backdropUrl} />}
 
             <header ref={headerRef} className='ptv-shell-header' aria-label='PiggieTV application shell'>
                 <div className='ptv-shell-header-left'>
@@ -1139,6 +1327,9 @@ export default function PTVShell({
                     aria-label='PiggieTV media navigation'
                 >
                     <div className='ptv-shell-nav-primary'>
+                        {navigationVariant === 'details' && primaryLinks[0] ? (
+                            <PtvShellDirectLink {...primaryLinks[0]} onClick={closeHeaderTransientState} />
+                        ) : null}
                         {navGroups.map(group => (
                             <PtvShellPrimaryDropdown
                                 key={group.id}
@@ -1152,7 +1343,7 @@ export default function PTVShell({
                                 onToggle={() => handlePanelToggle(group.id as PtvShellOpenPanel)}
                             />
                         ))}
-                        {primaryLinks.map(link => (
+                        {primaryLinks.filter(link => navigationVariant !== 'details' || link.id !== 'home').map(link => (
                             <PtvShellDirectLink key={link.id} {...link} onClick={() => closeHeaderTransientState()} />
                         ))}
                     </div>
@@ -1160,7 +1351,8 @@ export default function PTVShell({
 
                 <div className='ptv-shell-header-right'>
                     <PtvShellActions
-                        isAdmin={isAdmin}
+                        identityKey={access ? navigationAccess.identityKey : ''}
+                        isAdmin={access?.isAdmin === true}
                         onPanelToggle={handlePanelToggle}
                         openPanel={openPanel}
                         searchExpanded={isSearchExpanded}
@@ -1190,11 +1382,7 @@ export default function PTVShell({
 
             {headerOnly ? null : <PtvShellContextNav links={contextLinks} title={title} />}
 
-            {headerOnly ? null : (
-                <div className='ptv-shell-main ptv-shell-page-content' data-ptv-layout-node='shell-main'>
-                    {children}
-                </div>
-            )}
+            {headerOnly ? null : shellContent}
         </div>
     );
 }

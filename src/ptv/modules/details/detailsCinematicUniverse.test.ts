@@ -86,7 +86,7 @@ describe('F4A media universe model', () => {
         expect(model.shelves[0].title).not.toContain('Chronological');
     });
 
-    it('creates navigable person and studio entity cards only from IDs', () => {
+    it('does not repeat cast without a distinct connected-title reason', () => {
         const seed = {
             Id: 'seed',
             Name: 'Origin',
@@ -100,11 +100,13 @@ describe('F4A media universe model', () => {
         const model = buildPtvCinematicDetailsModel(seed, data([]));
         const entities = model.shelves.find(shelf => shelf.presentation === 'entities');
 
-        expect(entities?.items.map(card => card.itemId)).toEqual(['person', 'studio']);
-        expect(entities?.items.map(card => card.entityType)).toEqual(['Person', 'Studio']);
+        expect(entities?.items.map(card => card.itemId)).toEqual(['studio']);
+        expect(entities?.items.map(card => card.entityType)).toEqual(['Studio']);
+        expect(entities?.title).toBe('Explore connected sources');
+        expect(entities?.relationship).toBe('shared-studio');
     });
 
-    it('places strongly connected library titles ahead of people and places', () => {
+    it('places strongly connected library titles ahead of creator and collection navigation', () => {
         const director = { Id: 'nolan', Name: 'Christopher Nolan', Type: 'Director' };
         const studio = { Id: 'dc', Name: 'DC' };
         const seed = {
@@ -127,7 +129,8 @@ describe('F4A media universe model', () => {
         expect(model.shelves[0]?.id).toBe('explicit-connections');
         expect(model.shelves[0]?.items.map(card => card.itemId)).toEqual(['batman-begins']);
         expect(model.shelves[1]?.id).toBe('universe-entities');
-        expect(model.shelves[1]?.title).toBe('People and places');
+        expect(model.shelves[1]?.title).toBe('Explore connected sources');
+        expect(model.shelves[1]?.items[0]?.reason).toContain('connected title');
     });
 
     it('converts existing canonical metadata destinations into visual entity cards', () => {

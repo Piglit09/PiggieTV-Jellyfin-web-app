@@ -9,6 +9,8 @@ import {
     type AdminMetadataItemBundle,
     type AdminMetadataProviderField
 } from './adminMetadataManagerModel';
+import { AdminReadingAssessmentChangedError } from './adminReadingMetadataService';
+import { identityAssessment } from './adminReadingIdentityTestFixtures';
 import type {
     AdminReadingMetadataCandidate,
     AdminReadingMetadataSearchRequest,
@@ -100,6 +102,10 @@ function identifyResult(name = 'Matched title'): AdminMetadataIdentifyResult {
 
 function readingCandidate(overrides: Partial<AdminReadingMetadataCandidate> = {}): AdminReadingMetadataCandidate {
     return {
+        assessmentContext: 'signed-context',
+        assessmentDigest: 'digest-a',
+        archiveRevision: 'revision-a',
+        identityAssessment: identityAssessment({ providerId: '4000-77815' }),
         alternateTitles: [],
         artists: [],
         authors: [],
@@ -223,6 +229,51 @@ describe('shared admin metadata Identify controller', () => {
         await act(async () => root.unmount());
         container.remove();
         vi.clearAllMocks();
+    });
+
+    it.each(['archive', 'displayed value'])('ChangedArchiveResetsReview / SameReasonCodeDifferentDisplayedValueResetsReview: %s', async change => {
+        const candidate = readingCandidate();
+        const changed = identityAssessment({ ...candidate.identityAssessment!,
+            archiveRevision: change === 'archive' ? 'revision-b' : 'revision-a',
+            sources: { ...candidate.identityAssessment!.sources,
+                comicInfo: { ...candidate.identityAssessment!.sources.comicInfo, issueNumber: '10' } }
+        });
+        let current!: () => boolean;
+        const ops = operations(itemBundle(), { searchReadingIdentify: vi.fn(async () => readingResponse(candidate)), applyIdentifyResult: vi.fn(async (_result, guard) => {
+            current = guard!.isCurrent;
+            throw new AdminReadingAssessmentChangedError(changed);
+        }) });
+        await render({ bundle: itemBundle('book-a', 'Book'), operations: ops });
+        await act(async () => reading(latest).onSearch({ itemId: 'book-a', title: 'Synthetic' }));
+        const approval = { assessmentContext: 'signed-context', assessmentDigest: 'digest-a', archiveRevision: 'revision-a',
+            searchGeneration: 'generation-a', acknowledgedConflictCodes: [], acknowledgedUnverifiedCodes: [] };
+        await act(async () => {
+            await expect(reading(latest).onApply(candidate, approval)).rejects.toThrow();
+        });
+        expect(reading(latest).response?.candidates[0].identityAssessment).toEqual(changed);
+        expect(reading(latest).response?.candidates[0].archiveRevision).toBe(changed.archiveRevision);
+        expect(current()).toBe(false);
+    });
+
+    it('invalidates a pending Reading guard when the review owner unmounts', async () => {
+        const candidate = readingCandidate();
+        let current!: () => boolean;
+        const ops = operations(itemBundle(), {
+            searchReadingIdentify: vi.fn(async () => readingResponse(candidate)),
+            applyIdentifyResult: vi.fn(async (_result, guard) => {
+                current = guard!.isCurrent;
+                return itemBundle();
+            })
+        });
+        await render({ bundle: itemBundle('book-a', 'Book'), operations: ops });
+        await act(async () => reading(latest).onSearch({ itemId: 'book-a' }));
+        await act(async () => reading(latest).onApply(candidate, {
+            assessmentContext: 'signed-context', assessmentDigest: 'digest-a', archiveRevision: 'revision-a',
+            searchGeneration: 'generation-a', acknowledgedConflictCodes: [], acknowledgedUnverifiedCodes: []
+        }));
+        expect(current()).toBe(true);
+        await act(async () => root.render(null));
+        expect(current()).toBe(false);
     });
 
     it('accepts only a bounded prefill for the immutable item and never searches or applies on mount', async () => {
@@ -491,6 +542,7 @@ describe('shared admin metadata Identify controller', () => {
         await act(async () => reading(latest).onSearch(request));
         await vi.waitFor(() => expect(reading(latest).response).toBe(response));
         expect(searchReadingIdentify).toHaveBeenCalledWith({
+            searchGeneration: expect.any(String),
             author: undefined,
             chapterNumber: undefined,
             isbn: undefined,
@@ -504,13 +556,62 @@ describe('shared admin metadata Identify controller', () => {
             year: 2019
         });
 
-        await act(async () => reading(latest).onApply(candidate));
+        await act(async () => reading(latest).onApply(candidate, { assessmentContext: 'signed-context', assessmentDigest: 'digest-a', archiveRevision: 'revision-a', searchGeneration: 'generation-a', acknowledgedConflictCodes: [], acknowledgedUnverifiedCodes: [] }));
         expect(applyIdentifyResult).toHaveBeenCalledOnce();
         expect(applyIdentifyResult).toHaveBeenCalledWith(expect.objectContaining({
             readingCandidate: candidate,
             readingQuery: response.query
-        }));
+        }), expect.objectContaining({ approval: expect.objectContaining({ assessmentContext: 'signed-context' }), isCurrent: expect.any(Function) }));
         expect(onApplied).toHaveBeenCalledWith(saved);
         expect(reading(latest).message).toContain('Reading metadata applied');
+    });
+    it('rejects a removed candidate rather than substituting result zero', async () => {
+        const saved = itemBundle('book-a', 'Book');
+        const applyIdentifyResult = vi.fn(async () => saved);
+        await render({ bundle: saved, operations: operations(saved, { applyIdentifyResult }) });
+        await act(async () => {
+            await expect(reading(latest).onApply(readingCandidate(), {
+                assessmentContext: 'context', assessmentDigest: 'digest', archiveRevision: 'revision', searchGeneration: 'generation',
+                acknowledgedConflictCodes: [], acknowledgedUnverifiedCodes: []
+            })).rejects.toThrow();
+        });
+        expect(applyIdentifyResult).not.toHaveBeenCalled();
+    });
+
+    it.each([ true, false ])('creates distinct bounded search generations with crypto available: %s', async available => {
+        if (!available) vi.stubGlobal('crypto', undefined);
+        const saved = itemBundle('book-a', 'Book');
+        const searchReadingIdentify = vi.fn<(request: Omit<AdminReadingMetadataSearchRequest, 'itemId'>) => Promise<AdminReadingMetadataSearchResponse>>(async () => readingResponse(readingCandidate()));
+        await render({ bundle: saved, operations: operations(saved, { searchReadingIdentify }) });
+        try {
+            await act(async () => reading(latest).onSearch({ itemId: 'book-a', title: 'Synthetic' }));
+            await act(async () => reading(latest).onSearch({ itemId: 'book-a', title: 'Synthetic' }));
+            const generations = searchReadingIdentify.mock.calls.map(call => (call[0] as AdminReadingMetadataSearchRequest).searchGeneration);
+            expect(generations[0]).toMatch(/^[a-zA-Z0-9-]{1,64}$/);
+            expect(generations[1]).not.toBe(generations[0]);
+        } finally { vi.unstubAllGlobals(); }
+    });
+
+    it('rejects retained callbacks after another search and old Plugin results without context', async () => {
+        const saved = itemBundle('book-a', 'Book');
+        const oldCandidate = readingCandidate({ assessmentContext: null });
+        const applyIdentifyResult = vi.fn(async () => saved);
+        const searchReadingIdentify = vi.fn(async () => readingResponse(oldCandidate));
+        await render({ bundle: saved, operations: operations(saved, { applyIdentifyResult, searchReadingIdentify }) });
+        const approval = { assessmentContext: 'signed-context', assessmentDigest: 'digest-a', archiveRevision: 'revision-a',
+            searchGeneration: 'generation-a', acknowledgedConflictCodes: [], acknowledgedUnverifiedCodes: [] };
+        await act(async () => reading(latest).onSearch({ itemId: 'book-a', title: 'Synthetic' }));
+        const previousApply = reading(latest).onApply;
+        await act(async () => {
+            await expect(previousApply(oldCandidate, approval)).rejects.toThrow();
+        });
+        await act(async () => reading(latest).onSearch({ itemId: 'book-a', title: 'Another' }));
+        await act(async () => {
+            await expect(previousApply(oldCandidate, approval)).rejects.toThrow();
+        });
+        await act(async () => {
+            await expect(reading(latest).onApply(readingCandidate(), approval)).rejects.toThrow();
+        });
+        expect(applyIdentifyResult).not.toHaveBeenCalled();
     });
 });

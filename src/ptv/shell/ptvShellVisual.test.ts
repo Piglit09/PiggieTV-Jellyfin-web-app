@@ -56,7 +56,27 @@ describe('PiggieTV shell surface hierarchy', () => {
             .find(rule => rule.includes('grid-template-rows: 48px 52px'));
 
         expect(mobileHeaderRule).toBeDefined();
-        expect(mobileHeaderRule).toContain('min-height: 126px');
+        expect(mobileHeaderRule).toContain('min-height: calc(126px + env(safe-area-inset-top))');
+    });
+
+    it('keeps compact header controls clear of lateral safe areas', () => {
+        const mobileHeaderRule = getRuleBodies(shellStyles, '.ptv-shell-header')
+            .find(rule => rule.includes('grid-template-rows: 48px 52px'));
+
+        expect(mobileHeaderRule).toContain('left: calc(14px + env(safe-area-inset-left))');
+        expect(mobileHeaderRule).toContain('right: calc(14px + env(safe-area-inset-right))');
+    });
+
+    it('insets the Details header and expanded compact search from safe areas', () => {
+        const detailsHeaderRule = getRuleBodies(shellStyles, 'html.ptv-route-detail-page .ptv-shell-header')[0];
+        const expandedSearchRule = getRuleBodies(shellStyles, '.ptv-shell-search.is-expanded')
+            .find(rule => rule.includes('position: fixed'));
+
+        expect(detailsHeaderRule).toContain('top: calc(24px + env(safe-area-inset-top))');
+        expect(expandedSearchRule).toContain('left: calc(14px + env(safe-area-inset-left))');
+        expect(expandedSearchRule).toContain('right: calc(14px + env(safe-area-inset-right))');
+        expect(expandedSearchRule).toContain('top: calc(62px + env(safe-area-inset-top))');
+        expect(expandedSearchRule).toContain('width: calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right))');
     });
 
     it('compacts media labels without removing their accessible text on phone widths', () => {

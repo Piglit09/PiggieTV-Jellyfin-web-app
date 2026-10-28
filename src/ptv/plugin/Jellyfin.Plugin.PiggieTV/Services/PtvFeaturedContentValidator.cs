@@ -17,7 +17,7 @@ public static class PtvFeaturedContentValidator
     /// <summary>
     /// Current supported frontend featured-content cache payload version.
     /// </summary>
-    public const int FeaturedCacheVersion = 7;
+    public const int FeaturedCacheVersion = 9;
 
     /// <summary>
     /// Maximum serialized document size accepted from clients.
@@ -125,6 +125,13 @@ public static class PtvFeaturedContentValidator
         var payload = featuredContent["payload"] as JsonObject
             ?? throw Invalid("PTV_CACHE_MISSING_PAYLOAD", "featuredContent.payload is required.");
 
+        if (payload["scopeSchemaVersion"] is not JsonValue scopeSchema
+            || !scopeSchema.TryGetValue<int>(out var schemaVersion)
+            || schemaVersion != 2)
+        {
+            throw Invalid("PTV_CACHE_UNSUPPORTED_SCOPE_SCHEMA", "A current featured-content scope schema is required.");
+        }
+
         if (payload["heroItems"] is not JsonArray)
         {
             throw Invalid("PTV_CACHE_MISSING_HERO_ITEMS", "featuredContent.payload.heroItems must be an array.");
@@ -139,6 +146,11 @@ public static class PtvFeaturedContentValidator
             {
                 throw Invalid("PTV_CACHE_INVALID_SECTION_ITEMS", "Every featured-content section must contain an item array.");
             }
+        }
+
+        if (!HasCoherentSections(payload, sectionItems))
+        {
+            throw Invalid("PTV_CACHE_INVALID_SCOPE_SECTIONS", "Featured section items require unique matching section definitions.");
         }
 
         var semanticStatus = GetSemanticStatus(payload);
@@ -176,6 +188,35 @@ public static class PtvFeaturedContentValidator
         }
 
         return document;
+    }
+
+    internal static bool HasCurrentScopeSchema(PtvFeaturedContentDocument document) =>
+        document.FeaturedContent is JsonObject featured
+        && featured["payload"] is JsonObject payload
+        && payload["scopeSchemaVersion"] is JsonValue scopeSchema
+        && scopeSchema.TryGetValue<int>(out var version)
+        && version == 2
+        && payload["sectionItems"] is JsonObject sectionItems
+        && HasCoherentSections(payload, sectionItems);
+
+    private static bool HasCoherentSections(JsonObject payload, JsonObject sectionItems)
+    {
+        if (payload["sections"] is not JsonArray sections) return false;
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var section in sections)
+        {
+            if (section is not JsonObject definition
+                || definition["id"] is not JsonValue idValue
+                || !idValue.TryGetValue<string>(out var id)
+                || string.IsNullOrWhiteSpace(id)
+                || !ids.Add(id))
+            {
+                return false;
+            }
+        }
+
+        var itemKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return sectionItems.All(entry => itemKeys.Add(entry.Key) && ids.Contains(entry.Key));
     }
 
     /// <summary>Classifies whether a generated payload contains semantic Home content.</summary>

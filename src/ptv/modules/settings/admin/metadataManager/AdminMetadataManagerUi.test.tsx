@@ -245,6 +245,7 @@ function readingSearchResponse(title: string): AdminReadingMetadataSearchRespons
 function metadataManagerState(overrides: Partial<HookState> = {}): HookState {
     const saveMetadata = vi.fn(async (desired: AdminMetadataForm) => itemBundle({ form: desired }));
     return {
+        identityScope: { serverId: 'server-a', userId: 'admin-a' },
         activeMutation: null,
         applyIdentifyResult: vi.fn(async () => itemBundle()),
         artwork: null,
@@ -882,6 +883,21 @@ describe('PiggieTV native Metadata Manager UI', () => {
         await flushAsync();
         expect(onRefresh).toHaveBeenCalledOnce();
         expect(onRefresh).toHaveBeenCalledWith('replace-all', false);
+    });
+    it('blocks Reading Apply when an older Plugin supplies no signed identity context', async () => {
+        const applyIdentifyResult = vi.fn(async () => itemBundle({ type: 'Book' }));
+        uiMocks.state = metadataManagerState({
+            applyIdentifyResult, itemBundle: itemBundle({ type: 'Book' }),
+            searchReadingIdentify: vi.fn(async () => readingSearchResponse('Synthetic match'))
+        });
+        await renderPage('item-a');
+        await act(async () => buttonWithText(container, 'Identify')?.click());
+        await act(async () => buttonWithText(container, 'Search')?.click());
+        await flushAsync();
+        await act(async () => buttonWithText(container, 'Review match')?.click());
+        expect(document.body.textContent).toContain('Identity review is unavailable');
+        expect(buttonWithText(document.body, 'Apply match')?.disabled).toBe(true);
+        expect(applyIdentifyResult).not.toHaveBeenCalled();
     });
 });
 

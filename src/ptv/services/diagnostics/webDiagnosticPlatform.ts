@@ -38,6 +38,7 @@ import {
     FEATURED_CACHE_UPDATED_EVENT,
     getFeaturedContentCacheStatus
 } from '../../modules/cache/featuredContentCache';
+import { subscribePtvRecommendationDiagnosticScope } from '../../modules/recommendations/diagnostics/recommendationDiagnosticScope';
 import {
     PTV_ROUTE_CRITICAL_LIFECYCLE_EVENT,
     type PtvRouteCriticalLifecycleDetail
@@ -191,11 +192,14 @@ export function normalizePtvRouteCriticalLifecycleDetail(
 const PTV_RECOMMENDATION_GENERATION_LIMIT = 12;
 
 type PtvRecommendationGenerationState = {
+    authoritative: boolean;
     explicitIdentity: boolean;
     failureObserved: boolean;
+    identityScope: string | null;
     key: string;
     sequence: number;
     startedAt: number;
+    startedAtIso: string | null;
     terminal: boolean;
 };
 
@@ -336,11 +340,14 @@ function beginPtvRecommendationGeneration(event: PtvObservabilityEvent) {
 
     recommendationGenerationSequence += 1;
     const generation: PtvRecommendationGenerationState = {
+        authoritative: false,
         explicitIdentity: Boolean(explicitKey),
         failureObserved: false,
+        identityScope: null,
         key: explicitKey || `observed-generation-${recommendationGenerationSequence}`,
         sequence: recommendationGenerationSequence,
         startedAt: event.at,
+        startedAtIso: null,
         terminal: false
     };
 
@@ -378,6 +385,148 @@ function resetPtvRecommendationGenerationState() {
     recommendationFailureSticky = false;
     recommendationGenerationSequence = 0;
     recommendationGenerations.clear();
+}
+
+function observedRecommendationCount(value: unknown) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ?
+        Math.min(PTV_PLAYBACK_MAX_COUNT, Math.floor(value)) : 0;
+}
+
+function observedRecommendationDuration(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ?
+        Math.min(PTV_PLAYBACK_MAX_DURATION_MS, Number(value.toFixed(3))) : null;
+}
+
+function resetPtvRecommendationSummary(retireIdentity: boolean, active: boolean) {
+    const store = getPtvDiagnosticStore();
+    const previous = store.getSnapshot().recommendations;
+
+    store.updateContext({
+        recommendations: {
+            ...previous,
+            active,
+            cacheState: retireIdentity ? 'unknown' : previous.cacheState,
+            candidateCount: 0,
+            configuredRows: 0,
+            diversityCapRejectionCount: 0,
+            duplicateSuppressionCount: 0,
+            fallbackUsed: false,
+            feedbackRejectionCount: 0,
+            generatedItemCount: 0,
+            generatedRows: 0,
+            health: createPtvDiagnosticHealth('unknown', active ?
+                'Recommendation generation is running.' :
+                'Recommendation summary was retired with the authentication scope.'),
+            identityDuplicateRejectionCount: 0,
+            itemCount: 0,
+            lastErrorCategory: 'none',
+            lastFailureAt: retireIdentity ? null : previous.lastFailureAt,
+            lastFailureCategory: retireIdentity ? 'none' : previous.lastFailureCategory,
+            lastFailureResolvedAt: retireIdentity ? null : previous.lastFailureResolvedAt,
+            lastGenerationAt: retireIdentity ? null : previous.lastGenerationAt,
+            providerCount: 0,
+            renderedItemCount: null,
+            runDurationMs: null,
+            sourceCount: 0,
+            tasteSignalCount: 0,
+            terminalOutcome: null
+        }
+    });
+}
+
+function retirePtvRecommendationSummary() {
+    resetPtvRecommendationGenerationState();
+    resetPtvRecommendationSummary(true, false);
+}
+
+function beginAuthoritativePtvRecommendationGeneration(event: PtvObservabilityEvent) {
+    if (!isRecord(event.detail)) return false;
+    const key = getPtvRecommendationGenerationKey(event.detail);
+    const identityScope = event.detail.identityScope;
+    const startedAtIso = event.detail.startedAt;
+
+    if (!key || typeof identityScope !== 'string' || !/^recommendation-scope-\d+$/.test(identityScope)
+        || typeof startedAtIso !== 'string' || !Number.isFinite(Date.parse(startedAtIso))) return false;
+    if (recommendationGenerations.has(key)) return true;
+    if (currentRecommendationGeneration && event.at < currentRecommendationGeneration.startedAt) return true;
+
+    const changedIdentity = Boolean(currentRecommendationGeneration
+        && currentRecommendationGeneration.identityScope !== identityScope);
+    if (changedIdentity) resetPtvRecommendationGenerationState();
+    const generation = beginPtvRecommendationGeneration(event);
+
+    if (!generation) return true;
+    generation.authoritative = true;
+    generation.identityScope = identityScope;
+    generation.startedAtIso = startedAtIso;
+    resetPtvRecommendationSummary(changedIdentity, true);
+    return true;
+}
+
+function finishAuthoritativePtvRecommendationGeneration(event: PtvObservabilityEvent) {
+    if (!isRecord(event.detail)) return;
+    const generation = currentRecommendationGeneration;
+
+    if (!generation?.authoritative || generation.terminal
+        || generation.key !== getPtvRecommendationGenerationKey(event.detail)
+        || generation.identityScope !== event.detail.identityScope
+        || generation.startedAtIso !== event.detail.startedAt) return;
+
+    const outcome = event.detail.outcome;
+    if (outcome !== 'success' && outcome !== 'partial' && outcome !== 'failed' && outcome !== 'cancelled') return;
+    generation.terminal = true;
+    const detail = event.detail;
+    const store = getPtvDiagnosticStore();
+    const previous = store.getSnapshot().recommendations;
+    const providerCount = observedRecommendationCount(detail.providerCount);
+    const generatedRows = observedRecommendationCount(detail.generatedRowCount);
+    const generatedItemCount = observedRecommendationCount(detail.generatedItemCount);
+    const identityDuplicateRejectionCount = observedRecommendationCount(detail.identityDuplicateRejectionCount);
+    const diversityCapRejectionCount = observedRecommendationCount(detail.diversityCapRejectionCount);
+    const completedAt = typeof detail.completedAt === 'string' && Number.isFinite(Date.parse(detail.completedAt)) ?
+        detail.completedAt : new Date(event.at).toISOString();
+    const failure = outcome === 'partial' || outcome === 'failed';
+    const category = failure ? safeEnum(detail.errorCategory, [
+        'generation', 'source-all-failed', 'source-partial'
+    ], outcome === 'partial' ? 'source-partial' : 'generation') : 'none';
+    const health = outcome === 'success' ?
+        createPtvDiagnosticHealth('healthy', 'Recommendation generation completed successfully.') :
+        outcome === 'partial' ?
+            createPtvDiagnosticHealth('degraded', 'Recommendation generation completed with a bounded fallback.') :
+            outcome === 'failed' ?
+                createPtvDiagnosticHealth('degraded', 'Recommendation generation failed safely.') :
+                createPtvDiagnosticHealth('unknown', 'Recommendation generation was cancelled.');
+
+    store.updateContext({
+        recommendations: {
+            ...previous,
+            active: false,
+            candidateCount: observedRecommendationCount(detail.candidateCount),
+            diversityCapRejectionCount,
+            duplicateSuppressionCount: identityDuplicateRejectionCount + diversityCapRejectionCount,
+            fallbackUsed: detail.fallbackUsed === true,
+            feedbackRejectionCount: observedRecommendationCount(detail.feedbackRejectionCount),
+            generatedItemCount,
+            generatedRows,
+            health,
+            identityDuplicateRejectionCount,
+            itemCount: generatedItemCount,
+            lastErrorCategory: category,
+            lastFailureAt: failure ? completedAt : previous.lastFailureAt,
+            lastFailureCategory: failure ? category : previous.lastFailureCategory,
+            lastFailureResolvedAt: failure ? null :
+                outcome === 'success' && previous.lastFailureAt && !previous.lastFailureResolvedAt ?
+                    completedAt : previous.lastFailureResolvedAt,
+            lastGenerationAt: completedAt,
+            providerCount,
+            renderedItemCount: typeof detail.renderedItemCount === 'number' && Number.isFinite(detail.renderedItemCount)
+                && detail.renderedItemCount >= 0 ? observedRecommendationCount(detail.renderedItemCount) : null,
+            runDurationMs: observedRecommendationDuration(detail.durationMs),
+            sourceCount: providerCount,
+            tasteSignalCount: observedRecommendationCount(detail.tasteSignalCount),
+            terminalOutcome: outcome
+        }
+    });
 }
 
 function boundedPlaybackNumber(value: unknown, maximum: number, integer = false) {
@@ -1112,6 +1261,19 @@ export function bridgePtvDiagnosticObservabilityEvent(event: PtvObservabilityEve
     }
 
     if (event.type === 'recommendation') {
+        if (event.name === 'recommendation-generation-start') {
+            if (beginAuthoritativePtvRecommendationGeneration(event)) return;
+        }
+        if (event.name === 'recommendation-generation-finished') {
+            finishAuthoritativePtvRecommendationGeneration(event);
+            return;
+        }
+        // The current engine owns its terminal lifecycle. Its legacy stage logs
+        // cannot establish a generation when authentication failed closed.
+        if (isRecord(event.detail) && typeof event.detail.generationId === 'string'
+            && /^recommendation-generation-\d+$/.test(event.detail.generationId)) return;
+        if (currentRecommendationGeneration?.authoritative) return;
+
         const snapshot = store.getSnapshot();
         const previous = snapshot.recommendations;
         const explicitGenerationKey = getPtvRecommendationGenerationKey(event.detail);
@@ -1304,31 +1466,74 @@ function updateCacheSummary() {
     const status = getFeaturedContentCacheStatus({ prime: false });
     const now = Date.now();
     const ageMs = status.createdAt ? Math.max(0, now - status.createdAt) : null;
-    const failing = Boolean(status.readError || status.writeError || status.lastRefreshError);
-    const cacheState = status.isFresh ? 'fresh' : status.createdAt ? 'stale' : 'unknown';
+    const readOutcome = status.lastReadOutcome;
+    const writeOutcome = status.lastWriteOutcome;
+    const readFailing = Boolean(status.readError || readOutcome === 'failed' || readOutcome === 'rejected');
+    const writeFailing = Boolean(status.writeError || writeOutcome === 'failed' || writeOutcome === 'unverified');
+    const failing = readFailing || writeFailing || Boolean(status.lastRefreshError);
+    const countsObserved = status.countsObserved ?? Boolean(status.createdAt);
+    const emptyObservationAt = status.countsObservedAt ?? status.lastReadAttemptAt;
+    const observedEmpty = readOutcome === 'empty' && countsObserved && status.itemCount === 0
+        && status.sectionCount === 0 && !status.createdAt;
+    const emptyWithinTtl = observedEmpty && typeof emptyObservationAt === 'number'
+        && Number.isFinite(emptyObservationAt) && typeof status.ttlMs === 'number'
+        && status.ttlMs > 0 && now >= emptyObservationAt && now - emptyObservationAt <= status.ttlMs;
+    const emptyExpired = observedEmpty && typeof emptyObservationAt === 'number'
+        && Number.isFinite(emptyObservationAt) && !emptyWithinTtl;
+    const cacheState = status.isFresh ? 'fresh' : status.createdAt || emptyExpired ? 'stale' : 'unknown';
+    const toIso = (value: number | null | undefined) => typeof value === 'number' && Number.isFinite(value)
+        ? new Date(value).toISOString() : null;
+    let healthStatus: 'degraded' | 'healthy' | 'unknown' = 'unknown';
+    let healthReason = 'No featured-content cache entry is currently available.';
+
+    if (failing) {
+        healthStatus = 'degraded';
+        healthReason = 'The featured-content cache reported a read, write, or refresh error.';
+    } else if (status.isFresh) {
+        healthStatus = 'healthy';
+        healthReason = 'The featured-content cache is fresh.';
+    } else if (emptyWithinTtl) {
+        healthStatus = 'healthy';
+        healthReason = 'The featured-content cache was observed empty.';
+    } else if (status.createdAt || emptyExpired) {
+        healthStatus = 'degraded';
+        healthReason = 'The featured-content cache is stale.';
+    }
 
     getPtvDiagnosticStore().updateContext({
         cache: {
             ageMs,
+            cacheLayer: 'web-featured-content',
+            countsObserved,
+            countsObservedAt: toIso(status.countsObservedAt),
+            fallbackAvailable: Boolean(status.fallbackAvailable),
             health: createPtvDiagnosticHealth(
-                failing ? 'degraded' : status.isFresh ? 'healthy' : status.createdAt ? 'degraded' : 'unknown',
-                failing ? 'The featured-content cache reported a read, write, or refresh error.'
-                    : status.isFresh ? 'The featured-content cache is fresh.'
-                        : status.createdAt ? 'The featured-content cache is stale.'
-                            : 'No featured-content cache entry is currently available.',
+                healthStatus,
+                healthReason,
                 {
                     metrics: {
-                        itemCount: status.itemCount,
-                        sectionCount: status.sectionCount
+                        ...(countsObserved ? { itemCount: status.itemCount, sectionCount: status.sectionCount } : {})
                     }
                 }
             ),
             itemCount: status.itemCount,
-            lastErrorCategory: status.readError ? 'read' : status.writeError ? 'write'
+            lastErrorCategory: readFailing ? 'read' : writeFailing ? 'write'
                 : status.lastRefreshError ? 'refresh' : 'none',
-            lastReadStatus: status.readInProgress ? 'in-progress' : status.readError ? 'failed'
-                : status.createdAt ? 'available' : 'not-read',
-            lastWriteStatus: status.writeError ? 'failed' : status.isStored ? 'stored' : 'not-observed',
+            lastReadAttemptAt: toIso(status.lastReadAttemptAt),
+            lastReadFailureAt: toIso(status.lastReadFailureAt),
+            lastReadFailureCategory: safeEnum(status.lastReadFailureCategory,
+                ['none', 'transport', 'authentication', 'timeout', 'parse', 'semantic', 'unknown'], 'unknown'),
+            lastReadOutcome: safeEnum(readOutcome,
+                ['not-attempted', 'in-progress', 'empty', 'adopted', 'rejected', 'failed'], 'not-attempted'),
+            lastReadStatus: readOutcome === 'adopted' ? 'available' : readOutcome === 'not-attempted'
+                ? 'not-read' : readOutcome,
+            lastWriteAttemptAt: toIso(status.lastWriteAttemptAt),
+            lastWriteOutcome: safeEnum(writeOutcome,
+                ['not-attempted', 'in-progress', 'verified', 'unverified', 'failed'], 'not-attempted'),
+            lastWriteStatus: writeOutcome === 'verified' ? 'stored' : writeOutcome === 'not-attempted'
+                ? 'not-observed' : writeOutcome,
+            observationAgeMs: 0,
+            observedAt: new Date(now).toISOString(),
             owner: 'featured-content',
             sectionCount: status.sectionCount,
             state: cacheState,
@@ -1337,6 +1542,14 @@ function updateCacheSummary() {
             version: status.cacheVersion
         }
     });
+}
+
+export function refreshPtvDiagnosticCacheSummary(): void {
+    updateCacheSummary();
+}
+
+export function getPtvDiagnosticCacheSamplingIntervalMs(isLowPower: boolean): number {
+    return isLowPower ? 5 * 60_000 : 60_000;
 }
 
 function getPluginCapabilities(status: Record<string, unknown>) {
@@ -1510,6 +1723,7 @@ function createCollector(): DisposableCollector {
     let disposed = false;
     let animationFrame = 0;
     let frameFlushTimer = 0;
+    let cacheSummaryTimer = 0;
     let routeSettleTimer = 0;
     let scrollSettleTimer = 0;
     let scrollStartedAt = 0;
@@ -1529,6 +1743,9 @@ function createCollector(): DisposableCollector {
     let longTaskCount = 0;
     let collectorOverheadMs = 0;
     const disposers: Array<() => void> = [];
+    const refreshCacheSummary = () => {
+        if (!disposed) refreshPtvDiagnosticCacheSummary();
+    };
     const imageLifecycle = createPtvImageLifecycleTracker();
     const diagnosticSelfImageGenerations = createPtvImageRemountGuard();
     const handleDiagnosticScroll = (event: Event) => {
@@ -1875,9 +2092,14 @@ function createCollector(): DisposableCollector {
     document.querySelectorAll<HTMLImageElement>('img[src], img[data-src]').forEach(recordImageRequest);
     animationFrame = window.requestAnimationFrame(frameTick);
     frameFlushTimer = window.setInterval(flushFrames, 1000);
+    cacheSummaryTimer = window.setInterval(() => {
+        if (!document.hidden) refreshCacheSummary();
+    }, getPtvDiagnosticCacheSamplingIntervalMs(getPtvClientProfile().isLowPower));
+    store.setCacheSummaryRefresher(refreshCacheSummary);
 
     disposers.push(
         subscribePtvObservability(bridgePtvDiagnosticObservabilityEvent),
+        subscribePtvRecommendationDiagnosticScope(retirePtvRecommendationSummary),
         subscribePtvTvNavigation(snapshot => store.setFocus(getFocusDiagnostic(snapshot))),
         subscribePtvDiagnosticPreferences(preferences => {
             store.setCollectorEnabled(preferences.collectionEnabled);
@@ -1913,6 +2135,8 @@ function createCollector(): DisposableCollector {
             disposed = true;
             window.cancelAnimationFrame(animationFrame);
             window.clearInterval(frameFlushTimer);
+            window.clearInterval(cacheSummaryTimer);
+            store.setCacheSummaryRefresher(null);
             window.clearTimeout(routeSettleTimer);
             window.clearTimeout(scrollSettleTimer);
             mutationObserver.disconnect();

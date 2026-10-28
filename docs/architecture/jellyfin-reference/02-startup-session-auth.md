@@ -35,6 +35,12 @@ flowchart TD
 
 `[INFERRED]` The startup candidate probe uses `Promise.all` with no source-level timeout/abort, so one never-settling fetch can hold pre-render boot. Awaited host/localization work can do the same; plugin-load rejection itself is caught. `[VERIFIED_FROM_SOURCE]` `src/utils/dashboard.js`, lines 57–87; `src/index.jsx`, lines 69–117 and `loadPlugins`, lines 141–168.
 
+### Current PTV hosted-Web server-root restriction
+
+The stock description above remains the 10.11.11 reference. In the current PTV Web source, an HTTP(S) page served from a `/web` path uses its document's Jellyfin server root, including a BaseUrl prefix, as its only discovery and reconnection target. Saved servers, query overrides, configuration candidates, and an existing API client at another root cannot redirect that hosted page. `ConnectionManager` filters saved-server visibility and Local/Manual/Remote reconnect probes by that root; it also checks the address when creating or retrieving an API client, including before `connect()` runs. PTV Plugin API candidate URLs are also constrained to the hosted root, including retries after an unavailable Plugin response. Hosted initialization does not delete other saved credentials; the stock logout action still clears saved authentication fields globally. A development Webpack server and non-hosted client retain their existing split-origin selection. `[VERIFIED_FROM_SOURCE]` `src/ptv/core/urlOrigins.ts`, `getPtvHostedServerRoot`/`isPtvHostedServerAddress`; `src/ptv/core/serverOriginSelection.ts`, `buildPtvServerOriginCandidates`; `src/lib/jellyfin-apiclient/connectionManager.js`, saved-server selection, client initialization, and `tryReconnect`; `src/ptv/core/pluginApi.ts`, `getPluginRootCandidates`. `[VERIFIED_BY_TEST]` `serverOriginSelection.test.ts`, `connectionManager.hostedOrigin.test.ts`, and `pluginApiAuthentication.test.ts` exercise a hosted page with a newer saved server on another origin, a mixed-address record with remote last-connection mode, a prefixed BaseUrl, direct cross-origin connection, Plugin retry isolation, and preservation of unrelated credentials during initialization.
+
+This is a browser connection-selection rule, not a server authorization boundary or a guarantee about where a reverse proxy routes a hostname. An unavailable hosted server root must remain unavailable rather than falling back to another saved server. The real `.125` browser publication and request check remains a separate acceptance gate.
+
 ## Session restoration state machine
 
 ```mermaid

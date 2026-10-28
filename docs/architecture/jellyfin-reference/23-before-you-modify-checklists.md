@@ -10,6 +10,20 @@ These are review gates for changes to stock-compatible Jellyfin `10.11.11` and c
 
 Use [22-change-impact-matrix](22-change-impact-matrix.md) to find adjacent subsystem gates. Do not mark an item complete from a similarly named file or a successful HTTP status alone.
 
+## Local Web 0.5.60 Pass 01 regression contract
+
+- [x] Same-type Shows/Anime/Cartoons fixtures use disjoint IDs; no type/genre/provider/title heuristic grants library membership.
+- [x] Read one ordinary Jellyfin `ParentId` per resolved root; merge/deduplicate bounded pages without unsupported `AncestorIds` or `Ids` shortcuts.
+- [x] Reject missing resolution, foreign/missing/error nested ancestry, retired server/user identity and aborted owners before publication.
+- [x] Rank only fresh scoped DTOs; empty/small/error fallback cannot fill with a foreign library. Warm global rank data remains non-authoritative.
+- [x] Keep focused/directory cache identity rooted in server/user/library/route/filter/page; version incompatible focused entries rather than disabling caching.
+- [x] Repeated Home preview callbacks converge while changed DTOs and exact freshness-snapshot retirement still work.
+- [x] Projected/grouped UserViews require ordinary per-root paged Series membership before Season reads when physical ancestry cannot represent the view; foreign/exhausted/cancelled/retired and non-Season/BoxSet cases stay closed.
+- [x] Multi-root Random pools do not starve later roots; library backdrop retirement rejects late callbacks and same-scope unavailable-to-ready resurrection.
+- [x] Complete manual local Home/library route, Details/Back and hard-refresh acceptance. The 2026-10-01 isolated Jellyfin 12 fixture had all four libraries populated; bounded user-aware row sampling found zero cross-library IDs, and Home loop/browser checks passed. Evidence: [Pass 02 final Pass 01 regression acceptance](../../diagnostics/pass02-browser-acceptance.md#2026-10-01-final-pass-01-regression-acceptance).
+
+These entries describe the local `fix/web-library-isolation` source and focused regressions, not production qualification. They leave Plugin, global Home rows, Premium Collections, versioning and the remaining stabilization backlog unchanged.
+
 ## Universal preflight
 
 - [ ] State the intended behavior and the one authoritative owner that should change.
@@ -125,6 +139,34 @@ The isolated Plugin 0.5.17.0 startup-recovery derivative passes local qualificat
 - [ ] Run issuer/controller, parser/freshness, Plugin cache/bypass, hooks, preview, legacy and backdrop tests; then full Plugin/PTV/repository, TypeScript, lint/stylelint baselines, production build, provenance/version, Atlas and diff gates.
 - [ ] Only after full local gates, perform authorized CT103 matched samples and membership/pressure checks, then restore exact normal lab artifacts. No production action or version bump is implied by local tests.
 
+### Configured Home row library ownership — Canonical checkpoint integration
+
+- [ ] Treat Row Builder schema 3 `libraryScope` as explicit persisted identity. Migrate a built-in default only when its ID and original media/source tuple match; keep eligible legacy custom rules global and reject missing or malformed current scope.
+- [ ] Bind an unpinned built-in only from one expected-name and `CollectionType` virtual folder, then persist its exact `ItemId` through the existing Plugin settings mutation. Test ambiguous names, rename, deletion, type change, invalid ID, failed write, and no-op observation.
+- [ ] Generate library-owned rows only from complete recursive paged candidates under the pinned CollectionFolder. Do not substitute media type, path, global Featured candidates, or a partial page for membership. Preserve global/discovery rows independently.
+- [ ] Require cache v9 and scope schema 2 at the final checkpoint; reject old/versionless scope, incoherent section IDs, client-authored owned claims, and current-rule/binding/hash mismatches before an owned section reaches a per-user response.
+- [ ] Resolve the actual Jellyfin request user and authorize the pinned library and each returned item before serialization. Verify admin, restricted, anonymous, unresolved-user, concurrent, and pre-populated-cache payloads at the HTTP boundary; Web checks are additional presentation protection.
+- [ ] On Home, match configured association and scope evidence. Because restricted users cannot read administrator row settings, accept their ownership claim only from a fresh authenticated, server-projected Featured response, never a cached copy. Then prove each owned item through the active user's views and ordinary user-scoped recursive `ParentId` Items pages. Keep only positively proven IDs in Plugin order; a page/read/identity/route failure cannot turn unproven IDs into rows.
+- [ ] Keep the Web membership owner visit-local and uncached. Exercise eight-library, three-page, 25-read, two-concurrent-read, and ten-second ceilings; confirm cancellation, stale completion, and user/server/route replacement retire the old proof.
+- [ ] Cover cached/last-good rows, background merges, restricted-user response, fallback, and row-derived Hero so retired or unproven owned items do not reappear. Preserve independent Hero, Continue, recommendation, and global/discovery owners.
+- [ ] Run focused schema, Plugin generator/store/projector, Web cache/claim/membership, and actual Home integration tests; then required Plugin/Web release gates. Record hosted restricted-user membership and request-pressure evidence separately from local source/tests.
+
+### Controlled Home authority transition — Canonical checkpoint Tasks 7–8
+
+- [ ] For a known existing user, persist the per-user hold before the stock access-policy write. On `Complete`, compare authoritative policy, current topology epoch, and the exact bounded user-aware accessible-library set against the durable proof. Missing/corrupt/stale/mismatched proof must withhold owned Home and remain recoverable.
+- [ ] Treat account creation separately: `NEW_USER_PREWRITE_HOLD = NOT_APPLICABLE` until Jellyfin returns the ID. Reserve a controlled creation against migration capture, bind its known ID, apply intended/restrictive policy, read policy back, persist current-epoch per-user proof, then require fresh Web membership. Never authorize from temporary broad/default access.
+- [ ] On first install, seed no trusted cohort. Administrator verification freezes exact existing IDs (at most 1,000), confirms each current policy, proves each user independently, and excludes later-created IDs. Cover interrupted migration, missing/corrupt proof, policy/topology changes, explicit re-verification, visible counts, and recovery state.
+- [ ] Review the exact selected user through the authenticated, uncached Plugin `current` response. Normalize complete nested PascalCase or camelCase policy definitions at the Web boundary, reject mixed/incomplete definitions, and preserve `EnableAllFolders` with retained `EnabledFolders` preferences in the exact verify intent. A row-local read failure must block confirmation.
+- [ ] Keep pending Plugin reservations and an unresolved server-scoped browser creation hint ahead of batch start/refresh and candidate Review/Verify, including an otherwise identical retry. For a confirmed verification, retain confirmation if status refresh fails. For an uncertain POST, require fresh summary, same nonstale batch, exact current-user policy/proof readback, and matching `verificationBatchId` before reporting confirmation; do not automatically repeat the verify mutation. Retire local attempt state if authoritative batch identity or freshness changes so review controls remain usable.
+- [ ] Persist `VerificationBatchId` on new migration proofs. Project its nullable identity on administrator current readback without exposing it on the public user view; scope batch progress to the active batch while global summary counts all valid proofs. Repeated exact verification may reuse the prior durable operation and access epoch only for that same batch with no reservation and matching intended/current policy, topology epoch, and exact current accessible-library proof. Test restart replay without a ledger rewrite; replacement batch at the same topology, legacy missing batch ID, or changed membership must receive fresh proof; pending creation must block replay.
+- [ ] Save the server-scoped new-account operation hint at stage `prepared` before Plugin reserve, then `create-started` after confirmed reserve and before stock Create. A missing legacy stage proves nothing about whether Create began. Reservation changes refresh the recovery panel and verification siblings. An empty pending list cannot clear the hint: reconcile the exact operation through read-only, no-store `GET creations/{creationOperationId}/status`, distinguishing `reserved`, `bound`, `recovered`, and `absent`; missing/corrupt ledger and restricted recovery provenance must fail rather than claim absence. If status fails for an unlisted `prepared` hint, allow an explicit retry of Plugin reserve with the same operation ID and no stock Create. Clear a `prepared` hint on authoritative `absent`, but retain `create-started` or legacy-stage hints on `absent`. Keep an uncertain/conflicting read held, confirmed recovery/bind distinct from subsequent GET errors, and expose validated recovered `markedUserIds` as links for account policy review without granting Home proof.
+- [ ] Keep Add User's later **Check verification** read-only: `resumePendingNewAdminUser` may accept matching current Plugin proof or an explicit attested successor, but a 404, unproven state, or pending/failed operation must not begin bootstrap or write policy. Require explicit account-page review/recovery before any new policy mutation.
+- [ ] Withhold all Plugin Featured sections/items/Hero, including PTV global shelves, until current per-user proof passes. Retire cached/last-good PTV rows and Hero on access-epoch or authority uncertainty. Keep independently sourced native/generic Home content available; owned rows additionally need fresh visit-local user-aware membership.
+- [ ] For a controlled library write, begin the durable topology hold and affected tombstones first. Prove natural convergence using at most three immediate read-only snapshots: `GetVirtualFolders(false)`, a nonrecursive UserRoot top-child query with `Limit=129` and cap 128, and exact `GetItemById`. Require unique exact intended definition, old child absence, stable roots/options, and a final snapshot immediately before release.
+- [ ] Keep the hold on null/duplicate/ambiguous IDs, definition drift, stale old child, snapshot flip, delayed convergence, exception, or cancellation. Isolated Jellyfin 12 rename readback yielded no new authoritative CollectionFolder ID; this is `SAFE_FAIL_CLOSED` with automatic recovery `UNPROVEN`, not failed safety. Permit explicit retry of the same held operation without another stock write. Release without selected binding only with affected tombstones retained; selected rebind and release must persist atomically.
+- [ ] Do not call `ValidateTopLibraryFolders`, initiate a provider refresh/global scan, or request `refreshLibrary=true` from PTV. Stock create may itself perform intrinsic validation even with `refreshLibrary=false`; a first `GetUserRootFolder()` may initialize its views directory. Do not claim universally zero provider/filesystem work.
+- [ ] Run RED tests before each product change, then focused and full Plugin/Web/typecheck/lint/build gates and local physical acceptance. The Canonical checkpoint locally passed existing-user controlled access and new-user bootstrap fail-closed, but its rename remained held and automatic recovery unproven. These results do not prove Stage 2 integration or release readiness. Preserve the limitation for out-of-band changes on already-mounted remote clients.
+
 ## Cards and item actions
 
 Cards consume a DTO projection and delegate actions to authoritative Jellyfin mutations/playback; PTV also watches and enhances stock-rendered card DOM. `VERIFIED_FROM_SOURCE` — W@35c0793, `src/components/cardbuilder/Card/useCardImageUrl.ts`, lines 156-290; `src/elements/emby-itemscontainer/ItemsContainer.tsx`, lines 176-225; PTV-WEB@worktree, `src/ptv/modules/cards/CardEnhancer.ts`, `enhanceCard`/`enhancePtvCards`, lines 100-126; `src/ptv/modules/cards/index.js`, lines 4-16.
@@ -173,10 +215,14 @@ Album, album-artist, artist and Audio child relationships are separate Server fi
 - [ ] If deriving display artist from children, require bounded credible consensus; never infer from title text or rewrite Jellyfin metadata.
 - [ ] Preserve the previous valid relationship when a sparse same-item readback omits it; do not preserve across a different item/generation.
 - [ ] Keep exact track IDs/order/`UserData` and media sources separate from album metadata adoption.
+- [ ] For Jellyfin 12.2 album-track queries, prove the requested `MusicAlbum` ID is visible in a separately paged, user-aware search under the selected Music library. Do not use `Ids` with `ParentId` as membership proof or treat album title/path as identity.
+- [ ] Page recursive `ParentId=album` Audio children and `AlbumIds` relationship results; admit only exact `Audio.AlbumId`, deduplicate by item ID, and sort by disc/track number without replacing returned DTOs.
+- [ ] Fail closed on missing album/library/track identity, incomplete or excessive paging, abort, route retirement, and server/user change. Do not use an unscoped-empty fallback for album tracks.
 - [ ] Coalesce library discovery and identical list requests; record a cold/warm transport and concurrency budget.
 - [ ] Retire route work on abort/unmount/identity change. PTV's music coordinator exposes route-work cancellation and scoped discovery. `VERIFIED_FROM_SOURCE` — PTV-WEB@worktree, `musicApi.ts`, lines 241-425 and 526-605.
 - [ ] Test album relationship present, sparse omission, unanimous children, disagreeing children, zero children and old/new Identify generations.
 - [ ] Test albums/artists/tracks/playlists independently and one section failure without destroying others.
+- [ ] Test flat and nested-disc albums, foreign album/library tracks, restricted user, same-title albums, multi-page results, exact queue order, and current-user changes. Issue #38 requires separate authenticated hosted and physical acceptance; local fixtures alone cannot close it.
 - [ ] Verify Play, Shuffle, Mix, Play Next, queue, Favorite and Now Playing before/during/after metadata adoption.
 
 ## Reading and reader lifecycle
@@ -232,11 +278,17 @@ Server PlaybackInfo/device profile determines the delivery path; `PlaySessionId`
 - [ ] Give each player source a generation; destroy old HLS/player listeners/session before the replacement can report or recover.
 - [ ] Keep queue/Now Playing state independent from displayed metadata DTO replacement.
 - [ ] Preserve audio/subtitle selections, start ticks and seek semantics through source recreation.
+- [ ] Read each action-sheet selection from the current player stream index, and verify the browser's computed checkmark visibility after icon normalization; hidden alignment icons are not selected tracks.
+- [ ] Fence subtitle session readback, fetched cues and renderer imports to the current media element, play options, source generation and primary/secondary selection. Off or a newer track must reject late work; a repeated same-track request must keep its pending fetch, and a replacement source must fetch that track anew.
 - [ ] Report final stop after success, error and user cancellation where possible; observe Server session and FFmpeg job convergence.
 - [ ] Do not classify a successful report/segment HTTP status as proof that the renderer displayed uninterrupted frames.
 - [ ] Test direct play, remux/direct stream and transcode; start, pause, seek backward/forward, stream change, end, error and stop.
 - [ ] Test source A→B rapidly, HLS fragment stall/error recovery, background/foreground and remote-control socket/no-socket.
 - [ ] Verify one active player/HLS instance/listener set and stable queue/Now Playing after unrelated Identify/Details changes.
+- [ ] Keep continuous-session HTML video gain/mute on the retained media element through autoplay/manual Next; do not write an item-specific default over it. Keep full-teardown and non-video initialization semantics separate.
+- [ ] Retire owned transient menus through the existing controls visibility lease. Abort root/child sheets and fence lazy imports, user lookup, selections and finalization after hide, error, takeover or teardown; do not add another hide timer.
+- [ ] Defer the existing timers during active pointer/touch/held-key interaction, release on cancel/keyup/blur, and do not let lingering pointer focus keep Web controls visible indefinitely.
+- [ ] Verify top Movie/Series logo-or-title plus existing Back ownership, episode-only bottom identity, hidden Back focus, failed/stale logo fallback and cleanup before DOM reconciliation.
 
 PTV currently embeds an HLS session/source generation inside the stock HTML player; therefore edits on either side share one lifecycle boundary. `VERIFIED_FROM_SOURCE` — PTV-WEB@worktree, `src/plugins/htmlVideoPlayer/plugin.js`, imports/state/set source/disposal, lines 12-15, 323-340, 473-645 and 925-964; `src/ptv/modules/playback/hlsPlaybackSession.ts`, `createHlsPlaybackSession`, lines 277-824.
 
@@ -303,9 +355,16 @@ Stock webpack emits fixed entry/service-worker names and content-hashed lazy chu
 - [ ] Build from one source snapshot and create a complete asset manifest/hash set before deployment.
 - [ ] Keep service worker standalone and verify registration/controller origin; do not assume it caches the app.
 - [ ] Bound update/chunk recovery to one generation-aware reload and preserve a usable current app after update-check failure.
+- [ ] Compare the worker's verified embedded webpack generation with the running bundle, not merely waiting/installed state. Equal/older/unknown identities do not notify; a genuine later identity does.
+- [ ] Bind dismissal/reload attempts to the candidate and use one observation epoch across startup/controller registration reads, worker events and identity replies. A late result or error must not replace/erase newer availability.
+- [ ] Recheck playback/reading/mutation/unsaved activity immediately before every reload, including activation completion/fallback. Keep the stable worker URL and standalone notification/claim behavior; do not infer an application fetch cache.
 - [ ] Test production build, typecheck/lint/style checks, version check, build-info contract and emitted lazy chunks/routes.
 - [ ] Compare two clean builds where reproducibility is required; record intentional nondeterministic metadata.
-- [ ] Before deploy, verify exact previous rollback generation; atomically switch the full asset set; do not mix files.
+- [ ] Before deploy, verify the exact previous rollback generation. Prefer an atomic full-tree switch; when the installed Web root requires in-place publication, use a bounded, journaled transaction with index last, exact-tree verification, and tested Web-only rollback, then test old and new browser tabs for mixed-generation requests.
+- [ ] For a frozen Web artifact whose source commit precedes documentation-only HEAD, verify the source commit and tree from Git, the complete ZIP and extracted manifest, embedded marker, clean checkout, registered target, protected exact-ref approval, and exact rollback record. A version label or current HEAD alone does not authorize it.
+- [ ] Stage a validated ZIP outside the live Web root; reject path traversal, reparse/case ambiguity and unexpected target files. Record the complete old/new/changed file sets and transaction state. Retire only manifest-identified old Web assets, publish `index.html` last, and verify the exact installed tree and served index. Restore and verify the baseline on a partial failure.
+- [ ] For an interrupted transaction, require an independently reviewed recovery approval, the exact journal ID and SHA-256 pinned in protected policy, an inactive publication lock, and a fresh user/session check. Reject recovery-only approval for a new publication.
+- [ ] Immediately before target writes and before index publication, recheck protected approval, direct-local server identity, current Web/Plugin versions, fresh administrator sessions, zero playback, and independently attested Beta-route isolation and user-impact clearance. An old zero-stream snapshot is insufficient.
 - [ ] After deploy, verify LAN/public version, build ID/provenance, main/runtime/lazy chunks, authenticated session and hard refresh.
 - [ ] Test an old open tab and a new tab; prove no reload loop and rollback if a required lazy chunk or session path regresses.
 
@@ -373,3 +432,50 @@ These are requirements, not completion assertions. The isolated repair report re
 - [ ] Label unexecuted tests and unverified runtime behavior `UNKNOWN`.
 - [ ] Preserve a rollback for release/deploy or Plugin/Jellyfin runtime changes.
 - [ ] Assign `PASS` only when the requested invariant is proven at its actual trust/lifecycle boundary; use `PASS_WITH_GAPS` or `HOLD` when evidence is incomplete.
+
+## Stage 3 PTV overlay — embedded Reading identity acceptance
+
+- [ ] Confirm the current branch, exact source commit, clean/dirty state and controlled changed paths; do not substitute the operational Web/Plugin version label for commit and artifact identity.
+- [ ] Test the Plugin `POST /Ptv/v1/reading/metadata/reassess` method, elevated policy, server-derived administrator/item identity, signed context expiry and restart invalidation, missing/old Plugin behavior, typed response and no path/XML/token transport.
+- [ ] Inspect CBZ and CBR root ComicInfo through bounded read-only helper work. Preserve `Inspected`, `Absent`, `Unverified` and `NotAttempted`; OPF success, high score and cache hit cannot mask unverified ComicInfo.
+- [ ] Prove package completeness and both self-contained helper RID trees from one source SHA. Prove Windows Job assignment and Linux delegated cgroup membership before archive input under the actual service identity before claiming that platform supports CBR inspection; otherwise fail closed as unverified.
+- [ ] Verify archive size/entry/XML/output/ratio bounds, five-second process-tree deadline, two-helper cap, no media writes, no sibling RAR volume opening and no child accumulation.
+- [ ] In both shared administrator Identify entry points, require independent acknowledgment of displayed conflict and unverified reasons; retire checks on item/user/server/candidate/generation/digest/revision change.
+- [ ] Assert a fresh form comparison and reassessment occur immediately before manual `updateItem`. Auth, context, route, transport, malformed response or changed evidence must produce zero item updates. After a permitted update, read back exact authoritative metadata and preserve locks, artwork, relationships and `UserData`.
+- [ ] Re-run Stage 2 Controlled Home safety/isolation tests after shared Plugin DI/Web transport changes, then full Web/Plugin, contract, typecheck, lint/style baseline, version and build gates.
+- [ ] Keep Jellyfin 12.2 hosted helper/runtime, physical Apply/readback and old mounted-admin-session retirement `UNKNOWN` until separately tested. Local compilation, synthetic tests and package inspection alone are not deployment/release acceptance.
+- [ ] For `refreshItem('scan', false)` on a Book with a recognized saved Reading provider ID, prove that the hook blocks before exact-provider lookup, Jellyfin refresh and item update, with a clear instruction to use guarded Identify. Do not silently fall back. Separately prove explicit recursive Scan and Books without a recognized saved Reading ID still follow their existing stock refresh paths. Do not claim stock refresh itself has the PTV identity guard.
+- [ ] Cancel a queued archive inspection as a helper slot is released. After acquisition, the host must observe cancellation before pipe creation/helper launch; no retired waiter may start a helper. Preserve the two-process cap, bounded cleanup and fail-closed capacity behavior if a child cannot be reaped. Include `TooManyHelpersWait` in focused and full Plugin-suite evidence.
+
+## Stage 4 Web responsive/playback acceptance boundary
+
+- [ ] Check measured shell clearance, sticky navigation, safe areas and hit targets at phone, Fold-like, tablet and desktop widths, including live resize and browser-toolbar changes. A viewport fixture is not physical iPad/Fold proof.
+- [ ] Keep Fold outer→inner→outer layout selection separate from the stable client-kind Home row and artwork budget. Do not refetch or broaden library-owned rows merely because the layout class changed.
+- [ ] Verify Up Next Start Now/Hide, click/touch capture, countdown/natural-end single advance, stale queue identity and five episode handoffs. Watch history/resume correctness still requires isolated server readback.
+- [ ] Check compact inline player controls for 44 px touch targets, safe-area bounds and no horizontal overflow. Test native Safari fullscreen and recoverable controls on a real iPad separately.
+- [ ] Test Search partial success, per-group and aggregate failed-only retry, scope/abort retirement and no broad library fallback. Capture failing hosted endpoints before attributing the intermittent production issue.
+- [ ] Test update generation across two local builds, activation/storage failure, unchanged generation and old-bundle recovery. The local worker fixture does not prove deployed proxy/cache coherence.
+- [ ] Re-run Stage 2 Controlled Home and Stage 3 Reading safety regressions, full Web/Plugin suites, contract, typecheck, lint/style baseline, version and build gates. Keep physical/hosted `UNKNOWN` until separately authorized proof exists.
+
+## Web 0.5.78 Phase 1 diagnostic local acceptance boundary
+
+- [x] Record the approved Web repo/branch/HEAD/one-bump version and a clean
+  starting tree; keep the project mirror read-only.
+- [x] Prove passive Featured status cannot fetch, persist, install another
+  identity owner, or turn missing counts into observed zero. Separate Plugin
+  read, Web verified write, retained fallback, and historical failure.
+- [x] Prove recommendation progress cannot be terminal; one current
+  identity/generation owns outcome, counters, duration and recovery. Preserve
+  ranking, row policy and unknown rendered count.
+- [x] Preserve request health thresholds while dating retained-session
+  evidence. Label navigation supersession and absent critical instrumentation;
+  do not force route settlement.
+- [x] Run the affected cache/recommendation/route/dashboard suites,
+  Home/Collections/Reading boundary suites, contract, TypeScript, style,
+  privacy, and changed-file lint checks locally. Full-suite/build/browser
+  results belong in the implementation report once complete.
+- [ ] Obtain a separately authorized deployment and hosted/physical acceptance
+  on the exact build. `.50` production contact and `.125` installation or
+  service changes remain on hold. DIAG-03 complete-success recovery, DIAG-04
+  threshold, DIAG-05 image accounting, and `.125` Featured root cause remain
+  operationally unproven.

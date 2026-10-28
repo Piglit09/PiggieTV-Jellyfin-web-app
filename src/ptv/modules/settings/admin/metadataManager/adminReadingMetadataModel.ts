@@ -47,6 +47,67 @@ export type AdminReadingProviderIdentifier = Readonly<{
     provider: string;
 }>;
 
+export type AdminReadingIdentityEvidenceSource = 'unknown' | 'filename' | 'folder' | 'existing-metadata' | 'local-metadata' | 'administrator' | 'provider';
+export type AdminReadingIdentitySource = 'FileName' | 'ImmediateFolder' | 'ComicInfo' | 'CurrentItem' | 'Provider';
+export type AdminReadingRunEvidenceKind = 'Unknown' | 'ExplicitRun' | 'ExplicitVolume';
+export type AdminReadingArchiveState = 'inspected' | 'absent' | 'unverified' | 'not-attempted';
+export type AdminReadingScopedProviderId = Readonly<{ namespace: string; scope: 'Unknown' | 'Issue' | 'Series'; value: string }>;
+export type AdminReadingIdentityRecord = Readonly<{
+    hasRedactedIdentity: boolean;
+    seriesTitle: string | null;
+    issueNumber: string | null;
+    volumeOrRunLabel: string | null;
+    issuePublicationYear: number | null;
+    issuePublicationDate: string | null;
+    runEvidenceKind: AdminReadingRunEvidenceKind;
+    source: AdminReadingIdentitySource;
+    providerIds: readonly AdminReadingScopedProviderId[];
+}>;
+export type AdminReadingIdentitySources = Readonly<{
+    archiveState: AdminReadingArchiveState;
+    archiveReasonCode: string | null;
+    fileName: AdminReadingIdentityRecord;
+    immediateFolder: AdminReadingIdentityRecord;
+    comicInfo: AdminReadingIdentityRecord;
+    currentItem: AdminReadingIdentityRecord;
+}>;
+export type AdminReadingIdentityFinding = Readonly<{
+    code: string;
+    field: string;
+    leftSource: AdminReadingIdentitySource;
+    leftValue: string | null;
+    rightSource: AdminReadingIdentitySource;
+    rightValue: string | null;
+    isConflict: boolean;
+    isMaterialUncertainty: boolean;
+}>;
+export type AdminReadingIdentityAssessment = Readonly<{
+    itemId: string;
+    provider: string;
+    providerId: string;
+    searchGeneration: string;
+    archiveRevision: string;
+    revisionChanged: boolean;
+    sources: AdminReadingIdentitySources;
+    candidate: AdminReadingIdentityRecord;
+    findings: readonly AdminReadingIdentityFinding[];
+    requiresConflictAcknowledgment: boolean;
+    requiresUnverifiedAcknowledgment: boolean;
+    assessmentDigest: string;
+}>;
+export type AdminReadingIdentityReassessRequest = Readonly<{
+    itemId: string;
+    candidateContext: string;
+    displayedRevision: string | null;
+}>;
+export type AdminReadingIdentityConflict = Readonly<{
+    field: string;
+    preferredSource: AdminReadingIdentityEvidenceSource;
+    preferredValue: string | null;
+    conflictingSource: AdminReadingIdentityEvidenceSource;
+    conflictingValue: string | null;
+}>;
+
 export type AdminReadingMediaClassification = Readonly<{
     confidence: number;
     mediaClass: AdminReadingMediaClass;
@@ -72,6 +133,16 @@ export type AdminReadingStructuredQuery = Readonly<{
     seriesTitle: string | null;
     volumeNumber: string | null;
     year: number | null;
+    seriesTitleEvidence?: AdminReadingIdentityEvidenceSource;
+    issueNumberEvidence?: AdminReadingIdentityEvidenceSource;
+    seriesStartYear?: number | null;
+    seriesStartYearEvidence?: AdminReadingIdentityEvidenceSource;
+    issuePublicationYear?: number | null;
+    issuePublicationDate?: string | null;
+    issuePublicationEvidence?: AdminReadingIdentityEvidenceSource;
+    folderCorroboratesSeriesTitle?: boolean;
+    folderCorroboratesSeriesStartYear?: boolean;
+    identityConflicts?: readonly AdminReadingIdentityConflict[];
 }>;
 
 export type AdminReadingPersonCredit = Readonly<{
@@ -89,6 +160,19 @@ export type AdminReadingScoreReason = Readonly<{
 }>;
 
 export type AdminReadingMetadataCandidate = Readonly<{
+    assessmentContext?: string | null;
+    archiveRevision?: string | null;
+    assessmentDigest?: string | null;
+    identityAssessment?: AdminReadingIdentityAssessment | null;
+    hasRedactedIdentity?: boolean;
+    runEvidenceKind?: AdminReadingRunEvidenceKind;
+    identityProviderIds?: readonly AdminReadingScopedProviderId[];
+    seriesTitleEvidence?: AdminReadingIdentityEvidenceSource;
+    issueNumberEvidence?: AdminReadingIdentityEvidenceSource;
+    seriesStartYearEvidence?: AdminReadingIdentityEvidenceSource;
+    issuePublicationYear?: number | null;
+    issuePublicationDate?: string | null;
+    issuePublicationEvidence?: AdminReadingIdentityEvidenceSource;
     alternateTitles: readonly string[];
     artists: readonly AdminReadingPersonCredit[];
     authors: readonly AdminReadingPersonCredit[];
@@ -149,6 +233,7 @@ export type AdminReadingProviderStatus = Readonly<{
 }>;
 
 export type AdminReadingMetadataSearchRequest = Readonly<{
+    searchGeneration?: string;
     author?: string | null;
     chapterNumber?: string | null;
     itemId: string;
@@ -164,6 +249,8 @@ export type AdminReadingMetadataSearchRequest = Readonly<{
 }>;
 
 export type AdminReadingMetadataSearchResponse = Readonly<{
+    searchGeneration?: string | null;
+    identitySources?: AdminReadingIdentitySources;
     candidates: readonly AdminReadingMetadataCandidate[];
     localMetadata: AdminReadingLocalMetadataSummary;
     providerResults: readonly AdminReadingProviderSearchResult[];
@@ -172,4 +259,13 @@ export type AdminReadingMetadataSearchResponse = Readonly<{
 
 export type AdminReadingMetadataProvidersResponse = Readonly<{
     providers: readonly AdminReadingProviderStatus[];
+}>;
+
+export type AdminReadingApplyApproval = Readonly<{
+    assessmentContext: string;
+    assessmentDigest: string;
+    archiveRevision: string;
+    searchGeneration: string;
+    acknowledgedConflictCodes: readonly string[];
+    acknowledgedUnverifiedCodes: readonly string[];
 }>;

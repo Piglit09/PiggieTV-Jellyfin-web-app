@@ -156,7 +156,7 @@ function hasAuthoritativeEmailSettings(value: unknown): value is PtvSignupEmailS
         && typeof email.smtpHost === 'string'
         && typeof email.smtpPort === 'number'
         && typeof email.useSsl === 'boolean'
-        && (email.username === null || typeof email.username === 'string')
+        && (email.username === undefined || email.username === null || typeof email.username === 'string')
         && typeof email.verificationLinkMinutes === 'number'
         && typeof email.verificationSubject === 'string';
 }

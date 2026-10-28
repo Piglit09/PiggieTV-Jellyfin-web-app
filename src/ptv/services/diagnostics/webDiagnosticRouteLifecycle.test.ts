@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('lib/jellyfin-apiclient', () => ({ ServerConnections: {} }));
+
 vi.mock('../../api/client', () => ({
     getCurrentPtvApiClient: vi.fn(() => null),
     getPtvCurrentUserId: vi.fn(() => '')
@@ -133,6 +135,10 @@ describe('diagnostic route ownership', () => {
         expect(routes).toHaveLength(3);
         expect(routes.map(route => route.routeFamily)).toEqual([ 'home', 'music', 'home' ]);
         expect(routes.slice(0, 2).every(route => route.status === 'abandoned')).toBe(true);
+        expect(routes.slice(0, 2).every(route => (
+            route.departureReason === 'superseded-by-navigation'
+            && route.criticalWorkCoverage === 'not-observed'
+        ))).toBe(true);
     });
 
     it('records forward navigation once when controller, hash, and pop notifications overlap', () => {
@@ -149,6 +155,7 @@ describe('diagnostic route ownership', () => {
         expect(routes).toHaveLength(4);
         expect(routes.map(route => route.routeFamily)).toEqual([ 'home', 'music', 'home', 'music' ]);
         expect(routes.slice(0, 3).every(route => route.status === 'abandoned')).toBe(true);
+        expect(routes.slice(0, 3).every(route => route.departureReason === 'superseded-by-navigation')).toBe(true);
         expect(routes.at(-1)).toMatchObject({
             routeGeneration: 4,
             status: 'active'
@@ -182,6 +189,19 @@ describe('diagnostic route ownership', () => {
 
         expect(getPtvDiagnosticStore().getSnapshot().routes.at(-1)).toMatchObject({
             criticalState: 'pending',
+            settledAt: null,
+            status: 'active'
+        });
+    });
+
+    it.each([ '/settings', '/collections' ])('leaves a long-lived uninstrumented %s route active', path => {
+        publishControllerRoute(path, 1);
+        vi.advanceTimersByTime(30_000);
+
+        expect(getPtvDiagnosticStore().getSnapshot().routes.at(-1)).toMatchObject({
+            criticalState: 'undeclared',
+            criticalWorkCoverage: 'not-observed',
+            departureReason: null,
             settledAt: null,
             status: 'active'
         });
@@ -243,6 +263,7 @@ describe('diagnostic route ownership', () => {
 
         expect(getPtvDiagnosticStore().getSnapshot().routes.at(-1)).toMatchObject({
             criticalState: 'success',
+            criticalWorkCoverage: 'observed',
             routeFamily: 'reading',
             status: 'settled'
         });

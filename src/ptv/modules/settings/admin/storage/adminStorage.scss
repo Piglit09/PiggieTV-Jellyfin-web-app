@@ -1,0 +1,131 @@
+.ptv-admin-storage-panel {
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid var(--ptv-elevation-2-border);
+    border-radius: var(--ptv-radius-panel, 20px);
+    background: var(--ptv-component-panel-bg-subtle);
+    box-shadow: var(--ptv-elevation-2-shadow-muted);
+}
+
+.ptv-admin-configuration-grid > .ptv-admin-storage-panel {
+    grid-column: 1 / -1;
+}
+
+.ptv-admin-storage-panel > header h2 {
+    margin: 0;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.94rem;
+}
+
+.ptv-admin-storage-panel > header p {
+    margin: 5px 0 14px;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.73rem;
+    line-height: 1.45;
+}
+
+.ptv-admin-storage-list,
+.ptv-admin-storage-identity ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ptv-admin-storage-list {
+    display: grid;
+    gap: 10px;
+}
+
+.ptv-admin-storage-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(120px, 0.8fr);
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--ptv-border-divider);
+    border-radius: var(--ptv-radius-md, 12px);
+    background: var(--ptv-component-panel-bg-subtle);
+}
+
+.ptv-admin-storage-identity,
+.ptv-admin-storage-metrics,
+.ptv-admin-storage-usage {
+    min-width: 0;
+}
+
+.ptv-admin-storage-identity strong {
+    color: var(--ptv-color-text-soft);
+}
+
+.ptv-admin-storage-identity li {
+    margin-top: 3px;
+    overflow-wrap: anywhere;
+    color: var(--ptv-color-text-muted);
+    font-size: 0.72rem;
+}
+
+.ptv-admin-storage-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+}
+
+.ptv-admin-storage-metrics dt {
+    color: var(--ptv-color-text-muted);
+    font-size: 0.68rem;
+}
+
+.ptv-admin-storage-metrics dd {
+    margin: 2px 0 0;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.78rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.ptv-admin-storage-usage span {
+    display: block;
+    color: var(--ptv-color-text-soft);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-align: end;
+}
+
+.ptv-admin-storage-usage progress {
+    display: block;
+    width: 100%;
+    height: 7px;
+    margin-top: 7px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 999px;
+    background: var(--ptv-component-field-bg);
+    appearance: none;
+}
+
+.ptv-admin-storage-usage progress::-webkit-progress-bar {
+    border-radius: 999px;
+    background: var(--ptv-component-field-bg);
+}
+
+.ptv-admin-storage-usage progress::-webkit-progress-value {
+    border-radius: 999px;
+    background: var(--ptv-gradient-brand);
+}
+
+.ptv-admin-storage-usage progress::-moz-progress-bar {
+    border-radius: 999px;
+    background: var(--ptv-gradient-brand);
+}
+
+@media (max-width: 760px) {
+    .ptv-admin-storage-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ptv-admin-storage-usage span {
+        text-align: start;
+    }
+}

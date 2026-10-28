@@ -39,3 +39,20 @@ test('scans dotfiles and service-style environment files regardless of source ex
 
     assert.equal(isSecretScanCandidatePath('public/poster.png'), false);
 });
+
+test('scans CommonJS and Python source files for embedded credentials', () => {
+    for (const filePath of [
+        'scripts/deploy-helper.cjs',
+        'tools/metadata_probe.py',
+        'tools/metadata_probe.PY'
+    ]) {
+        assert.equal(isSecretScanCandidatePath(filePath), true);
+    }
+});
+
+test('ignores generated code templates while retaining real assignment detection', () => {
+    const generatedCode = 'replacement: \'x+="ApiKey=".concat(candidateLongName),x+="Device=".concat(z)\'';
+    assert.deepEqual(findPotentialSecretLabels(generatedCode), []);
+    const syntheticAssignment = ['api', 'Key=', '"', 'fixtureCredentialValue123456789', '"'].join('');
+    assert.ok(findPotentialSecretLabels(syntheticAssignment).includes('credential assignment'));
+});

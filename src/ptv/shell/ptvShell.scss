@@ -109,6 +109,27 @@ body.ptv-native-shell-mounted .appFooter {
     min-height: 100%;
     position: relative;
     z-index: 1;
+    scroll-padding-top: calc(var(--ptv-shell-header-clearance, 102px) + 0.75rem);
+}
+
+.ptv-shell-access-state {
+    background: var(--ptv-glass-panel-bg);
+    border: 1px solid var(--ptv-glass-border);
+    border-radius: 20px;
+    box-shadow: var(--ptv-glass-shadow);
+    color: rgb(255 255 255 / 90%);
+    margin: max(1rem, var(--ptv-shell-header-clearance, 102px)) auto 2rem;
+    max-width: min(42rem, calc(100% - 2rem));
+    min-height: 0;
+    padding: clamp(1rem, 3vw, 2rem);
+    text-align: center;
+}
+
+.ptv-shell-access-state a {
+    color: #dfc1ff;
+    display: inline-block;
+    font-weight: 700;
+    margin-top: 0.5rem;
 }
 
 .ptv-shell-backdrop {
@@ -377,7 +398,7 @@ body.ptv-native-shell-mounted .appFooter {
     backdrop-filter: blur(var(--ptv-glass-blur)) saturate(1.28);
 }
 
-html.ptv-client-mobile .ptv-shell-nav-primary,
+html.ptv-layout-compact-mobile .ptv-shell-nav-primary,
 html.ptv-layout-mobile .ptv-shell-nav-primary {
     overflow-x: auto;
     overflow-y: visible;
@@ -385,7 +406,7 @@ html.ptv-layout-mobile .ptv-shell-nav-primary {
     -webkit-overflow-scrolling: touch;
 }
 
-html.ptv-client-mobile .ptv-shell-nav-primary::-webkit-scrollbar,
+html.ptv-layout-compact-mobile .ptv-shell-nav-primary::-webkit-scrollbar,
 html.ptv-layout-mobile .ptv-shell-nav-primary::-webkit-scrollbar {
     display: none;
 }
@@ -534,7 +555,7 @@ html.ptv-layout-mobile .ptv-shell-nav-primary::-webkit-scrollbar {
     z-index: 10050;
 }
 
-html.ptv-client-mobile .ptv-shell-dropdown-panel,
+html.ptv-layout-compact-mobile .ptv-shell-dropdown-panel,
 html.ptv-layout-mobile .ptv-shell-dropdown-panel {
     left: var(--ptv-shell-dropdown-left, 14px);
     max-width: calc(100vw - 28px);
@@ -1186,7 +1207,7 @@ html.ptv-render-tv .ptv-media-dock {
 
 @media (max-width: 720px) {
     .ptv-shell-frame {
-        --ptv-shell-search-expanded-width: calc(100vw - 28px);
+        --ptv-shell-search-expanded-width: calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right));
     }
 
     .ptv-shell-header {
@@ -1196,13 +1217,13 @@ html.ptv-render-tv .ptv-media-dock {
         column-gap: 8px;
         grid-template-columns: minmax(0, 1fr) auto;
         grid-template-rows: 48px 52px;
-        left: 14px;
+        left: calc(14px + env(safe-area-inset-left));
         margin: 0;
-        min-height: 126px;
-        padding: 8px 0 10px;
+        min-height: calc(126px + env(safe-area-inset-top));
+        padding: calc(8px + env(safe-area-inset-top)) 0 10px;
         pointer-events: auto;
         position: sticky;
-        right: 14px;
+        right: calc(14px + env(safe-area-inset-right));
         row-gap: 8px;
         top: 0;
         z-index: 9800;
@@ -1243,11 +1264,11 @@ html.ptv-render-tv .ptv-media-dock {
     }
 
     .ptv-shell-search.is-expanded {
-        left: 14px;
+        left: calc(14px + env(safe-area-inset-left));
         position: fixed;
-        right: 14px;
-        top: 62px;
-        width: calc(100vw - 28px);
+        right: calc(14px + env(safe-area-inset-right));
+        top: calc(62px + env(safe-area-inset-top));
+        width: calc(100vw - 28px - env(safe-area-inset-left) - env(safe-area-inset-right));
         z-index: 9900;
     }
 
@@ -1461,7 +1482,7 @@ html[data-ptv-client-kind='tv'] .ptv-media-dock-actions {
 }
 
 html.ptv-route-detail-page .ptv-shell-header {
-    top: 24px;
+    top: calc(24px + env(safe-area-inset-top));
 }
 
 html.ptv-route-detail-page .ptv-shell-nav-primary {

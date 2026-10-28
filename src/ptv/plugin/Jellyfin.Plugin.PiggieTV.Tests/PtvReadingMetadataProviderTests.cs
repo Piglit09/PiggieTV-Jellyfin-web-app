@@ -208,6 +208,19 @@ public sealed class PtvReadingMetadataProviderTests
     }
 
     [Fact]
+    public async Task ComicVineRejectsContradictoryUpstreamNamespaceIds()
+    {
+        var provider = new PtvComicVineReadingMetadataProvider(
+            (_, _) => Task.FromResult<IEnumerable<RemoteSearchResult>>([new()
+            {
+                Name = "Orbit #9", ProviderIds = new Dictionary<string, string>
+                { ["ComicVine"] = "123", ["Comic Vine Volume"] = "456" }
+            }]), () => true, NullLogger<PtvComicVineReadingMetadataProvider>.Instance);
+        var result = await provider.SearchAsync(new() { SeriesTitle = "Orbit", CleanedTitle = "Orbit" }, CancellationToken.None);
+        Assert.Empty(result.Candidates);
+    }
+
+    [Fact]
     public async Task ComicVineNormalizesDefaultIssueTitleWithoutInventingSeriesRun()
     {
         var provider = new PtvComicVineReadingMetadataProvider(

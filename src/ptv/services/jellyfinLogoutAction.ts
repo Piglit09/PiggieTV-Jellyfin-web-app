@@ -1,5 +1,6 @@
 import Dashboard from '../../utils/dashboard';
 import { getPtvCurrentUserId, getPtvServerId } from '../api';
+import { retirePtvRecommendationDiagnosticScope } from '../modules/recommendations/diagnostics/recommendationDiagnosticScope';
 
 let logoutInFlight: Promise<void> | null = null;
 
@@ -44,6 +45,7 @@ export function requestJellyfinUserSwitch(): Promise<void> {
 function requestJellyfinSessionExit(switchUser: boolean): Promise<void> {
     if (logoutInFlight) return logoutInFlight;
 
+    retirePtvRecommendationDiagnosticScope();
     const serverId = String(getPtvServerId() || '');
     const userId = String(getPtvCurrentUserId(serverId) || '');
     const retirement = retirePtvIdentityState(serverId, userId);

@@ -63,6 +63,7 @@ import {
     applyPtvBrowseScope,
     findExactPtvBrowseDirectoryEntry,
     getPtvBrowseScopeIdentityKey,
+    getPtvBrowseScopedItems,
     isPtvBrowseScopeIdentityCurrent,
     loadPtvBrowseDirectory,
     loadPtvFocusedBrowsePages,
@@ -81,6 +82,8 @@ import {
     PtvFocusedBrowseLoadOwner
 } from './focusedBrowseLoader';
 import BrowseDirectory from './BrowseDirectory';
+import { selectPtvBrowseRecommendations } from './browseRecommendations';
+import { usePtvBrowseBackdrop } from './usePtvBrowseBackdrop';
 
 import './nativeBrowse.scss';
 
@@ -959,7 +962,7 @@ function withBrowseHardTimeout<T>(
     });
 }
 
-async function fetchBrowseItems(section: string, query: PtvItemQuery, signal?: AbortSignal): Promise<{
+async function fetchBrowseItems(section: string, query: PtvItemQuery, signal?: AbortSignal, scope?: PtvBrowseResolvedScope): Promise<{
     diagnostic: PtvBrowseDiagnostic;
     items: PtvItem[];
 }> {
@@ -981,7 +984,7 @@ async function fetchBrowseItems(section: string, query: PtvItemQuery, signal?: A
 
     try {
         const result = await withBrowseHardTimeout(
-            requestSignal => getPtvItems<PtvItem>(query, { signal: requestSignal }),
+            requestSignal => scope ? getPtvBrowseScopedItems(query, scope, requestSignal) : getPtvItems<PtvItem>(query, { signal: requestSignal }),
             section,
             timeoutMs,
             signal,
@@ -1076,21 +1079,6 @@ async function fetchBrowseItems(section: string, query: PtvItemQuery, signal?: A
     }
 }
 
-function filterPtvBrowseRecommendationItems(config: PtvBrowseConfig, items: Array<{ item?: unknown; mediaType?: unknown }>) {
-    const expectedType = config.kind === 'movies' ? 'movie' : 'show';
-    const targetItemType = config.kind === 'movies' ? 'Movie' : 'Series';
-
-    return items
-        .filter(entry => Boolean(entry.item))
-        .filter(entry => !entry.mediaType || String(entry.mediaType).toLowerCase() === expectedType)
-        .map(entry => entry.item as PtvItem)
-        .filter(item => {
-            const itemType = getText(item?.Type);
-
-            return !itemType || itemType === targetItemType;
-        });
-}
-
 async function fetchBrowseRecommendations(config: PtvBrowseConfig, scope: PtvBrowseResolvedScope, signal?: AbortSignal): Promise<{
     diagnostic: PtvBrowseDiagnostic;
     items: PtvItem[];
@@ -1103,7 +1091,11 @@ async function fetchBrowseRecommendations(config: PtvBrowseConfig, scope: PtvBro
         Limit: 20,
         SortBy: 'Random'
     }, 'recommendations', scope);
-    const fallback = () => fetchBrowseItems('recommendations', fallbackQuery, signal);
+    // Global rank/cache data is never library-membership evidence. This ordinary
+    // ParentId read is also the only permitted fallback; do not use Ids+ParentId.
+    const scopedResult = await fetchBrowseItems('recommendations', fallbackQuery, signal, scope);
+    if (scopedResult.diagnostic.status !== 'ready' || !scopedResult.items.length) return scopedResult;
+    const fallback = () => Promise.resolve(scopedResult);
 
     const userId = getPtvCurrentUserId();
 
@@ -1119,7 +1111,7 @@ async function fetchBrowseRecommendations(config: PtvBrowseConfig, scope: PtvBro
                 lateResultDiscarded = true;
             }
         );
-        const items = dedupeBrowseItems(filterPtvBrowseRecommendationItems(config, result.candidates));
+        const items = selectPtvBrowseRecommendations(config.kind, result.candidates, scopedResult.items);
 
         if (!items.length) return fallback();
 
@@ -1169,7 +1161,7 @@ async function fetchBrowseRecommendations(config: PtvBrowseConfig, scope: PtvBro
     }
 }
 
-async function fetchBrowseResumeItems(section: string, query: PtvItemQuery, signal?: AbortSignal): Promise<{
+async function fetchBrowseResumeItems(section: string, query: PtvItemQuery, signal?: AbortSignal, scope?: PtvBrowseResolvedScope): Promise<{
     diagnostic: PtvBrowseDiagnostic;
     items: PtvItem[];
 }> {
@@ -1191,7 +1183,7 @@ async function fetchBrowseResumeItems(section: string, query: PtvItemQuery, sign
 
     try {
         const result = await withBrowseHardTimeout(
-            requestSignal => getPtvResumeItems<PtvItem>(query, { signal: requestSignal }),
+            requestSignal => scope ? getPtvBrowseScopedItems(query, scope, requestSignal, true) : getPtvResumeItems<PtvItem>(query, { signal: requestSignal }),
             section,
             timeoutMs,
             signal,
@@ -2267,7 +2259,7 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                         run: () => fetchBrowseItems(
                             'featured',
                             getBaseQuery(config, getPtvBrowseFeaturedQueryOverrides(config.kind), 'featured', scope),
-                            routeAbortController.signal
+                            routeAbortController.signal, scope
                         )
                     },
                     {
@@ -2277,14 +2269,14 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                             Limit: 20,
                             SortBy: 'DatePlayed',
                             SortOrder: 'Descending'
-                        }, 'continue', scope), routeAbortController.signal)
+                        }, 'continue', scope), routeAbortController.signal, scope)
                     },
                     {
                         id: 'recommendations',
                         run: () => fetchBrowseItems('recommendations', getBaseQuery(config, {
                             Limit: 20,
                             SortBy: 'Random'
-                        }, 'recommendations', scope), routeAbortController.signal)
+                        }, 'recommendations', scope), routeAbortController.signal, scope)
                     },
                     {
                         id: 'recently-added',
@@ -2292,7 +2284,7 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                             Limit: 20,
                             SortBy: 'DateCreated',
                             SortOrder: 'Descending'
-                        }, 'recently-added', scope), routeAbortController.signal)
+                        }, 'recently-added', scope), routeAbortController.signal, scope)
                     },
                     {
                         id: 'browse',
@@ -2300,7 +2292,7 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                             Limit: 50,
                             SortBy: 'SortName',
                             SortOrder: 'Ascending'
-                        }, 'browse', scope), routeAbortController.signal)
+                        }, 'browse', scope), routeAbortController.signal, scope)
                     },
                     {
                         id: 'collections',
@@ -2312,7 +2304,7 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                             Limit: 24,
                             SortBy: 'SortName',
                             SortOrder: 'Ascending'
-                        }, 'collections', scope), routeAbortController.signal)
+                        }, 'collections', scope), routeAbortController.signal, scope)
                     }
                 ]) : [
                     {
@@ -2321,7 +2313,7 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                             const result = await fetchBrowseItems(
                                 'featured',
                                 getBaseQuery(config, getPtvBrowseFeaturedQueryOverrides(config.kind), 'featured', scope),
-                                routeAbortController.signal
+                                routeAbortController.signal, scope
                             );
 
                             return {
@@ -2337,7 +2329,7 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                             Limit: 20,
                             SortBy: 'DatePlayed',
                             SortOrder: 'Descending'
-                        }, 'continue', scope), routeAbortController.signal)
+                        }, 'continue', scope), routeAbortController.signal, scope)
                     },
                     {
                         id: 'recommendations',
@@ -2345,7 +2337,7 @@ function PtvBrowseLandingPage({ config, location, onBackdropChange, route, scope
                     },
                     ...browseTagSections.map((section: PtvBrowseLandingTagSection) => ({
                         id: section.id,
-                        run: () => fetchBrowseItems(section.id, getPtvBrowseLandingTagSectionQuery(config, scope, section), routeAbortController.signal)
+                        run: () => fetchBrowseItems(section.id, getPtvBrowseLandingTagSectionQuery(config, scope, section), routeAbortController.signal, scope)
                     }))
                 ]).filter(task => !retrySectionId || task.id === retrySectionId);
             const sectionTaskIds: string[] = [];
@@ -2983,7 +2975,6 @@ function NativeBrowsePage() {
         key: string;
         scope: PtvBrowseResolvedScope | null;
     }>>({ key: '', scope: null });
-    const [backdropUrl, setBackdropUrl] = useState('');
 
     useEffect(() => {
         let cancelled = false;
@@ -3015,9 +3006,47 @@ function NativeBrowsePage() {
     }, [route, scopeIdentityKey, scopeResolutionKey]);
 
     const scope = resolvedScope.key === scopeResolutionKey ? resolvedScope.scope : null;
+    const { backdropUrl, setBackdropUrl, backdropPresentationKey } = usePtvBrowseBackdrop(scopeResolutionKey, scope?.status === 'resolved' || scope?.status === 'unscoped');
     const browseLibraryTitle = useMemo(() => getPtvBrowseLibraryTitle(config, route), [config, route]);
     const title = route.view === 'landing' ? browseLibraryTitle : getFocusedBrowseTitle(route, config);
     const backdropSource = route.view === 'landing' ? `${config.kind}-hero` : `${route.kind}-${route.view}`;
+
+    let browseContent;
+    if (!scope) {
+        browseContent = (
+            <main className='ptv-browse-focused-content' aria-busy='true'>
+                <div className='ptv-browse-focused-status'>Resolving your {browseLibraryTitle}...</div>
+            </main>
+        );
+    } else if (scope.status === 'error') {
+        browseContent = (
+            <main className='ptv-browse-focused-content'>
+                <div className='ptv-browse-focused-status' role='alert'>{scope.error || 'The selected library is unavailable.'}</div>
+            </main>
+        );
+    } else if (route.view === 'landing') {
+        browseContent = (
+            <PtvBrowseLandingPage
+                key={scopeResolutionKey}
+                config={config}
+                location={location}
+                onBackdropChange={setBackdropUrl}
+                title={title}
+                route={route}
+                scope={scope}
+            />
+        );
+    } else {
+        browseContent = (
+            <PtvFocusedBrowsePage
+                key={scopeResolutionKey}
+                config={config}
+                onBackdropChange={setBackdropUrl}
+                route={route}
+                scope={scope}
+            />
+        );
+    }
 
     return (
         <Page
@@ -3030,33 +3059,14 @@ function NativeBrowsePage() {
             isThemeMediaSupported={false}
         >
             <PTVShell
+                backdropPresentationKey={backdropPresentationKey}
                 backdropSource={backdropSource}
                 backdropUrl={backdropUrl}
                 className='ptv-browse-shell'
                 section={getPtvBrowseShellSection(config)}
                 title={title}
             >
-                {!scope ? (
-                    <main className='ptv-browse-focused-content' aria-busy='true'>
-                        <div className='ptv-browse-focused-status'>Resolving your {browseLibraryTitle}...</div>
-                    </main>
-                ) : route.view === 'landing' ? (
-                    <PtvBrowseLandingPage
-                        config={config}
-                        location={location}
-                        onBackdropChange={setBackdropUrl}
-                        title={title}
-                        route={route}
-                        scope={scope}
-                    />
-                ) : (
-                    <PtvFocusedBrowsePage
-                        config={config}
-                        onBackdropChange={setBackdropUrl}
-                        route={route}
-                        scope={scope}
-                    />
-                )}
+                {browseContent}
             </PTVShell>
         </Page>
     );

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.IO.Compression;
 using System.Net;
 using System.Text.RegularExpressions;
@@ -14,6 +15,15 @@ namespace Jellyfin.Plugin.PiggieTV.Services;
 /// </summary>
 public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalMetadataInspector
 {
+    private readonly IPtvArchiveInspectionHost? _archiveHost;
+
+    /// <summary>Preserves the search-only registration until the Apply host is configured.</summary>
+    public PtvReadingLocalMetadataInspector() { }
+
+    /// <summary>Uses a configured isolated host for fresh Apply reassessment.</summary>
+    public PtvReadingLocalMetadataInspector(IPtvArchiveInspectionHost archiveHost) =>
+        _archiveHost = archiveHost ?? throw new ArgumentNullException(nameof(archiveHost));
+
     internal const int MaximumArchiveEntries = 4_096;
     internal const int MaximumXmlBytes = 512 * 1024;
     internal const int MaximumCompressionRatio = 100;
@@ -28,6 +38,22 @@ public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalM
         string sourcePath,
         PtvMetadataSearchContext context,
         PtvStructuredMetadataQuery query,
+        CancellationToken cancellationToken) =>
+        await InspectCoreAsync(sourcePath, context, query, forApply: false, cancellationToken).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<PtvReadingLocalMetadataInspectionResult> InspectForApplyAsync(
+        string sourcePath,
+        PtvMetadataSearchContext context,
+        PtvStructuredMetadataQuery query,
+        CancellationToken cancellationToken) =>
+        await InspectCoreAsync(sourcePath, context, query, forApply: true, cancellationToken).ConfigureAwait(false);
+
+    private async Task<PtvReadingLocalMetadataInspectionResult> InspectCoreAsync(
+        string sourcePath,
+        PtvMetadataSearchContext context,
+        PtvStructuredMetadataQuery query,
+        bool forApply,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -48,8 +74,13 @@ public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalM
 
         if (!sourcePathAccepted)
         {
-            result.State = PtvReadingLocalInspectionState.Rejected;
-            result.Warnings.Add("LOCAL_SOURCE_PATH_REJECTED");
+            var missing = string.IsNullOrWhiteSpace(sourcePath);
+            result.State = missing && forApply
+                ? PtvReadingLocalInspectionState.Unavailable
+                : PtvReadingLocalInspectionState.Rejected;
+            result.Warnings.Add(missing && forApply ? "LOCAL_SOURCE_UNAVAILABLE" : "LOCAL_SOURCE_PATH_REJECTED");
+            if (!missing)
+                result.ComicInfo = Unverified("LOCAL_SOURCE_PATH_REJECTED");
             return result;
         }
 
@@ -61,6 +92,7 @@ public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalM
             {
                 result.State = PtvReadingLocalInspectionState.Unavailable;
                 result.Warnings.Add("LOCAL_SOURCE_UNAVAILABLE");
+                result.ComicInfo = Unverified("LOCAL_SOURCE_UNAVAILABLE");
                 return result;
             }
 
@@ -68,6 +100,7 @@ public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalM
             {
                 result.State = PtvReadingLocalInspectionState.Rejected;
                 result.Warnings.Add("LOCAL_SOURCE_LINK_REJECTED");
+                result.ComicInfo = Unverified("LOCAL_SOURCE_LINK_REJECTED");
                 return result;
             }
         }
@@ -75,23 +108,34 @@ public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalM
         {
             result.State = PtvReadingLocalInspectionState.Unavailable;
             result.Warnings.Add("LOCAL_SOURCE_UNAVAILABLE");
+            result.ComicInfo = Unverified("LOCAL_SOURCE_UNAVAILABLE");
             return result;
         }
 
         var extension = Path.GetExtension(fullSourcePath);
-        if (extension.Equals(".cbr", StringComparison.OrdinalIgnoreCase))
+        var isComicArchive = extension.Equals(".cbz", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".zip", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".cbr", StringComparison.OrdinalIgnoreCase);
+        if (forApply && !isComicArchive)
+            result.ComicInfo = Unverified("COMICINFO_ARCHIVE_UNSUPPORTED");
+        if (!forApply && extension.Equals(".cbr", StringComparison.OrdinalIgnoreCase))
         {
             result.State = PtvReadingLocalInspectionState.Unsupported;
             result.Warnings.Add("CBR_LOCAL_METADATA_UNSUPPORTED");
+            result.ComicInfo = Unverified("CBR_LOCAL_METADATA_UNSUPPORTED");
             return result;
         }
 
         var encounteredRejectedDocument = false;
         var encounteredUnavailableDocument = false;
         if (extension.Equals(".cbz", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            || extension.Equals(".zip", StringComparison.OrdinalIgnoreCase)
+            || forApply && extension.Equals(".cbr", StringComparison.OrdinalIgnoreCase))
         {
-            var comicInfo = await ReadComicInfoAsync(fullSourcePath, cancellationToken).ConfigureAwait(false);
+            var comicInfo = forApply
+                ? await ReadIsolatedComicInfoAsync(fullSourcePath, cancellationToken).ConfigureAwait(false)
+                : await ReadComicInfoAsync(fullSourcePath, cancellationToken).ConfigureAwait(false);
+            result.ComicInfo = ToArchiveInspection(comicInfo);
             encounteredRejectedDocument |= comicInfo.Rejected;
             encounteredUnavailableDocument |= comicInfo.IsUnavailable;
             AddWarning(result, comicInfo.Warning);
@@ -123,6 +167,43 @@ public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalM
                     : PtvReadingLocalInspectionState.NotFound;
         return result;
     }
+
+    private async Task<DocumentInspection> ReadIsolatedComicInfoAsync(string sourcePath, CancellationToken cancellationToken)
+    {
+        if (_archiveHost is null)
+            return DocumentInspection.Unavailable("HELPER_UNAVAILABLE");
+
+        var archive = await _archiveHost.ReadComicInfoAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+        return archive.State switch
+        {
+            "inspected" => ParseComicInfo(archive.Bytes) with { ContentDigest = Convert.ToHexString(SHA256.HashData(archive.Bytes)) },
+            "absent" => DocumentInspection.Empty(),
+            _ => DocumentInspection.Unavailable(archive.ReasonCode)
+        };
+    }
+
+    private static PtvComicInfoArchiveInspection ToArchiveInspection(DocumentInspection inspection) =>
+        inspection.Metadata is not null
+            ? new PtvComicInfoArchiveInspection
+            {
+                State = PtvComicInfoArchiveInspectionState.Inspected,
+                ReasonCode = "COMICINFO_FOUND",
+                Metadata = inspection.Metadata,
+                ContentDigest = inspection.ContentDigest
+            }
+            : inspection.Rejected || inspection.IsUnavailable
+                ? new PtvComicInfoArchiveInspection { State = PtvComicInfoArchiveInspectionState.Unverified, ReasonCode = inspection.Warning ?? "COMICINFO_UNAVAILABLE", ContentDigest = inspection.ContentDigest }
+                : new PtvComicInfoArchiveInspection
+                {
+                    State = PtvComicInfoArchiveInspectionState.Absent,
+                    ReasonCode = "COMICINFO_ABSENT"
+                };
+
+    private static PtvComicInfoArchiveInspection Unverified(string reasonCode) => new()
+    {
+        State = PtvComicInfoArchiveInspectionState.Unverified,
+        ReasonCode = reasonCode
+    };
 
     private static async Task<DocumentInspection> ReadComicInfoAsync(
         string sourcePath,
@@ -174,7 +255,7 @@ public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalM
 
             await using var entryStream = entry.Open();
             var bytes = await ReadBoundedAsync(entryStream, cancellationToken).ConfigureAwait(false);
-            return ParseComicInfo(bytes);
+            return ParseComicInfo(bytes) with { ContentDigest = Convert.ToHexString(SHA256.HashData(bytes)) };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -831,6 +912,8 @@ public sealed partial class PtvReadingLocalMetadataInspector : IPtvReadingLocalM
         bool Rejected,
         bool IsUnavailable)
     {
+        public string? ContentDigest { get; init; }
+
         public static DocumentInspection Success(PtvReadingLocalMetadataEvidence metadata) => new(metadata, null, false, false);
 
         public static DocumentInspection Empty() => new(null, null, false, false);

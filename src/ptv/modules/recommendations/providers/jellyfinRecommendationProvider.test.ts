@@ -21,6 +21,7 @@ const providerEventMocks = vi.hoisted(() => ({
     logFailure: vi.fn(),
     logStage: vi.fn()
 }));
+const musicMocks = vi.hoisted(() => ({ getPtvMusicLibrary: vi.fn() }));
 
 vi.mock('../../../api', () => ({
     cleanPtvQuery: vi.fn((query: Record<string, unknown> | undefined) => query),
@@ -40,7 +41,7 @@ vi.mock('../../books/booksApi', () => ({
 
 vi.mock('../../music/musicApi', () => ({
     getPtvMusicHome: vi.fn(),
-    getPtvMusicLibrary: vi.fn(async () => null)
+    getPtvMusicLibrary: musicMocks.getPtvMusicLibrary
 }));
 
 vi.mock('../debug/recommendationRuntimeDebug', () => ({
@@ -81,6 +82,8 @@ describe('Jellyfin recommendation provider request lifecycle', () => {
         apiMocks.requestPtvJson.mockReset();
         providerEventMocks.logFailure.mockReset();
         providerEventMocks.logStage.mockReset();
+        musicMocks.getPtvMusicLibrary.mockReset();
+        musicMocks.getPtvMusicLibrary.mockResolvedValue(null);
     });
 
     it('propagates one captured server/user identity and signal to every coordinated request', async () => {
@@ -152,6 +155,21 @@ describe('Jellyfin recommendation provider request lifecycle', () => {
         providerEventMocks.logFailure.mock.calls.forEach(([, , detail ]) => {
             expect(detail).toMatchObject({ generationId: diagnosticGenerationId });
         });
+    });
+
+    it('records a recovered music-library prerequisite failure in the diagnostic bundle', async () => {
+        musicMocks.getPtvMusicLibrary.mockRejectedValue(new Error('private music library failure'));
+        apiMocks.requestPtvJson.mockImplementation(async endpoint => emptyPayload(endpoint));
+        const { getPtvRecommendationDataBundle } = await loadProvider();
+        const result = await getPtvRecommendationDataBundle();
+
+        expect(result.prerequisiteFallbackUsed).toBe(true);
+        expect(result.sourceFailures).toHaveLength(0);
+        expect(providerEventMocks.logFailure).toHaveBeenCalledWith(
+            'Music library prerequisite',
+            expect.any(Error),
+            expect.any(Object)
+        );
     });
 
     it('physically aborts active wrapper requests without launching queued sources or fallbacks', async () => {

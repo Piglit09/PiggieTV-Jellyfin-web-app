@@ -120,4 +120,53 @@ test.describe('PiggieTV episode details layout', () => {
         expect(geometry.artworkRatio).toBeCloseTo(16 / 9, 1);
         expect(geometry.recommendationsTop).toBeLessThan(844);
     });
+
+    test('keeps the recommendation rail in the viewport and its artwork stable through a live resize', async ({ page }) => {
+        await page.setViewportSize({ height: 844, width: 390 });
+        await page.goto('/#/details?id=fixture-item');
+
+        const detailPage = page.locator('#itemDetailPage.ptv-details--episode');
+        const recommendations = page.locator('#similarCollapsible');
+        await expect(detailPage).toBeVisible();
+        await expect(recommendations).toBeVisible();
+
+        const initialSource = await page.locator('.ptv-details-backdrop__image').getAttribute('src');
+        const compactBounds = await recommendations.boundingBox();
+        expect(compactBounds).not.toBeNull();
+        expect(compactBounds!.x).toBeGreaterThanOrEqual(0);
+        expect(compactBounds!.x + compactBounds!.width).toBeLessThanOrEqual(391);
+
+        await page.evaluate(() => document.documentElement.style.setProperty('--ptv-shell-header-clearance', '240px'));
+        const compactTopPadding = await page.locator('.detailPageWrapperContainer').evaluate((element) =>
+            Number.parseFloat(getComputedStyle(element).paddingTop)
+        );
+        expect(compactTopPadding).toBeGreaterThanOrEqual(260);
+        await page.locator('.detailPageSecondaryContainer').evaluate((container) => {
+            const shelf = document.createElement('section');
+            shelf.className = 'ptv-cinematic-shelf';
+            shelf.textContent = 'Related stories';
+            container.append(shelf);
+        });
+        const shelf = page.locator('.ptv-cinematic-shelf');
+        const shelfScrollMargin = await shelf.evaluate((element) =>
+            Number.parseFloat(getComputedStyle(element).scrollMarginTop)
+        );
+        expect(shelfScrollMargin).toBeGreaterThanOrEqual(256);
+
+        await page.setViewportSize({ height: 1180, width: 820 });
+        await expect(page.locator('.detailImageContainer.hide-desktop')).toBeVisible();
+        const portraitBounds = await recommendations.boundingBox();
+        expect(portraitBounds).not.toBeNull();
+        expect(portraitBounds!.x + portraitBounds!.width).toBeLessThanOrEqual(821);
+        expect(await page.locator('.ptv-details-backdrop__image').getAttribute('src')).toBe(initialSource);
+
+        await page.setViewportSize({ height: 768, width: 1024 });
+        await expect(page.locator('.detailImageContainer.hide-mobile')).toBeVisible();
+        const poster = await page.locator('.detailImageContainer.hide-mobile').boundingBox();
+        const ribbon = await page.locator('.detailRibbon').boundingBox();
+        expect(poster).not.toBeNull();
+        expect(ribbon).not.toBeNull();
+        expect(poster!.x + poster!.width).toBeLessThan(ribbon!.x);
+        expect(await page.locator('.ptv-details-backdrop__image').getAttribute('src')).toBe(initialSource);
+    });
 });

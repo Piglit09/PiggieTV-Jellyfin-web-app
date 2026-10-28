@@ -50,9 +50,11 @@ describe('PTV shell geometry ownership', () => {
     });
 
     it('places Home utilities below the shared shell header clearance', () => {
-        expect(shellSource).toMatch(/--ptv-utility-safe-top:\s*calc\(var\(--ptv-shell-header-top/);
-        expect(shellSource).toContain('--ptv-shell-header-clearance-height: 126px');
+        expect(shellSource).toMatch(/--ptv-utility-safe-top:\s*calc\(var\(--ptv-shell-header-clearance,/);
+        expect(shellSource).not.toContain('--ptv-shell-header-clearance-height: 126px');
         expect(homeSource).toMatch(/\.ptv-native-home-controls\s*\{[^}]*top:\s*var\(--ptv-utility-safe-top/);
+        expect(browseSource).toMatch(/\.ptv-browse-directory-tools\s*\{[^}]*top:\s*calc\(var\(--ptv-shell-header-clearance,/);
+        expect(browseSource).toMatch(/\.ptv-browse-directory-section\s*\{[^}]*scroll-margin-top:\s*calc\(var\(--ptv-shell-header-clearance,/);
     });
 
     it('keeps the mobile settings scrollport inset scoped to the settings page', () => {

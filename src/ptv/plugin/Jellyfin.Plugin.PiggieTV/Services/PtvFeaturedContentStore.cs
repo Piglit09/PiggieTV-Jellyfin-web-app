@@ -47,6 +47,28 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
             Directory.Exists(_directory));
     }
 
+    private static bool HasCurrentScopeSchemaSafely(PtvFeaturedContentDocument document)
+    {
+        try { return PtvFeaturedContentValidator.HasCurrentScopeSchema(document); }
+        catch (ArgumentException) { return false; } // Duplicate raw JSON keys cannot confer freshness.
+    }
+
+    private void FilterTopology(PtvFeaturedContentDocument document,
+        PtvConfiguredRowAssociationService.Generation? generation = null, bool publicRead = false)
+    {
+        // v7 has no scoped separation; retain raw diagnostics, never response authority.
+        if (document.FeaturedContent?["version"]?.ToJsonString() == "7") return;
+        if (_associations is not null)
+        {
+            _associations.FilterStoredTopology(document, publicRead);
+            if (generation is not null && !_associations.IsCurrentTopology(generation)
+                && document.FeaturedContent?["payload"] is JsonObject generatedPayload)
+                PtvFeaturedTopology.Filter(generatedPayload, null, generation.CreateConfiguration().Rows);
+        }
+        else if (document.FeaturedContent is JsonObject featured && featured["payload"] is JsonObject payload)
+            PtvFeaturedTopology.Filter(payload, null, null, false);
+    }
+
     /// <inheritdoc />
     public async Task<PtvFeaturedContentDocument> ReadAsync(CancellationToken cancellationToken)
     {
@@ -54,7 +76,10 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
 
         try
         {
-            return await ReadDocumentNoLockAsync(cancellationToken).ConfigureAwait(false);
+            var document = await ReadDocumentNoLockAsync(cancellationToken).ConfigureAwait(false);
+            FilterTopology(document, publicRead: true);
+            FilterTopology(document, publicRead: true);
+            return document;
         }
         finally
         {
@@ -87,8 +112,15 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
 
         try
         {
-            _associations?.RetireStoreBinding();
+            if (generation is not null)
+            {
+                // Cleanup must not launder malformed generated structure into a valid write.
+                if (!HasCurrentScopeSchemaSafely(document))
+                    throw new PtvFeaturedContentValidationException("PTV_CACHE_INVALID_SCOPE_SECTIONS", "Generated Featured sections must have coherent identities.");
+                FilterTopology(document, generation);
+            }
             normalizedDocument = ValidateDocument(document);
+            if (generation is null) ValidateClientScope(normalizedDocument);
             payloadBytes = JsonSerializer.SerializeToUtf8Bytes(normalizedDocument, JsonOptions);
 
             Directory.CreateDirectory(_directory);
@@ -128,16 +160,38 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            // A retired generation may retain the existing cache-write behavior, but never provenance.
-            var currentGeneration = generation is not null && _associations?.IsCurrent(generation) == true;
-            ReplaceTemporaryFile(temporaryPath, _filePath);
-            if (currentGeneration) _associations!.RegisterGeneratedWrite(generation!, normalizedDocument);
+            // Recheck after asynchronous I/O so a hold/epoch change while staging the
+            // bytes cannot publish the previously captured library claims.
+            FilterTopology(normalizedDocument, generation);
+            var currentBytes = JsonSerializer.SerializeToUtf8Bytes(normalizedDocument, JsonOptions);
+            if (!payloadBytes.AsSpan().SequenceEqual(currentBytes))
+            {
+                payloadBytes = currentBytes;
+                await File.WriteAllBytesAsync(temporaryPath, payloadBytes, cancellationToken).ConfigureAwait(false);
+            }
+            // A retired configuration generation never receives presentation provenance.
+            var currentGeneration = generation is not null && _associations?.IsCurrentTopology(generation) == true;
+            if (generation is not null && !currentGeneration)
+            {
+                FilterTopology(normalizedDocument, generation);
+                var retiredBytes = JsonSerializer.SerializeToUtf8Bytes(normalizedDocument, JsonOptions);
+                if (!payloadBytes.AsSpan().SequenceEqual(retiredBytes))
+                {
+                    payloadBytes = retiredBytes;
+                    await File.WriteAllBytesAsync(temporaryPath, payloadBytes, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            if (_associations is { } associations)
+                associations.CommitStoreReplacement(() => ReplaceTemporaryFile(temporaryPath, _filePath), generation, normalizedDocument);
+            else
+                ReplaceTemporaryFile(temporaryPath, _filePath);
             _lastPayloadBytes = payloadBytes.Length;
             _lastWriteError = null;
             _logger.LogInformation(
                 "PiggieTV featured-content cache write finished. Category=success; PayloadBytes={PayloadBytes}.",
                 payloadBytes.Length);
 
+            FilterTopology(normalizedDocument, generation);
             return normalizedDocument;
         }
         catch (PtvFeaturedContentValidationException ex)
@@ -201,6 +255,8 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
         try
         {
             var document = await ReadDocumentNoLockAsync(cancellationToken).ConfigureAwait(false);
+            var hadCurrentScopeSchema = HasCurrentScopeSchemaSafely(document);
+            FilterTopology(document, publicRead: true);
             var featuredStatus = PtvFeaturedContentStatus.FromDocument(document);
             var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var isWritable = TryProbeCacheDirectoryWritable(out var writeProbeError);
@@ -210,7 +266,7 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
                 _lastWriteError = writeProbeError;
             }
 
-            return new PtvFeaturedContentStoreStatus
+            var status = new PtvFeaturedContentStoreStatus
             {
                 CacheFilePath = _filePath,
                 CachePath = _directory,
@@ -224,9 +280,13 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
                 FeaturedCacheExpiresAt = featuredStatus.ExpiresAt,
                 FeaturedCacheFresh = featuredStatus.HasPayload
                     && featuredStatus.CacheVersion == PtvFeaturedContentValidator.FeaturedCacheVersion
+                    && hadCurrentScopeSchema
+                    && PtvFeaturedContentValidator.HasCurrentScopeSchema(document)
                     && featuredStatus.ExpiresAt.HasValue
                     && featuredStatus.ExpiresAt.Value > now
             };
+            FilterTopology(status.Document, publicRead: true);
+            return status;
         }
         finally
         {
@@ -258,6 +318,53 @@ public sealed class PtvFeaturedContentStore : IPtvFeaturedContentStore
     public PtvFeaturedContentDocument ValidateDocument(PtvFeaturedContentDocument? document)
     {
         return PtvFeaturedContentValidator.ValidateForSave(document, JsonOptions);
+    }
+
+    private void ValidateClientScope(PtvFeaturedContentDocument document)
+    {
+        var payload = (document.FeaturedContent as JsonObject)?["payload"] as JsonObject;
+        var sections = payload?["sections"] as JsonArray;
+        if (sections is null) return;
+
+        var currentRules = _associations?.CaptureGeneration()?.CreateConfiguration().Rows?.Rules ?? [];
+        var ownedRules = currentRules
+            .Where(rule => rule.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder")
+            .Select(rule => rule.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var section in sections.OfType<JsonObject>())
+        {
+            var sourceRuleId = ReadUniqueScopeField(section, "sourceRuleId");
+            var ruleId = ReadUniqueScopeField(section, "ruleId");
+            var claimedType = ReadUniqueScopeField(section, "scopeType");
+            if (sourceRuleId is not null && ruleId is not null
+                && !sourceRuleId.Equals(ruleId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new PtvFeaturedContentValidationException(
+                    "PTV_CACHE_CONFLICTING_LIBRARY_SCOPE", "Featured section rule identifiers conflict.");
+            }
+            if (PtvFeaturedTopology.Owned(section, null)
+                || string.Equals(claimedType, "library", StringComparison.OrdinalIgnoreCase)
+                || (sourceRuleId is not null && ownedRules.Contains(sourceRuleId))
+                || (ruleId is not null && ownedRules.Contains(ruleId)))
+            {
+                throw new PtvFeaturedContentValidationException(
+                    "PTV_CACHE_UNTRUSTED_LIBRARY_SCOPE",
+                    "Library-owned Featured sections require a current server-generated document.");
+            }
+        }
+    }
+
+    private static string? ReadUniqueScopeField(JsonObject source, string field)
+    {
+        var values = source.Where(property => property.Key.Equals(field, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (values.Length == 0) return null;
+        if (values.Length != 1 || values[0].Value is not JsonValue value || !value.TryGetValue<string>(out var text))
+        {
+            throw new PtvFeaturedContentValidationException(
+                "PTV_CACHE_AMBIGUOUS_LIBRARY_SCOPE", "Featured section scope fields must be unique strings.");
+        }
+
+        return text?.Trim();
     }
 
     private async Task<PtvFeaturedContentDocument> ReadDocumentNoLockAsync(CancellationToken cancellationToken)

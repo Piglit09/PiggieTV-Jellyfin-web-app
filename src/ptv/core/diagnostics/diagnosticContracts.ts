@@ -113,6 +113,10 @@ export type PtvRouteDiagnostic = Readonly<{
     criticalCompletedAt: string | null;
     criticalStartedAt: string | null;
     criticalState: PtvRouteCriticalState;
+    /** Whether a route owner published any critical-work lifecycle event. */
+    criticalWorkCoverage: 'not-observed' | 'observed';
+    /** A navigation departure is not itself evidence of failed route work. */
+    departureReason: 'superseded-by-navigation' | null;
     firstContentAt: string | null;
     firstDirectionalMovementAt: string | null;
     firstFocusableAt: string | null;
@@ -433,11 +437,23 @@ export type PtvShelfDiagnostic = Readonly<{
 
 export type PtvCacheDiagnostic = Readonly<{
     ageMs: number | null;
+    cacheLayer: 'web-featured-content';
+    countsObserved: boolean;
+    countsObservedAt: string | null;
+    fallbackAvailable: boolean;
     health: PtvDiagnosticHealth;
     itemCount: number;
     lastErrorCategory: string;
+    lastReadAttemptAt: string | null;
+    lastReadFailureAt: string | null;
+    lastReadFailureCategory: string;
+    lastReadOutcome: string;
     lastReadStatus: string;
+    lastWriteAttemptAt: string | null;
+    lastWriteOutcome: string;
     lastWriteStatus: string;
+    observationAgeMs: number | null;
+    observedAt: string | null;
     owner: string;
     sectionCount: number;
     state: 'fresh' | 'stale' | 'unknown';
@@ -449,15 +465,42 @@ export type PtvCacheDiagnostic = Readonly<{
 export type PtvRecommendationDiagnostic = Readonly<{
     active: boolean;
     cacheState: string;
+    candidateCount: number;
     configuredRows: number;
+    /** Rejections counted at selection attempts; one item may be considered in multiple rows. */
+    diversityCapRejectionCount: number;
     duplicateSuppressionCount: number;
+    fallbackUsed: boolean;
+    feedbackRejectionCount: number;
+    generatedItemCount: number;
     generatedRows: number;
     health: PtvDiagnosticHealth;
+    /** Rejections counted at selection attempts; one item may be considered in multiple rows. */
+    identityDuplicateRejectionCount: number;
     itemCount: number;
     lastErrorCategory: string;
+    lastFailureAt: string | null;
+    lastFailureCategory: string;
+    lastFailureResolvedAt: string | null;
     lastGenerationAt: string | null;
+    providerCount: number;
+    renderedItemCount: number | null;
     runDurationMs: number | null;
     sourceCount: number;
+    tasteSignalCount: number;
+    terminalOutcome: 'success' | 'partial' | 'failed' | 'cancelled' | null;
+}>;
+
+/** A retained session observation; it does not assert current request latency. */
+export type PtvSlowRequestObservation = Readonly<{
+    durationMs: number;
+    eligibleSampleCount: number;
+    lastObservedAt: string;
+    requestFamily: string;
+    retainedRequestCount: number;
+    scope: 'retained-session';
+    trigger: 'p95' | 'single-request';
+    trimmedRequestCount: number;
 }>;
 
 export type PtvPlaybackSessionState =
@@ -618,6 +661,8 @@ export type PtvDiagnosticSnapshot = Readonly<{
     server: PtvServerDiagnostic;
     session: PtvDiagnosticSession;
     shelves: readonly PtvShelfDiagnostic[];
+    /** Additive; older exports may omit this field. */
+    slowRequestObservation?: PtvSlowRequestObservation | null;
     warnings: readonly string[];
 }>;
 

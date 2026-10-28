@@ -1,7 +1,10 @@
 using System.Text.Json.Nodes;
+using Jellyfin.Plugin.PiggieTV.Configuration;
 using Jellyfin.Plugin.PiggieTV.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Jellyfin.Plugin.PiggieTV.Services;
 
@@ -144,7 +147,8 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
         "payloadClassification",
         "rowConfigApplied",
         "rowConfigHash",
-        "rowConfigVersion"
+        "rowConfigVersion",
+        "scopeSchemaVersion"
     ];
 
     private static readonly string[] AllowedSectionFields =
@@ -169,6 +173,7 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
         "presentation",
         "recommendationConfigHash",
         "rowConfigHash",
+        "resolvedScopeHash",
         "rowKicker",
         "rowType",
         "ruleId",
@@ -179,6 +184,11 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
         "sourceGroupId",
         "sourceRecommendationId",
         "sourceRuleId",
+        "topologyEpoch",
+        "bindingGeneration",
+        "scopeType",
+        "libraryId",
+        "bindingKey",
         "sourceType",
         "sourceValue",
         "studioFilter",
@@ -203,16 +213,22 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly PtvConfiguredRowAssociationService? _associations;
+    private readonly ILogger<PtvFeaturedContentAuthorizationService> _logger;
+    private readonly object _scopeLogGate = new();
+    private readonly HashSet<string> _scopeLogKeys = new(StringComparer.Ordinal);
 
     /// <summary>Initializes the Jellyfin-backed authorization projector.</summary>
     /// <param name="userManager">Jellyfin user manager.</param>
     /// <param name="libraryManager">Jellyfin library manager.</param>
     /// <param name="associations">Optional response-only configured-row issuer.</param>
-    public PtvFeaturedContentAuthorizationService(IUserManager userManager, ILibraryManager libraryManager, PtvConfiguredRowAssociationService? associations = null)
+    public PtvFeaturedContentAuthorizationService(IUserManager userManager, ILibraryManager libraryManager,
+        PtvConfiguredRowAssociationService? associations = null,
+        ILogger<PtvFeaturedContentAuthorizationService>? logger = null)
     {
         _userManager = userManager;
         _libraryManager = libraryManager;
         _associations = associations;
+        _logger = logger ?? NullLogger<PtvFeaturedContentAuthorizationService>.Instance;
     }
 
     /// <inheritdoc />
@@ -237,6 +253,26 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
             throw new InvalidOperationException("Featured content is missing its payload.");
         }
 
+        // Version 7 (and versionless) has no trustworthy scoped/global separation.
+        // Keep its version visible for stale-cache status, but expose no content.
+        int? featuredVersion = null;
+        if (FindNode(featuredContent, "version") is JsonValue versionNode && versionNode.TryGetValue<int>(out var parsedVersion))
+        {
+            featuredVersion = parsedVersion;
+        }
+
+        if (featuredVersion != PtvFeaturedContentValidator.FeaturedCacheVersion && featuredVersion != 8)
+        {
+            LogScopeOnce(document.UpdatedAt, "home-legacy-scoped-rejected", string.Empty, string.Empty);
+            var emptyPayload = new JsonObject { ["heroItems"] = new JsonArray(), ["sections"] = new JsonArray(), ["sectionItems"] = new JsonObject() };
+            return new(true, new PtvFeaturedContentDocument
+            {
+                Version = document.Version,
+                UpdatedAt = document.UpdatedAt,
+                FeaturedContent = new JsonObject { ["version"] = featuredVersion, ["payload"] = emptyPayload }
+            }, 0, 0);
+        }
+
         var associationProjection = _associations?.CaptureProjection(document, userId);
         var accessByItemId = new Dictionary<Guid, bool>();
 
@@ -252,8 +288,11 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
             return authorized;
         }
 
-        var sourceSections = FindNode(sourcePayload, "sections") as JsonArray;
-        var sourceSectionItems = BuildSourceSectionItems(sourcePayload, sourceSections);
+        var unverifiedSections = FindNode(sourcePayload, "sections") as JsonArray;
+        var sourceSectionItems = BuildSourceSectionItems(sourcePayload, unverifiedSections);
+        var scopedProjection = ValidateCurrentScopes(sourcePayload, unverifiedSections, sourceSectionItems, IsAuthorized, document.UpdatedAt, featuredVersion == PtvFeaturedContentValidator.FeaturedCacheVersion);
+        var sourceSections = scopedProjection.Sections;
+        var approvedOwned = scopedProjection.ApprovedOwnedIds;
         var virtualSectionIds = GetVirtualSectionIds(sourceSections);
         var filteredSectionItems = new JsonObject();
 
@@ -271,7 +310,8 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
             }
         }
 
-        var sectionProjection = SanitizeSections(sourceSections, sourceSectionItems, filteredSectionItems, associationProjection);
+        var sectionProjection = SanitizeSections(sourceSections, sourceSectionItems, filteredSectionItems, associationProjection, approvedOwned,
+            allowOrphans: false);
         var filteredPayload = new JsonObject
         {
             ["heroItems"] = FilterItems(FindNode(sourcePayload, "heroItems") as JsonArray, IsAuthorized),
@@ -309,6 +349,147 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
             filteredDocument,
             accessByItemId.Count,
             accessByItemId.Count(entry => entry.Value));
+    }
+
+    private (JsonArray Sections, HashSet<string> ApprovedOwnedIds) ValidateCurrentScopes(
+        JsonObject payload,
+        JsonArray? sourceSections,
+        JsonObject sourceSectionItems,
+        Func<Guid, bool> isAuthorized,
+        long generation,
+        bool currentVersion)
+    {
+        var accepted = new JsonArray();
+        var approvedOwned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var current = _associations?.CaptureGeneration()?.CreateConfiguration();
+        var rules = (current?.Rows?.Rules ?? [])
+            .Where(rule => !string.IsNullOrWhiteSpace(rule.Id))
+            .ToDictionary(rule => rule.Id, StringComparer.OrdinalIgnoreCase);
+        var topology = _associations?.ReadTopology();
+        var scopeSchemaValid = currentVersion && ReadInt(payload, "scopeSchemaVersion") == 2;
+        MediaBrowser.Model.Entities.VirtualFolderInfo[]? folders = null;
+
+        foreach (var (section, id) in GetUniqueSectionsById(sourceSections))
+        {
+            if (!currentVersion && (PtvFeaturedTopology.Text(section, "scopeType") != "global" || PtvFeaturedTopology.Owned(section, current?.Rows)))
+            {
+                RemoveSectionItems(sourceSectionItems, id);
+                continue;
+            }
+            var ruleId = ReadString(section, "sourceRuleId");
+            var configured = ReadString(section, "rowType") == "configured-rule";
+            var claimType = ReadString(section, "scopeType");
+            var hasRule = rules.TryGetValue(ruleId, out var rule);
+            var currentlyOwned = hasRule && rule!.LibraryScope?.Mode is "defaultLibrary" or "virtualFolder";
+            var claimsOwned = PtvFeaturedTopology.Owned(section, null);
+
+            if (currentlyOwned || claimsOwned)
+            {
+                var valid = false;
+                var rejectionCode = "home-poisoned-payload-rejected";
+                var rejectionReason = "invalid-claim";
+                var explicitOverride = rule is not null && topology is not null
+                    && topology.Bindings.TryGetValue(ruleId, out var rebound)
+                    && PtvHomeLibraryScopeResolver.HasVerifiedEffectiveBinding(rule, topology, rebound)
+                    && rebound.CollectionFolderId == ReadString(section, "libraryId");
+                if (currentlyOwned && claimsOwned && claimType == "library" && configured && scopeSchemaValid && rule is not null
+                    && _associations?.HasCurrentOwnedPublicationReady() == true
+                    && PtvFeaturedTopology.Matches(section, topology, ruleId)
+                    && (ReadString(section, "ruleId").Length == 0 || ReadString(section, "ruleId") == ruleId)
+                    && Guid.TryParseExact(ReadString(section, "libraryId"), "N", out var claimedId)
+                    && claimedId != Guid.Empty
+                    && (string.Equals(rule.LibraryScope!.VirtualFolderId, claimedId.ToString("N"), StringComparison.Ordinal)
+                        || explicitOverride)
+                    && string.Equals(ReadString(section, "bindingKey"), rule.LibraryScope.DefaultKey ?? string.Empty, StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        folders ??= _libraryManager.GetVirtualFolders().ToArray();
+                        var resolved = PtvHomeLibraryScopeResolver.Resolve(rule, folders, topology);
+                        var exactCollection = !explicitOverride || _libraryManager.GetItemById(claimedId) is CollectionFolder currentFolder
+                            && currentFolder.Id == claimedId;
+                        if (!exactCollection)
+                        {
+                            rejectionCode = "home-scope-unresolved";
+                            rejectionReason = "current-folder-missing";
+                        }
+                        else if (resolved.Status != "resolved")
+                        {
+                            rejectionCode = resolved.Status == "ambiguous" ? "home-scope-ambiguous" : "home-scope-unresolved";
+                            rejectionReason = resolved.Status;
+                        }
+                        else if (resolved.LibraryId != claimedId
+                            || ReadString(section, "resolvedScopeHash") != PtvHomeLibraryScopeResolver.ComputeScopeHash(
+                                rule, "resolved", explicitOverride ? claimedId.ToString("N") : null))
+                        {
+                            rejectionCode = "home-scope-hash-mismatch";
+                            rejectionReason = "binding-or-hash-mismatch";
+                        }
+                        else if (!isAuthorized(claimedId))
+                        {
+                            rejectionCode = "home-scope-unresolved";
+                            rejectionReason = "library-inaccessible";
+                        }
+                        else
+                        {
+                            valid = true;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        rejectionCode = "home-scope-unresolved";
+                        rejectionReason = "library-query-failed";
+                    }
+                }
+
+                if (!valid)
+                {
+                    LogScopeOnce(generation, rejectionCode, ruleId, id, rejectionReason);
+                    RemoveSectionItems(sourceSectionItems, id);
+                    continue;
+                }
+
+                LogScopeOnce(generation, "home-scope-resolved", ruleId, id, "resolved");
+                approvedOwned.Add(id);
+            }
+            else if (_associations is not null && configured && (!hasRule || rule?.LibraryScope?.Mode != "global"))
+            {
+                LogScopeOnce(generation, "home-scope-unresolved", ruleId, id, "rule-not-current-global");
+                RemoveSectionItems(sourceSectionItems, id);
+                continue;
+            }
+
+            accepted.Add(section.DeepClone());
+        }
+
+        return (accepted, approvedOwned);
+    }
+
+    private void LogScopeOnce(long generation, string code, string ruleId, string sectionId, string reason = "none")
+    {
+        if (!_logger.IsEnabled(LogLevel.Information)) return;
+        var key = $"{generation}|{code}|{ruleId}|{sectionId}|{reason}";
+        lock (_scopeLogGate)
+        {
+            if (_scopeLogKeys.Count >= 2048) _scopeLogKeys.Clear();
+            if (!_scopeLogKeys.Add(key)) return;
+        }
+
+        _logger.LogInformation("PiggieTV Home scope. Code={Code}; RuleId={RuleId}; SectionId={SectionId}; Reason={Reason}; Count=1.",
+            code, ruleId, sectionId, reason);
+    }
+
+    private static void RemoveSectionItems(JsonObject items, string id)
+    {
+        foreach (var key in items.Select(entry => entry.Key).Where(key => key.Equals(id, StringComparison.OrdinalIgnoreCase)).ToArray())
+        {
+            items.Remove(key);
+        }
+    }
+
+    private static int? ReadInt(JsonObject source, string propertyName)
+    {
+        return FindNode(source, propertyName) is JsonValue value && value.TryGetValue<int>(out var result) ? result : null;
     }
 
     private static JsonObject BuildSourceSectionItems(JsonObject payload, JsonArray? sections)
@@ -480,7 +661,9 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
         JsonArray? source,
         JsonObject sourceSectionItems,
         JsonObject filteredSectionItems,
-        PtvConfiguredRowAssociationService.Projection? associationProjection)
+        PtvConfiguredRowAssociationService.Projection? associationProjection,
+        IReadOnlySet<string> approvedOwnedIds,
+        bool allowOrphans)
     {
         var sections = new JsonArray();
         var sectionItems = new JsonObject();
@@ -520,6 +703,14 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
                     sectionItems,
                     reservedSourceIds);
                 NormalizeSensitiveSection(section, responseSectionId);
+                if (approvedOwnedIds.Contains(sectionId))
+                {
+                    // Keep only the safe ownership proof needed by the current Web gate.
+                    foreach (var field in new[] { "scopeType", "libraryId", "bindingKey", "resolvedScopeHash", "topologyEpoch", "bindingGeneration" })
+                    {
+                        CopyKnownProperty(sourceSection, section, field);
+                    }
+                }
             }
 
             section["itemCount"] = authorizedItems.Count;
@@ -541,7 +732,7 @@ public sealed class PtvFeaturedContentAuthorizationService : IPtvFeaturedContent
             sections.Add(section);
         }
 
-        foreach (var orphanedItems in filteredSectionItems.ToArray())
+        foreach (var orphanedItems in allowOrphans ? filteredSectionItems.ToArray() : [])
         {
             if (processedSourceKeys.Contains(orphanedItems.Key) || orphanedItems.Value is not JsonArray items)
             {

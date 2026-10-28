@@ -1,0 +1,10 @@
+[
+  {
+    "id": "older-plugin-without-capabilities-route",
+    "operation": "capabilities",
+    "principal": "user",
+    "transportStatus": 404,
+    "bodyContract": "host-defined",
+    "expectedClientState": "unsupported"
+  }
+]

@@ -180,6 +180,82 @@ describe('PtvShellPrimaryDropdown', () => {
         expect(trigger.getAttribute('aria-expanded')).toBe('true');
     });
 
+    it('opens from desktop pointer hover and keeps the portaled menu available', async () => {
+        const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+        vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+        try {
+            flushSync(() => trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+            await vi.waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('true'));
+            flushAnimationFrames();
+
+            expect(document.querySelector('[data-ptv-shell-primary-menu="movies"] a')).not.toBeNull();
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('keeps the hovered menu open while the mouse crosses into its portal', async () => {
+        vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+        try {
+            const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+            flushSync(() => trigger.click());
+            const panel = document.querySelector<HTMLElement>('[data-ptv-shell-primary-menu="movies"]')!;
+
+            flushSync(() => {
+                trigger.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: panel }));
+                panel.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: trigger }));
+            });
+            await new Promise(resolve => window.setTimeout(resolve, 220));
+
+            expect(trigger.getAttribute('aria-expanded')).toBe('true');
+            expect(panel.isConnected).toBe(true);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('closes after the desktop pointer leaves the dropdown and menu', async () => {
+        vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+        try {
+            const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+            flushSync(() => trigger.click());
+            flushSync(() => trigger.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+
+            await vi.waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('does not open on hover for a touch-only pointer', async () => {
+        vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
+        try {
+            const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+            flushSync(() => trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+            await new Promise(resolve => window.setTimeout(resolve, 20));
+
+            expect(trigger.getAttribute('aria-expanded')).toBe('false');
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('does not reopen after a pending hover-close is dismissed outside', async () => {
+        vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+        try {
+            const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
+            flushSync(() => trigger.click());
+            flushSync(() => trigger.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+            flushSync(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+            expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+            await new Promise(resolve => window.setTimeout(resolve, 220));
+            expect(trigger.getAttribute('aria-expanded')).toBe('false');
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
     it('opens with ArrowDown and moves keyboard focus within the portal menu', () => {
         const trigger = container.querySelector<HTMLButtonElement>('#ptv-shell-movies-trigger')!;
 

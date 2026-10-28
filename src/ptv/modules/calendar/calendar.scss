@@ -28,6 +28,19 @@
     padding: 32px 0 64px;
 }
 
+@media (min-width: 721px) {
+    .ptv-calendar-page .ptv-shell-context-nav {
+        position: relative;
+        inset: auto;
+        margin: 0 var(--ptv-content-edge, 24px);
+        padding-top: calc(var(--ptv-shell-header-clearance, 102px) + 12px);
+    }
+
+    .ptv-calendar-content {
+        padding-top: 12px;
+    }
+}
+
 .ptv-calendar-title {
     margin: 0;
     color: rgba(245, 247, 255, 0.96);

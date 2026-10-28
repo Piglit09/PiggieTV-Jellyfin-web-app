@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { useApi } from '../../../../../hooks/useApi';
 import PtvIcon from '../../../icons/PtvIcon';
+import { getResolvedAdminServerId } from '../adminServerIdentity';
+import { readPendingNewAdminCreation } from './adminNewUserBootstrapService';
 import { selectAdminUsers } from './adminUsersAdapters';
 import type { AdminUserFilter, AdminUserSort, AdminUserSummary } from './adminUsersModel';
 import {
@@ -12,6 +14,8 @@ import {
     getAdminUserEmailPresentation
 } from './AdminUserPresentation';
 import { useAdminUsers } from './useAdminUsers';
+import PtvAdminUserVerification from './PtvAdminUserVerification';
+import PtvAdminCreationRecovery from './PtvAdminCreationRecovery';
 
 const AddAdminUserDialog = lazy(async () => {
     const module = await import('./AdminUserDialogs');
@@ -104,13 +108,16 @@ function UserListSkeleton() {
 }
 
 export default function PtvAdminUsersPage() {
-    const { __legacyApiClient__: apiClient, api } = useApi();
+    const { __legacyApiClient__: apiClient, api, user: currentUser } = useApi();
     const navigate = useNavigate();
     const [ searchParams, setSearchParams ] = useSearchParams();
     const usersState = useAdminUsers(api, apiClient);
     const [ query, setQuery ] = useState('');
     const [ filter, setFilter ] = useState<AdminUserFilter>('all');
     const [ sort, setSort ] = useState<AdminUserSort>('username');
+    const [ verificationRefreshRevision, setVerificationRefreshRevision ] = useState(0);
+    const refreshUsers = usersState.refresh;
+    const localCreationHold = Boolean(readPendingNewAdminCreation(getResolvedAdminServerId(apiClient)));
     const addOpen = searchParams.get('action') === 'add';
     const visibleUsers = useMemo(() => selectAdminUsers(usersState.users, {
         filter,
@@ -124,6 +131,10 @@ export default function PtvAdminUsersPage() {
         void usersState.refresh();
         navigate(`/settings/admin/users/${encodeURIComponent(userId)}`);
     }, [closeAdd, navigate, usersState]);
+    const handleCreationChanged = useCallback(() => {
+        setVerificationRefreshRevision(revision => revision + 1);
+        void refreshUsers().catch(() => undefined);
+    }, [refreshUsers]);
 
     return (
         <section className='ptv-admin-users' data-testid='ptv-admin-users-list'>
@@ -140,6 +151,9 @@ export default function PtvAdminUsersPage() {
                     </button>
                 </div>
             </header>
+
+            <PtvAdminUserVerification api={api} localCreationHold={localCreationHold} refreshRevision={verificationRefreshRevision} users={usersState.users} />
+            <PtvAdminCreationRecovery api={api} apiClient={apiClient} onChanged={handleCreationChanged} refreshRevision={verificationRefreshRevision} users={usersState.users} />
 
             <div className='ptv-admin-users-toolbar'>
                 <label className='ptv-admin-user-search' htmlFor='ptv-admin-user-search'>
@@ -223,10 +237,12 @@ export default function PtvAdminUsersPage() {
             {addOpen && (
                 <Suspense fallback={null}>
                     <AddAdminUserDialog
+                        adminUserId={currentUser?.Id}
                         api={api}
                         apiClient={apiClient}
                         onClose={closeAdd}
                         onCreated={handleCreated}
+                        onReservationChanged={handleCreationChanged}
                         open
                     />
                 </Suspense>

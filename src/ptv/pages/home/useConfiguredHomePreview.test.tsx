@@ -1,4 +1,4 @@
-import React, { act } from 'react';
+import React, { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,11 +29,18 @@ const configuredRow = { rowType: 'configured-rule', configuredPresentationAuthor
 const genericRow = { rowType: 'fallback' };
 const item = { Id: 'synthetic-item', Name: 'Synthetic' };
 let preview: ReturnType<typeof useConfiguredHomePreview>;
+let harnessRenders = 0;
 
-function Harness({ identity = 'server-a:user-a', heroAuthorities, aggregateAuthority }: Readonly<{
-    identity?: string; heroAuthorities?: Record<string, string>; aggregateAuthority?: string;
+function Harness({ identity = 'server-a:user-a', heroAuthorities, aggregateAuthority, autoHero = false }: Readonly<{
+    identity?: string; heroAuthorities?: Record<string, string>; aggregateAuthority?: string; autoHero?: boolean;
 }>) {
-    preview = useConfiguredHomePreview(identity, heroAuthorities, aggregateAuthority);
+    harnessRenders += 1;
+    preview = useConfiguredHomePreview(identity, autoHero ? { ...heroAuthorities } : heroAuthorities, aggregateAuthority);
+    const setBackdrop = preview.setActiveBackdropItem;
+    useEffect(() => {
+        // Bound a broken callback loop so the regression fails rather than hanging.
+        if (autoHero && harnessRenders < 12) setBackdrop(item);
+    }, [autoHero, setBackdrop]);
     return <div data-active={preview.activeBackdropItem?.Id || ''} data-focused={preview.focusedHeroItem?.Id || ''} data-pending={preview.pendingHeroItem?.Id || ''} />;
 }
 
@@ -44,6 +51,7 @@ describe('configured Home preview lifetime', () => {
     beforeEach(() => {
         (globalThis as typeof globalThis & Record<string, unknown>)['IS_REACT_ACT_ENVIRONMENT'] = true;
         freshness.snapshot = Object.freeze({ status: 'CURRENT', authority: 'proof-a', identityKey: 'server-a:user-a', revision: 1 });
+        harnessRenders = 0;
         container = document.createElement('div');
         root = createRoot(container);
         act(() => root.render(<Harness />));
@@ -74,6 +82,33 @@ describe('configured Home preview lifetime', () => {
         });
         return captured;
     }
+
+    it('does not render again for the identical active backdrop and exact proof', () => {
+        act(() => preview.setActiveBackdropItem(item));
+        const settledRenders = harnessRenders;
+        act(() => preview.setActiveBackdropItem(item));
+        // React may execute one bailout render; a subsequent duplicate must be quiet.
+        const bailoutRenders = harnessRenders;
+        act(() => preview.setActiveBackdropItem(item));
+        expect(harnessRenders).toBe(bailoutRenders);
+        expect(bailoutRenders).toBeLessThanOrEqual(settledRenders + 1);
+    });
+
+    it('converges when a hero effect receives an equivalent fresh authority map', () => {
+        function HeroEffectHarness() {
+            return <Harness autoHero heroAuthorities={{}} />;
+        }
+        act(() => root.render(<HeroEffectHarness />));
+        expect(preview.activeBackdropItem).toBe(item);
+        expect(harnessRenders).toBeLessThan(5);
+    });
+
+    it('adopts an updated DTO with the same item ID instead of suppressing it as a duplicate', () => {
+        act(() => preview.setActiveBackdropItem(item));
+        const updated = { ...item, Name: 'Updated metadata' };
+        act(() => preview.setActiveBackdropItem(updated));
+        expect(preview.activeBackdropItem).toBe(updated);
+    });
 
     it('displays a configured selection only with its exact current proof', () => {
         queueAll();

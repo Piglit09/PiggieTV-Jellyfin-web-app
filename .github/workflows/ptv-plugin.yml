@@ -2,12 +2,6 @@ name: PiggieTV plugin contract
 
 on:
   pull_request:
-    paths:
-      - 'src/ptv/plugin/**'
-      - 'src/ptv/core/pluginApi.ts'
-      - 'src/ptv/core/config.ts'
-      - 'src/ptv/core/buildInfo.ts'
-      - '.github/workflows/ptv-plugin.yml'
   push:
     branches:
       - main
@@ -17,6 +11,10 @@ on:
       - 'src/ptv/core/pluginApi.ts'
       - 'src/ptv/core/config.ts'
       - 'src/ptv/core/buildInfo.ts'
+      - 'scripts/ptv-plugin-package.mjs'
+      - 'scripts/ptv-artifact-manifest.mjs'
+      - 'scripts/ptv-workspace-preflight.mjs'
+      - 'config/ptv-workspace-policy.json'
       - '.github/workflows/ptv-plugin.yml'
 
 concurrency:
@@ -42,10 +40,16 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Validate frontend/plugin contract
         run: node scripts/ptv-plugin-contract-check.mjs
 
+      - name: Verify exact CI source
+        run: node scripts/ptv-workspace-preflight.mjs build --ci-ref "$(git rev-parse HEAD)"
+
       - name: Build and test plugin
         run: dotnet test src/ptv/plugin/Jellyfin.Plugin.PiggieTV.Tests/Jellyfin.Plugin.PiggieTV.Tests.csproj --configuration Release
+
+      - name: Validate clean local Plugin Release package without publishing
+        run: node scripts/ptv-plugin-package.mjs

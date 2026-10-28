@@ -11,6 +11,56 @@ namespace Jellyfin.Plugin.PiggieTV.Tests;
 public sealed class FeaturedContentStoreTests
 {
     [Fact]
+    public async Task VersionEightWithoutScopeSchemaCannotBeStoredAsFresh()
+    {
+        using var fixture = new TempApplicationPaths();
+        var payload = CreateLegacyV7Payload();
+        payload["version"] = PtvFeaturedContentValidator.FeaturedCacheVersion;
+        var store = new PtvFeaturedContentStore(fixture, new NoopLogger<PtvFeaturedContentStore>());
+
+        await Assert.ThrowsAsync<PtvFeaturedContentValidationException>(() => store.WriteAsync(
+            new PtvFeaturedContentDocument { Version = 1, UpdatedAt = NowMs(), FeaturedContent = payload },
+            CancellationToken.None));
+
+        Assert.False((await store.GetStatusAsync(CancellationToken.None)).FeaturedCacheFresh);
+    }
+
+    [Fact]
+    public async Task RetainedVersionEightWithoutScopeSchemaIsStale()
+    {
+        using var fixture = new TempApplicationPaths();
+        var cacheDirectory = Path.Combine(fixture.PluginConfigurationsPath, "PiggieTV");
+        Directory.CreateDirectory(cacheDirectory);
+        var payload = CreateLegacyV7Payload();
+        payload["version"] = PtvFeaturedContentValidator.FeaturedCacheVersion;
+        await File.WriteAllTextAsync(Path.Combine(cacheDirectory, "featured-content-cache.json"), payload.ToJsonString(JsonOptions));
+
+        var status = await new PtvFeaturedContentStore(fixture, new NoopLogger<PtvFeaturedContentStore>())
+            .GetStatusAsync(CancellationToken.None);
+
+        Assert.True(status.FeaturedCacheExists);
+        Assert.False(status.FeaturedCacheFresh);
+    }
+
+    [Fact]
+    public async Task VersionEightOrphanItemsCannotRemainFreshButInvisible()
+    {
+        using var fixture = new TempApplicationPaths();
+        var payload = CreateLegacyV7Payload();
+        payload["version"] = PtvFeaturedContentValidator.FeaturedCacheVersion;
+        payload["payload"]!["scopeSchemaVersion"] = 2;
+        var document = new PtvFeaturedContentDocument { Version = 1, UpdatedAt = NowMs(), FeaturedContent = payload };
+        var store = new PtvFeaturedContentStore(fixture, new NoopLogger<PtvFeaturedContentStore>());
+
+        await Assert.ThrowsAsync<PtvFeaturedContentValidationException>(() => store.WriteAsync(document, CancellationToken.None));
+
+        var cacheDirectory = Path.Combine(fixture.PluginConfigurationsPath, "PiggieTV");
+        Directory.CreateDirectory(cacheDirectory);
+        await File.WriteAllTextAsync(Path.Combine(cacheDirectory, "featured-content-cache.json"), payload.ToJsonString(JsonOptions));
+        Assert.False((await store.GetStatusAsync(CancellationToken.None)).FeaturedCacheFresh);
+    }
+
+    [Fact]
     public async Task LegacyV7FeaturedPayloadReportsCountsAndSerializesContent()
     {
         using var fixture = new TempApplicationPaths();
@@ -29,7 +79,7 @@ public sealed class FeaturedContentStoreTests
         var payload = featuredContent["payload"]!.AsObject();
 
         Assert.True(status.FeaturedCacheExists);
-        Assert.True(status.FeaturedCacheFresh);
+        Assert.False(status.FeaturedCacheFresh);
         Assert.True(featuredStatus.HasPayload);
         Assert.Equal(7, featuredStatus.CacheVersion);
         Assert.Equal(2, featuredStatus.HeroCount);
@@ -64,7 +114,7 @@ public sealed class FeaturedContentStoreTests
         var serialized = JsonSerializer.SerializeToUtf8Bytes(status.Document, JsonOptions);
 
         Assert.True(status.FeaturedCacheExists);
-        Assert.True(status.FeaturedCacheFresh);
+        Assert.False(status.FeaturedCacheFresh);
         Assert.True(featuredStatus.HasPayload);
         Assert.Equal(7, featuredStatus.CacheVersion);
         Assert.Equal(2, featuredStatus.HeroCount);

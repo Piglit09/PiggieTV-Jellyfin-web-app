@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const connectionMocks = vi.hoisted(() => ({
     client: null as null | {
@@ -33,6 +33,10 @@ describe('plugin API authentication startup', () => {
         (window as unknown as { ApiClient?: unknown }).ApiClient = undefined;
         window.localStorage.clear();
         resetPtvPluginApiAvailability();
+    });
+
+    afterEach(() => {
+        window.history.replaceState(null, '', '/');
     });
 
     it('waits for authentication and deduplicates status, settings, and featured startup reads', async () => {
@@ -385,5 +389,23 @@ describe('plugin API authentication startup', () => {
         expect(firstGetJSON).toHaveBeenCalledWith('https://old-media.example.test/Ptv/v1/status', true);
         expect(nextGetJSON).toHaveBeenCalledWith('https://media.example.test/Ptv/v1/status', true);
         expect(getPtvPluginApiDiagnostics().resolvedRoot).toBe('state:resolved');
+    });
+
+    it('does not retry Plugin requests outside a Jellyfin-hosted BaseUrl', async () => {
+        window.history.replaceState(null, '', '/jellyfin/web/index.html');
+        const hostedRoot = `${window.location.origin}/jellyfin`;
+        const getJSON = vi.fn().mockRejectedValue(new Error('fixture Plugin unavailable'));
+        const client = {
+            accessToken: () => 'authenticated',
+            getCurrentUserId: () => 'user',
+            getJSON,
+            getUrl: (path: string) => `https://other-server.example.test/${path}`
+        };
+
+        await expect(getCurrentPtvPluginApiClient(client)!.getStatus({ bypassCache: true })).rejects.toThrow();
+
+        const attemptedUrls = getJSON.mock.calls.map(([url]) => url as string);
+        expect(attemptedUrls.length).toBeGreaterThan(0);
+        expect(attemptedUrls.every(url => url.startsWith(`${hostedRoot}/Ptv/`))).toBe(true);
     });
 });

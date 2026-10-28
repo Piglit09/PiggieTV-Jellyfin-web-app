@@ -42,4 +42,17 @@ describe('player chrome auto-hide timer', () => {
             isTv: true
         })).toBe(true);
     });
+
+    it('defers the existing hide callback during an active pointer interaction, not an idle menu', () => {
+        expect(shouldDeferPlayerChromeHide({
+            controlFocused: false,
+            isTv: false,
+            interactionActive: true
+        })).toBe(true);
+        expect(shouldDeferPlayerChromeHide({
+            controlFocused: false,
+            isTv: false,
+            interactionActive: false
+        })).toBe(false);
+    });
 });

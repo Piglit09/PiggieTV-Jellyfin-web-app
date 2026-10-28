@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/resolve-request.schema.json",
+  "title": "PTV Channels v1 join request",
+  "type": "object",
+  "required": ["contractVersion"],
+  "properties": {
+    "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+    "expectedProgramId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "expectedEntryRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" }
+  },
+  "dependentRequired": {
+    "expectedProgramId": ["expectedEntryRevision"],
+    "expectedEntryRevision": ["expectedProgramId"]
+  },
+  "additionalProperties": false
+}

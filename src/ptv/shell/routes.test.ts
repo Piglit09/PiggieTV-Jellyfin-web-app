@@ -85,6 +85,18 @@ describe('PTV shell Request route ownership', () => {
 });
 
 describe('PTV shell browse route ownership', () => {
+    it('keeps static media and administrator route identity separate from displayed permissions', () => {
+        expect(getRoute('#/music').navigation).toEqual({
+            activeItemId: 'music',
+            activeSectionId: 'media',
+            href: '#/music'
+        });
+        expect(getRoute('#/dashboard').navigation).toMatchObject({
+            activeItemId: 'dashboard',
+            activeSectionId: 'admin'
+        });
+    });
+
     it.each([
         ['#/movies?view=genre&genre=Crime', 'movies'],
         ['#/shows?view=network&network=AMC', 'shows'],

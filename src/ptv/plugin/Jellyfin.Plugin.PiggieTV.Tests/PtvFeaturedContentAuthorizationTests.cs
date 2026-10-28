@@ -68,14 +68,10 @@ public sealed class PtvFeaturedContentAuthorizationTests
             .GetProperty("featuredContent")
             .GetProperty("version")
             .GetInt32());
-        var heroItem = Assert.Single(payload.GetProperty("heroItems").EnumerateArray());
-        var heroPropertyNames = heroItem.EnumerateObject().Select(property => property.Name).ToArray();
-        Assert.Equal(
-            heroPropertyNames.Length,
-            heroPropertyNames.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Single(payload.GetProperty("heroItems").EnumerateArray());
         var filteredMixed = payload.GetProperty("sectionItems").GetProperty("section");
         var sections = payload.GetProperty("sections").EnumerateArray().ToArray();
-        Assert.Equal(4, sections.Length);
+        Assert.Equal(3, sections.Length);
         var filteredMixedDefinition = Assert.Single(sections, section => section.GetProperty("id").GetString() == "section");
         Assert.Single(filteredMixed.EnumerateArray());
         Assert.Equal(1, filteredMixedDefinition.GetProperty("itemCount").GetInt32());
@@ -99,6 +95,25 @@ public sealed class PtvFeaturedContentAuthorizationTests
     }
 
     [Fact]
+    public async Task TemporaryBroadAccessCannotAuthorizeAnyPluginFeaturedSectionBeforeDurableProof()
+    {
+        var store = new TestFeaturedContentStore(CreateSharedDocument());
+        var users = CreateUserManager(RestrictedUserId);
+        var libraries = CreateLibraryManager(new Dictionary<Guid, IReadOnlySet<Guid>>
+        {
+            [RestrictedUserId] = new HashSet<Guid> { LibraryAItemId, LibraryBItemId }
+        });
+        var services = BuildServices(store, users, libraries, proven: false);
+
+        var response = await GetSerializedPayloadAsync(CreateController(services, RestrictedUserId));
+        using var document = JsonDocument.Parse(response);
+        var payload = document.RootElement.GetProperty("featuredContent").GetProperty("payload");
+        Assert.Empty(payload.GetProperty("sections").EnumerateArray());
+        Assert.Empty(payload.GetProperty("sectionItems").EnumerateObject());
+        Assert.Empty(payload.GetProperty("heroItems").EnumerateArray());
+    }
+
+    [Fact]
     public async Task CaseVariantDuplicateMetadataKeysCannotBypassCanonicalProjection()
     {
         var sharedDocument = CreateSharedDocument();
@@ -119,29 +134,37 @@ public sealed class PtvFeaturedContentAuthorizationTests
             [RestrictedUserId] = new HashSet<Guid> { LibraryAItemId }
         });
 
-        var response = await GetSerializedPayloadAsync(CreateController(store, users, libraries, RestrictedUserId));
-
-        Assert.DoesNotContain(CaseVariantSentinel, response, StringComparison.Ordinal);
-        Assert.DoesNotContain(LibraryBItemId.ToString("N"), response, StringComparison.OrdinalIgnoreCase);
-        using var document = JsonDocument.Parse(response);
-        var projectedHeroes = document.RootElement
-            .GetProperty("featuredContent")
-            .GetProperty("payload")
-            .GetProperty("heroItems")
-            .EnumerateArray()
-            .ToArray();
+        var projected = new PtvFeaturedContentAuthorizationService(users, libraries)
+            .AuthorizeForUser(sharedDocument, RestrictedUserId).Document;
+        var projectionJson = JsonSerializer.Serialize(projected);
+        Assert.DoesNotContain(CaseVariantSentinel, projectionJson, StringComparison.Ordinal);
+        var projectedPayload = JsonDocument.Parse(projectionJson).RootElement
+            .GetProperty("featuredContent").GetProperty("payload");
+        var projectedHeroes = projectedPayload.GetProperty("heroItems").EnumerateArray().ToArray();
         Assert.Equal(2, projectedHeroes.Length);
         Assert.All(projectedHeroes, item =>
         {
             var propertyNames = item.EnumerateObject().Select(property => property.Name).ToArray();
-            Assert.Equal(
-                propertyNames.Length,
-                propertyNames.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.Equal(propertyNames.Length, propertyNames.Distinct(StringComparer.OrdinalIgnoreCase).Count());
         });
         Assert.Single(projectedHeroes, item => item.TryGetProperty("Name", out _));
         Assert.Single(projectedHeroes, item => item.TryGetProperty("ProviderIds", out _));
         Assert.Single(projectedHeroes, item => item.TryGetProperty("ImageTags", out _));
         Assert.Single(projectedHeroes, item => item.TryGetProperty("MediaSources", out _));
+
+        var response = await GetSerializedPayloadAsync(CreateController(store, users, libraries, RestrictedUserId));
+
+        Assert.DoesNotContain(CaseVariantSentinel, response, StringComparison.Ordinal);
+        Assert.DoesNotContain(LibraryBItemId.ToString("N"), response, StringComparison.OrdinalIgnoreCase);
+        using var document = JsonDocument.Parse(response);
+        var deliveredHeroes = document.RootElement
+            .GetProperty("featuredContent")
+            .GetProperty("payload")
+            .GetProperty("heroItems")
+            .EnumerateArray()
+            .ToArray();
+        Assert.All(deliveredHeroes, item => Assert.Equal(LibraryAItemId.ToString("N"),
+            item.GetProperty("Id").GetString()));
     }
 
     [Fact]
@@ -410,15 +433,20 @@ public sealed class PtvFeaturedContentAuthorizationTests
     private static IServiceProvider BuildServices(
         IPtvFeaturedContentStore store,
         IUserManager userManager,
-        ILibraryManager libraryManager)
+        ILibraryManager libraryManager,
+        bool proven = true)
     {
-        return new ServiceCollection()
+        // These tests isolate per-item Featured projection. A narrow already-proven
+        // user authority keeps that projection reachable through the HTTP endpoint.
+        var access = DispatchProxy.Create<IPtvHomeUserAccessLedger, HomeAccessProxy>();
+        var services = new ServiceCollection()
             .AddSingleton(store)
             .AddSingleton(userManager)
             .AddSingleton(libraryManager)
             .AddSingleton<IPtvFeaturedContentAuthorizationService>(
-                new PtvFeaturedContentAuthorizationService(userManager, libraryManager))
-            .BuildServiceProvider();
+                new PtvFeaturedContentAuthorizationService(userManager, libraryManager));
+        if (proven) services.AddSingleton(access);
+        return services.BuildServiceProvider();
     }
 
     private static PtvStatusController CreateController(IServiceProvider services, Guid userId) =>
@@ -490,6 +518,7 @@ public sealed class PtvFeaturedContentAuthorizationTests
                 ["expiresAt"] = 1_788_003_600_000,
                 ["payload"] = new JsonObject
                 {
+                    ["scopeSchemaVersion"] = 2,
                     ["heroItems"] = new JsonArray(
                         itemA.DeepClone(),
                         itemB.DeepClone(),
@@ -671,6 +700,8 @@ public sealed class PtvFeaturedContentAuthorizationTests
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
+            if (targetMethod?.Name == nameof(ILibraryManager.GetVirtualFolders))
+                return new List<MediaBrowser.Model.Entities.VirtualFolderInfo>();
             if (targetMethod?.Name == nameof(ILibraryManager.GetItemById)
                 && args is [Guid itemId, User user])
             {
@@ -696,6 +727,21 @@ public sealed class PtvFeaturedContentAuthorizationTests
             return targetMethod?.ReturnType.IsValueType == true
                 ? Activator.CreateInstance(targetMethod.ReturnType)
                 : null;
+        }
+    }
+
+    public class HomeAccessProxy : DispatchProxy
+    {
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(IPtvHomeUserAccessLedger.ReadAsync)
+                && args is { Length: >= 3 } && args[0] is Guid userId)
+                return Task.FromResult(new PtvHomeUserAccessView
+                {
+                    UserId = userId.ToString("N"), AccessEpoch = new string('E', 64),
+                    Held = false, PolicyProven = true, State = "policy-attested"
+                });
+            throw new NotSupportedException(targetMethod?.Name);
         }
     }
 

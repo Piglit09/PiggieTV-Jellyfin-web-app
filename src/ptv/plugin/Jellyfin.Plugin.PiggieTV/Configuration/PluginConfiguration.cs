@@ -9,6 +9,9 @@ namespace Jellyfin.Plugin.PiggieTV.Configuration;
 /// </summary>
 public class PiggieTVPluginConfiguration : BasePluginConfiguration
 {
+    /// <summary>Records durable initialization of the Home topology ledger.</summary>
+    public bool HomeTopologyLedgerInitialized { get; set; }
+
     /// <summary>
     /// Gets or sets feature toggle settings.
     /// </summary>
@@ -707,7 +710,7 @@ public sealed class RowBuilderSettings
 {
     /// <summary>Gets or sets the row-builder schema version.</summary>
     [JsonPropertyName("schemaVersion")]
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; } = 3;
 
     /// <summary>Gets or sets a value indicating whether configured homepage rows are enabled.</summary>
     [JsonPropertyName("enabled")]
@@ -735,7 +738,7 @@ public sealed class RowBuilderSettings
     /// <returns>Default row-builder settings.</returns>
     public static RowBuilderSettings CreateDefault() => new()
     {
-        SchemaVersion = 2,
+        SchemaVersion = 3,
         Enabled = true,
         DefaultsInitialized = true,
         Rules =
@@ -748,6 +751,7 @@ public sealed class RowBuilderSettings
                 MediaType = "mixed",
                 SourceType = "continueWatching",
                 SourceValue = "continue",
+                LibraryScope = new RowLibraryScope { Mode = "global" },
                 GenerationMode = "latest",
                 ItemLimit = 16,
                 RowCount = 1
@@ -760,6 +764,7 @@ public sealed class RowBuilderSettings
                 MediaType = "movies",
                 SourceType = "latest",
                 SourceValue = "movies",
+                LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = "movies" },
                 GenerationMode = "latest",
                 ItemLimit = 16,
                 RowCount = 1
@@ -772,6 +777,7 @@ public sealed class RowBuilderSettings
                 MediaType = "shows",
                 SourceType = "latest",
                 SourceValue = "shows",
+                LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = "shows" },
                 GenerationMode = "latest",
                 ItemLimit = 16,
                 RowCount = 1
@@ -784,6 +790,7 @@ public sealed class RowBuilderSettings
                 MediaType = "cartoons",
                 SourceType = "latest",
                 SourceValue = "cartoons",
+                LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = "cartoons" },
                 GenerationMode = "latest",
                 ItemLimit = 16,
                 RowCount = 1
@@ -796,6 +803,7 @@ public sealed class RowBuilderSettings
                 MediaType = "anime",
                 SourceType = "latest",
                 SourceValue = "anime",
+                LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = "anime" },
                 GenerationMode = "latest",
                 ItemLimit = 16,
                 RowCount = 1
@@ -808,6 +816,7 @@ public sealed class RowBuilderSettings
                 MediaType = "music",
                 SourceType = "latest",
                 SourceValue = "music",
+                LibraryScope = new RowLibraryScope { Mode = "defaultLibrary", DefaultKey = "music" },
                 GenerationMode = "latest",
                 ItemLimit = 16,
                 RowCount = 1
@@ -820,6 +829,7 @@ public sealed class RowBuilderSettings
                 MediaType = "mixed",
                 SourceType = "requested",
                 SourceValue = "jellyseerr",
+                LibraryScope = new RowLibraryScope { Mode = "global" },
                 GenerationMode = "latest",
                 ItemLimit = 16,
                 RowCount = 1
@@ -833,6 +843,10 @@ public sealed class RowBuilderSettings
 /// </summary>
 public sealed class RowBuilderRule
 {
+    /// <summary>Gets or sets the exact Jellyfin library ownership of this rule.</summary>
+    [JsonPropertyName("libraryScope")]
+    public RowLibraryScope? LibraryScope { get; set; }
+
     /// <summary>Gets or sets the stable rule id.</summary>
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -900,6 +914,22 @@ public sealed class RowBuilderRule
     /// <summary>Gets or sets an optional homepage group label.</summary>
     [JsonPropertyName("groupTitle")]
     public string GroupTitle { get; set; } = string.Empty;
+}
+
+/// <summary>Persisted library identity for one configured Home row.</summary>
+public sealed class RowLibraryScope
+{
+    /// <summary>Gets or sets global, defaultLibrary, or virtualFolder.</summary>
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "invalid";
+
+    /// <summary>Gets or sets the canonical key of a built-in owned row.</summary>
+    [JsonPropertyName("defaultKey")]
+    public string? DefaultKey { get; set; }
+
+    /// <summary>Gets or sets the pinned Jellyfin VirtualFolder ItemId.</summary>
+    [JsonPropertyName("virtualFolderId")]
+    public string? VirtualFolderId { get; set; }
 }
 
 /// <summary>

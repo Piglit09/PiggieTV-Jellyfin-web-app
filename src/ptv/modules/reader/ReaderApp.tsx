@@ -35,7 +35,7 @@ interface ReaderAppProps {
 }
 
 function progressFromSource(source: ReaderSource): ReaderProgressState {
-    return loadReaderProgress(source.metadata.stableId) || {
+    return loadReaderProgress(source.metadata.stableId, source.serverId) || {
         stableId: source.metadata.stableId,
         format: source.format,
         position: '',
@@ -80,7 +80,7 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
     const [pageIndex, setPageIndex] = useState(() => progressFromSource(source).pageIndex || 0);
     const [percent, setPercent] = useState(() => progressFromSource(source).percent || 0);
     const [position, setPosition] = useState(() => progressFromSource(source).position || '');
-    const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>(() => loadReaderBookmarks(source.metadata.stableId));
+    const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>(() => loadReaderBookmarks(source.metadata.stableId, source.serverId));
     const [navigator, setNavigator] = useState<ReaderNavigator | null>(null);
     const [zoom, setZoom] = useState<ReaderZoomState>(() => loadReaderZoomSession(source.metadata.stableId, source.format));
     const [effectiveScale, setEffectiveScale] = useState(zoom.manualScale);
@@ -169,8 +169,8 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
             pageCount,
             percent: normalizedPercent,
             updatedAt: Date.now()
-        });
-    }, [onProgress, readerDocument?.pageCount, source.format, source.metadata.stableId]);
+        }, source.serverId);
+    }, [onProgress, readerDocument?.pageCount, source.format, source.metadata.stableId, source.serverId]);
 
     const goToPage = useCallback((nextPage: number) => {
         const count = readerDocument?.pageCount || 0;
@@ -300,10 +300,10 @@ export function ReaderApp({ openedAt, source, onClose, onProgress }: ReaderAppPr
             position: position || `page:${pageIndex}`,
             pageIndex,
             percent
-        });
+        }, source.serverId);
 
         setBookmarks(nextBookmarks);
-    }, [pageIndex, percent, position, source.metadata.stableId]);
+    }, [pageIndex, percent, position, source.metadata.stableId, source.serverId]);
 
     const jumpToBookmark = useCallback((bookmark: ReaderBookmark) => {
         if (readerDocument?.format === 'epub') {

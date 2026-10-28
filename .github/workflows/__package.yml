@@ -28,6 +28,10 @@ jobs:
       - name: Install Node.js dependencies
         run: npm ci --no-audit
 
+      - name: Verify PTV exact source before build
+        if: ${{ github.repository == 'Piglit09/PiggieTV-Jellyfin-web-app' }}
+        run: node scripts/ptv-workspace-preflight.mjs build --ci-ref "$(git rev-parse HEAD)"
+
       - name: Run a production build
         env:
           JELLYFIN_VERSION: ${{ inputs.commit || github.sha }}
@@ -38,8 +42,33 @@ jobs:
           jq '.multiserver=true | .servers=["https://demo.jellyfin.org/unstable"]' dist/config.json > dist/config.tmp.json
           mv dist/config.tmp.json dist/config.json
 
+      - name: Verify PTV package source and final transformed files
+        if: ${{ github.repository == 'Piglit09/PiggieTV-Jellyfin-web-app' }}
+        run: |
+          node scripts/ptv-workspace-preflight.mjs package --ci-ref "$(git rev-parse HEAD)"
+          node scripts/ptv-artifact-manifest.mjs create --artifact dist --output "$RUNNER_TEMP/frontend-manifest.json" --mode transformed-production
+          node scripts/ptv-artifact-manifest.mjs verify --artifact dist --manifest "$RUNNER_TEMP/frontend-manifest.json"
+
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frontend
           path: dist
+
+      - name: Upload PTV complete-file manifest
+        if: ${{ github.repository == 'Piglit09/PiggieTV-Jellyfin-web-app' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-manifest
+          path: ${{ runner.temp }}/frontend-manifest.json
+
+      - name: Download uploaded PTV frontend for byte verification
+        if: ${{ github.repository == 'Piglit09/PiggieTV-Jellyfin-web-app' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend
+          path: verified-dist
+
+      - name: Verify uploaded PTV frontend against the final manifest
+        if: ${{ github.repository == 'Piglit09/PiggieTV-Jellyfin-web-app' }}
+        run: node scripts/ptv-artifact-manifest.mjs verify --artifact verified-dist --manifest "$RUNNER_TEMP/frontend-manifest.json"

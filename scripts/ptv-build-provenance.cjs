@@ -16,6 +16,7 @@ function normalizePtvCommitSha(value, source) {
 function runGit(execFileSync, args, cwd) {
     return execFileSync('git', args, {
         cwd,
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
         encoding: 'utf8',
         stdio: [ 'ignore', 'pipe', 'ignore' ]
     }).trim();
@@ -24,22 +25,33 @@ function runGit(execFileSync, args, cwd) {
 function resolvePtvCommitSha(options = {}) {
     const env = options.env || process.env;
     const override = String(env.PTV_COMMIT_SHA || '').trim();
-
-    if (override) return normalizePtvCommitSha(override, 'PTV_COMMIT_SHA');
-
     const cwd = options.cwd || path.resolve(__dirname, '..');
     const execFileSync = options.execFileSync || childProcess.execFileSync;
     const commitSha = normalizePtvCommitSha(
         runGit(execFileSync, [ 'rev-parse', 'HEAD' ], cwd),
         'git rev-parse'
     );
+    if (commitSha.length !== 40) {
+        throw new Error('git rev-parse HEAD must return a full 40-character commit SHA.');
+    }
     const dirty = Boolean(runGit(
         execFileSync,
         [ 'status', '--porcelain=v1', '--untracked-files=normal' ],
         cwd
     ));
 
-    return `${commitSha}${dirty ? '-dirty' : ''}`;
+    const actual = `${commitSha}${dirty ? '-dirty' : ''}`;
+    if (override) {
+        const claimed = normalizePtvCommitSha(override, 'PTV_COMMIT_SHA');
+        if (claimed.replace(/-dirty$/u, '').length !== 40) {
+            throw new Error('PTV_COMMIT_SHA must contain the full 40-character Git commit SHA.');
+        }
+        if (claimed !== actual) {
+            throw new Error('PTV_COMMIT_SHA does not match Git HEAD and the checkout dirty state.');
+        }
+    }
+
+    return actual;
 }
 
 module.exports = {

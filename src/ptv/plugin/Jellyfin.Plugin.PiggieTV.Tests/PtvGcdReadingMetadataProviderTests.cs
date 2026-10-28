@@ -35,6 +35,9 @@ public sealed class PtvGcdReadingMetadataProviderTests
         Assert.Equal(PtvReadingIdentityEvidenceSource.Unknown, candidate.SeriesStartYearEvidence);
         Assert.Equal("2177121", candidate.ExternalIds["GCD"]);
         Assert.Equal("152889", candidate.ExternalIds["GCDSeries"]);
+        Assert.Contains(candidate.IdentityProviderIds, id => id.Namespace == "GCD" && id.Scope == PtvReadingProviderIdScope.Issue && id.Value == "2177121");
+        Assert.Contains(candidate.IdentityProviderIds, id => id.Namespace == "GCDSeries" && id.Scope == PtvReadingProviderIdScope.Series && id.Value == "152889");
+        Assert.Equal(PtvReadingRunEvidenceKind.Unknown, candidate.RunEvidenceKind);
         Assert.Equal("https://www.comics.org/issue/2177121/", candidate.SourceUrl);
         Assert.Null(candidate.RawProviderMetadata);
 

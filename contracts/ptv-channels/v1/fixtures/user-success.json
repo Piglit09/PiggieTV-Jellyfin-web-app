@@ -1,0 +1,190 @@
+[
+  {
+    "id": "capabilities-enabled",
+    "operation": "capabilities",
+    "principal": "user",
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "enabled": true,
+      "guidePastHours": 24,
+      "guideFutureHours": 48,
+      "maxGuideWindowHours": 24,
+      "maxEntriesPerPage": 500
+    }
+  },
+  {
+    "id": "capabilities-disabled",
+    "operation": "capabilities",
+    "principal": "user",
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "enabled": false,
+      "guidePastHours": 24,
+      "guideFutureHours": 48,
+      "maxGuideWindowHours": 24,
+      "maxEntriesPerPage": 500
+    }
+  },
+  {
+    "id": "list-ready-and-recovering",
+    "operation": "list",
+    "principal": "user",
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "listRevision": "list-9",
+      "channels": [
+        {
+          "channelId": "ch-cinema",
+          "name": "PTV Cinema",
+          "state": "ready",
+          "timelineRevision": "tl-7",
+          "now": { "programId": "pg-42", "entryRevision": "entry-3", "startUtc": "2026-10-18T20:00:00Z", "endUtc": "2026-10-18T22:00:00Z", "availability": "playable", "title": "Example Movie" },
+          "next": { "programId": "pg-43", "entryRevision": "entry-3", "startUtc": "2026-10-18T22:00:00Z", "endUtc": "2026-10-18T22:30:00Z", "availability": "unavailable" }
+        },
+        {
+          "channelId": "ch-recovering",
+          "name": "PTV Episodes",
+          "state": "recovering",
+          "timelineRevision": "tl-4"
+        },
+        {
+          "channelId": "ch-expired",
+          "name": "PTV Classics",
+          "state": "horizonExpired",
+          "timelineRevision": "tl-2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "guide-first-page",
+    "operation": "guide",
+    "principal": "restrictedUser",
+    "pathParams": { "channelId": "ch-cinema" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-18T23:00:00Z" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "channelId": "ch-cinema",
+      "timelineRevision": "tl-7",
+      "fromUtc": "2026-10-18T20:00:00Z",
+      "toUtc": "2026-10-18T23:00:00Z",
+      "entries": [
+        { "programId": "pg-42", "entryRevision": "entry-3", "startUtc": "2026-10-18T20:00:00Z", "endUtc": "2026-10-18T22:00:00Z", "availability": "playable", "title": "Example Movie" },
+        { "programId": "pg-43", "entryRevision": "entry-3", "startUtc": "2026-10-18T22:00:00Z", "endUtc": "2026-10-18T22:30:00Z", "availability": "unavailable" }
+      ],
+      "nextCursor": "cursor-page-2"
+    }
+  },
+  {
+    "id": "guide-last-page",
+    "operation": "guide",
+    "principal": "restrictedUser",
+    "pathParams": { "channelId": "ch-cinema" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-18T23:00:00Z", "cursor": "cursor-page-2" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:01Z",
+      "channelId": "ch-cinema",
+      "timelineRevision": "tl-7",
+      "fromUtc": "2026-10-18T20:00:00Z",
+      "toUtc": "2026-10-18T23:00:00Z",
+      "entries": [
+        { "programId": "pg-44", "entryRevision": "entry-3", "startUtc": "2026-10-18T22:30:00Z", "endUtc": "2026-10-18T23:00:00Z", "availability": "gap" }
+      ]
+    }
+  },
+  {
+    "id": "guide-user-projection",
+    "operation": "guide",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-18T22:00:00Z" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "channelId": "ch-cinema",
+      "timelineRevision": "tl-7",
+      "fromUtc": "2026-10-18T20:00:00Z",
+      "toUtc": "2026-10-18T22:00:00Z",
+      "entries": [{ "programId": "pg-42", "entryRevision": "entry-3", "startUtc": "2026-10-18T20:00:00Z", "endUtc": "2026-10-18T22:00:00Z", "availability": "playable", "title": "Example Movie" }]
+    }
+  },
+  {
+    "id": "guide-restricted-projection",
+    "operation": "guide",
+    "principal": "restrictedUser",
+    "pathParams": { "channelId": "ch-cinema" },
+    "query": { "fromUtc": "2026-10-18T20:00:00Z", "toUtc": "2026-10-18T22:00:00Z" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "channelId": "ch-cinema",
+      "timelineRevision": "tl-7",
+      "fromUtc": "2026-10-18T20:00:00Z",
+      "toUtc": "2026-10-18T22:00:00Z",
+      "entries": [{ "programId": "pg-42", "entryRevision": "entry-3", "startUtc": "2026-10-18T20:00:00Z", "endUtc": "2026-10-18T22:00:00Z", "availability": "unavailable" }]
+    }
+  },
+  {
+    "id": "resolve-guide-click",
+    "operation": "resolve",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "1.0", "expectedProgramId": "pg-42", "expectedEntryRevision": "entry-3" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:00Z",
+      "channelId": "ch-cinema",
+      "timelineRevision": "tl-7",
+      "programId": "pg-42",
+      "entryRevision": "entry-3",
+      "itemId": "jf-88",
+      "startUtc": "2026-10-18T20:00:00Z",
+      "endUtc": "2026-10-18T22:00:00Z",
+      "positionMs": 1800000,
+      "remainingMs": 5400000
+    }
+  },
+  {
+    "id": "resolve-go-live",
+    "operation": "resolve",
+    "principal": "user",
+    "pathParams": { "channelId": "ch-cinema" },
+    "request": { "contractVersion": "1.0" },
+    "status": 200,
+    "headers": { "Cache-Control": "private, no-store" },
+    "response": {
+      "contractVersion": "1.0",
+      "serverTimeUtc": "2026-10-18T20:30:01Z",
+      "channelId": "ch-cinema",
+      "timelineRevision": "tl-7",
+      "programId": "pg-42",
+      "entryRevision": "entry-3",
+      "itemId": "jf-88",
+      "startUtc": "2026-10-18T20:00:00Z",
+      "endUtc": "2026-10-18T22:00:00Z",
+      "positionMs": 1801000,
+      "remainingMs": 5399000
+    }
+  }
+]

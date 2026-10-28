@@ -14,6 +14,7 @@ This index is the fast entry point for Jellyfin Server/Web 10.11.11 and the curr
 | Review active deviations and stabilization order | [system-map.json](system-map.json) → `activeKnownDeviations` / `stabilizationBacklog` | Follow each entry's evidence and closure criteria; do not infer closure from a local implementation alone |
 | Query the atlas mechanically | [system-map.json](system-map.json) | Use node references, `chapterRefs`, and each entry's `evidence` array |
 | Evaluate a newer Jellyfin implementation | [26 — Post-10.11.11 differences](26-upstream-post-10.11.11-differences.md) | Keep every such finding labeled `UPSTREAM_NEWER_THAN_10.11.11` |
+| Review the Jellyfin 12.2 PTV Plugin candidate and staged rollout | [27 — Jellyfin 12.2 compatibility](27-jellyfin-12-2-compatibility.md) | Distinguish build/test evidence from live .125 and VM115 acceptance |
 
 ## Stock system chapters
 
@@ -52,6 +53,7 @@ This index is the fast entry point for Jellyfin Server/Web 10.11.11 and the curr
 | [24 — Stock API contract reference](24-stock-api-contract-reference.md) | Authentication envelope, endpoint families, payload/status/completion semantics |
 | [25 — Known Jellyfin non-guarantees](25-known-jellyfin-non-guarantees.md) | Negative contract: behavior callers must not assume |
 | [26 — Post-10.11.11 differences](26-upstream-post-10.11.11-differences.md) | Selected newer-upstream changes, isolated from the 10.11.11 baseline |
+| [27 — Jellyfin 12.2 compatibility](27-jellyfin-12-2-compatibility.md) | Staged .125-to-VM115 Server upgrade, Plugin target, and evidence gates |
 
 ## Concept locator
 
@@ -63,6 +65,7 @@ This index is the fast entry point for Jellyfin Server/Web 10.11.11 and the curr
 | API keys | [04](04-user-permissions-library-access.md), [24](24-stock-api-contract-reference.md) | [23](23-before-you-modify-checklists.md) |
 | Application host / dependency injection / plugins | [01](01-system-overview.md), [15](15-settings-admin-mutations.md) | [20](20-ptv-vs-stock-map.md), [24](24-stock-api-contract-reference.md) |
 | Artwork replacement / provider images | [12](12-images-artwork-cache.md), [13](13-metadata-identify.md), [24](24-stock-api-contract-reference.md) | [22](22-change-impact-matrix.md), [23](23-before-you-modify-checklists.md) |
+| Embedded comic identity and Reading Apply review | [11](11-reading.md), [13](13-metadata-identify.md), [24](24-stock-api-contract-reference.md) | [20](20-ptv-vs-stock-map.md), [21](21-ownership-conflicts.md), [23](23-before-you-modify-checklists.md), [25](25-known-jellyfin-non-guarantees.md) |
 | Authentication / login / token restoration | [02](02-startup-session-auth.md), [04](04-user-permissions-library-access.md), [24](24-stock-api-contract-reference.md) | [16](16-caching-invalidation.md), [23](23-before-you-modify-checklists.md) |
 | Back navigation / dialogs / history | [03](03-routing-navigation-lifecycle.md), [19](19-failure-race-lifecycle.md) | [21](21-ownership-conflicts.md), [23](23-before-you-modify-checklists.md) |
 | Books / EPUB / PDF / comic archives | [05](05-library-item-relationships.md), [11](11-reading.md) | [20](20-ptv-vs-stock-map.md), [23](23-before-you-modify-checklists.md) |
@@ -78,6 +81,7 @@ This index is the fast entry point for Jellyfin Server/Web 10.11.11 and the curr
 | DTO projection / sparse fields / authoritative readback | [05](05-library-item-relationships.md), [13](13-metadata-identify.md), [24](24-stock-api-contract-reference.md) | [19](19-failure-race-lifecycle.md), [22](22-change-impact-matrix.md), [25](25-known-jellyfin-non-guarantees.md) |
 | Favorites / UserData | [05](05-library-item-relationships.md), [07](07-cards-and-item-state.md), [16](16-caching-invalidation.md) | [22](22-change-impact-matrix.md), [23](23-before-you-modify-checklists.md) |
 | Featured / recommendations / generated rows | [06](06-home-data-flow.md), [20](20-ptv-vs-stock-map.md) | [04](04-user-permissions-library-access.md), [21](21-ownership-conflicts.md), [22](22-change-impact-matrix.md) |
+| Controlled Home library scope, user proof, and held transitions | [20](20-ptv-vs-stock-map.md), [21](21-ownership-conflicts.md), [24](24-stock-api-contract-reference.md) | [22](22-change-impact-matrix.md), [23](23-before-you-modify-checklists.md), [25](25-known-jellyfin-non-guarantees.md) |
 | Home sections / Next Up / Recently Added | [06](06-home-data-flow.md) | [04](04-user-permissions-library-access.md), [16](16-caching-invalidation.md), [23](23-before-you-modify-checklists.md) |
 | Identify / RemoteSearchResult / apply | [13](13-metadata-identify.md), [24](24-stock-api-contract-reference.md) | [10](10-music.md), [11](11-reading.md), [12](12-images-artwork-cache.md), [22](22-change-impact-matrix.md) |
 | ImageTags / parent images / fallback | [07](07-cards-and-item-state.md), [12](12-images-artwork-cache.md), [16](16-caching-invalidation.md) | [13](13-metadata-identify.md), [22](22-change-impact-matrix.md), [23](23-before-you-modify-checklists.md) |

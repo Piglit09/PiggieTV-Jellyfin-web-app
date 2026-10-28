@@ -1072,6 +1072,10 @@ span.material-icons.ptv-icon-legacy.ptv-icon-users::after {
     -webkit-mask-size: contain !important;
 }
 
+.actionSheet .ptv-icon[style*='visibility:hidden'] {
+    visibility: hidden !important;
+}
+
 .ptv-header-icon-btn .ptv-icon,
 .ptv-shell-icon-button .ptv-icon,
 .ptv-shell-search-trigger .ptv-icon,

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/guide-query.schema.json",
+  "title": "PTV Channels v1 guide query",
+  "type": "object",
+  "required": ["fromUtc", "toUtc"],
+  "properties": {
+    "fromUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "toUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "cursor": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" }
+  },
+  "additionalProperties": false
+}

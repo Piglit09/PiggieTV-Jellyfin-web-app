@@ -1,8 +1,10 @@
-import React, { FC, useCallback, useEffect, useState } from 'react';
+import React, { FC, useCallback, useEffect, useRef, useState } from 'react';
 import SidebarSection from './SidebarSection';
 import { PTV_ASSETS, PTV_BRANDING, PTV_EVENTS, PTV_ROUTES } from '../../core/config';
 import { applyPtvResponsiveImage } from '../../core/images';
 import { getPtvNavigationSections } from '../../shell';
+import { usePtvNavigationAccess } from '../../shell/usePtvNavigationAccess';
+import { usePtvArrCalendarAvailability } from '../calendar/arrCalendarAvailability';
 import { cancelPendingPtvRequestActivation } from '../request/requestLoader';
 
 type SidebarProps = {
@@ -12,6 +14,18 @@ type SidebarProps = {
 
 const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
     const [activeRoute, setActiveRoute] = useState(window.location.hash || PTV_ROUTES.home);
+    const navigationAccess = usePtvNavigationAccess();
+    const calendarAvailability = usePtvArrCalendarAvailability();
+    const sections = getPtvNavigationSections(
+        navigationAccess.status === 'ready' ? navigationAccess.access : null,
+        { calendarAvailable: navigationAccess.status === 'ready' && calendarAvailability.showEntry }
+    );
+    const navigationKey = JSON.stringify(sections.map(section => section.items.map(item => [item.id, item.href, item.label])));
+    const previousAccessRef = useRef({
+        identityKey: navigationAccess.identityKey,
+        navigationKey,
+        status: navigationAccess.status
+    });
     const mountSidebarLogo = useCallback((image: HTMLImageElement | null) => {
         if (image) {
             image.dataset.ptvLogo = 'sidebar';
@@ -27,6 +41,20 @@ const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
             document.body.classList.remove('ptv-sidebar-is-open');
         };
     }, [isOpen]);
+
+    useEffect(() => {
+        const previous = previousAccessRef.current;
+        if (isOpen && (
+            Boolean(previous.identityKey && previous.identityKey !== navigationAccess.identityKey)
+            || previous.status === 'ready' && navigationAccess.status !== 'ready'
+            || previous.navigationKey !== navigationKey
+        )) onClose();
+        previousAccessRef.current = {
+            identityKey: navigationAccess.identityKey,
+            navigationKey,
+            status: navigationAccess.status
+        };
+    }, [isOpen, navigationAccess.identityKey, navigationAccess.status, navigationKey, onClose]);
 
     useEffect(() => {
         const onHashChange = () => {
@@ -75,7 +103,7 @@ const Sidebar: FC<SidebarProps> = ({ isOpen, onClose }) => {
                 </a>
 
                 <nav className='ptv-sidebar-nav' aria-label='PiggieTV navigation'>
-                    {getPtvNavigationSections().map(section => (
+                    {sections.map(section => (
                         <SidebarSection
                             key={section.id}
                             section={section}

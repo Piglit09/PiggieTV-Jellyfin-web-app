@@ -1,0 +1,163 @@
+{
+  "contractVersion": "1.0",
+  "basePath": "/Ptv/v1/channels",
+  "authentication": {
+    "user": "A current, unambiguous, enabled Jellyfin user is required.",
+    "administrator": "A current Jellyfin administrator user is required; an API key alone is insufficient."
+  },
+  "errorStatus": {
+    "INVALID_REQUEST": 400,
+    "UNSUPPORTED_CONTRACT": 400,
+    "UNAUTHENTICATED": 401,
+    "PRINCIPAL_UNAVAILABLE": 401,
+    "ADMIN_REQUIRED": 403,
+    "CHANNEL_NOT_FOUND": 404,
+    "RESOURCE_NOT_FOUND": 404,
+    "PROGRAM_CHANGED": 409,
+    "PROGRAM_UNAVAILABLE": 409,
+    "PROGRAM_ROLLOVER": 409,
+    "TIMELINE_RECOVERING": 409,
+    "REVISION_CONFLICT": 412,
+    "PRECONDITION_REQUIRED": 428,
+    "INVALID_DEFINITION": 422,
+    "CHANNELS_DISABLED": 503,
+    "HORIZON_EXPIRED": 503,
+    "TIMELINE_UNAVAILABLE": 503
+  },
+  "operations": [
+    {
+      "id": "capabilities",
+      "method": "GET",
+      "path": "/Ptv/v1/channels/capabilities",
+      "auth": "user",
+      "successStatus": 200,
+      "responseSchema": "capabilities-response.schema.json",
+      "cacheControl": "private, no-store"
+    },
+    {
+      "id": "list",
+      "method": "GET",
+      "path": "/Ptv/v1/channels",
+      "auth": "user",
+      "successStatus": 200,
+      "responseSchema": "channel-list-response.schema.json",
+      "cacheControl": "private, no-store"
+    },
+    {
+      "id": "guide",
+      "method": "GET",
+      "path": "/Ptv/v1/channels/{channelId}/guide",
+      "auth": "user",
+      "successStatus": 200,
+      "responseSchema": "guide-response.schema.json",
+      "cacheControl": "private, no-store",
+      "pathParamsSchema": {
+        "type": "object",
+        "required": ["channelId"],
+        "properties": { "channelId": { "type": "string", "minLength": 1 } },
+        "additionalProperties": false
+      },
+      "querySchema": "guide-query.schema.json",
+      "maxWindowHours": 24,
+      "maxEntriesPerPage": 500
+    },
+    {
+      "id": "resolve",
+      "method": "POST",
+      "path": "/Ptv/v1/channels/{channelId}/resolve",
+      "auth": "user",
+      "pathParamsSchema": {
+        "type": "object",
+        "required": ["channelId"],
+        "properties": { "channelId": { "type": "string", "minLength": 1 } },
+        "additionalProperties": false
+      },
+      "requestSchema": "resolve-request.schema.json",
+      "successStatus": 200,
+      "responseSchema": "resolve-response.schema.json",
+      "cacheControl": "private, no-store"
+    },
+    {
+      "id": "admin-list",
+      "method": "GET",
+      "path": "/Ptv/v1/channels/admin/{resource}",
+      "auth": "administrator",
+      "pathParamsSchema": {
+        "type": "object",
+        "required": ["resource"],
+        "properties": { "resource": { "enum": ["definitions", "collections", "blocks"] } },
+        "additionalProperties": false
+      },
+      "successStatus": 200,
+      "responseSchema": "admin.schema.json#/$defs/listEnvelope",
+      "cacheControl": "private, no-store"
+    },
+    {
+      "id": "admin-create",
+      "method": "POST",
+      "path": "/Ptv/v1/channels/admin/{resource}",
+      "auth": "administrator",
+      "pathParamsSchema": {
+        "type": "object",
+        "required": ["resource"],
+        "properties": { "resource": { "enum": ["definitions", "collections", "blocks"] } },
+        "additionalProperties": false
+      },
+      "requestSchema": "admin.schema.json#/$defs/writeEnvelope",
+      "successStatus": 201,
+      "responseSchema": "admin.schema.json#/$defs/readEnvelope",
+      "cacheControl": "private, no-store",
+      "responseETag": "resourceRevision"
+    },
+    {
+      "id": "admin-read",
+      "method": "GET",
+      "path": "/Ptv/v1/channels/admin/{resource}/{id}",
+      "auth": "administrator",
+      "pathParamsSchema": {
+        "type": "object",
+        "required": ["resource", "id"],
+        "properties": {
+          "resource": { "enum": ["definitions", "collections", "blocks"] },
+          "id": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "successStatus": 200,
+      "responseSchema": "admin.schema.json#/$defs/readEnvelope",
+      "cacheControl": "private, no-store",
+      "responseETag": "resourceRevision"
+    },
+    {
+      "id": "admin-update",
+      "method": "PUT",
+      "path": "/Ptv/v1/channels/admin/{resource}/{id}",
+      "auth": "administrator",
+      "pathParamsSchema": {
+        "type": "object",
+        "required": ["resource", "id"],
+        "properties": {
+          "resource": { "enum": ["definitions", "collections", "blocks"] },
+          "id": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "requestSchema": "admin.schema.json#/$defs/writeEnvelope",
+      "requestIfMatch": true,
+      "successStatus": 200,
+      "responseSchema": "admin.schema.json#/$defs/readEnvelope",
+      "cacheControl": "private, no-store",
+      "responseETag": "resourceRevision"
+    },
+    {
+      "id": "admin-preview",
+      "method": "POST",
+      "path": "/Ptv/v1/channels/admin/preview",
+      "auth": "administrator",
+      "requestSchema": "admin.schema.json#/$defs/previewRequest",
+      "successStatus": 200,
+      "responseSchema": "admin.schema.json#/$defs/previewResponse",
+      "cacheControl": "private, no-store"
+    }
+  ]
+}

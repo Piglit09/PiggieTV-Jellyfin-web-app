@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://piggietv.com/contracts/ptv-channels/v1/channel-list-response.schema.json",
+  "title": "PTV Channels v1 list and Now/Next response",
+  "type": "object",
+  "required": ["contractVersion", "serverTimeUtc", "listRevision", "channels"],
+  "properties": {
+    "contractVersion": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/contractVersion" },
+    "serverTimeUtc": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/utc" },
+    "listRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+    "channels": { "type": "array", "items": { "$ref": "#/$defs/channel" } }
+  },
+  "not": { "required": ["itemId"] },
+  "additionalProperties": true,
+  "$defs": {
+    "channel": {
+      "oneOf": [
+        { "$ref": "#/$defs/ready" },
+        { "$ref": "#/$defs/horizonExpired" },
+        { "$ref": "#/$defs/recovering" }
+      ]
+    },
+    "base": {
+      "type": "object",
+      "required": ["channelId", "name", "state", "timelineRevision"],
+      "properties": {
+        "channelId": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" },
+        "name": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["ready", "horizonExpired", "recovering"] },
+        "timelineRevision": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/common.schema.json#/$defs/opaqueId" }
+      },
+      "not": { "required": ["itemId"] },
+      "additionalProperties": true
+    },
+    "ready": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["now"],
+          "properties": {
+            "state": { "const": "ready" },
+            "now": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/entry.schema.json" },
+            "next": { "$ref": "https://piggietv.com/contracts/ptv-channels/v1/entry.schema.json" }
+          }
+        }
+      ]
+    },
+    "horizonExpired": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "properties": { "state": { "const": "horizonExpired" } }, "not": { "anyOf": [{ "required": ["now"] }, { "required": ["next"] }] } }
+      ]
+    },
+    "recovering": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "properties": { "state": { "const": "recovering" } }, "not": { "anyOf": [{ "required": ["now"] }, { "required": ["next"] }] } }
+      ]
+    }
+  }
+}

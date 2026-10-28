@@ -32,6 +32,7 @@ import {
 } from '../../services/diagnostics/diagnosticPreferences';
 import {
     PTV_SEVERE_FRAME_JANK_WARNING,
+    PTV_SLOW_API_REQUESTS_WARNING,
     getPtvDiagnosticStore
 } from '../../services/diagnostics/diagnosticStore';
 import { refreshPtvWebDiagnosticExternalStatus } from '../../services/diagnostics/webDiagnosticPlatform';
@@ -133,6 +134,19 @@ function MetricCardBase({
 
 const MetricCard = React.memo(MetricCardBase);
 
+function SlowRequestWarning({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
+    if (!snapshot.warnings.includes(PTV_SLOW_API_REQUESTS_WARNING)) return null;
+    const observation = snapshot.slowRequestObservation;
+
+    return (
+        <Alert severity='warning'>
+            {observation ?
+                `SLOW_API_REQUESTS: retained session observation at ${observation.lastObservedAt}; ${observation.requestFamily}, ${observation.durationMs} ms (${observation.trigger}); ${observation.eligibleSampleCount} eligible successful requests of ${observation.retainedRequestCount} retained, ${observation.trimmedRequestCount} trimmed. This does not establish current latency.` :
+                'SLOW_API_REQUESTS: retained session warning; the observation time is unavailable in this export. This does not establish current latency.'}
+        </Alert>
+    );
+}
+
 function TechnicalDetails({
     title,
     values
@@ -170,6 +184,7 @@ function Overview({
             {snapshot.warnings.includes(PTV_SEVERE_FRAME_JANK_WARNING) && (
                 <Alert severity='error'>SEVERE_FRAME_JANK: sustained severe rendering degradation was observed after route settlement.</Alert>
             )}
+            <SlowRequestWarning snapshot={snapshot} />
             <div className='ptv-diagnostics-card-grid'>
                 <MetricCard title='Overall health' value={snapshot.health.status} caption={snapshot.health.reason} health={snapshot.health} />
                 <MetricCard title='Client / platform' value={snapshot.platform.platform} caption={`${snapshot.platform.profile} · ${snapshot.platform.deviceClass}`} />
@@ -181,8 +196,8 @@ function Overview({
                 <MetricCard title='Frame health' value={frame ? `${frame.approximateFps} FPS` : 'collecting'} caption={frame ? `${frame.jankyFramePercentage}% janky · p95 ${frame.p95FrameMs} ms` : 'Browser-observed timing, not GPU timing.'} />
                 <MetricCard title='Focus engine' value={snapshot.latestFocus.engineEnabled ? 'enabled' : 'disabled'} caption={snapshot.latestFocus.health.reason} health={snapshot.latestFocus.health} />
                 <MetricCard title='Current route' value={route?.routeFamily || 'unknown'} valueClassName='ptv-diagnostics-metric-value--route' caption={route ? route.status : 'No route lifecycle sample yet.'} />
-                <MetricCard title='Cache health' value={snapshot.cache.state} caption={`${snapshot.cache.itemCount} items · ${snapshot.cache.storageType}`} health={snapshot.cache.health} />
-                <MetricCard title='Recommendations' value={snapshot.recommendations.health.status} caption={`${snapshot.recommendations.generatedRows} generated rows · ${snapshot.recommendations.health.reason}`} health={snapshot.recommendations.health} />
+                <MetricCard title='Cache health' value={snapshot.cache.state} caption={snapshot.cache.countsObserved ? `${snapshot.cache.itemCount} items · ${snapshot.cache.storageType}` : `Not observed · ${snapshot.cache.storageType}`} health={snapshot.cache.health} />
+                <MetricCard title='Recommendations' value={snapshot.recommendations.health.status} caption={snapshot.recommendations.lastGenerationAt && snapshot.recommendations.terminalOutcome ? `${snapshot.recommendations.generatedRows} generated rows · ${snapshot.recommendations.health.reason}` : `Not observed · ${snapshot.recommendations.health.reason}`} health={snapshot.recommendations.health} />
             </div>
             <TechnicalDetails
                 title='Diagnostic self-check'
@@ -309,41 +324,44 @@ function Requests({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
     const rows = [...snapshot.requests].reverse().slice(0, 50);
 
     return (
-        <TableContainer className='ptv-diagnostics-table'>
-            <Table size='small' aria-label='Recent privacy-safe requests'>
-                <TableHead>
-                    <TableRow>
-                        <TableCell>Family</TableCell>
-                        <TableCell>Method</TableCell>
-                        <TableCell>Duration</TableCell>
-                        <TableCell>Status</TableCell>
-                        <TableCell>Concurrency</TableCell>
-                        <TableCell>Coordinator / cache</TableCell>
-                        <TableCell>Route</TableCell>
-                        <TableCell>Error</TableCell>
-                    </TableRow>
-                </TableHead>
-                <TableBody>
-                    {rows.map(request => (
-                        <TableRow key={request.requestId}>
-                            <TableCell>{request.requestFamily}</TableCell>
-                            <TableCell>{request.method}</TableCell>
-                            <TableCell>{request.durationMs} ms</TableCell>
-                            <TableCell>{request.cancellation ? 'cancelled' : request.status ?? (request.success ? 'success' : 'failed')}</TableCell>
-                            <TableCell>{request.activeConcurrencyAtStart}</TableCell>
-                            <TableCell>{request.coordinatorHit ? 'coalesced' : request.cacheClassification}</TableCell>
-                            <TableCell>{request.routeFamily}</TableCell>
-                            <TableCell>{request.errorCategory}</TableCell>
-                        </TableRow>
-                    ))}
-                    {!rows.length && (
+        <>
+            <SlowRequestWarning snapshot={snapshot} />
+            <TableContainer className='ptv-diagnostics-table'>
+                <Table size='small' aria-label='Recent privacy-safe requests'>
+                    <TableHead>
                         <TableRow>
-                            <TableCell colSpan={8}>No coordinated PTV requests have completed in this diagnostic session.</TableCell>
+                            <TableCell>Family</TableCell>
+                            <TableCell>Method</TableCell>
+                            <TableCell>Duration</TableCell>
+                            <TableCell>Status</TableCell>
+                            <TableCell>Concurrency</TableCell>
+                            <TableCell>Coordinator / cache</TableCell>
+                            <TableCell>Route</TableCell>
+                            <TableCell>Error</TableCell>
                         </TableRow>
-                    )}
-                </TableBody>
-            </Table>
-        </TableContainer>
+                    </TableHead>
+                    <TableBody>
+                        {rows.map(request => (
+                            <TableRow key={request.requestId}>
+                                <TableCell>{request.requestFamily}</TableCell>
+                                <TableCell>{request.method}</TableCell>
+                                <TableCell>{request.durationMs} ms</TableCell>
+                                <TableCell>{request.cancellation ? 'cancelled' : request.status ?? (request.success ? 'success' : 'failed')}</TableCell>
+                                <TableCell>{request.activeConcurrencyAtStart}</TableCell>
+                                <TableCell>{request.coordinatorHit ? 'coalesced' : request.cacheClassification}</TableCell>
+                                <TableCell>{request.routeFamily}</TableCell>
+                                <TableCell>{request.errorCategory}</TableCell>
+                            </TableRow>
+                        ))}
+                        {!rows.length && (
+                            <TableRow>
+                                <TableCell colSpan={8}>No coordinated PTV requests have completed in this diagnostic session.</TableCell>
+                            </TableRow>
+                        )}
+                    </TableBody>
+                </Table>
+            </TableContainer>
+        </>
     );
 }
 
@@ -435,6 +453,7 @@ function Routes({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
                     <TableRow>
                         <TableCell>Route family</TableCell>
                         <TableCell>Status</TableCell>
+                        <TableCell>Critical work</TableCell>
                         <TableCell>First content</TableCell>
                         <TableCell>Focusable</TableCell>
                         <TableCell>Settled</TableCell>
@@ -445,7 +464,8 @@ function Routes({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
                     {[...snapshot.routes].reverse().slice(0, 50).map(route => (
                         <TableRow key={route.routeSessionId}>
                             <TableCell>{route.routeFamily}</TableCell>
-                            <TableCell>{route.status}</TableCell>
+                            <TableCell>{route.departureReason === 'superseded-by-navigation' || route.status === 'abandoned' ? 'superseded by navigation' : route.status}</TableCell>
+                            <TableCell>{route.criticalWorkCoverage === 'observed' || route.criticalState !== 'undeclared' ? route.criticalState : 'critical work not instrumented'}</TableCell>
                             <TableCell>{formatNumber(route.navigationToFirstContentMs, ' ms')}</TableCell>
                             <TableCell>{formatNumber(route.navigationToFocusableMs, ' ms')}</TableCell>
                             <TableCell>{formatNumber(route.navigationToSettledMs, ' ms')}</TableCell>
@@ -566,16 +586,32 @@ function PluginServer({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
 }
 
 function CacheRecommendations({ snapshot }: { snapshot: PtvDiagnosticSnapshot }) {
+    const cache = snapshot.cache;
+    const recommendations = snapshot.recommendations;
+    const generationObserved = Boolean(recommendations.lastGenerationAt && recommendations.terminalOutcome);
+    const observedCount = (count: number) => generationObserved ? formatNumber(count) : 'Not observed';
+    const cacheStateLabel = cache.state === 'unknown' && cache.lastReadOutcome === 'empty'
+        && cache.countsObserved && cache.itemCount === 0 && cache.sectionCount === 0
+        && cache.health.status === 'healthy' ? 'empty' : cache.state;
+    const contentValue = cache.countsObserved ? `${cache.itemCount} items` : 'Not observed';
+    const contentCaption = cache.countsObserved ?
+        `${cache.sectionCount} sections · age ${formatNumber(cache.ageMs, ' ms')}` :
+        'Item and section counts have not been observed';
+
     return (
         <div className='ptv-diagnostics-card-grid ptv-diagnostics-card-grid--compact'>
-            <MetricCard title='Cache state' value={snapshot.cache.state} caption={snapshot.cache.health.reason} health={snapshot.cache.health} />
-            <MetricCard title='Cache owner / version' value={`${snapshot.cache.owner} / ${snapshot.cache.version ?? 'unknown'}`} caption={snapshot.cache.storageType} />
-            <MetricCard title='Cache content' value={`${snapshot.cache.itemCount} items`} caption={`${snapshot.cache.sectionCount} sections · age ${formatNumber(snapshot.cache.ageMs, ' ms')}`} />
-            <MetricCard title='Cache I/O' value={`${snapshot.cache.lastReadStatus} / ${snapshot.cache.lastWriteStatus}`} caption={`Error: ${snapshot.cache.lastErrorCategory}`} />
-            <MetricCard title='Recommendation state' value={snapshot.recommendations.active ? 'active' : 'idle'} caption={snapshot.recommendations.health.reason} health={snapshot.recommendations.health} />
-            <MetricCard title='Rows' value={`${snapshot.recommendations.generatedRows} / ${snapshot.recommendations.configuredRows}`} caption={`${snapshot.recommendations.itemCount} items · ${snapshot.recommendations.sourceCount} sources`} />
-            <MetricCard title='Last generation' value={snapshot.recommendations.lastGenerationAt || 'not observed'} caption={`Duration ${formatNumber(snapshot.recommendations.runDurationMs, ' ms')}`} />
-            <MetricCard title='Recommendation cache' value={snapshot.recommendations.cacheState} caption={`${snapshot.recommendations.duplicateSuppressionCount} duplicates suppressed`} />
+            <MetricCard title='Cache state' value={cacheStateLabel} caption={cache.health.reason} health={cache.health} />
+            <MetricCard title='Cache owner / version' value={`${cache.owner} / ${cache.version ?? 'unknown'}`} caption={`${cache.cacheLayer} · ${cache.storageType}`} />
+            <MetricCard title='Cache content' value={contentValue} caption={`${contentCaption} · observed ${cache.observedAt || 'never'}`} />
+            <MetricCard title='Cache I/O' value={`${cache.lastReadStatus} / ${cache.lastWriteStatus}`} caption={`Read failure: ${cache.lastReadFailureCategory} · fallback ${cache.fallbackAvailable ? 'available' : 'none'}`} />
+            <MetricCard title='Recommendation state' value={recommendations.active ? 'active' : recommendations.terminalOutcome || 'Not observed'} caption={`${recommendations.health.reason} · fallback ${recommendations.fallbackUsed ? 'used' : 'none observed'}`} health={recommendations.health} />
+            <MetricCard title='Recommendation providers' value={observedCount(recommendations.providerCount)} caption={`${observedCount(recommendations.tasteSignalCount)} taste signals`} />
+            <MetricCard title='Recommendation candidates' value={observedCount(recommendations.candidateCount)} caption='Scored candidates in the latest completed generation' />
+            <MetricCard title='Generated rows' value={observedCount(recommendations.generatedRows)} caption={`${observedCount(recommendations.generatedItemCount)} generated items`} />
+            <MetricCard title='Rendered items' value={generationObserved && recommendations.renderedItemCount !== null ? formatNumber(recommendations.renderedItemCount) : 'Not observed'} caption='Visible items are reported only when the surface observes rendering.' />
+            <MetricCard title='Recommendation rejection attempts' value={generationObserved ? formatNumber(recommendations.identityDuplicateRejectionCount + recommendations.diversityCapRejectionCount + recommendations.feedbackRejectionCount) : 'Not observed'} caption={`${observedCount(recommendations.identityDuplicateRejectionCount)} identity duplicates · ${observedCount(recommendations.diversityCapRejectionCount)} diversity caps · ${observedCount(recommendations.feedbackRejectionCount)} feedback/completed`} />
+            <MetricCard title='Last generation' value={recommendations.lastGenerationAt || 'Not observed'} caption={`Duration ${recommendations.runDurationMs === null ? 'Not observed' : formatNumber(recommendations.runDurationMs, ' ms')}`} />
+            <MetricCard title='Recommendation cache' value={recommendations.cacheState} caption={recommendations.lastFailureAt ? `Last failure ${recommendations.lastFailureCategory} · resolved ${recommendations.lastFailureResolvedAt || 'not observed'}` : 'No failure retained for this identity'} />
         </div>
     );
 }

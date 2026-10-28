@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
     getPtvItems: vi.fn(),
+    getPtvResumeItems: vi.fn(),
     getPtvUserViews: vi.fn(),
     requestPtvJson: vi.fn(),
     serverId: 'server',
@@ -11,7 +12,7 @@ const apiMocks = vi.hoisted(() => ({
 vi.mock('../../api', () => ({
     getPtvCurrentUserId: vi.fn(() => apiMocks.userId),
     getPtvItems: apiMocks.getPtvItems,
-    getPtvResumeItems: vi.fn(),
+    getPtvResumeItems: apiMocks.getPtvResumeItems,
     getPtvServerId: vi.fn(() => apiMocks.serverId),
     getPtvUserViews: apiMocks.getPtvUserViews,
     requestPtvJson: apiMocks.requestPtvJson,
@@ -22,6 +23,7 @@ import {
     applyPtvBrowseScope,
     buildPtvFocusedBrowseQuery,
     findExactPtvBrowseDirectoryEntry,
+    getPtvBrowseScopedItems,
     getPtvBrowseScopeIdentityKey,
     getPtvBrowseTrendingScore,
     getPtvFocusedBrowseCacheKey,
@@ -60,10 +62,19 @@ function createAbortableUserViewsMock(onSignal: (signal?: AbortSignal) => void) 
     };
 }
 
+async function resolveGroupedShowsScope() {
+    apiMocks.getPtvUserViews.mockResolvedValue({
+        Items: [{ CollectionType: 'tvshows', Id: 'grouped-shows-view', Name: 'TV Shows', Type: 'UserView' }]
+    });
+
+    return resolvePtvBrowseScope(parsePtvBrowseRoute('/shows'));
+}
+
 describe('browseData', () => {
     beforeEach(() => {
         resetPtvBrowseDataCachesForTests();
         apiMocks.getPtvItems.mockReset();
+        apiMocks.getPtvResumeItems.mockReset();
         apiMocks.getPtvUserViews.mockReset();
         apiMocks.requestPtvJson.mockReset();
         apiMocks.serverId = 'server';
@@ -229,11 +240,422 @@ describe('browseData', () => {
         });
     });
 
-    it('preserves selected parents while enforcing the resolved library ancestor', () => {
+    it('does not emit an unsupported AncestorIds parameter for a nested parent', () => {
         expect(applyPtvBrowseScope({ ParentId: 'series-id' }, scopedAnime)).toEqual({
-            AncestorIds: 'anime-library',
             ParentId: 'series-id'
         });
+    });
+
+    it('fails closed before constructing a query for an unavailable library', () => {
+        expect(() => applyPtvBrowseScope({}, {
+            ...scopedAnime, error: 'Anime unavailable', libraryIds: [], status: 'error'
+        })).toThrow('Anime unavailable');
+    });
+
+    it('never reads global items or directories for a failed library scope', async () => {
+        const scope: PtvBrowseResolvedScope = {
+            ...scopedAnime, error: 'Anime unavailable', libraryIds: [], status: 'error'
+        };
+        const route = parsePtvBrowseRoute('/shows', '?topParentId=anime&view=latest');
+        apiMocks.getPtvItems.mockResolvedValue({ Items: [{ Id: 'foreign-show' }] });
+        apiMocks.requestPtvJson.mockResolvedValue({ Items: [{ Id: 'foreign-genre' }] });
+
+        await expect(loadPtvFocusedBrowsePage(route, scope)).rejects.toThrow('Anime unavailable');
+        await expect(loadPtvBrowseDirectory(route, scope, 'genre')).rejects.toThrow('Anime unavailable');
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+        expect(apiMocks.requestPtvJson).not.toHaveBeenCalled();
+    });
+
+    it('reads each resolved root instead of relying on unsupported multi-root AncestorIds', async () => {
+        const scope = { ...scopedAnime, libraryIds: ['anime-a', 'anime-b'] };
+        apiMocks.getPtvItems.mockImplementation(async query => ({
+            Items: [{ Id: query.ParentId ? `${query.ParentId}-series` : 'foreign-show', Type: 'Series' }],
+            TotalRecordCount: 1
+        }));
+
+        const result = await loadPtvFocusedBrowsePage(
+            parsePtvBrowseRoute('/shows', '?topParentId=anime&view=latest'), scope
+        );
+        expect(result.items.map(item => item.Id).sort((a, b) => String(a).localeCompare(String(b))))
+            .toEqual(['anime-a-series', 'anime-b-series']);
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.ParentId).sort((a, b) => String(a).localeCompare(String(b))))
+            .toEqual(['anime-a', 'anime-b']);
+        for (const [query] of apiMocks.getPtvItems.mock.calls) {
+            expect(query).not.toHaveProperty('AncestorIds');
+            expect(query).not.toHaveProperty('Ids');
+        }
+    });
+
+    it('rejects a nested parent belonging to a different library', async () => {
+        apiMocks.requestPtvJson.mockResolvedValue([{ Id: 'shows-library' }]);
+        apiMocks.getPtvItems.mockResolvedValue({ Items: [{ Id: 'foreign-season' }] });
+        const route = { ...parsePtvBrowseRoute('/shows', '?topParentId=anime'), view: 'season' as const, seasonParentId: 'foreign-series' };
+
+        await expect(loadPtvFocusedBrowsePage(route, scopedAnime)).rejects.toThrow(/outside.*library/i);
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+    });
+
+    it('rechecks identity after the awaited nested proof helper and before starting the child read', async () => {
+        const retireIdentity = () => {
+            apiMocks.userId = 'user-b';
+        };
+        apiMocks.requestPtvJson.mockImplementation(() => {
+            const response = Promise.resolve([{ Id: 'anime-library' }]);
+            void response.then(() => {
+                void Promise.resolve().then(retireIdentity);
+            });
+            return response;
+        });
+        apiMocks.getPtvItems.mockResolvedValue({ Items: [{ Id: 'season', Type: 'Season' }] });
+
+        await expect(getPtvBrowseScopedItems({ ParentId: 'anime-series', IncludeItemTypes: 'Season' }, scopedAnime))
+            .rejects.toMatchObject({ name: 'AbortError' });
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+    });
+
+    it('verifies a nested parent through user-aware ancestors before reading its children', async () => {
+        apiMocks.requestPtvJson.mockResolvedValue([{ Id: 'anime-library' }]);
+        apiMocks.getPtvItems.mockResolvedValue({ Items: [{ Id: 'anime-season' }] });
+        const route = { ...parsePtvBrowseRoute('/shows', '?topParentId=anime'), view: 'season' as const, seasonParentId: 'anime-series' };
+
+        await expect(loadPtvFocusedBrowsePage(route, scopedAnime)).resolves.toMatchObject({ items: [{ Id: 'anime-season' }] });
+        expect(apiMocks.requestPtvJson).toHaveBeenCalledWith('Items/anime-series/Ancestors', expect.objectContaining({ params: { userId: 'user' } }));
+        expect(apiMocks.getPtvItems.mock.calls[0][0]).toMatchObject({ ParentId: 'anime-series', Recursive: false });
+        expect(apiMocks.getPtvItems.mock.calls[0][0]).not.toHaveProperty('AncestorIds');
+    });
+
+    it.each(['serverId', 'userId'] as const)('discards a scoped root response after its %s changes', async identityField => {
+        let resolveItems!: (value: { Items: Array<{ Id: string }> }) => void;
+        const response = new Promise<{ Items: Array<{ Id: string }> }>(resolve => {
+            resolveItems = resolve;
+        });
+        apiMocks.getPtvItems.mockReturnValue(response);
+
+        const request = getPtvBrowseScopedItems({ Limit: 2 }, scopedAnime);
+        expect(apiMocks.getPtvItems).toHaveBeenCalledWith(
+            { Limit: 2, ParentId: 'anime-library' },
+            expect.objectContaining({ serverId: 'server', userId: 'user' })
+        );
+
+        apiMocks[identityField] = 'retired-identity';
+        resolveItems({ Items: [{ Id: 'old-account-series' }] });
+
+        await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('stops root fanout when the display identity retires during the first read', async () => {
+        let resolveItems!: (value: { Items: Array<{ Id: string }> }) => void;
+        const response = new Promise<{ Items: Array<{ Id: string }> }>(resolve => {
+            resolveItems = resolve;
+        });
+        apiMocks.getPtvItems.mockReturnValue(response);
+
+        const request = getPtvBrowseScopedItems({ Limit: 2 }, {
+            ...scopedAnime, libraryIds: ['anime-a', 'anime-b']
+        });
+        expect(apiMocks.getPtvItems).toHaveBeenCalledTimes(1);
+        apiMocks.userId = 'user-b';
+        resolveItems({ Items: [{ Id: 'old-account-series' }] });
+
+        await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.ParentId)).toEqual(['anime-a']);
+    });
+
+    it('does not read children after the display identity retires during ancestry verification', async () => {
+        let resolveAncestors!: (value: Array<{ Id: string }>) => void;
+        const response = new Promise<Array<{ Id: string }>>(resolve => {
+            resolveAncestors = resolve;
+        });
+        apiMocks.requestPtvJson.mockReturnValue(response);
+
+        const request = getPtvBrowseScopedItems({ ParentId: 'anime-series', Recursive: false }, scopedAnime);
+        apiMocks.userId = 'user-b';
+        resolveAncestors([{ Id: 'anime-library' }]);
+
+        await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])('rejects explicit item IDs before membership or item API reads (resume=%s)', async resume => {
+        await expect(getPtvBrowseScopedItems({
+            Ids: 'foreign-show', ParentId: 'anime-series', Limit: 2
+        }, scopedAnime, undefined, resume)).rejects.toThrow(/cannot establish library membership/i);
+
+        expect(apiMocks.requestPtvJson).not.toHaveBeenCalled();
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it('merges and deduplicates bounded root reads before applying the requested page', async () => {
+        const rootItems: Record<string, Array<{ Id: string; SortName: string }>> = {
+            'anime-a': [
+                { Id: 'anime-a-alpha', SortName: 'Alpha' },
+                { Id: 'shared-charlie', SortName: 'Charlie' },
+                { Id: 'anime-a-echo', SortName: 'Echo' },
+                { Id: 'anime-a-golf', SortName: 'Golf' },
+                { Id: 'anime-a-india', SortName: 'India' }
+            ],
+            'anime-b': [
+                { Id: 'anime-b-bravo', SortName: 'Bravo' },
+                { Id: 'shared-charlie', SortName: 'Charlie' },
+                { Id: 'anime-b-delta', SortName: 'Delta' },
+                { Id: 'anime-b-foxtrot', SortName: 'Foxtrot' },
+                { Id: 'anime-b-hotel', SortName: 'Hotel' }
+            ]
+        };
+        apiMocks.getPtvItems.mockImplementation(async query => {
+            const items = rootItems[query.ParentId] || [{ Id: 'foreign-show', SortName: 'Foreign' }];
+
+            return { Items: items.slice(query.StartIndex, query.StartIndex + query.Limit), TotalRecordCount: items.length };
+        });
+
+        const result = await getPtvBrowseScopedItems({
+            AncestorIds: 'foreign-library', IncludeItemTypes: 'Series', Limit: 2,
+            Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', StartIndex: 2
+        }, { ...scopedAnime, libraryIds: ['anime-a', 'anime-b'] });
+
+        expect(result.Items?.map(item => item.Id)).toEqual(['shared-charlie', 'anime-b-delta']);
+        expect(result.TotalRecordCount).toBe(10);
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query)).toEqual([
+            { IncludeItemTypes: 'Series', Limit: 4, ParentId: 'anime-a', Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', StartIndex: 0 },
+            { IncludeItemTypes: 'Series', Limit: 4, ParentId: 'anime-b', Recursive: true, SortBy: 'SortName', SortOrder: 'Ascending', StartIndex: 0 }
+        ]);
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it('waits for each root read before starting the next root', async () => {
+        let resolveItems!: (value: { Items: Array<{ Id: string }> }) => void;
+        const firstResponse = new Promise<{ Items: Array<{ Id: string }> }>(resolve => {
+            resolveItems = resolve;
+        });
+        apiMocks.getPtvItems.mockReturnValueOnce(firstResponse).mockResolvedValueOnce({ Items: [{ Id: 'anime-b-series' }] });
+
+        const request = getPtvBrowseScopedItems({ Limit: 2 }, {
+            ...scopedAnime, libraryIds: ['anime-a', 'anime-b']
+        });
+
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.ParentId)).toEqual(['anime-a']);
+        resolveItems({ Items: [{ Id: 'anime-a-series' }] });
+        const result = await request;
+
+        expect(result.Items?.map(item => item.Id)).toEqual(['anime-a-series', 'anime-b-series']);
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.ParentId)).toEqual(['anime-a', 'anime-b']);
+    });
+
+    it('pages merged resume results by LastPlayedDate using only bounded per-root resume reads', async () => {
+        const rootItems: Record<string, Array<{ Id: string; UserData: { LastPlayedDate: string } }>> = {
+            'anime-a': [
+                { Id: 'shared-episode', UserData: { LastPlayedDate: '2026-09-28T10:00:00Z' } },
+                { Id: 'anime-a-older', UserData: { LastPlayedDate: '2026-09-28T08:00:00Z' } },
+                { Id: 'anime-a-oldest', UserData: { LastPlayedDate: '2026-09-28T06:00:00Z' } }
+            ],
+            'anime-b': [
+                { Id: 'anime-b-newest', UserData: { LastPlayedDate: '2026-09-28T11:00:00Z' } },
+                { Id: 'shared-episode', UserData: { LastPlayedDate: '2026-09-28T10:00:00Z' } },
+                { Id: 'anime-b-middle', UserData: { LastPlayedDate: '2026-09-28T09:00:00Z' } }
+            ]
+        };
+        apiMocks.getPtvResumeItems.mockImplementation(async query => {
+            const items = rootItems[query.ParentId] || [];
+
+            return { Items: items.slice(query.StartIndex, query.StartIndex + query.Limit), TotalRecordCount: items.length };
+        });
+
+        const result = await getPtvBrowseScopedItems({
+            Filters: 'IsResumable', IncludeItemTypes: 'Episode,Series', Limit: 2,
+            SortBy: 'DatePlayed,DateCreated', SortOrder: 'Descending', StartIndex: 1
+        }, { ...scopedAnime, libraryIds: ['anime-a', 'anime-b'] }, undefined, true);
+
+        expect(result.Items?.map(item => item.Id)).toEqual(['shared-episode', 'anime-b-middle']);
+        expect(apiMocks.getPtvResumeItems.mock.calls.map(([query, options]) => [query.ParentId, query.StartIndex, query.Limit, options.serverId, options.userId])).toEqual([
+            ['anime-a', 0, 3, 'server', 'user'],
+            ['anime-b', 0, 3, 'server', 'user']
+        ]);
+        for (const [query] of apiMocks.getPtvResumeItems.mock.calls) {
+            expect(query).toMatchObject({ Filters: 'IsResumable', IncludeItemTypes: 'Episode,Series' });
+            expect(query).not.toHaveProperty('AncestorIds');
+            expect(query).not.toHaveProperty('Ids');
+        }
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { name: 'missing', ancestors: undefined },
+        { name: 'empty', ancestors: [] },
+        { name: 'malformed', ancestors: { Items: [{ Id: 'anime-library' }] } }
+    ])('does not read nested children with $name ancestry', async ({ ancestors }) => {
+        apiMocks.requestPtvJson.mockResolvedValue(ancestors);
+
+        await expect(getPtvBrowseScopedItems({ ParentId: 'anime-series', Recursive: false }, scopedAnime))
+            .rejects.toThrow(/outside.*library/i);
+
+        expect(apiMocks.requestPtvJson).toHaveBeenCalledWith('Items/anime-series/Ancestors', expect.objectContaining({
+            params: { userId: 'user' }, serverId: 'server', userId: 'user'
+        }));
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it('propagates a nested ancestry failure without an item-read fallback', async () => {
+        const ancestryError = new Error('Ancestry unavailable');
+        apiMocks.requestPtvJson.mockRejectedValue(ancestryError);
+
+        await expect(getPtvBrowseScopedItems({ ParentId: 'anime-series', Recursive: false }, scopedAnime))
+            .rejects.toBe(ancestryError);
+
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it('retains projected root provenance when resolving a grouped TV Shows UserView', async () => {
+        apiMocks.getPtvUserViews.mockResolvedValue({
+            Items: [
+                { CollectionType: 'tvshows', Id: 'grouped-shows-view', Name: 'TV Shows', Type: 'UserView' },
+                { CollectionType: 'tvshows', Id: 'physical-shows-library', Name: 'Shows Library', Type: 'CollectionFolder' }
+            ]
+        });
+
+        await expect(resolvePtvBrowseScope(parsePtvBrowseRoute('/shows'))).resolves.toMatchObject({
+            libraryIds: ['grouped-shows-view', 'physical-shows-library'],
+            projectedLibraryIds: ['grouped-shows-view'],
+            status: 'resolved'
+        });
+    });
+
+    it('proves projected Series membership across two bounded root pages before reading Seasons', async () => {
+        const scope = await resolveGroupedShowsScope();
+        const firstPage = Array.from({ length: 200 }, (_, index) => ({ Id: `other-series-${index}`, Type: 'Series' }));
+        apiMocks.requestPtvJson.mockResolvedValue([{ Id: 'physical-tv-library', Type: 'CollectionFolder' }]);
+        apiMocks.getPtvItems.mockImplementation(async query => {
+            if (query.ParentId === 'grouped-shows-view') {
+                return {
+                    Items: query.StartIndex === 0 ? firstPage : [{ Id: 'projected-series', Type: 'Series' }],
+                    TotalRecordCount: 201
+                };
+            }
+            return { Items: [{ Id: 'projected-season', Type: 'Season' }], TotalRecordCount: 1 };
+        });
+        const query = { IncludeItemTypes: 'Season', Limit: 3, ParentId: 'projected-series', Recursive: false, StartIndex: 0 };
+
+        const result = await getPtvBrowseScopedItems(query, scope);
+
+        expect(result.Items?.map(item => item.Id)).toEqual(['projected-season']);
+        expect(apiMocks.getPtvItems.mock.calls.map(([params]) => [
+            params.ParentId, params.IncludeItemTypes, params.Recursive, params.Limit, params.StartIndex
+        ])).toEqual([
+            ['grouped-shows-view', 'Series', true, 200, 0],
+            ['grouped-shows-view', 'Series', true, 200, 200],
+            ['projected-series', 'Season', false, 3, 0]
+        ]);
+        expect(apiMocks.getPtvItems.mock.calls[2][0]).toEqual(query);
+        for (const [params, options] of apiMocks.getPtvItems.mock.calls) {
+            expect(params).not.toHaveProperty('AncestorIds');
+            expect(params).not.toHaveProperty('Ids');
+            expect(options).toMatchObject({ serverId: 'server', userId: 'user' });
+        }
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { name: 'foreign', firstPageSize: 1, totalRecordCount: 1, starts: [0] },
+        { name: 'exhausted', firstPageSize: 200, totalRecordCount: 201, starts: [0, 200] }
+    ])('denies a $name Series after scanning the projected root without membership', async ({ firstPageSize, totalRecordCount, starts }) => {
+        const scope = await resolveGroupedShowsScope();
+        const firstPage = Array.from({ length: firstPageSize }, (_, index) => ({ Id: `other-series-${index}`, Type: 'Series' }));
+        apiMocks.requestPtvJson.mockResolvedValue([{ Id: 'physical-tv-library', Type: 'CollectionFolder' }]);
+        apiMocks.getPtvItems.mockImplementation(async query => {
+            const rootPage = query.StartIndex === 0 ? firstPage : [];
+
+            return {
+                Items: query.ParentId === 'grouped-shows-view' ? rootPage : [{ Id: 'foreign-season', Type: 'Season' }],
+                TotalRecordCount: totalRecordCount
+            };
+        });
+
+        await expect(getPtvBrowseScopedItems({
+            IncludeItemTypes: 'Season', Limit: 3, ParentId: 'foreign-series', Recursive: false
+        }, scope)).rejects.toThrow(/outside.*library/i);
+
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.StartIndex)).toEqual(starts);
+        for (const [query] of apiMocks.getPtvItems.mock.calls) {
+            expect(query).toMatchObject({ ParentId: 'grouped-shows-view', IncludeItemTypes: 'Series', Recursive: true, Limit: 200 });
+            expect(query).not.toHaveProperty('Ids');
+            expect(query).not.toHaveProperty('AncestorIds');
+        }
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it.each(['cancelled', 'retired'] as const)('does not read Seasons after projected membership work is %s', async retirement => {
+        const scope = await resolveGroupedShowsScope();
+        const controller = createPtvAbortController();
+        let resolveMembership!: (value: { Items: Array<{ Id: string; Type: string }>; TotalRecordCount: number }) => void;
+        const response = new Promise<{ Items: Array<{ Id: string; Type: string }>; TotalRecordCount: number }>(resolve => {
+            resolveMembership = resolve;
+        });
+        apiMocks.requestPtvJson.mockResolvedValue([{ Id: 'physical-tv-library', Type: 'CollectionFolder' }]);
+        apiMocks.getPtvItems.mockReturnValue(response);
+
+        const request = getPtvBrowseScopedItems({
+            IncludeItemTypes: 'Season', Limit: 3, ParentId: 'projected-series', Recursive: false
+        }, scope, controller.signal);
+        const outcome = request.then(result => ({ result }), error => ({ error }));
+        await vi.waitFor(() => {
+            expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.ParentId)).toEqual(['grouped-shows-view']);
+        });
+
+        if (retirement === 'cancelled') controller.abort();
+        else apiMocks.userId = 'user-b';
+        resolveMembership({ Items: [{ Id: 'projected-series', Type: 'Series' }], TotalRecordCount: 1 });
+
+        expect(await outcome).toMatchObject({ error: { name: 'AbortError' } });
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query.ParentId)).toEqual(['grouped-shows-view']);
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it.each(['Series', 'Episode', 'Movie', 'BoxSet', 'Season,BoxSet'])('does not broaden projected membership proof to %s child queries', async includeItemTypes => {
+        const scope = await resolveGroupedShowsScope();
+        apiMocks.requestPtvJson.mockResolvedValue([{ Id: 'physical-tv-library', Type: 'CollectionFolder' }]);
+        apiMocks.getPtvItems.mockResolvedValue({ Items: [{ Id: 'foreign-parent', Type: 'Series' }], TotalRecordCount: 1 });
+
+        await expect(getPtvBrowseScopedItems({
+            IncludeItemTypes: includeItemTypes, Limit: 3, ParentId: 'foreign-parent', Recursive: false
+        }, scope)).rejects.toThrow(/outside.*library/i);
+
+        expect(apiMocks.getPtvItems).not.toHaveBeenCalled();
+        expect(apiMocks.getPtvResumeItems).not.toHaveBeenCalled();
+    });
+
+    it('interleaves bounded multi-root Random results before slicing the page', async () => {
+        apiMocks.getPtvItems.mockImplementation(async query => ({
+            Items: query.ParentId === 'anime-a' ? [{ Id: 'a1' }, { Id: 'a2' }] : [{ Id: 'b1' }, { Id: 'b2' }],
+            TotalRecordCount: 2
+        }));
+
+        const result = await getPtvBrowseScopedItems({ Limit: 2, SortBy: 'Random', StartIndex: 0 }, {
+            ...scopedAnime, libraryIds: ['anime-a', 'anime-b']
+        });
+
+        expect(result.Items?.map(item => item.Id)).toEqual(['a1', 'b1']);
+        expect(apiMocks.getPtvItems.mock.calls.map(([query]) => query)).toEqual([
+            { Limit: 2, ParentId: 'anime-a', SortBy: 'Random', StartIndex: 0 },
+            { Limit: 2, ParentId: 'anime-b', SortBy: 'Random', StartIndex: 0 }
+        ]);
+    });
+
+    it('preserves item deduplication when interleaving multi-root Random results', async () => {
+        apiMocks.getPtvItems.mockImplementation(async query => ({
+            Items: query.ParentId === 'anime-a' ? [{ Id: 'a1' }, { Id: 'shared' }, { Id: 'a3' }] : [{ Id: 'b1' }, { Id: 'shared' }, { Id: 'b3' }],
+            TotalRecordCount: 3
+        }));
+
+        const result = await getPtvBrowseScopedItems({ Limit: 5, SortBy: 'Random', StartIndex: 0 }, {
+            ...scopedAnime, libraryIds: ['anime-a', 'anime-b']
+        });
+        const ids = result.Items?.map(item => item.Id) || [];
+
+        expect(ids.slice(0, 2)).toEqual(['a1', 'b1']);
+        expect([...ids].sort((left, right) => String(left).localeCompare(String(right)))).toEqual(['a1', 'a3', 'b1', 'b3', 'shared']);
     });
 
     it('maps exact structured filters and paging to Jellyfin query fields', () => {

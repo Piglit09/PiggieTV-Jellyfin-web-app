@@ -1,5 +1,11 @@
 /** Point-in-time presentation proof only. Jellyfin remains the item-access authority. */
 type PresentationAuthority = { version: 1; scope: string; generation: string };
+export type VerifiedHomeTransitionBinding = Readonly<{
+    libraryId: string;
+    topologyEpoch: string;
+    bindingGeneration: number;
+    explicitRebind: boolean;
+}>;
 export type ConfiguredRowFreshnessSnapshot = Readonly<{
     status: 'UNKNOWN' | 'VERIFYING' | 'CURRENT' | 'STALE' | 'ERROR';
     authority: string | null;
@@ -13,9 +19,12 @@ type ProofState = {
     revision: number;
     authority: PresentationAuthority;
     bindings: Set<string>;
+    transitionBindings: Map<string, VerifiedHomeTransitionBinding>;
 };
 
 const opaque = /^[a-f0-9]{64}$/;
+const libraryId = /^[a-f0-9]{32}$/;
+const topologyEpoch = /^[a-fA-F0-9]{64}$/;
 const listeners = new Set<() => void>();
 const proofs = new WeakMap<ConfiguredRowProof, ProofState>();
 const consumedVerifications = new WeakSet<ConfiguredRowVerification>();
@@ -117,19 +126,41 @@ function failVerification(verification: ConfiguredRowVerification, reason: strin
     return null;
 }
 
-function parseBindings(value: unknown): Set<string> | null {
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]) {
+    return Object.keys(value).length === keys.length
+        && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function parseBindings(value: unknown): Pick<ProofState, 'bindings' | 'transitionBindings'> | null {
     if (!Array.isArray(value)) return null;
     const pairs = new Set<string>();
     const sections = new Set<string>();
+    const transitionBindings = new Map<string, VerifiedHomeTransitionBinding>();
     for (const entry of value) {
         const item = record(entry);
-        if (!item || Object.keys(item).length !== 2 || typeof item.rule !== 'string' || !opaque.test(item.rule)
+        const standard = !!item && hasExactKeys(item, [ 'rule', 'section' ]);
+        const rebound = !!item && hasExactKeys(item, [ 'rule', 'section', 'libraryId', 'topologyEpoch',
+            'bindingGeneration', 'explicitRebind' ]);
+        if (!item || (!standard && !rebound) || typeof item.rule !== 'string' || !opaque.test(item.rule)
             || typeof item.section !== 'string' || !opaque.test(item.section)
             || sections.has(item.section)) return null;
+        if (rebound) {
+            if (typeof item.libraryId !== 'string' || !libraryId.test(item.libraryId)
+                || item.libraryId === '0'.repeat(32)
+                || typeof item.topologyEpoch !== 'string' || !topologyEpoch.test(item.topologyEpoch)
+                || typeof item.bindingGeneration !== 'number' || !Number.isSafeInteger(item.bindingGeneration)
+                || item.bindingGeneration <= 0 || typeof item.explicitRebind !== 'boolean') return null;
+            transitionBindings.set(`${item.rule}.${item.section}`, {
+                libraryId: item.libraryId,
+                topologyEpoch: item.topologyEpoch,
+                bindingGeneration: item.bindingGeneration,
+                explicitRebind: item.explicitRebind
+            });
+        }
         sections.add(item.section);
         pairs.add(`${item.rule}.${item.section}`);
     }
-    return pairs;
+    return { bindings: pairs, transitionBindings };
 }
 
 /** Invoke only after both response inputs have resolved; readAuthority creates a fresh transport. */
@@ -157,7 +188,7 @@ export async function verifyConfiguredRowFreshness(options: {
             return failVerification(verification, 'final-authority-unproven');
         }
         const proof: ConfiguredRowProof = Object.freeze({ verified: true });
-        proofs.set(proof, { revision: verification.revision, authority: finalAuthority, bindings });
+        proofs.set(proof, { revision: verification.revision, authority: finalAuthority, ...bindings });
         publish({ ...snapshot, status: 'CURRENT', authority: key, reason: 'final-read-verified' });
         return proof;
     } catch (error) {
@@ -189,6 +220,19 @@ export function isConfiguredSectionVerified(section: unknown, proof: ConfiguredR
     return !!state && association?.version === 1 && association.scope === state.authority.scope
         && typeof association.rule === 'string' && typeof association.section === 'string'
         && state.bindings.has(`${association.rule}.${association.section}`);
+}
+
+/** Only the current final status proof may bind a saved rule to a new CollectionFolder ID. */
+export function getVerifiedHomeTransitionBinding(
+    section: unknown,
+    proof: ConfiguredRowProof | null | undefined
+): VerifiedHomeTransitionBinding | null {
+    const state = getCurrentProof(proof);
+    const association = record(record(section)?.configuredRowAssociation);
+    if (!state || association?.version !== 1 || association.scope !== state.authority.scope
+        || typeof association.rule !== 'string' || !opaque.test(association.rule)
+        || typeof association.section !== 'string' || !opaque.test(association.section)) return null;
+    return state.transitionBindings.get(`${association.rule}.${association.section}`) || null;
 }
 
 export function isConfiguredRowPresentationCurrent(row: unknown, identityKey?: string | null) {

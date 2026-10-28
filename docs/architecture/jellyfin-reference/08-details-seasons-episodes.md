@@ -116,3 +116,10 @@ Exact item route: `GET /Users/{userId}/Items?IncludeItemTypes=Episode&Recursive=
 2. A restored view reuses cached controller state; explicit mutation success is the principal metadata reload trigger.
 3. Series/season/episode traversal is user-scoped but not a single transaction: each section can settle independently.
 4. Cleanup removes subscriptions and retained references, but it does not cancel or generation-gate network work.
+
+## Stage 4 PTV cinematic Details presentation — isolated integration candidate
+
+- `[VERIFIED_FROM_SOURCE]` Cinematic Details remains a wrapper around the stock item/children reads. Its shell and lower sections use the measured PTV header clearance for sticky and scroll offsets; the responsive change does not alter DTO, artwork URL, or relationship request identity. `src/ptv/modules/details/details-shell.scss`; `details-sections.scss`.
+- `[VERIFIED_FROM_SOURCE]` The PTV relationship model now labels generic related video titles generically. Franchise/collection labels require explicit matching metadata, and shared creator, studio, network, genre, label or publisher evidence retains its own classification. For video/series, entity cards repeated from stock Cast are suppressed unless a person links to distinct related titles. `src/ptv/modules/details/detailsCinematicModel.ts`; `detailsCinematicExperience.ts`.
+- `[VERIFIED_BY_TEST]` Focused model tests and local Playwright live-resize/portrait/landscape checks exercise the presentation contract. Physical iPad portrait/landscape and Fold reference-screenshot acceptance remains `[UNKNOWN]`; no server metadata authority changes are implied.
+- `[VERIFIED_BY_TEST]` `e2e/tests/details-shared-layout.spec.ts` covers shared Details fixtures for Movie, Series, Season, Book, Anime and Cartoons through 360–1440 CSS px and live resizing. It asserts page overflow, poster/action/title order, 44 px action width, rail horizontal scroll and stable backdrop source. These are synthetic kind variants and cannot prove every production item-specific Details path or physical Safari/Fold rendering.

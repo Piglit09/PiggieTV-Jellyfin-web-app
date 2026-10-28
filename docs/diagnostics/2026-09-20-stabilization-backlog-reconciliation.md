@@ -20,7 +20,7 @@ The focused Web run passed 10 test files and 80 tests. The focused Plugin run us
 
 ## Post-R3 Deferred Follow-up
 
-The following issues were recorded during release validation and are explicitly outside the R3 scope. They remain open until separately reproduced, designed, implemented, and verified. No item below is a production-acceptance blocker for Web 0.5.60 / Plugin 0.5.19.0.
+The following issues were recorded during R3 release validation and were outside that release's scope. The classifications below describe the Web 0.5.60 / Plugin 0.5.19.0 snapshot; later source work or acceptance may have changed their status. Consult current GitHub issues and acceptance evidence for current status. No item below was treated as a production-acceptance blocker for R3.
 
 | Item | Classification | Evidence | Follow-up |
 | --- | --- | --- | --- |

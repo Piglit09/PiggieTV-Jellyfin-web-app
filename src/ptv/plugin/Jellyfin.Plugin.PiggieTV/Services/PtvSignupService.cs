@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Jellyfin.Database.Implementations.Entities;
+using Jellyfin.Plugin.PiggieTV.Api;
 using Jellyfin.Plugin.PiggieTV.Configuration;
 using Jellyfin.Plugin.PiggieTV.Models;
 using MediaBrowser.Controller.Library;
@@ -31,27 +32,39 @@ public sealed class PtvSignupService : IPtvSignupService
     private readonly IPtvMailService _mailService;
     private readonly IDataProtector _passwordProtector;
     private readonly IUserManager _userManager;
+    private readonly ILibraryManager _libraryManager;
+    private readonly IPtvHomeUserAccessLedger _homeUserAccessLedger;
+    private readonly IPtvHomeTopologyLedger _homeTopologyLedger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PtvSignupService"/> class.
     /// </summary>
     /// <param name="logger">Logger.</param>
     /// <param name="userManager">Jellyfin user manager.</param>
+    /// <param name="libraryManager">Current user-aware library readback.</param>
     /// <param name="dataProtectionProvider">Data protection provider.</param>
     /// <param name="accountService">Durable account service.</param>
     /// <param name="mailService">Central transactional mail service.</param>
+    /// <param name="homeUserAccessLedger">Durable per-user Home authority.</param>
+    /// <param name="homeTopologyLedger">Current Home topology authority.</param>
     public PtvSignupService(
         ILogger<PtvSignupService> logger,
         IUserManager userManager,
+        ILibraryManager libraryManager,
         IDataProtectionProvider dataProtectionProvider,
         IPtvAccountService accountService,
-        IPtvMailService mailService)
+        IPtvMailService mailService,
+        IPtvHomeUserAccessLedger homeUserAccessLedger,
+        IPtvHomeTopologyLedger homeTopologyLedger)
     {
         _accountService = accountService;
         _logger = logger;
         _mailService = mailService;
         _passwordProtector = dataProtectionProvider.CreateProtector("PiggieTV.Signup.PendingPassword.v1");
         _userManager = userManager;
+        _libraryManager = libraryManager;
+        _homeUserAccessLedger = homeUserAccessLedger;
+        _homeTopologyLedger = homeTopologyLedger;
     }
 
     /// <inheritdoc />
@@ -304,30 +317,60 @@ public sealed class PtvSignupService : IPtvSignupService
             }
 
             var preset = FindPreset(signup, pending.PolicyPresetId);
-            var createdUser = await _userManager.CreateUserAsync(pending.Username).ConfigureAwait(false);
+            var intendedPolicy = BuildPolicy(new UserPolicy(), preset, pending.EnabledFolderIds);
+            var creationId = Guid.NewGuid();
+            var existingIds = _userManager.GetUsersIds().Take(1001).ToArray();
+            var createdUser = await PtvSignupCreationReservation.CreateAndBindAsync(
+                _homeUserAccessLedger, creationId, existingIds,
+                _ => _userManager.CreateUserAsync(pending.Username), user => user.Id,
+                cancellationToken).ConfigureAwait(false);
+            var intendedAccess = new PtvHomeAccessDefinition
+            {
+                UserId = createdUser.Id.ToString("N"),
+                EnableAllFolders = intendedPolicy.EnableAllFolders,
+                EnabledFolders = intendedPolicy.EnabledFolders.Select(id => id.ToString("N"))
+                    .Order(StringComparer.Ordinal).ToArray(),
+                IsAdministrator = intendedPolicy.IsAdministrator,
+                IsDisabled = intendedPolicy.IsDisabled
+            };
 
             try
             {
                 await ChangePasswordAsync(createdUser, password).ConfigureAwait(false);
-                await ApplyPolicyAsync(createdUser.Id, new UserPolicy(), preset, pending.EnabledFolderIds, cancellationToken)
-                    .ConfigureAwait(false);
-                await _accountService.ImportVerifiedSignupEmailAsync(
-                    createdUser.Id,
-                    pending.Username,
-                    pending.Email,
-                    cancellationToken).ConfigureAwait(false);
-
-                signup.PendingVerifications.Remove(pending);
-                signup.Users.Add(new SignupUserRecord
-                {
-                    CreatedAtUtc = DateTimeOffset.UtcNow,
-                    Email = pending.Email,
-                    PolicyPresetId = preset.Id,
-                    RemoteAddress = remoteAddress,
-                    UserId = createdUser.Id.ToString("N"),
-                    Username = pending.Username
-                });
-                SaveConfiguration(configuration);
+                await PtvSignupUserAccessBootstrap.ExecuteAsync(createdUser.Id, intendedAccess, _homeUserAccessLedger,
+                    ct =>
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var user = _userManager.GetUserById(createdUser.Id);
+                        return Task.FromResult(user is null ? null : PtvHomeUserAccessController.Access(user));
+                    },
+                    async ct => PtvHomeUserAccessController.UsableEpoch(
+                        await _homeTopologyLedger.ReadAsync(ct).ConfigureAwait(false)),
+                    ct => _userManager.UpdatePolicyAsync(createdUser.Id, intendedPolicy).WaitAsync(ct),
+                    cancellationToken,
+                    async ct =>
+                    {
+                        await _accountService.ImportVerifiedSignupEmailAsync(
+                            createdUser.Id, pending.Username, pending.Email, ct).ConfigureAwait(false);
+                        signup.PendingVerifications.Remove(pending);
+                        signup.Users.Add(new SignupUserRecord
+                        {
+                            CreatedAtUtc = DateTimeOffset.UtcNow,
+                            Email = pending.Email,
+                            PolicyPresetId = preset.Id,
+                            RemoteAddress = remoteAddress,
+                            UserId = createdUser.Id.ToString("N"),
+                            Username = pending.Username
+                        });
+                        SaveConfiguration(configuration);
+                    },
+                    ct =>
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var user = _userManager.GetUserById(createdUser.Id);
+                        return Task.FromResult<IReadOnlyCollection<string>?>(user is null ? null :
+                            PtvHomeUserAccessController.ReadAccessibleLibraries(_libraryManager, user));
+                    }).ConfigureAwait(false);
             }
             catch (Exception provisioningException)
             {
@@ -552,9 +595,12 @@ public sealed class PtvSignupService : IPtvSignupService
                 return Fail("The account for this reset code was not found.");
             }
 
-            await ChangePasswordAsync(user, request.Password!).ConfigureAwait(false);
-            signup.PasswordResetCodes.Remove(reset);
+            // Retire every code for this verified email before changing the Jellyfin password.
+            // A configuration write failure must not leave valid codes after a password change.
+            signup.PasswordResetCodes.RemoveAll(candidate =>
+                string.Equals(candidate.Email, email, StringComparison.OrdinalIgnoreCase));
             SaveConfiguration(configuration);
+            await ChangePasswordAsync(user, request.Password!).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "PiggieTV password reset completed. Username={Username}; Email={Email}; Remote={RemoteAddress}.",
@@ -801,12 +847,10 @@ public sealed class PtvSignupService : IPtvSignupService
         }
     }
 
-    private async Task ApplyPolicyAsync(
-        Guid userId,
+    private static UserPolicy BuildPolicy(
         UserPolicy policy,
         SignupPolicyPreset preset,
-        IReadOnlyCollection<string> folderOverride,
-        CancellationToken cancellationToken)
+        IReadOnlyCollection<string> folderOverride)
     {
         policy.IsAdministrator = false;
         policy.IsDisabled = false;
@@ -846,7 +890,7 @@ public sealed class PtvSignupService : IPtvSignupService
         policy.EnableAllFolders = preset.EnableAllFolders && effectiveFolderOverride.Count == 0;
         policy.EnabledFolders = policy.EnableAllFolders ? [] : enabledFolderIds;
 
-        await _userManager.UpdatePolicyAsync(userId, policy).WaitAsync(cancellationToken).ConfigureAwait(false);
+        return policy;
     }
 
     private PtvSignupInviteValidationResponse ValidateInvite(SignupSettings signup, SignupInvite? invite)

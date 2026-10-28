@@ -1,3 +1,6 @@
+import { observeHomeLibraryAuthority } from '../pages/home/homeLibraryTransitionFreshness';
+import type { Api } from '@jellyfin/sdk';
+import type { VirtualFolderInfo } from '@jellyfin/sdk/lib/generated-client/models/virtual-folder-info';
 import { ServerConnections } from 'lib/jellyfin-apiclient';
 import Events from '../../utils/events';
 import { getPtvAuthenticatedDisplayIdentityKey } from '../services/displayIdentity';
@@ -16,6 +19,7 @@ import type {
 } from './recommendations/recommendationPolicyContracts';
 import {
     classifyPtvRequestUrl,
+    getPtvHostedServerRoot,
     isPtvWebpackDevServerOrigin,
     resolvePtvServerUrlForPage,
     type PtvRequestOriginKind
@@ -42,6 +46,163 @@ type PtvJellyfinApiClient = {
     serverAddress?: () => string;
     serverId?: () => string | null | undefined;
     serverInfo?: () => { Id?: string | null } | null | undefined;
+};
+
+export type HomeTransitionLibraryDefinition = {
+    libraryId: string;
+    name: string;
+    collectionType: string;
+    roots: string[];
+    options: NonNullable<VirtualFolderInfo['LibraryOptions']>;
+};
+export type HomeTransitionIntent = {
+    operationId: string;
+    serverId: string;
+    kind: 'create' | 'rename' | 'delete' | 'roots' | 'definition';
+    expectedLibraryAbsent?: boolean;
+    expectedLibrary?: HomeTransitionLibraryDefinition;
+    intendedLibrary?: HomeTransitionLibraryDefinition;
+};
+export type HomeTransitionResponse = {
+    operationId: string | null;
+    epoch: string;
+    held: boolean;
+    state: 'pending' | 'failed' | 'complete' | 'idle' | 'recovery-required';
+    affectedRuleIds: string[];
+    writeAllowed: boolean;
+    authority: 'unresolved' | 'binding-required' | 'generation-pending' | 'bound';
+    library?: VirtualFolderInfo | null;
+};
+export type HomeTransitionCompleteRequest = {
+    bindings?: Array<{ ruleId: string; libraryId: string }>;
+};
+export type HomeUserAccess = {
+    userId: string;
+    enableAllFolders: boolean;
+    enabledFolders: string[];
+    isAdministrator: boolean;
+    isDisabled: boolean;
+};
+export type HomeUserAccessBeginRequest = {
+    operationId: string;
+    supersedesOperationId?: string;
+    userId: string;
+    mode: 'existing' | 'bootstrap' | 'preserve' | 'reproof';
+    expectedAccess: HomeUserAccess | null;
+    intendedAccess: HomeUserAccess;
+};
+export type HomeUserAccessResponse = {
+    version: 1;
+    userId: string;
+    operationId: string | null;
+    accessEpoch: string | null;
+    held: boolean;
+    policyProven: boolean;
+    state: 'unproven' | 'pending' | 'failed' | 'policy-attested' | 'recovery-required';
+    writeAllowed: boolean;
+    /** Administrator current diagnostic only; core Begin/Complete omit these fields. */
+    supersededOperationId?: string | null;
+    verificationBatchId?: string | null;
+    currentAccess?: HomeUserAccess | null;
+    expectedAccess?: HomeUserAccess | null;
+    intendedAccess?: HomeUserAccess | null;
+    controlledCreated?: boolean;
+    migrationRecoveryRestricted?: boolean;
+    lateUnverified?: boolean;
+};
+
+function invalidHomeAccessResponse(): never {
+    throw Object.assign(new Error('The Plugin returned an invalid Home access policy.'), {
+        code: 'PTV_PLUGIN_ACCESS_RESPONSE_INVALID'
+    });
+}
+
+function normalizeHomeAccessDefinition(value: unknown): HomeUserAccess {
+    if (!isRecord(value)) invalidHomeAccessResponse();
+    const camelKeys = [ 'userId', 'enableAllFolders', 'enabledFolders', 'isAdministrator', 'isDisabled' ];
+    const pascalKeys = [ 'UserId', 'EnableAllFolders', 'EnabledFolders', 'IsAdministrator', 'IsDisabled' ];
+    const hasCamel = camelKeys.some(key => key in value);
+    const hasPascal = pascalKeys.some(key => key in value);
+    if (hasCamel === hasPascal) invalidHomeAccessResponse();
+    const keys = hasPascal ? pascalKeys : camelKeys;
+    const [ userId, enableAllFolders, enabledFolders, isAdministrator, isDisabled ] = keys.map(key => value[key]);
+    if (typeof userId !== 'string' || typeof enableAllFolders !== 'boolean'
+        || !Array.isArray(enabledFolders) || !enabledFolders.every(folder => typeof folder === 'string')
+        || typeof isAdministrator !== 'boolean' || typeof isDisabled !== 'boolean') invalidHomeAccessResponse();
+    return { userId, enableAllFolders, enabledFolders, isAdministrator, isDisabled };
+}
+
+function normalizeHomeUserAccessResponse(value: unknown): HomeUserAccessResponse {
+    if (!isRecord(value)) invalidHomeAccessResponse();
+    const response = { ...value };
+    for (const field of [ 'currentAccess', 'expectedAccess', 'intendedAccess' ] as const) {
+        if (field in response && response[field] !== null && response[field] !== undefined) {
+            response[field] = normalizeHomeAccessDefinition(response[field]);
+        }
+    }
+    return response as HomeUserAccessResponse;
+}
+export type HomeUserVerificationBatch = {
+    id: string;
+    topologyEpoch: string;
+    candidateUserIds: string[];
+    verifiedCount: number;
+    needsVerificationCount: number;
+    stale: boolean;
+};
+export type HomeUserVerificationRequest = {
+    intendedAccess: HomeUserAccess;
+    confirmCurrentPolicy: true;
+};
+export type HomeUserVerificationSummary = {
+    verifiedCount: number;
+    needsVerificationCount: number;
+    totalCount: number;
+    currentBatchId: string | null;
+    topologyEpoch: string | null;
+    held: boolean;
+    recoveryRequired: boolean;
+    pendingCreationReservations: number;
+    legacyCohortStarted: boolean;
+    migrationRecoveryRestricted: boolean;
+};
+export type HomeUserCorruptRecoveryResponse = {
+    recovered: boolean;
+    requiresVerification: boolean;
+};
+export type HomeUserCreationReservation = {
+    version: 1;
+    creationOperationId: string;
+    state: 'reserved';
+    migrationVerificationHeld: true;
+    /** Jellyfin may omit a nullable userId until the creation is bound. */
+    userId?: null;
+    bootstrapRequired: false;
+};
+export type HomeUserCreationBinding = {
+    version: 1;
+    creationOperationId: string;
+    state: 'bound';
+    userId: string;
+    bootstrapRequired: true;
+    migrationVerificationHeld: false;
+};
+export type HomeUserCreationCurrent = {
+    pendingCount: number;
+    pending: Array<{ creationOperationId: string; candidateNewUserIds: string[] }>;
+};
+export type HomeUserCreationOperationStatus = {
+    version: 1;
+    creationOperationId: string;
+    state: 'reserved' | 'bound' | 'recovered' | 'absent';
+    /** Unbound statuses may omit the nullable Jellyfin user ID. */
+    userId?: string | null;
+    markedUserIds: string[];
+};
+export type HomeUserCreationRecovery = {
+    creationOperationId: string;
+    state: 'recovered';
+    markedUserIds: string[];
 };
 
 type JsonResponseLike = {
@@ -701,6 +862,9 @@ function getPluginRootCandidates(
     params?: Record<string, unknown>,
     options: { requireApiClientRoot?: boolean } = {}
 ) {
+    const hostedRoot = getPtvHostedServerRoot();
+    if (hostedRoot) return [hostedRoot];
+
     const rootCandidates: string[] = [];
     const apiClientRoot = getPluginRootFromApiClient(apiClient, path, params);
 
@@ -1350,7 +1514,7 @@ function requestPluginJson<T>(
         && method === 'GET'
         && getEndpointName(path) === 'featuredContent';
     const candidates = getPluginUrlCandidates(currentClient, path, options.params, {
-        requireApiClientRoot: isAuthenticatedFeaturedRead
+        requireApiClientRoot: isAuthenticatedFeaturedRead || /^ptv\/v1\/home-(?:transitions|user-access)\//.test(normalizePluginPath(path).toLowerCase())
     });
     const serverIdentity = getPluginRequestServerIdentity(currentClient, path, options.params, candidates[0]);
     const authenticatedIdentity = requiresAuthentication ? getPluginAuthenticatedIdentity(currentClient) : null;
@@ -1728,6 +1892,7 @@ function createRowsValidationCompatibilityResponse(settings: unknown) {
 const pluginStatusListeners = new Set<(status: unknown) => void>();
 
 function publishPtvPluginStatus(status: unknown) {
+    observeHomeLibraryAuthority(status);
     observeConfiguredRowAuthority(readConfiguredPresentationAuthority(status));
     pluginStatusListeners.forEach(listener => {
         try {
@@ -1803,6 +1968,88 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
     if (!apiClient?.getUrl) return null;
 
     return {
+        matchesSdkApi(api: Api) {
+            const address = apiClient.serverAddress?.();
+            const token = apiClient.accessToken?.();
+            return Boolean(address && token && api.basePath.replace(/\/$/, '') === address.replace(/\/$/, '') && api.accessToken === token);
+        },
+        beginHomeTransition(body: HomeTransitionIntent, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeTransitionResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.homeTransitions}/begin`, { ...options, body, method: 'POST' });
+        },
+        completeHomeTransition(operationId: string, body: HomeTransitionCompleteRequest = {}, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeTransitionResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.homeTransitions}/${encodeURIComponent(operationId)}/complete`, { ...options, body, method: 'POST' });
+        },
+        getCurrentHomeTransition(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeTransitionResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.homeTransitions}/current`, { ...options, bypassCache: true });
+        },
+        beginHomeUserAccess(body: HomeUserAccessBeginRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserAccessResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/begin`, { ...options, body, method: 'POST' });
+        },
+        completeHomeUserAccess(operationId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserAccessResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/${encodeURIComponent(operationId)}/complete`, { ...options, body: {}, method: 'POST' });
+        },
+        getCurrentHomeUserAccess(userId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<unknown>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/current`, {
+                ...options,
+                bypassCache: true,
+                params: { userId }
+            }).then(normalizeHomeUserAccessResponse);
+        },
+        createHomeUserVerificationBatch(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserVerificationBatch>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/verification-batches`, {
+                ...options, body: {}, method: 'POST'
+            });
+        },
+        createFreshHomeUserVerificationBatch(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserVerificationBatch>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/verification-batches/new`, {
+                ...options, body: {}, method: 'POST'
+            });
+        },
+        getHomeUserVerificationSummary(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserVerificationSummary>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/verification-summary`, {
+                ...options, bypassCache: true
+            });
+        },
+        recoverCorruptHomeUserAccessLedger(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserCorruptRecoveryResponse>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/recover-corrupt`, {
+                ...options, body: {}, method: 'POST'
+            });
+        },
+        reserveHomeUserCreation(body: { creationOperationId: string }, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserCreationReservation>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/creations/reserve`, {
+                ...options, body, method: 'POST'
+            });
+        },
+        bindHomeUserCreation(creationOperationId: string, body: { userId: string }, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserCreationBinding>(apiClient,
+                `${PTV_PLUGIN_API.endpoints.homeUserAccess}/creations/${encodeURIComponent(creationOperationId)}/bind`,
+                { ...options, body, method: 'POST' });
+        },
+        getCurrentHomeUserCreations(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserCreationCurrent>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/creations/current`, {
+                ...options, bypassCache: true
+            });
+        },
+        getHomeUserCreationOperationStatus(creationOperationId: string, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserCreationOperationStatus>(apiClient,
+                `${PTV_PLUGIN_API.endpoints.homeUserAccess}/creations/${encodeURIComponent(creationOperationId)}/status`,
+                { ...options, bypassCache: true });
+        },
+        recoverHomeUserCreation(creationOperationId: string, body: { confirmCreationRequestSettled: true }, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserCreationRecovery>(apiClient,
+                `${PTV_PLUGIN_API.endpoints.homeUserAccess}/creations/${encodeURIComponent(creationOperationId)}/recover`,
+                { ...options, body, method: 'POST' });
+        },
+        getCurrentHomeUserVerificationBatch(options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserVerificationBatch>(apiClient, `${PTV_PLUGIN_API.endpoints.homeUserAccess}/verification-batches/current`, {
+                ...options, bypassCache: true
+            });
+        },
+        verifyHomeUserVerificationBatchCandidate(batchId: string, userId: string, body: HomeUserVerificationRequest, options?: PtvPluginRequestOptions) {
+            return requestPluginJson<HomeUserAccessResponse>(apiClient,
+                `${PTV_PLUGIN_API.endpoints.homeUserAccess}/verification-batches/${encodeURIComponent(batchId)}/users/${encodeURIComponent(userId)}/verify`,
+                { ...options, body, method: 'POST' });
+        },
         getCurrentServerId() {
             return typeof apiClient.serverId === 'function' ? apiClient.serverId() : null;
         },
@@ -1969,6 +2216,16 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                 }
             );
         },
+        reassessReadingMetadata<TResponse = unknown, TRequest = unknown>(
+            body: TRequest,
+            options?: PtvPluginRequestOptions
+        ) {
+            return requestPluginJson<TResponse>(
+                apiClient,
+                PTV_PLUGIN_API.endpoints.readingMetadataReassess,
+                { ...options, body, method: 'POST', bypassCache: true }
+            );
+        },
         getReadingSeriesOverrides<T = unknown>(routeKind: string, options?: PtvPluginRequestOptions) {
             return requestPluginJson<T>(
                 apiClient,
@@ -2033,7 +2290,10 @@ export function getCurrentPtvPluginApiClient(apiClient = getCurrentApiClient()) 
                     if (isObservationCurrent()) publishPtvPluginStatus(status);
                     return status;
                 }).catch(error => {
-                    if (isObservationCurrent()) retireConfiguredRowFreshness('status-authority-uncertain');
+                    if (isObservationCurrent()) {
+                        observeHomeLibraryAuthority(null);
+                        retireConfiguredRowFreshness('status-authority-uncertain');
+                    }
                     throw error;
                 });
         },

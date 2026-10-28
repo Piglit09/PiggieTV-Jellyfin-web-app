@@ -16,8 +16,11 @@ import {
 } from './adminMetadataManagerModel';
 import type { AdminMetadataIdentifyWorkflowProps } from './AdminMetadataManagerWorkflows';
 import type { AdminReadingIdentifyWorkflowProps } from './AdminReadingIdentifyWorkflow';
+import { adminReadingAssessmentKey, AdminReadingAssessmentChangedError, type AdminReadingApplyGuard } from './adminReadingMetadataService';
 import { toAdminMetadataIdentifyResult } from './adminReadingMetadataAdapters';
 import type {
+    AdminReadingIdentityAssessment,
+    AdminReadingMetadataCandidate,
     AdminReadingMetadataProvidersResponse,
     AdminReadingMetadataSearchRequest,
     AdminReadingMetadataSearchResponse
@@ -29,8 +32,9 @@ type StandardIdentifySearchRequest = Readonly<{
 }>;
 
 export type AdminMetadataIdentifyControllerOperations = Readonly<{
+    identityScope?: Readonly<{ serverId: string | null; userId: string }>;
     activeMutation: string | null;
-    applyIdentifyResult: (result: AdminMetadataIdentifyResult) => Promise<AdminMetadataItemBundle>;
+    applyIdentifyResult: (result: AdminMetadataIdentifyResult, guard?: AdminReadingApplyGuard) => Promise<AdminMetadataItemBundle>;
     fetchIdentifyProviders: () => Promise<readonly AdminMetadataProviderField[]>;
     fetchReadingProviders: () => Promise<AdminReadingMetadataProvidersResponse>;
     searchIdentify: (request: StandardIdentifySearchRequest) => Promise<readonly AdminMetadataIdentifyResult[]>;
@@ -68,6 +72,17 @@ export type AdminMetadataIdentifyController =
     | AdminMetadataReadingIdentifyController
     | AdminMetadataStandardIdentifyController;
 
+function replaceReadingAssessment(
+    response: AdminReadingMetadataSearchResponse | null,
+    selected: AdminReadingMetadataCandidate | undefined,
+    assessment: AdminReadingIdentityAssessment
+) {
+    return response ? { ...response, candidates: response.candidates.map(candidate =>
+        candidate === selected ? { ...candidate, identityAssessment: assessment,
+            archiveRevision: assessment.archiveRevision, assessmentDigest: assessment.assessmentDigest } : candidate)
+    } : response;
+}
+
 function safeMessage(error: unknown, fallback: string) {
     return error instanceof AdminMetadataManagerServiceError ? error.message : fallback;
 }
@@ -99,10 +114,23 @@ function prefillKey(prefill: AdminMetadataManagerIdentifyPrefill | null) {
     });
 }
 
+let readingGenerationCounter = 0;
+
+function createReadingSearchGeneration() {
+    readingGenerationCounter += 1;
+    if (globalThis.crypto?.getRandomValues) {
+        const values = globalThis.crypto.getRandomValues(new Uint32Array(4));
+        return Array.from(values, value => value.toString(16).padStart(8, '0')).join('');
+    }
+    // Correlation only, never authentication; LAN HTTP need not expose randomUUID.
+    return `reading-${Date.now().toString(36)}-${readingGenerationCounter.toString(36)}`;
+}
+
 function readingRequestWithoutItemId(
     request: AdminReadingMetadataSearchRequest
 ): Omit<AdminReadingMetadataSearchRequest, 'itemId'> {
     return {
+        searchGeneration: request.searchGeneration,
         author: request.author,
         chapterNumber: request.chapterNumber,
         isbn: request.isbn,
@@ -142,7 +170,7 @@ export function useAdminMetadataIdentifyController(
         () => validateAdminMetadataIdentifyPrefill(input.identifyPrefill, itemId),
         [ input.identifyPrefill, itemId ]
     );
-    const workflowKey = `${itemId}:${prefillKey(validatedPrefill)}`;
+    const workflowKey = JSON.stringify([ input.operations.identityScope?.serverId, input.operations.identityScope?.userId, itemId, prefillKey(validatedPrefill) ]);
     const activeScopeRef = useRef(workflowKey);
     activeScopeRef.current = workflowKey;
 
@@ -154,6 +182,8 @@ export function useAdminMetadataIdentifyController(
     const [ readingProviderError, setReadingProviderError ] = useState<string | null>(null);
     const [ readingProvidersLoading, setReadingProvidersLoading ] = useState(false);
     const [ readingResponse, setReadingResponse ] = useState<AdminReadingMetadataSearchResponse | null>(null);
+    const readingResponseRef = useRef(readingResponse);
+    readingResponseRef.current = readingResponse;
     const [ searchError, setSearchError ] = useState<string | null>(null);
     const [ applyError, setApplyError ] = useState<string | null>(null);
     const [ message, setMessage ] = useState<string | null>(null);
@@ -161,7 +191,7 @@ export function useAdminMetadataIdentifyController(
     const [ applyPending, setApplyPending ] = useState(false);
     const providerFlightsRef = useRef(new Set<string>());
     const searchGenerationRef = useRef(0);
-    const applyFlightsRef = useRef(new Map<string, Promise<void>>());
+    const applyFlightsRef = useRef(new Map<string, { key: string; promise: Promise<void> }>());
 
     useEffect(() => {
         searchGenerationRef.current += 1;
@@ -178,6 +208,9 @@ export function useAdminMetadataIdentifyController(
         setMessage(null);
         setSearching(false);
         setApplyPending(false);
+        return () => {
+            searchGenerationRef.current += 1;
+        };
     }, [ workflowKey ]);
 
     const loadIdentifyProviders = useCallback(async () => {
@@ -258,7 +291,7 @@ export function useAdminMetadataIdentifyController(
         const search = beginSearch(workflowKey);
         setReadingResponse(null);
         try {
-            const response = await searchReadingIdentify(readingRequestWithoutItemId(request));
+            const response = await searchReadingIdentify(readingRequestWithoutItemId({ ...request, searchGeneration: createReadingSearchGeneration() }));
             if (!isCurrentSearch(search.scope, search.generation)) return;
             setReadingResponse(response);
             if (!response.candidates.length) setMessage('No matching provider results were found.');
@@ -271,10 +304,14 @@ export function useAdminMetadataIdentifyController(
         }
     }, [ beginSearch, isCurrentSearch, searchReadingIdentify, workflowKey ]);
 
-    const runApply = useCallback((result: AdminMetadataIdentifyResult, successMessage: string) => {
+    const runApply = useCallback((result: AdminMetadataIdentifyResult, successMessage: string, guard?: AdminReadingApplyGuard) => {
         const scope = workflowKey;
         const active = applyFlightsRef.current.get(scope);
-        if (active) return active;
+        const key = adminReadingAssessmentKey([result, guard?.approval, bundle.form]);
+        if (active) {
+            if (active.key === key) return active.promise;
+            return Promise.reject(new AdminMetadataManagerServiceError('conflict', 'Another Identify match is being applied. Wait and review again.'));
+        }
 
         // Defer work one microtask so the flight is registered even when an
         // apply blocker rejects before the first network await.
@@ -289,12 +326,16 @@ export function useAdminMetadataIdentifyController(
                 if (blockerMessage) {
                     throw new AdminMetadataManagerServiceError('invalid-input', blockerMessage);
                 }
-                const saved = await applyIdentifyResult(result);
+                const saved = await (guard ? applyIdentifyResult(result, guard) : applyIdentifyResult(result));
                 if (activeScopeRef.current !== scope) return;
                 input.onApplied?.(saved);
                 setMessage(successMessage);
             } catch (error) {
                 if (activeScopeRef.current === scope) {
+                    if (error instanceof AdminReadingAssessmentChangedError && guard?.isCurrent()) {
+                        const assessment = error.assessment;
+                        setReadingResponse(response => replaceReadingAssessment(response, result.readingCandidate, assessment));
+                    }
                     // A local blocker is already bounded application copy. Keep
                     // it exact even if HMR/chunk boundaries break instanceof.
                     setApplyError(blockerMessage || safeMessage(error, "The Identify match couldn't be applied."));
@@ -305,10 +346,11 @@ export function useAdminMetadataIdentifyController(
                 if (activeScopeRef.current === scope) setApplyPending(false);
             }
         });
-        applyFlightsRef.current.set(scope, promise);
+        applyFlightsRef.current.set(scope, { key, promise });
         return promise;
-    }, [ applyIdentifyResult, input.applyBlocker, input.onApplied, workflowKey ]);
+    }, [ applyIdentifyResult, bundle.form, input.applyBlocker, input.onApplied, workflowKey ]);
 
+    const currentSearchGeneration = searchGenerationRef.current;
     const initialName = validatedPrefill?.name || bundle.form.name || '';
     const initialProviderIds = validatedPrefill?.providerIds || bundle.form.providerIds || {};
     const initialYear = validatedPrefill ? validatedPrefill.year : bundle.form.productionYear ?? null;
@@ -319,6 +361,8 @@ export function useAdminMetadataIdentifyController(
             kind: 'reading',
             workflowKey,
             workflowProps: {
+                serverId: input.operations.identityScope?.serverId,
+                userId: input.operations.identityScope?.userId,
                 applyError,
                 applying,
                 error: searchError,
@@ -335,15 +379,22 @@ export function useAdminMetadataIdentifyController(
                 itemId,
                 itemName,
                 message,
-                onApply: candidate => {
+                onApply: (candidate, approval) => {
                     const candidateIndex = readingResponse?.candidates.indexOf(candidate) ?? -1;
+                    if (activeScopeRef.current !== workflowKey || searchGenerationRef.current !== currentSearchGeneration || readingResponseRef.current !== readingResponse || searching || candidateIndex < 0
+                        || !candidate.assessmentContext || candidate.assessmentContext !== approval.assessmentContext) {
+                        const error = new AdminMetadataManagerServiceError('invalid-input', 'Search again and review the current Reading match before applying.');
+                        setApplyError(error.message);
+                        return Promise.reject(error);
+                    }
                     return runApply(
                         toAdminMetadataIdentifyResult(
                             candidate,
-                            candidateIndex < 0 ? 0 : candidateIndex,
+                            candidateIndex,
                             readingResponse?.query
                         ),
-                        'Reading metadata applied. Locked fields and artwork were preserved.'
+                        'Reading metadata applied. Locked fields and artwork were preserved.',
+                        { approval, isCurrent: () => activeScopeRef.current === workflowKey && searchGenerationRef.current === currentSearchGeneration && readingResponseRef.current === readingResponse }
                     );
                 },
                 onClearApplyError: clearApplyError,

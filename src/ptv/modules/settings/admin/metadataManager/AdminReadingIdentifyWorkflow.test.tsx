@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AdminReadingIdentifyWorkflow, {
     type AdminReadingIdentifyWorkflowProps
 } from './AdminReadingIdentifyWorkflow';
+import { identityAssessment } from './adminReadingIdentityTestFixtures';
 import type {
     AdminReadingMetadataCandidate,
     AdminReadingMetadataSearchResponse,
@@ -68,6 +69,10 @@ function query(overrides: Partial<AdminReadingStructuredQuery> = {}): AdminReadi
 
 function candidate(overrides: Partial<AdminReadingMetadataCandidate> = {}): AdminReadingMetadataCandidate {
     return {
+        assessmentContext: 'signed-context',
+        archiveRevision: 'revision-a',
+        assessmentDigest: 'digest-a',
+        identityAssessment: identityAssessment({ providerId: overrides.providerId || '4000-123' }),
         alternateTitles: [ 'Deadpool Vol. 8' ],
         artists: [ { name: 'Artist One', providerId: null, role: 'Artist' } ],
         authors: [ { name: 'Writer One', providerId: null, role: 'Writer' } ],
@@ -219,6 +224,48 @@ describe('PTV Reading Identify workflow', () => {
     async function render(componentProps: AdminReadingIdentifyWorkflowProps) {
         await act(async () => root.render(<AdminReadingIdentifyWorkflow {...componentProps} />));
     }
+
+    it('shows failed archive evidence and source disagreements despite OPF success and zero candidates', async () => {
+        const sources = { ...identityAssessment().sources, archiveState: 'unverified' as const, archiveReasonCode: 'HELPER_UNAVAILABLE' };
+        await render(props({ response: response({ candidates: [], identitySources: sources,
+            localMetadata: { state: 'inspected', sources: [ 'OPF' ], warnings: [] },
+            query: query({ identityConflicts: [ { field: 'SeriesTitle', preferredSource: 'local-metadata', preferredValue: 'Orbit',
+                conflictingSource: 'filename', conflictingValue: 'Other Series' } ] }) }) }));
+        const parsed = container.querySelector('.ptv-reading-parsed-query')!;
+        expect(parsed.textContent).toContain('Archive identity could not be verified');
+        expect(parsed.textContent).toContain('helper unavailable');
+        expect(parsed.textContent).toContain('Local metadata: Orbit');
+        expect(parsed.textContent).toContain('File name: Other Series');
+        expect(container.textContent).toContain('No matches found');
+    });
+
+    it('labels compatible explicit run and issue publication values with their sources', async () => {
+        const base = identityAssessment();
+        const assessment = identityAssessment({ sources: { ...base.sources, archiveState: 'inspected',
+            comicInfo: { ...base.sources.comicInfo, volumeOrRunLabel: '2018', runEvidenceKind: 'ExplicitRun', issuePublicationYear: 2019 } },
+        candidate: { ...base.candidate, volumeOrRunLabel: '2018', runEvidenceKind: 'ExplicitRun', issuePublicationYear: 2019, issuePublicationDate: '2019-02-01' } });
+        await render(props({ response: response({ identitySources: assessment.sources, candidates: [ candidate({
+            identityAssessment: assessment, runEvidenceKind: 'ExplicitRun', startYear: 2018, seriesStartYearEvidence: 'provider',
+            issuePublicationYear: 2019, issuePublicationDate: '2019-02-01', issuePublicationEvidence: 'provider'
+        }) ] }) }));
+        expect(container.querySelector('.ptv-reading-parsed-query')?.textContent).toContain('ComicInfo / Run: 2018');
+        const card = container.querySelector('.ptv-reading-candidate-card')!;
+        expect(card.textContent).toContain('Provider / Run: 2018');
+        expect(card.textContent).toContain('Provider / Issue publication: 2019-02-01');
+        expect(card.textContent).not.toContain('Identity conflict');
+    });
+
+    it('explains unknown run identity without promoting GCD startYear', async () => {
+        const assessment = identityAssessment({ requiresUnverifiedAcknowledgment: true, findings: [ {
+            code: 'RUN_IDENTITY_UNDETERMINED', field: 'VolumeOrRunLabel', leftSource: 'ComicInfo', leftValue: '2018',
+            rightSource: 'Provider', rightValue: null, isConflict: false, isMaterialUncertainty: true
+        } ] });
+        await render(props({ response: response({ candidates: [ candidate({ provider: 'gcd', startYear: 2019,
+            runEvidenceKind: 'Unknown', identityAssessment: assessment }) ] }) }));
+        const card = container.querySelector('.ptv-reading-candidate-card')!;
+        expect(card.textContent).toContain('Run identity undetermined');
+        expect(card.textContent).not.toContain('Run: 2019');
+    });
 
     it('prefills structured comic evidence without searching or applying on mount', async () => {
         const onApply = vi.fn(async () => undefined);
@@ -466,8 +513,8 @@ describe('PTV Reading Identify workflow', () => {
         await act(async () => elementWithText<HTMLButtonElement>(dialog!, 'button', 'Apply match')?.click());
         await flushAsync();
         expect(onApply).toHaveBeenCalledOnce();
-        expect(onApply).toHaveBeenCalledWith(match);
-        expect(document.body.querySelector('#ptv-reading-apply-description')?.textContent).toBe('');
+        expect(onApply).toHaveBeenCalledWith(match, expect.objectContaining({ assessmentContext: 'signed-context', acknowledgedConflictCodes: [], acknowledgedUnverifiedCodes: [] }));
+        expect(document.body.querySelector('#ptv-reading-apply-description')).toBeNull();
     });
 
     it('keeps a failed confirmation open and clears its error before another candidate', async () => {
@@ -502,7 +549,7 @@ describe('PTV Reading Identify workflow', () => {
         expect(elementWithText<HTMLButtonElement>(dialog!, 'button', 'Apply match')?.disabled).toBe(false);
 
         await act(async () => elementWithText<HTMLButtonElement>(dialog!, 'button', 'Cancel')?.click());
-        expect(document.body.querySelector('#ptv-reading-apply-description')?.textContent).toBe('');
+        expect(document.body.querySelector('#ptv-reading-apply-description')).toBeNull();
         expect(onClearApplyError).toHaveBeenCalledTimes(2);
 
         await render(baseProps);
@@ -517,8 +564,8 @@ describe('PTV Reading Identify workflow', () => {
         await act(async () => elementWithText<HTMLButtonElement>(dialog!, 'button', 'Apply match')?.click());
         await flushAsync();
         expect(onApply).toHaveBeenCalledTimes(2);
-        expect(onApply).toHaveBeenLastCalledWith(alternateMatch);
-        expect(document.body.querySelector('#ptv-reading-apply-description')?.textContent).toBe('');
+        expect(onApply).toHaveBeenLastCalledWith(alternateMatch, expect.any(Object));
+        expect(document.body.querySelector('#ptv-reading-apply-description')).toBeNull();
     });
 
     it('renders provider prose as bounded plain text and rejects unsafe cover/source URLs', async () => {
@@ -551,5 +598,85 @@ describe('PTV Reading Identify workflow', () => {
         expect(container.querySelector('.ptv-reading-candidate-action')?.textContent).toBe('Review match');
         expect(container.querySelector('table')).toBeNull();
         expect(container.querySelector<HTMLElement>('.ptv-reading-candidate-card')?.style.width).toBe('');
+    });
+    it('shows source-labeled conflicts and requires two separate unchecked acknowledgments', async () => {
+        const assessment = identityAssessment({
+            requiresConflictAcknowledgment: true, requiresUnverifiedAcknowledgment: true,
+            findings: [
+                { code: 'ISSUE_CONFLICT', field: 'issueNumber', leftSource: 'ComicInfo', leftValue: '1', rightSource: 'Provider', rightValue: '9', isConflict: true, isMaterialUncertainty: false },
+                { code: 'ARCHIVE_TIMEOUT', field: 'archive', leftSource: 'ComicInfo', leftValue: null, rightSource: 'Provider', rightValue: null, isConflict: false, isMaterialUncertainty: true }
+            ]
+        });
+        const match = candidate({ identityAssessment: assessment });
+        const onApply = vi.fn(async () => undefined);
+        await render(props({ onApply, response: response({ candidates: [ match ] }) }));
+        expect(container.querySelector('.ptv-reading-candidate-card')?.textContent).toContain('ComicInfo');
+        expect(container.querySelector('.ptv-reading-candidate-card')?.textContent).toContain('Provider: 9');
+        await act(async () => elementWithText<HTMLButtonElement>(container, 'button', 'Review match')?.click());
+        const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+        const boxes = dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+        const apply = elementWithText<HTMLButtonElement>(dialog, 'button', 'Apply despite conflict')!;
+        expect(apply).toBeDefined();
+        expect(boxes.length).toBe(2);
+        expect(Array.from(boxes).every(box => !box.checked)).toBe(true);
+        expect(apply.disabled).toBe(true);
+        await act(async () => boxes[0].click());
+        expect(apply.disabled).toBe(true);
+        await act(async () => boxes[1].click());
+        expect(apply.disabled).toBe(false);
+        await act(async () => apply.click());
+        expect(onApply).toHaveBeenCalledWith(match, expect.objectContaining({
+            acknowledgedConflictCodes: [ 'ISSUE_CONFLICT' ], acknowledgedUnverifiedCodes: [ 'ARCHIVE_TIMEOUT' ]
+        }));
+    });
+
+    it('blocks old Plugin candidates without signed context and needs no box for absent ComicInfo', async () => {
+        const base = props({ response: response() });
+        await render(base);
+        expect(container.querySelector('.ptv-reading-candidate-card')?.textContent).toContain('No embedded ComicInfo found');
+        await act(async () => elementWithText<HTMLButtonElement>(container, 'button', 'Review match')?.click());
+        expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('No embedded ComicInfo found');
+        expect(document.body.querySelectorAll('input[type="checkbox"]').length).toBe(0);
+        expect(elementWithText<HTMLButtonElement>(document.body, 'button', 'Apply match')?.disabled).toBe(false);
+        await render({ ...base, response: response({ candidates: [ candidate({ assessmentContext: null }) ] }) });
+        await act(async () => elementWithText<HTMLButtonElement>(container, 'button', 'Review match')?.click());
+        expect(elementWithText<HTMLButtonElement>(document.body, 'button', 'Apply match')?.disabled).toBe(true);
+    });
+
+    it.each([ 'digest', 'revision', 'generation', 'assessment', 'item', 'user', 'server', 'candidate' ])('clears acknowledgment on %s change', async change => {
+        const assessment = identityAssessment({ requiresConflictAcknowledgment: true });
+        const match = candidate({ identityAssessment: assessment });
+        const base = props({ response: response({ candidates: [ match ] }), serverId: 'server-a', userId: 'user-a' });
+        await render(base);
+        await act(async () => elementWithText<HTMLButtonElement>(container, 'button', 'Review match')?.click());
+        await act(async () => document.body.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
+        expect(document.body.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
+        const next = candidate({ ...match,
+            assessmentDigest: change === 'digest' ? 'digest-b' : match.assessmentDigest,
+            archiveRevision: change === 'revision' ? 'revision-b' : match.archiveRevision,
+            providerId: change === 'candidate' ? 'other' : match.providerId,
+            identityAssessment: { ...assessment, searchGeneration: change === 'generation' ? 'generation-b' : assessment.searchGeneration,
+                revisionChanged: change === 'assessment' }
+        });
+        await render({ ...base, itemId: change === 'item' ? 'book-b' : base.itemId,
+            userId: change === 'user' ? 'user-b' : base.userId, serverId: change === 'server' ? 'server-b' : base.serverId,
+            response: response({ candidates: [ next ] }) });
+        expect(Array.from(document.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).some(box => box.checked)).toBe(false);
+    });
+
+    it('requires only the unverified acknowledgment and explains an inspection timeout', async () => {
+        const base = identityAssessment();
+        const match = candidate({ identityAssessment: { ...base, requiresUnverifiedAcknowledgment: true,
+            sources: { ...base.sources, archiveState: 'unverified', archiveReasonCode: 'HELPER_TIMEOUT' },
+            findings: [ { code: 'ARCHIVE_IDENTITY_UNVERIFIED', field: 'Archive', leftSource: 'ComicInfo', leftValue: 'HELPER_TIMEOUT',
+                rightSource: 'Provider', rightValue: null, isConflict: false, isMaterialUncertainty: true } ] } });
+        await render(props({ response: response({ candidates: [ match ] }) }));
+        await act(async () => elementWithText<HTMLButtonElement>(container, 'button', 'Review match')?.click());
+        const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
+        expect(dialog.textContent).toContain('helper timeout');
+        expect(dialog.querySelectorAll('input[type="checkbox"]').length).toBe(1);
+        expect(elementWithText<HTMLButtonElement>(dialog, 'button', 'Apply match')?.disabled).toBe(true);
+        await act(async () => dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
+        expect(elementWithText<HTMLButtonElement>(dialog, 'button', 'Apply match')?.disabled).toBe(false);
     });
 });

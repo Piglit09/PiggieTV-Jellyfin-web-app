@@ -27,6 +27,12 @@ const REQUEST_LOAD_TIMEOUT = PTV_TIMERS.requestLoadTimeoutMs;
 const REQUEST_OPEN_EVENT = PTV_EVENTS.requestOpen;
 const REQUEST_CLOSE_EVENT = PTV_EVENTS.requestClose;
 const REQUEST_STATE_EVENT = PTV_EVENTS.requestStateChange;
+const SAFE_RETURN_ROUTE_NAMES = new Set([
+    'home', 'home.html', 'favorites', 'movies', 'shows', 'tv', 'collections',
+    'music', 'reading', 'books', 'comics', 'manga', 'search', 'details', 'item',
+    'list', 'calendar', 'recommendations', 'recomendations', 'settings',
+    'mypreferences', 'userprofile', 'dashboard', 'livetv', 'homevideos'
+]);
 
 let requestViewScheduled = false;
 let requestLoadTimer = null;
@@ -75,6 +81,10 @@ function getRequestRouteUrl() {
 
 function rememberSafeRoute() {
     if (isRequestRoute()) return;
+    const hash = window.location.hash || '';
+    if (!hash.startsWith('#/')) return;
+    const routeName = hash.slice(2).split(/[/?]/, 1)[0].toLowerCase();
+    if (!SAFE_RETURN_ROUTE_NAMES.has(routeName)) return;
 
     lastSafeUrl = getCurrentUrl();
 }
@@ -243,6 +253,8 @@ function closeRequestView(options = {}) {
 
     if (shouldUseHistory && isRequestRoute()) {
         window.history.replaceState(getCleanRequestState(), '', lastSafeUrl || getFallbackSafeUrl());
+        // replaceState does not notify the hash router about the new route.
+        window.dispatchEvent(new Event('popstate'));
     }
 }
 

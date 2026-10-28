@@ -1,5 +1,5 @@
 /* eslint-disable sonarjs/no-clear-text-protocols -- Reserved addresses model split-origin development. */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
     buildPtvServerOriginCandidates,
@@ -9,6 +9,41 @@ import {
 } from './serverOriginSelection';
 
 describe('PiggieTV server origin selection', () => {
+    afterEach(() => {
+        window.history.replaceState(null, '', '/');
+    });
+
+    it('keeps a Jellyfin-hosted page on its own server despite saved and requested remote servers', () => {
+        window.history.replaceState(null, '', '/web/index.html');
+        const hostedOrigin = window.location.origin;
+        const otherOrigin = 'https://other-server.example.test';
+
+        expect(buildPtvServerOriginCandidates({
+            apiClient: {
+                accessToken: () => 'test-token',
+                getCurrentUserId: () => 'test-user',
+                serverAddress: () => otherOrigin
+            },
+            configuredUrls: [ otherOrigin ],
+            development: false,
+            fallbackOrigin: hostedOrigin,
+            fallbackServer: { ManualAddress: otherOrigin },
+            requestedServer: { ManualAddress: otherOrigin },
+            requestedServerUrl: otherOrigin,
+            runtimeUrls: [ otherOrigin ]
+        })).toEqual([ hostedOrigin ]);
+    });
+
+    it('keeps a Jellyfin-hosted page on its own prefixed server root', () => {
+        window.history.replaceState(null, '', '/jellyfin/web/index.html');
+
+        expect(buildPtvServerOriginCandidates({
+            development: false,
+            fallbackOrigin: window.location.origin,
+            requestedServerUrl: 'https://other-server.example.test'
+        })).toEqual([ `${window.location.origin}/jellyfin` ]);
+    });
+
     it('prioritizes the explicit development backend without deriving it from the frontend', () => {
         expect(buildPtvServerOriginCandidates({
             development: true,

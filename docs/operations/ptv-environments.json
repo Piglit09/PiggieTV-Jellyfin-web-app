@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "projectId": "PTV_WEB",
+  "environments": [
+    {
+      "id": "JF_PRODUCTION_50",
+      "role": "PRODUCTION",
+      "host": "10.16.0.50",
+      "currentRuntimeIdentity": "UNKNOWN",
+      "deployment": {
+        "enabled": false,
+        "targetPath": null,
+        "reason": "Production is denied by default; an exact task-specific approval and independently verified rollback are required."
+      }
+    },
+    {
+      "id": "JF_DEVELOPMENT_125",
+      "role": "DEVELOPMENT",
+      "host": "10.16.0.125",
+      "currentRuntimeIdentity": "c1858e3f2d09468fb546ad9cfe438283",
+      "deployment": {
+        "enabled": true,
+        "targetPath": null,
+        "serverId": "c1858e3f2d09468fb546ad9cfe438283",
+        "serverName": "PTV Testing",
+        "webTargetPath": "C:\\Program Files\\Jellyfin\\Server\\jellyfin-web",
+        "pluginTargetRoot": "C:\\JFData\\plugins\\PiggieTV_Plugin (testing)",
+        "reason": "Standing Web and Plugin development installations on .125 only; the independently protected operator policy must also grant testDeploy125. Active Beta use warns but does not block. Production remains denied."
+      }
+    }
+  ],
+  "unregisteredInstances": "DENIED"
+}

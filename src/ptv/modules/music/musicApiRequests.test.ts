@@ -41,6 +41,7 @@ vi.mock('../../api', async () => {
 import {
     getPtvCurrentUserId,
     getPtvFavoriteItems,
+    getPtvItem,
     getPtvItems,
     getPtvRecentlyAdded,
     getPtvResumeItems,
@@ -71,6 +72,38 @@ function getPlaylistCandidates(count: number): PtvMusicItem[] {
         Name: `Playlist ${index}`,
         Type: 'Playlist'
     }));
+}
+
+const selectedMusicAlbum: PtvMusicItem = {
+    Id: 'album-1',
+    Name: 'A Two-Disc Album',
+    Type: 'MusicAlbum'
+};
+
+function musicTrack(id: string, disc: number, track: number, albumId = 'album-1'): PtvMusicItem {
+    return {
+        AlbumId: albumId,
+        Id: id,
+        IndexNumber: track,
+        Name: `Track ${track}`,
+        ParentId: `disc-${disc}`,
+        ParentIndexNumber: disc,
+        Type: 'Audio'
+    };
+}
+
+function mockSelectedMusicLibrary() {
+    vi.mocked(getPtvUserViews).mockResolvedValue({
+        Items: [
+            { CollectionType: 'music', Id: 'music-library-1', Name: 'Music', Type: 'CollectionFolder' },
+            { CollectionType: 'movies', Id: 'movie-library-1', Name: 'Movies', Type: 'CollectionFolder' }
+        ],
+        TotalRecordCount: 2
+    });
+}
+
+function isMusicAlbumMembershipQuery(query?: { IncludeItemTypes?: string }) {
+    return query?.IncludeItemTypes === 'MusicAlbum';
 }
 
 function createAbortError() {
@@ -153,6 +186,8 @@ describe('PiggieTV Music list requests', () => {
         vi.mocked(getPtvCurrentUserId).mockReturnValue('user-1');
         vi.mocked(getPtvServerId).mockReturnValue('server-1');
         vi.mocked(getPtvFavoriteItems).mockReset();
+        vi.mocked(getPtvItem).mockReset();
+        vi.mocked(getPtvItem).mockResolvedValue(selectedMusicAlbum);
         vi.mocked(getPtvItems).mockReset();
         vi.mocked(getPtvRecentlyAdded).mockReset();
         vi.mocked(getPtvResumeItems).mockReset();
@@ -332,40 +367,318 @@ describe('PiggieTV Music list requests', () => {
         ]);
     });
 
-    it('loads one album through Jellyfin album relationship identity without treating the album as a parent folder', async () => {
-        vi.mocked(getPtvUserViews).mockResolvedValue({
-            Items: [{
-                CollectionType: 'music',
-                Id: 'music-library-1',
-                Name: 'Music',
-                Type: 'CollectionFolder'
-            }],
-            TotalRecordCount: 1
+    it('proves selected-library album membership before loading and ordering nested disc tracks', async () => {
+        const tracks = [
+            musicTrack('disc-2-track-2', 2, 2),
+            musicTrack('disc-1-track-2', 1, 2),
+            musicTrack('disc-2-track-1', 2, 1),
+            musicTrack('disc-1-track-1', 1, 1)
+        ];
+
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return { Items: [selectedMusicAlbum], TotalRecordCount: 1 };
+            }
+
+            if (query?.ParentId === selectedMusicAlbum.Id) {
+                return { Items: tracks, TotalRecordCount: tracks.length };
+            }
+
+            return { Items: [], TotalRecordCount: 0 };
         });
-        vi.mocked(getPtvItems).mockResolvedValue({
-            Items: [{
-                AlbumId: 'album-1',
-                Id: 'track-1',
-                Name: 'Track 1',
-                Type: 'Audio'
-            }],
-            TotalRecordCount: 1
+
+        const result = await fetchPtvMusicAlbumTracks('album-1', 100);
+        const queries = vi.mocked(getPtvItems).mock.calls.map(([query]) => query);
+        const albumQueries = queries.filter(isMusicAlbumMembershipQuery);
+
+        expect(result.map(track => track.Id)).toEqual([
+            'disc-1-track-1', 'disc-1-track-2', 'disc-2-track-1', 'disc-2-track-2'
+        ]);
+        expect(result[0]).toBe(tracks[3]);
+        expect(vi.mocked(getPtvItem).mock.calls[0]?.[0]).toBe('album-1');
+        expect(albumQueries).toEqual([expect.objectContaining({
+            IncludeItemTypes: 'MusicAlbum',
+            ParentId: 'music-library-1',
+            Recursive: true,
+            SearchTerm: selectedMusicAlbum.Name
+        })]);
+        expect(albumQueries[0]).not.toHaveProperty('Ids');
+        expect(queries).toContainEqual(expect.objectContaining({
+            IncludeItemTypes: 'Audio',
+            ParentId: 'album-1',
+            Recursive: true
+        }));
+    });
+
+    it('keeps a flat single-disc album playable with its original track identities', async () => {
+        const tracks = [musicTrack('flat-track-2', 1, 2), musicTrack('flat-track-1', 1, 1)];
+
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return { Items: [selectedMusicAlbum], TotalRecordCount: 1 };
+            }
+
+            return { Items: tracks, TotalRecordCount: tracks.length };
         });
 
         await expect(fetchPtvMusicAlbumTracks('album-1', 100)).resolves.toEqual([
-            expect.objectContaining({ Id: 'track-1' })
+            tracks[1], tracks[0]
         ]);
+    });
 
-        const query = vi.mocked(getPtvItems).mock.calls[0]?.[0];
+    it('includes a dispersed album track returned only by Jellyfin album relationship identity', async () => {
+        const descendant = musicTrack('folder-track', 1, 2);
+        const dispersed = { ...musicTrack('dispersed-track', 1, 1), ParentId: 'unrelated-folder' };
+        const foreign = musicTrack('foreign-track', 1, 3, 'other-album');
 
-        expect(query).toEqual(expect.objectContaining({
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return { Items: [selectedMusicAlbum], TotalRecordCount: 1 };
+            }
+
+            if (query?.ParentId === selectedMusicAlbum.Id) {
+                return { Items: [descendant], TotalRecordCount: 1 };
+            }
+
+            if (query?.AlbumIds === selectedMusicAlbum.Id) {
+                return { Items: [dispersed, foreign], TotalRecordCount: 2 };
+            }
+
+            return { Items: [], TotalRecordCount: 0 };
+        });
+
+        const result = await fetchPtvMusicAlbumTracks('album-1', 100);
+        const queries = vi.mocked(getPtvItems).mock.calls.map(([query]) => query);
+
+        expect(result).toEqual([dispersed, descendant]);
+        expect(queries).toContainEqual(expect.objectContaining({
             AlbumIds: 'album-1',
             IncludeItemTypes: 'Audio',
-            ParentId: 'music-library-1',
-            Recursive: true
+            ParentId: 'music-library-1'
         }));
-        expect(query?.ParentId).not.toBe('album-1');
+    });
+
+    it('deduplicates mixed direct and nested tracks while excluding foreign or unverified album IDs', async () => {
+        const directTrack = {
+            ...musicTrack('direct-track', 1, 2),
+            ParentId: 'album-1',
+            ParentIndexNumber: undefined
+        };
+        const firstDiscTrack = musicTrack('disc-1-track', 1, 1);
+        const nestedTrack = musicTrack('nested-track', 2, 1);
+        const foreignTrack = musicTrack('foreign-track', 2, 2, 'album-elsewhere');
+        const missingAlbumId = { ...musicTrack('unverified-track', 2, 3), AlbumId: undefined };
+
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return { Items: [selectedMusicAlbum], TotalRecordCount: 1 };
+            }
+
+            return {
+                Items: [nestedTrack, foreignTrack, directTrack, firstDiscTrack, nestedTrack, missingAlbumId],
+                TotalRecordCount: 6
+            };
+        });
+
+        const result = await fetchPtvMusicAlbumTracks('album-1', 100);
+
+        expect(result.map(track => track.Id)).toEqual(['disc-1-track', 'direct-track', 'nested-track']);
+        expect(result).toEqual([firstDiscTrack, directTrack, nestedTrack]);
+    });
+
+    it('does not load tracks for an album absent from the selected Music library', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return { Items: [{ ...selectedMusicAlbum, Id: 'other-library-album' }], TotalRecordCount: 1 };
+            }
+
+            return { Items: [musicTrack('foreign-track', 1, 1)], TotalRecordCount: 1 };
+        });
+
+        await expect(fetchPtvMusicAlbumTracks('album-1', 100)).resolves.toEqual([]);
+        expect(vi.mocked(getPtvItems).mock.calls.map(([query]) => query?.IncludeItemTypes)).toEqual([
+            'MusicAlbum'
+        ]);
+        expect(vi.mocked(getPtvItems).mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+            ParentId: 'music-library-1',
+            SearchTerm: selectedMusicAlbum.Name
+        }));
+        expect(vi.mocked(getPtvItems).mock.calls[0]?.[0]).not.toHaveProperty('Ids');
+    });
+
+    it('stops scoped album membership paging once the exact album ID is found', async () => {
+        const track = musicTrack('confirmed-track', 1, 1);
+
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return {
+                    Items: Number(query?.StartIndex || 0) === 0 ? [selectedMusicAlbum] : [],
+                    TotalRecordCount: 5000
+                };
+            }
+
+            if (query?.ParentId === selectedMusicAlbum.Id) {
+                return { Items: [track], TotalRecordCount: 1 };
+            }
+
+            return { Items: [], TotalRecordCount: 0 };
+        });
+
+        await expect(fetchPtvMusicAlbumTracks('album-1', 100)).resolves.toEqual([track]);
+        expect(vi.mocked(getPtvItems).mock.calls.filter(([query]) => isMusicAlbumMembershipQuery(query))).toHaveLength(1);
+    });
+
+    it('does not fall back to an unscoped album query when no Music library is visible', async () => {
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        vi.mocked(getPtvItems).mockResolvedValue({
+            Items: [musicTrack('unscoped-track', 1, 1)],
+            TotalRecordCount: 1
+        });
+
+        await expect(fetchPtvMusicAlbumTracks('album-1', 100)).resolves.toEqual([]);
+        expect(getPtvItems).not.toHaveBeenCalled();
+    });
+
+    it('pages album descendants beyond the first 100 tracks without truncating the playback queue', async () => {
+        const tracks = Array.from({ length: 120 }, (_, index) => (
+            musicTrack(`track-${String(index + 1).padStart(3, '0')}`, index < 60 ? 1 : 2, (index % 60) + 1)
+        ));
+
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return { Items: [selectedMusicAlbum], TotalRecordCount: 1 };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            const pageSize = Math.min(Number(query?.Limit || 100), 100);
+
+            return { Items: tracks.slice(start, start + pageSize), TotalRecordCount: tracks.length };
+        });
+
+        const result = await fetchPtvMusicAlbumTracks('album-1', 150);
+        const audioQueries = vi.mocked(getPtvItems).mock.calls
+            .map(([query]) => query)
+            .filter(query => query?.IncludeItemTypes === 'Audio');
+
+        expect(result.map(track => track.Id)).toEqual(tracks.map(track => track.Id));
+        expect(audioQueries.length).toBeGreaterThan(1);
+        expect(audioQueries.some(query => Number(query?.StartIndex || 0) > 0)).toBe(true);
+    });
+
+    it.each([
+        { label: 'zero', total: 0 },
+        { label: 'unavailable', total: undefined }
+    ])('stops a short album Audio page when the reported total is $label', async ({ total }) => {
+        const track = musicTrack('short-page-track', 1, 1);
+
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return { Items: [selectedMusicAlbum], TotalRecordCount: 1 };
+            }
+
+            if (query?.ParentId === selectedMusicAlbum.Id) {
+                return { Items: [track], TotalRecordCount: total };
+            }
+
+            return { Items: [], TotalRecordCount: 0 };
+        });
+
+        await expect(fetchPtvMusicAlbumTracks('album-1', 100)).resolves.toEqual([track]);
+        expect(vi.mocked(getPtvItems).mock.calls.filter(([query]) => query?.ParentId === 'album-1')).toHaveLength(1);
+    });
+
+    it('fails closed when selected-library album membership or descendant retrieval fails', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockRejectedValueOnce(new Error('Music membership unavailable'));
+
+        await expect(fetchPtvMusicAlbumTracks('album-1', 100)).rejects.toThrow('Music membership unavailable');
         expect(getPtvItems).toHaveBeenCalledTimes(1);
+
+        vi.mocked(getPtvItems).mockReset();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return { Items: [selectedMusicAlbum], TotalRecordCount: 1 };
+            }
+
+            throw new Error('Album descendants unavailable');
+        });
+
+        await expect(fetchPtvMusicAlbumTracks('album-1', 100)).rejects.toThrow('Album descendants unavailable');
+        expect(vi.mocked(getPtvItems).mock.calls.map(([query]) => query?.IncludeItemTypes)).toEqual([
+            'MusicAlbum', 'Audio'
+        ]);
+    });
+
+    it('propagates route cancellation without starting a fallback album query', async () => {
+        // eslint-disable-next-line compat/compat -- Jellyfin loads the AbortController polyfill for legacy web runtimes.
+        const controller = new AbortController();
+
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation((query, options) => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return Promise.resolve({ Items: [selectedMusicAlbum], TotalRecordCount: 1 });
+            }
+
+            return new Promise((_resolve, reject) => {
+                // eslint-disable-next-line sonarjs/no-nested-functions -- The test transport must observe the route-owned signal.
+                options?.signal?.addEventListener('abort', () => reject(createAbortError()), { once: true });
+            });
+        });
+
+        const request = fetchPtvMusicAlbumTracks('album-1', 100, controller.signal);
+
+        await vi.waitFor(() => {
+            expect(vi.mocked(getPtvItems).mock.calls.some(([query]) => query?.IncludeItemTypes === 'Audio')).toBe(true);
+        });
+        controller.abort();
+
+        await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+        expect(vi.mocked(getPtvItems).mock.calls.map(([query]) => query?.IncludeItemTypes)).toEqual([
+            'MusicAlbum', 'Audio'
+        ]);
+    });
+
+    it.each(['user', 'server'])('does not expose the previous %s identity\'s album tracks after a session change', async identity => {
+        let resolveAudio!: (result: PtvItemsResult<PtvMusicItem>) => void;
+
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(query => {
+            if (isMusicAlbumMembershipQuery(query)) {
+                return Promise.resolve({ Items: [selectedMusicAlbum], TotalRecordCount: 1 });
+            }
+
+            if (query?.ParentId === 'album-1') {
+                return new Promise(resolve => {
+                    resolveAudio = resolve;
+                });
+            }
+
+            return Promise.resolve({ Items: [], TotalRecordCount: 0 });
+        });
+
+        const request = fetchPtvMusicAlbumTracks('album-1', 100);
+
+        await vi.waitFor(() => {
+            expect(vi.mocked(getPtvItems).mock.calls.some(([query]) => query?.IncludeItemTypes === 'Audio')).toBe(true);
+        });
+
+        if (identity === 'user') {
+            vi.mocked(getPtvCurrentUserId).mockReturnValue('user-2');
+        } else {
+            vi.mocked(getPtvServerId).mockReturnValue('server-2');
+        }
+        resolveAudio({ Items: [musicTrack('previous-session-track', 1, 1)], TotalRecordCount: 1 });
+
+        await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+        expect(getPtvItems).toHaveBeenCalledTimes(2);
     });
 
     it('negative-caches library discovery and records one truthful discovery start', async () => {

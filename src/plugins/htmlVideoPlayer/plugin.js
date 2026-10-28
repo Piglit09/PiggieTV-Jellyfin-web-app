@@ -250,6 +250,9 @@ export class HtmlVideoPlayer {
      * @type {number | undefined}
      */
     #customSecondaryTrackIndex;
+    #subtitleSelectionGeneration = [0, 0];
+    #subtitleRenderGeneration = [0, 0];
+    #subtitleRequestedIndex = [undefined, undefined];
     /**
      * @type {boolean | undefined}
      */
@@ -540,6 +543,9 @@ export class HtmlVideoPlayer {
      */
     disposePtvPlaybackSession(reason) {
         this._ptvPlaybackSourceGeneration = (this._ptvPlaybackSourceGeneration || 0) + 1;
+        if (reason === 'source-replaced') {
+            this.destroyCustomTrack(this.#mediaElement);
+        }
         const session = this._ptvPlaybackSession;
 
         this._ptvPlaybackSession = null;
@@ -1282,6 +1288,16 @@ export class HtmlVideoPlayer {
      * @private
      */
     destroyCustomTrack(videoElement, targetTrackIndex) {
+        let targets = [PRIMARY_TEXT_TRACK_INDEX, SECONDARY_TEXT_TRACK_INDEX];
+        if (this.isPrimaryTrack(targetTrackIndex)) {
+            targets = [PRIMARY_TEXT_TRACK_INDEX];
+        } else if (this.isSecondaryTrack(targetTrackIndex)) {
+            targets = [SECONDARY_TEXT_TRACK_INDEX];
+        }
+        for (const target of targets) {
+            this.#subtitleSelectionGeneration[target]++;
+            this.#subtitleRenderGeneration[target]++;
+        }
         this.destroyCustomRenderedTrackElements(targetTrackIndex);
         this.destroyNativeTracks(videoElement, targetTrackIndex);
         this.destroyStoredTrackInfo(targetTrackIndex);
@@ -1336,9 +1352,12 @@ export class HtmlVideoPlayer {
      * @private
      */
     setTrackForDisplay(videoElement, track, targetTextTrackIndex = PRIMARY_TEXT_TRACK_INDEX) {
+        const targetIndex = this.isSecondaryTrack(targetTextTrackIndex) ? SECONDARY_TEXT_TRACK_INDEX : PRIMARY_TEXT_TRACK_INDEX;
         if (!track) {
             // Destroy all tracks by passing undefined if there is no valid primary track
             this.destroyCustomTrack(videoElement, this.isSecondaryTrack(targetTextTrackIndex) ? targetTextTrackIndex : undefined);
+            this.#subtitleRequestedIndex[targetIndex] = -1;
+            if (targetIndex === PRIMARY_TEXT_TRACK_INDEX) this.#subtitleRequestedIndex[SECONDARY_TEXT_TRACK_INDEX] = -1;
             return;
         }
 
@@ -1356,6 +1375,7 @@ export class HtmlVideoPlayer {
         const item = this._currentPlayOptions.item;
 
         this.destroyCustomTrack(videoElement, targetTextTrackIndex);
+        this.#subtitleRequestedIndex[targetIndex] = track.Index;
 
         if (this.isSecondaryTrack(targetTextTrackIndex)) {
             this.#customSecondaryTrackIndex = track.Index;
@@ -1368,7 +1388,7 @@ export class HtmlVideoPlayer {
     /**
      * @private
      */
-    renderSsaAss(videoElement, track, item) {
+    renderSsaAss(videoElement, track, item, isCurrent) {
         const supportedFonts = ['application/vnd.ms-opentype', 'application/x-truetype-font', 'font/otf', 'font/ttf', 'font/woff', 'font/woff2'];
         const availableFonts = [];
         const attachments = this._currentPlayOptions.mediaSource.MediaAttachments || [];
@@ -1385,6 +1405,7 @@ export class HtmlVideoPlayer {
         });
         const htmlVideoPlayer = this;
         import('@jellyfin/libass-wasm').then(({ default: SubtitlesOctopus }) => {
+            if (!isCurrent()) return;
             const mediaSource = this._currentPlayOptions.mediaSource;
             const videoStream = getMediaStreamVideoTracks(mediaSource)[0];
 
@@ -1395,6 +1416,7 @@ export class HtmlVideoPlayer {
                 workerUrl: `${appRouter.baseUrl()}/libraries/subtitles-octopus-worker.js`,
                 legacyWorkerUrl: `${appRouter.baseUrl()}/libraries/subtitles-octopus-worker-legacy.js`,
                 onError() {
+                    if (!isCurrent()) return;
                     // HACK: Clear JavascriptSubtitlesOctopus: it gets disposed when an error occurs
                     htmlVideoPlayer.#currentAssRenderer = null;
 
@@ -1424,11 +1446,13 @@ export class HtmlVideoPlayer {
                 resolveUrl(options.workerUrl),
                 resolveUrl(options.legacyWorkerUrl)
             ]).then(([config, workerUrl, legacyWorkerUrl]) => {
+                if (!isCurrent()) return;
                 options.workerUrl = workerUrl;
                 options.legacyWorkerUrl = legacyWorkerUrl;
 
                 if (config.EnableFallbackFont) {
                     apiClient.getJSON(fallbackFontList).then((fontFiles = []) => {
+                        if (!isCurrent()) return;
                         fontFiles.forEach(font => {
                             const fontUrl = apiClient.getUrl(`/FallbackFont/Fonts/${encodeURIComponent(font.Name)}`, {
                                 ApiKey: apiClient.accessToken()
@@ -1447,8 +1471,9 @@ export class HtmlVideoPlayer {
     /**
      * @private
      */
-    renderPgs(videoElement, track, item) {
+    renderPgs(videoElement, track, item, isCurrent) {
         import('libpgs').then((libpgs) => {
+            if (!isCurrent()) return;
             const aspectRatio = this.getAspectRatio() === 'auto' ? 'contain' : this.getAspectRatio();
             const options = {
                 video: videoElement,
@@ -1464,10 +1489,9 @@ export class HtmlVideoPlayer {
     /**
      * @private
      */
-    renderSubtitlesWithCustomElement(videoElement, track, item, targetTextTrackIndex) {
+    renderSubtitlesWithCustomElement(videoElement, track, item, targetTextTrackIndex, isCurrent) {
         this.fetchSubtitles(track, item).then((subtitleData) => {
-            // Exit if the video element was destroyed while fetching subtitles
-            if (!this.#mediaElement) return;
+            if (!isCurrent()) return;
 
             const subtitleAppearance = userSettings.getSubtitleAppearanceSettings();
             const subtitleVerticalPosition = parseInt(subtitleAppearance.verticalPosition, 10);
@@ -1542,19 +1566,29 @@ export class HtmlVideoPlayer {
      * @private
      */
     async renderTracksEvents(videoElement, track, item, targetTextTrackIndex = PRIMARY_TEXT_TRACK_INDEX) {
+        const targetIndex = this.isSecondaryTrack(targetTextTrackIndex) ? SECONDARY_TEXT_TRACK_INDEX : PRIMARY_TEXT_TRACK_INDEX;
+        const renderGeneration = this.#subtitleRenderGeneration[targetIndex];
+        const selectionGeneration = this.#subtitleSelectionGeneration[targetIndex];
+        const playOptions = this._currentPlayOptions;
+        const sourceGeneration = this._ptvPlaybackSourceGeneration;
+        const isCurrent = () => this.#mediaElement === videoElement
+            && this.#subtitleRenderGeneration[targetIndex] === renderGeneration
+            && this.#subtitleSelectionGeneration[targetIndex] === selectionGeneration
+            && this._currentPlayOptions === playOptions
+            && this._ptvPlaybackSourceGeneration === sourceGeneration;
         if (!itemHelper.isLocalItem(item) || track.IsExternal) {
             const format = (track.Codec || '').toLowerCase();
             if (format === 'ssa' || format === 'ass') {
-                this.renderSsaAss(videoElement, track, item);
+                this.renderSsaAss(videoElement, track, item, isCurrent);
                 return;
             }
             if (format === 'pgssub') {
-                this.renderPgs(videoElement, track, item);
+                this.renderPgs(videoElement, track, item, isCurrent);
                 return;
             }
 
             if (useCustomSubtitles(userSettings)) {
-                this.renderSubtitlesWithCustomElement(videoElement, track, item, targetTextTrackIndex);
+                this.renderSubtitlesWithCustomElement(videoElement, track, item, targetTextTrackIndex, isCurrent);
                 return;
             }
         }
@@ -1583,8 +1617,7 @@ export class HtmlVideoPlayer {
 
         // download the track json
         this.fetchSubtitles(track, item).then(data => {
-            // Exit if the video element was destroyed while fetching subtitles
-            if (!this.#mediaElement) return;
+            if (!isCurrent()) return;
 
             console.debug(`downloaded ${data.TrackEvents.length} track events`);
 
@@ -1652,6 +1685,16 @@ export class HtmlVideoPlayer {
     setCurrentTrackElement(streamIndex, targetTextTrackIndex) {
         console.debug(`setting new text track index to: ${streamIndex}`);
 
+        const targetIndex = this.isSecondaryTrack(targetTextTrackIndex) ? SECONDARY_TEXT_TRACK_INDEX : PRIMARY_TEXT_TRACK_INDEX;
+        if (this.#subtitleRequestedIndex[targetIndex] !== streamIndex) {
+            this.#subtitleRequestedIndex[targetIndex] = streamIndex;
+            this.#subtitleSelectionGeneration[targetIndex]++;
+        }
+        const selectionGeneration = this.#subtitleSelectionGeneration[targetIndex];
+        const mediaElement = this.#mediaElement;
+        const playOptions = this._currentPlayOptions;
+        const sourceGeneration = this._ptvPlaybackSourceGeneration;
+
         const mediaStreamTextTracks = getMediaStreamTextTracks(this._currentPlayOptions.mediaSource);
 
         let track = streamIndex === -1 ? null : mediaStreamTextTracks.filter(function (t) {
@@ -1679,6 +1722,10 @@ export class HtmlVideoPlayer {
         const player = this;
 
         sessionPromise.then((s) => {
+            if (player.#subtitleSelectionGeneration[targetIndex] !== selectionGeneration
+                || player.#mediaElement !== mediaElement
+                || player._currentPlayOptions !== playOptions
+                || player._ptvPlaybackSourceGeneration !== sourceGeneration) return;
             if (!s.TranscodingInfo || s.TranscodingInfo.IsVideoDirect) {
                 // restore recorded delivery method if any
                 mediaStreamTextTracks.forEach((t) => {

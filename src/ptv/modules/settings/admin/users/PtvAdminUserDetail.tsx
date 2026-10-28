@@ -26,6 +26,7 @@ import {
     updateAdminUsername
 } from './adminUsersService';
 import { AdminUserPasswordDialog } from './AdminUserDialogs';
+import PtvAdminUserAccessRecovery from './PtvAdminUserAccessRecovery';
 import {
     AdminUserAvatar,
     AdminUserBadge,
@@ -360,6 +361,7 @@ export default function PtvAdminUserDetail({ userId }: Readonly<{ userId: string
                     <p>The account may no longer exist, or the server may be temporarily unavailable.</p>
                     <button onClick={() => void state.refetch()} type='button'>Retry</button>
                 </div>
+                <PtvAdminUserAccessRecovery api={api} userId={userId} />
             </section>
         );
     }
@@ -392,6 +394,8 @@ export default function PtvAdminUserDetail({ userId }: Readonly<{ userId: string
                     <AdminUserBadge tone={detail.authorizationState === 'ready' ? (detail.enabled ? 'healthy' : 'danger') : 'warning'}>{detail.authorizationState === 'ready' ? (detail.enabled ? 'Active' : 'Disabled') : 'Status unavailable'}</AdminUserBadge>
                 </div>
             </header>
+
+            <PtvAdminUserAccessRecovery api={api} onVerified={() => void state.refetch()} userId={userId} />
 
             {(state.profileError || state.sessionsError) && (
                 <aside className='ptv-admin-users-notice' role='status'>

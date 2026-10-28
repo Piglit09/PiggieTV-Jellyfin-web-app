@@ -1,3 +1,4 @@
+import { acceptHomeLibraryAuthority, beginHomeLibraryVerification, getHomeLibraryAuthoritySnapshot } from '../pages/home/homeLibraryTransitionFreshness';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type TestClient = {
@@ -70,6 +71,18 @@ beforeEach(() => {
 });
 
 describe('final configured-row freshness transport ordering', () => {
+    it('retires library-only proof when current status transport fails', async () => {
+        const revision = beginHomeLibraryVerification('server-a:admin');
+        acceptHomeLibraryAuthority({ currentHomeTopology: { version: 1, epoch: scopeA, held: false },
+            currentHomeUserAccess: { version: 1, userId: 'admin', accessEpoch: generationA,
+                held: false, policyProven: true } }, revision, 'server-a:admin');
+        const client = createClient(vi.fn().mockRejectedValue({ status: 403 }));
+        connectionMocks.client = client;
+        await expect(getCurrentPtvPluginApiClient(client)!.getStatus({ bypassCache: true })).rejects.toBeDefined();
+        expect(getHomeLibraryAuthoritySnapshot().topology).toBeUndefined();
+        expect(getHomeLibraryAuthoritySnapshot().revision).toBeGreaterThan(revision);
+    });
+
     it('starts a bypassed final status read after both inputs and never joins a pre-input status request', async () => {
         const ordinary = deferred<unknown>();
         const final = deferred<unknown>();

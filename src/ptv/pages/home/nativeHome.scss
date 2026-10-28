@@ -1137,6 +1137,7 @@ html.ptv-route-home[data-ptv-route-native='true'] .ptv-mainDrawerHandle {
 
 .ptv-native-home-scroller {
     align-items: flex-start;
+    box-sizing: border-box;
     display: flex;
     gap: clamp(12px, 0.82vw, 18px);
     margin-top: 0;

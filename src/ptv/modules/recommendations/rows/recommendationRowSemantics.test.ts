@@ -38,6 +38,24 @@ function score(id: string, index: number, userSignal: boolean): PtvRecommendatio
 }
 
 describe('recommendation row semantics', () => {
+    it('separates repeated identities from diversity-cap rejections in row selection', () => {
+        const profile = new Proxy({}, { get: () => [] }) as PtvTasteProfile;
+        const scores = Array.from({ length: 18 }, (_, index) => ({
+            ...score(`user-${index}`, index, true),
+            item: {
+                ...score(`user-${index}`, index, true).item,
+                SeriesName: index < 4 ? 'same-series' : `series-${index}`
+            }
+        }));
+        scores.push({ ...scores[0], item: { ...scores[0].item } });
+        const result = buildPtvRecommendationRowsWithQuality(profile, scores);
+
+        expect(result.identityDuplicateRejectionCount).toBeGreaterThan(0);
+        expect(result.diversityCapRejectionCount).toBeGreaterThan(0);
+        expect(result.identityDuplicateRejectionCount + result.diversityCapRejectionCount)
+            .toBe(result.duplicateItemsRemoved);
+    });
+
     it('keeps personalized rows distinct and balances PTV Recommendation inputs', () => {
         const profile = new Proxy({}, { get: () => [] }) as PtvTasteProfile;
         const scores = [

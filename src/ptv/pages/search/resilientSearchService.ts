@@ -7,6 +7,7 @@ import {
 import { requestPtvJson } from '../../api/client';
 import type { PtvItem, PtvItemsResult } from '../../api/types';
 import { createPtvAbortController } from '../../core/abortController';
+import type { PtvSearchRecoveryDiagnostics } from '../../services/searchRecovery';
 import type { PtvSearchGroupId } from './nativeSearchState';
 import { searchPtvAuthoritativeSeries } from './authoritativeSeriesSearch';
 import {
@@ -35,6 +36,8 @@ type PtvDirectSearchOptions = Readonly<{
 }>;
 
 type PtvDirectSearchOutcome = Readonly<{
+    endpointPaths?: string[];
+    failureReason?: string;
     groupId: PtvSearchGroupId;
     items: PtvItem[];
     requestCount: number;
@@ -216,6 +219,17 @@ function getFailureStatus(error: unknown): PtvDirectSearchOutcome['status'] {
     return 'error';
 }
 
+function getRequestFailureReason(error: unknown) {
+    const record = error && typeof error === 'object' ? error as Record<string, unknown> : null;
+    const response = record?.response && typeof record.response === 'object' ?
+        record.response as Record<string, unknown> : null;
+    const status = Number(record?.status || record?.statusCode || response?.status);
+
+    if (Number.isInteger(status) && status >= 400 && status <= 599) return `http-${status}`;
+    if (getFailureStatus(error) === 'timeout') return 'client-group-deadline';
+    return 'unclassified-request-error';
+}
+
 async function searchAuthoritativeSeriesWithTimeout(options: PtvDirectSearchOptions) {
     if (options.signal.aborted) throw new PtvSearchAbortedError();
 
@@ -253,12 +267,29 @@ function getDirectoryFailureStatus(
     return 'error';
 }
 
+function getMovieOutcomeDetails(items: readonly PtvItem[], diagnostics: PtvSearchRecoveryDiagnostics) {
+    const incomplete = !items.length && diagnostics.recoveryAttempted && !diagnostics.catalogExhausted;
+    const endpointPaths = ['Users/{user}/Items'];
+
+    if (diagnostics.catalogRequestsThisSearch > 0 && diagnostics.catalogRequestEndpoint) {
+        endpointPaths.push('Users/{user}/Items');
+    }
+
+    return {
+        endpointPaths,
+        failureReason: incomplete ? 'incomplete-catalog-recovery' : undefined,
+        status: incomplete ? 'error' as const : 'success' as const
+    };
+}
+
 async function searchDirectDirectoryGroup(
     plan: PtvDirectSearchPlan,
     options: PtvDirectSearchOptions
 ): Promise<PtvDirectSearchOutcome> {
     const items: PtvItem[] = [];
     const failureStatuses: PtvDirectSearchOutcome['status'][] = [];
+    const failureReasons: string[] = [];
+    const endpointPaths: string[] = [];
     let requestCount = 0;
     let successfulRequestCount = 0;
     const publishDirectoryItems = (directoryItems: readonly PtvItem[], completedRequestCount: number) => {
@@ -271,6 +302,7 @@ async function searchDirectDirectoryGroup(
     };
 
     const requestEndpoint = async (endpoint: NonNullable<PtvDirectSearchPlan['directoryEndpoints']>[number]) => {
+        endpointPaths.push(endpoint.path);
         try {
             const response = await requestPtvJson<PtvItemsResult<PtvItem>>(endpoint.path, {
                 params: {
@@ -305,6 +337,7 @@ async function searchDirectDirectoryGroup(
             };
         } catch (error) {
             return {
+                failureReason: getRequestFailureReason(error),
                 items: [] as PtvItem[],
                 status: getFailureStatus(error)
             };
@@ -333,6 +366,7 @@ async function searchDirectDirectoryGroup(
                 items.push(...outcome.items);
             } else {
                 failureStatuses.push(outcome.status);
+                failureReasons.push(outcome.failureReason || 'unclassified-request-error');
             }
         });
     } else {
@@ -348,12 +382,14 @@ async function searchDirectDirectoryGroup(
                 publishDirectoryItems(items, requestCount);
             } else {
                 failureStatuses.push(outcome.status);
+                failureReasons.push(outcome.failureReason || 'unclassified-request-error');
             }
         }
     }
 
     if (successfulRequestCount) {
         return {
+            endpointPaths,
             groupId: plan.groupId,
             items: rankAndDedupeItems(items, options.query, options.perGroupLimit),
             requestCount,
@@ -362,6 +398,8 @@ async function searchDirectDirectoryGroup(
     }
 
     return {
+        endpointPaths,
+        failureReason: failureReasons.every(reason => reason === failureReasons[0]) ? failureReasons[0] : 'multiple-request-failures',
         groupId: plan.groupId,
         items: [],
         requestCount,
@@ -397,21 +435,20 @@ async function searchDirectGroup(
             });
             const diagnostics = result.ptvSearchRecoveryDiagnostics;
             const items = rankAndDedupeItems(result.Items || [], options.query, options.perGroupLimit);
-            const incompleteEmptyResult = !items.length
-                && diagnostics.recoveryAttempted
-                && !diagnostics.catalogExhausted;
             const requestCount = 1
                 + diagnostics.catalogRequestsThisSearch
                 + (diagnostics.catalogHydrationCount > 0 ? 1 : 0);
 
             return {
+                ...getMovieOutcomeDetails(items, diagnostics),
                 groupId: plan.groupId,
                 items,
-                requestCount,
-                status: incompleteEmptyResult ? 'error' : 'success'
+                requestCount
             };
         } catch (error) {
             return {
+                endpointPaths: ['Users/{user}/Items'],
+                failureReason: getRequestFailureReason(error),
                 groupId: plan.groupId,
                 items: [],
                 requestCount: 1,
@@ -425,6 +462,7 @@ async function searchDirectGroup(
             const result = await searchAuthoritativeSeriesWithTimeout(options);
 
             return {
+                endpointPaths: ['Users/{user}/Items'],
                 groupId: plan.groupId,
                 items: result.items,
                 requestCount: Math.max(1, result.pagesLoaded),
@@ -432,6 +470,8 @@ async function searchDirectGroup(
             };
         } catch (error) {
             return {
+                endpointPaths: ['Users/{user}/Items'],
+                failureReason: getRequestFailureReason(error),
                 groupId: plan.groupId,
                 items: [],
                 requestCount: 1,
@@ -462,11 +502,14 @@ async function searchDirectGroup(
     });
 
     return outcome.status === 'success' ? {
+        endpointPaths: ['Users/{user}/Items'],
         groupId: plan.groupId,
         items: rankAndDedupeItems(outcome.items, options.query, options.perGroupLimit),
         requestCount: 1,
         status: 'success'
     } : {
+        endpointPaths: ['Users/{user}/Items'],
+        failureReason: getRequestFailureReason(outcome.error),
         groupId: plan.groupId,
         items: [],
         requestCount: 1,
@@ -553,6 +596,8 @@ async function searchDirectGroupsBounded(
             if (outcome && !(timedOut && outcome.status === 'aborted')) return outcome;
 
             return {
+                endpointPaths: outcome?.endpointPaths || [],
+                failureReason: timedOut ? 'client-batch-deadline' as const : 'request-error' as const,
                 groupId: plan.groupId,
                 items: [],
                 requestCount: outcome?.requestCount || 0,
@@ -602,7 +647,10 @@ async function searchPrimaryHints(options: Readonly<{
 }
 
 export type PtvResilientSearchResult = Readonly<{
+    endpointPaths: Partial<Record<PtvSearchGroupId, string[]>>;
     failedGroupIds: PtvSearchGroupId[];
+    failedGroupReasons: Partial<Record<PtvSearchGroupId, string>>;
+    failedGroupStatuses: Partial<Record<PtvSearchGroupId, 'error' | 'timeout'>>;
     groups: PtvGroupedSearchHints;
     hintCount: number;
     primaryStatus: 'error' | 'success' | 'timeout';
@@ -610,6 +658,46 @@ export type PtvResilientSearchResult = Readonly<{
     requestCount: number;
     totalRecordCount: number;
 }>;
+
+export type PtvFailedGroupRetryResult = Readonly<{
+    endpointPaths: Partial<Record<PtvSearchGroupId, string[]>>;
+    failedGroupReasons: Partial<Record<PtvSearchGroupId, string>>;
+    failedGroupStatuses: Partial<Record<PtvSearchGroupId, 'error' | 'timeout'>>;
+    groups: Partial<PtvGroupedSearchHints>;
+    requestCount: number;
+}>;
+
+export async function retryPtvFailedSearchGroups(options: Readonly<{
+    failedGroupIds: readonly PtvSearchGroupId[];
+    includeItemTypes: readonly string[];
+    perGroupLimit: number;
+    query: string;
+    serverId: string;
+    signal: AbortSignal;
+    userId: string;
+}>): Promise<PtvFailedGroupRetryResult> {
+    if (options.signal.aborted) throw new PtvSearchAbortedError();
+
+    const failedIds = new Set(options.failedGroupIds);
+    const plans = getRequestedPlans(options.includeItemTypes).filter(plan => failedIds.has(plan.groupId));
+    const batch = await searchDirectGroupsBounded(plans, options);
+    const groups: Partial<PtvGroupedSearchHints> = {};
+    const endpointPaths: PtvFailedGroupRetryResult['endpointPaths'] = {};
+    const failedGroupReasons: PtvFailedGroupRetryResult['failedGroupReasons'] = {};
+    const failedGroupStatuses: PtvFailedGroupRetryResult['failedGroupStatuses'] = {};
+
+    batch.outcomes.forEach(outcome => {
+        endpointPaths[outcome.groupId] = outcome.endpointPaths || [];
+        if (outcome.status === 'success' || outcome.items.length) {
+            groups[outcome.groupId] = outcome.items;
+        } else {
+            failedGroupStatuses[outcome.groupId] = outcome.status === 'timeout' ? 'timeout' : 'error';
+            failedGroupReasons[outcome.groupId] = outcome.failureReason || (outcome.status === 'timeout' ? 'client-group-deadline' : 'unclassified-request-error');
+        }
+    });
+
+    return { endpointPaths, failedGroupReasons, failedGroupStatuses, groups, requestCount: batch.requestCount };
+}
 
 export async function searchPtvWithRecovery(options: Readonly<{
     includeItemTypes: readonly string[];
@@ -676,11 +764,15 @@ export async function searchPtvWithRecovery(options: Readonly<{
     if (options.signal.aborted) throw new PtvSearchAbortedError();
 
     const groups = primaryResult ? { ...primaryResult.groups } : emptyGroupedSearchHints();
+    const endpointPaths: PtvResilientSearchResult['endpointPaths'] = {};
     const failedGroupIds: PtvSearchGroupId[] = [];
+    const failedGroupReasons: PtvResilientSearchResult['failedGroupReasons'] = {};
+    const failedGroupStatuses: PtvResilientSearchResult['failedGroupStatuses'] = {};
     const recoveredGroupIds: PtvSearchGroupId[] = [];
     let successfulDirectCount = 0;
 
     directOutcomes.forEach(outcome => {
+        endpointPaths[outcome.groupId] = outcome.endpointPaths || [];
         const publishedItems = publishedDirectResults.get(outcome.groupId)?.items || [];
         const directItems = rankAndDedupeItems([
             ...publishedItems,
@@ -704,6 +796,8 @@ export async function searchPtvWithRecovery(options: Readonly<{
             || (outcome.groupId === 'movies' && !(groups.movies || []).length)
         ) {
             failedGroupIds.push(outcome.groupId);
+            failedGroupStatuses[outcome.groupId] = outcome.status === 'timeout' ? 'timeout' : 'error';
+            failedGroupReasons[outcome.groupId] = outcome.failureReason || (outcome.status === 'timeout' ? 'client-group-deadline' : 'unclassified-request-error');
         }
     });
 
@@ -713,6 +807,8 @@ export async function searchPtvWithRecovery(options: Readonly<{
         requestedPlans.forEach(plan => {
             if (!directGroupIds.has(plan.groupId) && !failedGroupIds.includes(plan.groupId)) {
                 failedGroupIds.push(plan.groupId);
+                failedGroupStatuses[plan.groupId] = getPtvSearchHintFailureKind(primaryError) === 'timeout' ? 'timeout' : 'error';
+                failedGroupReasons[plan.groupId] = 'primary-hints-unavailable';
             }
         });
     }
@@ -729,7 +825,10 @@ export async function searchPtvWithRecovery(options: Readonly<{
     }
 
     return {
+        endpointPaths,
         failedGroupIds,
+        failedGroupReasons,
+        failedGroupStatuses,
         groups,
         hintCount: primaryResult?.hintCount || 0,
         primaryStatus,

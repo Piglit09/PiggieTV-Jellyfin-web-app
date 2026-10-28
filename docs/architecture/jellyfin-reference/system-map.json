@@ -123,14 +123,15 @@
       ]
     },
     "ptvWeb": {
-      "version": "0.5.57",
+      "version": "0.5.67",
       "versionAuthority": "ptv-version.json",
-      "worktreeState": "dirty",
+      "worktreeState": "Stage 2 controlled Home integration candidate on base 63d13eb0b9043252959d3018bb1e6ab399cd2f5d; local source and Atlas checkpoints retained on the integration branch",
       "identityStatus": "VERIFIED_FROM_SOURCE",
+      "identityDetail": "Stage 2 isolated controlled Home source candidate, bumped once from the Web 0.5.66 base. The version string alone does not identify the current deployed Web artifact or this candidate's recorded local commit.",
       "evidence": [
         {
           "repository": "PTV Web",
-          "version": "current worktree",
+          "version": "Stage 2 source candidate 0.5.67; base 0.5.66",
           "file": "ptv-version.json",
           "symbol": "version",
           "lines": "2",
@@ -142,23 +143,26 @@
       ]
     },
     "ptvPlugin": {
-      "version": "0.5.16.0",
-      "targetFramework": "net9.0",
-      "jellyfinPackageVersion": "10.11.11",
+      "version": "0.5.21.0",
+      "targetFramework": "net10.0",
+      "jellyfinPackageVersion": "12.2.0",
+      "targetAbi": "12.2.0.0",
       "identityStatus": "VERIFIED_FROM_SOURCE",
+      "identityDetail": "Stage 2 controlled Home Plugin source candidate on the Jellyfin 12.2/.NET 10 compatibility base, bumped once from 0.5.20.0. Earlier .125 and production VM115 runtime smoke evidence belongs to the 0.5.20.0 source line, not this integrated candidate.",
       "evidence": [
         {
           "repository": "PTV Plugin embedded source",
-          "version": "0.5.16.0",
+          "version": "Stage 2 source candidate 0.5.21.0; base 0.5.20.0",
           "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Jellyfin.Plugin.PiggieTV.csproj",
           "symbol": "TargetFramework/Version/PackageReference",
-          "lines": "4, 9-20",
+          "lines": "3, 9-21",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ],
       "chapterRefs": [
         "20-ptv-vs-stock-map.md",
-        "24-stock-api-contract-reference.md"
+        "24-stock-api-contract-reference.md",
+        "27-jellyfin-12-2-compatibility.md"
       ]
     }
   },
@@ -305,7 +309,10 @@
         "initialize PTV runtime modules",
         "classify and coordinate native/enhanced/fallback routes from canonical browser URL state rather than presentation state",
         "publish route generation state",
-        "own immutable PTV route-family lifetimes and terminal retirement"
+        "own immutable PTV route-family lifetimes and terminal retirement",
+        "project current-user navigation visibility without replacing Jellyfin authorization",
+        "withhold direct browse and Reading page presentation when the requested view or subtype lacks returned user-view evidence",
+        "bind notification presentation to the current verified server/user identity"
       ],
       "systemRefs": [
         "applicationStartup",
@@ -346,6 +353,7 @@
       "kind": "native PTV system",
       "responsibilities": [
         "music discovery and relationship reconciliation",
+        "user-visible Music album membership proof and bounded nested-disc track projection",
         "Music Identify adoption",
         "native audio queue and playback view state"
       ],
@@ -395,7 +403,8 @@
       ],
       "chapterRefs": [
         "20-ptv-vs-stock-map.md",
-        "24-stock-api-contract-reference.md"
+        "24-stock-api-contract-reference.md",
+        "27-jellyfin-12-2-compatibility.md"
       ],
       "evidenceRefs": [
         "$.ptvOverrides.pluginApi.evidence[0]",
@@ -775,6 +784,52 @@
         }
       ]
     },
+    "ptvReadingIdentityGuard": {
+      "authoritativeOwners": [
+        "Jellyfin Book entity, resolved file path, manual item metadata write, user-scoped DTO, images, relationships and UserData"
+      ],
+      "derivedOwners": [
+        "PTV Plugin bounded ComicInfo archive inspector, source-specific identity assessor and signed candidate context",
+        "PTV shared administrator Reading Identify review and guarded manual save"
+      ],
+      "classification": ["STOCK_WRAPPED", "NEW_PTV_SYSTEM"],
+      "scope": "Explicit PTV Reading Identify Apply in Metadata Manager and Metadata Quality; recognized-provider nonrecursive Book Scan is blocked before its former PTV exact-provider write; explicit recursive Scan, stock Identify and Jellyfin refresh are outside the guard",
+      "route": "POST /Ptv/v1/reading/metadata/reassess; authenticated administrator with Policies.RequiresElevation",
+      "contract": "Search-issued context binds administrator, item, provider identity and scope, search generation and typed provenance for at most 15 minutes and one Plugin process; reassess bypasses search cache/provider fetch and returns current typed conflict or unverified evidence plus opaque revision",
+      "mutationOrder": "fresh form conflict check -> reassess current archive/item -> independently acknowledged review -> manual Jellyfin updateItem -> exact authoritative readback",
+      "scanDispatch": "Nonrecursive Book Scan with a recognized saved Reading provider ID rejects before provider lookup, stock refresh or item update and directs the administrator to guarded Identify; no automatic fallback. Explicit recursive Scan and Books without a recognized saved Reading ID retain their stock refresh paths.",
+      "lifecycle": "Changed server/user/item/candidate/generation/revision/assessment retires old review and acknowledgments; denied or failed reassessment makes zero item updates",
+      "queuedCancellation": "After the two-helper semaphore grants a queued waiter, recheck the linked cancellation token before pipe creation or helper launch; cleanup releases safe capacity, but failed child reap consumes the slot until restart rather than allowing a third process",
+      "resourceBoundary": "At most two helpers/server and five seconds; 512 MiB hard Windows Job or delegated Linux cgroup limit before archive input; missing helper or unenforceable limit yields typed unverified identity",
+      "package": "Main Plugin files plus separately packaged self-contained linux-x64 and win-x64 helper trees; source commit and artifact hashes required before any deployment",
+      "nonGuarantees": [
+        "No atomic archive-to-Jellyfin metadata transaction",
+        "No provider candidate correctness or freshness guarantee",
+        "No guard for stock writers, explicit recursive Scan or older mounted Web admin clients",
+        "No image/cache/relationship convergence from mutation acknowledgment",
+        "Local tests do not prove Linux/Windows Jellyfin service helper binding or resource limits"
+      ],
+      "componentRefs": ["ptvPlugin", "ptvReading"],
+      "dependsOn": ["reading", "metadataIdentify", "settingsAndAdmin", "libraryAndItemProjection", "cacheAndInvalidation"],
+      "stage3PhysicalStatus": "NOT_TESTED; Jellyfin .50 and .125 not contacted in source integration",
+      "chapterRefs": ["11-reading.md", "13-metadata-identify.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidence": [
+        {
+          "repository": "PTV Reading lineage",
+          "version": "db873570c4 source candidate",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvReadingMetadataIdentificationService.cs",
+          "symbol": "ReassessAsync / fresh identity evidence",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Reading lineage",
+          "version": "db873570c4 source candidate",
+          "file": "src/ptv/modules/settings/admin/metadataManager/adminMetadataManagerService.ts",
+          "symbol": "manual save beforeUpdate guard and readback",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
     "metadataIdentify": {
       "authoritativeOwners": [
         "Jellyfin Server metadata/provider pipeline and persisted item state"
@@ -851,15 +906,18 @@
     },
     "settingsAndAdmin": {
       "authoritativeOwners": [
-        "Jellyfin Server configuration managers/documents and admin controllers"
+        "Jellyfin Server configuration managers/documents and admin controllers",
+        "Jellyfin Server elevated storage and ScheduledTasks read endpoints"
       ],
       "derivedOwners": [
         "dashboard forms",
-        "query/form baselines"
+        "query/form baselines",
+        "PTV read-only admin storage view and authenticated server+user+connection-scoped query"
       ],
       "dependsOn": [
         "administrator policy",
         "configuration read",
+        "elevated storage and scheduled-task progress reads",
         "mutation acknowledgment",
         "authoritative readback",
         "cacheAndInvalidation"
@@ -876,6 +934,13 @@
           "file": "Jellyfin.Api/Controllers/ConfigurationController.cs",
           "symbol": "configuration read/write/branding actions",
           "lines": "23-162",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "0.5.71 local candidate",
+          "file": "src/ptv/modules/settings/admin/storage/useAdminStorage.ts; src/ptv/modules/settings/admin/storage/AdminStoragePanel.tsx; src/ptv/modules/settings/admin/tasks/adminTasks.scss",
+          "symbol": "administrator-scoped storage read/view and Tasks style boundary",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]
@@ -952,7 +1017,7 @@
     "buildServiceWorkerAssets": {
       "authoritativeOwners": [
         "Webpack build output for asset generation",
-        "active browser service worker for controlled cache generation"
+        "Browser registration/controller for worker lifecycle only, not application asset caching"
       ],
       "dependsOn": [
         "chunk identity",
@@ -977,10 +1042,99 @@
     }
   },
   "owners": {
+    "buildArtifactAndDeploymentGovernance": {
+      "authoritativeOwner": "Approved Windows PTV Web local Git checkout and separately approved Linux cloud edit/build checkout for source identity; independently protected operator policy for deployment approval",
+      "derivedOwners": ["workspace preflight", "whole-artifact SHA-256 manifest", "Web and Plugin package entrypoints", "registered deployment wrappers", "exact-tree Web publication transaction", "standing .125 development deployment guard", "fresh local server identity and active-session warning"],
+      "identity": ["resolved source root and Git common directory", "origin remote", "complete effective origin push destination set for cloud development", "cloud bugfix branch and pinned baseline ancestry", "full artifact source commit and committed tree", "Web and Plugin version authorities", "complete archive and file-manifest hashes", "registered target and independently protected operator policy", "verified Web rollback reference for release workflows"],
+      "rule": "Supported build and package entrypoints fail closed for an unapproved root or source identity. Release packages require clean committed source. Frozen artifact verification binds a reachable source commit, committed versions and complete file hashes. The legacy release wrapper retains exact-ref approval and rollback gates. The separate development guard allows repeated test-only Web and Plugin installations on the registered .125 server after independently protected standing policy provisioning; it requires exact source, artifact, server and path identity, warns about active Beta users, and never authorizes data or production changes. Web publication retires only known obsolete assets before writing index last. Plugin replacement requires a graceful stop and verified relaunch of the pinned development instance. Production .50 remains denied during development testing.",
+      "nonGuarantee": "Repository scripts do not prevent arbitrary manual filesystem writes or replace independently controlled operating-system permissions. In-place per-file Web publication is rollback-capable but not a single atomic directory switch. Local fixture tests do not prove hosted cache behavior, old-tab convergence, or physical acceptance.",
+      "chapterRefs": ["18-build-service-worker-assets.md", "23-before-you-modify-checklists.md"],
+      "localEvidence": {
+        "baseCommit": "a8928478c7a28093f72431bf01271d878dee928d",
+        "status": "PHASE6_GOVERNANCE_LOCAL_ONLY_NOT_DEPLOYED"
+      },
+      "cloudDevelopment": {
+        "sourceRoot": "/workspace/PiggieTV-Jellyfin-web-app",
+        "gitCommonDirectory": "/workspace/PiggieTV-Jellyfin-web-app/.git",
+        "gitDirectoryRule": "A real standalone .git directory at the resolved source root; no linked worktree or symlink substitution",
+        "expectedRemote": "https://github.com/Piglit09/PiggieTV-Jellyfin-web-app.git",
+        "branchPrefix": "codex/bugfix/",
+        "baseCommit": "db38180035a9e413510414bd8b75940806952b7f",
+        "allowedModes": ["edit", "build"],
+        "pushDestinationRule": "Preserve the existing origin identity check and separately require every effective origin push URL to match the approved HTTPS repository, with existing optional .git suffix normalization. Include Git rewrites and fetch-as-push fallback. Reject empty or malformed destination sets; an approved first URL does not authorize additional foreign URLs.",
+        "ciAndDeploymentBoundary": "At the cloud root reject package, deploy and deploy-development before CI exception handling; reject --ci-ref for cloud edit/build. Genuine exact-ref CI elsewhere and protected Windows deployment authority retain their existing separate paths. No cloud merge, release, deployment or server access is granted.",
+        "trustBoundary": "Cloud policy and guard code are task-writable, not independently protected credentials or a signed grant. Supported-entrypoint checks cannot prevent arbitrary manual writes or a modified guard. GitHub permissions and human review remain separate boundaries; checked-in revocation alone cannot revoke credentials or old checkout contents.",
+        "requiredProof": ["resolved root/common directory and standalone Git directory", "existing origin identity and complete effective push destination set", "named bugfix branch, full HEAD and pinned baseline ancestry", "actual Linux edit/build preflight success", "disposable Git regressions for multiple destinations, fallback, rewrites and malformed entries", "cloud package/deploy/CI denial and unchanged Windows/genuine CI behavior"],
+        "evidence": [
+          {
+            "status": "VERIFIED_FROM_SOURCE",
+            "file": "scripts/ptv-workspace-preflight.mjs",
+            "symbol": "pinnedAuthority.cloudDevelopment / validateCloudDevelopment / sourceReferenceForMode",
+            "procedure": "docs/operations/ptv-cloud-development.md"
+          },
+          {
+            "status": "VERIFIED_BY_TEST",
+            "environment": "actual Linux Codex checkout, 2026-10-27",
+            "sourceCommit": "8ac3dcc713cde18e94114022beede6ad820a57ce",
+            "branch": "codex/bugfix/cloud-origin-destinations",
+            "commands": ["node scripts/ptv-workspace-preflight.mjs edit", "node scripts/ptv-workspace-preflight.mjs build"],
+            "result": "PASS with cloud-development authority on the unchanged merged guard before the complete push-set correction; source identity acceptance only",
+            "finalCorrectionEvidence": "docs/superpowers/plans/2026-10-27-cloud-origin-destinations.md"
+          }
+        ],
+        "validationLimit": "Earlier Windows fixtures simulate Linux by injecting runtimePlatform; distinguish those results from actual Linux checkout preflights. Neither proves hosted cache/session convergence, physical acceptance or deployment authorization. Preserve historical Phase 6 localEvidence separately."
+      }
+    },
+    "browseLibraryPresentation": {
+      "authoritativeOwner": "Jellyfin authenticated ordinary ParentId item/Resume reads, with user-aware Ancestors proof for nested parents",
+      "derivedOwners": ["NativeBrowsePage resolved route scope", "browseData scoped reader and focused/directory caches", "browseRecommendations projection of global ranks onto fresh scoped DTOs", "usePtvBrowseBackdrop exact scope/availability owner and shell image retirement"],
+      "identity": ["server", "user", "resolved library roots", "route generation and filters/page"],
+      "rule": "Missing scope fails closed. Media type and global recommendation/cache snapshots are not membership. No unsupported AncestorIds HTTP filter or explicit Ids membership shortcut. Fallback uses only the same fresh library pool; global Home/hub/Collections owners remain global.",
+      "projectedRoots": "DTO Type=UserView provenance permits only Series-to-Season membership proof via ordinary recursive paged root reads when physical ancestors cannot represent a grouped view. Other nested/BoxSet queries do not gain that fallback. Random root pools interleave before limiting.",
+      "chapterRefs": ["05-library-item-relationships.md", "21-ownership-conflicts.md", "23-before-you-modify-checklists.md"],
+      "localEvidence": {
+        "baseCommit": "4eda45c8c6bd56a8f6ab9e31fa81ddc13d5e0073",
+        "version": "Web 0.5.60 unchanged; Plugin unchanged",
+        "files": ["src/ptv/pages/browse/browseData.ts", "src/ptv/pages/browse/NativeBrowsePage.tsx", "src/ptv/pages/browse/browseRecommendations.ts"],
+        "status": "VERIFIED_FROM_SOURCE_AND_FOCUSED_TESTS_NOT_DEPLOYED"
+      }
+    },
+    "navigationAccess": {
+      "authoritativeOwner": "Jellyfin authenticated current user, policy and user-scoped User Views; Jellyfin item APIs remain the response authorization boundary",
+      "derivedOwner": "each mounted usePtvNavigationAccess instance owns a current server/user/revision projection; no shared navigation cache",
+      "viewOwners": ["PTVShell header, Details navigation and direct media-page presentation", "PTV Sidebar", "CollectionsPage selects the collections shell section"],
+      "identity": ["current authenticated Jellyfin server ID", "current user ID", "exact returned User View IDs and CollectionType", "read revision"],
+      "rule": "Fail closed before initial proof and after missing, conflicting or failed identity/read evidence. A same-identity background refresh retains the last proven projection until success replaces it or failure withdraws it. Display names only classify already returned views; neither Web filtering nor hidden direct links authorize API responses. Preserve distinct accessible libraries, expose administrator links only from matching current-user Policy.IsAdministrator === true, and show Live TV/Guide only from matching current-user Policy.EnableLiveTvAccess === true. Direct browse topParentId presentation requires a returned view ID or a legacy alias with a returned kind/name match; Reading subroutes require a returned view of the corresponding kind; CollectionsPage uses the collections shell section for direct-route presentation. Sidebar Calendar uses existing ARR availability only after ready navigation proof; Request remains independent. Static route classification remains separate from filtered visible links.",
+      "retirement": ["abort prior read on identity/revision change", "reject late response after current identity mismatch", "withdraw immediately on identity change and after failed revalidation", "close header transient menus on identity/status/access change", "close open sidebar on identity/status or same-identity visible-navigation change", "refresh on focus, visibility, storage, bounded periodic check and aged route change"],
+      "nonGuarantee": "External in-session permission changes may precede the next client refresh; no atomic policy subscription or hosted/physical acceptance is established by local source alone.",
+      "chapterRefs": ["03-routing-navigation-lifecycle.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md"],
+      "localEvidence": {
+        "baseCommit": "70283b34ffa904c030cf82821e5d561643a21b82",
+        "version": "Phase 2G local source change from Web 0.5.80 baseline; Plugin unchanged",
+        "files": ["src/ptv/shell/navigationAccess.ts", "src/ptv/shell/usePtvNavigationAccess.ts", "src/ptv/shell/navigation.ts", "src/ptv/shell/routes.js", "src/ptv/shell/PTVShell.tsx", "src/ptv/modules/sidebar/Sidebar.tsx", "src/ptv/modules/collections/CollectionsPage.tsx"],
+        "status": "VERIFIED_FROM_SOURCE_HOSTED_AND_PHYSICAL_PENDING"
+      }
+    },
+    "notificationInbox": {
+      "authoritativeOwner": "PTV notificationService browser-local notice and retry-handler state; Jellyfin remains authority for any underlying user data or API payload",
+      "cacheOwner": "localStorage ptv:notifications:v2:<encoded canonical server/user identity> plus one active in-memory list",
+      "viewOwner": "PTVShell notification badge and panel snapshot for the current verified navigation identity",
+      "legacyRule": "Preserve identity-agnostic ptv:notifications:v1 bytes for recovery, but never hydrate them into an authenticated account.",
+      "retirement": ["missing or conflicting identity exposes no notices and forbids new persistence", "identity change loads only that identity's saved v2 list", "identity change resets deduplication and clears in-memory retry handlers", "subscribers requesting an older identity receive an empty snapshot"],
+      "nonGuarantee": "Browser-local notice isolation does not authorize a Jellyfin or Plugin response and is not hosted cross-account acceptance proof.",
+      "chapterRefs": ["16-caching-invalidation.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md"],
+      "localEvidence": {
+        "baseCommit": "70283b34ffa904c030cf82821e5d561643a21b82",
+        "version": "Phase 2G local source change from Web 0.5.80 baseline",
+        "files": ["src/ptv/services/notificationService.ts", "src/ptv/shell/PTVShell.tsx"],
+        "status": "VERIFIED_FROM_SOURCE_HOSTED_AND_PHYSICAL_PENDING"
+      }
+    },
     "configuredHomePresentation": {
       "authoritativeOwner": "PTV Plugin configuration issuer and trusted generated store binding, observed through an explicit final protected status read",
       "recoveryOwner": "PtvFeaturedContentRefreshService existing semaphore and hosted scheduler; missing current generation/document binding triggers normal regeneration independently of content TTL, with a bounded missing-trust retry and replaceable schedule wakeup",
       "recoveryEvidenceRef": "$.ptvOverrides.configuredHomePresentation.evidence[3]",
+      "localWebRenderContract": "Web 0.5.60 Pass 01 memoizes derived presentation on state/identity/exact freshness snapshot and makes identical item-reference/proof preview updates idempotent. Snapshot retirement and old-callback proof binding remain authoritative; local source/tests only, not deployed.",
       "derivedOwners": [
         "configuredRowFreshness single active server/user proof and local revision",
         "Native Home current/last-good rows and derived Hero presentation",
@@ -1000,6 +1154,19 @@
         "$.ptvOverrides.configuredHomePresentation.evidence[0]",
         "$.ptvOverrides.configuredHomePresentation.evidence[1]"
       ]
+    },
+    "configuredHomeRowLibraryOwnership": {
+      "authoritativeOwner": "Jellyfin VirtualFolder ItemId for configured library identity and Jellyfin user-aware views/item reads for current-user visibility",
+      "settingsOwner": "PtvPluginSettingsService persists schema-3 RowLibraryScope and pins one uniquely matched built-in default through its normal configuration mutation",
+      "generationOwner": "PtvFeaturedContentRefreshService uses complete paged recursive CollectionFolder candidate pools for library-owned rules; global rows retain their separate candidate pool",
+      "responseOwner": "PtvFeaturedContentAuthorizationService checks the current rule, folder binding and Jellyfin user access before serializing an owned section",
+      "webDerivedOwner": "one Home-visit membership authority proves positive user-scoped item IDs and retires with route, generation or identity; restricted users take their scope claim only from a fresh authorized Featured response, not administrator settings or a cached copy",
+      "topologyTransitionOwner": "PtvHomeTopologyLedger durably holds before a controlled stock library write, and PtvHomeTransitionsController proves bounded natural convergence before release; selected rebind and release persist atomically",
+      "userAccessProofOwner": "PtvHomeUserAccessLedger persists per-user holds and proofs bound to authoritative policy, current topology epoch, and exact user-aware accessible-library IDs; administrator migration and new-user bootstrap have separate workflows",
+      "identity": ["pinned library ItemId and collection type", "current row rule and generated scope claim", "Jellyfin server and user", "Home route generation", "topology epoch and library revision", "per-user access epoch and exact accessible-library set"],
+      "rule": "Names and media type only constrain first-time default binding; neither a shared candidate, authorized item, scope hash, nor cached response alone proves current library membership. Every PTV Featured row requires current per-user proof, and owned rows additionally require positive visit-local membership. Missing, stale, or corrupt proof fails closed; no Web membership proof is persisted.",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md"],
+      "evidenceRefs": ["$.ptvOverrides.homeRowLibraryOwnership.evidence[0]", "$.ptvOverrides.homeRowLibraryOwnership.evidence[1]", "$.ptvOverrides.homeRowLibraryOwnership.evidence[2]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[1]"]
     },
     "authenticatedPrincipal": {
       "authoritativeOwner": "Jellyfin Server authentication context",
@@ -1052,7 +1219,8 @@
       "derivedOwners": [
         "legacy AppRouter bridge",
         "view manager",
-        "dialog history state"
+        "dialog history state",
+        "PTVShell measured header clearance for presentation only"
       ],
       "observers": [
         "header/navigation",
@@ -1070,6 +1238,32 @@
         "$.systems.routingAndViewLifecycle.evidence[0]",
         "$.systems.routingAndViewLifecycle.evidence[1]"
       ]
+    },
+    "responsiveShellGeometry": {
+      "authoritativeOwner": "mounted PTVShell header bounding geometry",
+      "derivedOwners": ["root --ptv-shell-header-clearance CSS value", "shell, Browse and cinematic Details sticky/scroll offsets", "Calendar section-navigation and content clearance"],
+      "refresh": ["header ResizeObserver", "root route-class change", "window resize", "visualViewport resize"],
+      "cleanup": ["disconnect observers and listeners on shell unmount", "remove or transfer the root CSS value"],
+      "nonAuthority": "Presentation geometry does not select route, user/library scope, image identity or data requests.",
+      "localCandidateEvidence": ["src/ptv/shell/PTVShell.tsx", "src/ptv/shell/ptvShell.scss", "src/ptv/styles/shell.scss", "src/ptv/pages/browse/nativeBrowse.scss", "src/ptv/modules/details/details-shell.scss", "src/ptv/modules/calendar/calendar.scss", "e2e/tests/calendar-layout.spec.ts"],
+      "chapterRefs": ["03-routing-navigation-lifecycle.md", "08-details-seasons-episodes.md", "22-change-impact-matrix.md"]
+    },
+    "responsiveLayoutSelection": {
+      "authoritativeOwner": "PTV clientProfile measured viewport and ten-foot signal for presentation classes",
+      "derivedOwners": ["compact/mobile/tablet/desktop shell layout classes"],
+      "selectionRule": "For non-TV layouts, visual/inner viewport width and coarse-pointer compact landscape dimensions precede mobile/tablet user-agent fallback. Viewport posture can change presentation without changing client kind.",
+      "separateBudgetOwner": "getPtvPerformanceProfile retains client-kind Home row and artwork budgets across Fold outer/inner viewport changes",
+      "nonAuthority": "Layout class is not user/library scope, route identity, image request identity or authorization.",
+      "localCandidateEvidence": ["src/ptv/core/clientProfile.ts", "src/ptv/core/clientProfile.test.ts", "src/ptv/shell/ptvShell.scss", "e2e/tests/shell-header-visual.spec.ts"],
+      "chapterRefs": ["03-routing-navigation-lifecycle.md", "06-home-data-flow.md", "22-change-impact-matrix.md"]
+    },
+    "searchFailedGroupRecovery": {
+      "authoritativeOwner": "Jellyfin user-scoped Search/Items responses within the existing PTV request plan",
+      "derivedOwners": ["NativeSearchPage failed-group state", "NativeSearchGroupRetryAction per-group control", "resilientSearchService bounded direct retry"],
+      "identity": ["server", "user", "settled query", "filter", "route/input scope", "request generation"],
+      "rule": "Each group Retry and aggregate Try again select only current error/timeout/cancelled group IDs. Successful groups remain visible. Abort or identity/scope change rejects late retry results. No broad library fallback or fabricated result is allowed.",
+      "localCandidateEvidence": ["src/ptv/pages/search/NativeSearchPage.tsx", "src/ptv/pages/search/NativeSearchGroupRetryAction.tsx", "src/ptv/pages/search/searchGroupRetryState.ts", "src/ptv/pages/search/resilientSearchService.ts"],
+      "chapterRefs": ["09-search.md", "19-failure-race-lifecycle.md", "22-change-impact-matrix.md"]
     },
     "itemMetadata": {
       "authoritativeOwner": "Jellyfin Server persisted item/domain state",
@@ -1172,20 +1366,56 @@
     "builtAssetGeneration": {
       "authoritativeOwner": "deployed Web build output",
       "derivedOwners": [
-        "service-worker cache",
+        "standalone worker embedded generation and lifecycle",
         "browser HTTP cache",
-        "open document/chunk graph"
+        "open document/chunk graph",
+        "UpdateService verified candidate observer"
       ],
       "cleanup": [
-        "service-worker generation activation/retirement",
-        "browser reload/update flow"
+        "candidate-specific dismissal/reload retirement",
+        "one observation epoch fences registration reads, worker events and identity replies",
+        "activity-gated browser reload/update flow",
+        "activation failure remains visible and retryable; no fallback reload before active/controlling worker and stored generation acknowledgement; same-session Later dismissal survives failed-reload reconciliation for the same verified generation"
+      ],
+      "updateRule": "Same-origin worker MessagePort identity derives only from existing webpack provenance. Equal/older/unknown generations do not notify; verified later generations do. This worker has no fetch/cache/purge owner.",
+      "localCandidateEvidence": [
+        "src/ptv/services/updateGeneration.ts",
+        "src/ptv/services/updateService.ts",
+        "src/ptv/services/updateService.test.ts",
+        "src/serviceworker.js",
+        "e2e/tests/general.spec.ts old-bundle recovery fixture"
       ],
       "chapterRefs": [
-        "18-build-service-worker-assets.md"
+        "18-build-service-worker-assets.md",
+        "21-ownership-conflicts.md",
+        "23-before-you-modify-checklists.md"
       ],
       "evidenceRefs": [
         "$.systems.buildServiceWorkerAssets.evidence[0]"
       ]
+    },
+    "videoControlsTransientState": {
+      "authoritativeOwner": "native video controller current visibility lease and existing controls hide timers",
+      "derivedOwners": ["abortable root/child action sheets", "PTV Movie/Series header", "episode-only bottom identity"],
+      "identity": ["active view and visibility lease", "active manager player", "server/item", "controls visibility"],
+      "cleanup": ["hide", "view/player/lease replacement", "playback start/stop/error", "view teardown"],
+      "rule": "One operation starts before lazy work and guards post-await reads, selection mutations and identity-safe finalization. Held input defers existing timers and releases on cancel/keyup/blur; no separate menu timeout. Up Next prompt owns input while visible; prompt and stock PlaybackManager share a per-playback next-advance claim against natural end. A changed queue may reoffer its replacement, and an explicit playback request retires pending autoplay before the new item starts. Safari native video fullscreen uses native controls and restores the prior setting on exit. Active HTML video gain/mute belongs to the retained element across Next/autoplay, not PTV item-start enforcement. Header artwork uses existing image ownership and retires before DOM reconciliation. Audio/subtitle menu checks reflect the current stream index after icon normalization. HTML video subtitle session/fetch/renderer work is fenced by target, selection/render generation, source and media element; Off and source replacement retire old work while same-track repeats preserve a valid pending fetch.",
+      "localStage4Presentation": "Custom inline OSD uses compact wrapping, at least 44 px visible touch boxes, and safe-area-aware top/bottom placement; native Safari fullscreen remains browser-owned.",
+      "localCandidateStatus": "Web 0.5.62 RC1 source preparation; local Pass 02 browser acceptance passed, production/deployment not claimed",
+      "files": ["src/controllers/playback/video/index.js", "src/controllers/playback/video/videoTransientMenuLifecycle.ts", "src/components/playback/playersettingsmenu.js", "src/ptv/modules/playback/videoInputOwnership.ts", "src/ptv/modules/playback/index.js", "src/ptv/modules/playback/playerHeader.ts", "src/controllers/playback/video/videoDisplayTitle.ts", "src/plugins/htmlVideoPlayer/plugin.js", "src/ptv/modules/icons/icons.scss"],
+      "tests": ["videoTransientMenuLifecycle.test.ts", "htmlVideoSubtitleSelectionRace.test.ts", "streamSelectionVisual.spec.ts", "playersettingsmenu.test.ts", "continuousVideoPreferences.test.ts", "playerHeader.test.ts", "playerHeader.integration.test.ts", "playerHeader.imageLoad.test.ts", "videoDisplayTitle.test.ts", "videoInputOwnership.test.ts", "playerChromeTimer.test.ts"],
+      "chapterRefs": ["14-playback-session-transcoding.md", "21-ownership-conflicts.md", "23-before-you-modify-checklists.md"]
+    },
+    "playbackQualitySelection": {
+      "authoritativeOwners": ["Jellyfin Server PlaybackInfo, user policy and encoding services", "active Web PlaybackManager for request-local selection and client stream handoff"],
+      "derivedOwners": ["player settings menu label", "player statistics and current playback view"],
+      "identity": ["active local player", "server/item/media source", "stream-change generation", "user remote bitrate policy"],
+      "rule": "Auto connection estimates are not authorization caps. Manual tiers clone the device profile for one PlaybackInfo request with required Width/Height ceilings, validate the negotiated path before handoff, and keep the prior encoding until the selected player stream starts. Original omits the client bitrate cap; Jellyfin continues to enforce server/user policy. The menu labels are upper envelopes, not verified delivered resolution.",
+      "failureAndCleanup": "An unsupported negotiation retains the old stream. A failed quality start attempts to restore the old stream and retains its selection; a failed restoration remains a playback error. New item playback clears the prior quality label.",
+      "localCandidateStatus": "Issue #52 local source/tests only; hosted output and physical continuity unknown; no Plugin or server change",
+      "files": ["src/components/qualityOptions.js", "src/components/playback/playersettingsmenu.js", "src/components/playback/videoQualityNegotiation.js", "src/components/playback/playbackmanager.js"],
+      "tests": ["qualityOptions.player.test.ts", "playersettingsmenu.test.ts", "videoQualityNegotiation.test.ts", "playbackQualitySelection.test.ts"],
+      "chapterRefs": ["14-playback-session-transcoding.md", "23-before-you-modify-checklists.md", "25-known-jellyfin-non-guarantees.md"]
     }
   },
   "dependencies": {
@@ -1193,10 +1423,20 @@
       {
         "from": "settingsAndAdmin",
         "to": "home",
-        "reason": "Configured presentation requires an explicit point-in-time final status proof after settings and Featured inputs; observed retirement fences derived rows and previews.",
+        "reason": "Configured presentation requires an explicit point-in-time final status proof after settings and Featured inputs; observed retirement fences derived rows and previews. Controlled Home authority adds durable holds and per-user verification before a library-owned row may publish.",
         "evidenceRefs": [
           "$.ptvOverrides.configuredHomePresentation.evidence[0]",
-          "$.ptvOverrides.configuredHomePresentation.evidence[1]"
+          "$.ptvOverrides.configuredHomePresentation.evidence[1]",
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]"
+        ]
+      },
+      {
+        "from": "settingsAndAdmin",
+        "to": "cacheAndInvalidation",
+        "reason": "Controlled topology and user-access changes durably hold PTV Home authority before stock writes; a fresh final convergence or per-user policy/membership proof governs Featured staging and cache retirement.",
+        "evidenceRefs": [
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]",
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[1]"
         ]
       },
       {
@@ -1218,12 +1458,31 @@
         ]
       },
       {
+        "from": "permissionsAndLibraryAccess",
+        "to": "routingAndViewLifecycle",
+        "reason": "PTV header and sidebar derive visible media links from current authenticated User Views and policy while the hash router remains URL authority; the client projection does not authorize server responses.",
+        "evidenceRefs": [
+          "$.systems.permissionsAndLibraryAccess.evidence[0]",
+          "$.ptvOverrides.routing.evidence[2]"
+        ]
+      },
+      {
+        "from": "permissionsAndLibraryAccess",
+        "to": "home",
+        "reason": "All PTV Featured rows require current durable per-user policy, topology epoch, and exact user-aware accessible-library proof; owned Home rows additionally require fresh visit-local item membership.",
+        "evidenceRefs": [
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]",
+          "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[3]"
+        ]
+      },
+      {
         "from": "libraryAndItemProjection",
         "to": "home",
-        "reason": "Home rows consume user-scoped item projections.",
+        "reason": "Home rows consume user-scoped item projections; library-owned configured rows additionally require positive membership in the pinned library for the current user.",
         "evidenceRefs": [
           "$.systems.home.evidence[0]",
-          "$.systems.libraryAndItemProjection.evidence[1]"
+          "$.systems.libraryAndItemProjection.evidence[1]",
+          "$.ptvOverrides.homeRowLibraryOwnership.evidence[2]"
         ]
       },
       {
@@ -1242,6 +1501,15 @@
         "evidenceRefs": [
           "$.systems.libraryAndItemProjection.evidence[0]",
           "$.systems.music.evidence[0]"
+        ]
+      },
+      {
+        "from": "ptvReadingIdentityGuard",
+        "to": "metadataIdentify",
+        "reason": "The PTV administrator Reading guard reassesses current archive and candidate identity before the existing manual Jellyfin item metadata write; it does not replace the stock mutation or its readback.",
+        "evidenceRefs": [
+          "$.systems.ptvReadingIdentityGuard.evidence[0]",
+          "$.systems.ptvReadingIdentityGuard.evidence[1]"
         ]
       },
       {
@@ -1398,6 +1666,14 @@
         "25-known-jellyfin-non-guarantees.md"
       ]
     },
+    "ptvReadingManualIdentifyApply": {
+      "authority": "Jellyfin Server ItemUpdateController and persisted Book metadata; PTV Plugin preflight is read-only",
+      "preWriteGuard": "Current administrator/item/candidate context, fresh form check, fresh source-specific reassessment and separate conflict/unverified acknowledgments; any uncertainty blocks before updateItem",
+      "retiredBypass": "The former PTV exact-provider nonrecursive Book Scan with a saved Reading provider ID is blocked before search/write and redirects the administrator to guarded Identify; explicit recursive stock Scan remains unchanged",
+      "acknowledgment": "Manual update response is distinct from exact authoritative readback and independent image/cache/relationship convergence",
+      "requiredReconciliation": ["exact user-scoped item readback", "locked-field and relationship preservation", "image-tag/artwork outcome", "stale review and concurrent save retirement"],
+      "chapterRefs": ["11-reading.md", "13-metadata-identify.md", "21-ownership-conflicts.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"]
+    },
     "userData": {
       "authority": "Jellyfin Server user item data",
       "examples": [
@@ -1429,6 +1705,38 @@
         "16-caching-invalidation.md",
         "19-failure-race-lifecycle.md"
       ]
+    },
+    "homeDefaultLibraryPin": {
+      "authority": "PTV Plugin settings service under its existing configuration mutation gate",
+      "trigger": "existing Featured refresh observes exactly one unpinned built-in default match by initial name and CollectionType",
+      "write": "persist the matched VirtualFolder ItemId in schema-3 RowLibraryScope before treating it as a resolved owned rule",
+      "failureRule": "no-op observation does not mutate; ambiguous or failed persistence leaves the row unbound and cannot grant an in-memory-only binding",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "23-before-you-modify-checklists.md"],
+      "evidenceRefs": ["$.ptvOverrides.homeRowLibraryOwnership.evidence[0]"]
+    },
+    "controlledHomeLibraryTransition": {
+      "authority": "Jellyfin owns stock virtual-folder mutation; PtvHomeTopologyLedger owns PTV pre-write hold, affected tombstones, and durable release/rebind",
+      "sequence": "administrator Begin persists hold before stock write; Complete makes at most three immediate bounded read-only natural-convergence snapshots, privately stages Featured, then requires a fresh final snapshot before durable release; selected rebind and release are atomic",
+      "failureRule": "uncertain, delayed, cancelled, drifted, duplicate, null, or stale-old-child evidence keeps hold; an isolated Jellyfin 12 rename left ItemId/UserView absent in the accepted completion window, so automatic convergence is unproven and administrator recovery is required; no selected binding may release the broad hold only with affected tombstones retained; explicit retry uses the same operation without a stock rewrite",
+      "excludedActions": ["ValidateTopLibraryFolders", "PTV provider refresh", "global scan", "refreshLibrary=true"],
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidenceRefs": ["$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[1]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[2]"]
+    },
+    "controlledExistingUserAccess": {
+      "authority": "Jellyfin owns policy and current user-aware accessible libraries; PtvHomeUserAccessLedger owns PTV per-user hold and proof",
+      "sequence": "administrator Begin persists hold for known ID before stock policy write; Complete compares intended policy, current topology epoch, and exact current user-aware accessible-library set",
+      "failureRule": "missing, corrupt, stale, mismatched, or interrupted proof keeps owned Home unavailable and administrator recovery possible",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md"],
+      "evidenceRefs": ["$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]"]
+    },
+    "newUserBootstrapAndMigration": {
+      "authority": "Jellyfin creates the user before returning its ID; PTV reservation, ledger, and administrator verification own Home eligibility proof, not account existence",
+      "sequence": "Web saves a server-scoped creation hint at prepared before Plugin reserve, then create-started after confirmed reservation and before stock Create; legacy missing stage cannot prove Create never started. A confirmed unbound reservation may omit nullable userId; Web accepts only omitted/null and still requires matching operation, reserved state, migration hold, and bootstrapRequired=false. Reservation changes refresh recovery and verification siblings. An uncertain reserve retains the local creation/verification hold; an unlisted hint requires exact read-only Plugin operation-status reconciliation. Only prepared plus authoritative absent can release that hint; create-started or legacy-stage absent remains held. Web checks the active administrator, server, and Plugin session before stock Create and between new-user bootstrap mutations; interruption retains the recovery hint and any Plugin hold. After binding, new-account bootstrap writes selected library restrictions before role/enabled policy. Explicit administrator recovery reduces an enabled account's role or disables it first when applicable; otherwise it writes libraries before enablement or elevation. Exact Plugin proof follows. These separate Jellyfin writes are not atomic; default stock access may be broad between Create and the first restrictive write. New user remains unproven after ID binding until intended/restrictive policy write, authoritative readback, current-epoch durable per-user proof, and fresh membership; first-install migration freezes exact existing IDs and proves each individually",
+      "prewriteHold": "NEW_USER_PREWRITE_HOLD = NOT_APPLICABLE",
+      "verificationReplayRule": "New migration proofs persist VerificationBatchId. An identical verification reuses the prior durable operation and access epoch without a write only when the persisted batch ID equals the current fixed batch, no creation reservation exists, and exact intended/current policy, current topology epoch, and current accessible-library proof still match. Replacement batch at the same topology, legacy missing batch ID, or changed membership requires fresh proof; an uncertain Web POST requires authoritative status/current readback before another review.",
+      "failureRule": "temporary broad/default Jellyfin access, new ID outside fixed cohort, interrupted batch, pending Plugin reservation or local browser creation hold, or missing/corrupt/stale proof cannot authorize owned Home or PTV Featured rows. An empty Plugin pending list does not alone clear an uncertain browser hint; exact operation status must come from a valid durable ledger and missing/corrupt or recovery-restricted provenance cannot prove absence. A later Check verification is read-only and cannot bootstrap on 404, unproven, pending, or failed status. Preserve administrator recovery and confirmed mutation outcomes across later status-read failures",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidenceRefs": ["$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[0]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[3]", "$.ptvOverrides.controlledHomeAuthorityTransitions.evidence[5]"]
     },
     "libraryRefresh": {
       "authority": "Jellyfin Server library/refresh task mechanisms",
@@ -1584,8 +1892,39 @@
     "ptvV1": {
       "authority": "PTV Plugin authenticated controllers plus Jellyfin services used by each route",
       "routeRegistry": "PtvApiRoutes",
-      "securityRule": "Plugin payload authorization must be complete before serialization; Web filtering is defense-in-depth only.",
+      "securityRule": "Plugin payload authorization must be complete before serialization; all PTV Featured rows require current durable per-user proof, and Web filtering is additional presentation protection.",
       "configuredPresentationCandidate": "Isolated PATCHED response-only currentPresentationAuthority {version:1,scope:hex64,generation:hex64} on protected status, administrator settings/rows and authorized Featured payload. Status atomically includes administrator-only exact configuredPresentationBindings. This is presentation provenance, not item authorization or a payload signature; absent trusted binding fails closed.",
+      "homeRowLibraryScope": {
+        "routes": ["GET/POST /Ptv/v1/rows", "GET/POST /Ptv/v1/settings", "GET /Ptv/v1/featured"],
+        "routesChanged": false,
+        "rowSettingsSchema": 3,
+        "featuredCacheVersion": 9,
+        "scopeSchemaVersion": 2,
+        "scopeModes": ["global", "defaultLibrary", "virtualFolder"],
+        "rule": "Pinned VirtualFolder ItemId identifies an owned row's library. Current generated scope claims and per-user Jellyfin access are validated before response; a restricted user's claim comes only from a fresh authorized Featured response because administrator row settings are forbidden. Web Home separately proves positive current-user item membership. Scope metadata is not an authorization token or a continuous-currentness guarantee."
+      },
+      "homeUserAccess": {
+        "baseRoute": "/Ptv/v1/home-user-access",
+        "routes": ["GET current", "POST begin", "POST {operationId}/complete", "POST verification-batches", "POST verification-batches/new", "GET verification-batches/current", "POST verification-batches/{batchId}/users/{userId}/verify", "POST creations/reserve", "POST creations/{creationOperationId}/bind", "GET creations/current", "GET creations/{creationOperationId}/status", "POST creations/{creationOperationId}/recover", "GET verification-summary", "POST recover-corrupt"],
+        "rule": "Administrator controlled existing-user changes require durable pre-write hold; new-account creation has no pre-ID hold and must fail closed through policy readback, current-epoch durable proof, and fresh membership. Migration freezes exact candidate IDs and verifies each separately.",
+        "currentPolicyProjection": "Authenticated no-store GET current reads the exact selected Jellyfin user. Web normalizes complete nested PascalCase currentAccess, expectedAccess, and intendedAccess policy definitions at its Plugin API boundary, rejects mixed/incomplete definitions, and retains EnableAllFolders plus saved EnabledFolders preferences for exact review and verify intent.",
+        "verificationRetry": "Explicit verify requires same fixed batch/user, no pending creation reservation, exact intended and current Jellyfin policy, current topology epoch, and fresh bounded accessible-library evidence. New proofs persist VerificationBatchId; a repeated request returns the existing policy-attested operation/access epoch without a ledger write only when that prior batch ID equals the current batch and PolicyProven still holds against current policy, topology, and exact library IDs. Replacement or legacy batch identity creates fresh proof. Uncertain Web responses require fresh summary/batch and current-user proof readback before another review; no automatic duplicate POST.",
+        "creationOperationStatus": "Administrator-only, private no-store read of one exact operation from the durable ledger. Version 1 response contains creationOperationId, state reserved/bound/recovered/absent, userId for bound, and markedUserIds for recovered. Read does not mutate state; missing/corrupt ledger or recovery-restricted provenance cannot claim absent. Web displays validated recovered markedUserIds as account-review links, not Home proof.",
+        "creationRecovery": "A server-scoped browser operation is a local hold and recovery hint, not Plugin authority. Prepared is saved before reserve and create-started after confirmed reserve before stock Create; missing legacy stage is unknown. Stock Create follows only a confirmed Plugin reservation. Reservation changes refresh recovery and verification siblings. An empty pending list cannot clear the hint; unlisted operations require exact read-only status reconciliation. Only prepared plus authoritative absent releases the local hint; create-started or legacy-stage absent stays held. Confirmed recover/bind stays confirmed even when the following status GET fails, while binding alone never verifies Home access. A later Check verification reads current Plugin proof only and does not restart bootstrap on 404 or unproven/pending/failed status."
+      },
+      "readingIdentityReassessment": {
+        "route": "POST /Ptv/v1/reading/metadata/reassess",
+        "access": "authenticated Jellyfin administrator; server-side elevation required",
+        "request": "exact item ID, bounded signed candidate context and displayed assessment/archive revision",
+        "response": "typed source-labeled assessment, conflict/unverified reasons and opaque current revision; no file path or raw ComicInfo XML",
+        "completion": "read-only point-in-time reassessment, not a metadata write or future archive lock",
+        "failure": "missing/expired/tampered context, denied user, missing route/item, malformed response or infrastructure failure blocks Apply"
+      },
+      "homeTransitions": {
+        "baseRoute": "/Ptv/v1/home-transitions",
+        "routes": ["GET current", "POST begin", "POST {operationId}/complete"],
+        "rule": "Persist topology hold before stock mutation; complete after bounded configured-folder, active-top-child, and exact-item natural-convergence proof plus fresh final snapshot; selected binding is atomic with release, and no selection retains affected tombstones."
+      },
       "chapterRefs": [
         "20-ptv-vs-stock-map.md",
         "24-stock-api-contract-reference.md"
@@ -1620,11 +1959,25 @@
         "25-known-jellyfin-non-guarantees.md"
       ]
     },
+    "configuredHomeLibraryMembership": {
+      "risk": "HIGH",
+      "rule": "A title, media type, global candidate pool, old cache entry, scope hash, or item-access result alone does not prove membership in one pinned library. Require current durable per-user policy/epoch/exact accessible-library proof for every PTV Featured row; owned rows also require resolved persisted ID, coherent current generated claim, per-user server authorization, and positive visit-local user-scoped membership. Partial scans retain only positively proven IDs; failures and route/identity retirement cannot borrow cached proof, rows, or row-derived Hero state.",
+      "affected": ["settingsAndAdmin", "permissionsAndLibraryAccess", "libraryAndItemProjection", "home", "cacheAndInvalidation"],
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"]
+    },
+    "controlledHomeAuthorityTransition": {
+      "risk": "CRITICAL",
+      "rule": "Known-user and library controlled mutations require durable pre-write holds; new accounts have no pre-ID hold and remain unproven until restrictive policy, authoritative readback, durable per-user proof, and fresh membership. Plugin reservation uncertainty or a local browser creation hint blocks stock Create and migration verification; exact read-only operation status is needed to reconcile an unlisted hint. Verification POST uncertainty needs authoritative batch/current proof readback before another review. Exact Plugin verification replay may retain its epoch only for the persisted same batch while current policy, topology and accessible-library proof still match. Natural folder convergence is bounded and read-only; uncertainty keeps hold/tombstones. Arbitrary out-of-band Jellyfin changes cannot guarantee immediate retirement of every already-mounted remote client before a fresh authority signal.",
+      "affected": ["settingsAndAdmin", "permissionsAndLibraryAccess", "libraryAndItemProjection", "home", "cacheAndInvalidation"],
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"]
+    },
     "serverAuthorizationVsWebVisibility": {
       "risk": "CRITICAL",
       "rule": "Do not expose a server-wide payload and rely on later Web filtering; after server-side projection, preserve the same immutable server+user security identity through every Web response cache, coalesced request, in-flight owner, dashboard/readback hydrator and publication generation. An authenticated per-user response must not fall through to another server root.",
       "affected": [
         "permissionsAndLibraryAccess",
+        "PTV header and sidebar navigation",
+        "PTV browser-local notification inbox",
         "home",
         "search",
         "PTV Plugin endpoints and caches"
@@ -1686,6 +2039,12 @@
         "21-ownership-conflicts.md",
         "22-change-impact-matrix.md"
       ]
+    },
+    "readingIdentityBeforeMutation": {
+      "risk": "CRITICAL",
+      "rule": "A source-specific archive conflict or typed unverified result requires its own explicit current-review acknowledgment; stale or failed administrator reassessment cannot reach Jellyfin updateItem. A recognized-provider nonrecursive Book Scan must block before its former exact-provider write instead of bypassing review or falling back. A successful reassessment does not atomically lock archive bytes through the later write; explicit recursive Scan and stock refresh remain outside the guard.",
+      "affected": ["ptvReadingIdentityGuard", "metadataIdentify", "settingsAndAdmin", "libraryAndItemProjection", "images", "cacheAndInvalidation"],
+      "chapterRefs": ["11-reading.md", "13-metadata-identify.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"]
     },
     "mutationAcknowledgmentVsConvergence": {
       "risk": "HIGH",
@@ -1798,7 +2157,7 @@
         "implementationGate": "PASS",
         "deploymentStatus": "DEPLOYED",
         "physicalValidationStatus": "VALIDATION_PENDING",
-        "summary": "Plugin 0.5.16.0 projects the shared Featured document through Jellyfin's request-user access policy before response serialization and is deployed in production. The implementation and deterministic user-isolation matrix pass. A prior production acceptance proved the restricted response boundary; the bounded Web 0.5.56 smoke preserved anonymous rejection and showed no cross-user flash but stopped before a fresh raw restricted payload comparison, so the current-release physical status remains pending.",
+        "summary": "Plugin 0.5.16.0 introduced request-user projection of the shared Featured document before response serialization and was deployed in production during that release. The implementation and deterministic user-isolation matrix pass. A prior production acceptance proved the restricted response boundary; the bounded Web 0.5.56 smoke preserved anonymous rejection and showed no cross-user flash but stopped before a fresh raw restricted payload comparison, so a fresh physical comparison remains pending for later releases.",
         "nodeRefs": {
           "components": [
             "ptvPlugin"
@@ -1831,7 +2190,7 @@
         "evidence": [
           {
             "repository": "PTV Plugin embedded source",
-            "version": "0.5.16.0 current worktree",
+            "version": "0.5.20.0 current source; behavior introduced in 0.5.16.0",
             "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs",
             "symbol": "GetFeaturedContent",
             "lines": "329-396",
@@ -1839,7 +2198,7 @@
           },
           {
             "repository": "PTV Plugin embedded source",
-            "version": "0.5.16.0 current worktree",
+            "version": "0.5.20.0 current source; behavior introduced in 0.5.16.0",
             "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentAuthorizationService.cs",
             "symbol": "AuthorizeForUser",
             "lines": "215-305",
@@ -1863,7 +2222,7 @@
           "CHANGE-PROTOCOL.md"
         ],
         "closureCriteria": [
-          "Deploy the exact validated Plugin 0.5.16.0 artifact through a separately authorized safe deployment.",
+          "Verify that the deployed current Plugin artifact preserves the request-user projection introduced in 0.5.16.0.",
           "Prove with real administrator and restricted Jellyfin users that the final HTTP payload contains only authorized item metadata.",
           "Confirm the restricted request neither mutates nor poisons the shared cache and the following administrator response remains complete."
         ]
@@ -2486,6 +2845,14 @@
             "symbol": "failed recommendation generation remained degraded; complete-success recovery unobserved",
             "lines": "115-119",
             "status": "VERIFIED_BY_TEST"
+          },
+          {
+            "repository": "PTV Web",
+            "version": "0.5.78 local candidate, 2026-10-24",
+            "file": "src/ptv/services/diagnostics/recommendationGenerationDiagnostics.test.ts; src/ptv/modules/recommendations/engine/recommendationEngine.feedback.test.ts; src/ptv/services/diagnostics/webDiagnosticPlatform.test.ts",
+            "symbol": "identity-owned terminal generation outcome, current counters, nullable timing and dated failure recovery",
+            "lines": "focused tests and producer/collector generation symbols",
+            "status": "VERIFIED_BY_TEST"
           }
         ],
         "chapterRefs": [
@@ -2927,6 +3294,7 @@
         "status": "OPEN",
         "mustIsolate": false,
         "objective": "DIAG-02 through DIAG-04 retain their deployed Web 0.5.56 evidence. DIAG-01 production remains FAIL/HOLD, while its Web 0.5.57 URL-authoritative local release candidate passes focused, full PTV, full repository, static, version/provenance, diff, and production-build gates. The Music lint delta is cleared by a type-only Promise<null | void> return annotation with both void call sites and runtime behavior preserved. Keep the operational gate HOLD because Web 0.5.57 is not deployed and physical validation is pending. Also keep this backlog item open because DIAG-03 complete-success recovery and the DIAG-04 seven-request threshold were not physically exercised, and DIAG-05 route-scoped image terminal/disposed accounting remains open.",
+        "localPhase1Candidate": "Web 0.5.78 local diagnostic observer changes on 2026-10-24: Featured read/write/count/fallback observation, identity-owned recommendation terminal generation, timestamped retained slow-request evidence, and route supersession/critical-work coverage. Local deterministic tests pass; no deployment or hosted/physical acceptance. Preserve DIAG-01 operational HOLD, DIAG-03 recovery UNKNOWN, DIAG-04 physical threshold UNKNOWN, and DIAG-05 OPEN.",
         "completionEvidenceRequired": [
           "One route session per logical navigation (Web 0.5.57 URL-authoritative implementation and local release gates PASS; production 0.5.56 FAIL/HOLD; deployment and physical validation pending)",
           "Route-owned terminal readiness (local and observed production PASS)",
@@ -3088,6 +3456,91 @@
         }
       ]
     },
+    "homeRowLibraryOwnership": {
+      "classification": ["STOCK_REPLACED", "NEW_PTV_SYSTEM"],
+      "ptvChange": "Row Builder schema 3 persists explicit global/defaultLibrary/virtualFolder scope. The existing Plugin settings mutation pins a unique built-in VirtualFolder ItemId; the existing Featured refresh owner generates owned rows from complete recursive library pools and emits v9/scope-schema-2 claims. The per-user response projector rechecks current scope and Jellyfin access. Restricted users take the server-issued claim only from a fresh authorized Featured response. Web Home uses one bounded visit-local user-scoped membership owner and publishes only positively proven owned item IDs in Plugin order.",
+      "stockContractPreserved": "Jellyfin owns virtual-folder identity, user-visible views and user-aware item access; its separate endpoint snapshots do not form an atomic membership lease.",
+      "risk": "HIGH",
+      "conflictClass": "RACE_RISK",
+      "localStatus": "Canonical checkpoint 678592eb is source/test-proven locally. Stage 2 Web 0.5.67 / Plugin 0.5.21.0 integration passes local Web and Plugin suites, including scoped Featured and ownership regressions; populated hosted physical/request-pressure acceptance remains open. The user-provided operational screenshot's 9 sections and 119 items are shared cache counts, not per-user completeness or isolation proof. No deployment or release claim.",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md"],
+      "evidence": [
+        {
+          "repository": "PTV Plugin local source",
+          "version": "Canonical checkpoint 678592eb; Stage 2 local source integration Web 0.5.67 / Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Configuration/PluginConfiguration.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvPluginSettingsNormalizer.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeLibraryScopeResolver.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvPluginSettingsService.cs",
+          "symbol": "RowLibraryScope / NormalizeLibraryScope / Resolve / BindDefaultLibraries",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Plugin local source",
+          "version": "Canonical checkpoint 678592eb; Stage 2 local source integration Web 0.5.67 / Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeLibraryCandidates.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentRefreshService.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentStore.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentValidator.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedContentAuthorizationService.cs",
+          "symbol": "GetCandidates / ResolveOwnedCandidatePools / ValidateClientScope / HasCurrentScopeSchema / ValidateCurrentScopes",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web local source",
+          "version": "Canonical checkpoint 678592eb; Stage 2 local source integration Web 0.5.67 / Plugin 0.5.21.0",
+          "file": "src/ptv/modules/dashboard/rowBuilderImport.ts; src/ptv/modules/dashboard/PiggieTvRowsPage.tsx; src/ptv/modules/cache/featuredContentCache.ts; src/ptv/pages/home/homeLibraryOwnership.ts; src/ptv/pages/home/homeLibraryMembership.ts; src/ptv/pages/home/hooks.ts",
+          "symbol": "normalizePtvRowLibraryScope / RowLibraryScopeControls / scopeSchemaVersion / resolveHomeLibraryOwnershipClaim / createHomeLibraryMembershipAuthority / useNativeHomeData",
+          "status": "VERIFIED_FROM_SOURCE"
+        }
+      ]
+    },
+    "controlledHomeAuthorityTransitions": {
+      "classification": ["NEW_PTV_SYSTEM", "STOCK_WRAPPED"],
+      "ptvChange": "Durable Plugin topology and per-user access ledgers hold controlled mutations before stock writes where the ID exists. New-account creation uses fail-closed known-ID bootstrap and fixed-ID administrator migration, not a fabricated pre-ID hold. Web normalizes exact current Home policies at the Plugin API boundary, holds uncertain creation/verification attempts for authoritative readback, and preserves confirmed mutations across subsequent status-read failures. Web local creation hints mark prepared before reserve and create-started after confirmed reserve before stock Create; an unlisted prepared hint can explicitly retry Plugin reserve with the same ID without stock Create. An administrator-only read-only Plugin route reports exact durable creation-operation status, with recovered possible IDs linked for account review. Reservation changes refresh recovery and verification panels; later Check verification reads proof without restarting bootstrap. Plugin exact migration verification replay retains the existing proof only for its persisted batch ID while all current policy, topology, membership, cohort, and reservation guards pass. Administrator current readback projects nullable batch-proof identity; active batch progress counts only its own proofs, and Web cannot confirm an uncertain attempt from an older batch proof. A changed or stale batch retires local attempt state. Plugin Featured requires current per-user proof for all rows. Web Home retires stale PTV responses and separately proves owned membership. Bounded administrator readback of natural folder convergence precedes topology release; selected rebind and release are atomic.",
+      "stockContractPreserved": "Jellyfin owns account creation, user policy, user-aware library visibility, virtual-folder configuration, and active top-folder state. No PTV ValidateTopLibraryFolders, provider refresh, global scan, or refreshLibrary=true is invoked for convergence proof. Stock mutation internals and lazy UserRoot initialization are separate effects.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "localStatus": "Canonical checkpoint 678592eb: existing-user controlled access PASS and new-user bootstrap fail-closed PASS in local acceptance; NEW_USER_PREWRITE_HOLD is NOT_APPLICABLE. Stage 2 Web 0.5.67 / Plugin 0.5.21.0 source integration passes local suites, including additional guards that keep same-ID rename held and prevent create from tombstoning unrelated unpinned defaults. Controlled rename is SAFE_FAIL_CLOSED with held row when no new CollectionFolder ID appears; automatic natural convergence/recovery remains unproven after the observed Jellyfin 12 null ItemId/UserView. Arbitrary out-of-band Jellyfin mutation cannot guarantee retirement of every already-mounted remote client before fresh authority is observed. Hosted physical acceptance and release gates remain open. NOT RELEASE READY; no deployment claim.",
+      "chapterRefs": ["20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "22-change-impact-matrix.md", "23-before-you-modify-checklists.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidence": [
+        {
+          "repository": "PTV Plugin local source",
+          "version": "Canonical checkpoint 678592eb, Plugin 0.5.19.0; Stage 2 local source integration Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvHomeUserAccessController.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeUserAccessLedger.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvSignupCreationReservation.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvSignupUserAccessBootstrap.cs",
+          "symbol": "Begin/Complete, fixed-ID verification, durable current-epoch accessible-library proof, creation reservation and bootstrap",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Plugin local source",
+          "version": "Canonical checkpoint 678592eb, Plugin 0.5.19.0; Stage 2 local source integration Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvHomeTransitionsController.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeTopologyLedger.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV.Tests/PtvHomeTransitionControllerTests.cs",
+          "symbol": "bounded natural-convergence snapshot, fresh final readback, CompleteAndRebindAsync, explicit retry",
+          "status": "VERIFIED_BY_TEST"
+        },
+        {
+          "repository": "Retained exact Jellyfin 12 source",
+          "version": "server commit 6c073e19ddf604b2369c638716164fdab4c952dc; newer than stock 10.11.11 baseline",
+          "file": "Emby.Server.Implementations/Library/LibraryManager.cs",
+          "symbol": "GetVirtualFolders(false), GetUserRootFolder, GetItemList nonrecursive repository path, ValidateTopLibraryFolders provider work",
+          "status": "UPSTREAM_NEWER_THAN_10.11.11"
+        },
+        {
+          "repository": "PTV Plugin and Web local source/tests",
+          "version": "Canonical checkpoint 678592eb, Web 0.5.62 / Plugin 0.5.19.0; Stage 2 local source integration Web 0.5.67 / Plugin 0.5.21.0",
+          "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvStatusController.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvFeaturedTopology.cs; src/ptv/modules/cache/featuredContentCache.ts; src/ptv/pages/home/hooks.ts; src/ptv/plugin/Jellyfin.Plugin.PiggieTV.Tests/PtvHomeUserAccessTests.cs",
+          "symbol": "all-PTV-Featured proof gate, Web cache/late-result retirement, per-user migration and bootstrap regressions",
+          "status": "VERIFIED_BY_TEST"
+        },
+        {
+          "repository": "PTV Plugin and Web local source candidate",
+          "version": "2026-10-24 Home access administration repair; deployment and hosted physical acceptance unverified",
+          "file": "src/ptv/core/pluginApi.ts; src/ptv/modules/settings/admin/users/PtvAdminUserVerification.tsx; src/ptv/modules/settings/admin/users/PtvAdminCreationRecovery.tsx; src/ptv/modules/settings/admin/users/AdminUserDialogs.tsx; src/ptv/modules/settings/admin/users/adminNewUserBootstrapService.ts; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Services/PtvHomeUserAccessLedger.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvHomeUserAccessController.cs; src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Models/PtvHomeUserAccessModels.cs",
+          "symbol": "current policy normalization, exact administrator review, local staged creation hold, read-only durable operation status and post-create verification check, recovered-account links, reservation refresh coordination, uncertain mutation reconciliation, and batch-identity-guarded proof-preserving verification replay",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web local source/tests",
+          "version": "2026-10-24 Web 0.5.80 source candidate; development installation and physical account acceptance pending",
+          "file": "src/ptv/core/pluginApi.ts; src/ptv/modules/settings/admin/users/AdminUserDialogs.tsx; src/ptv/modules/settings/admin/users/PtvAdminCreationRecovery.tsx; src/ptv/modules/settings/admin/users/PtvAdminUsersPage.tsx; src/ptv/modules/settings/admin/users/adminNewUserBootstrapService.ts; src/ptv/modules/settings/admin/users/AdminUserDialogsCreation.test.tsx; src/ptv/modules/settings/admin/users/adminNewUserBootstrapService.test.ts",
+          "symbol": "omitted nullable reservation userId, session-aware creation continuation, recoverable interruptions, selected-library-first bootstrap, privilege-aware recovery write order, and visible transaction phases",
+          "status": "VERIFIED_BY_TEST"
+        }
+      ]
+    },
     "bootstrapAndCoreRuntime": {
       "classification": [
         "STOCK_EXTENDED",
@@ -3095,6 +3548,7 @@
       ],
       "stockContractPreserved": "Stock server connection and React render sequence remain present.",
       "ptvChange": "PTV styles, modules, shell, observability and runtime initialize around the stock-derived bootstrap. Connection-dependent Plugin identity listeners are installed only after module evaluation reaches a runtime client access, avoiding eager reads through the existing Jellyfin connection-barrel cycle.",
+      "hostedOriginRestriction": "For an HTTP(S) /web document, PTV discovery, stock-derived API client initialization, saved-server reconnect, and PTV Plugin API retries are constrained to the document's Jellyfin server root, including any BaseUrl prefix. Other saved credentials are retained during initialization but cannot be selected or probed by that hosted page; stock logout still clears saved authentication fields globally. Development and non-hosted clients retain split-origin behavior. This is client connection selection, not server authorization or reverse-proxy routing proof.",
       "risk": "HIGH",
       "conflictClass": "INTENTIONAL_WRAPPER",
       "chapterRefs": [
@@ -3125,6 +3579,13 @@
           "symbol": "partial-barrel module-evaluation regression and emitted production-dist cold-bootstrap gate",
           "lines": "full test/harness files",
           "status": "VERIFIED_BY_TEST"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "0.5.73 local candidate",
+          "file": "src/ptv/core/urlOrigins.ts; src/ptv/core/serverOriginSelection.ts; src/lib/jellyfin-apiclient/connectionManager.js; src/ptv/core/pluginApi.ts; src/ptv/core/serverOriginSelection.test.ts; src/lib/jellyfin-apiclient/connectionManager.hostedOrigin.test.ts; src/ptv/core/pluginApiAuthentication.test.ts",
+          "symbol": "hosted Web server-root discovery, API client initialization, saved-server selection, reconnect and Plugin API retry restriction",
+          "status": "VERIFIED_FROM_SOURCE / VERIFIED_BY_TEST"
         }
       ]
     },
@@ -3134,6 +3595,9 @@
         "STOCK_REPLACED"
       ],
       "ptvChange": "PTV maps stable routes to native PTV pages from canonical browser URL/hash state and uses routeController as the immutable route-family lifetime/generation/AbortSignal owner while keeping hash-router compatibility. Transient presentation classes are not route identity authority.",
+      "localStage4Presentation": "Mounted PTVShell measures the header and publishes a CSS-only clearance consumed by shell, Browse and cinematic Details. clientProfile selects non-TV layout classes from measured viewport posture before user-agent fallback while preserving client-kind performance budget. Neither presentation decision changes route identity or request authority.",
+      "localPhase7Navigation": "PTVShell owns the same Movies/Shows dropdowns on ordinary and Details routes. Details item section supplies active-group presentation only when its hash has no primary section; canonical hash remains route authority. Fine-pointer hover shares the click/keyboard/touch menu owner and bounded portal-exit cleanup. Local tests pass; hosted and physical acceptance remain pending.",
+      "localPhase2GNavigationAccess": "PTVShell and Sidebar project only the current authenticated user's returned User View IDs and CollectionType into media links, retaining multiple accessible libraries. A matching current-user policy controls admin presentation. Missing/failed/changed identity withdraws links and retires open menus; same-identity background refresh retains proven presentation until a result replaces or invalidates it. Direct browse topParentId and Reading subtype page presentation require matching returned view evidence; supported legacy aliases also require a returned kind/name match. Sidebar Calendar uses existing ARR availability only after ready proof while Request remains independent. Focus, visibility, storage, periodic and aged route checks refresh proof. Static route classification remains separate from filtered visible links. The projection does not replace Jellyfin response authorization or URL route authority. Hosted and physical acceptance remain pending.",
       "risk": "HIGH",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
@@ -3155,6 +3619,13 @@
           "file": "src/ptv/shell/routeController.ts",
           "symbol": "route ownership/generation/lifetime and observers",
           "lines": "51-134,217-290,581-670,727-780",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "Phase 2G local source change from Web 0.5.80 baseline",
+          "file": "src/ptv/shell/navigationAccess.ts; src/ptv/shell/usePtvNavigationAccess.ts; src/ptv/shell/PTVShell.tsx; src/ptv/shell/navigation.ts; src/ptv/shell/routes.js; src/ptv/modules/sidebar/Sidebar.tsx",
+          "symbol": "current-user User Views and policy projection, direct-route view evidence, Calendar availability, identity retirement, static route classification and filtered header/sidebar navigation",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]
@@ -3193,7 +3664,8 @@
         "STOCK_REPLACED",
         "NEW_PTV_SYSTEM"
       ],
-      "ptvChange": "NativeHome and PTV hooks compose/cache featured and stock-derived row data. The active legacy-compatible Home path adopts routeController lifetimes for requests, publication, Hero/rows, listeners, observers, timers, cards and images. Featured transport/memory/dashboard-readback owners preserve canonical server+user identity, authenticated Featured transport stays on the active ApiClient root, queued memory reasserts ownership, and forced row-image consumer handles retire with their exact row/route owner.",
+      "ptvChange": "NativeHome and PTV hooks compose/cache featured and stock-derived row data. The active legacy-compatible Home path adopts routeController lifetimes for requests, publication, Hero/rows, listeners, observers, timers, cards and images. Featured transport/memory/dashboard-readback owners preserve canonical server+user identity, authenticated Featured transport stays on the active ApiClient root, queued memory reasserts ownership, and forced row-image consumer handles retire with their exact row/route owner. Library-owned configured rows additionally require an exact Plugin scope claim and visit-local positive user-scoped membership before Home publication or retention.",
+      "localStage4Presentation": "Fold-like viewport width changes alter shell layout classes but retain the same client-kind Home row limits and image budget; Home request and image identity remain unchanged.",
       "risk": "CRITICAL",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
@@ -3260,7 +3732,10 @@
     },
     "details": {
       "classification": "STOCK_WRAPPED",
-      "ptvChange": "PTV observes stock Details rendering, reconciles item/readback state, and applies route-generation-aware enhancements.",
+      "ptvChange": "PTV observes stock Details rendering, reconciles item/readback state, and applies route-generation-aware enhancements. Cinematic enrichment retains unchanged keyed shelves and artwork nodes, loads artwork only for changed shelves, and retires progressive timers before reconciliation or owner teardown. A hidden empty skeleton may adopt a late exact result only under its current owner.",
+      "localStage4Presentation": "Responsive Details offsets consume PTVShell clearance. Generic related-title copy remains generic; franchise/collection wording requires explicit shared metadata, and repeated Cast people without distinct related-title value are omitted from the entity rail.",
+      "localPhase2Fixture": "The shared Details browser matrix defines Movie, Series, Season, Book, Anime and Cartoons at live-resized 360-1440 CSS px; it is not physical or complete authenticated item proof.",
+      "localIssue53ThemeLifecycle": "themeMediaPlayer retains automatic theme ownership under server/user/item and playback generations. NativeHome withdraws theme retention. Accepted manual play, queue addition and explicit selection relinquish automatic ownership; PlaybackManager clones only adopted queue-entry options to remove automatic guards while leaving captured pending automatic starts cancellable. Authentication events retire owned themes and late reads/starts recheck their captured user. HtmlAudioPlayer's existing fade owner settles cancellation, restores gain/events and fences retirement to its source generation. The global dock remains derived. Local rendered/real-manager/HTML-audio fixture proof does not establish hosted or physical acceptance.",
       "risk": "HIGH",
       "conflictClass": "INTENTIONAL_WRAPPER",
       "chapterRefs": [
@@ -3276,8 +3751,32 @@
           "symbol": "details enhancement/readback/lifecycle",
           "lines": "648-860",
           "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web",
+          "version": "current worktree",
+          "file": "src/ptv/modules/details/detailsCinematicExperience.ts",
+          "symbol": "cinematic enrichment keyed shelf reconciliation and retirement",
+          "lines": "45-91, 248-286, 375-410, 467-647",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web Issue #53 local candidate",
+          "version": "0.5.82",
+          "file": "src/components/themeMediaPlayer.js; src/components/playback/playbackmanager.js; src/plugins/htmlAudioPlayer/plugin.js; src/ptv/pages/home/NativeHome.tsx",
+          "symbol": "theme route retirement, accepted playbackrequest and carried queue adoption",
+          "lines": "named symbols",
+          "status": "VERIFIED_FROM_SOURCE"
         }
       ]
+    },
+    "search": {
+      "classification": "STOCK_REPLACED",
+      "ptvChange": "NativeSearchPage owns grouped, user-scoped PTV Search. Stage 4 integrates per-group and aggregate failed-group-only retry keyed by settled server, user, query, filter and request scope; successful groups remain visible and stale/aborted results cannot adopt.",
+      "risk": "HIGH",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": ["09-search.md", "19-failure-race-lifecycle.md", "20-ptv-vs-stock-map.md"],
+      "localCandidateEvidence": ["src/ptv/pages/search/NativeSearchPage.tsx", "src/ptv/pages/search/NativeSearchGroupRetryAction.tsx", "src/ptv/pages/search/searchGroupRetryState.ts", "src/ptv/pages/search/resilientSearchService.ts"]
     },
     "requestCoordination": {
       "classification": "NEW_PTV_SYSTEM",
@@ -3361,18 +3860,38 @@
         }
       ]
     },
+    "readingIdentityGuard": {
+      "classification": ["STOCK_WRAPPED", "NEW_PTV_SYSTEM"],
+      "ptvChange": "Adds bounded source-specific ComicInfo evidence and an administrator-only fresh pre-write reassessment to the existing shared Reading Identify/manual save workflow. Retires the PTV nonrecursive saved-provider Book Scan writer by blocking it before search/write with direction to Identify. Explicit recursive Scan and stock refresh remain unchanged; Jellyfin remains metadata authority.",
+      "risk": "CRITICAL",
+      "conflictClass": "RACE_RISK",
+      "chapterRefs": ["11-reading.md", "13-metadata-identify.md", "20-ptv-vs-stock-map.md", "21-ownership-conflicts.md", "24-stock-api-contract-reference.md", "25-known-jellyfin-non-guarantees.md"],
+      "evidence": [
+        {"repository": "PTV Reading lineage", "version": "db873570c4 source candidate", "file": "src/ptv/plugin/Jellyfin.Plugin.PiggieTV/Api/PtvReadingMetadataController.cs", "symbol": "administrator reassess route", "status": "VERIFIED_FROM_SOURCE"},
+        {"repository": "PTV Reading lineage", "version": "db873570c4 source candidate", "file": "src/ptv/modules/settings/admin/metadataManager/useAdminMetadataIdentifyController.ts", "symbol": "current review and approval binding", "status": "VERIFIED_FROM_SOURCE"}
+      ]
+    },
     "music": {
       "classification": [
         "STOCK_REPLACED",
         "NEW_PTV_SYSTEM"
       ],
-      "ptvChange": "PTV owns native Music discovery, relationship reconciliation, queue and native audio playback surfaces while using Jellyfin item/stream/report APIs.",
+      "ptvChange": "PTV owns native Music discovery, relationship reconciliation, queue and native audio playback surfaces while using Jellyfin item/stream/report APIs. The Issue #38 local candidate resolves nested-disc album tracks with a separately proven user-visible Music album identity and exact Audio AlbumId filtering.",
       "risk": "CRITICAL",
       "conflictClass": "RACE_RISK",
+      "albumTrackLocalCandidate": {
+        "authority": "Jellyfin user-aware MusicAlbum and Audio item responses; PTV does not infer membership from filename, title, or path",
+        "membership": "Require the requested album ID in a paged Music-scoped MusicAlbum search under the selected user-visible Music library. Do not combine Ids and ParentId as membership proof because Jellyfin 12.2 may let Ids override ParentId.",
+        "trackProjection": "Page recursive ParentId album descendants and the AlbumIds relationship query; admit only Audio whose exact AlbumId equals the requested album ID; deduplicate by item ID and order by disc, track, sort name, and ID.",
+        "lifecycle": "Bound page count and reject incomplete pages; abort results on route cancellation or server/user display-identity change. Do not use the shared unscoped-empty fallback.",
+        "acceptance": "Local source/test candidate only. Authenticated hosted candidate and physical Music playback/queue acceptance remain pending separate installation authorization."
+      },
       "chapterRefs": [
         "10-music.md",
         "20-ptv-vs-stock-map.md",
-        "21-ownership-conflicts.md"
+        "21-ownership-conflicts.md",
+        "22-change-impact-matrix.md",
+        "23-before-you-modify-checklists.md"
       ],
       "evidence": [
         {
@@ -3390,6 +3909,13 @@
           "symbol": "native audio/queue ownership",
           "lines": "1010-1085,1309-1453",
           "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web local Issue #38 candidate",
+          "version": "unreleased source",
+          "file": "src/ptv/modules/music/musicApi.ts",
+          "symbol": "fetchPtvMusicAlbumTracks Music-scoped membership and nested-disc projection",
+          "status": "VERIFIED_FROM_SOURCE"
         }
       ]
     },
@@ -3398,7 +3924,7 @@
         "STOCK_REPLACED",
         "NEW_PTV_SYSTEM"
       ],
-      "ptvChange": "PTV provides a native Reading page/reader and stores reader progress/bookmarks locally.",
+      "ptvChange": "PTV provides a native Reading page/reader and stores reader progress/bookmarks locally. Phase 7 local records use a verified Jellyfin server/user identity plus item stable ID; missing identity disables persistence and legacy item-only records are not consumed.",
       "risk": "CRITICAL",
       "conflictClass": "RACE_RISK",
       "chapterRefs": [
@@ -3451,7 +3977,7 @@
     },
     "pluginApi": {
       "classification": "NEW_PTV_SYSTEM",
-      "ptvChange": "The Plugin registers PTV services/controllers and exposes authenticated PTV API routes while reusing Jellyfin DI, identity and library services. The Web Plugin client preserves each authenticated per-user response under a canonical immutable Jellyfin server+user GET cache/coalescing identity; missing identity disables sharing rather than using a global fallback. Authenticated Featured GETs use only the active ApiClient root plus compatibility route names on that root. Login/logout identity-retirement listeners bind lazily on runtime client access so this contract does not eagerly dereference the Jellyfin connection barrel during bootstrap.",
+      "ptvChange": "The Plugin registers PTV services/controllers and exposes authenticated PTV API routes while reusing Jellyfin DI, identity and library services. Phase 7 local discovery uses user-aware item queries; requested-library random selection adds the requested ancestor ID, and configured tag-row settings require administrator authorization. Existing Seerr request-history and write guards and password-reset code retirement retain their separate hosted acceptance gates. The Web Plugin client preserves each authenticated per-user response under a canonical immutable Jellyfin server+user GET cache/coalescing identity; missing identity disables sharing rather than using a global fallback. Authenticated Featured GETs use only the active ApiClient root plus compatibility route names on that root. Login/logout identity-retirement listeners bind lazily on runtime client access so this contract does not eagerly dereference the Jellyfin connection barrel during bootstrap.",
       "risk": "CRITICAL",
       "conflictClass": "INTENTIONAL_WRAPPER",
       "chapterRefs": [
@@ -3515,6 +4041,7 @@
     "24-stock-api-contract-reference.md",
     "25-known-jellyfin-non-guarantees.md",
     "26-upstream-post-10.11.11-differences.md",
+    "27-jellyfin-12-2-compatibility.md",
     "INDEX.md"
   ]
 }
